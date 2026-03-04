@@ -40,11 +40,17 @@
 - **自动化**: OpenClaw 自动更新 issue，用户仅对话
 
 #### Design（设计）
-- **触发**: 用户说"可以设计了" 或 issue 标记 `ready-for-design`
+- **触发**: OpenClaw 智能判断需求完整
+  - 检测用户是否说"可以设计了"
+  - 检测 Issue Body 是否包含完整的任务清单
+  - 检测是否在 Refinement 阶段停留足够时间（可选）
 - **执行**: OpenCode `/opsx:new` + `/opsx:ff` 生成 artifacts
-- **输出**: Design PR + specs/ 目录
+- **输出**: 
+  - Design PR（仅包含 `specs/issue-{N}.md`）
+  - 不包含代码骨架或接口定义
 - **标签**: `stage:design`
 - **自动化**: 100%
+- **OpenSpec**: 可选工具（如果不使用 OpenSpec，要求产出 specs，可以手动编写）
 
 #### Implementation（实现）
 - **触发**: Design PR merged
@@ -64,21 +70,65 @@
 - **自动化**: Agent Review 100%，User Review 可选
 
 #### Re-evaluation（重新评估）
-- **触发**: 
-  - 发现重大设计缺陷
-  - 需求理解偏差
-  - 技术方案不可行
+- **触发**: 用户手动触发
+  - 用户在对话中说"重新评估这个设计"
+  - 用户在 Issue 上添加 `action:reevaluate` label
 - **执行**: OpenCode 重新分析，可能回到 Design 或 Refinement
 - **输出**: 新的 Design 或更新后的 issue
 - **标签**: `stage:re-evaluation`
 - **自动化**: OpenCode 分析 + OpenClaw 通知用户决策
+- **注意**: 不自动触发 Re-evaluation，避免误判和过度反应
 
 #### Done（完成）
 - **触发**: PR merged
 - **标签**: `stage:done` + issue closed
 - **后续**: 可选进入质量债务流程
 
-### 1.3 为什么叫"Re-evaluation"?
+### 1.3 Issue Body 演进规则
+
+Issue Body 在不同阶段有不同的内容和演进规则：
+
+#### Exploration（探索）
+- **Issue Body 内容**: 简短的需求描述（1-2 句话）
+- **示例**: "文章管理需要支持多规格"
+- **状态**: 初始需求，不能启动设计和开发
+
+#### Refinement（提炼）
+- **Issue Body 内容**: 完整的需求描述 + 任务清单（Markdown checkboxes）
+- **示例**:
+  ```markdown
+  ## 需求描述
+  文章管理需要支持多规格（SKU/SPU），包括：
+  - 支持创建多规格商品
+  - 支持批量导入规格
+  - 支持规格库存管理
+  
+  ## 任务清单
+  - [ ] 设计 SKU/SPU 数据模型
+  - [ ] 实现规格创建 API
+  - [ ] 实现批量导入功能
+  - [ ] 实现库存管理功能
+  ```
+- **状态**: 完整需求，可以准备设计
+- **触发**: 用户说"可以设计了"或 OpenClaw 智能判断需求完整
+
+#### Design（设计）
+- **Issue Body**: 保持不变
+- **新增**: `specs/issue-{N}.md`（设计文档）
+- **Design PR**: 仅包含 `specs/issue-{N}.md`
+
+#### Implementation（实现）
+- **Issue Body**: 更新任务清单进度（checkboxes）
+- **示例**:
+  ```markdown
+  ## 任务清单
+  - [x] 设计 SKU/SPU 数据模型
+  - [x] 实现规格创建 API
+  - [ ] 实现批量导入功能（进行中）
+  - [ ] 实现库存管理功能
+  ```
+
+### 1.4 为什么叫"Re-evaluation"?
 
 **备选名称对比**:
 - `Rework`（返工）: 太负面，暗示失败
