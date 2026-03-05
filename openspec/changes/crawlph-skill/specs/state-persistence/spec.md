@@ -2,25 +2,36 @@
 
 ### Requirement: File-based State Storage
 
-The system SHALL persist state to files in /data/.clawdbot/.
+The system SHALL persist state to files in the crawlph agent data directory (`~/.openclaw/agents/crawlph/data/`).
 
 #### Scenario: Store claims
 
 - **WHEN** claiming an Issue
-- **THEN** system SHALL write to crawlph-claims.json
+- **THEN** system SHALL write to `crawlph-claims.json`
 - **AND** file SHALL be atomic (write to temp, then rename)
 
 #### Scenario: Store cursor
 
 - **WHEN** in watch mode
-- **THEN** system SHALL store cursor in crawlph-cursor.json
+- **THEN** system SHALL store cursor in `crawlph-cursor.json`
 - **AND** cursor SHALL include last checked timestamp
 
 #### Scenario: Store progress
 
 - **WHEN** making progress on an Issue
-- **THEN** system SHALL store in crawlph-progress/issue-{N}.json
+- **THEN** system SHALL store in `progress/issue-{N}.json`
 - **AND** progress SHALL include current stage, attempts, and checkpoints
+
+#### Directory Structure
+
+```
+~/.openclaw/agents/crawlph/data/
+├── crawlph-claims.json      # Issue claims
+├── crawlph-cursor.json      # Watch mode cursor
+└── progress/                # Per-issue progress
+    ├── issue-123.json
+    └── issue-456.json
+```
 
 ### Requirement: State File Format
 
@@ -28,7 +39,7 @@ State files SHALL use JSON format with consistent structure.
 
 #### Scenario: Claims file format
 
-- **WHEN** reading crawlph-claims.json
+- **WHEN** reading `crawlph-claims.json`
 - **THEN** format SHALL be:
   ```json
   {
@@ -44,7 +55,7 @@ State files SHALL use JSON format with consistent structure.
 
 #### Scenario: Progress file format
 
-- **WHEN** reading crawlph-progress/issue-{N}.json
+- **WHEN** reading `progress/issue-{N}.json`
 - **THEN** format SHALL be:
   ```json
   {
