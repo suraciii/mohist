@@ -1,49 +1,72 @@
 ## Context
 
-crawlph 是一个 OpenClaw skill，用于自动化 spec-driven development workflow。它参考 gh-issues skill 的设计模式，但专注于 7-stage workflow 和 Ralph Coding 自动化循环。
+crawlph 是一个 OpenClaw 专用 Agent，用于自动化 spec-driven development workflow。它运行在独立的 agent session 中，不占用用户的 main session，支持后台持续运行和多种交互方式。
 
-### 架构层次
+### 架构层次（专用 Agent 架构）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    OpenClaw Gateway                         │
+│                  OpenClaw Gateway                           │
 │                                                             │
-│   ┌───────────────────────────────────────────────────────┐│
-│   │              crawlph SKILL.md                         ││
-│   │                                                       ││
-│   │   • Orchestrator agent (主会话)                       ││
-│   │   • Phases: Parse → Fetch → Confirm → Process        ││
-│   │   • Ralph Loop: spawn sub-agents                     ││
-│   │   • Context hygiene after each iteration             ││
-│   │                                                       ││
-│   └───────────────────────────────────────────────────────┘│
-│                          │                                  │
-│                          │ sessions_spawn (ACP)             │
-│                          ▼                                  │
-│   ┌───────────────────────────────────────────────────────┐│
-│   │              Sub-agent Sessions                       ││
-│   │                                                       ││
-│   │   • 干净上下文                                        ││
-│   │   • 7-stage workflow                                 ││
-│   │   • 调用 OpenCode + OpenSpec CLI                     ││
-│   │                                                       ││
-│   └───────────────────────────────────────────────────────┘│
+│   触发源 (多入口)                                            │
+│   ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌──────────┐     │
+│   │Telegram │  │ Discord │  │ GitHub  │  │  Main    │     │
+│   │ Channel │  │ Channel │  │ Webhook │  │  Agent   │     │
+│   └────┬────┘  └────┬────┘  └────┬────┘  └────┬─────┘     │
+│        │            │            │             │            │
+│        └────────────┴────────────┴────────────┘            │
+│                          │                                   │
+│                          ▼                                   │
+│   ┌────────────────────────────────────────────────┐        │
+│   │         crawlph Agent (专用编排器)              │        │
+│   │                                                │        │
+│   │   配置:                                         │        │
+│   │   • id: "crawlph"                             │        │
+│   │   • workspace: ~/.openclaw/workspace-crawlph/  │        │
+│   │   • agentDir: ~/.openclaw/agents/crawlph/      │        │
+│   │                                                │        │
+│   │   行为:                                         │        │
+│   │   • 启动后自动进入 watch mode                   │        │
+│   │   • 每 60s 检查新 Issues                       │        │
+│   │   • spawn sub-agents 处理具体 Issues            │        │
+│   │                                                │        │
+│   └─────────────┬──────────────────────────────────┘        │
+│                 │ sessions_spawn (max 8)                     │
+│                 ▼                                             │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│   │ Sub-agent #1 │  │ Sub-agent #2 │  │ Sub-agent #N │     │
+│   │  (Issue 123) │  │  (Issue 456) │  │  (Issue 789) │     │
+│   └──────────────┘  └──────────────┘  └──────────────┘     │
 │                                                             │
+│   同时...                                                    │
+│                                                             │
+│   ┌──────────────┐                                            │
+│   │  main agent  │ ← 用户正常使用，不受影响                      │
+│   │  (你的会话)   │                                            │
+│   └──────────────┘                                            │
 └─────────────────────────────────────────────────────────────┘
-                          │
-                          │ External Tools
-                          ▼
+                           │
+                           │ External Tools
+                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│   GitHub API    │   OpenSpec CLI   │   Telegram API        │
-│   (Issue/PR)    │   (specs)        │   (notifications)     │
+│   GitHub API    │   OpenSpec CLI   │   Channel API          │
+│   (Issue/PR)    │   (specs)        │   (notifications)       │
 └─────────────────────────────────────────────────────────────┘
+
+状态持久化:
+~/.openclaw/agents/crawlph/data/
+├── crawlph-claims.json
+├── crawlph-cursor.json
+└── progress/
+    └── issue-{N}.json
 ```
 
 ### 当前状态
 
-- OpenClaw 已有 gh-issues skill（865 行），证明了纯 Skill 实现复杂 workflow 的可行性
+- OpenClaw 支持 multi-agent 架构，每个 agent 完全隔离
 - OpenSpec CLI 已安装（v1.2.0），可用于生成 specs
 - OpenCode 可通过 ACP runtime 调用
+- 支持 bindings 路由消息到不同 agent
 
 ## Goals / Non-Goals
 
@@ -63,17 +86,44 @@ crawlph 是一个 OpenClaw skill，用于自动化 spec-driven development workf
 
 ## Decisions
 
-### D1: 纯 Skill 实现（无 Plugin）
+### D1: 专用 Agent 架构（替代纯 Skill）
 
-**选择**: Phase 1 只实现 Skill，不添加 Plugin
+**选择**: 使用专用 Agent (`crawlph`) 作为编排器，而非纯 Skill
 
 **理由**:
-- gh-issues 已证明纯 Skill 可实现复杂 workflow
-- Skill 修改无需重启 Gateway
-- 更轻量，迭代更快
-- 如后续需要 Plugin 能力（自定义 tools、后台服务），再添加
+- 用户需要 **后台持续运行** (watch mode)，长期占用会话，纯 Skill 会阻塞 main session
+- 用户需要 **多种交互方式**：Telegram/Discord channel、GitHub webhook、main session 触发
+- 专用 Agent 完全隔离，不影响用户正常使用 main session
+- 利用 OpenClaw 的 agent 会话持久化，重启后自动恢复状态
 
-**替代方案**: 一开始就实现 Skill + Plugin 混合 - 拒绝，因为增加复杂度
+**替代方案**: 纯 Skill 架构 - 拒绝，因为：
+- watch mode 会阻塞 main session
+- 无法通过 channel 直接交互
+- 无法接收 GitHub webhook 事件
+
+**配置示例** (`~/.openclaw/openclaw.json`):
+```json5
+{
+  agents: {
+    list: [
+      {
+        id: "crawlph",
+        workspace: "~/.openclaw/workspace-crawlph",
+        agentDir: "~/.openclaw/agents/crawlph/agent",
+        model: "anthropic/claude-opus-4-5",
+        thinking: "high",
+        sandbox: { mode: "off" },
+      },
+    ],
+  },
+  bindings: [
+    {
+      agentId: "crawlph",
+      match: { channel: "telegram", peer: { kind: "channel", id: "CHANNEL_ID" } },
+    },
+  ],
+}
+```
 
 ### D2: Orchestrator 循环实现 Ralph Loop
 
@@ -139,24 +189,50 @@ while (!success) {
 }
 ```
 
-### D6: 文件存储状态持久化
+### D6: Agent 数据目录状态持久化
 
-**选择**: 使用文件存储（`/data/.clawdbot/`）
+**选择**: 使用 OpenClaw Agent 数据目录（`~/.openclaw/agents/crawlph/data/`）
 
 **文件结构**:
 ```
-/data/.clawdbot/
-├── crawlph-claims.json      # Issue claims (防止重复处理)
-├── crawlph-cursor.json      # Watch mode cursor
-└── crawlph-progress/        # 每个 Issue 的进度
-    ├── issue-123.json
-    └── issue-456.json
+~/.openclaw/agents/crawlph/
+├── agent/
+│   └── auth-profiles.json   # GitHub token
+├── sessions/
+│   └── main.jsonl           # Agent 会话历史
+└── data/                    # crawlph 专用状态
+    ├── crawlph-claims.json  # Issue claims (防止重复处理)
+    ├── crawlph-cursor.json # Watch mode cursor
+    └── progress/           # 每个 Issue 的进度
+        ├── issue-123.json
+        └── issue-456.json
 ```
 
 **理由**:
-- 简单可靠
-- 无需数据库
-- 跨会话持久化
+- 符合 OpenClaw 标准目录结构
+- 利用 agent 的会话持久化机制
+- 与 OpenClaw 其他数据分离
+- GitHub token 可以通过 agent 的 auth-profiles 管理
+
+**进度文件格式** (`progress/issue-{N}.json`):
+```json
+{
+  "issueNumber": 123,
+  "currentStage": "implementation",
+  "attempts": 3,
+  "prNumber": 456,
+  "lastError": "TypeScript compilation failed",
+  "checkpoints": {
+    "exploration": "2024-01-01T00:00:00Z",
+    "refinement": "2024-01-01T01:00:00Z",
+    "design": "2024-01-01T02:00:00Z"
+  },
+  "context": {
+    "branchName": "issue-123-add-auth",
+    "specFile": "openspec/changes/issue-123/spec.md"
+  }
+}
+```
 
 ### D7: 并发限制 8 个 sub-agents
 
@@ -244,7 +320,7 @@ while (!success) {
 }
 ```
 
-**进度文件格式** (`/data/.clawdbot/crawlph-progress/issue-{N}.json`):
+**进度文件格式** (`~/.openclaw/agents/crawlph/data/progress/issue-{N}.json`):
 ```json
 {
   "issueNumber": 123,
@@ -289,6 +365,55 @@ if (openspec_cli_available() && version >= MIN_VERSION) {
 
 **最低版本要求**: OpenSpec CLI >= v1.0.0
 
+### D12: Agent Bindings 和自动启动
+
+**选择**: 通过 bindings 配置实现多入口触发，Agent 启动后自动进入 watch mode
+
+**触发方式**:
+
+| 触发源 | 配置方式 | 说明 |
+|--------|----------|------|
+| **Telegram Channel** | `bindings` 配置 | 绑定 channel ID 到 crawlph agent |
+| **Discord Channel** | `bindings` 配置 | 绑定 channel ID 到 crawlph agent |
+| **GitHub Webhook** | Webhook 配置 | 需要实现 webhook endpoint |
+| **Main Agent** | `sessions_send` | 用户在 main session 中发送指令 |
+
+**Bindings 配置示例**:
+```json5
+{
+  bindings: [
+    // Telegram 频道 → crawlph agent
+    {
+      agentId: "crawlph",
+      match: {
+        channel: "telegram",
+        peer: { kind: "channel", id: "YOUR_CHANNEL_ID" },
+      },
+    },
+    // Discord 频道 → crawlph agent
+    {
+      agentId: "crawlph",
+      match: {
+        channel: "discord",
+        peer: { kind: "channel", id: "YOUR_CHANNEL_ID" },
+      },
+    },
+  ],
+}
+```
+
+**自动启动行为**:
+- Agent 启动后立即进入 watch mode
+- 不需要手动触发
+- 从上次 cursor 位置继续（恢复状态）
+- 可以通过发送 "停止" 消息停止 watch mode
+
+**响应外部指令**:
+- "状态" → 显示当前状态
+- "处理所有 Issues" → 立即检查并处理
+- "停止" → 停止 watch mode
+- "帮助" → 显示可用命令
+
 ## Risks / Trade-offs
 
 ### R1: 上下文积累导致性能问题
@@ -328,29 +453,48 @@ if (openspec_cli_available() && version >= MIN_VERSION) {
 
 ## Migration Plan
 
-### Phase 1: 核心功能实现
+### Phase 1: 专用 Agent 配置
 
-1. 创建 `skills/crawlph/SKILL.md`
+1. 创建 crawlph workspace 目录结构
+   ```bash
+   mkdir -p ~/.openclaw/workspace-crawlph
+   mkdir -p ~/.openclaw/agents/crawlph/data/progress
+   ```
+
+2. 创建 AGENTS.md（Agent 核心逻辑）
+3. 创建 SOUL.md（Agent persona）
+4. 创建 TOOLS.md（工具说明）
+
+5. 更新 openclaw.json
+   - 添加 crawlph agent 配置
+   - 添加 bindings 配置（Telegram/Discord）
+   - 配置 GitHub token
+
+6. 重启 Gateway 使配置生效
+
+### Phase 2: Agent 逻辑实现
+
+1. 实现 watch mode 自动检查逻辑
 2. 实现 Issue orchestration
 3. 实现 7-stage workflow
 4. 实现 Ralph Loop
 5. 集成 OpenSpec CLI
 6. 实现 PR lifecycle
-7. 实现进度报告
+7. 实现进度报告（Channel + Issue Comments）
 
-### Phase 2: 测试和优化
+### Phase 3: 测试和优化
 
-1. 测试各种触发模式
+1. 测试各种触发模式（Telegram/Discord/Webhook/Main agent）
 2. 测试并发处理
 3. 测试失败重试
-4. 优化 Context hygiene
-5. 添加更多错误处理
+4. 测试 watch mode 恢复
+5. 优化错误处理
 
 ### Rollback Strategy
 
 如果出现问题：
-1. 移除 `skills/crawlph/` 目录
-2. 清理 `/data/.clawdbot/crawlph-*.json`
+1. 从 openclaw.json 移除 crawlph agent 配置
+2. 清理 `~/.openclaw/agents/crawlph/` 目录
 3. 手动处理未完成的 Issues
 
 ## Open Questions
@@ -359,5 +503,7 @@ if (openspec_cli_available() && version >= MIN_VERSION) {
 |---|------|------|------|
 | 1 | Watch mode interval: 默认 60 秒是否合适？ | ✅ 已解决 | 60 秒，参考 issue-orchestration spec |
 | 2 | Sub-agent 超时: 每个 sub-agent 应该有超时限制吗？ | ✅ 已解决 | 30 分钟，可配置 `--timeout` |
-| 3 | Channel 配置: 是否支持多个通知 Channel？ | ❓ 待定 | 当前仅支持单个，后续可扩展 |
+| 3 | Channel 配置: 是否支持多个通知 Channel？ | ✅ 已解决 | 通过 bindings 支持多个 channel |
 | 4 | Specs 格式: 如果不使用 OpenSpec，specs 文件应该放在哪里？ | ✅ 已解决 | `specs/issue-{N}.md`，参考 openspec-integration spec |
+| 5 | Agent 自动启动: Gateway 重启后是否自动启动 crawlph agent？ | ✅ 已解决 | 是，OpenClaw 会自动启动所有配置的 agents |
+| 6 | GitHub Webhook: 如何实现 webhook endpoint？ | ❓ 待定 | 需要调研 OpenClaw 的 webhook 支持 |

@@ -38,7 +38,7 @@ IMPORTANT:
 - You implement Ralph Loop: infinite retry with clean context per attempt
 - Design and Implementation happen in the SAME PR (Draft → Open → Merged)
 - You spawn sub-agents via `sessions_spawn` with `runtime: "acp"` and `agentId: "opencode"`
-- You persist state in `/data/.clawdbot/` directory
+- You persist state in `~/.openclaw/agents/crawlph/data/` directory
 - You send progress notifications via Channel AND record milestones in Issue Comments
 - Maximum 8 concurrent sub-agents
 
@@ -120,7 +120,7 @@ If empty result:
 
 **2.4. Load Claims:**
 
-Read `/data/.clawdbot/crawlph-claims.json` to get currently claimed Issues:
+Read `~/.openclaw/agents/crawlph/data/crawlph-claims.json` to get currently claimed Issues:
 
 ```json
 {
@@ -186,12 +186,12 @@ Process each Issue using the Ralph Loop pattern (infinite retry until success).
 For each Issue to process:
 
 1. **Claim the Issue:**
-   - Add entry to `/data/.clawdbot/crawlph-claims.json`
+   - Add entry to `~/.openclaw/agents/crawlph/data/crawlph-claims.json`
    - Set `claimedAt` to current timestamp
    - Set `agentId` to current session ID
 
 2. **Initialize Progress File:**
-   - Create `/data/.clawdbot/crawlph-progress/issue-{N}.json`
+   - Create `~/.openclaw/agents/crawlph/data/progress/issue-{N}.json`
    ```json
    {
      "issueNumber": 123,
@@ -417,7 +417,7 @@ Clear:
 - Codebase analysis results
 
 # Save cursor for next iteration
-echo '{"lastRun": "'$(date -Iseconds)'"}' > /data/.clawdbot/crawlph-cursor.json
+echo '{"lastRun": "'$(date -Iseconds)'"}' > ~/.openclaw/agents/crawlph/data/crawlph-cursor.json
 
 # Sleep and loop back to Phase 2
 sleep 60
@@ -440,7 +440,7 @@ Handle edge cases and cleanup.
 
 **7.1. Stale Claim Cleanup:**
 
-On startup, check `/data/.clawdbot/crawlph-claims.json`:
+On startup, check `~/.openclaw/agents/crawlph/data/crawlph-claims.json`:
 - Remove claims older than 24 hours
 - These are likely from crashed sessions
 
@@ -454,7 +454,7 @@ If progress file is corrupted:
 **7.3. Recovery After Restart:**
 
 If Orchestrator restarts:
-- Read all progress files in `/data/.clawdbot/crawlph-progress/`
+   - Read all progress files in `~/.openclaw/agents/crawlph/data/progress/`
 - Resume processing from last known stage
 - Do NOT restart from Stage 1 unless progress file missing
 
@@ -476,7 +476,7 @@ If Orchestrator restarts:
 - After 3 failures: Send notification and pause
 
 **File System Errors:**
-- If cannot write to `/data/.clawdbot/`: Stop and tell user to check permissions
+- If cannot write to `~/.openclaw/agents/crawlph/data/`: Stop and tell user to check permissions
 - Use atomic writes (write to temp file, then rename)
 
 ---

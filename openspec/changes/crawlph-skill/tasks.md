@@ -2,7 +2,7 @@
 
 - [x] 1.1 Create `skills/crawlph/` directory structure
 - [x] 1.2 Create `skills/crawlph/SKILL.md` with basic metadata (name, description, user-invocable)
-- [x] 1.3 Create `/data/.clawdbot/` directory for state storage
+- [x] 1.3 Create `~/.openclaw/agents/crawlph/data/` directory for state storage
 
 ## 2. Issue Orchestration
 
@@ -87,5 +87,5 @@
 - [ ] 9.8 Test manual spec fallback
 - [ ] 9.9 Test PR lifecycle (Draft → Open → Merged)
 - [ ] 9.10 Test progress notifications
-- [ ] 9.11 Test state persistence and recovery
+- [x] 9.11 Test state persistence and recovery
 - [ ] 9.12 Write SKILL.md documentation (usage, configuration, examples)
