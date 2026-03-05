@@ -25,7 +25,7 @@ The system SHALL implement infinite retry loop for Issue processing until succes
 #### Scenario: Progress file format
 
 - **WHEN** persisting progress
-- **THEN** system SHALL write to `/data/.clawdbot/crawlph-progress/issue-{N}.json`
+- **THEN** system SHALL write to `~/.openclaw/agents/crawlph/data/progress/issue-{N}.json`
 - **AND** file SHALL include:
   - `currentStage`: current workflow stage
   - `attempts`: number of retry attempts

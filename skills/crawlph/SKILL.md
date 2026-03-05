@@ -38,7 +38,7 @@ IMPORTANT:
 - You implement Ralph Loop: infinite retry with clean context per attempt
 - Design and Implementation happen in the SAME PR (Draft → Open → Merged)
 - You spawn sub-agents via `sessions_spawn` with `runtime: "acp"` and `agentId: "opencode"`
-- You persist state in `~/.openclaw/agents/crawlph/data/` directory
+- You persist state in `{DATA_DIR}` directory (passed via config, defaults to `~/.openclaw/agents/crawlph/data/`)
 - You send progress notifications via Channel AND record milestones in Issue Comments
 - Maximum 8 concurrent sub-agents
 
@@ -72,6 +72,7 @@ Parse the arguments string to determine execution mode and filters.
 - `AUTO_CONFIRM = true` if `--yes` flag is set
 - `NOTIFY_CHANNEL = --notify-channel value OR skills.entries["crawlph"].notifyChannel from config OR null`
 - `MAX_CONCURRENT = 8` (hardcoded limit)
+- `DATA_DIR = ${CRAWLPH_DATA_DIR:-~/.openclaw/agents/crawlph/data}/`
 - `POLL_INTERVAL = 60` seconds (for watch mode)
 
 **If `--watch` and `--cron` both set:**
@@ -120,7 +121,7 @@ If empty result:
 
 **2.4. Load Claims:**
 
-Read `~/.openclaw/agents/crawlph/data/crawlph-claims.json` to get currently claimed Issues:
+Read `{DATA_DIR}/crawlph-claims.json` to get currently claimed Issues:
 
 ```json
 {
@@ -186,12 +187,12 @@ Process each Issue using the Ralph Loop pattern (infinite retry until success).
 For each Issue to process:
 
 1. **Claim the Issue:**
-   - Add entry to `~/.openclaw/agents/crawlph/data/crawlph-claims.json`
+   - Add entry to `{DATA_DIR}/crawlph-claims.json`
    - Set `claimedAt` to current timestamp
    - Set `agentId` to current session ID
 
 2. **Initialize Progress File:**
-   - Create `~/.openclaw/agents/crawlph/data/progress/issue-{N}.json`
+   - Create `{DATA_DIR}/progress/issue-{N}.json`
    ```json
    {
      "issueNumber": 123,
@@ -260,6 +261,7 @@ Issue Number: {ISSUE_NUMBER}
 Current Stage: {CURRENT_STAGE}
 Checkpoints: {CHECKPOINTS}
 Branch Name: issue-{ISSUE_NUMBER}-{short-title}
+Data Directory: {DATA_DIR}
 </config>
 
 <issue>
@@ -271,6 +273,8 @@ Labels: {ISSUE_LABELS}
 
 <instructions>
 You are a sub-agent processing a GitHub Issue through a 7-stage workflow. Follow these stages in order. Mark each stage complete by adding a comment to the Issue.
+
+Use {DATA_DIR} for all state file paths.
 
 **Stage 1: Exploration (label: stage:exploration)**
 - Analyze the Issue to understand the requirement
@@ -417,7 +421,7 @@ Clear:
 - Codebase analysis results
 
 # Save cursor for next iteration
-echo '{"lastRun": "'$(date -Iseconds)'"}' > ~/.openclaw/agents/crawlph/data/crawlph-cursor.json
+echo '{"lastRun": "'$(date -Iseconds)'"}' > {DATA_DIR}/crawlph-cursor.json
 
 # Sleep and loop back to Phase 2
 sleep 60
@@ -440,7 +444,7 @@ Handle edge cases and cleanup.
 
 **7.1. Stale Claim Cleanup:**
 
-On startup, check `~/.openclaw/agents/crawlph/data/crawlph-claims.json`:
+On startup, check `{DATA_DIR}/crawlph-claims.json`:
 - Remove claims older than 24 hours
 - These are likely from crashed sessions
 
@@ -454,7 +458,7 @@ If progress file is corrupted:
 **7.3. Recovery After Restart:**
 
 If Orchestrator restarts:
-   - Read all progress files in `~/.openclaw/agents/crawlph/data/progress/`
+   - Read all progress files in `{DATA_DIR}/progress/`
 - Resume processing from last known stage
 - Do NOT restart from Stage 1 unless progress file missing
 
@@ -476,7 +480,7 @@ If Orchestrator restarts:
 - After 3 failures: Send notification and pause
 
 **File System Errors:**
-- If cannot write to `~/.openclaw/agents/crawlph/data/`: Stop and tell user to check permissions
+- If cannot write to `{DATA_DIR}/`: Stop and tell user to check permissions
 - Use atomic writes (write to temp file, then rename)
 
 ---
