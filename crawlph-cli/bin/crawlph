@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+
+const path = require('path');
+const fs = require('fs');
+
+const distPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
+
+if (!fs.existsSync(distPath)) {
+  console.error('CLI not built. Run: npm run build');
+  process.exit(1);
+}
+
+require(distPath);
