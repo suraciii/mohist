@@ -1,0 +1,167 @@
+import { Command } from 'commander';
+import chalk from 'chalk';
+import http from 'http';
+import { ApiResponse, Project } from '../../types';
+
+const API_BASE = 'http://localhost:3456/api';
+
+function apiClient<T = any>(
+  method: string,
+  path: string,
+  body?: any
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const data = body ? JSON.stringify(body) : undefined;
+    
+    const req = http.request(
+      `${API_BASE}${path}`,
+      {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': data ? Buffer.byteLength(data) : 0
+        }
+      },
+      (res) => {
+        let responseData = '';
+        
+        res.on('data', (chunk) => {
+          responseData += chunk;
+        });
+        
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(responseData);
+            resolve(parsed);
+          } catch (error) {
+            reject(new Error('Invalid JSON response'));
+          }
+        });
+      }
+    );
+    
+    req.on('error', reject);
+    
+    if (data) {
+      req.write(data);
+    }
+    
+    req.end();
+  });
+}
+
+export function setupProjectCommands(program: Command): void {
+  const project = program.command('project').description('Manage projects');
+
+  project
+    .command('create <name>')
+    .description('Create a new project')
+    .requiredOption('--repo <repo>', 'GitHub repository (owner/repo)')
+    .action(async (name, options) => {
+      try {
+        const response = await apiClient<ApiResponse<Project>>(
+          'POST',
+          '/projects',
+          { name, repo: options.repo }
+        );
+        
+        if (response.success && response.data) {
+          console.log(chalk.green(`✓ Project created: ${response.data.name}`));
+          console.log(chalk.gray(`  Repository: ${response.data.repo}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to create project: ${error}`));
+      }
+    });
+
+  project
+    .command('list')
+    .description('List all projects')
+    .action(async () => {
+      try {
+        const response = await apiClient<ApiResponse<Project[]>>('GET', '/projects');
+        
+        if (response.success && response.data) {
+          if (response.data.length === 0) {
+            console.log(chalk.yellow('No projects found'));
+            return;
+          }
+          
+          console.log(chalk.bold('\nProjects:\n'));
+          response.data.forEach((p, i) => {
+            console.log(`  ${i + 1}. ${chalk.cyan(p.name)} - ${p.repo}`);
+          });
+          console.log();
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to list projects: ${error}`));
+      }
+    });
+
+  project
+    .command('use <name>')
+    .description('Switch to a project')
+    .action(async (name) => {
+      try {
+        const response = await apiClient<ApiResponse<Project>>(
+          'POST',
+          `/projects/${name}/use`
+        );
+        
+        if (response.success && response.data) {
+          console.log(chalk.green(`✓ Switched to project: ${response.data.name}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to switch project: ${error}`));
+      }
+    });
+
+  project
+    .command('remove <name>')
+    .description('Remove a project')
+    .action(async (name) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'DELETE',
+          `/projects/${name}`
+        );
+        
+        if (response.success) {
+          console.log(chalk.green(`✓ Project removed: ${name}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to remove project: ${error}`));
+      }
+    });
+
+  project
+    .command('show <name>')
+    .description('Show project details')
+    .action(async (name) => {
+      try {
+        const response = await apiClient<ApiResponse<Project>>(
+          'GET',
+          `/projects/${name}`
+        );
+        
+        if (response.success && response.data) {
+          const p = response.data;
+          console.log(chalk.bold(`\nProject: ${p.name}\n`));
+          console.log(`  Repository: ${chalk.cyan(p.repo)}`);
+          console.log(`  Path: ${chalk.gray(p.path)}`);
+          console.log(`  Created: ${chalk.gray(p.createdAt)}`);
+          console.log();
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to show project: ${error}`));
+      }
+    });
+}
