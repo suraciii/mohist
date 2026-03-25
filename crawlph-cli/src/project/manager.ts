@@ -9,19 +9,18 @@ export class ProjectManager {
     projects.forEach(p => this.projects.set(p.id, p));
   }
 
-  create(name: string, repo: string): Project {
+  create(name: string, projectPath: string): Project {
     const id = uuidv4();
     const project: Project = {
       id,
       name,
-      repo,
-      path: process.cwd(),
+      path: projectPath,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     this.projects.set(id, project);
-    console.log(`Project created: ${name} (${repo})`);
+    console.log(`Project created: ${name} (${projectPath})`);
     
     return project;
   }

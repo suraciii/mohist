@@ -57,7 +57,6 @@ function formatStage(stage: string): string {
     'waiting-design-review': chalk.yellow,
     implementing: chalk.cyan,
     'waiting-review': chalk.magenta,
-    merging: chalk.yellow,
     done: chalk.green
   };
   
@@ -78,6 +77,28 @@ function formatStatus(status: string): string {
 
 export function setupIssueCommands(program: Command): void {
   const issue = program.command('issue').description('Manage issues');
+
+  issue
+    .command('create <title>')
+    .description('Create a new issue')
+    .option('-b, --body <body>', 'Issue body/description')
+    .action(async (title, options) => {
+      try {
+        const response = await apiClient<ApiResponse<Issue>>(
+          'POST',
+          '/issues',
+          { title, body: options.body }
+        );
+        
+        if (response.success && response.data) {
+          console.log(chalk.green(`✓ Created issue #${response.data.number}: ${response.data.title}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to create issue: ${error}`));
+      }
+    });
 
   issue
     .command('list')
@@ -122,7 +143,7 @@ export function setupIssueCommands(program: Command): void {
     .description('Show issue details')
     .action(async (number) => {
       try {
-        const response = await apiClient<ApiResponse<Issue>>(
+        const response = await apiClient<ApiResponse<any>>(
           'GET',
           `/issues/${number}`
         );
@@ -132,10 +153,23 @@ export function setupIssueCommands(program: Command): void {
           console.log(chalk.bold(`\nIssue #${issue.number}: ${issue.title}\n`));
           console.log(`  Stage: ${formatStage(issue.stage)}`);
           console.log(`  Status: ${formatStatus(issue.status)}`);
-          console.log(`  URL: ${chalk.gray(issue.url)}`);
           
-          if (issue.prNumber) {
-            console.log(`  PR: ${chalk.cyan(`#${issue.prNumber}`)}`);
+          if (issue.body) {
+            console.log(`\n  ${chalk.gray('Body:')}`);
+            console.log(`  ${issue.body.split('\n').join('\n  ')}`);
+          }
+          
+          if (issue.progress) {
+            console.log(`\n  ${chalk.gray('Progress:')}`);
+            console.log(`  ${issue.progress.current}/${issue.progress.total} (${issue.progress.percentage}%)`);
+          }
+          
+          if (issue.stageInfo) {
+            console.log(`\n  ${chalk.gray('Stage Info:')}`);
+            console.log(`  ${issue.stageInfo.description}`);
+            if (issue.stageInfo.requiresApproval) {
+              console.log(`  ${chalk.yellow('⚠ Requires your approval to continue')}`);
+            }
           }
           
           console.log();
@@ -159,11 +193,37 @@ export function setupIssueCommands(program: Command): void {
         
         if (response.success) {
           console.log(chalk.green(`✓ Started processing issue #${number}`));
+          if (response.data?.taskId) {
+            console.log(chalk.gray(`  Task ID: ${response.data.taskId}`));
+          }
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
         }
       } catch (error) {
         console.error(chalk.red(`Failed to start issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('approve <number>')
+    .description('Approve the current stage of an issue')
+    .action(async (number) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          `/issues/${number}/approve`
+        );
+        
+        if (response.success) {
+          console.log(chalk.green(`✓ Approved issue #${number}`));
+          if (response.data?.message) {
+            console.log(chalk.gray(`  ${response.data.message}`));
+          }
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to approve issue: ${error}`));
       }
     });
 

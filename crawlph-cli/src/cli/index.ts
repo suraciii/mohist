@@ -2,16 +2,15 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import http from 'http';
 import { startServer, stopServer, serverStatus, serverLogs } from './commands/server';
-import { setupProjectCommands } from './commands/project';
+import { setupProjectCommands, setupInitCommand } from './commands/project';
 import { setupIssueCommands } from './commands/issue';
-import { setupPRCommands } from './commands/pr';
 import { setupQuickCommands } from './commands/quick';
 
 const program = new Command();
 
 program
   .name('crawlph')
-  .description('AI-powered GitHub workflow automation tool')
+  .description('AI-powered issue workflow automation tool')
   .version('0.1.0');
 
 function checkServerHealth(): Promise<boolean> {
@@ -76,8 +75,8 @@ serverCmd
   });
 
 setupProjectCommands(program);
+setupInitCommand(program);
 setupIssueCommands(program);
-setupPRCommands(program);
 setupQuickCommands(program);
 
 program.parse();

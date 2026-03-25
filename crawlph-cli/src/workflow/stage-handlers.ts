@@ -69,36 +69,6 @@ export class WaitingReviewHandler implements StageHandler {
   }
 }
 
-export class MergingHandler implements StageHandler {
-  constructor(private githubClient: any) {}
-  
-  canExecute(issue: Issue): boolean {
-    return canStartAgent(issue.stage, issue.status) && !!issue.prNumber;
-  }
-  
-  async execute(issue: Issue, _task: Task): Promise<void> {
-    if (!issue.prNumber) {
-      throw new Error('No PR associated with issue');
-    }
-    
-    const pr = await this.githubClient.getPullRequest(issue.prNumber);
-    
-    if (!pr.approved) {
-      throw new Error('PR not approved');
-    }
-    
-    if (pr.merged) {
-      return;
-    }
-    
-    await this.githubClient.mergePR(issue.prNumber);
-  }
-  
-  onComplete(issue: Issue): Stage | null {
-    return getNextStage(issue.stage);
-  }
-}
-
 export class DoneHandler implements StageHandler {
   canExecute(_issue: Issue): boolean {
     return false;
@@ -129,8 +99,7 @@ export class DraftHandler implements StageHandler {
 
 export function getStageHandler(
   stage: Stage,
-  runner?: AgentRunner,
-  githubClient?: any
+  runner?: AgentRunner
 ): StageHandler {
   switch (stage) {
     case Stage.Draft:
@@ -145,9 +114,6 @@ export function getStageHandler(
       return new ImplementingHandler(runner);
     case Stage.WaitingReview:
       return new WaitingReviewHandler();
-    case Stage.Merging:
-      if (!githubClient) throw new Error('GitHubClient required for merging stage');
-      return new MergingHandler(githubClient);
     case Stage.Done:
       return new DoneHandler();
     default:

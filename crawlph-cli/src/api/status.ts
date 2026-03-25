@@ -1,22 +1,32 @@
 import { Router, Request, Response } from 'express';
-import { ProjectManager } from '../project/manager';
+import { StateManager } from '../server/state-manager';
+import { TaskQueue } from '../server/task-queue';
 import { ApiResponse } from '../types';
 
-export function createStatusRoutes(projectManager: ProjectManager): Router {
+export function createStatusRoutes(
+  stateManager: StateManager,
+  taskQueue: TaskQueue
+): Router {
   const router = Router();
 
-  router.get('/', (req: Request, res: Response): void => {
+  router.get('/status', (req: Request, res: Response): void => {
     try {
       const all = req.query.all === 'true';
       
       if (all) {
-        const projects = projectManager.list();
-        const status = projects.map(p => ({
-          name: p.name,
-          repo: p.repo,
-          issues: 0,
-          activeIssues: 0
-        }));
+        const projects = stateManager.loadProjects();
+        const status = projects.map(p => {
+          const issues = stateManager.loadIssues(p.id);
+          const activeIssues = issues.filter(i => i.status === 'active').length;
+          
+          return {
+            name: p.name,
+            path: p.path,
+            issues: issues.length,
+            activeIssues,
+            isCurrent: stateManager.getCurrentProjectId() === p.id
+          };
+        });
         
         const response: ApiResponse = {
           success: true,
@@ -26,8 +36,8 @@ export function createStatusRoutes(projectManager: ProjectManager): Router {
         return;
       }
 
-      const current = projectManager.getCurrent();
-      if (!current) {
+      const currentId = stateManager.getCurrentProjectId();
+      if (!currentId) {
         const response: ApiResponse = {
           success: false,
           error: 'No current project. Use: crawlph project use <name>'
@@ -36,11 +46,36 @@ export function createStatusRoutes(projectManager: ProjectManager): Router {
         return;
       }
 
+      const current = stateManager.getProjectById(currentId);
+      if (!current) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Current project not found'
+        };
+        res.status(404).json(response);
+        return;
+      }
+
+      const issues = stateManager.loadIssues(currentId);
+      const activeIssues = issues.filter(i => i.status === 'active');
+      const runningTasks = taskQueue.getRunningCount();
+      const queuedTasks = taskQueue.getQueueLength();
+
       const status = {
         name: current.name,
-        repo: current.repo,
-        issues: 0,
-        activeIssues: 0
+        path: current.path,
+        issues: issues.length,
+        activeIssues: activeIssues.length,
+        runningTasks,
+        queuedTasks,
+        issuesByStage: {
+          draft: issues.filter(i => i.stage === 'draft').length,
+          designing: issues.filter(i => i.stage === 'designing').length,
+          waitingDesignReview: issues.filter(i => i.stage === 'waiting-design-review').length,
+          implementing: issues.filter(i => i.stage === 'implementing').length,
+          waitingReview: issues.filter(i => i.stage === 'waiting-review').length,
+          done: issues.filter(i => i.stage === 'done').length,
+        }
       };
 
       const response: ApiResponse = {
@@ -55,6 +90,10 @@ export function createStatusRoutes(projectManager: ProjectManager): Router {
       };
       res.status(500).json(response);
     }
+  });
+
+  router.get('/health', (_req: Request, res: Response): void => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
   return router;

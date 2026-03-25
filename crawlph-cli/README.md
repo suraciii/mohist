@@ -172,24 +172,6 @@ Configuration is stored in `~/.crawlph/config.json`:
 }
 ```
 
-## GitHub Labels
-
-crawlph uses GitHub Labels to track issue state:
-
-- `crawlph:stage/draft`
-- `crawlph:stage/designing`
-- `crawlph:stage/waiting-design-review`
-- `crawlph:stage/implementing`
-- `crawlph:stage/waiting-review`
-- `crawlph:stage/merging`
-- `crawlph:stage/done`
-
-And status labels:
-
-- `crawlph:status/active`
-- `crawlph:status/paused`
-- `crawlph:status/blocked`
-
 ## Architecture
 
 crawlph uses a **fat server, thin client** architecture:
