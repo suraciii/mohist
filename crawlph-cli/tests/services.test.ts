@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resetDatabase, closeDatabase } from '../src/db/database';
-import { runMigrations } from '../src/db/migrations';
+import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
@@ -20,7 +20,7 @@ describe('ProjectService', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     
     projectRepo = new ProjectRepo(db);
     configRepo = new ConfigRepo(db);
@@ -166,7 +166,7 @@ describe('IssueService', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
     const project = projectRepo.create({ name: 'Test Project', path: '/test' });
@@ -270,7 +270,7 @@ describe('WorkflowService', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
     const project = projectRepo.create({ name: 'Test', path: '/test' });
@@ -416,7 +416,7 @@ describe('ConfigService', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     
     configRepo = new ConfigRepo(db);
     service = new ConfigService(configRepo);

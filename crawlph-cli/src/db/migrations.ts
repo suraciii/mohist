@@ -1,6 +1,6 @@
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -54,6 +54,19 @@ const CREATE_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);',
 ];
 
+const CREATE_COMMENTS_TABLE = `
+CREATE TABLE IF NOT EXISTS comments (
+  id          TEXT PRIMARY KEY,
+  issue_id    TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  body        TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+`;
+
+const CREATE_COMMENTS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_comments_issue_id ON comments(issue_id);',
+];
+
 export function runMigrations(db: DatabaseManager): void {
   db.transaction(() => {
     db.exec(CREATE_PROJECTS_TABLE);
@@ -77,11 +90,15 @@ function setSchemaVersion(db: DatabaseManager, version: number): void {
 }
 
 export function getSchemaVersion(db: DatabaseManager): number {
-  const row = db.get<{ value: string }>(
-    'SELECT value FROM config WHERE key = ?',
-    ['schema_version']
-  );
-  return row ? parseInt(row.value, 10) : 0;
+  try {
+    const row = db.get<{ value: string }>(
+      'SELECT value FROM config WHERE key = ?',
+      ['schema_version']
+    );
+    return row ? parseInt(row.value, 10) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function initializeDatabase(db: DatabaseManager): void {
@@ -90,4 +107,29 @@ export function initializeDatabase(db: DatabaseManager): void {
   if (currentVersion === 0) {
     runMigrations(db);
   }
+  
+  if (currentVersion < 2) {
+    migrateToVersion2(db);
+  }
+}
+
+function migrateToVersion2(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(issues)"
+    );
+    const hasLabels = tableInfo.some(col => col.name === 'labels');
+    
+    if (!hasLabels) {
+      db.exec("ALTER TABLE issues ADD COLUMN labels TEXT DEFAULT '[]'");
+    }
+    
+    db.exec(CREATE_COMMENTS_TABLE);
+    
+    for (const indexSql of CREATE_COMMENTS_INDEXES) {
+      db.exec(indexSql);
+    }
+    
+    setSchemaVersion(db, 2);
+  });
 }
