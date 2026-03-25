@@ -5,6 +5,7 @@ import { createProjectRoutes } from '../api/projects';
 import { createIssueRoutes } from '../api/issues';
 import { createConfigRoutes } from '../api/config';
 import { createStatusRoutes } from '../api/status';
+import { createLabelRoutes } from '../api/labels';
 import { ConfigService } from '../services';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
   
   server.addRouter('/api/projects', createProjectRoutes(stateManager));
   server.addRouter('/api/issues', createIssueRoutes(stateManager, taskQueue));
+  server.addRouter('/api/labels', createLabelRoutes(stateManager));
   server.addRouter('/api/config', createConfigRoutes(configService));
   server.addRouter('/api', createStatusRoutes(stateManager, taskQueue));
 

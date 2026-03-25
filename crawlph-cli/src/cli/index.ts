@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import http from 'http';
 import { startServer, stopServer, serverStatus, serverLogs } from './commands/server';
 import { setupProjectCommands, setupInitCommand } from './commands/project';
-import { setupIssueCommands } from './commands/issue';
+import { setupIssueCommands, setupLabelCommands } from './commands/issue';
 import { setupQuickCommands } from './commands/quick';
 
 const program = new Command();
@@ -77,6 +77,7 @@ serverCmd
 setupProjectCommands(program);
 setupInitCommand(program);
 setupIssueCommands(program);
+setupLabelCommands(program);
 setupQuickCommands(program);
 
 program.parse();

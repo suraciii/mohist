@@ -10,18 +10,28 @@ interface IssueRow {
   body: string | null;
   stage: string;
   status: string;
+  labels: string;
   created_at: string;
   updated_at: string;
 }
 
 function rowToIssue(row: IssueRow): Issue {
+  let labels: string[] = [];
+  try {
+    labels = JSON.parse(row.labels || '[]');
+  } catch {
+    labels = [];
+  }
+  
   return {
+    id: row.id,
     number: row.number,
     title: row.title,
     body: row.body || undefined,
     stage: row.stage as Stage,
     status: row.status as IssueStatus,
     projectId: row.project_id,
+    labels,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -32,6 +42,7 @@ export interface CreateIssueData {
   projectId: string;
   title: string;
   body?: string;
+  labels?: string[];
 }
 
 export interface IssueQueryOptions {
@@ -46,20 +57,23 @@ export class IssueRepo {
   create(data: CreateIssueData): Issue {
     const now = new Date().toISOString();
     const id = uuidv4();
+    const labels = JSON.stringify(data.labels || []);
     
     this.db.run(
-      `INSERT INTO issues (id, number, project_id, title, body, stage, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, data.number, data.projectId, data.title, data.body || null, Stage.Draft, IssueStatus.Active, now, now]
+      `INSERT INTO issues (id, number, project_id, title, body, stage, status, labels, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, data.number, data.projectId, data.title, data.body || null, Stage.Draft, IssueStatus.Active, labels, now, now]
     );
     
     return {
+      id,
       number: data.number,
       title: data.title,
       body: data.body,
       stage: Stage.Draft,
       status: IssueStatus.Active,
       projectId: data.projectId,
+      labels: data.labels || [],
       createdAt: now,
       updatedAt: now,
     };
@@ -138,7 +152,7 @@ export class IssueRepo {
     return this.findById(issueId);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[] }>): Issue | null {
     const existing = this.findById(issueId);
     if (!existing) return null;
     
@@ -161,6 +175,10 @@ export class IssueRepo {
       updates.push('status = ?');
       values.push(data.status);
     }
+    if (data.labels !== undefined) {
+      updates.push('labels = ?');
+      values.push(JSON.stringify(data.labels));
+    }
     
     if (updates.length === 0) return existing;
     
@@ -174,6 +192,22 @@ export class IssueRepo {
     );
     
     return this.findById(issueId);
+  }
+  
+  addLabel(issueId: string, label: string): Issue | null {
+    const issue = this.findById(issueId);
+    if (!issue) return null;
+    
+    const labels = [...new Set([...issue.labels, label])];
+    return this.update(issueId, { labels });
+  }
+  
+  removeLabel(issueId: string, label: string): Issue | null {
+    const issue = this.findById(issueId);
+    if (!issue) return null;
+    
+    const labels = issue.labels.filter(l => l !== label);
+    return this.update(issueId, { labels });
   }
 
   delete(issueId: string): boolean {

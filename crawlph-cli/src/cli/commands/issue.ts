@@ -75,6 +75,30 @@ function formatStatus(status: string): string {
   return color(status);
 }
 
+function formatLabels(labels: string[]): string {
+  if (!labels || labels.length === 0) return '';
+  return labels.map(l => chalk.blue(`[${l}]`)).join(' ');
+}
+
+function parseLabelFlags(flags: string[] | undefined): { add: string[]; remove: string[] } {
+  const add: string[] = [];
+  const remove: string[] = [];
+  
+  if (flags) {
+    for (const flag of flags) {
+      if (flag.startsWith('+')) {
+        add.push(flag.slice(1));
+      } else if (flag.startsWith('-')) {
+        remove.push(flag.slice(1));
+      } else {
+        add.push(flag);
+      }
+    }
+  }
+  
+  return { add, remove };
+}
+
 export function setupIssueCommands(program: Command): void {
   const issue = program.command('issue').description('Manage issues');
 
@@ -82,12 +106,13 @@ export function setupIssueCommands(program: Command): void {
     .command('create <title>')
     .description('Create a new issue')
     .option('-b, --body <body>', 'Issue body/description')
+    .option('-l, --label <label>', 'Add label (can be repeated)', (val, prev: string[]) => [...prev, val], [] as string[])
     .action(async (title, options) => {
       try {
         const response = await apiClient<ApiResponse<Issue>>(
           'POST',
           '/issues',
-          { title, body: options.body }
+          { title, body: options.body, labels: options.label }
         );
         
         if (response.success && response.data) {
@@ -104,11 +129,19 @@ export function setupIssueCommands(program: Command): void {
     .command('list')
     .description('List issues')
     .option('-s, --status <stage>', 'Filter by stage')
+    .option('-l, --label <label>', 'Filter by label')
     .action(async (options) => {
       try {
         let path = '/issues';
+        const params: string[] = [];
         if (options.status) {
-          path += `?stage=${options.status}`;
+          params.push(`stage=${options.status}`);
+        }
+        if (options.label) {
+          params.push(`label=${options.label}`);
+        }
+        if (params.length > 0) {
+          path += `?${params.join('&')}`;
         }
         
         const response = await apiClient<ApiResponse<Issue[]>>('GET', path);
@@ -120,16 +153,17 @@ export function setupIssueCommands(program: Command): void {
           }
           
           console.log(chalk.bold('\nIssues:\n'));
-          console.log('  #   Stage                     Status    Title');
-          console.log('  ' + '─'.repeat(70));
+          console.log('  ID                 Stage                     Status    Labels              Title');
+          console.log('  ' + '─'.repeat(95));
           
-          response.data.forEach((issue) => {
-            const num = chalk.cyan(`#${issue.number}`.padEnd(4));
+          response.data.forEach((issue: any) => {
+            const id = chalk.cyan(`${issue.projectName || 'unknown'}#${issue.number}`.padEnd(18));
             const stage = formatStage(issue.stage).padEnd(25);
             const status = formatStatus(issue.status).padEnd(9);
+            const labels = formatLabels(issue.labels).padEnd(20);
             const title = issue.title.substring(0, 40);
             
-            console.log(`  ${num} ${stage} ${status} ${title}`);
+            console.log(`  ${id} ${stage} ${status} ${labels} ${title}`);
           });
           console.log();
         }
@@ -150,13 +184,27 @@ export function setupIssueCommands(program: Command): void {
         
         if (response.success && response.data) {
           const issue = response.data;
-          console.log(chalk.bold(`\nIssue #${issue.number}: ${issue.title}\n`));
+          const displayId = `${issue.projectName || 'unknown'}#${issue.number}`;
+          console.log(chalk.bold(`\nIssue ${displayId}: ${issue.title}\n`));
           console.log(`  Stage: ${formatStage(issue.stage)}`);
           console.log(`  Status: ${formatStatus(issue.status)}`);
+          
+          if (issue.labels && issue.labels.length > 0) {
+            console.log(`  Labels: ${formatLabels(issue.labels)}`);
+          }
           
           if (issue.body) {
             console.log(`\n  ${chalk.gray('Body:')}`);
             console.log(`  ${issue.body.split('\n').join('\n  ')}`);
+          }
+          
+          if (issue.comments && issue.comments.length > 0) {
+            console.log(`\n  ${chalk.gray('Comments:')} (${issue.comments.length})`);
+            issue.comments.forEach((comment: any) => {
+              console.log(`    ${chalk.gray(new Date(comment.createdAt).toLocaleString())}`);
+              console.log(`    ${comment.body.split('\n').join('\n    ')}`);
+              console.log();
+            });
           }
           
           if (issue.progress) {
@@ -178,6 +226,98 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to show issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('update <number>')
+    .description('Update an issue')
+    .option('--title <title>', 'New title')
+    .option('--body <body>', 'New body')
+    .option('-l, --label <label>', 'Add (+label) or remove (-label) label', (val, prev: string[]) => [...prev, val], [] as string[])
+    .action(async (number, options) => {
+      try {
+        const { add, remove } = parseLabelFlags(options.label);
+        
+        const response = await apiClient<ApiResponse<Issue>>(
+          'PATCH',
+          `/issues/${number}`,
+          {
+            title: options.title,
+            body: options.body,
+            addLabels: add.length > 0 ? add : undefined,
+            removeLabels: remove.length > 0 ? remove : undefined,
+          }
+        );
+        
+        if (response.success && response.data) {
+          console.log(chalk.green(`✓ Updated issue #${response.data.number}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to update issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('close <number>')
+    .description('Close an issue')
+    .action(async (number) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          `/issues/${number}/close`
+        );
+        
+        if (response.success) {
+          console.log(chalk.green(`✓ Closed issue #${number}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to close issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('reopen <number>')
+    .description('Reopen a closed issue')
+    .action(async (number) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          `/issues/${number}/reopen`
+        );
+        
+        if (response.success) {
+          console.log(chalk.green(`✓ Reopened issue #${number}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to reopen issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('comment <number> <text>')
+    .description('Add a comment to an issue')
+    .action(async (number, text) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          `/issues/${number}/comments`,
+          { body: text }
+        );
+        
+        if (response.success) {
+          console.log(chalk.green(`✓ Comment added to issue #${number}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to add comment: ${error}`));
       }
     });
 
@@ -264,6 +404,39 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to resume issue: ${error}`));
+      }
+    });
+}
+
+export function setupLabelCommands(program: Command): void {
+  const label = program.command('label').description('Manage labels');
+
+  label
+    .command('list')
+    .description('List all labels used in the current project')
+    .action(async () => {
+      try {
+        const response = await apiClient<ApiResponse<string[]>>(
+          'GET',
+          '/labels'
+        );
+        
+        if (response.success && response.data) {
+          if (response.data.length === 0) {
+            console.log(chalk.yellow('No labels found'));
+            return;
+          }
+          
+          console.log(chalk.bold('\nLabels:\n'));
+          response.data.forEach((labelName) => {
+            console.log(`  ${chalk.blue(`[${labelName}]`)}`);
+          });
+          console.log();
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to list labels: ${error}`));
       }
     });
 }

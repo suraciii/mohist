@@ -1,11 +1,13 @@
-import { Project, Issue, Task, Stage, IssueStatus } from '../types';
+import { Project, Issue, Task, Stage, IssueStatus, Comment } from '../types';
 import { 
   getDatabase, 
   initializeDatabase,
   ProjectRepo, 
   IssueRepo, 
   TaskRepo,
-  ConfigRepo 
+  ConfigRepo,
+  CommentRepo,
+  LabelRepo 
 } from '../db';
 import { initializeDefaultConfig } from '../db/config-repo';
 
@@ -14,6 +16,8 @@ export class StateManager {
   private issueRepo: IssueRepo;
   private taskRepo: TaskRepo;
   private configRepo: ConfigRepo;
+  private commentRepo: CommentRepo;
+  private labelRepo: LabelRepo;
   private initialized: boolean = false;
 
   constructor() {
@@ -24,6 +28,8 @@ export class StateManager {
     this.issueRepo = new IssueRepo(db);
     this.taskRepo = new TaskRepo(db);
     this.configRepo = new ConfigRepo(db);
+    this.commentRepo = new CommentRepo(db);
+    this.labelRepo = new LabelRepo(db);
     
     initializeDefaultConfig(this.configRepo);
     this.initialized = true;
@@ -71,13 +77,14 @@ export class StateManager {
     return this.issueRepo.findById(id);
   }
 
-  createIssue(projectId: string, title: string, body?: string): Issue {
+  createIssue(projectId: string, title: string, body?: string, labels?: string[]): Issue {
     const number = this.issueRepo.getNextNumber(projectId);
     return this.issueRepo.create({
       number,
       projectId,
       title,
       body,
+      labels,
     });
   }
 
@@ -161,6 +168,38 @@ export class StateManager {
 
   getConfigRepo(): ConfigRepo {
     return this.configRepo;
+  }
+
+  getCommentRepo(): CommentRepo {
+    return this.commentRepo;
+  }
+
+  getLabelRepo(): LabelRepo {
+    return this.labelRepo;
+  }
+
+  createComment(issueId: string, body: string): Comment {
+    return this.commentRepo.create({ issueId, body });
+  }
+
+  getCommentsByIssue(issueId: string): Comment[] {
+    return this.commentRepo.findByIssue(issueId);
+  }
+
+  getLabels(projectId: string): string[] {
+    return this.labelRepo.findAllUsed(projectId);
+  }
+
+  updateIssueLabels(issueId: string, labels: string[]): Issue | null {
+    return this.issueRepo.update(issueId, { labels });
+  }
+
+  addIssueLabel(issueId: string, label: string): Issue | null {
+    return this.issueRepo.addLabel(issueId, label);
+  }
+
+  removeIssueLabel(issueId: string, label: string): Issue | null {
+    return this.issueRepo.removeLabel(issueId, label);
   }
 }
 

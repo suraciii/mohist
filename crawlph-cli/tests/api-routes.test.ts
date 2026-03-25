@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { resetDatabase, closeDatabase } from '../src/db/database';
-import { runMigrations } from '../src/db/migrations';
+import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
@@ -34,20 +34,20 @@ describe('API Routes', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     
-    projectRepo = new ProjectRepo(db);
-    issueRepo = new IssueRepo(db);
-    taskRepo = new TaskRepo(db);
-    configRepo = new ConfigRepo(db);
+    stateManager = new StateManager();
+    taskQueue = new TaskQueue(stateManager.getTaskRepo());
+    
+    projectRepo = stateManager.getProjectRepo();
+    issueRepo = stateManager.getIssueRepo();
+    taskRepo = stateManager.getTaskRepo();
+    configRepo = stateManager.getConfigRepo();
     
     projectService = new ProjectService(projectRepo, configRepo);
-    issueService = new IssueService(issueRepo);
+    issueService = new IssueService(issueRepo, taskRepo);
     workflowService = new WorkflowService(issueService);
     configService = new ConfigService(configRepo);
-    
-    stateManager = new StateManager(projectService, issueService, taskRepo);
-    taskQueue = new TaskQueue(taskRepo);
   });
 
   afterEach(() => {
@@ -168,7 +168,7 @@ describe('API Routes', () => {
     beforeEach(async () => {
       app = express();
       app.use(express.json());
-      app.use('/api/issues', createIssueRoutes(stateManager, taskQueue, workflowService));
+      app.use('/api/issues', createIssueRoutes(stateManager, taskQueue));
       
       const project = projectService.create({ name: 'Test Project', path: '/test/path' });
       projectId = project.id;

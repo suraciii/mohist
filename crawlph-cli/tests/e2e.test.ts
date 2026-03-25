@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { resetDatabase, closeDatabase } from '../src/db/database';
-import { runMigrations } from '../src/db/migrations';
+import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
@@ -26,7 +26,7 @@ describe('E2E: Single Issue Complete Flow', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
     const issueRepo = new IssueRepo(db);

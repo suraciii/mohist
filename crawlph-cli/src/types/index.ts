@@ -14,12 +14,14 @@ export enum IssueStatus {
 }
 
 export interface Issue {
+  id: string;
   number: number;
   title: string;
   body?: string;
   stage: Stage;
   status: IssueStatus;
   projectId: string;
+  labels: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -64,4 +66,11 @@ export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+export interface Comment {
+  id: string;
+  issueId: string;
+  body: string;
+  createdAt: string;
 }

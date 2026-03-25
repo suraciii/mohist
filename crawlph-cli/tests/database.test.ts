@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseManager, resetDatabase, closeDatabase } from '../src/db/database';
-import { runMigrations } from '../src/db/migrations';
+import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
 import { TaskRepo } from '../src/db/task-repo';
 import { ConfigRepo } from '../src/db/config-repo';
+import { CommentRepo } from '../src/db/comment-repo';
+import { LabelRepo } from '../src/db/label-repo';
 import { Stage, IssueStatus } from '../src/types';
 
 describe('DatabaseManager', () => {
@@ -12,7 +14,7 @@ describe('DatabaseManager', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
   });
 
   afterEach(() => {
@@ -106,7 +108,7 @@ describe('ProjectRepo', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     repo = new ProjectRepo(db);
   });
 
@@ -191,7 +193,7 @@ describe('IssueRepo', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
     const project = projectRepo.create({ name: 'Test Project', path: '/test' });
@@ -286,7 +288,7 @@ describe('TaskRepo', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
     const project = projectRepo.create({ name: 'Test', path: '/test' });
@@ -342,7 +344,7 @@ describe('ConfigRepo', () => {
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
-    runMigrations(db);
+    initializeDatabase(db);
     repo = new ConfigRepo(db);
   });
 
@@ -394,6 +396,211 @@ describe('ConfigRepo', () => {
       const all = repo.getAll();
       expect(all['key1']).toBe('value1');
       expect(all['key2']).toBe('value2');
+    });
+  });
+});
+
+describe('IssueRepo Labels', () => {
+  let db: DatabaseManager;
+  let repo: IssueRepo;
+  let projectId: string;
+
+  beforeEach(() => {
+    db = resetDatabase({ inMemory: true });
+    initializeDatabase(db);
+    
+    const projectRepo = new ProjectRepo(db);
+    const project = projectRepo.create({ name: 'Test Project', path: '/test' });
+    projectId = project.id;
+    
+    repo = new IssueRepo(db);
+  });
+
+  afterEach(() => {
+    closeDatabase();
+  });
+
+  describe('create with labels', () => {
+    it('should create an issue with labels', () => {
+      const issue = repo.create({
+        number: 1,
+        projectId,
+        title: 'Test Issue',
+        labels: ['bug', 'priority:high']
+      });
+      
+      expect(issue.labels).toEqual(['bug', 'priority:high']);
+    });
+
+    it('should default to empty labels array', () => {
+      const issue = repo.create({
+        number: 1,
+        projectId,
+        title: 'Test Issue'
+      });
+      
+      expect(issue.labels).toEqual([]);
+    });
+  });
+
+  describe('addLabel', () => {
+    it('should add a label to an issue', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test' });
+      const updated = repo.addLabel(issue.id, 'bug');
+      
+      expect(updated?.labels).toContain('bug');
+    });
+
+    it('should not duplicate labels', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test', labels: ['bug'] });
+      const updated = repo.addLabel(issue.id, 'bug');
+      
+      expect(updated?.labels).toEqual(['bug']);
+    });
+  });
+
+  describe('removeLabel', () => {
+    it('should remove a label from an issue', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test', labels: ['bug', 'feature'] });
+      const updated = repo.removeLabel(issue.id, 'bug');
+      
+      expect(updated?.labels).toEqual(['feature']);
+    });
+
+    it('should handle non-existent label gracefully', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test', labels: ['bug'] });
+      const updated = repo.removeLabel(issue.id, 'nonexistent');
+      
+      expect(updated?.labels).toEqual(['bug']);
+    });
+  });
+
+  describe('update with labels', () => {
+    it('should update labels via update method', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test' });
+      const updated = repo.update(issue.id, { labels: ['new-label'] });
+      
+      expect(updated?.labels).toEqual(['new-label']);
+    });
+  });
+});
+
+describe('CommentRepo', () => {
+  let db: DatabaseManager;
+  let repo: CommentRepo;
+  let issueId: string;
+
+  beforeEach(() => {
+    db = resetDatabase({ inMemory: true });
+    initializeDatabase(db);
+    
+    const projectRepo = new ProjectRepo(db);
+    const project = projectRepo.create({ name: 'Test', path: '/test' });
+    
+    const issueRepo = new IssueRepo(db);
+    const issue = issueRepo.create({ number: 1, projectId: project.id, title: 'Test Issue' });
+    issueId = issue.id;
+    
+    repo = new CommentRepo(db);
+  });
+
+  afterEach(() => {
+    closeDatabase();
+  });
+
+  describe('create', () => {
+    it('should create a comment', () => {
+      const comment = repo.create({ issueId, body: 'Test comment' });
+      
+      expect(comment.id).toBeDefined();
+      expect(comment.issueId).toBe(issueId);
+      expect(comment.body).toBe('Test comment');
+      expect(comment.createdAt).toBeDefined();
+    });
+  });
+
+  describe('findByIssue', () => {
+    it('should find comments by issue', () => {
+      repo.create({ issueId, body: 'Comment 1' });
+      repo.create({ issueId, body: 'Comment 2' });
+      
+      const comments = repo.findByIssue(issueId);
+      expect(comments).toHaveLength(2);
+    });
+
+    it('should return comments in chronological order', async () => {
+      repo.create({ issueId, body: 'First' });
+      await new Promise(r => setTimeout(r, 10));
+      repo.create({ issueId, body: 'Second' });
+      
+      const comments = repo.findByIssue(issueId);
+      expect(comments[0].body).toBe('First');
+      expect(comments[1].body).toBe('Second');
+    });
+
+    it('should return empty array for issue with no comments', () => {
+      const comments = repo.findByIssue(issueId);
+      expect(comments).toEqual([]);
+    });
+  });
+
+  describe('deleteByIssue', () => {
+    it('should delete all comments for an issue', () => {
+      repo.create({ issueId, body: 'Comment 1' });
+      repo.create({ issueId, body: 'Comment 2' });
+      
+      const count = repo.deleteByIssue(issueId);
+      expect(count).toBe(2);
+      expect(repo.findByIssue(issueId)).toHaveLength(0);
+    });
+  });
+});
+
+describe('LabelRepo', () => {
+  let db: DatabaseManager;
+  let repo: LabelRepo;
+  let projectId: string;
+
+  beforeEach(() => {
+    db = resetDatabase({ inMemory: true });
+    initializeDatabase(db);
+    
+    const projectRepo = new ProjectRepo(db);
+    const project = projectRepo.create({ name: 'Test', path: '/test' });
+    projectId = project.id;
+    
+    repo = new LabelRepo(db);
+  });
+
+  afterEach(() => {
+    closeDatabase();
+  });
+
+  describe('findAllUsed', () => {
+    it('should return all labels used in project', () => {
+      const issueRepo = new IssueRepo(db);
+      issueRepo.create({ number: 1, projectId, title: 'Issue 1', labels: ['bug', 'priority:high'] });
+      issueRepo.create({ number: 2, projectId, title: 'Issue 2', labels: ['feature', 'bug'] });
+      
+      const labels = repo.findAllUsed(projectId);
+      expect(labels).toEqual(['bug', 'feature', 'priority:high']);
+    });
+
+    it('should return empty array for project with no labels', () => {
+      const labels = repo.findAllUsed(projectId);
+      expect(labels).toEqual([]);
+    });
+
+    it('should only return labels from specified project', () => {
+      const projectRepo = new ProjectRepo(db);
+      const otherProject = projectRepo.create({ name: 'Other', path: '/other' });
+      
+      const issueRepo = new IssueRepo(db);
+      issueRepo.create({ number: 1, projectId, title: 'Issue 1', labels: ['bug'] });
+      issueRepo.create({ number: 1, projectId: otherProject.id, title: 'Issue 2', labels: ['feature'] });
+      
+      const labels = repo.findAllUsed(projectId);
+      expect(labels).toEqual(['bug']);
     });
   });
 });
