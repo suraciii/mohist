@@ -1,290 +1,97 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-
-function createMockProjectManager() {
-  return {
-    create: vi.fn(),
-    list: vi.fn(),
-    get: vi.fn(),
-    delete: vi.fn(),
-    use: vi.fn(),
-    getCurrent: vi.fn(),
-    setCurrentById: vi.fn()
-  };
-}
-
-function createMockTaskQueue() {
-  return {
-    enqueue: vi.fn().mockReturnValue('task-uuid-123'),
-    dequeue: vi.fn(),
-    complete: vi.fn(),
-    getQueueLength: vi.fn().mockReturnValue(0),
-    getRunningCount: vi.fn().mockReturnValue(0),
-    getPendingTasks: vi.fn().mockReturnValue([]),
-    getRunningTasks: vi.fn().mockReturnValue([]),
-    getAllTasks: vi.fn().mockReturnValue([]),
-    canStartNew: vi.fn().mockReturnValue(true),
-    clear: vi.fn()
-  };
-}
-
-function createMockStateManager() {
-  return {
-    saveProjects: vi.fn(),
-    loadProjects: vi.fn().mockReturnValue([]),
-    saveState: vi.fn(),
-    loadState: vi.fn().mockReturnValue(null)
-  };
-}
+import { resetDatabase, closeDatabase } from '../src/db/database';
+import { runMigrations } from '../src/db/migrations';
+import { DatabaseManager } from '../src/db/database';
+import { ProjectRepo } from '../src/db/project-repo';
+import { IssueRepo } from '../src/db/issue-repo';
+import { TaskRepo } from '../src/db/task-repo';
+import { ConfigRepo } from '../src/db/config-repo';
+import { ProjectService } from '../src/services/project-service';
+import { IssueService } from '../src/services/issue-service';
+import { WorkflowService } from '../src/services/workflow-service';
+import { ConfigService } from '../src/services/config-service';
+import { StateManager } from '../src/server/state-manager';
+import { TaskQueue } from '../src/server/task-queue';
+import { createProjectRoutes } from '../src/api/projects';
+import { createIssueRoutes } from '../src/api/issues';
+import { createStatusRoutes } from '../src/api/status';
+import { createConfigRoutes } from '../src/api/config';
 
 describe('API Routes', () => {
-  describe('Issue Routes', () => {
-    let app: express.Express;
-    let mockProjectManager: ReturnType<typeof createMockProjectManager>;
-    let mockTaskQueue: ReturnType<typeof createMockTaskQueue>;
+  let db: DatabaseManager;
+  let projectRepo: ProjectRepo;
+  let issueRepo: IssueRepo;
+  let taskRepo: TaskRepo;
+  let configRepo: ConfigRepo;
+  let projectService: ProjectService;
+  let issueService: IssueService;
+  let workflowService: WorkflowService;
+  let configService: ConfigService;
+  let stateManager: StateManager;
+  let taskQueue: TaskQueue;
 
-    beforeEach(async () => {
-      vi.clearAllMocks();
-      mockProjectManager = createMockProjectManager();
-      mockTaskQueue = createMockTaskQueue();
-      
-      app = express();
-      app.use(express.json());
-      
-      const { createIssueRoutes } = await import('../src/api/issues');
-      app.use('/api/issues', createIssueRoutes(mockProjectManager as any, mockTaskQueue as any));
-    });
-
-    describe('GET /api/issues', () => {
-      it('should return error when no current project', async () => {
-        mockProjectManager.getCurrent.mockReturnValue(undefined);
-
-        const response = await request(app).get('/api/issues');
-
-        expect(response.status).toBe(400);
-        expect(response.body.success).toBe(false);
-        expect(response.body.error).toBe('No current project');
-      });
-
-      it('should return empty issues array when project is set', async () => {
-        mockProjectManager.getCurrent.mockReturnValue({
-          id: 'project-1',
-          name: 'Test Project',
-          repo: 'owner/repo',
-          path: '/path/to/project',
-          createdAt: '2024-01-01T00:00:00Z',
-          updatedAt: '2024-01-01T00:00:00Z'
-        });
-
-        const response = await request(app).get('/api/issues');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data).toEqual([]);
-      });
-    });
-
-    describe('GET /api/issues/:number', () => {
-      it('should return error when no current project', async () => {
-        mockProjectManager.getCurrent.mockReturnValue(undefined);
-
-        const response = await request(app).get('/api/issues/1');
-
-        expect(response.status).toBe(400);
-        expect(response.body.error).toBe('No current project');
-      });
-
-      it('should return 404 for non-existent issue', async () => {
-        mockProjectManager.getCurrent.mockReturnValue({
-          id: 'project-1',
-          name: 'Test Project'
-        });
-
-        const response = await request(app).get('/api/issues/999');
-
-        expect(response.status).toBe(404);
-        expect(response.body.error).toContain('not found');
-      });
-    });
-
-    describe('POST /api/issues/:number/start', () => {
-      it('should return error when no current project', async () => {
-        mockProjectManager.getCurrent.mockReturnValue(undefined);
-
-        const response = await request(app).post('/api/issues/1/start');
-
-        expect(response.status).toBe(400);
-        expect(response.body.error).toBe('No current project');
-      });
-
-      it('should enqueue task when project is set', async () => {
-        mockProjectManager.getCurrent.mockReturnValue({
-          id: 'project-1',
-          name: 'Test Project'
-        });
-
-        const response = await request(app).post('/api/issues/1/start');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.taskId).toBe('task-uuid-123');
-        expect(mockTaskQueue.enqueue).toHaveBeenCalledWith(1, 'project-1', 'draft');
-      });
-    });
-
-    describe('POST /api/issues/:number/pause', () => {
-      it('should return success message', async () => {
-        const response = await request(app).post('/api/issues/1/pause');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('paused');
-      });
-    });
-
-    describe('POST /api/issues/:number/resume', () => {
-      it('should return success message', async () => {
-        const response = await request(app).post('/api/issues/1/resume');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('resumed');
-      });
-    });
+  beforeEach(() => {
+    db = resetDatabase({ inMemory: true });
+    runMigrations(db);
+    
+    projectRepo = new ProjectRepo(db);
+    issueRepo = new IssueRepo(db);
+    taskRepo = new TaskRepo(db);
+    configRepo = new ConfigRepo(db);
+    
+    projectService = new ProjectService(projectRepo, configRepo);
+    issueService = new IssueService(issueRepo);
+    workflowService = new WorkflowService(issueService);
+    configService = new ConfigService(configRepo);
+    
+    stateManager = new StateManager(projectService, issueService, taskRepo);
+    taskQueue = new TaskQueue(taskRepo);
   });
 
-  describe('PR Routes', () => {
-    let app: express.Express;
-    let mockProjectManager: ReturnType<typeof createMockProjectManager>;
-
-    beforeEach(async () => {
-      vi.clearAllMocks();
-      mockProjectManager = createMockProjectManager();
-      
-      app = express();
-      app.use(express.json());
-      
-      const { createPullRequestRoutes } = await import('../src/api/prs');
-      app.use('/api/prs', createPullRequestRoutes(mockProjectManager as any));
-    });
-
-    describe('GET /api/prs', () => {
-      it('should return error when no current project', async () => {
-        mockProjectManager.getCurrent.mockReturnValue(undefined);
-
-        const response = await request(app).get('/api/prs');
-
-        expect(response.status).toBe(400);
-        expect(response.body.error).toBe('No current project');
-      });
-
-      it('should return empty PRs array when project is set', async () => {
-        mockProjectManager.getCurrent.mockReturnValue({
-          id: 'project-1',
-          name: 'Test Project'
-        });
-
-        const response = await request(app).get('/api/prs');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data).toEqual([]);
-      });
-    });
-
-    describe('GET /api/prs/:number', () => {
-      it('should return error when no current project', async () => {
-        mockProjectManager.getCurrent.mockReturnValue(undefined);
-
-        const response = await request(app).get('/api/prs/1');
-
-        expect(response.status).toBe(400);
-        expect(response.body.error).toBe('No current project');
-      });
-
-      it('should return 404 for non-existent PR', async () => {
-        mockProjectManager.getCurrent.mockReturnValue({
-          id: 'project-1',
-          name: 'Test Project'
-        });
-
-        const response = await request(app).get('/api/prs/999');
-
-        expect(response.status).toBe(404);
-        expect(response.body.error).toContain('not found');
-      });
-    });
-
-    describe('POST /api/prs/:number/approve', () => {
-      it('should return success message', async () => {
-        const response = await request(app).post('/api/prs/1/approve');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('approved');
-      });
-    });
+  afterEach(() => {
+    closeDatabase();
   });
 
   describe('Project Routes', () => {
     let app: express.Express;
-    let mockProjectManager: ReturnType<typeof createMockProjectManager>;
-    let mockStateManager: ReturnType<typeof createMockStateManager>;
 
-    beforeEach(async () => {
-      vi.clearAllMocks();
-      mockProjectManager = createMockProjectManager();
-      mockStateManager = createMockStateManager();
-      
+    beforeEach(() => {
       app = express();
       app.use(express.json());
-      
-      const { createProjectRoutes } = await import('../src/api/projects');
-      app.use('/api/projects', createProjectRoutes(mockProjectManager as any, mockStateManager as any));
+      app.use('/api/projects', createProjectRoutes(stateManager));
     });
 
     describe('POST /api/projects', () => {
-      it('should create project', async () => {
-        mockProjectManager.get.mockReturnValue(undefined);
-        mockProjectManager.create.mockReturnValue({
-          id: 'project-1',
-          name: 'New Project',
-          repo: 'owner/repo'
-        });
-        mockProjectManager.list.mockReturnValue([
-          { id: 'project-1', name: 'New Project', repo: 'owner/repo' }
-        ]);
-
+      it('should create a project', async () => {
         const response = await request(app)
           .post('/api/projects')
-          .send({ name: 'New Project', repo: 'owner/repo' });
+          .send({ name: 'Test Project', path: '/test/path' });
 
         expect(response.status).toBe(201);
         expect(response.body.success).toBe(true);
-        expect(mockProjectManager.create).toHaveBeenCalledWith('New Project', 'owner/repo');
-        expect(mockStateManager.saveProjects).toHaveBeenCalled();
+        expect(response.body.data.name).toBe('Test Project');
+        expect(response.body.data.path).toBe('/test/path');
       });
 
-      it('should require repo parameter', async () => {
+      it('should require name and path', async () => {
         const response = await request(app)
           .post('/api/projects')
-          .send({ name: 'New Project' });
+          .send({ name: 'Test Project' });
 
         expect(response.status).toBe(400);
-        expect(response.body.error).toContain('repo');
+        expect(response.body.error).toContain('required');
       });
-      
+
       it('should reject duplicate project name', async () => {
-        mockProjectManager.get.mockReturnValue({
-          id: 'existing-project',
-          name: 'New Project',
-          repo: 'owner/other'
-        });
+        await request(app)
+          .post('/api/projects')
+          .send({ name: 'Test Project', path: '/test/path' });
 
         const response = await request(app)
           .post('/api/projects')
-          .send({ name: 'New Project', repo: 'owner/repo' });
+          .send({ name: 'Test Project', path: '/other/path' });
 
         expect(response.status).toBe(409);
         expect(response.body.error).toContain('already exists');
@@ -293,10 +100,12 @@ describe('API Routes', () => {
 
     describe('GET /api/projects', () => {
       it('should list projects', async () => {
-        mockProjectManager.list.mockReturnValue([
-          { id: 'project-1', name: 'Project 1' },
-          { id: 'project-2', name: 'Project 2' }
-        ]);
+        await request(app)
+          .post('/api/projects')
+          .send({ name: 'Project 1', path: '/path/1' });
+        await request(app)
+          .post('/api/projects')
+          .send({ name: 'Project 2', path: '/path/2' });
 
         const response = await request(app).get('/api/projects');
 
@@ -305,27 +114,198 @@ describe('API Routes', () => {
         expect(response.body.data).toHaveLength(2);
       });
     });
+
+    describe('GET /api/projects/:name', () => {
+      it('should return project details', async () => {
+        await request(app)
+          .post('/api/projects')
+          .send({ name: 'Test Project', path: '/test/path' });
+
+        const response = await request(app).get('/api/projects/Test Project');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.name).toBe('Test Project');
+      });
+
+      it('should return 404 for non-existent project', async () => {
+        const response = await request(app).get('/api/projects/NonExistent');
+
+        expect(response.status).toBe(404);
+      });
+    });
+
+    describe('DELETE /api/projects/:name', () => {
+      it('should delete project', async () => {
+        await request(app)
+          .post('/api/projects')
+          .send({ name: 'Test Project', path: '/test/path' });
+
+        const response = await request(app).delete('/api/projects/Test Project');
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+      });
+    });
+
+    describe('POST /api/projects/:name/use', () => {
+      it('should set current project', async () => {
+        await request(app)
+          .post('/api/projects')
+          .send({ name: 'Test Project', path: '/test/path' });
+
+        const response = await request(app).post('/api/projects/Test Project/use');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.name).toBe('Test Project');
+      });
+    });
+  });
+
+  describe('Issue Routes', () => {
+    let app: express.Express;
+    let projectId: string;
+
+    beforeEach(async () => {
+      app = express();
+      app.use(express.json());
+      app.use('/api/issues', createIssueRoutes(stateManager, taskQueue, workflowService));
+      
+      const project = projectService.create({ name: 'Test Project', path: '/test/path' });
+      projectId = project.id;
+      projectService.setCurrent(project);
+    });
+
+    describe('POST /api/issues', () => {
+      it('should create an issue', async () => {
+        const response = await request(app)
+          .post('/api/issues')
+          .send({ title: 'Test Issue', body: 'Test body' });
+
+        expect(response.status).toBe(201);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.title).toBe('Test Issue');
+        expect(response.body.data.number).toBe(1);
+      });
+
+      it('should require title', async () => {
+        const response = await request(app)
+          .post('/api/issues')
+          .send({ body: 'Test body' });
+
+        expect(response.status).toBe(400);
+      });
+
+      it('should return error when no current project', async () => {
+        projectService.clearCurrent();
+        
+        const response = await request(app)
+          .post('/api/issues')
+          .send({ title: 'Test Issue' });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('No current project');
+      });
+    });
+
+    describe('GET /api/issues', () => {
+      it('should list issues', async () => {
+        issueService.create({ projectId, title: 'Issue 1' });
+        issueService.create({ projectId, title: 'Issue 2' });
+
+        const response = await request(app).get('/api/issues');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(2);
+      });
+
+      it('should filter by stage', async () => {
+        issueService.create({ projectId, title: 'Test' });
+        issueService.transitionToStageByNumber(projectId, 1, 'designing' as any);
+
+        const response = await request(app).get('/api/issues?stage=designing');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(1);
+      });
+    });
+
+    describe('GET /api/issues/:number', () => {
+      it('should return issue details', async () => {
+        issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(app).get('/api/issues/1');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.number).toBe(1);
+        expect(response.body.data.title).toBe('Test Issue');
+      });
+
+      it('should return 404 for non-existent issue', async () => {
+        const response = await request(app).get('/api/issues/999');
+
+        expect(response.status).toBe(404);
+      });
+    });
+
+    describe('POST /api/issues/:number/start', () => {
+      it('should start processing an issue', async () => {
+        issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(app).post('/api/issues/1/start');
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.taskId).toBeDefined();
+      });
+    });
+
+    describe('POST /api/issues/:number/approve', () => {
+      it('should approve issue at review stage', async () => {
+        issueService.create({ projectId, title: 'Test Issue' });
+        issueService.transitionToStageByNumber(projectId, 1, 'waiting-design-review' as any);
+
+        const response = await request(app).post('/api/issues/1/approve');
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+      });
+    });
+
+    describe('POST /api/issues/:number/pause', () => {
+      it('should pause issue', async () => {
+        issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(app).post('/api/issues/1/pause');
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+      });
+    });
+
+    describe('POST /api/issues/:number/resume', () => {
+      it('should resume issue', async () => {
+        const issue = issueService.create({ projectId, title: 'Test Issue' });
+        issueService.pause(projectId, 1);
+
+        const response = await request(app).post('/api/issues/1/resume');
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+      });
+    });
   });
 
   describe('Status Routes', () => {
     let app: express.Express;
-    let mockProjectManager: ReturnType<typeof createMockProjectManager>;
 
-    beforeEach(async () => {
-      vi.clearAllMocks();
-      mockProjectManager = createMockProjectManager();
-      
+    beforeEach(() => {
       app = express();
       app.use(express.json());
-      
-      const { createStatusRoutes } = await import('../src/api/status');
-      app.use('/api/status', createStatusRoutes(mockProjectManager as any));
+      app.use('/api', createStatusRoutes(stateManager, taskQueue));
     });
 
     describe('GET /api/status', () => {
       it('should return error when no current project', async () => {
-        mockProjectManager.getCurrent.mockReturnValue(undefined);
-
         const response = await request(app).get('/api/status');
 
         expect(response.status).toBe(400);
@@ -333,11 +313,8 @@ describe('API Routes', () => {
       });
 
       it('should return current project status', async () => {
-        mockProjectManager.getCurrent.mockReturnValue({
-          id: 'project-1',
-          name: 'Test Project',
-          repo: 'owner/repo'
-        });
+        const project = projectService.create({ name: 'Test Project', path: '/test/path' });
+        projectService.setCurrent(project);
 
         const response = await request(app).get('/api/status');
 
@@ -345,18 +322,66 @@ describe('API Routes', () => {
         expect(response.body.success).toBe(true);
         expect(response.body.data.name).toBe('Test Project');
       });
+    });
 
-      it('should return all projects status with ?all=true', async () => {
-        mockProjectManager.list.mockReturnValue([
-          { id: 'project-1', name: 'Project 1', repo: 'owner/repo1' },
-          { id: 'project-2', name: 'Project 2', repo: 'owner/repo2' }
-        ]);
+    describe('GET /api/status?all=true', () => {
+      it('should return all projects status', async () => {
+        projectService.create({ name: 'Project 1', path: '/path/1' });
+        projectService.create({ name: 'Project 2', path: '/path/2' });
 
         const response = await request(app).get('/api/status?all=true');
 
         expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
         expect(response.body.data).toHaveLength(2);
+      });
+    });
+  });
+
+  describe('Config Routes', () => {
+    let app: express.Express;
+
+    beforeEach(() => {
+      app = express();
+      app.use(express.json());
+      app.use('/api/config', createConfigRoutes(configService));
+    });
+
+    describe('GET /api/config', () => {
+      it('should return config', async () => {
+        const response = await request(app).get('/api/config');
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.serverPort).toBeDefined();
+      });
+    });
+
+    describe('PUT /api/config/:key', () => {
+      it('should update config value', async () => {
+        const response = await request(app)
+          .put('/api/config/server.port')
+          .send({ value: 4000 });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+      });
+
+      it('should validate port range', async () => {
+        const response = await request(app)
+          .put('/api/config/server.port')
+          .send({ value: 99999 });
+
+        expect(response.status).toBe(400);
+      });
+    });
+
+    describe('GET /api/config/list', () => {
+      it('should return all config values', async () => {
+        const response = await request(app).get('/api/config/list');
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data).toBeDefined();
       });
     });
   });

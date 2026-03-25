@@ -4,7 +4,6 @@ export enum Stage {
   WaitingDesignReview = 'waiting-design-review',
   Implementing = 'implementing',
   WaitingReview = 'waiting-review',
-  Merging = 'merging',
   Done = 'done'
 }
 
@@ -20,10 +19,7 @@ export interface Issue {
   body?: string;
   stage: Stage;
   status: IssueStatus;
-  labels: string[];
   projectId: string;
-  prNumber?: number;
-  url: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -31,7 +27,6 @@ export interface Issue {
 export interface Project {
   id: string;
   name: string;
-  repo: string;
   path: string;
   createdAt: string;
   updatedAt: string;
@@ -50,19 +45,10 @@ export interface Task {
 }
 
 export interface Config {
-  githubToken?: string;
   serverPort: number;
   pollInterval: number;
   maxConcurrentAgents: number;
   agentTimeout: number;
-}
-
-export interface ProjectConfig {
-  repo: string;
-  labels: {
-    stagePrefix: string;
-    statusPrefix: string;
-  };
 }
 
 export interface ServerState {
@@ -78,26 +64,4 @@ export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
-}
-
-export interface GitHubLabel {
-  name: string;
-  color: string;
-  description?: string;
-}
-
-export interface PullRequest {
-  number: number;
-  title: string;
-  state: 'open' | 'closed';
-  draft: boolean;
-  mergeable?: boolean;
-  merged: boolean;
-  approved: boolean;
-  headBranch: string;
-  baseBranch: string;
-  url: string;
-  issueNumber?: number;
-  createdAt: string;
-  updatedAt: string;
 }

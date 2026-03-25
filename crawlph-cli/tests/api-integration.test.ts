@@ -12,11 +12,7 @@ describe('API Integration Tests', () => {
       expect(typeof createIssueRoutes).toBe('function');
     });
     
-    it('should export createPullRequestRoutes', async () => {
-      const { createPullRequestRoutes } = await import('../src/api/prs');
-      expect(typeof createPullRequestRoutes).toBe('function');
-    });
-    
+
     it('should export createStatusRoutes', async () => {
       const { createStatusRoutes } = await import('../src/api/status');
       expect(typeof createStatusRoutes).toBe('function');

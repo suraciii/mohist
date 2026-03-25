@@ -1,28 +1,24 @@
 import { Router, Request, Response } from 'express';
-import { ProjectManager } from '../project/manager';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Project } from '../types';
 
-export function createProjectRoutes(
-  projectManager: ProjectManager,
-  stateManager: StateManager
-): Router {
+export function createProjectRoutes(stateManager: StateManager): Router {
   const router = Router();
 
   router.post('/', (req: Request, res: Response): void => {
     try {
-      const { name, repo } = req.body;
+      const { name, path } = req.body;
       
-      if (!name || !repo) {
+      if (!name || !path) {
         const response: ApiResponse = {
           success: false,
-          error: 'name and repo are required'
+          error: 'name and path are required'
         };
         res.status(400).json(response);
         return;
       }
 
-      const existing = projectManager.get(name);
+      const existing = stateManager.getProjectByName(name);
       if (existing) {
         const response: ApiResponse = {
           success: false,
@@ -32,10 +28,7 @@ export function createProjectRoutes(
         return;
       }
 
-      const project = projectManager.create(name, repo);
-      
-      const projects = projectManager.list();
-      stateManager.saveProjects(projects);
+      const project = stateManager.saveProject({ name, path });
 
       const response: ApiResponse<Project> = {
         success: true,
@@ -53,7 +46,7 @@ export function createProjectRoutes(
 
   router.get('/', (_req: Request, res: Response): void => {
     try {
-      const projects = projectManager.list();
+      const projects = stateManager.loadProjects();
       const response: ApiResponse<Project[]> = {
         success: true,
         data: projects
@@ -70,7 +63,7 @@ export function createProjectRoutes(
 
   router.get('/:name', (req: Request, res: Response): void => {
     try {
-      const project = projectManager.get(req.params.name);
+      const project = stateManager.getProjectByName(req.params.name);
       
       if (!project) {
         const response: ApiResponse = {
@@ -97,9 +90,9 @@ export function createProjectRoutes(
 
   router.delete('/:name', (req: Request, res: Response): void => {
     try {
-      const deleted = projectManager.delete(req.params.name);
+      const project = stateManager.getProjectByName(req.params.name);
       
-      if (!deleted) {
+      if (!project) {
         const response: ApiResponse = {
           success: false,
           error: 'Project not found'
@@ -108,8 +101,7 @@ export function createProjectRoutes(
         return;
       }
 
-      const projects = projectManager.list();
-      stateManager.saveProjects(projects);
+      stateManager.deleteProject(project.id);
 
       const response: ApiResponse = {
         success: true
@@ -126,7 +118,7 @@ export function createProjectRoutes(
 
   router.post('/:name/use', (req: Request, res: Response): void => {
     try {
-      const project = projectManager.use(req.params.name);
+      const project = stateManager.getProjectByName(req.params.name);
       
       if (!project) {
         const response: ApiResponse = {
@@ -136,6 +128,8 @@ export function createProjectRoutes(
         res.status(404).json(response);
         return;
       }
+
+      stateManager.setCurrentProjectId(project.id);
 
       const response: ApiResponse<Project> = {
         success: true,

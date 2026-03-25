@@ -1,25 +1,13 @@
 import { HttpServer } from './http-server';
-import { Config } from '../types';
+import { getStateManager } from './state-manager';
+import { TaskQueue } from './task-queue';
+import { createProjectRoutes } from '../api/projects';
+import { createIssueRoutes } from '../api/issues';
+import { createConfigRoutes } from '../api/config';
+import { createStatusRoutes } from '../api/status';
+import { ConfigService } from '../services';
 import * as fs from 'fs';
 import * as path from 'path';
-
-const DEFAULT_CONFIG: Config = {
-  serverPort: 3456,
-  pollInterval: 60000,
-  maxConcurrentAgents: 8,
-  agentTimeout: 1800000
-};
-
-function loadConfig(): Config {
-  const configPath = path.join(process.env.HOME || '', '.crawlph', 'config.json');
-  
-  if (fs.existsSync(configPath)) {
-    const configData = fs.readFileSync(configPath, 'utf-8');
-    return { ...DEFAULT_CONFIG, ...JSON.parse(configData) };
-  }
-  
-  return DEFAULT_CONFIG;
-}
 
 function ensureDataDir(): void {
   const dataDir = path.join(process.env.HOME || '', '.crawlph');
@@ -37,8 +25,18 @@ function ensureDataDir(): void {
 async function main(): Promise<void> {
   ensureDataDir();
   
-  const config = loadConfig();
+  const stateManager = getStateManager();
+  const configService = new ConfigService(stateManager.getConfigRepo());
+  const config = configService.getConfig();
+  
   const server = new HttpServer(config);
+  
+  const taskQueue = new TaskQueue(config.maxConcurrentAgents);
+  
+  server.addRouter('/api/projects', createProjectRoutes(stateManager));
+  server.addRouter('/api/issues', createIssueRoutes(stateManager, taskQueue));
+  server.addRouter('/api/config', createConfigRoutes(configService));
+  server.addRouter('/api', createStatusRoutes(stateManager, taskQueue));
 
   process.on('SIGTERM', async () => {
     console.log('Received SIGTERM, shutting down gracefully...');
@@ -54,8 +52,14 @@ async function main(): Promise<void> {
 
   await server.start();
   
+  const { projects, activeTasks } = stateManager.recoverState();
+  
   console.log(`crawlph server started on port ${config.serverPort}`);
   console.log(`Max concurrent agents: ${config.maxConcurrentAgents}`);
+  console.log(`Loaded ${projects.length} projects`);
+  if (activeTasks.length > 0) {
+    console.log(`Recovered ${activeTasks.length} tasks`);
+  }
 }
 
 main().catch((error) => {

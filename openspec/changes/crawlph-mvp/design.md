@@ -12,7 +12,7 @@ crawlph 目前是一个 opencode skill (skills/crawlph/SKILL.md)，实现了 7 �
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    目标架构                                      │
+│                    MVP 目标架构                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │   用户                                                          │
@@ -27,41 +27,46 @@ crawlph 目前是一个 opencode skill (skills/crawlph/SKILL.md)，实现了 7 �
 │    ▼                                                            │
 │   crawlph Server (业务逻辑)                                     │
 │   • 项目管理                                                    │
-│   • Issue/PR 管理                                               │
+│   • Issue 管理                                                  │
 │   • 工作流引擎                                                  │
 │   • Agent Runner                                                │
-│   • Poller                                                      │
-│   • 状态存储                                                    │
-│    │                                                            │
-│    ├───────► GitHub API (状态存储)                              │
+│   • 状态存储 (SQLite)                                           │
 │    │                                                            │
 │    └───────► opencode agents (任务执行)                         │
+│                                                                 │
+│   ══════════════════════════════════════════════════════════    │
+│   无外部依赖：无 GitHub API，无远程服务                          │
+│   ══════════════════════════════════════════════════════════    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**关键原则**: CLI 是 thin client，Server 是 fat server。所有业务逻辑在 Server 侧。
+**关键原则**: 
+- CLI 是 thin client，Server 是 fat server
+- 所有业务逻辑在 Server 侧
+- MVP 使用 SQLite 本地存储，GitHub 集成作为 Phase 2 插件
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-1. 验证核心价值：AI 自动处理 Issue，用户只在关键点介入
+1. 验证核心价值：AI 自动处理任务，用户只在关键点介入
 2. 实现 Server + CLI 架构的基础设施
 3. 完成单 Issue 的完整工作流（draft → done）
 4. 支持多项目管理
 5. 提供清晰的状态可视化（`crawlph status`）
-6. 可以给自己用，也可以给其他开发者用
+6. 测试友好：SQLite :memory: + mock spawn
 
 **Non-Goals:**
 
-1. Ralph Loop（无限重试机制）- 初期不实现，失败就停下
-2. 并发 Issues（同时处理多个）- 先做单 Issue 验证流程
-3. 冲突检测 - Phase 2
-4. 依赖管理 - Phase 2
-5. Web UI / 远程访问 - Phase 2
-6. 通知推送 - Phase 2
-7. CLI 自动启动 Server - 用户必须显式启动
+1. GitHub 集成 - Phase 2 插件
+2. Ralph Loop（无限重试机制）- 初期不实现，失败就停下
+3. 并发 Issues（同时处理多个）- 先做单 Issue 验证流程
+4. 冲突检测 - Phase 2
+5. 依赖管理 - Phase 2
+6. Web UI / 远程访问 - Phase 2
+7. 通知推送 - Phase 2
+8. CLI 自动启动 Server - 用户必须显式启动
 
 ## Decisions
 
@@ -79,15 +84,120 @@ crawlph 目前是一个 opencode skill (skills/crawlph/SKILL.md)，实现了 7 �
 - Go: 性能更好，但 AI 生态弱
 - Python: 简单，但类型系统和并发模型不如 TS
 
-### D2: 命令风格
+### D2: 存储方案
+
+**选择**: SQLite (better-sqlite3)
+
+**理由**:
+- 单文件，无需外部服务
+- 事务支持，并发安全（WAL 模式）
+- 索引优化查询
+- :memory: 测试极其简单
+- 同步 API，代码简洁
+
+**Schema 设计**:
+
+```sql
+-- 项目
+CREATE TABLE projects (
+  id          TEXT PRIMARY KEY,
+  name        TEXT UNIQUE NOT NULL,
+  path        TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
+-- Issues
+CREATE TABLE issues (
+  id          TEXT PRIMARY KEY,
+  number      INTEGER NOT NULL,
+  project_id  TEXT NOT NULL REFERENCES projects(id),
+  title       TEXT NOT NULL,
+  body        TEXT,
+  stage       TEXT NOT NULL DEFAULT 'draft',
+  status      TEXT NOT NULL DEFAULT 'active',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  UNIQUE(project_id, number)
+);
+
+CREATE INDEX idx_issues_project_stage ON issues(project_id, stage);
+CREATE INDEX idx_issues_project_status ON issues(project_id, status);
+
+-- 任务
+CREATE TABLE tasks (
+  id           TEXT PRIMARY KEY,
+  issue_id     TEXT NOT NULL REFERENCES issues(id),
+  project_id   TEXT NOT NULL REFERENCES projects(id),
+  stage        TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  agent_pid    INTEGER,
+  error        TEXT,
+  started_at   TEXT,
+  completed_at TEXT
+);
+
+CREATE INDEX idx_tasks_project_status ON tasks(project_id, status);
+
+-- 配置
+CREATE TABLE config (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+```
+
+**替代方案**:
+- JSON 文件: 简单但并发不安全，无事务
+- PostgreSQL: 过于重量级，需要外部服务
+
+### D3: 分层架构
+
+**选择**: Repository 模式
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         分层架构                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   CLI (Commander.js)                                            │
+│        │                                                        │
+│        ▼                                                        │
+│   API (Express)                                                 │
+│        │                                                        │
+│        ▼                                                        │
+│   Services (业务逻辑)                                            │
+│   • IssueService                                                │
+│   • ProjectService                                              │
+│   • WorkflowService                                             │
+│        │                                                        │
+│        ▼                                                        │
+│   Repositories (数据访问)                                        │
+│   • IssueRepo                                                   │
+│   • ProjectRepo                                                 │
+│   • TaskRepo                                                    │
+│   • ConfigRepo                                                  │
+│        │                                                        │
+│        ▼                                                        │
+│   Database (SQLite)                                             │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**理由**:
+- 依赖注入，便于测试
+- 未来可替换存储后端
+- 关注点分离
+
+### D4: 命令风格
 
 **选择**: 分组式命令 (`crawlph <group> <action>`)
 
 ```
 crawlph server start
 crawlph project list
-crawlph issue start 123
-crawlph pr approve 201
+crawlph issue create "添加暗黑模式"
+crawlph issue start 1
+crawlph issue approve 1
 ```
 
 **理由**:
@@ -95,67 +205,30 @@ crawlph pr approve 201
 - 易于扩展新命令
 - 与 `gh`、`kubectl` 等工具一致
 
-**替代方案**:
-- 简洁式 (`crawlph start 123`): 简单但不易扩展
+### D5: 工作流阶段
 
-### D3: 项目模型
-
-**选择**: 支持多项目管理
+**选择**: 7 阶段工作流（无 PR 阶段）
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    项目模型                                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   crawlph "项目" = 一个 GitHub repo 的管理实例                   │
-│                                                                 │
-│   一个 Server 可以管理多个项目:                                  │
-│   • blog  → suraciii/blog                                      │
-│   • shop  → suraciii/shop                                      │
-│                                                                 │
-│   当前项目确定方式:                                              │
-│   1. 目录检测: 当前目录下的 .crawlph/config.json                │
-│   2. 全局切换: crawlph project use <name>                       │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+draft → designing → waiting-design-review → implementing → waiting-review → done
 ```
 
-**数据存储**:
+**阶段说明**:
 
-```
-~/.crawlph/
-├── config.json           # 全局配置 (token, server)
-├── projects.json         # 项目索引
-└── logs/                 # 全局日志
+| 阶段 | 触发 | 执行者 | 动作 |
+|------|------|--------|------|
+| draft | `issue create` | 用户 | 创建 Issue |
+| designing | `issue start` | Agent | AI 生成设计 |
+| waiting-design-review | Agent 完成 | 用户 | 审批设计 |
+| implementing | `issue approve` | Agent | AI 实现代码 |
+| waiting-review | Agent 完成 | 用户 | 审批实现 |
+| done | `issue approve` | 用户 | 标记完成 |
 
-<project-path>/.crawlph/
-└── config.json           # 项目配置 (repo, labels)
-```
+**与原版区别**:
+- 移除 `merging` 阶段（无 GitHub PR）
+- 审批通过 CLI 命令完成
 
-### D4: 状态存储
-
-**选择**: GitHub Labels（主要）+ 本地缓存（辅助）
-
-**理由**:
-- Labels 作为状态来源，跨设备同步
-- 本地缓存减少 API 调用
-
-**标签设计**:
-
-```
-crawlph:stage/draft
-crawlph:stage/designing
-crawlph:stage/waiting-design-review
-crawlph:stage/implementing
-crawlph:stage/waiting-review
-crawlph:stage/merging
-crawlph:stage/done
-
-crawlph:status/paused
-crawlph:status/blocked
-```
-
-### D5: CLI ↔ Server 通信
+### D6: CLI ↔ Server 通信
 
 **选择**: HTTP API (localhost:3456)
 
@@ -180,23 +253,19 @@ POST   /api/projects/:name/use
 
 # Issues
 GET    /api/issues
+POST   /api/issues                    # 新增：创建 Issue
 GET    /api/issues/:number
 POST   /api/issues/:number/start
+POST   /api/issues/:number/approve    # 新增：审批
 POST   /api/issues/:number/pause
 POST   /api/issues/:number/resume
-
-# PRs
-GET    /api/prs
-GET    /api/prs/:number
-POST   /api/prs/:number/approve
-POST   /api/prs/:number/request-changes
 
 # 配置
 GET    /api/config
 PUT    /api/config/:key
 ```
 
-### D6: Server 生命周期
+### D7: Server 生命周期
 
 **选择**: 用户显式管理 Server
 
@@ -211,11 +280,7 @@ $ crawlph server status    # 状态
 - 便于调试和问题排查
 - 避免"自动启动"带来的意外行为
 
-**Server 未运行时的 CLI 行为**:
-- `crawlph server *` 命令正常工作
-- 其他命令返回错误: "Server is not running. Start with: crawlph server start"
-
-### D7: Agent 执行方式
+### D8: Agent 执行方式
 
 **选择**: `child_process.spawn("opencode", ...)`
 
@@ -224,30 +289,46 @@ $ crawlph server status    # 状态
 - 无需学习新 SDK
 - 快速启动
 
-**风险**: Server 挂了，所有 agent 都挂
-
-**替代方案**:
-- opencode SDK: 需要调研，可能更优雅
-- 直接调用 OpenAI API: 完全独立，但失去 opencode 生态
-
-**后续调研**: 评估 SDK 可行性 (https://opencode.ai/docs/zh-cn/sdk/)
-
-### D8: 错误处理
+### D9: 错误处理
 
 **选择**: 失败即停止，标记为 blocked
-
-**理由**:
-- MVP 阶段保持简单
-- Ralph Loop 增加复杂度
-- 用户可以通过日志了解失败原因
 
 **流程**:
 1. Agent 执行失败
 2. Server 捕获错误
-3. 更新 Label 为 `crawlph:status/blocked`
-4. 记录日志
-5. 用户查看 `crawlph server logs` 或 `crawlph status`
+3. 更新 Issue status 为 `blocked`
+4. 记录错误信息到 Task
+5. 用户查看 `crawlph issue show <number>`
 6. 用户修复问题后，`crawlph issue resume <number>`
+
+### D10: 未来扩展 - IssueProvider 接口
+
+**选择**: 定义 Provider 接口，GitHub 作为插件
+
+```typescript
+interface IssueProvider {
+  // 查询
+  getIssues(projectId: string): Promise<Issue[]>;
+  getIssue(projectId: string, number: number): Promise<Issue>;
+
+  // 变更
+  createIssue(projectId: string, data: CreateIssueData): Promise<Issue>;
+  updateStage(issue: Issue, stage: Stage): Promise<void>;
+  updateStatus(issue: Issue, status: Status): Promise<void>;
+}
+
+// MVP: 本地实现
+class LocalProvider implements IssueProvider {
+  constructor(private repo: IssueRepo) {}
+  // 直接操作 SQLite
+}
+
+// Phase 2: GitHub 实现
+class GitHubProvider implements IssueProvider {
+  constructor(private octokit: Octokit) {}
+  // 通过 Labels 管理状态
+}
+```
 
 ## Risks / Trade-offs
 
@@ -258,57 +339,43 @@ $ crawlph server status    # 状态
 **缓解**:
 - MVP 阶段可接受（用户量小）
 - Phase 2: 考虑独立的 agent 进程管理
-- Phase 2: 引入进程监控和自动恢复
 
-### R2: GitHub API 限流
+### R2: SQLite 并发限制
 
-**风险**: Poller 频繁调用 GitHub API 可能触发限流
-
-**缓解**:
-- 轮询间隔 60s
-- 使用 ETag / If-Modified-Since 减少数据传输
-- 缓存 Issue 数据，减少重复请求
-
-### R3: 单 PR 模式的复杂性
-
-**风险**: 设计和实现在同一个 PR，可能导致审查混乱
+**风险**: WAL 模式下写入仍有限制
 
 **缓解**:
-- 使用 commits 分离（先 design commit，后 impl commits）
-- PR description 清晰标注当前阶段
-- 用户可以通过 commits 历史回顾
+- MVP 场景并发量低
+- 使用事务保证一致性
+- 如需要，Phase 2 可迁移到 PostgreSQL
 
-### R4: 多项目状态管理
+### R3: 跨平台兼容性
 
-**风险**: 多个项目的当前状态可能混淆
-
-**缓解**:
-- 目录检测优先（当前目录 -> 项目）
-- `crawlph status` 始终显示当前项目名称
-- `--all` 标志显示所有项目
-
-### R5: 跨平台兼容性
-
-**风险**: 进程管理在 Windows 上行为不同
+**风险**: better-sqlite3 需要编译
 
 **缓解**:
-- 使用 HTTP API，跨平台兼容
-- child_process 在 Node.js 中跨平台
-- 测试覆盖 macOS, Linux, Windows
+- npm 提供预编译版本
+- 备选：sql.js（纯 JS，无需编译）
 
 ## Open Questions
 
 1. **Agent 超时时间**: 默认 30 分钟是否合适？是否需要可配置？
-2. **PR 命名规范**: `[crawlph] Design: <issue-title>` 还是其他格式？
-3. **Server 停止策略**: 优雅停止 vs 立即停止？
+2. **设计文档存储**: 存在 SQLite 还是项目目录的 `.crawlph/designs/`？
 
 ## Migration Plan
 
-1. **创建新目录**: `crawlph-cli/` 作为独立项目
-2. **实现 Server**: HTTP API + Poller + Agent Runner + 项目管理
-3. **实现 CLI**: 命令解析 + 与 Server 通信
-4. **测试**: 单 Issue 完整流程
-5. **文档**: README + 使用指南
-6. **保留现有 skill**: 作为参考和回退方案
+### Phase 1: MVP (当前)
 
-**Rollback**: 直接使用现有 skill，删除 `crawlph-cli/` 目录即可。
+1. **重构存储层**: 实现 SQLite + Repository 模式
+2. **简化数据模型**: 移除 GitHub 特定字段
+3. **更新 API**: 使用 Repository 而非 GitHubClient
+4. **更新 CLI**: 添加 `issue create`, `issue approve` 命令
+5. **测试**: 使用 :memory: 数据库
+
+### Phase 2: GitHub 插件
+
+1. **定义 IssueProvider 接口**
+2. **实现 GitHubProvider**
+3. **配置选择**: 用户可选择 Local 或 GitHub
+
+**Rollback**: Phase 1 代码独立可用，不依赖 GitHub。

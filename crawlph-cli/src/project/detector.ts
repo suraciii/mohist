@@ -27,7 +27,6 @@ export class DirectoryDetector {
         return {
           id: config.id || 'detected',
           name: config.name || path.basename(currentDir),
-          repo: config.repo,
           path: currentDir,
           createdAt: config.createdAt || new Date().toISOString(),
           updatedAt: config.updatedAt || new Date().toISOString()
