@@ -1,0 +1,175 @@
+{
+  "project": "mohist",
+  "description": "Implement WorkflowEngine with multi-worker execution, git worktree isolation, and local merge support",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix Task.issueId mapping bug in TaskRepo",
+      "spec": "specs/workflow-engine/spec.md",
+      "description": "Fix rowToTask in task-repo.ts to properly map issue_id from database row to Task.issueId. Currently it hardcodes issueNumber to 0. Replace Task.issueNumber (number) with Task.issueId (string) in types/index.ts. Update all references to issueNumber in TaskQueue (which will be deleted in T-002) and rowToTask/create in TaskRepo.",
+      "acceptanceCriteria": [
+        "Task interface has issueId: string instead of issueNumber: number",
+        "TaskRepo.findById returns Task with correct issueId",
+        "TaskRepo.create stores and returns issueId",
+        "Build passes without type errors"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Task.issueNumber is replaced entirely by Task.issueId. All consumers already have the full Issue object so issueNumber is redundant on Task."
+    },
+    {
+      "id": "T-002",
+      "title": "Remove memory TaskQueue, use TaskRepo directly in API routes",
+      "spec": "specs/workflow-engine/spec.md",
+      "description": "Remove the in-memory TaskQueue class from server/task-queue.ts. Update API routes (issues.ts, status.ts) to use TaskRepo directly instead of TaskQueue. Update status.ts to get running/pending counts from TaskRepo. Update server/index.ts to remove TaskQueue instantiation.",
+      "acceptanceCriteria": [
+        "No TaskQueue imports remain in API routes or server/index.ts",
+        "POST /issues/:number/start creates task via StateManager.createTask()",
+        "POST /issues/:number/approve creates next task via StateManager.createTask()",
+        "GET /api/status gets running/queued counts from TaskRepo (not TaskQueue)",
+        "Build passes without type errors"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Delete server/task-queue.ts entirely. status.ts lines 61-62 need updating. For approve route: current code uses taskQueue.enqueue(number, projectId, stage) which takes issueNumber. After removal, replace with stateManager.createTask(issueId, projectId, stage) — need to first call issueService.getByNumber(projectId, number) to get issue.id (UUID). Same pattern applies to start route."
+    },
+    {
+      "id": "T-003",
+      "title": "Implement WorktreeManager",
+      "spec": "specs/worktree-manager/spec.md",
+      "description": "Create src/git/worktree-manager.ts implementing create (git worktree add), remove (git worktree remove), list (git worktree list), exists, and prune methods. Worktree directory: ~/.mohist/projects/{projectName}/worktrees/issue-{N}/, branch name: mo/issue-{N}. {projectName} is slugified (lowercase, spaces to dashes, remove special chars).",
+      "acceptanceCriteria": [
+        "WorktreeManager.create creates worktree and branch under project-specific path",
+        "WorktreeManager.remove cleans up worktree and branch",
+        "WorktreeManager.list returns active worktrees",
+        "WorktreeManager.exists checks if worktree exists",
+        "Non-git-repo returns meaningful error",
+        "Project names with spaces/special chars are slugified for directory names",
+        "Build passes without type errors"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Use child_process.exec for git commands. Ensure project parent dir exists before creating."
+    },
+    {
+      "id": "T-004",
+      "title": "Implement WorkflowEngine with multi-worker execution",
+      "spec": "specs/workflow-engine/spec.md",
+      "description": "Create src/workflow/engine.ts implementing WorkflowEngine class with N workers (configurable via maxConcurrentAgents). Each worker independently polls TaskRepo for pending tasks using findAndClaim atomic operation (single UPDATE with NOT EXISTS subquery in one SQLite transaction, see D12). Execute corresponding StageHandler, handle success/failure. Enforce same-Issue single-task constraint at SQL level. Maintain worktree path registry (Map<issueId, worktreePath>), recover from git worktree list on startup. On task completion, check Issue status is still active before advancing stage. Provide killAgentByIssueId() for pause support.",
+      "acceptanceCriteria": [
+        "Engine starts N workers on start()",
+        "findAndClaim uses single SQL with NOT EXISTS to enforce same-Issue constraint atomically",
+        "Same-Issue running task prevents new task execution at SQL level (not post-check)",
+        "Task success checks Issue is still active before advancing stage",
+        "Task failure marks issue as blocked",
+        "Worktree path registry maintained and recovered on startup",
+        "killAgentByIssueId() terminates running Agent for given Issue",
+        "stop() gracefully waits for running tasks with timeout",
+        "Build passes without type errors"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "findAndClaim SQL (D12): UPDATE tasks SET status='running' WHERE id=(SELECT id FROM tasks t WHERE t.status='pending' AND NOT EXISTS(SELECT 1 FROM tasks t2 WHERE t2.issue_id=t.issue_id AND t2.status='running') ORDER BY t.started_at LIMIT 1) RETURNING *; Use DatabaseManager.get() not run() since better-sqlite3 get() supports RETURNING rows. Add findAndClaim method to TaskRepo in this task scope. Also add TaskRepo.findRunningByIssue(issueId: string) for killAgentByIssueId reverse lookup (D13). Engine maintains Map<issueId, taskId> — Worker registers on task claim, clears on task complete/fail. killAgentByIssueId flow: lookup taskId from map → TaskRepo.updateStatus(taskId, 'failed', 'user_paused') → AgentRunner.killAgent(taskId) → clear map entry."
+    },
+    {
+      "id": "T-005",
+      "title": "Integrate WorktreeManager into issue start flow",
+      "spec": "specs/worktree-manager/spec.md",
+      "description": "Update issue start API route (POST /issues/:number/start) to create worktree via WorktreeManager before creating task. Server uses Project.path to determine worktree location, Project.name (slugified) for directory naming. Store worktree path in WorkflowEngine's worktree registry (Map<issueId, worktreePath>) so Workers can pass it to AgentRunner. Add POST /issues/:number/cleanup route that calls WorktreeManager.remove() and removes registry entry.",
+      "acceptanceCriteria": [
+        "POST /issues/:number/start creates worktree under ~/.mohist/projects/{name}/worktrees/issue-{N}/",
+        "Worktree path registered in Engine's worktree registry",
+        "Starting an already-started issue reuses existing worktree",
+        "POST /issues/:number/cleanup removes worktree and branch, unregisters from registry",
+        "Build passes without type errors"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Server has Project.path via stateManager.getProjectById(). WorktreeManager instance lives on WorkflowEngine. The start route needs access to Engine to register worktree path. cleanup route needs Engine to unregister."
+    },
+    {
+      "id": "T-006",
+      "title": "Update AgentRunner to use worktree as cwd",
+      "spec": "specs/agent-runner/spec.md",
+      "description": "Update AgentRunner.spawnAgent to accept worktree path and use it as cwd. Update runDesignerAgent and runImplementerAgent to pass worktree path. Redirect stdout/stderr to log files at ~/.mohist/projects/{projectName}/logs/issue-{N}/.",
+      "acceptanceCriteria": [
+        "AgentRunner.spawnAgent uses worktree path as cwd",
+        "Agent stdout/stderr written to ~/.mohist/projects/{projectName}/logs/issue-{N}/agent-{stage}.log",
+        "Log directory created automatically if not exists",
+        "Build passes without type errors"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "StageHandler.execute signature changes from execute(issue, task) to execute(issue, task, context) where context = { worktreePath: string, projectName: string }. Engine constructs context from worktree registry + Project.name before calling Handler. DesigningHandler and ImplementingHandler pass context.worktreePath and context.projectName to AgentRunner.spawnAgent. AgentRunner.spawnAgent uses worktreePath as cwd and projectName to construct log path ~/.mohist/projects/{projectName}/logs/issue-{N}/agent-{stage}.log."
+    },
+    {
+      "id": "T-007",
+      "title": "Integrate WorkflowEngine into Server lifecycle",
+      "spec": "specs/server-daemon/spec.md",
+      "description": "Update server/index.ts to create and start WorkflowEngine on server start. Wire graceful shutdown: on SIGTERM/SIGINT, call engine.stop() before server.stop(). Update server status to show active worker count and pending task count. Update pause API route to call Engine.killAgentByIssueId() after marking Issue as paused (Engine marks Task as failed, kills Agent). Update resume API route to intelligently create new Task for stuck Issues (see D15): check Issue is in Agent stage (designing/implementing), has no running/pending Task, then create new Task and set Issue to active.",
+      "acceptanceCriteria": [
+        "Server start creates and starts WorkflowEngine",
+        "Server stop calls engine.stop() before terminating",
+        "GET /api/status includes worker count and pending task count",
+        "mo server status shows active workers and queue info",
+        "POST /issues/:number/pause marks Issue paused, calls Engine to kill Agent and mark Task failed",
+        "POST /issues/:number/resume creates new Task for paused/blocked/stuck Issues, sets Issue to active",
+        "POST /issues/:number/resume rejects Issues in non-Agent stages or with existing running/pending Tasks",
+        "Build passes without type errors"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "pause route needs Engine access via server/index.ts wiring. resume route logic (D15): Issue must be in designing/implementing, no running/pending Task → create Task(stage: currentStage) + set Issue active. pause route (D13): Engine.killAgentByIssueId() marks Task failed first, then kills process. Worker's reject is idempotent. Also clean up dead directory: server/index.ts ensureDataDir() creates ~/.mohist/logs/ which is unused since D14 moved logs to ~/.mohist/projects/{name}/logs/ — remove that mkdir or change to ~/.mohist/projects/."
+    },
+    {
+      "id": "T-008",
+      "title": "Implement local merge on approve",
+      "spec": "specs/local-merge/spec.md",
+      "description": "Update the approve CLI command: when Issue is in waiting-review, CLI first calls GET /api/issues/:number to get projectPath, then executes git merge --no-ff mo/issue-{N} locally in the project directory. Only on success, CLI calls Server API to transition Issue to Done, then calls POST /api/issues/:number/cleanup to let Server clean up worktree and branch. On conflict, show error and do NOT call Server API (Issue stays at waiting-review). For non-waiting-review approve, keep existing Server API flow.",
+      "acceptanceCriteria": [
+        "mo issue approve on waiting-review: CLI gets projectPath from API, does git merge locally, then calls Server API",
+        "Successful merge transitions Issue to Done via Server API, then calls cleanup API",
+        "Merge conflict shows error but does NOT change Issue status",
+        "Approve on non-waiting-review uses existing Server API flow",
+        "Build passes without type errors"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "CLI command in cli/commands/issue.ts checks issue.stage from API response. If waiting-review: get projectPath -> git merge -> on success call approve API -> call cleanup API. Server needs new POST /issues/:number/cleanup route that calls WorktreeManager.remove() and removes registry entry."
+    },
+    {
+      "id": "T-009",
+      "title": "Add mo issue diff and mo issue logs CLI commands",
+      "spec": "specs/local-merge/spec.md",
+      "description": "Add two new CLI commands: 'mo issue diff <number>' calls GET /api/issues/:number to get projectPath, then runs git diff main...mo/issue-{N} in that directory. 'mo issue logs <number>' shows agent logs from ~/.mohist/projects/{projectName}/logs/issue-{N}/, with --follow option for tailing.",
+      "acceptanceCriteria": [
+        "mo issue diff gets projectPath from API, shows diff between issue branch and main",
+        "mo issue logs shows last 50 lines of agent logs",
+        "mo issue logs --follow tails the log file",
+        "Error messages for missing branch or logs",
+        "Build passes without type errors"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Add to cli/commands/issue.ts setupIssueCommands function. Both commands use apiClient to get projectPath first. For logs command: CLI gets projectName from API response (already returned in GET /api/issues/:number), then slugifies it locally to construct log path ~/.mohist/projects/{slugifiedName}/logs/issue-{N}/. CLI must replicate the same slug logic as Server (lowercase, spaces to dashes, remove special chars) — consider extracting to a shared utility or documenting the exact rules."
+    },
+    {
+      "id": "T-010",
+      "title": "End-to-end test and fix integration issues",
+      "spec": "specs/workflow-engine/spec.md",
+      "description": "Run the full workflow: mo server start, mo issue create, mo issue start, verify agent spawns in worktree, mo issue approve (design), verify implementing starts, mo issue approve (merge), verify worktree cleanup. Fix any integration issues found.",
+      "acceptanceCriteria": [
+        "Full workflow completes from create to done",
+        "Agent runs in worktree directory",
+        "Design review checkpoint works",
+        "Local merge works",
+        "Worktree cleaned up after merge",
+        "All existing tests pass",
+        "Build passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "This is a manual integration test task. Run npm test to ensure no regressions."
+    }
+  ]
+}
