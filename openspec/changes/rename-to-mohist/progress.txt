@@ -13,3 +13,19 @@
 - npm workspaces configuration is minimal - just need `workspaces: ["packages/*"]`
 
 **Next**: T-002 - Update package.json naming
+
+## 2026-03-26T18:39:00Z - T-002 Complete
+
+**Task**: Update package.json naming
+
+**What was done**:
+- Updated packages/cli/package.json: name to 'mohist'
+- Updated bin commands: crawlph → mo, crawlph-server → mo-server
+- Renamed bin/ files: crawlph → mo, crawlph-server → mo-server
+- Updated repository URLs to reference mohist
+
+**Learnings**:
+- Package name and bin commands changed successfully
+- Bin files need to be renamed to match package.json bin definitions
+
+**Next**: T-003 - Update CLI command name
