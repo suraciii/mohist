@@ -5,14 +5,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "mo": "./bin/crawlph",
-    "mo-server": "./bin/crawlph-server"
+    "mo": "./bin/mo",
+    "mo-server": "./bin/mo-server"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start:server": "node bin/crawlph-server",
-    "start:cli": "node bin/crawlph",
+    "start:server": "node bin/mo-server",
+    "start:cli": "node bin/mo",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "lint": "eslint src --ext .ts",

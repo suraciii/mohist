@@ -29,3 +29,128 @@
 - Bin files need to be renamed to match package.json bin definitions
 
 **Next**: T-003 - Update CLI command name
+
+## 2026-03-26T19:00:00Z - T-003 Complete
+
+**Task**: Update CLI command name
+
+**What was done**:
+- Changed CLI name from 'crawlph' to 'mo' in src/cli/index.ts
+- Updated error message: "Start the server with: mo server start"
+- Updated server command descriptions from "crawlph server" to "mohist server"
+- Build passes successfully
+
+**Learnings**:
+- CLI name change requires updating .name() call
+- Error messages and descriptions need to reference the new command name
+- Build confirms TypeScript compiles correctly
+
+**Next**: T-004 - Update data directory paths
+
+## 2026-03-26T19:05:00Z - T-004 Complete
+
+**Task**: Update data directory paths
+
+**What was done**:
+- Updated src/db/database.ts: DEFAULT_DB_DIR changed from ~/.crawlph to ~/.mohist
+- Updated src/server/index.ts: dataDir changed to ~/.mohist
+- Updated src/cli/commands/server.ts: PID_FILE and LOG_FILE paths changed to ~/.mohist
+- Updated src/project/detector.ts: project config path changed from .crawlph to .mohist
+- Build passes successfully
+
+**Learnings**:
+- Data directory references are scattered across database, server, CLI commands, and project detector
+- All paths now consistently use ~/.mohist/
+
+**Next**: T-005 - Update database filename
+
+## 2026-03-26T19:05:00Z - T-005 Complete
+
+**Task**: Update database filename
+
+**What was done**:
+- Updated src/db/database.ts: DEFAULT_DB_NAME changed from 'crawlph.db' to 'mohist.db'
+- Build passes successfully
+
+**Learnings**:
+- Database filename is defined in database.ts alongside the directory path
+- T-004 and T-005 are closely related, completed together in same iteration
+
+**Next**: T-006 - Update agent prompts
+
+## 2026-03-26T19:10:00Z - T-006 Complete
+
+**Task**: Update agent prompts
+
+**What was done**:
+- Updated src/agent/prompts.ts:
+  - Designer Agent prompt: 'crawlph' → 'mohist'
+  - Implementer Agent prompt: 'crawlph' → 'mohist'
+  - Reviewer Agent prompt: 'crawlph' → 'mohist'
+  - Commit message prefixes: '[crawlph]' → '[mohist]'
+- Build passes successfully
+
+**Learnings**:
+- Agent prompts have consistent structure with [mohist] commit prefixes
+- All three agent types (Designer, Implementer, Reviewer) use the project name
+
+**Next**: T-007 - Update documentation
+
+## 2026-03-26T19:15:00Z - T-007 Complete
+
+**Task**: Update documentation
+
+**What was done**:
+- Updated AGENTS.md:
+  - Project description: crawlph → mohist
+  - Directory structure: crawlph-cli/ → packages/cli/
+  - Commands: updated to use 'mo' and 'mo-server'
+  - Data storage: ~/.crawlph/ → ~/.mohist/
+- Updated .gitignore: .crawlph/ → .mohist/
+- Fixed remaining source references:
+  - src/cli/commands/server.ts: serverPath 'crawlph-server' → 'mo-server', error message
+  - src/server/index.ts: startup log 'crawlph' → 'mohist'
+  - src/db/database.ts: DEFAULT_DB_NAME 'crawlph.db' → 'mohist.db'
+  - src/api/labels.ts: error message 'crawlph' → 'mo'
+  - src/api/issues.ts: all error messages (sed replace)
+  - package.json: bin entries and scripts updated
+- Build passes successfully
+
+**Learnings**:
+- Documentation and source files have many scattered references
+- API error messages were missed in earlier tasks
+- package.json bin entries and scripts need to match the new binary names
+
+**Next**: T-008 - Update .gitignore and openspec specs (already done as part of T-007)
+
+## 2026-03-26T19:15:00Z - T-008 Complete
+
+**Task**: Update .gitignore and openspec specs
+
+**What was done**:
+- Updated .gitignore: .crawlph/ → .mohist/
+- This was completed as part of T-007
+
+**Learnings**:
+- T-007 and T-008 overlap in updating .gitignore
+- All gitignore changes now complete
+
+**Next**: T-009 - Verify build and tests
+
+## 2026-03-26T19:20:00Z - T-009 Complete
+
+**Task**: Verify build and tests
+
+**What was done**:
+- npm install: verified (dependencies already installed)
+- npm run build: SUCCESS - TypeScript compilation passed
+- npm test: SUCCESS - 173 tests passed (1 skipped)
+- mo --help: VERIFIED - displays correctly with new 'mo' command name
+
+**Learnings**:
+- All 173 tests pass successfully
+- Build process works correctly in monorepo structure
+- CLI responds correctly to 'mo' commands
+- Renaming from crawlph to mohist is complete and functional
+
+**Next**: ALL TASKS COMPLETE - Ready for final verification and commit

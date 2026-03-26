@@ -10,8 +10,8 @@ export interface DatabaseConfig {
   inMemory?: boolean;
 }
 
-const DEFAULT_DB_DIR = path.join(os.homedir(), '.crawlph');
-const DEFAULT_DB_NAME = 'crawlph.db';
+const DEFAULT_DB_DIR = path.join(os.homedir(), '.mohist');
+const DEFAULT_DB_NAME = 'mohist.db';
 
 export class DatabaseManager {
   private db: Database.Database;

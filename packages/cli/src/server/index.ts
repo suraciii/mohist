@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 function ensureDataDir(): void {
-  const dataDir = path.join(process.env.HOME || '', '.crawlph');
+  const dataDir = path.join(process.env.HOME || '', '.mohist');
   
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   
   const { projects, activeTasks } = stateManager.recoverState();
   
-  console.log(`crawlph server started on port ${config.serverPort}`);
+  console.log(`mohist server started on port ${config.serverPort}`);
   console.log(`Max concurrent agents: ${config.maxConcurrentAgents}`);
   console.log(`Loaded ${projects.length} projects`);
   if (activeTasks.length > 0) {

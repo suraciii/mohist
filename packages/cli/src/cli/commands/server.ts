@@ -4,8 +4,8 @@ import * as path from 'path';
 import chalk from 'chalk';
 import http from 'http';
 
-const PID_FILE = path.join(process.env.HOME || '', '.crawlph', 'server.pid');
-const LOG_FILE = path.join(process.env.HOME || '', '.crawlph', 'logs', 'server.log');
+const PID_FILE = path.join(process.env.HOME || '', '.mohist', 'server.pid');
+const LOG_FILE = path.join(process.env.HOME || '', '.mohist', 'logs', 'server.log');
 
 interface ServerStatus {
   running: boolean;
@@ -59,7 +59,7 @@ export async function startServer(): Promise<void> {
     return;
   }
   
-  const serverPath = path.join(__dirname, '..', '..', '..', 'bin', 'crawlph-server');
+  const serverPath = path.join(__dirname, '..', '..', '..', 'bin', 'mo-server');
   
   if (!fs.existsSync(LOG_FILE)) {
     const logsDir = path.dirname(LOG_FILE);
@@ -184,7 +184,7 @@ export async function serverStatus(): Promise<void> {
     console.log(chalk.gray(`Logs: ${LOG_FILE}`));
   } else {
     console.log(chalk.red('Server is not running'));
-    console.log(chalk.yellow('Start with: crawlph server start'));
+    console.log(chalk.yellow('Start with: mo server start'));
   }
 }
 
