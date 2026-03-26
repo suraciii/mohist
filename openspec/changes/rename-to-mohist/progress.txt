@@ -1,0 +1,15 @@
+
+## 2026-03-26T12:31:00Z - T-001 Complete
+
+**Task**: Create monorepo directory structure
+
+**What was done**:
+- Created `packages/` directory
+- Moved `crawlph-cli/` to `packages/cli/`
+- Created root `package.json` with workspaces config
+
+**Learnings**:
+- Monorepo structure ready for future packages (server, shared)
+- npm workspaces configuration is minimal - just need `workspaces: ["packages/*"]`
+
+**Next**: T-002 - Update package.json naming

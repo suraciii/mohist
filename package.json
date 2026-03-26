@@ -1,0 +1,14 @@
+{
+  "name": "mohist-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/cli",
+    "test": "npm run test -w packages/cli",
+    "lint": "npm run lint -w packages/cli",
+    "typecheck": "npm run typecheck -w packages/cli"
+  }
+}
