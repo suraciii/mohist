@@ -13,7 +13,6 @@ import { IssueService } from '../src/services/issue-service';
 import { WorkflowService } from '../src/services/workflow-service';
 import { ConfigService } from '../src/services/config-service';
 import { StateManager } from '../src/server/state-manager';
-import { TaskQueue } from '../src/server/task-queue';
 import { createProjectRoutes } from '../src/api/projects';
 import { createIssueRoutes } from '../src/api/issues';
 import { createStatusRoutes } from '../src/api/status';
@@ -38,13 +37,12 @@ describe('E2E: Single Issue Complete Flow', () => {
     const configService = new ConfigService(configRepo);
     
     const stateManager = new StateManager();
-    const taskQueue = new TaskQueue(taskRepo);
     
     app = express();
     app.use(express.json());
     app.use('/api/projects', createProjectRoutes(stateManager));
-    app.use('/api/issues', createIssueRoutes(stateManager, taskQueue));
-    app.use('/api', createStatusRoutes(stateManager, taskQueue));
+    app.use('/api/issues', createIssueRoutes(stateManager));
+    app.use('/api', createStatusRoutes(stateManager));
     
     const project = projectService.create({ name: 'E2E Test Project', path: '/test/e2e' });
     projectId = project.id;

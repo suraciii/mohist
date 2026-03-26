@@ -1,12 +1,14 @@
 import { HttpServer } from './http-server';
 import { getStateManager } from './state-manager';
-import { TaskQueue } from './task-queue';
 import { createProjectRoutes } from '../api/projects';
 import { createIssueRoutes } from '../api/issues';
 import { createConfigRoutes } from '../api/config';
 import { createStatusRoutes } from '../api/status';
 import { createLabelRoutes } from '../api/labels';
 import { ConfigService } from '../services';
+import { WorkflowEngine } from '../workflow/engine';
+import { AgentRunner } from '../agent/runner';
+import { WorktreeManager } from '../git/worktree-manager';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -29,30 +31,45 @@ async function main(): Promise<void> {
   const stateManager = getStateManager();
   const configService = new ConfigService(stateManager.getConfigRepo());
   const config = configService.getConfig();
+
+  const worktreeManager = new WorktreeManager();
+  const agentRunner = new AgentRunner(config.agentTimeout);
+  const engine = new WorkflowEngine(
+    stateManager.getTaskRepo(),
+    stateManager.getIssueRepo(),
+    stateManager.getProjectRepo(),
+    agentRunner,
+    worktreeManager,
+    {
+      maxConcurrentAgents: config.maxConcurrentAgents,
+      pollInterval: config.pollInterval,
+    }
+  );
   
   const server = new HttpServer(config);
   
-  const taskQueue = new TaskQueue(config.maxConcurrentAgents);
-  
   server.addRouter('/api/projects', createProjectRoutes(stateManager));
-  server.addRouter('/api/issues', createIssueRoutes(stateManager, taskQueue));
+  server.addRouter('/api/issues', createIssueRoutes(stateManager, engine, worktreeManager));
   server.addRouter('/api/labels', createLabelRoutes(stateManager));
   server.addRouter('/api/config', createConfigRoutes(configService));
-  server.addRouter('/api', createStatusRoutes(stateManager, taskQueue));
+  server.addRouter('/api', createStatusRoutes(stateManager));
 
   process.on('SIGTERM', async () => {
     console.log('Received SIGTERM, shutting down gracefully...');
+    await engine.stop();
     await server.stop();
     process.exit(0);
   });
 
   process.on('SIGINT', async () => {
     console.log('Received SIGINT, shutting down gracefully...');
+    await engine.stop();
     await server.stop();
     process.exit(0);
   });
 
   await server.start();
+  await engine.start();
   
   const { projects, activeTasks } = stateManager.recoverState();
   

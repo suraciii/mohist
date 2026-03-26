@@ -1,11 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { StateManager } from '../server/state-manager';
-import { TaskQueue } from '../server/task-queue';
 import { ApiResponse } from '../types';
 
 export function createStatusRoutes(
-  stateManager: StateManager,
-  taskQueue: TaskQueue
+  stateManager: StateManager
 ): Router {
   const router = Router();
 
@@ -58,8 +56,8 @@ export function createStatusRoutes(
 
       const issues = stateManager.loadIssues(currentId);
       const activeIssues = issues.filter(i => i.status === 'active');
-      const runningTasks = taskQueue.getRunningCount();
-      const queuedTasks = taskQueue.getQueueLength();
+      const runningTasks = stateManager.getTaskRepo().countRunning();
+      const queuedTasks = stateManager.getTaskRepo().countPending();
 
       const status = {
         name: current.name,

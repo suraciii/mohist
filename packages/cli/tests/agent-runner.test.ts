@@ -3,6 +3,20 @@ import { EventEmitter } from 'events';
 import { AgentRunner, SpawnFunction } from '../src/agent/runner';
 import { Issue, Task, Stage, IssueStatus } from '../src/types';
 import { SpawnOptions, ChildProcess } from 'child_process';
+import * as fs from 'fs';
+
+vi.mock('fs', () => ({
+  ...vi.importActual('fs'),
+  existsSync: vi.fn(() => true),
+  mkdirSync: vi.fn(() => undefined),
+  createWriteStream: vi.fn(() => ({
+    write: vi.fn(),
+    end: vi.fn(),
+    on: vi.fn(),
+    once: vi.fn(),
+    emit: vi.fn(),
+  })),
+}));
 
 function createMockChildProcess(): ChildProcess {
   const proc = new EventEmitter() as ChildProcess;
@@ -50,25 +64,28 @@ describe('AgentRunner', () => {
   let mockSpawnHelper: ReturnType<typeof createMockSpawn>;
 
   const mockIssue: Issue = {
+    id: 'issue-1',
     number: 1,
     title: 'Test Issue',
     body: 'Test body',
     stage: Stage.Designing,
     status: IssueStatus.Active,
     labels: [],
-    projectId: 'test-project',
-    url: 'https://github.com/testowner/testrepo/issues/1',
+    projectId: 'test-project-id',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
 
   const mockTask: Task = {
     id: 'task-1',
-    issueNumber: 1,
-    projectId: '/path/to/project',
+    issueId: 'issue-1',
+    projectId: 'test-project-id',
     stage: Stage.Designing,
     status: 'pending'
   };
+
+  const worktreePath = '/home/user/.mohist/projects/test-project/worktrees/issue-1';
+  const projectName = 'test-project';
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -98,9 +115,10 @@ describe('AgentRunner', () => {
     it('should spawn process with correct arguments', async () => {
       const promise = runner.spawnAgent(
         'task-1',
+        worktreePath,
+        projectName,
         1,
-        '/path/to/project',
-        'designer',
+        Stage.Designing,
         'Test prompt'
       );
 
@@ -115,7 +133,7 @@ describe('AgentRunner', () => {
           '30'
         ],
         {
-          cwd: '/path/to/project',
+          cwd: worktreePath,
           stdio: ['ignore', 'pipe', 'pipe']
         }
       );
@@ -124,8 +142,53 @@ describe('AgentRunner', () => {
       await promise;
     });
 
+    it('should use worktree path as cwd', async () => {
+      const promise = runner.spawnAgent(
+        'task-1',
+        worktreePath,
+        projectName,
+        1,
+        Stage.Designing,
+        'prompt'
+      );
+
+      expect(mockSpawnHelper.mockSpawn).toHaveBeenCalledWith(
+        'opencode',
+        expect.anything(),
+        expect.objectContaining({
+          cwd: worktreePath
+        })
+      );
+
+      mockSpawnHelper.simulateExit(0);
+      await promise;
+    });
+
+    it('should create log directory and write log file', async () => {
+      const promise = runner.spawnAgent(
+        'task-1',
+        worktreePath,
+        projectName,
+        1,
+        Stage.Designing,
+        'prompt'
+      );
+
+      expect(fs.mkdirSync).toHaveBeenCalledWith(
+        expect.stringContaining('logs/issue-1'),
+        { recursive: true }
+      );
+      expect(fs.createWriteStream).toHaveBeenCalledWith(
+        expect.stringContaining('agent-designing.log'),
+        { flags: 'a' }
+      );
+
+      mockSpawnHelper.simulateExit(0);
+      await promise;
+    });
+
     it('should resolve on successful exit', async () => {
-      const promise = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt');
+      const promise = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt');
 
       mockSpawnHelper.simulateExit(0);
 
@@ -133,7 +196,7 @@ describe('AgentRunner', () => {
     });
 
     it('should reject on non-zero exit code', async () => {
-      const promise = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt');
+      const promise = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt');
 
       mockSpawnHelper.simulateStderr('Error occurred');
       mockSpawnHelper.simulateExit(1);
@@ -142,7 +205,7 @@ describe('AgentRunner', () => {
     });
 
     it('should reject on process error', async () => {
-      const promise = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt');
+      const promise = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt');
 
       mockSpawnHelper.simulateError(new Error('Spawn failed'));
 
@@ -151,7 +214,7 @@ describe('AgentRunner', () => {
 
     it('should capture stdout data', async () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      const promise = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt');
+      const promise = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt');
 
       mockSpawnHelper.simulateStdout('Agent output\n');
       mockSpawnHelper.simulateExit(0);
@@ -163,7 +226,7 @@ describe('AgentRunner', () => {
 
     it('should capture stderr data', async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const promise = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt');
+      const promise = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt');
 
       mockSpawnHelper.simulateStderr('Warning message\n');
       mockSpawnHelper.simulateExit(0);
@@ -171,6 +234,25 @@ describe('AgentRunner', () => {
       await promise;
       expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Warning message'));
       consoleErrorSpy.mockRestore();
+    });
+
+    it('should use different log file for implementing stage', async () => {
+      const promise = runner.spawnAgent(
+        'task-1',
+        worktreePath,
+        projectName,
+        1,
+        Stage.Implementing,
+        'prompt'
+      );
+
+      expect(fs.createWriteStream).toHaveBeenCalledWith(
+        expect.stringContaining('agent-implementing.log'),
+        { flags: 'a' }
+      );
+
+      mockSpawnHelper.simulateExit(0);
+      await promise;
     });
   });
 
@@ -181,7 +263,7 @@ describe('AgentRunner', () => {
     });
 
     it('should kill running agent', async () => {
-      const promise = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt');
+      const promise = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt');
       const proc = mockSpawnHelper.getLastProcess();
 
       expect(runner.isRunning('task-1')).toBe(true);
@@ -202,8 +284,8 @@ describe('AgentRunner', () => {
     });
 
     it('should return correct count of running agents', async () => {
-      const promise1 = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt1');
-      const promise2 = runner.spawnAgent('task-2', 2, '/project', 'designer', 'prompt2');
+      const promise1 = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt1');
+      const promise2 = runner.spawnAgent('task-2', worktreePath, projectName, 2, Stage.Designing, 'prompt2');
 
       expect(runner.getRunningCount()).toBe(2);
 
@@ -220,7 +302,7 @@ describe('AgentRunner', () => {
     });
 
     it('should return true for running task', async () => {
-      const promise = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt');
+      const promise = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt');
 
       expect(runner.isRunning('task-1')).toBe(true);
 
@@ -229,7 +311,7 @@ describe('AgentRunner', () => {
     });
 
     it('should return false after task completes', async () => {
-      const promise = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt');
+      const promise = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt');
       mockSpawnHelper.simulateExit(0);
       await promise;
 
@@ -243,8 +325,8 @@ describe('AgentRunner', () => {
     });
 
     it('should kill all running agents', async () => {
-      const promise1 = runner.spawnAgent('task-1', 1, '/project', 'designer', 'prompt1');
-      const promise2 = runner.spawnAgent('task-2', 2, '/project', 'designer', 'prompt2');
+      const promise1 = runner.spawnAgent('task-1', worktreePath, projectName, 1, Stage.Designing, 'prompt1');
+      const promise2 = runner.spawnAgent('task-2', worktreePath, projectName, 2, Stage.Designing, 'prompt2');
 
       const processes = mockSpawnHelper.getAllProcesses();
 
@@ -262,7 +344,7 @@ describe('AgentRunner', () => {
 
   describe('runDesignerAgent', () => {
     it('should spawn agent with designer prompt', async () => {
-      const promise = runner.runDesignerAgent(mockIssue, mockTask);
+      const promise = runner.runDesignerAgent(mockIssue, mockTask, worktreePath, projectName);
 
       expect(mockSpawnHelper.mockSpawn).toHaveBeenCalledWith(
         'opencode',
@@ -274,7 +356,9 @@ describe('AgentRunner', () => {
           '--timeout',
           '30'
         ]),
-        expect.any(Object)
+        expect.objectContaining({
+          cwd: worktreePath,
+        })
       );
 
       mockSpawnHelper.simulateExit(0);
@@ -282,7 +366,7 @@ describe('AgentRunner', () => {
     });
 
     it('should include issue number and title in prompt', async () => {
-      const promise = runner.runDesignerAgent(mockIssue, mockTask);
+      const promise = runner.runDesignerAgent(mockIssue, mockTask, worktreePath, projectName);
 
       const callArgs = mockSpawnHelper.mockSpawn.mock.calls[0][1];
       const promptArg = callArgs[callArgs.indexOf('--message') + 1];
@@ -293,11 +377,26 @@ describe('AgentRunner', () => {
       mockSpawnHelper.simulateExit(0);
       await promise;
     });
+
+    it('should use worktree path as cwd', async () => {
+      const promise = runner.runDesignerAgent(mockIssue, mockTask, worktreePath, projectName);
+
+      expect(mockSpawnHelper.mockSpawn).toHaveBeenCalledWith(
+        'opencode',
+        expect.anything(),
+        expect.objectContaining({
+          cwd: worktreePath,
+        })
+      );
+
+      mockSpawnHelper.simulateExit(0);
+      await promise;
+    });
   });
 
   describe('runImplementerAgent', () => {
     it('should spawn agent with implementer prompt', async () => {
-      const promise = runner.runImplementerAgent(mockIssue, mockTask, '/path/to/design.md');
+      const promise = runner.runImplementerAgent(mockIssue, mockTask, '/path/to/design.md', worktreePath, projectName);
 
       expect(mockSpawnHelper.mockSpawn).toHaveBeenCalledWith(
         'opencode',
@@ -309,7 +408,9 @@ describe('AgentRunner', () => {
           '--timeout',
           '30'
         ]),
-        expect.any(Object)
+        expect.objectContaining({
+          cwd: worktreePath,
+        })
       );
 
       mockSpawnHelper.simulateExit(0);
@@ -317,7 +418,7 @@ describe('AgentRunner', () => {
     });
 
     it('should include design path in prompt', async () => {
-      const promise = runner.runImplementerAgent(mockIssue, mockTask, '/path/to/design.md');
+      const promise = runner.runImplementerAgent(mockIssue, mockTask, '/path/to/design.md', worktreePath, projectName);
 
       const callArgs = mockSpawnHelper.mockSpawn.mock.calls[0][1];
       const promptArg = callArgs[callArgs.indexOf('--message') + 1];

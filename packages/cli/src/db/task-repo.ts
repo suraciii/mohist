@@ -19,7 +19,7 @@ type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
 function rowToTask(row: TaskRow): Task {
   return {
     id: row.id,
-    issueNumber: 0,  // Will need to be populated from issue
+    issueId: row.issue_id,
     projectId: row.project_id,
     stage: row.stage as Stage,
     status: row.status as TaskStatus,
@@ -57,7 +57,7 @@ export class TaskRepo {
     
     return {
       id,
-      issueNumber: 0,
+      issueId: data.issueId,
       projectId: data.projectId,
       stage: data.stage,
       status: 'pending',
@@ -110,6 +110,34 @@ export class TaskRepo {
 
   findPending(): Task[] {
     return this.findAll({ status: 'pending' });
+  }
+
+  findAndClaim(): Task | null {
+    const now = new Date().toISOString();
+    const row = this.db.get<TaskRow>(
+      `UPDATE tasks SET status = 'running', started_at = ?
+       WHERE id = (
+         SELECT id FROM tasks t
+         WHERE t.status = 'pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM tasks t2
+           WHERE t2.issue_id = t.issue_id AND t2.status = 'running'
+         )
+         ORDER BY t.started_at ASC
+         LIMIT 1
+       )
+       RETURNING *`,
+      [now]
+    );
+    return row ? rowToTask(row) : null;
+  }
+
+  findRunningByIssue(issueId: string): Task | null {
+    const row = this.db.get<TaskRow>(
+      'SELECT * FROM tasks WHERE issue_id = ? AND status = ?',
+      [issueId, 'running']
+    );
+    return row ? rowToTask(row) : null;
   }
 
   findRunningByProject(projectId: string): Task[] {
@@ -171,6 +199,14 @@ export class TaskRepo {
     const row = this.db.get<{ count: number }>(
       'SELECT COUNT(*) as count FROM tasks WHERE status = ?',
       ['running']
+    );
+    return row?.count || 0;
+  }
+
+  countPending(): number {
+    const row = this.db.get<{ count: number }>(
+      'SELECT COUNT(*) as count FROM tasks WHERE status = ?',
+      ['pending']
     );
     return row?.count || 0;
   }

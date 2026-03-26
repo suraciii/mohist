@@ -36,7 +36,7 @@ export interface Project {
 
 export interface Task {
   id: string;
-  issueNumber: number;
+  issueId: string;
   projectId: string;
   stage: Stage;
   status: 'pending' | 'running' | 'completed' | 'failed';

@@ -13,7 +13,6 @@ import { IssueService } from '../src/services/issue-service';
 import { WorkflowService } from '../src/services/workflow-service';
 import { ConfigService } from '../src/services/config-service';
 import { StateManager } from '../src/server/state-manager';
-import { TaskQueue } from '../src/server/task-queue';
 import { createProjectRoutes } from '../src/api/projects';
 import { createIssueRoutes } from '../src/api/issues';
 import { createStatusRoutes } from '../src/api/status';
@@ -30,14 +29,12 @@ describe('API Routes', () => {
   let workflowService: WorkflowService;
   let configService: ConfigService;
   let stateManager: StateManager;
-  let taskQueue: TaskQueue;
 
   beforeEach(() => {
     db = resetDatabase({ inMemory: true });
     initializeDatabase(db);
     
     stateManager = new StateManager();
-    taskQueue = new TaskQueue(stateManager.getTaskRepo());
     
     projectRepo = stateManager.getProjectRepo();
     issueRepo = stateManager.getIssueRepo();
@@ -168,7 +165,7 @@ describe('API Routes', () => {
     beforeEach(async () => {
       app = express();
       app.use(express.json());
-      app.use('/api/issues', createIssueRoutes(stateManager, taskQueue));
+      app.use('/api/issues', createIssueRoutes(stateManager));
       
       const project = projectService.create({ name: 'Test Project', path: '/test/path' });
       projectId = project.id;
@@ -301,7 +298,7 @@ describe('API Routes', () => {
     beforeEach(() => {
       app = express();
       app.use(express.json());
-      app.use('/api', createStatusRoutes(stateManager, taskQueue));
+      app.use('/api', createStatusRoutes(stateManager));
     });
 
     describe('GET /api/status', () => {
