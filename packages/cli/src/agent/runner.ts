@@ -1,8 +1,28 @@
 import { spawn, ChildProcess, SpawnOptions } from 'child_process';
-import { Task, Issue } from '../types';
+import * as fs from 'fs';
+import * as path from 'path';
+import { Task, Issue, Stage } from '../types';
 import { PromptTemplates } from './prompts';
 
 export type SpawnFunction = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function getLogDir(projectName: string, issueNumber: number): string {
+  const home = process.env.HOME || '';
+  const slug = slugify(projectName);
+  return path.join(home, '.mohist', 'projects', slug, 'logs', `issue-${issueNumber}`);
+}
+
+function stageToLogName(stage: Stage): string {
+  return `agent-${stage}.log`;
+}
 
 export class AgentRunner {
   private processes: Map<string, ChildProcess> = new Map();
@@ -16,9 +36,10 @@ export class AgentRunner {
 
   async spawnAgent(
     taskId: string,
-    _issueNumber: number,
-    projectPath: string,
-    _agentType: 'designer' | 'implementer',
+    worktreePath: string,
+    projectName: string,
+    issueNumber: number,
+    stage: Stage,
     prompt: string
   ): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -33,8 +54,21 @@ export class AgentRunner {
 
       console.log(`Spawning agent for task ${taskId}: opencode ${args.join(' ')}`);
 
+      const logDir = getLogDir(projectName, issueNumber);
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+
+      const logPath = path.join(logDir, stageToLogName(stage));
+      let logStream: fs.WriteStream | null = null;
+      try {
+        logStream = fs.createWriteStream(logPath, { flags: 'a' });
+      } catch {
+        console.error(`Failed to open log file ${logPath}, continuing without file logging`);
+      }
+
       const agentProcess = this.spawnFn('opencode', args, {
-        cwd: projectPath,
+        cwd: worktreePath,
         stdio: ['ignore', 'pipe', 'pipe']
       });
 
@@ -44,17 +78,23 @@ export class AgentRunner {
       let stderr = '';
 
       agentProcess.stdout?.on('data', (data) => {
-        stdout += data.toString();
-        console.log(`[Agent ${taskId}] ${data.toString().trim()}`);
+        const text = data.toString();
+        stdout += text;
+        console.log(`[Agent ${taskId}] ${text.trim()}`);
+        logStream?.write(`[stdout] ${text}`);
       });
 
       agentProcess.stderr?.on('data', (data) => {
-        stderr += data.toString();
-        console.error(`[Agent ${taskId} ERROR] ${data.toString().trim()}`);
+        const text = data.toString();
+        stderr += text;
+        console.error(`[Agent ${taskId} ERROR] ${text.trim()}`);
+        logStream?.write(`[stderr] ${text}`);
       });
 
       const timeoutHandle = setTimeout(() => {
         console.log(`Agent ${taskId} timed out after ${this.timeout}ms`);
+        logStream?.write(`\n[timeout] Agent timed out after ${this.timeout}ms\n`);
+        logStream?.end();
         this.killAgent(taskId);
         reject(new Error('Agent timeout'));
       }, this.timeout);
@@ -62,6 +102,9 @@ export class AgentRunner {
       agentProcess.on('close', (code) => {
         clearTimeout(timeoutHandle);
         this.processes.delete(taskId);
+
+        logStream?.write(`\n[exit] Agent exited with code ${code}\n`);
+        logStream?.end();
 
         if (code === 0) {
           console.log(`Agent ${taskId} completed successfully`);
@@ -75,6 +118,8 @@ export class AgentRunner {
       agentProcess.on('error', (error) => {
         clearTimeout(timeoutHandle);
         this.processes.delete(taskId);
+        logStream?.write(`\n[error] ${error.message}\n`);
+        logStream?.end();
         console.error(`Agent ${taskId} error:`, error);
         reject(error);
       });
@@ -108,34 +153,47 @@ export class AgentRunner {
     return this.processes.has(taskId);
   }
 
-  async runDesignerAgent(issue: Issue, task: Task): Promise<void> {
+  async runDesignerAgent(
+    issue: Issue,
+    task: Task,
+    worktreePath: string,
+    projectName: string
+  ): Promise<void> {
     const prompt = PromptTemplates.getDesignerPrompt(
       issue.number,
       issue.title,
       issue.body
     );
-    
+
     await this.spawnAgent(
       task.id,
+      worktreePath,
+      projectName,
       issue.number,
-      task.projectId,
-      'designer',
+      task.stage,
       prompt
     );
   }
 
-  async runImplementerAgent(issue: Issue, task: Task, designPath: string): Promise<void> {
+  async runImplementerAgent(
+    issue: Issue,
+    task: Task,
+    designPath: string,
+    worktreePath: string,
+    projectName: string
+  ): Promise<void> {
     const prompt = PromptTemplates.getImplementerPrompt(
       issue.number,
       issue.title,
       designPath
     );
-    
+
     await this.spawnAgent(
       task.id,
+      worktreePath,
+      projectName,
       issue.number,
-      task.projectId,
-      'implementer',
+      task.stage,
       prompt
     );
   }

@@ -2,9 +2,14 @@ import { Stage, Issue, Task } from '../types';
 import { AgentRunner } from '../agent/runner';
 import { getNextStage, canStartAgent } from './issue-workflow';
 
+export interface StageHandlerContext {
+  worktreePath: string;
+  projectName: string;
+}
+
 export interface StageHandler {
   canExecute(issue: Issue): boolean;
-  execute(issue: Issue, task: Task): Promise<void>;
+  execute(issue: Issue, task: Task, context: StageHandlerContext): Promise<void>;
   onComplete(issue: Issue): Stage | null;
 }
 
@@ -15,8 +20,8 @@ export class DesigningHandler implements StageHandler {
     return canStartAgent(issue.stage, issue.status);
   }
   
-  async execute(issue: Issue, task: Task): Promise<void> {
-    await this.runner.runDesignerAgent(issue, task);
+  async execute(issue: Issue, task: Task, context: StageHandlerContext): Promise<void> {
+    await this.runner.runDesignerAgent(issue, task, context.worktreePath, context.projectName);
   }
   
   onComplete(issue: Issue): Stage | null {
@@ -31,9 +36,9 @@ export class ImplementingHandler implements StageHandler {
     return canStartAgent(issue.stage, issue.status);
   }
   
-  async execute(issue: Issue, task: Task): Promise<void> {
+  async execute(issue: Issue, task: Task, context: StageHandlerContext): Promise<void> {
     const designPath = `openspec/changes/issue-${issue.number}/design.md`;
-    await this.runner.runImplementerAgent(issue, task, designPath);
+    await this.runner.runImplementerAgent(issue, task, designPath, context.worktreePath, context.projectName);
   }
   
   onComplete(issue: Issue): Stage | null {
@@ -46,7 +51,7 @@ export class WaitingDesignReviewHandler implements StageHandler {
     return false;
   }
   
-  async execute(_issue: Issue, _task: Task): Promise<void> {
+  async execute(_issue: Issue, _task: Task, _context: StageHandlerContext): Promise<void> {
     throw new Error('Cannot execute waiting-design-review stage - requires user approval');
   }
   
@@ -60,7 +65,7 @@ export class WaitingReviewHandler implements StageHandler {
     return false;
   }
   
-  async execute(_issue: Issue, _task: Task): Promise<void> {
+  async execute(_issue: Issue, _task: Task, _context: StageHandlerContext): Promise<void> {
     throw new Error('Cannot execute waiting-review stage - requires user approval');
   }
   
@@ -74,7 +79,7 @@ export class DoneHandler implements StageHandler {
     return false;
   }
   
-  async execute(_issue: Issue, _task: Task): Promise<void> {
+  async execute(_issue: Issue, _task: Task, _context: StageHandlerContext): Promise<void> {
     throw new Error('Cannot execute done stage - this is a terminal state');
   }
   
@@ -88,7 +93,7 @@ export class DraftHandler implements StageHandler {
     return false;
   }
   
-  async execute(_issue: Issue, _task: Task): Promise<void> {
+  async execute(_issue: Issue, _task: Task, _context: StageHandlerContext): Promise<void> {
     throw new Error('Cannot execute draft stage - must be started first');
   }
   

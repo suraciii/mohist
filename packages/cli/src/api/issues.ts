@@ -1,12 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { StateManager } from '../server/state-manager';
-import { TaskQueue } from '../server/task-queue';
 import { ApiResponse, Issue, Stage, Comment } from '../types';
 import { IssueService, WorkflowService } from '../services';
+import { WorkflowEngine } from '../workflow/engine';
+import { WorktreeManager } from '../git/worktree-manager';
 
 export function createIssueRoutes(
   stateManager: StateManager,
-  taskQueue: TaskQueue
+  engine: WorkflowEngine | null = null,
+  worktreeManager: WorktreeManager | null = null
 ): Router {
   const router = Router();
   
@@ -137,6 +139,7 @@ export function createIssueRoutes(
         data: {
           ...issue,
           projectName: project?.name || 'unknown',
+          projectPath: project?.path || '',
           comments,
           progress,
           stageInfo
@@ -263,7 +266,7 @@ export function createIssueRoutes(
     }
   });
 
-  router.post('/:number/start', (req: Request, res: Response): void => {
+  router.post('/:number/start', async (req: Request, res: Response): Promise<void> => {
     try {
       const number = parseInt(req.params.number);
       const projectId = getCurrentProjectId();
@@ -289,11 +292,18 @@ export function createIssueRoutes(
       }
 
       const issue = result.issue!;
-      const taskId = taskQueue.enqueue(number, projectId, issue.stage);
+      const project = stateManager.getProjectById(projectId);
+
+      if (worktreeManager && engine && project) {
+        const worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
+        engine.registerWorktree(issue.id, worktreePath);
+      }
+
+      const task = stateManager.createTask(issue.id, projectId, issue.stage);
 
       const response: ApiResponse = {
         success: true,
-        data: { taskId, issue }
+        data: { taskId: task.id, issue }
       };
       res.json(response);
     } catch (error) {
@@ -333,10 +343,10 @@ export function createIssueRoutes(
       const issue = result.issue!;
       
       if (issue.stage !== Stage.Done) {
-        const taskId = taskQueue.enqueue(number, projectId, issue.stage);
+        const task = stateManager.createTask(issue.id, projectId, issue.stage);
         const response: ApiResponse = {
           success: true,
-          data: { issue, taskId, message: `Issue #${number} approved, continuing to ${issue.stage}` }
+          data: { issue, taskId: task.id, message: `Issue #${number} approved, continuing to ${issue.stage}` }
         };
         res.json(response);
       } else {
@@ -500,6 +510,51 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: { issue, message: `Issue #${number} reopened` }
+      };
+      res.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      res.status(500).json(response);
+    }
+  });
+
+  router.post('/:number/cleanup', async (req: Request, res: Response): Promise<void> => {
+    try {
+      const number = parseInt(req.params.number);
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No current project. Use: mo project use <name>'
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        res.status(404).json(response);
+        return;
+      }
+
+      const project = stateManager.getProjectById(projectId);
+
+      if (worktreeManager && engine && project) {
+        await worktreeManager.remove(project.path, project.name, issue.number);
+        engine.unregisterWorktree(issue.id);
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: { issue, message: `Issue #${number} worktree cleaned up` }
       };
       res.json(response);
     } catch (error) {

@@ -1,5 +1,86 @@
 # Ralph Progress Log
-Started: 2026-03-26T15:56:14.323Z
+Started: 2026-03-26T16:27:48.248Z
 
 ---
 
+## 2026-03-27T00:30:17Z - T-002: Remove memory TaskQueue, use TaskRepo directly in API routes
+
+**What was done:**
+- Deleted `src/server/task-queue.ts` entirely
+- Updated `api/issues.ts`: removed TaskQueue parameter, replaced `taskQueue.enqueue()` with `stateManager.createTask()` in start and approve routes
+- Updated `api/status.ts`: removed TaskQueue parameter, replaced `taskQueue.getRunningCount()/getQueueLength()` with `stateManager.getTaskRepo().countRunning()/countPending()`
+- Updated `server/index.ts`: removed TaskQueue import and instantiation, updated route factory calls to not pass taskQueue
+- Added `countPending()` method to `TaskRepo`
+- Updated all 3 test files (e2e, api-integration, api-routes) to remove TaskQueue references
+
+**Learnings:**
+- TaskRepo already had `countRunning()` but was missing `countPending()` — added it following the same pattern
+- `StateManager.createTask(issueId, projectId, stage)` returns a Task with `id`, so the response shape (`taskId: task.id`) is preserved
+- The TaskQueue constructor signature had been changed by T-001 (accepting number not repo), which was already inconsistent with test code — good that we're deleting it entirely
+
+**Verification:** Build passes (tsc), 172/173 tests pass (1 pre-existing skip)
+
+---
+
+## 2026-03-27T00:38:00Z - T-004: Implement WorkflowEngine with multi-worker execution
+
+**What was done:**
+- Created `src/workflow/engine.ts` with `WorkflowEngine` class
+- Added `findAndClaim()` to `TaskRepo`: atomic SQL `UPDATE ... RETURNING` with `NOT EXISTS` subquery enforcing same-Issue single-task constraint at DB level (D12)
+- Added `findRunningByIssue(issueId)` to `TaskRepo` for killAgentByIssueId reverse lookup (D13)
+- Implemented N-worker polling loop: each worker independently calls `findAndClaim()`, executes `StageHandler`, handles success/failure
+- On task success: marks task completed, checks issue still active, advances stage, creates next task only if next stage is agent stage (not user approval or terminal)
+- On task failure: marks task failed, marks issue blocked (unless task already failed by killAgentByIssueId — idempotent check)
+- `killAgentByIssueId(issueId)`: reverse lookup via `issueTaskMap`, checks task still running, marks failed with 'user_paused', kills agent process
+- `stop(timeoutMs)`: sets running=false, awaits workers with timeout, force-kills agents on timeout, marks remaining running tasks as failed
+- Worktree registry: `Map<issueId, worktreePath>` with `registerWorktree/unregisterWorktree/getWorktreePath`
+- Recovery on startup: iterates all projects, calls `WorktreeManager.list()`, maps issueId→worktreePath
+- Exposed `getActiveWorkerCount()` and `getPendingTaskCount()` for status API
+
+**Learnings:**
+- better-sqlite3's `stmt.get()` supports `UPDATE ... RETURNING` (confirmed by design notes) — used `db.get()` not `db.run()`
+- killAgentByIssueId must check task.status === 'running' before updating to avoid race with worker marking task completed
+- Worker's finally block handles idempotent cleanup of issueTaskMap entry (safe if already deleted by killAgentByIssueId)
+- The engine doesn't create tasks after user-approval stages — the approve API route handles that via StateManager.createTask()
+
+**Verification:** Build passes (tsc), 172/173 tests pass (1 pre-existing skip)
+
+---
+
+## 2026-03-27T00:32:46Z - T-003: Implement WorktreeManager
+
+**What was done:**
+- Created `src/git/worktree-manager.ts` with `WorktreeManager` class
+- Implemented `create()`: validates git repo, creates parent dirs, runs `git worktree add -b mo/issue-{N}`, returns worktree path; skips if already exists
+- Implemented `remove()`: runs `git worktree remove --force` then `git branch -d`, gracefully handles already-missing worktrees/branches
+- Implemented `list()`: parses `git worktree list --porcelain` output, filters to `mo/issue-*` branches, returns `WorktreeInfo[]`
+- Implemented `exists()`: checks `fs.existsSync` on worktree path
+- Implemented `prune()`: runs `git worktree prune`
+- Added `slugify()` utility: lowercase, non-alphanumeric to `-`, trim dashes
+- Worktree path: `~/.mohist/projects/{slugifiedName}/worktrees/issue-{N}/`
+
+**Learnings:**
+- Used `execFile` (not `exec`) for git commands to avoid shell injection risks
+- `remove()` needs `--force` flag on `git worktree remove` to handle dirty worktrees
+- Graceful error handling in `remove()` — missing worktree/branch should not throw since cleanup may be retried
+- `git worktree list --porcelain` is more reliable than parsing the default human-readable format
+
+**Verification:** Build passes (tsc), 172/173 tests pass (1 pre-existing skip)
+
+---
+
+## 2026-03-27T00:41:00Z - T-005: Integrate WorktreeManager into issue start flow
+
+**What was done:**
+- Updated `createIssueRoutes()` signature to accept `WorkflowEngine` and `WorktreeManager` (both optional, defaulting to null)
+- Updated `POST /:number/start` route: after workflow transition, creates worktree via `WorktreeManager.create()` and registers path in engine's worktree registry before creating task. Made handler `async`.
+- Added `POST /:number/cleanup` route: looks up issue, calls `WorktreeManager.remove()` to delete worktree+branch, calls `engine.unregisterWorktree()` to clean up registry
+- Added `projectPath` to `GET /:number` response (from `Project.path`) for future CLI local-merge support (T-008, T-009)
+- Updated `server/index.ts`: creates `WorktreeManager`, `AgentRunner`, `WorkflowEngine` instances; passes engine and worktreeManager to issue routes; calls `engine.start()` after `server.start()`; calls `engine.stop()` before `server.stop()` in SIGTERM/SIGINT handlers
+
+**Learnings:**
+- WorktreeManager.create() already handles the "already exists" case by returning early, so starting an already-started issue naturally reuses the worktree
+- Made engine/worktreeManager params optional with null defaults so issue routes work without engine (backward compatible for tests that don't provide engine)
+- Graceful shutdown order matters: engine.stop() before server.stop() ensures workers drain before HTTP connections close
+
+**Verification:** Build passes (tsc), 172/173 tests pass (1 pre-existing skip)

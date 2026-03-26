@@ -40,11 +40,6 @@ describe('API Integration Tests', () => {
       expect(typeof HttpServer).toBe('function');
     });
     
-    it('should export TaskQueue', async () => {
-      const { TaskQueue } = await import('../src/server/task-queue');
-      expect(typeof TaskQueue).toBe('function');
-    });
-    
     it('should export StateManager', async () => {
       const { StateManager } = await import('../src/server/state-manager');
       expect(typeof StateManager).toBe('function');

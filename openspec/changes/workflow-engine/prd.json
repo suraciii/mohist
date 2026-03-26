@@ -14,7 +14,7 @@
         "Build passes without type errors"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Task.issueNumber is replaced entirely by Task.issueId. All consumers already have the full Issue object so issueNumber is redundant on Task."
     },
     {
@@ -30,7 +30,7 @@
         "Build passes without type errors"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Delete server/task-queue.ts entirely. status.ts lines 61-62 need updating. For approve route: current code uses taskQueue.enqueue(number, projectId, stage) which takes issueNumber. After removal, replace with stateManager.createTask(issueId, projectId, stage) — need to first call issueService.getByNumber(projectId, number) to get issue.id (UUID). Same pattern applies to start route."
     },
     {
@@ -48,7 +48,7 @@
         "Build passes without type errors"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Use child_process.exec for git commands. Ensure project parent dir exists before creating."
     },
     {
@@ -68,7 +68,7 @@
         "Build passes without type errors"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "findAndClaim SQL (D12): UPDATE tasks SET status='running' WHERE id=(SELECT id FROM tasks t WHERE t.status='pending' AND NOT EXISTS(SELECT 1 FROM tasks t2 WHERE t2.issue_id=t.issue_id AND t2.status='running') ORDER BY t.started_at LIMIT 1) RETURNING *; Use DatabaseManager.get() not run() since better-sqlite3 get() supports RETURNING rows. Add findAndClaim method to TaskRepo in this task scope. Also add TaskRepo.findRunningByIssue(issueId: string) for killAgentByIssueId reverse lookup (D13). Engine maintains Map<issueId, taskId> — Worker registers on task claim, clears on task complete/fail. killAgentByIssueId flow: lookup taskId from map → TaskRepo.updateStatus(taskId, 'failed', 'user_paused') → AgentRunner.killAgent(taskId) → clear map entry."
     },
     {
@@ -84,7 +84,7 @@
         "Build passes without type errors"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Server has Project.path via stateManager.getProjectById(). WorktreeManager instance lives on WorkflowEngine. The start route needs access to Engine to register worktree path. cleanup route needs Engine to unregister."
     },
     {
