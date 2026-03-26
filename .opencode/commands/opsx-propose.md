@@ -7,9 +7,9 @@ Propose a new change - create the change and generate all artifacts in one step.
 I'll create a change with artifacts:
 - proposal.md (what & why)
 - design.md (how)
-- tasks.md (implementation steps)
+- prd.json (structured task definitions)
 
-When ready to implement, run /opsx-apply
+When ready to implement, run `openspec ralph --change <name>`
 
 ---
 
@@ -37,7 +37,7 @@ When ready to implement, run /opsx-apply
    openspec status --change "<name>" --json
    ```
    Parse the JSON to get:
-   - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["tasks"]`)
+   - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["prd"]`)
    - `artifacts`: list of all artifacts with their status and dependencies
 
 4. **Create artifacts in sequence until apply-ready**
@@ -83,7 +83,7 @@ After completing all artifacts, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
-- Prompt: "Run `/opsx-apply` to start implementing."
+- Prompt: "Run `openspec ralph --change <name>` to start implementing."
 
 **Artifact Creation Guidelines**
 

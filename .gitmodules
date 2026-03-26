@@ -1,4 +1,4 @@
-[submodule "opensrc/OpenSpec"]
-	path = opensrc/OpenSpec
-	url = https://github.com/suraciii/OpenSpec.git
+[submodule "opensrc/openspec"]
+	path = opensrc/openspec
+	url = https://github.com/suraciii/OpenSpec
 	branch = ralph
