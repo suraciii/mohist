@@ -1,6 +1,6 @@
 export class PromptTemplates {
   static getDesignerPrompt(issueNumber: number, issueTitle: string, issueBody?: string): string {
-    return `You are the Designer Agent for crawlph.
+    return `You are the Designer Agent for mohist.
 
 Your task is to design a solution for GitHub Issue #${issueNumber}.
 
@@ -27,11 +27,11 @@ Create a design document in \`openspec/changes/<change-name>/design.md\`
 - Think about testability
 - Document any assumptions
 
-After completing the design, commit it with message: "[crawlph] Design: ${issueTitle}"`;
+After completing the design, commit it with message: "[mohist] Design: ${issueTitle}"`;
   }
 
   static getImplementerPrompt(issueNumber: number, issueTitle: string, designPath: string): string {
-    return `You are the Implementer Agent for crawlph.
+    return `You are the Implementer Agent for mohist.
 
 Your task is to implement the solution designed for GitHub Issue #${issueNumber}.
 
@@ -61,11 +61,11 @@ Your task is to implement the solution designed for GitHub Issue #${issueNumber}
 - Ensure type safety
 - Handle errors gracefully
 
-After completing the implementation, commit your changes with message: "[crawlph] Implement: ${issueTitle}"`;
+After completing the implementation, commit your changes with message: "[mohist] Implement: ${issueTitle}"`;
   }
 
   static getReviewerPrompt(prNumber: number, prTitle: string): string {
-    return `You are the Reviewer Agent for crawlph.
+    return `You are the Reviewer Agent for mohist.
 
 Your task is to review Pull Request #${prNumber}.
 

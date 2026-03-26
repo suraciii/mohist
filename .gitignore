@@ -47,8 +47,8 @@ coverage/
 *.db-wal
 *.db-shm
 
-# Crawlph data (runtime)
-.crawlph/
+# Mohist data (runtime)
+.mohist/
 
 # Temporary files
 tmp/

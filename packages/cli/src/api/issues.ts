@@ -26,7 +26,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -80,7 +80,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -110,7 +110,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -160,7 +160,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -222,7 +222,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -271,7 +271,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -313,7 +313,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -363,7 +363,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -402,7 +402,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -441,7 +441,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -480,7 +480,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: crawlph project use <name>'
+          error: 'No current project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;

@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-crawlph 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLite 存储，通过 opencode agents 自动完成 Issue 的设计、实现和审查。
+mohist 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLite 存储，通过 opencode agents 自动完成 Issue 的设计、实现和审查。
 
 ## 目录职责
 
 | 目录 | 职责 | 内容 |
 |------|------|------|
-| `crawlph-cli/` | 核心实现 | CLI + Server + Agent Runner |
+| `packages/cli/` | 核心实现 | CLI + Server + Agent Runner |
 | `prd/` | 产品文档 | 产品定位、功能规划、用户故事 |
 | `design/` | 技术设计 | 架构设计、技术规格、流程设计 |
 | `docs/` | 用户文档 | README、CONTRIBUTING、使用指南 |
@@ -17,7 +17,7 @@ crawlph 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLi
 ## 核心实现结构
 
 ```
-crawlph-cli/
+packages/cli/
 ├── src/
 │   ├── cli/           # CLI 命令入口
 │   ├── server/        # HTTP Server + 状态管理
@@ -45,23 +45,23 @@ draft → designing → waiting-design-review → implementing → waiting-revie
 
 ```bash
 # 开发
-cd crawlph-cli && npm run build
-cd crawlph-cli && npm test
+cd packages/cli && npm run build
+cd packages/cli && npm test
 
 # 运行 Server
-cd crawlph-cli && npm run server
+cd packages/cli && npm run server
 
 # CLI 使用
-node dist/cli/index.js server start
-node dist/cli/index.js issue list
-node dist/cli/index.js issue start 1
+node bin/mo server start
+node bin/mo issue list
+node bin/mo issue start 1
 ```
 
 ## 数据存储
 
 ```
-~/.crawlph/
-├── crawlph.db    # SQLite 数据库
+~/.mohist/
+├── mohist.db    # SQLite 数据库
 └── logs/         # 日志文件
 ```
 

@@ -9,7 +9,7 @@ import { setupQuickCommands } from './commands/quick';
 const program = new Command();
 
 program
-  .name('crawlph')
+  .name('mo')
   .description('AI-powered issue workflow automation tool')
   .version('0.1.0');
 
@@ -31,7 +31,7 @@ export async function requireServer(): Promise<void> {
   const isRunning = await checkServerHealth();
   if (!isRunning) {
     console.error(chalk.red('Error: Server is not running'));
-    console.error(chalk.yellow('Start the server with: crawlph server start'));
+    console.error(chalk.yellow('Start the server with: mo server start'));
     process.exit(1);
   }
 }
@@ -42,18 +42,18 @@ export function formatError(error: string): void {
 
 const serverCmd = program
   .command('server')
-  .description('Manage the crawlph server');
+  .description('Manage the mohist server');
 
 serverCmd
   .command('start')
-  .description('Start the crawlph server in daemon mode')
+  .description('Start the mohist server in daemon mode')
   .action(async () => {
     await startServer();
   });
 
 serverCmd
   .command('stop')
-  .description('Stop the crawlph server')
+  .description('Stop the mohist server')
   .action(async () => {
     await stopServer();
   });

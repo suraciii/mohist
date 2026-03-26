@@ -17,7 +17,7 @@ export class DirectoryDetector {
 
   private static detectProjectFromConfig(): Project | undefined {
     const currentDir = process.cwd();
-    const configPath = path.join(currentDir, '.crawlph', 'config.json');
+    const configPath = path.join(currentDir, '.mohist', 'config.json');
     
     if (fs.existsSync(configPath)) {
       try {
@@ -41,7 +41,7 @@ export class DirectoryDetector {
 
   static isInProjectDir(): boolean {
     const currentDir = process.cwd();
-    const configPath = path.join(currentDir, '.crawlph', 'config.json');
+    const configPath = path.join(currentDir, '.mohist', 'config.json');
     return fs.existsSync(configPath);
   }
 }
