@@ -1,12 +1,12 @@
 {
-  "name": "crawlph-cli",
+  "name": "mohist",
   "version": "0.1.0",
   "description": "AI-powered issue workflow automation tool",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "crawlph": "./bin/crawlph",
-    "crawlph-server": "./bin/crawlph-server"
+    "mo": "./bin/crawlph",
+    "mo-server": "./bin/crawlph-server"
   },
   "scripts": {
     "build": "tsc",
@@ -31,12 +31,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/owner/crawlph.git"
+    "url": "https://github.com/owner/mohist.git"
   },
   "bugs": {
-    "url": "https://github.com/owner/crawlph/issues"
+    "url": "https://github.com/owner/mohist/issues"
   },
-  "homepage": "https://github.com/owner/crawlph#readme",
+  "homepage": "https://github.com/owner/mohist#readme",
   "engines": {
     "node": ">=18.0.0"
   },

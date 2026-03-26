@@ -26,7 +26,7 @@
         "Repository URLs reference mohist"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
