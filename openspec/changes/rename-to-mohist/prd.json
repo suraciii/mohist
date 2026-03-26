@@ -1,0 +1,127 @@
+{
+  "project": "mohist",
+  "description": "Rebrand crawlph to mohist and reorganize into monorepo structure",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create monorepo directory structure",
+      "description": "Create packages/ directory, move crawlph-cli/ contents to packages/cli/, create root package.json with workspaces config.",
+      "acceptanceCriteria": [
+        "packages/cli/ exists with all source files",
+        "Root package.json exists with workspaces config",
+        "Original crawlph-cli/ directory removed"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "T-002",
+      "title": "Update package.json naming",
+      "description": "Update packages/cli/package.json: name to 'mohist', bin to 'mo' and 'mo-server', update repository URLs.",
+      "acceptanceCriteria": [
+        "package.json name is 'mohist'",
+        "bin 'crawlph' changed to 'mo'",
+        "bin 'crawlph-server' changed to 'mo-server'",
+        "Repository URLs reference mohist"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Update CLI command name",
+      "spec": "specs/cli-interface/spec.md#REQ-001",
+      "description": "Update .name('crawlph') to .name('mo') in src/cli/index.ts and all error message references.",
+      "acceptanceCriteria": [
+        "CLI responds to 'mo --help'",
+        "Error messages reference 'mo server start'",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-004",
+      "title": "Update data directory paths",
+      "spec": "specs/state-persistence/spec.md#REQ-001",
+      "description": "Update all ~/.crawlph/ references to ~/.mohist/ in database.ts, server/index.ts, server commands, and detector.ts.",
+      "acceptanceCriteria": [
+        "All source files use ~/.mohist/",
+        "PID and log files use ~/.mohist/",
+        "Project detector uses .mohist/",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-005",
+      "title": "Update database filename",
+      "spec": "specs/state-persistence/spec.md#REQ-001",
+      "description": "Rename crawlph.db to mohist.db in database.ts.",
+      "acceptanceCriteria": [
+        "Database file is mohist.db",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-006",
+      "title": "Update agent prompts",
+      "description": "Update all 'crawlph' references in src/agent/prompts.ts to 'mohist'.",
+      "acceptanceCriteria": [
+        "All prompt references use 'mohist'",
+        "Commit messages use '[mohist]' prefix",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-007",
+      "title": "Update documentation",
+      "description": "Update docs/README.md and AGENTS.md with new CLI command, paths, and package names.",
+      "acceptanceCriteria": [
+        "README uses 'mo' command examples",
+        "README references ~/.mohist/",
+        "AGENTS.md updated with new paths"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-008",
+      "title": "Update .gitignore and openspec specs",
+      "description": "Update .gitignore from .crawlph/ to .mohist/, update any path references in openspec/specs/.",
+      "acceptanceCriteria": [
+        ".gitignore uses .mohist/",
+        "openspec specs reference correct paths"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-009",
+      "title": "Verify build and tests",
+      "description": "Run npm install, build, and tests to verify everything works after reorganization.",
+      "acceptanceCriteria": [
+        "npm install succeeds in workspace",
+        "npm run build succeeds",
+        "npm test passes",
+        "mo --help displays correctly"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
