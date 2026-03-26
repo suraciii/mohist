@@ -2,140 +2,82 @@
 
 ## Project Overview
 
-This is crawlph - an AI-powered GitHub workflow automation skill for OpenClaw. It implements the Ralph Loop pattern for infinite retry Issue processing through 6 workflow stages (exploration → refinement → design → implementation → review → done).
+crawlph 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLite 存储，通过 opencode agents 自动完成 Issue 的设计、实现和审查。
 
-## Key Files
+## 目录职责
 
-| File | Purpose |
-|------|---------|
-| `skills/crawlph/SKILL.md` | Main skill definition and workflow logic |
-| `openspec/changes/crawlph-skill/` | Change artifacts (design, specs, tests) |
-| `AGENT-TEST-GUIDE.md` | **Testing guide for all changes** |
+| 目录 | 职责 | 内容 |
+|------|------|------|
+| `crawlph-cli/` | 核心实现 | CLI + Server + Agent Runner |
+| `prd/` | 产品文档 | 产品定位、功能规划、用户故事 |
+| `design/` | 技术设计 | 架构设计、技术规格、流程设计 |
+| `docs/` | 用户文档 | README、CONTRIBUTING、使用指南 |
+| `openspec/` | 变更管理 | OpenSpec 变更提案、任务追踪 |
 
-## Before You Start
+## 核心实现结构
 
-**Read the testing guide**: `AGENT-TEST-GUIDE.md`
+```
+crawlph-cli/
+├── src/
+│   ├── cli/           # CLI 命令入口
+│   ├── server/        # HTTP Server + 状态管理
+│   ├── agent/         # Agent Runner (spawn opencode)
+│   ├── services/      # 业务逻辑层
+│   ├── db/            # SQLite 数据层
+│   ├── api/           # REST API 路由
+│   ├── workflow/      # 工作流状态机
+│   └── providers/     # Issue 来源接口 (local/github)
+├── tests/             # 测试文件
+└── dist/              # 编译输出
+```
 
-This guide is a general reference for testing any changes in this project.
+## 工作流阶段
 
-This is essential before modifying:
-- SKILL.md behavior or workflow logic
-- State persistence (claims, progress, cursor files)
-- Sub-agent spawn configuration
-- Path handling or data directory logic
+```
+draft → designing → waiting-design-review → implementing → waiting-review → done
+```
 
-## Testing
+用户审批点：
+- `waiting-design-review`: 设计完成后等待用户审批
+- `waiting-review`: 实现完成后等待用户审批
 
-### Quick Test
+## 常用命令
 
 ```bash
-# Set environment
-export GH_TOKEN=$(gh auth token)
-export CRAWLPH_DATA_DIR="$HOME/.openclaw/agents/crawlph-test/data"
+# 开发
+cd crawlph-cli && npm run build
+cd crawlph-cli && npm test
 
-# Run test
-cd /mnt/c/Users/szf/repos/crawlph-test
-timeout 180 openclaw agent --agent crawlph-test --local --message '/crawlph 1 --yes' --timeout 170
+# 运行 Server
+cd crawlph-cli && npm run server
+
+# CLI 使用
+node dist/cli/index.js server start
+node dist/cli/index.js issue list
+node dist/cli/index.js issue start 1
 ```
 
-### Verification Checklist
-
-After test execution, verify:
-1. **Claims**: `cat ~/.openclaw/agents/crawlph-test/data/crawlph-claims.json`
-2. **Progress**: `ls ~/.openclaw/agents/crawlph-test/data/progress/`
-3. **Issue status**: `gh issue view 1`
-4. **PR status**: `gh pr list`
-5. **Git log**: `git log --oneline -5`
-
-### Common Issues
-
-| Issue | Solution |
-|-------|----------|
-| API rate limit | `export GH_TOKEN=$(gh auth token)` |
-| Wrong data directory | Verify `CRAWLPH_DATA_DIR` is set |
-| Agent not found | Run `setup_test_agent.py` |
-
-## Commands
-
-```bash
-# Check skill syntax
-ls skills/crawlph/
-
-# View test execution logs
-cat openspec/changes/crawlph-skill/TEST-EXECUTION-LOG.md
-
-# Monitor running agent
-tail -f /tmp/test-run.log
-
-# Clean test data
-rm -rf ~/.openclaw/agents/crawlph-test/data/progress/*
-```
-
-### Validation Repository Management
-- Test issues should be created in `crawlph-validation` repository, NOT in the main `crawlph` repo
-- Creating test issues in main repo pollutes the project backlog
-- crawlph-validation is the dedicated sandbox for testing workflow scenarios
-
-## Project Structure
+## 数据存储
 
 ```
-crawlph/
-├── skills/crawlph/           # Skill definition
-│   └── SKILL.md             # Main workflow logic
-├── openspec/
-│   └── changes/
-│       └── crawlph-skill/   # Change artifacts
-│           ├── design.md
-│           ├── specs/
-│           └── tasks.md
-├── AGENT-TEST-GUIDE.md      # ⭐ Testing guide for all changes
-└── AGENTS.md                # This file
+~/.crawlph/
+├── crawlph.db    # SQLite 数据库
+└── logs/         # 日志文件
 ```
 
-## Environment Notes
+## 非显而易见的发现
 
-- **Always use WSL for validation** - Windows paths and tools cause path resolution issues
-- Test repository: `suraciii/crawlph-test` (private)
-- Test agent: `crawlph-test`
-- Full workflow takes ~20-30 minutes
-- Always test before modifying SKILL.md
+### Agent Runner
+- 使用 `opencode agent --local --message "..."` spawn 子进程
+- 超时默认 30 分钟
+- Prompt 在 `src/agent/prompts.ts` 中定义
 
-## Non-Obvious Discoveries
+### 工作流状态机
+- 只能顺序推进，不能跳过阶段
+- `WorkflowService` 控制状态转换
+- `StateManager` 管理运行时状态
 
-### GitHub CLI Quirks
-- `gh issue create` in non-interactive mode **requires both** `--title` and `--body` flags
-- Workflow labels must be pre-created: crawlph expects `stage:*` and `action:*` labels to exist
-
-### Validation Testing
-- Create 5 experiment scenarios: Happy Path, Chaos Path, Concurrency, Re-evaluation, State Persistence
-- Each scenario tests specific failure modes and recovery mechanisms
-- Ralph Loop checkpoint granularity is at Stage level - mid-stage crashes lose progress
-
-### Agent Debugging
-- Session logs: `~/.openclaw/agents/{agent-id}/sessions/{session-id}.jsonl` - real-time execution trace
-- Use `tail -f` on session logs to monitor sub-agent progress during long-running stages
-
-### Model Configuration Constraints
-- crawlph-test agent only supports: `zai/glm-5` or `kimi-coding/k2p5` models
-- Other providers (minimax-portal, etc.) will fail with "model not found" errors
-- Edit `~/.openclaw/agents/crawlph-test/models.json` to match supported providers
-
-### Workspace Configuration Trap
-- Agent workspace MUST match the GitHub repository with Issues to process
-- Mismatch causes "no git remotes found" or "error: No such remote 'origin'"
-- Fix: Update `workspace` path in `~/.openclaw/openclaw.json` agents list
-
-### Ralph Loop API Limitations
-- Design stage hangs silently on 429 (rate limit) errors without retry or timeout
-- No automatic fallback to previous stage on API failures
-- Workaround: Kill agent and restart from last checkpoint
-
-### Windows Path Handling in WSL
-- sed on Windows paths requires forward slash escaping: `sed 's|\\\\|/|g'`
-- Or use WSL path format directly: `/mnt/c/Users/...`
-- Git commands work but path resolution differs between Windows and WSL contexts
-
-### openclaw.json 编辑陷阱
-- 手动编辑 JSON 文件时，单引号 `'` 会导致 JSON 解析错误
-- 必须使用双引号 `"` 包裹所有字符串值
-- 使用 jq 或 Node.js 修改 JSON 更安全：`jq '.agents.list[0].workspace = "/new/path"' ~/.openclaw/openclaw.json`
+### Provider 接口
+- 当前只实现了 `local` provider
+- `github` provider 接口已定义但未实现
+- Provider 切换通过配置控制

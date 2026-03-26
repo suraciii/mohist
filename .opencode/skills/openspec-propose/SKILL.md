@@ -1,12 +1,12 @@
 ---
 name: openspec-propose
-description: Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation.
+description: Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and prd.json ready for implementation.
 license: MIT
 compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.2.0"
+  generatedBy: "1.3.0-ralph.1"
 ---
 
 Propose a new change - create the change and generate all artifacts in one step.
@@ -14,9 +14,9 @@ Propose a new change - create the change and generate all artifacts in one step.
 I'll create a change with artifacts:
 - proposal.md (what & why)
 - design.md (how)
-- tasks.md (implementation steps)
+- prd.json (structured task definitions)
 
-When ready to implement, run /opsx-apply
+When ready to implement, run `openspec ralph --change <name>`
 
 ---
 
@@ -44,7 +44,7 @@ When ready to implement, run /opsx-apply
    openspec status --change "<name>" --json
    ```
    Parse the JSON to get:
-   - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["tasks"]`)
+   - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["prd"]`)
    - `artifacts`: list of all artifacts with their status and dependencies
 
 4. **Create artifacts in sequence until apply-ready**
@@ -90,7 +90,7 @@ After completing all artifacts, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
-- Prompt: "Run `/opsx-apply` or ask me to implement to start working on the tasks."
+- Prompt: "Run `openspec ralph --change <name>` or ask me to implement to start working on the tasks."
 
 **Artifact Creation Guidelines**
 
