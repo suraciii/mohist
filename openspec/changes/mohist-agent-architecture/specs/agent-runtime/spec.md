@@ -24,41 +24,51 @@ The system SHALL provide a tool definition API where each tool is defined with: 
 - **WHEN** a tool is invoked with parameters not matching its Zod schema
 - **THEN** the runtime SHALL return a validation error to the LLM
 
-### Requirement: Session management
-The system SHALL support creating agent sessions with: a unique ID, an associated issue ID, a message history (role + content), and a creation timestamp. Sessions SHALL support adding user and assistant messages.
+### Requirement: In-memory session management
+The system SHALL support creating agent sessions in memory with: a unique ID, an associated issue ID, a message history (AI SDK CoreMessage[]), and a creation timestamp. Sessions SHALL support adding messages. Sessions are NOT persisted to SQLite in M1 — server restart loses all session data.
 
 #### Scenario: Create session
 - **WHEN** a new session is created with an issue ID
-- **THEN** the system SHALL generate a unique session ID and store it in SQLite
+- **THEN** the system SHALL generate a unique session ID and store it in memory
 - **THEN** the session SHALL start with an empty message history
 
 #### Scenario: Append message to session
-- **WHEN** a message (role + content) is appended to a session
-- **THEN** the message SHALL be persisted to the session_messages table
+- **WHEN** a message is appended to a session
+- **THEN** the message SHALL be added to the session's in-memory history
 - **THEN** the message SHALL be available for subsequent LLM calls
 
-### Requirement: Sub-agent spawning
-The system SHALL support spawning sub-agents from a parent session. A sub-agent SHALL have its own independent session and LLM loop. The parent session SHALL synchronously wait for the sub-agent to complete and receive the text result.
+#### Scenario: Close session
+- **WHEN** a session is closed
+- **THEN** the session SHALL be marked as closed and removed from active sessions
+
+### Requirement: Sub-agent spawning (opencode subprocess)
+The system SHALL support spawning opencode as a subprocess from the Main Agent via the spawn_agent tool. M1 implementation: spawn_agent directly spawns `opencode agent --local --message <task>` in the issue's worktree, synchronously waits for completion, and returns stdout/stderr/exit_code. No child LLM loop in M1.
 
 #### Scenario: Spawn and wait
-- **WHEN** the parent agent calls the spawn_agent tool
-- **THEN** the system SHALL create a new child session
-- **THEN** the system SHALL run the child agent's LLM loop to completion
-- **THEN** the sub-agent's final text output SHALL be returned to the parent as a tool result
+- **WHEN** the Main Agent calls spawn_agent with agent_type, task, and cwd
+- **THEN** the system SHALL spawn an opencode subprocess in the cwd
+- **THEN** the system SHALL wait for the subprocess to complete
+- **THEN** the subprocess output (stdout/stderr/exit_code) SHALL be returned as a tool result
+
+#### Scenario: Sub-agent timeout
+- **WHEN** the opencode subprocess exceeds the configured timeout (default 30 minutes)
+- **THEN** the system SHALL kill the subprocess
+- **THEN** a timeout error SHALL be returned to the Main Agent
 
 #### Scenario: Sub-agent failure
-- **WHEN** the sub-agent's LLM loop encounters an error
-- **THEN** the error information SHALL be returned to the parent as a tool result
-- **THEN** the parent LLM SHALL decide how to handle the failure
+- **WHEN** the opencode subprocess exits with non-zero code
+- **THEN** the stderr output and exit code SHALL be returned to the Main Agent
+- **THEN** the Main Agent LLM SHALL decide how to handle the failure
 
 ### Requirement: LLM provider configuration
-The system SHALL support configuring LLM providers via `~/.mohist/config.json`. The configuration SHALL include: default model ID, provider ID, and optional API key. Each agent SHALL be able to override the default model.
+The system SHALL support configuring LLM providers via config table (accessed through existing ConfigRepo). The configuration SHALL include: default model in "provider/model-id" format (e.g. "anthropic/claude-sonnet-4"), and per-provider options (baseURL, apiKey). API keys SHALL be detected from environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY), shared with opencode.
 
 #### Scenario: Load provider config
 - **WHEN** Mohist server starts
-- **THEN** the system SHALL load provider configuration from `~/.mohist/config.json`
+- **THEN** the system SHALL load llm config from the config table
+- **THEN** the system SHALL detect API key from environment variables
 - **THEN** the configured model SHALL be used for LLM calls
 
-#### Scenario: Agent-specific model override
-- **WHEN** an agent definition specifies a model
-- **THEN** that agent SHALL use the specified model instead of the default
+#### Scenario: Config with proxy
+- **WHEN** llm.provider.<id>.options.baseURL is set in config
+- **THEN** the system SHALL use that baseURL for the provider's API calls
