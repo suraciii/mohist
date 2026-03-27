@@ -5,8 +5,30 @@ import { execSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ApiResponse, Issue } from '../../types';
+import { slugify } from '../../utils/slugify';
 
 const API_BASE = 'http://localhost:3456/api';
+
+function getDefaultBranch(projectPath: string): string {
+  try {
+    const symbolicRef = execSync('git symbolic-ref refs/remotes/origin/HEAD', {
+      cwd: projectPath,
+      stdio: 'pipe',
+      encoding: 'utf-8',
+    }).trim();
+    return symbolicRef.replace('refs/remotes/origin/', '');
+  } catch {
+    try {
+      return execSync('git rev-parse --abbrev-ref HEAD', {
+        cwd: projectPath,
+        stdio: 'pipe',
+        encoding: 'utf-8',
+      }).trim();
+    } catch {
+      return 'main';
+    }
+  }
+}
 
 function apiClient<T = any>(
   method: string,
@@ -372,7 +394,8 @@ export function setupIssueCommands(program: Command): void {
           }
 
           const branchName = `mo/issue-${number}`;
-          console.log(chalk.gray(`Merging ${branchName} into main...`));
+          const defaultBranch = getDefaultBranch(projectPath);
+          console.log(chalk.gray(`Merging ${branchName} into ${defaultBranch}...`));
 
           try {
             execSync(`git merge --no-ff ${branchName}`, {
@@ -499,9 +522,10 @@ export function setupIssueCommands(program: Command): void {
         }
 
         const branchName = `mo/issue-${number}`;
+        const defaultBranch = getDefaultBranch(projectPath);
 
         try {
-          execSync(`git diff main...${branchName}`, {
+          execSync(`git diff ${defaultBranch}...${branchName}`, {
             cwd: projectPath,
             stdio: 'inherit'
           });
@@ -541,11 +565,7 @@ export function setupIssueCommands(program: Command): void {
           return;
         }
 
-        const slug = projectName
-          .toLowerCase()
-          .trim()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-+|-+$/g, '');
+        const slug = slugify(projectName);
 
         const home = process.env.HOME || '';
         const logDir = path.join(home, '.mohist', 'projects', slug, 'logs', `issue-${number}`);

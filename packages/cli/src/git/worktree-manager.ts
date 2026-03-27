@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
+import { slugify } from '../utils/slugify';
 
 const execFileAsync = promisify(execFile);
 
@@ -9,14 +10,6 @@ export interface WorktreeInfo {
   worktreePath: string;
   branch: string;
   issueNumber: number;
-}
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
 }
 
 function getWorktreeBaseDir(projectName: string): string {
@@ -56,9 +49,7 @@ export class WorktreeManager {
     }
 
     const baseDir = getWorktreeBaseDir(projectName);
-    if (!fs.existsSync(baseDir)) {
-      fs.mkdirSync(baseDir, { recursive: true });
-    }
+    fs.mkdirSync(baseDir, { recursive: true });
 
     try {
       await execFileAsync(
