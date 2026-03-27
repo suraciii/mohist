@@ -2,13 +2,17 @@ import { Router, Request, Response } from 'express';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Issue, Stage, Comment } from '../types';
 import { IssueService, WorkflowService } from '../services';
-import { WorkflowEngine } from '../workflow/engine';
 import { WorktreeManager } from '../git/worktree-manager';
+import { SessionManager } from '../agent-runtime';
+import { runMainAgent } from '../agents/main-agent';
+
+let activeAgentIssueId: string | null = null;
+let activeAgentPromise: Promise<void> | null = null;
 
 export function createIssueRoutes(
   stateManager: StateManager,
-  engine: WorkflowEngine | null = null,
-  worktreeManager: WorktreeManager | null = null
+  worktreeManager: WorktreeManager | null = null,
+  sessionManager: SessionManager = new SessionManager()
 ): Router {
   const router = Router();
   
@@ -280,30 +284,81 @@ export function createIssueRoutes(
         return;
       }
 
-      const result = workflowService.startProcessing(projectId, number);
-      
-      if (!result.success) {
+      if (activeAgentPromise) {
         const response: ApiResponse = {
           success: false,
-          error: result.error
+          error: `Another issue (#${activeAgentIssueId}) is already running. Wait for it to complete or pause first.`
         };
         res.status(400).json(response);
         return;
       }
 
-      const issue = result.issue!;
-      const project = stateManager.getProjectById(projectId);
-
-      if (worktreeManager && engine && project) {
-        const worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
-        engine.registerWorktree(issue.id, worktreePath);
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        res.status(404).json(response);
+        return;
       }
 
-      const task = stateManager.createTask(issue.id, projectId, issue.stage);
+      if (issue.status === 'paused') {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is paused. Resume it first.`
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      if (issue.stage !== Stage.Draft) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is not in draft stage (current: ${issue.stage})`
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      stateManager.updateIssueStage(issue.id, Stage.Designing);
+      const updatedIssue = stateManager.getIssueByNumber(projectId, number)!;
+
+      const project = stateManager.getProjectById(projectId);
+      let worktreePath = process.cwd();
+      if (worktreeManager && project) {
+        worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
+      }
+
+      activeAgentIssueId = issue.id;
+      activeAgentPromise = (async () => {
+        try {
+          await runMainAgent(
+            {
+              id: issue.id,
+              number: issue.number,
+              title: issue.title,
+              body: issue.body,
+            },
+            {
+              issueRepo: stateManager.getIssueRepo(),
+              commentRepo: stateManager.getCommentRepo(),
+              worktreePath,
+            },
+            sessionManager,
+          );
+        } catch (err) {
+          console.error(`Agent loop failed for issue #${number}:`, err);
+          stateManager.updateIssueStatus(issue.id, 'blocked' as any);
+        } finally {
+          activeAgentPromise = null;
+          activeAgentIssueId = null;
+        }
+      })();
 
       const response: ApiResponse = {
         success: true,
-        data: { taskId: task.id, issue }
+        data: { issue: updatedIssue, message: `Issue #${number} started, agent is running` }
       };
       res.json(response);
     } catch (error) {
@@ -390,9 +445,8 @@ export function createIssueRoutes(
         return;
       }
 
-      if (engine) {
-        engine.killAgentByIssueId(issue.id);
-      }
+      activeAgentPromise = null;
+      activeAgentIssueId = null;
 
       const taskRepo = stateManager.getTaskRepo();
       const pendingTasks = taskRepo.findByIssueId(issue.id).filter(t => t.status === 'pending');
@@ -599,9 +653,8 @@ export function createIssueRoutes(
 
       const project = stateManager.getProjectById(projectId);
 
-      if (worktreeManager && engine && project) {
+      if (worktreeManager && project) {
         await worktreeManager.remove(project.path, project.name, issue.number);
-        engine.unregisterWorktree(issue.id);
       }
 
       const response: ApiResponse = {

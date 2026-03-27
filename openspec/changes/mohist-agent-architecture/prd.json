@@ -12,7 +12,7 @@
         "ai and @ai-sdk/anthropic are in package.json dependencies"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Only add dependencies, no code changes. Start with Anthropic as the only bundled provider."
     },
     {
@@ -27,7 +27,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Read config via existing ConfigService/ConfigRepo. The llm config goes under the 'llm' key in config table. Reference: opencode provider.ts lines 1186-1317 (getSDK) and 1343-1368 (getLanguage)."
     },
     {
@@ -42,7 +42,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Keep it simple. No truncation, no middleware. The execute function signature: (params: validated) => Promise<string>."
     },
     {
@@ -58,7 +58,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Use AI SDK's CoreMessage type for messages. ~50 lines total. No SQLite, no persistence (D8). Session data lost on server restart."
     },
     {
@@ -74,7 +74,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "This is the core runtime. Reference: opencode's SessionProcessor.process() and LLM.stream(). The streamText() call should set maxSteps (default 20). Handle tool execution errors by returning error string to LLM."
     },
     {
@@ -91,7 +91,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "M1: spawn_agent directly spawns opencode (no child LLM loop). This is a transparent pass-through. M3 will upgrade to child LLM loop, but the tool interface stays the same."
     },
     {
@@ -105,7 +105,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "These tools need access to IssueRepo and CommentRepo. Pass a context object (with repos) to each tool's execute function via closure or dependency injection."
     },
     {
@@ -121,7 +121,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "M1: CodeAgentDef is a definition file (prompt template), not an independent LLM loop. Main Agent's system prompt should be a static template string with variable interpolation for issue context."
     },
     {
@@ -137,7 +137,7 @@
         "npm run build passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "The start endpoint becomes fire-and-forget. The agent loop runs as a background async task. Error handling: if the agent loop throws, mark the issue as failed. D12: single issue — return error if an issue is already running."
     },
     {
