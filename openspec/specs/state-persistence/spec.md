@@ -1,19 +1,19 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: File-based State Storage
 
-The system SHALL persist state to files in the crawlph agent data directory (`~/.openclaw/agents/crawlph/data/`).
+The system SHALL persist state to files in the mohist data directory (`~/.mohist/`).
 
 #### Scenario: Store claims
 
 - **WHEN** claiming an Issue
-- **THEN** system SHALL write to `crawlph-claims.json`
+- **THEN** system SHALL write to `mohist-claims.json`
 - **AND** file SHALL be atomic (write to temp, then rename)
 
 #### Scenario: Store cursor
 
 - **WHEN** in watch mode
-- **THEN** system SHALL store cursor in `crawlph-cursor.json`
+- **THEN** system SHALL store cursor in `mohist-cursor.json`
 - **AND** cursor SHALL include last checked timestamp
 
 #### Scenario: Store progress
@@ -25,12 +25,15 @@ The system SHALL persist state to files in the crawlph agent data directory (`~/
 #### Directory Structure
 
 ```
-~/.openclaw/agents/crawlph/data/
-├── crawlph-claims.json      # Issue claims
-├── crawlph-cursor.json      # Watch mode cursor
-└── progress/                # Per-issue progress
-    ├── issue-123.json
-    └── issue-456.json
+~/.mohist/
+├── mohist.db              # SQLite database
+├── mohist-claims.json     # Issue claims
+├── mohist-cursor.json     # Watch mode cursor
+├── config.json            # Configuration
+├── projects.json          # Projects list
+├── server.pid             # Server PID
+└── logs/                  # Log files
+    └── server.log
 ```
 
 ### Requirement: State File Format
@@ -39,7 +42,7 @@ State files SHALL use JSON format with consistent structure.
 
 #### Scenario: Claims file format
 
-- **WHEN** reading `crawlph-claims.json`
+- **WHEN** reading `mohist-claims.json`
 - **THEN** format SHALL be:
   ```json
   {
@@ -77,7 +80,7 @@ The system SHALL recover state after restart.
 #### Scenario: Resume from persisted state
 
 - **WHEN** orchestrator restarts
-- **THEN** system SHALL read existing state files
+- **THEN** system SHALL read existing state files from `~/.mohist/`
 - **AND** system SHALL resume processing from last checkpoint
 
 #### Scenario: Handle corrupted state

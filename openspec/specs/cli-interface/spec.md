@@ -5,11 +5,11 @@
 CLI SHALL 提供分组式命令界面，与 server 通信。
 
 #### Scenario: 查看 help
-- **WHEN** 用户执行 `crawlph --help`
+- **WHEN** 用户执行 `mo --help`
 - **THEN** 显示所有命令组和用法
 
 #### Scenario: 查看子命令 help
-- **WHEN** 用户执行 `crawlph issue --help`
+- **WHEN** 用户执行 `mo issue --help`
 - **THEN** 显示 issue 命令组的所有子命令
 
 ### Requirement: CLI 是 thin client
@@ -17,7 +17,7 @@ CLI SHALL 提供分组式命令界面，与 server 通信。
 CLI SHALL NOT 包含业务逻辑，所有逻辑在 server 侧。
 
 #### Scenario: CLI 调用 server API
-- **WHEN** 用户执行 `crawlph issue list`
+- **WHEN** 用户执行 `mo issue list`
 - **THEN** CLI 调用 `GET /api/issues`
 - **AND** CLI 格式化输出 server 返回的数据
 - **AND** CLI 不做任何业务决策
@@ -35,7 +35,7 @@ CLI SHALL 在执行命令前检测 server 是否运行。
 - **WHEN** 用户执行需要 server 的命令
 - **AND** server 未运行
 - **THEN** CLI 返回错误 "Server is not running"
-- **AND** CLI 提示 "Start with: crawlph server start"
+- **AND** CLI 提示 "Start with: mo server start"
 
 #### Scenario: Server 运行中
 - **WHEN** 用户执行需要 server 的命令
@@ -47,7 +47,7 @@ CLI SHALL 在执行命令前检测 server 是否运行。
 CLI SHALL 提供清晰、美化的终端输出。
 
 #### Scenario: status 命令输出
-- **WHEN** 用户执行 `crawlph status`
+- **WHEN** 用户执行 `mo status`
 - **THEN** 显示格式化的状态表格
 - **AND** 显示当前项目名称
 - **AND** 使用颜色区分不同状态
@@ -57,17 +57,72 @@ CLI SHALL 提供清晰、美化的终端输出。
 - **THEN** 显示清晰的错误信息
 - **AND** 提供可能的解决方案
 
+### Requirement: CLI 支持本地 Issue CRUD
+
+CLI SHALL 通过 Server API 支持本地 Issue 的创建、读取、更新、删除操作。
+
+#### Scenario: CLI 调用 Server API 创建 Issue
+- **WHEN** 用户执行 `mo issue create "title"`
+- **THEN** CLI 发送 POST /api/issues 请求到 Server
+- **AND** Server 在本地 SQLite 创建 Issue
+- **AND** CLI 显示创建结果
+
+#### Scenario: CLI 调用 Server API 列出 Issues
+- **WHEN** 用户执行 `mo issue list`
+- **THEN** CLI 发送 GET /api/issues 请求到 Server
+- **AND** Server 从本地 SQLite 查询 Issues
+- **AND** CLI 格式化显示结果
+
+#### Scenario: CLI 调用 Server API 更新 Issue
+- **WHEN** 用户执行 `mo issue update <id> --title "new"`
+- **THEN** CLI 发送 PATCH /api/issues/:id 请求到 Server
+- **AND** Server 更新本地 SQLite
+- **AND** CLI 显示更新结果
+
+#### Scenario: CLI 调用 Server API 添加评论
+- **WHEN** 用户执行 `mo issue comment <id> "text"`
+- **THEN** CLI 发送 POST /api/issues/:id/comments 请求到 Server
+- **AND** Server 在本地 SQLite 创建 comment
+- **AND** CLI 显示成功消息
+
+### Requirement: Server API 扩展
+
+Server SHALL 新增以下 API 端点支持本地 Issue CRUD。
+
+#### Scenario: POST /api/issues
+- **WHEN** Server 收到 POST /api/issues 请求
+- **WITH** body: { title, body?, labels? }
+- **THEN** Server 在当前项目创建 Issue
+- **AND** 返回 Issue 详情
+
+#### Scenario: PATCH /api/issues/:id
+- **WHEN** Server 收到 PATCH /api/issues/:id 请求
+- **WITH** body: { title?, body?, labels? }
+- **THEN** Server 更新指定 Issue
+- **AND** 返回更新后的 Issue
+
+#### Scenario: POST /api/issues/:id/comments
+- **WHEN** Server 收到 POST /api/issues/:id/comments 请求
+- **WITH** body: { body }
+- **THEN** Server 创建 comment
+- **AND** 返回 comment 详情
+
+#### Scenario: GET /api/labels
+- **WHEN** Server 收到 GET /api/labels 请求
+- **THEN** Server 返回当前项目所有使用过的 labels
+- **AND** 按名称排序
+
 ### Requirement: CLI 支持 server 命令
 
 CLI SHALL 支持 server 管理命令（无需 server 运行）。
 
 #### Scenario: 启动 server
-- **WHEN** 用户执行 `crawlph server start`
+- **WHEN** 用户执行 `mo server start`
 - **THEN** CLI 启动 server 进程
 - **AND** CLI 等待 server 就绪
 - **AND** CLI 显示 "Server started"
 
 #### Scenario: 停止 server
-- **WHEN** 用户执行 `crawlph server stop`
+- **WHEN** 用户执行 `mo server stop`
 - **THEN** CLI 发送停止信号给 server
 - **AND** CLI 显示 "Server stopped"
