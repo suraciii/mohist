@@ -2,3 +2,9 @@
 	path = opensrc/openspec
 	url = https://github.com/suraciii/OpenSpec
 	branch = ralph
+[submodule "opensrc/openclaw"]
+	path = opensrc/openclaw
+	url = https://github.com/openclaw/openclaw.git
+[submodule "opensrc/opencode"]
+	path = opensrc/opencode
+	url = https://github.com/anomalyco/opencode
