@@ -1,86 +1,93 @@
 # Ralph Progress Log
-Started: 2026-03-26T16:27:48.248Z
+Started: 2026-03-26T16:48:48.258Z
 
 ---
 
-## 2026-03-27T00:30:17Z - T-002: Remove memory TaskQueue, use TaskRepo directly in API routes
+## 2026-03-27T00:00:00Z - T-006: Update AgentRunner to use worktree as cwd
 
-**What was done:**
-- Deleted `src/server/task-queue.ts` entirely
-- Updated `api/issues.ts`: removed TaskQueue parameter, replaced `taskQueue.enqueue()` with `stateManager.createTask()` in start and approve routes
-- Updated `api/status.ts`: removed TaskQueue parameter, replaced `taskQueue.getRunningCount()/getQueueLength()` with `stateManager.getTaskRepo().countRunning()/countPending()`
-- Updated `server/index.ts`: removed TaskQueue import and instantiation, updated route factory calls to not pass taskQueue
-- Added `countPending()` method to `TaskRepo`
-- Updated all 3 test files (e2e, api-integration, api-routes) to remove TaskQueue references
+**Status**: Completed (already implemented in prior iterations)
 
-**Learnings:**
-- TaskRepo already had `countRunning()` but was missing `countPending()` — added it following the same pattern
-- `StateManager.createTask(issueId, projectId, stage)` returns a Task with `id`, so the response shape (`taskId: task.id`) is preserved
-- The TaskQueue constructor signature had been changed by T-001 (accepting number not repo), which was already inconsistent with test code — good that we're deleting it entirely
+**What was done**: Verified all T-006 acceptance criteria already met from T-004/T-005 work:
+- `spawnAgent` already accepts `worktreePath` and uses it as `cwd`
+- stdout/stderr already written to `~/.mohist/projects/{projectName}/logs/issue-{N}/agent-{stage}.log`
+- Log directory auto-created with `fs.mkdirSync(logDir, { recursive: true })`
+- `runDesignerAgent` and `runImplementerAgent` pass `worktreePath` and `projectName` through
+- `StageHandler.execute` signature already includes `StageHandlerContext` with `worktreePath` and `projectName`
+- Build passes cleanly
 
-**Verification:** Build passes (tsc), 172/173 tests pass (1 pre-existing skip)
+**Learnings**: T-006 was effectively completed as part of T-004 (engine) and T-005 (worktree integration) since those tasks already required the full chain: Engine → StageHandler → AgentRunner → worktree cwd + log paths.
 
 ---
 
-## 2026-03-27T00:38:00Z - T-004: Implement WorkflowEngine with multi-worker execution
+## 2026-03-27T00:55:00Z - T-007: Integrate WorkflowEngine into Server lifecycle
 
-**What was done:**
-- Created `src/workflow/engine.ts` with `WorkflowEngine` class
-- Added `findAndClaim()` to `TaskRepo`: atomic SQL `UPDATE ... RETURNING` with `NOT EXISTS` subquery enforcing same-Issue single-task constraint at DB level (D12)
-- Added `findRunningByIssue(issueId)` to `TaskRepo` for killAgentByIssueId reverse lookup (D13)
-- Implemented N-worker polling loop: each worker independently calls `findAndClaim()`, executes `StageHandler`, handles success/failure
-- On task success: marks task completed, checks issue still active, advances stage, creates next task only if next stage is agent stage (not user approval or terminal)
-- On task failure: marks task failed, marks issue blocked (unless task already failed by killAgentByIssueId — idempotent check)
-- `killAgentByIssueId(issueId)`: reverse lookup via `issueTaskMap`, checks task still running, marks failed with 'user_paused', kills agent process
-- `stop(timeoutMs)`: sets running=false, awaits workers with timeout, force-kills agents on timeout, marks remaining running tasks as failed
-- Worktree registry: `Map<issueId, worktreePath>` with `registerWorktree/unregisterWorktree/getWorktreePath`
-- Recovery on startup: iterates all projects, calls `WorktreeManager.list()`, maps issueId→worktreePath
-- Exposed `getActiveWorkerCount()` and `getPendingTaskCount()` for status API
+**Status**: Completed
 
-**Learnings:**
-- better-sqlite3's `stmt.get()` supports `UPDATE ... RETURNING` (confirmed by design notes) — used `db.get()` not `db.run()`
-- killAgentByIssueId must check task.status === 'running' before updating to avoid race with worker marking task completed
-- Worker's finally block handles idempotent cleanup of issueTaskMap entry (safe if already deleted by killAgentByIssueId)
-- The engine doesn't create tasks after user-approval stages — the approve API route handles that via StateManager.createTask()
+**What was done**:
+- `server/index.ts`: Fixed `ensureDataDir()` to create `~/.mohist/projects/` instead of unused `~/.mohist/logs/`. Passed engine to `createStatusRoutes`.
+- `api/status.ts`: Added `WorkflowEngine` parameter, included `activeWorkers` count in status response.
+- `api/issues.ts` pause route: Added `engine.killAgentByIssueId()` call after marking Issue paused. Also cancels pending tasks for the issue (marks them failed) to ensure clean state for resume.
+- `api/issues.ts` resume route: Implemented D15 logic - validates issue is in agent stage (designing/implementing), checks no running/pending tasks exist, creates new task with current stage, sets issue to active. Returns 400 with clear error messages for invalid states.
+- `cli/commands/server.ts`: Added `fetchServerStatus()` helper to query `GET /api/status`. `serverStatus()` now displays active workers, running tasks, and queued tasks from the API.
 
-**Verification:** Build passes (tsc), 172/173 tests pass (1 pre-existing skip)
+**Learnings**:
+- Pause route must cancel pending tasks (not just running) to ensure clean resume state. Without this, resume would reject issues with pending tasks left from before the pause.
+- Engine parameter is optional in route factories for test compatibility (tests don't need a real engine).
+- Pre-existing test failure in `agent-runner.test.ts` (log path mismatch) is unrelated to this task.
 
 ---
 
-## 2026-03-27T00:32:46Z - T-003: Implement WorktreeManager
+## 2026-03-27T08:00:00Z - T-008: Implement local merge on approve
 
-**What was done:**
-- Created `src/git/worktree-manager.ts` with `WorktreeManager` class
-- Implemented `create()`: validates git repo, creates parent dirs, runs `git worktree add -b mo/issue-{N}`, returns worktree path; skips if already exists
-- Implemented `remove()`: runs `git worktree remove --force` then `git branch -d`, gracefully handles already-missing worktrees/branches
-- Implemented `list()`: parses `git worktree list --porcelain` output, filters to `mo/issue-*` branches, returns `WorktreeInfo[]`
-- Implemented `exists()`: checks `fs.existsSync` on worktree path
-- Implemented `prune()`: runs `git worktree prune`
-- Added `slugify()` utility: lowercase, non-alphanumeric to `-`, trim dashes
-- Worktree path: `~/.mohist/projects/{slugifiedName}/worktrees/issue-{N}/`
+**Status**: Completed
 
-**Learnings:**
-- Used `execFile` (not `exec`) for git commands to avoid shell injection risks
-- `remove()` needs `--force` flag on `git worktree remove` to handle dirty worktrees
-- Graceful error handling in `remove()` — missing worktree/branch should not throw since cleanup may be retried
-- `git worktree list --porcelain` is more reliable than parsing the default human-readable format
+**What was done**:
+- Updated `cli/commands/issue.ts` approve command to check issue stage before approving
+- When issue is in `waiting-review` stage:
+  1. Fetches issue details via `GET /api/issues/:number` to get `projectPath`
+  2. Executes `git merge --no-ff mo/issue-{N}` locally in projectPath using `execSync`
+  3. On success: calls `POST /issues/:number/approve` then `POST /issues/:number/cleanup`
+  4. On merge conflict: displays error with resolution instructions, does NOT call server API
+- For non-waiting-review stages: uses existing server API flow (unchanged)
+- Added `execSync` import from `child_process`
 
-**Verification:** Build passes (tsc), 172/173 tests pass (1 pre-existing skip)
+**Learnings**:
+- Server-side cleanup route (`POST /issues/:number/cleanup`) was already implemented in T-005, so no server changes needed for T-008
+- `execSync` with `stdio: 'pipe'` prevents merge output from polluting CLI, while still throwing on non-zero exit (conflict)
+- If server approve fails after successful merge, user is given `git reset --hard HEAD~1` instructions to revert
 
 ---
 
-## 2026-03-27T00:41:00Z - T-005: Integrate WorktreeManager into issue start flow
+## 2026-03-27T12:00:00Z - T-009: Add mo issue diff and mo issue logs CLI commands
 
-**What was done:**
-- Updated `createIssueRoutes()` signature to accept `WorkflowEngine` and `WorktreeManager` (both optional, defaulting to null)
-- Updated `POST /:number/start` route: after workflow transition, creates worktree via `WorktreeManager.create()` and registers path in engine's worktree registry before creating task. Made handler `async`.
-- Added `POST /:number/cleanup` route: looks up issue, calls `WorktreeManager.remove()` to delete worktree+branch, calls `engine.unregisterWorktree()` to clean up registry
-- Added `projectPath` to `GET /:number` response (from `Project.path`) for future CLI local-merge support (T-008, T-009)
-- Updated `server/index.ts`: creates `WorktreeManager`, `AgentRunner`, `WorkflowEngine` instances; passes engine and worktreeManager to issue routes; calls `engine.start()` after `server.start()`; calls `engine.stop()` before `server.stop()` in SIGTERM/SIGINT handlers
+**Status**: Completed
 
-**Learnings:**
-- WorktreeManager.create() already handles the "already exists" case by returning early, so starting an already-started issue naturally reuses the worktree
-- Made engine/worktreeManager params optional with null defaults so issue routes work without engine (backward compatible for tests that don't provide engine)
-- Graceful shutdown order matters: engine.stop() before server.stop() ensures workers drain before HTTP connections close
+**What was done**:
+- Added `mo issue diff <number>` command: fetches issue via API to get `projectPath`, runs `git diff main...mo/issue-{N}` with `stdio: 'inherit'` for colored output. Shows "No worktree found" error for missing branches.
+- Added `mo issue logs <number>` command: fetches issue via API to get `projectName`, slugifies it locally (same logic as Server's WorktreeManager), reads logs from `~/.mohist/projects/{slug}/logs/issue-{N}/`. Default shows last 50 lines of all `.log` files. `--follow` option tails the most recent log file using `tail -f`.
+- Added imports: `spawn` from child_process, `fs`, `path`
 
-**Verification:** Build passes (tsc), 172/173 tests pass (1 pre-existing skip)
+**Learnings**:
+- Slugify logic must be kept in sync between CLI and Server. Currently duplicated - could be extracted to a shared util if more divergence occurs.
+- `stdio: 'inherit'` for diff preserves git's native color output.
+- `tail -f` with SIGINT handler ensures clean exit on Ctrl+C.
+
+---
+
+## 2026-03-27T01:05:00Z - T-010: End-to-end test and fix integration issues
+
+**Status**: Completed
+
+**What was done**:
+- Ran `npm run build` — passes cleanly
+- Ran `npm test` — found 1 failure in `agent-runner.test.ts`
+- Fixed `src/agent/runner.ts:57-59`: removed redundant `existsSync` guard before `mkdirSync(logDir, { recursive: true })`. The `recursive: true` option makes `mkdirSync` idempotent, so the guard was unnecessary. The test mocked `existsSync` to always return `true`, preventing `mkdirSync` from ever being called.
+- All 176 tests pass, 1 skipped (pre-existing), build clean
+
+**Learnings**:
+- When using `{ recursive: true }` with `mkdirSync`, an `existsSync` guard is redundant and can cause test fragility
+- The pre-existing test failure flagged in T-007 progress was indeed this same issue — resolved now
+- E2E tests already covered the full workflow (create→start→approve design→approve impl→done), pause/resume, and multi-issue scenarios
+
+---
+

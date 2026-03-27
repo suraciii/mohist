@@ -55,9 +55,7 @@ export class AgentRunner {
       console.log(`Spawning agent for task ${taskId}: opencode ${args.join(' ')}`);
 
       const logDir = getLogDir(projectName, issueNumber);
-      if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-      }
+      fs.mkdirSync(logDir, { recursive: true });
 
       const logPath = path.join(logDir, stageToLogName(stage));
       let logStream: fs.WriteStream | null = null;

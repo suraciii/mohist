@@ -99,7 +99,7 @@
         "Build passes without type errors"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "StageHandler.execute signature changes from execute(issue, task) to execute(issue, task, context) where context = { worktreePath: string, projectName: string }. Engine constructs context from worktree registry + Project.name before calling Handler. DesigningHandler and ImplementingHandler pass context.worktreePath and context.projectName to AgentRunner.spawnAgent. AgentRunner.spawnAgent uses worktreePath as cwd and projectName to construct log path ~/.mohist/projects/{projectName}/logs/issue-{N}/agent-{stage}.log."
     },
     {
@@ -118,7 +118,7 @@
         "Build passes without type errors"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "pause route needs Engine access via server/index.ts wiring. resume route logic (D15): Issue must be in designing/implementing, no running/pending Task → create Task(stage: currentStage) + set Issue active. pause route (D13): Engine.killAgentByIssueId() marks Task failed first, then kills process. Worker's reject is idempotent. Also clean up dead directory: server/index.ts ensureDataDir() creates ~/.mohist/logs/ which is unused since D14 moved logs to ~/.mohist/projects/{name}/logs/ — remove that mkdir or change to ~/.mohist/projects/."
     },
     {
@@ -134,7 +134,7 @@
         "Build passes without type errors"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "CLI command in cli/commands/issue.ts checks issue.stage from API response. If waiting-review: get projectPath -> git merge -> on success call approve API -> call cleanup API. Server needs new POST /issues/:number/cleanup route that calls WorktreeManager.remove() and removes registry entry."
     },
     {
@@ -150,7 +150,7 @@
         "Build passes without type errors"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Add to cli/commands/issue.ts setupIssueCommands function. Both commands use apiClient to get projectPath first. For logs command: CLI gets projectName from API response (already returned in GET /api/issues/:number), then slugifies it locally to construct log path ~/.mohist/projects/{slugifiedName}/logs/issue-{N}/. CLI must replicate the same slug logic as Server (lowercase, spaces to dashes, remove special chars) — consider extracting to a shared utility or documenting the exact rules."
     },
     {
@@ -168,8 +168,8 @@
         "Build passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "This is a manual integration test task. Run npm test to ensure no regressions."
+      "passes": true,
+      "notes": "Fixed agent-runner test: removed unnecessary existsSync guard before mkdirSync({ recursive: true }) in runner.ts. mkdirSync with recursive is idempotent so the guard was redundant and caused test failure when fs.existsSync was mocked. All 176 tests pass, build clean."
     }
   ]
 }
