@@ -6,9 +6,8 @@ import { createConfigRoutes } from '../api/config';
 import { createStatusRoutes } from '../api/status';
 import { createLabelRoutes } from '../api/labels';
 import { ConfigService } from '../services';
-import { WorkflowEngine } from '../workflow/engine';
-import { AgentRunner } from '../agent/runner';
 import { WorktreeManager } from '../git/worktree-manager';
+import { SessionManager } from '../agent-runtime';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,40 +32,26 @@ async function main(): Promise<void> {
   const config = configService.getConfig();
 
   const worktreeManager = new WorktreeManager();
-  const agentRunner = new AgentRunner(config.agentTimeout);
-  const engine = new WorkflowEngine(
-    stateManager.getTaskRepo(),
-    stateManager.getIssueRepo(),
-    stateManager.getProjectRepo(),
-    agentRunner,
-    worktreeManager,
-    {
-      maxConcurrentAgents: config.maxConcurrentAgents,
-      pollInterval: config.pollInterval,
-    }
-  );
+  const sessionManager = new SessionManager();
   
   const server = new HttpServer(config);
   
   server.addRouter('/api/projects', createProjectRoutes(stateManager));
-  server.addRouter('/api/issues', createIssueRoutes(stateManager, engine, worktreeManager));
+  server.addRouter('/api/issues', createIssueRoutes(stateManager, worktreeManager, sessionManager));
   server.addRouter('/api/labels', createLabelRoutes(stateManager));
   server.addRouter('/api/config', createConfigRoutes(configService));
-  server.addRouter('/api', createStatusRoutes(stateManager, engine));
+  server.addRouter('/api', createStatusRoutes(stateManager));
 
   process.on('SIGTERM', async () => {
     console.log('Received SIGTERM, shutting down gracefully...');
-    await engine.stop();
     await server.stop();
   });
 
   process.on('SIGINT', async () => {
     console.log('Received SIGINT, shutting down gracefully...');
-    await engine.stop();
     await server.stop();
   });
 
-  await engine.start();
   await server.start();
   
   const { projects, activeTasks } = stateManager.recoverState();

@@ -1,11 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse } from '../types';
-import { WorkflowEngine } from '../workflow/engine';
 
 export function createStatusRoutes(
-  stateManager: StateManager,
-  engine?: WorkflowEngine | null
+  stateManager: StateManager
 ): Router {
   const router = Router();
 
@@ -68,7 +66,7 @@ export function createStatusRoutes(
         activeIssues: activeIssues.length,
         runningTasks,
         queuedTasks,
-        activeWorkers: engine?.getActiveWorkerCount() ?? 0,
+        activeWorkers: 0,
         issuesByStage: {
           draft: issues.filter(i => i.stage === 'draft').length,
           designing: issues.filter(i => i.stage === 'designing').length,

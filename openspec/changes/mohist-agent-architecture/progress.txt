@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Started: 2026-03-27T17:26:07.433Z
+
+---
+
+[2026-03-28T12:00:00Z] T-009: Wire start endpoint to Main Agent — COMPLETED
+- Rewrote POST /:number/start in api/issues.ts to create a session and launch Main Agent as a fire-and-forget background task
+- Removed WorkflowEngine and AgentRunner imports/usage from server/index.ts
+- Removed WorkflowEngine dependency from api/status.ts (replaced engine.getActiveWorkerCount() with 0)
+- Changed createIssueRoutes signature: removed engine param, added sessionManager param
+- Added module-level activeAgentIssueId/activeAgentPromise for D12 single-issue enforcement
+- Start endpoint now sets issue stage to 'designing', creates worktree, launches runMainAgent async, returns immediately
+- Error handling: agent loop failure marks issue as 'blocked'
+- Cleanup/pause routes updated to remove engine references
+- npm run build passes, tsc --noEmit passes
+
