@@ -439,11 +439,11 @@ export function createIssueRoutes(
         return;
       }
 
-      const agentStages = [Stage.Designing, Stage.Implementing];
-      if (!agentStages.includes(issue.stage)) {
+      const resumeableStages = [Stage.Designing, Stage.Implementing, Stage.WaitingDesignReview];
+      if (!resumeableStages.includes(issue.stage)) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} cannot be resumed from stage "${issue.stage}". Must be in designing or implementing stage.`
+          error: `Issue #${number} cannot be resumed from stage "${issue.stage}". Must be in designing, implementing, or waiting-design-review stage.`
         };
         res.status(400).json(response);
         return;
@@ -473,7 +473,13 @@ export function createIssueRoutes(
         return;
       }
 
-      const task = stateManager.createTask(issue.id, projectId, issue.stage);
+      let task;
+      if (issue.stage === Stage.WaitingDesignReview) {
+        issueService.transitionToStage(resumed.id, Stage.Designing);
+        task = stateManager.createTask(issue.id, projectId, Stage.Designing);
+      } else {
+        task = stateManager.createTask(issue.id, projectId, issue.stage);
+      }
 
       const response: ApiResponse = {
         success: true,

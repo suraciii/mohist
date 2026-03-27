@@ -1,5 +1,6 @@
 import { Stage, IssueStatus, Issue } from '../types';
 import { IssueService } from './issue-service';
+import { getNextStage, requiresUserApproval } from '../workflow/issue-workflow';
 
 export interface TransitionResult {
   success: boolean;
@@ -16,27 +17,18 @@ export const STAGE_ORDER: Stage[] = [
   Stage.Done,
 ];
 
-export const USER_APPROVAL_STAGES: Stage[] = [
-  Stage.WaitingDesignReview,
-  Stage.WaitingReview,
-];
-
 export class WorkflowService {
   constructor(private issueService: IssueService) {}
 
   canTransition(from: Stage, to: Stage): boolean {
     const fromIndex = STAGE_ORDER.indexOf(from);
     const toIndex = STAGE_ORDER.indexOf(to);
-    
     if (fromIndex === -1 || toIndex === -1) return false;
-    
     return toIndex === fromIndex + 1;
   }
 
   getNextStage(current: Stage): Stage | null {
-    const index = STAGE_ORDER.indexOf(current);
-    if (index === -1 || index >= STAGE_ORDER.length - 1) return null;
-    return STAGE_ORDER[index + 1];
+    return getNextStage(current);
   }
 
   getPreviousStage(current: Stage): Stage | null {
@@ -46,7 +38,7 @@ export class WorkflowService {
   }
 
   requiresUserApproval(stage: Stage): boolean {
-    return USER_APPROVAL_STAGES.includes(stage);
+    return requiresUserApproval(stage);
   }
 
   startProcessing(projectId: string, issueNumber: number): TransitionResult {
@@ -63,7 +55,7 @@ export class WorkflowService {
       return { success: false, error: `Issue #${issueNumber} is not in draft stage` };
     }
 
-    const nextStage = this.getNextStage(issue.stage);
+    const nextStage = getNextStage(issue.stage);
     if (!nextStage) {
       return { success: false, error: `Cannot advance from stage ${issue.stage}` };
     }
@@ -82,14 +74,14 @@ export class WorkflowService {
       return { success: false, error: `Issue #${issueNumber} not found` };
     }
 
-    if (!this.requiresUserApproval(issue.stage)) {
-      return { 
-        success: false, 
-        error: `Issue #${issueNumber} is at stage ${issue.stage}, which does not require approval` 
+    if (!requiresUserApproval(issue.stage)) {
+      return {
+        success: false,
+        error: `Issue #${issueNumber} is at stage ${issue.stage}, which does not require approval`
       };
     }
 
-    const nextStage = this.getNextStage(issue.stage);
+    const nextStage = getNextStage(issue.stage);
     if (!nextStage) {
       return { success: false, error: `Cannot advance from stage ${issue.stage}` };
     }
@@ -108,7 +100,7 @@ export class WorkflowService {
       return { success: false, error: `Issue #${issueNumber} not found` };
     }
 
-    const nextStage = this.getNextStage(issue.stage);
+    const nextStage = getNextStage(issue.stage);
     if (!nextStage) {
       return { success: false, error: `Cannot advance from stage ${issue.stage}` };
     }
@@ -139,8 +131,8 @@ export class WorkflowService {
     return {
       name: stage,
       description: descriptions[stage] || 'Unknown stage',
-      requiresApproval: this.requiresUserApproval(stage),
-      nextStage: this.getNextStage(stage),
+      requiresApproval: requiresUserApproval(stage),
+      nextStage: getNextStage(stage),
     };
   }
 
@@ -148,7 +140,7 @@ export class WorkflowService {
     const index = STAGE_ORDER.indexOf(stage);
     const total = STAGE_ORDER.length;
     const current = index + 1;
-    
+
     return {
       current,
       total,

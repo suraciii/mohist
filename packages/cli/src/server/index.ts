@@ -58,18 +58,16 @@ async function main(): Promise<void> {
     console.log('Received SIGTERM, shutting down gracefully...');
     await engine.stop();
     await server.stop();
-    process.exit(0);
   });
 
   process.on('SIGINT', async () => {
     console.log('Received SIGINT, shutting down gracefully...');
     await engine.stop();
     await server.stop();
-    process.exit(0);
   });
 
-  await server.start();
   await engine.start();
+  await server.start();
   
   const { projects, activeTasks } = stateManager.recoverState();
   

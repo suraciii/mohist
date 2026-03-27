@@ -3,16 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Task, Issue, Stage } from '../types';
 import { PromptTemplates } from './prompts';
+import { slugify } from '../utils/slugify';
 
 export type SpawnFunction = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 function getLogDir(projectName: string, issueNumber: number): string {
   const home = process.env.HOME || '';
@@ -128,6 +121,14 @@ export class AgentRunner {
     const process = this.processes.get(taskId);
     if (process) {
       process.kill('SIGTERM');
+      const killTimeout = setTimeout(() => {
+        try {
+          process.kill('SIGKILL');
+        } catch {
+          // process already exited
+        }
+      }, 5000);
+      process.on('exit', () => clearTimeout(killTimeout));
       this.processes.delete(taskId);
       console.log(`Killed agent ${taskId}`);
       return true;
@@ -138,6 +139,13 @@ export class AgentRunner {
   killAll(): void {
     for (const [taskId, process] of this.processes) {
       process.kill('SIGTERM');
+      setTimeout(() => {
+        try {
+          process.kill('SIGKILL');
+        } catch {
+          // process already exited
+        }
+      }, 5000);
       console.log(`Killed agent ${taskId}`);
     }
     this.processes.clear();

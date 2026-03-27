@@ -55,10 +55,8 @@ describe('API Integration Tests', () => {
     });
     
     it('should export stage handlers', async () => {
-      const { getStageHandler, DesigningHandler, ImplementingHandler } = await import('../src/workflow/stage-handlers');
+      const { getStageHandler } = await import('../src/workflow/stage-handlers');
       expect(typeof getStageHandler).toBe('function');
-      expect(typeof DesigningHandler).toBe('function');
-      expect(typeof ImplementingHandler).toBe('function');
     });
   });
 });

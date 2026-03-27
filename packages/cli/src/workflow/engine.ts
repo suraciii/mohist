@@ -27,6 +27,7 @@ export class WorkflowEngine {
 
   async start(): Promise<void> {
     await this.recoverWorktreeRegistry();
+    this.recoverIssueTaskMap();
     this.running = true;
     for (let i = 0; i < this.config.maxConcurrentAgents; i++) {
       this.workers.push(this.workerLoop(i));
@@ -84,7 +85,7 @@ export class WorkflowEngine {
   }
 
   getActiveWorkerCount(): number {
-    return this.workers.length;
+    return this.issueTaskMap.size;
   }
 
   getPendingTaskCount(): number {
@@ -185,6 +186,16 @@ export class WorkflowEngine {
     }
     if (this.worktreeRegistry.size > 0) {
       console.log(`Recovered ${this.worktreeRegistry.size} worktree(s) from disk`);
+    }
+  }
+
+  private recoverIssueTaskMap(): void {
+    const runningTasks = this.taskRepo.findRunning();
+    for (const task of runningTasks) {
+      this.issueTaskMap.set(task.issueId, task.id);
+    }
+    if (runningTasks.length > 0) {
+      console.log(`Recovered ${runningTasks.length} running task mapping(s)`);
     }
   }
 
