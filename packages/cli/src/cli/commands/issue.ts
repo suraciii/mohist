@@ -1,6 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import http from 'http';
+import { execSync, spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ApiResponse, Issue } from '../../types';
 
 const API_BASE = 'http://localhost:3456/api';
@@ -349,18 +352,84 @@ export function setupIssueCommands(program: Command): void {
     .description('Approve the current stage of an issue')
     .action(async (number) => {
       try {
-        const response = await apiClient<ApiResponse>(
-          'POST',
-          `/issues/${number}/approve`
+        const detailResponse = await apiClient<ApiResponse<any>>(
+          'GET',
+          `/issues/${number}`
         );
-        
-        if (response.success) {
-          console.log(chalk.green(`✓ Approved issue #${number}`));
-          if (response.data?.message) {
-            console.log(chalk.gray(`  ${response.data.message}`));
+
+        if (!detailResponse.success || !detailResponse.data) {
+          console.error(chalk.red(`Error: ${detailResponse.error}`));
+          return;
+        }
+
+        const issue = detailResponse.data;
+
+        if (issue.stage === 'waiting-review') {
+          const projectPath = issue.projectPath;
+          if (!projectPath) {
+            console.error(chalk.red('Error: No project path found. Cannot perform local merge.'));
+            return;
+          }
+
+          const branchName = `mo/issue-${number}`;
+          console.log(chalk.gray(`Merging ${branchName} into main...`));
+
+          try {
+            execSync(`git merge --no-ff ${branchName}`, {
+              cwd: projectPath,
+              stdio: 'pipe'
+            });
+            console.log(chalk.green(`✓ Merged ${branchName} successfully`));
+          } catch (mergeError: any) {
+            console.error(chalk.red(`✗ Merge conflict detected`));
+            console.error(chalk.red(`  Resolve conflicts in ${projectPath}, then run:`));
+            console.error(chalk.yellow(`    git add . && git commit`));
+            console.error(chalk.yellow(`    mo issue approve ${number}`));
+            return;
+          }
+
+          const approveResponse = await apiClient<ApiResponse>(
+            'POST',
+            `/issues/${number}/approve`
+          );
+
+          if (approveResponse.success) {
+            console.log(chalk.green(`✓ Approved issue #${number}`));
+            if (approveResponse.data?.message) {
+              console.log(chalk.gray(`  ${approveResponse.data.message}`));
+            }
+
+            try {
+              const cleanupResponse = await apiClient<ApiResponse>(
+                'POST',
+                `/issues/${number}/cleanup`
+              );
+              if (cleanupResponse.success) {
+                console.log(chalk.green(`✓ Cleaned up worktree for issue #${number}`));
+              }
+            } catch (cleanupError) {
+              console.error(chalk.yellow(`Warning: Worktree cleanup failed: ${cleanupError}`));
+              console.error(chalk.yellow('  Run manually: mo issue cleanup not available. Use git worktree remove.'));
+            }
+          } else {
+            console.error(chalk.red(`Error: ${approveResponse.error}`));
+            console.error(chalk.yellow('  Merge succeeded but server approval failed. You may need to revert the merge:'));
+            console.error(chalk.yellow(`    git reset --hard HEAD~1`));
           }
         } else {
-          console.error(chalk.red(`Error: ${response.error}`));
+          const response = await apiClient<ApiResponse>(
+            'POST',
+            `/issues/${number}/approve`
+          );
+
+          if (response.success) {
+            console.log(chalk.green(`✓ Approved issue #${number}`));
+            if (response.data?.message) {
+              console.log(chalk.gray(`  ${response.data.message}`));
+            }
+          } else {
+            console.error(chalk.red(`Error: ${response.error}`));
+          }
         }
       } catch (error) {
         console.error(chalk.red(`Failed to approve issue: ${error}`));
@@ -404,6 +473,126 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to resume issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('diff <number>')
+    .description('Show diff between issue branch and main')
+    .action(async (number) => {
+      try {
+        const detailResponse = await apiClient<ApiResponse<any>>(
+          'GET',
+          `/issues/${number}`
+        );
+
+        if (!detailResponse.success || !detailResponse.data) {
+          console.error(chalk.red(`Error: ${detailResponse.error}`));
+          return;
+        }
+
+        const issue = detailResponse.data;
+        const projectPath = issue.projectPath;
+        if (!projectPath) {
+          console.error(chalk.red('Error: No project path found'));
+          return;
+        }
+
+        const branchName = `mo/issue-${number}`;
+
+        try {
+          execSync(`git diff main...${branchName}`, {
+            cwd: projectPath,
+            stdio: 'inherit'
+          });
+        } catch (error: any) {
+          const message = error.message || String(error);
+          if (message.includes('unknown revision') || message.includes('not found')) {
+            console.error(chalk.red(`No worktree found for issue #${number}`));
+          } else {
+            console.error(chalk.red(`Failed to show diff: ${message}`));
+          }
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to show diff: ${error}`));
+      }
+    });
+
+  issue
+    .command('logs <number>')
+    .description('Show agent logs for an issue')
+    .option('-f, --follow', 'Follow log output in real time')
+    .action(async (number, options) => {
+      try {
+        const detailResponse = await apiClient<ApiResponse<any>>(
+          'GET',
+          `/issues/${number}`
+        );
+
+        if (!detailResponse.success || !detailResponse.data) {
+          console.error(chalk.red(`Error: ${detailResponse.error}`));
+          return;
+        }
+
+        const issue = detailResponse.data;
+        const projectName = issue.projectName;
+        if (!projectName || projectName === 'unknown') {
+          console.error(chalk.red('Error: No project name found'));
+          return;
+        }
+
+        const slug = projectName
+          .toLowerCase()
+          .trim()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '');
+
+        const home = process.env.HOME || '';
+        const logDir = path.join(home, '.mohist', 'projects', slug, 'logs', `issue-${number}`);
+
+        if (!fs.existsSync(logDir)) {
+          console.error(chalk.red(`No logs found for issue #${number}`));
+          return;
+        }
+
+        const logFiles = fs.readdirSync(logDir)
+          .filter(f => f.endsWith('.log'))
+          .sort();
+
+        if (logFiles.length === 0) {
+          console.error(chalk.red(`No logs found for issue #${number}`));
+          return;
+        }
+
+        if (options.follow) {
+          const logFile = logFiles[logFiles.length - 1];
+          const logPath = path.join(logDir, logFile);
+
+          const tail = spawn('tail', ['-f', '-n', '50', logPath], {
+            stdio: 'inherit'
+          });
+
+          tail.on('error', (err) => {
+            console.error(chalk.red(`Failed to tail logs: ${err.message}`));
+          });
+
+          process.on('SIGINT', () => {
+            tail.kill();
+            process.exit(0);
+          });
+        } else {
+          for (const logFile of logFiles) {
+            const logPath = path.join(logDir, logFile);
+            const content = fs.readFileSync(logPath, 'utf-8');
+            const lines = content.split('\n');
+            const lastLines = lines.slice(-50);
+            console.log(chalk.bold(`--- ${logFile} ---`));
+            console.log(lastLines.join('\n'));
+            console.log();
+          }
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to show logs: ${error}`));
       }
     });
 }

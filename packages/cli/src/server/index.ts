@@ -19,9 +19,9 @@ function ensureDataDir(): void {
     fs.mkdirSync(dataDir, { recursive: true });
   }
   
-  const logsDir = path.join(dataDir, 'logs');
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true });
+  const projectsDir = path.join(dataDir, 'projects');
+  if (!fs.existsSync(projectsDir)) {
+    fs.mkdirSync(projectsDir, { recursive: true });
   }
 }
 
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   server.addRouter('/api/issues', createIssueRoutes(stateManager, engine, worktreeManager));
   server.addRouter('/api/labels', createLabelRoutes(stateManager));
   server.addRouter('/api/config', createConfigRoutes(configService));
-  server.addRouter('/api', createStatusRoutes(stateManager));
+  server.addRouter('/api', createStatusRoutes(stateManager, engine));
 
   process.on('SIGTERM', async () => {
     console.log('Received SIGTERM, shutting down gracefully...');

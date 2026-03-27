@@ -282,6 +282,7 @@ describe('API Routes', () => {
     describe('POST /api/issues/:number/resume', () => {
       it('should resume issue', async () => {
         const issue = issueService.create({ projectId, title: 'Test Issue' });
+        issueService.transitionToStage(issue.id, 'designing' as any);
         issueService.pause(projectId, 1);
 
         const response = await request(app).post('/api/issues/1/resume');

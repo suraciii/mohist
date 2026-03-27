@@ -390,6 +390,16 @@ export function createIssueRoutes(
         return;
       }
 
+      if (engine) {
+        engine.killAgentByIssueId(issue.id);
+      }
+
+      const taskRepo = stateManager.getTaskRepo();
+      const pendingTasks = taskRepo.findByIssueId(issue.id).filter(t => t.status === 'pending');
+      for (const t of pendingTasks) {
+        taskRepo.updateStatus(t.id, 'failed', 'user_paused');
+      }
+
       const response: ApiResponse = {
         success: true,
         data: { issue, message: `Issue #${number} paused` }
@@ -418,7 +428,7 @@ export function createIssueRoutes(
         return;
       }
 
-      const issue = issueService.resume(projectId, number);
+      const issue = issueService.getByNumber(projectId, number);
       
       if (!issue) {
         const response: ApiResponse = {
@@ -429,9 +439,45 @@ export function createIssueRoutes(
         return;
       }
 
+      const agentStages = [Stage.Designing, Stage.Implementing];
+      if (!agentStages.includes(issue.stage)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} cannot be resumed from stage "${issue.stage}". Must be in designing or implementing stage.`
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      const taskRepo = stateManager.getTaskRepo();
+      const existingTasks = taskRepo.findByIssueId(issue.id);
+      const hasActiveTask = existingTasks.some(
+        t => t.status === 'running' || t.status === 'pending'
+      );
+      if (hasActiveTask) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} already has an active task. Wait for it to complete or pause first.`
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      const resumed = issueService.resume(projectId, number);
+      if (!resumed) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Failed to resume Issue #${number}`
+        };
+        res.status(500).json(response);
+        return;
+      }
+
+      const task = stateManager.createTask(issue.id, projectId, issue.stage);
+
       const response: ApiResponse = {
         success: true,
-        data: { issue, message: `Issue #${number} resumed` }
+        data: { issue: resumed, taskId: task.id, message: `Issue #${number} resumed` }
       };
       res.json(response);
     } catch (error) {
