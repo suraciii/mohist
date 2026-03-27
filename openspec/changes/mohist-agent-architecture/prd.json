@@ -1,361 +1,176 @@
 {
   "project": "mohist-agent-architecture",
-  "description": "Transform Mohist from a deterministic workflow engine into an AI agent with its own LLM. Implement two-layer agent architecture (Workflow Agent + Sub-Agents), event-driven interaction, and workflow.yaml-driven pipeline.",
+  "description": "Milestone 1: Transform Mohist from a deterministic workflow engine into an AI agent with its own LLM. Single issue, fully automatic, Main Agent (LLM orchestrator) + Code Agent (opencode subprocess), no Event Bus, no gate, no workflow.yaml.",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Set up Vercel AI SDK v5 dependency",
-      "description": "Add `ai`, `@ai-sdk/anthropic`, `@ai-sdk/openai`, and `zod` dependencies to packages/cli. Create a minimal LLM provider configuration in ~/.mohist/config.json and a provider loader module that reads the config and creates a model instance.",
+      "title": "Add AI SDK dependencies",
+      "description": "Add ai, @ai-sdk/anthropic, and zod to packages/cli. These are the core dependencies for the agent runtime (D3).",
       "acceptanceCriteria": [
         "npm install succeeds without errors",
-        "Provider loader can create a model instance from config.json",
-        "Typecheck passes"
+        "npm run build passes",
+        "ai and @ai-sdk/anthropic are in package.json dependencies"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "Start with Anthropic as the default provider. Follow opencode's provider config pattern."
+      "notes": "Only add dependencies, no code changes. Start with Anthropic as the only bundled provider."
     },
     {
       "id": "T-002",
-      "title": "Implement tool system",
-      "description": "Create a tool definition API (similar to opencode's Tool.define) with Zod parameter validation, description, and execute function. Implement a ToolRegistry that registers and retrieves tools by ID.",
-      "spec": "specs/agent-runtime/spec.md#REQ-tool-system",
+      "title": "Implement LLM provider resolver",
+      "description": "Create agent-runtime/llm.ts with resolveModel(config) that reads model config from ~/.mohist/config.json, detects API key from environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY), creates AI SDK provider instance, and returns a LanguageModel. Follow opencode's getSDK + getLanguage pattern (simplified). M1 supports only Anthropic and OpenAI as bundled providers.",
+      "spec": "specs/agent-runtime/spec.md#REQ-llm-provider-configuration",
       "acceptanceCriteria": [
-        "Tool.define creates a tool with validated parameters",
-        "ToolRegistry registers and retrieves tools by ID",
-        "Invalid parameters return validation error",
+        "resolveModel returns a LanguageModel instance from config.json + env vars",
+        "Missing API key throws a clear error message",
+        "Missing config.json falls back to env vars only with a sensible default model",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "Keep it simple: define(id, {description, parameters, execute}). No truncation needed initially."
+      "notes": "Read config via existing ConfigService/ConfigRepo. The llm config goes under the 'llm' key in config table. Reference: opencode provider.ts lines 1186-1317 (getSDK) and 1343-1368 (getLanguage)."
     },
     {
       "id": "T-003",
-      "title": "Implement session management (messages)",
-      "description": "Create SQLite tables for sessions and session_messages. Implement SessionManager with create, appendMessage, getMessages, and close operations. Messages have role (user/assistant/system) and content.",
-      "spec": "specs/agent-runtime/spec.md#REQ-session-management",
+      "title": "Implement tool system",
+      "description": "Create agent-runtime/tool.ts with Tool.define(id, { description, parameters: zodSchema, execute }) and ToolRegistry.register/get/clear. Each tool has a Zod-validated parameters schema and an execute function returning a string result.",
+      "spec": "specs/agent-runtime/spec.md#REQ-tool-system",
       "acceptanceCriteria": [
-        "sessions and session_messages tables exist with correct schema",
-        "Session can be created with an issue_id",
-        "Messages can be appended and retrieved",
+        "Tool.define creates a tool with validated parameters",
+        "ToolRegistry registers and retrieves tools by ID",
+        "Invalid parameters return a validation error string to the LLM",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": false,
-      "notes": "Use the existing db/ infrastructure. Add migration for new tables."
+      "notes": "Keep it simple. No truncation, no middleware. The execute function signature: (params: validated) => Promise<string>."
     },
     {
       "id": "T-004",
-      "title": "Implement LLM tool loop",
-      "description": "Create an agent loop function using Vercel AI SDK streamText() with maxSteps. The loop SHALL: build messages from session history, resolve tools from ToolRegistry, call streamText with tools, process tool calls (execute tools, feed results back), and return the final assistant text.",
-      "spec": "specs/agent-runtime/spec.md#REQ-llm-tool-loop",
+      "title": "Implement in-memory session manager",
+      "description": "Create agent-runtime/session.ts with SessionManager using a Map<sessionId, Session>. Session has: id, issueId, messages (CoreMessage[]), createdAt, closedAt. Methods: create(issueId), appendMessage(sessionId, message), getMessages(sessionId), close(sessionId). Pure in-memory, no SQLite (D8).",
+      "spec": "specs/agent-runtime/spec.md#REQ-session-management",
       "acceptanceCriteria": [
-        "LLM loop calls tools and feeds results back automatically",
-        "Loop stops when LLM produces final text",
-        "Loop stops when maxSteps is reached",
-        "Tool results are returned as tool_call results to the LLM"
+        "create generates a unique session ID and stores it in memory",
+        "appendMessage adds a message to the session's history",
+        "getMessages returns the full message history for LLM calls",
+        "close marks session as closed",
+        "Typecheck passes"
       ],
       "priority": 4,
       "passes": false,
-      "notes": "Reference opencode's SessionProcessor.process() and LLM.stream(). This is the core runtime."
+      "notes": "Use AI SDK's CoreMessage type for messages. ~50 lines total. No SQLite, no persistence (D8). Session data lost on server restart."
     },
     {
       "id": "T-005",
-      "title": "Implement sub-agent spawning",
-      "description": "Create a spawn_agent tool for the Main Agent. When called, it creates a new child session, runs the child agent's LLM loop to completion (synchronously waits), extracts the final text, and returns it as a tool result. Child agents SHALL NOT be able to spawn further sub-agents.",
-      "spec": "specs/agent-runtime/spec.md#REQ-sub-agent-spawning",
+      "title": "Implement LLM tool loop",
+      "description": "Create agent-runtime/agent-loop.ts with runAgentLoop(session, tools, model, options). The function uses AI SDK streamText() with maxSteps to implement the tool calling cycle: build messages from session history, resolve tools from ToolRegistry, call streamText with tools, process tool calls (execute tools, feed results back), persist messages to session, and return when LLM produces final text or maxSteps reached.",
+      "spec": "specs/agent-runtime/spec.md#REQ-llm-tool-loop",
       "acceptanceCriteria": [
-        "spawn_agent creates a child session and runs LLM loop",
-        "Parent waits synchronously for child to complete",
-        "Child's final text is returned as tool result",
-        "Child cannot call spawn_agent (tool not available)",
+        "LLM loop calls tools and feeds results back automatically",
+        "Loop stops when LLM produces final text (no more tool calls)",
+        "Loop stops when maxSteps is reached",
+        "All messages (including tool results) are appended to session",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": false,
-      "notes": "Follow opencode's task tool pattern (task.ts). Child session is not persisted."
+      "notes": "This is the core runtime. Reference: opencode's SessionProcessor.process() and LLM.stream(). The streamText() call should set maxSteps (default 20). Handle tool execution errors by returning error string to LLM."
     },
     {
       "id": "T-006",
-      "title": "Implement basic Mohist tools (read, glob, grep)",
-      "description": "Implement read_file, glob, and grep tools for sub-agents. read_file reads file content, glob finds files by pattern, grep searches file contents. These are read-only tools shared by Explore, Plan, Code, and Verify agents.",
+      "title": "Implement spawn_agent tool",
+      "description": "Create tools/spawn-agent.ts. This tool spawns an opencode subprocess in the issue's worktree directory. Parameters: { agent_type: string, task: string, cwd?: string, timeout?: number }. Implementation: spawn 'opencode agent --local --message <task>' with cwd set to worktree, capture stdout/stderr/exit_code, wait for completion, return formatted result. Reuse spawn logic from existing agent/runner.ts (D2, C7).",
+      "spec": "specs/agent-runtime/spec.md#REQ-sub-agent-spawning",
       "acceptanceCriteria": [
-        "read_file returns file content",
-        "glob returns matching file paths",
-        "grep returns matching lines with file paths",
-        "Tools work within the issue's worktree directory",
+        "spawn_agent spawns opencode subprocess in the specified cwd",
+        "Subprocess stdout and stderr are captured",
+        "Timeout (default 30 min) kills subprocess and returns error",
+        "Exit code 0 returns success with stdout content",
+        "Non-zero exit code returns error with stderr content",
         "Typecheck passes"
       ],
       "priority": 6,
       "passes": false,
-      "notes": "Reference opencode's read.ts, glob.ts, grep.ts for implementation patterns. Simplify for Mohist's needs."
+      "notes": "M1: spawn_agent directly spawns opencode (no child LLM loop). This is a transparent pass-through. M3 will upgrade to child LLM loop, but the tool interface stays the same."
     },
     {
       "id": "T-007",
-      "title": "Implement write_file and bash tools",
-      "description": "Implement write_file tool (write content to file) and bash tool (execute shell command with timeout). write_file is for Plan agent. bash is for Verify agent (run tests, git commands).",
+      "title": "Implement Mohist domain tools",
+      "description": "Create three tools: advance_stage (tools/advance-stage.ts) updates issues.stage in SQLite via IssueRepo, add_comment (tools/add-comment.ts) inserts a comment via CommentRepo, and get_issue (tools/get-issue.ts) reads current issue state. All three tools receive a context object with db repos on creation.",
       "acceptanceCriteria": [
-        "write_file creates/overwrites files in worktree",
-        "bash executes commands and returns stdout/stderr",
-        "bash has configurable timeout (default 5 min)",
+        "advance_stage updates issue stage in database and returns new stage",
+        "add_comment inserts a comment with timestamp and returns success",
+        "get_issue returns issue title, body, stage, and number",
         "Typecheck passes"
       ],
       "priority": 7,
       "passes": false,
-      "notes": "bash tool should support cwd parameter for worktree scoping."
+      "notes": "These tools need access to IssueRepo and CommentRepo. Pass a context object (with repos) to each tool's execute function via closure or dependency injection."
     },
     {
       "id": "T-008",
-      "title": "Implement call_opencode tool",
-      "description": "Implement the call_opencode tool for Code Agent. It spawns an opencode subprocess in the issue's worktree, passes a prompt, waits for completion (with configurable timeout), and returns stdout/stderr/exit_code.",
-      "spec": "specs/sub-agents/spec.md#REQ-code-agent",
+      "title": "Define Code Agent and Main Agent",
+      "description": "Create agents/code-agent.ts with CodeAgentDef (agent name, buildPrompt helper). Create agents/main-agent.ts with the Main Agent: system prompt (hardcoded design → implement → done flow), tool set assembly (spawn_agent, advance_stage, add_comment, get_issue), and a run function that creates a session and starts the agent loop.",
+      "spec": "specs/workflow-agent/spec.md#REQ-main-agent-system-prompt",
       "acceptanceCriteria": [
-        "call_opencode spawns opencode subprocess in worktree",
-        "Prompt is passed via --message flag",
-        "Subprocess output is captured and returned",
-        "Timeout kills the subprocess after configured duration",
+        "Main Agent has a system prompt with role, workflow stages, and tool descriptions",
+        "Main Agent assembles its tool set from the four M1 tools",
+        "Main Agent run function creates a session and calls runAgentLoop",
+        "CodeAgentDef exports name and buildPrompt helper",
         "Typecheck passes"
       ],
       "priority": 8,
       "passes": false,
-      "notes": "Reference current agent/runner.ts for spawn mechanism. Default timeout 30 min."
+      "notes": "M1: CodeAgentDef is a definition file (prompt template), not an independent LLM loop. Main Agent's system prompt should be a static template string with variable interpolation for issue context."
     },
     {
       "id": "T-009",
-      "title": "Implement event bus",
-      "description": "Create an in-memory event bus with callback-based listeners (Set<listener>). Support publish(eventType, data), subscribe(eventType, callback), and unsubscribe(eventType, callback). All events SHALL carry an issueId field.",
-      "spec": "specs/event-bus/spec.md#REQ-event-bus",
+      "title": "Wire start endpoint to Main Agent",
+      "description": "Modify api/issues.ts POST /:number/start to create a session, prepare tool context (repos, worktree path), and launch the Main Agent agent loop (async, non-blocking). Also modify server/index.ts to remove WorkflowEngine creation and startup — M1 does not need the old engine. The start endpoint should return immediately with session info while the agent loop runs in the background.",
+      "spec": "specs/workflow-agent/spec.md#REQ-per-issue-persistent-session",
       "acceptanceCriteria": [
-        "Events can be published and received by subscribers",
-        "Multiple subscribers receive the same event",
-        "Unsubscribe stops receiving events",
-        "Event data includes issueId",
-        "Typecheck passes"
+        "POST /api/issues/:number/start creates a session and launches Main Agent",
+        "Start endpoint returns immediately (does not wait for agent to finish)",
+        "Running issue stage is set to 'designing' on start",
+        "server/index.ts no longer creates or starts WorkflowEngine",
+        "npm run build passes"
       ],
       "priority": 9,
       "passes": false,
-      "notes": "Simple Set<listener> on globalThis or a module-level Map. No need for complex event routing."
+      "notes": "The start endpoint becomes fire-and-forget. The agent loop runs as a background async task. Error handling: if the agent loop throws, mark the issue as failed. D12: single issue — return error if an issue is already running."
     },
     {
       "id": "T-010",
-      "title": "Implement ask_user tool and pending map",
-      "description": "Implement the ask_user tool using Deferred-based pending map (reference opencode Question module). ask_user creates a Deferred, stores in pending map, publishes question_asked event, and blocks until question_replied event resolves the Deferred. Also implement reject path (RejectedError).",
-      "spec": "specs/user-interaction/spec.md#REQ-ask-user-tool",
+      "title": "End-to-end integration test",
+      "description": "Verify the complete M1 flow: mo issue create → mo issue start → Main Agent calls spawn_agent (opencode) for design stage → advance_stage → spawn_agent for implement stage → advance_stage to done. The test should create a minimal issue, start it, and verify the agent progresses through stages to completion.",
       "acceptanceCriteria": [
-        "ask_user blocks agent loop until user replies",
-        "question_asked event is published on ask",
-        "question_replied event resolves the Deferred",
-        "Question rejection returns RejectedError",
-        "Typecheck passes"
+        "mo issue create succeeds",
+        "mo issue start triggers Main Agent execution",
+        "Issue progresses through design → implement → done stages",
+        "mo issue show reports final stage as done",
+        "spawn_agent successfully spawns opencode subprocess"
       ],
       "priority": 10,
       "passes": false,
-      "notes": "Use Promise-based Deferred (Promise constructor with resolve/reject stored externally)."
+      "notes": "This is a manual integration test. Use a trivial issue like 'create a hello.txt file'. May need opencode installed and ANTHROPIC_API_KEY set. The test validates the full chain: API → session → agent loop → tools → opencode."
     },
     {
       "id": "T-011",
-      "title": "Implement workflow_log append-only table",
-      "description": "Create workflow_log SQLite table and a log subscriber that auto-persists workflow events. The subscriber listens to the event bus and appends records for stage_enter, stage_exit, agent_spawn, agent_done, and human_action events.",
-      "spec": "specs/event-bus/spec.md#REQ-workflow-log-persistence",
+      "title": "Remove old workflow engine code",
+      "description": "Delete the old deterministic workflow engine and agent runner code that is no longer used: workflow/engine.ts, workflow/issue-workflow.ts, workflow/stage-handlers.ts, agent/runner.ts, agent/prompts.ts. Clean up unused imports in server/index.ts, api/issues.ts, and any other files that reference the deleted modules.",
       "acceptanceCriteria": [
-        "workflow_log table exists with correct schema",
-        "Stage events are auto-recorded",
-        "Agent events are auto-recorded",
-        "Records are append-only (no update/delete)",
-        "Typecheck passes"
+        "workflow/engine.ts is deleted",
+        "workflow/issue-workflow.ts is deleted",
+        "workflow/stage-handlers.ts is deleted",
+        "agent/runner.ts is deleted",
+        "agent/prompts.ts is deleted",
+        "No broken imports remain",
+        "npm run build passes"
       ],
       "priority": 11,
       "passes": false,
-      "notes": "Add database migration. The log subscriber is a simple bus subscriber."
-    },
-    {
-      "id": "T-012",
-      "title": "Implement workflow.yaml loader",
-      "description": "Create a WorkflowLoader that reads and validates .mohist/workflow.yaml from the project root. Parse stages with agent, description, expects, gate_after fields. Provide a built-in default workflow when no yaml exists.",
-      "spec": "specs/workflow-config/spec.md#REQ-workflow-yaml-location",
-      "acceptanceCriteria": [
-        "WorkflowLoader reads .mohist/workflow.yaml",
-        "Stages are parsed in array order",
-        "gate_after values are validated (approve/auto)",
-        "Missing yaml falls back to built-in default",
-        "Typecheck passes"
-      ],
-      "priority": 12,
-      "passes": false,
-      "notes": "Use a YAML parser library (js-yaml). Validate with Zod schema."
-    },
-    {
-      "id": "T-013",
-      "title": "Define sub-agent types (prompts and tool sets)",
-      "description": "Create agent definitions for Explore, Plan, Code, and Verify agents in code. Each definition includes: name, system prompt, tool set (array of tool IDs), and optional model override. Explore: read-only + ask_user + add_comment. Plan: read + write. Code: read + call_opencode. Verify: read + bash.",
-      "spec": "specs/sub-agents/spec.md#REQ-sub-agent-types",
-      "acceptanceCriteria": [
-        "Four agent definitions exist with correct tool sets",
-        "Explore agent has ask_user tool, others don't",
-        "Code agent has call_opencode, others don't",
-        "No agent has spawn_agent tool",
-        "Typecheck passes"
-      ],
-      "priority": 13,
-      "passes": false,
-      "notes": "Agent definitions are TypeScript objects/modules. Prompts will be iterated on."
-    },
-    {
-      "id": "T-014",
-      "title": "Implement Main Agent system prompt builder",
-      "description": "Create a system prompt builder for the Main Agent that dynamically generates the prompt with: role definition, available tools, current issue context (title, description, stage), workflow definition (stages from yaml with descriptions and expects), gate semantics, and error handling guidelines.",
-      "spec": "specs/workflow-agent/spec.md#REQ-main-agent-system-prompt",
-      "acceptanceCriteria": [
-        "System prompt includes current issue information",
-        "System prompt includes workflow stages from yaml",
-        "System prompt includes gate semantics",
-        "Prompt is dynamically generated per LLM call",
-        "Typecheck passes"
-      ],
-      "priority": 14,
-      "passes": false,
-      "notes": "Keep prompt concise. Main Agent doesn't need coding knowledge."
-    },
-    {
-      "id": "T-015",
-      "title": "Implement advance_stage tool",
-      "description": "Create an advance_stage tool for the Main Agent. When called, it updates the issue's stage in the database, publishes stage_exit and stage_enter events on the bus, and returns success.",
-      "spec": "specs/workflow-agent/spec.md#REQ-workflow-orchestration",
-      "acceptanceCriteria": [
-        "advance_stage updates issue stage in database",
-        "stage_exit event is published for current stage",
-        "stage_enter event is published for new stage",
-        "Typecheck passes"
-      ],
-      "priority": 15,
-      "passes": false,
-      "notes": "This is the Main Agent's primary tool for stage progression."
-    },
-    {
-      "id": "T-016",
-      "title": "Implement add_comment tool",
-      "description": "Create an add_comment tool for sub-agents to record findings and results to the issue. The tool appends a comment to the issue's comment list in the database.",
-      "acceptanceCriteria": [
-        "add_comment appends a comment to the issue",
-        "Comment includes timestamp and content",
-        "Comments are queryable via API",
-        "Typecheck passes"
-      ],
-      "priority": 16,
-      "passes": false,
-      "notes": "Reuse existing comment-repo from db/."
-    },
-    {
-      "id": "T-017",
-      "title": "Implement Main Agent session lifecycle",
-      "description": "Implement the Main Agent per-issue session lifecycle: create session on issue start, persist messages to SQLite, handle gate pauses (session remains in memory, LLM loop stops), resume on user action (inject user message, restart LLM loop), restore from SQLite on server restart, and close on issue completion.",
-      "spec": "specs/workflow-agent/spec.md#REQ-per-issue-persistent-session",
-      "acceptanceCriteria": [
-        "Session is created when issue starts",
-        "Messages are persisted to SQLite",
-        "Session survives server restart (restored from DB)",
-        "Session is closed when issue reaches done",
-        "Typecheck passes"
-      ],
-      "priority": 17,
-      "passes": false,
-      "notes": "Gate pause = stop LLM loop, keep session in memory. Resume = inject user message, restart loop."
-    },
-    {
-      "id": "T-018",
-      "title": "Implement user message injection",
-      "description": "Implement the mechanism for injecting user messages into the Main Agent session. When a user_message event arrives on the bus, append it as a user message to the session and trigger a new LLM loop iteration. Handle the case where the agent loop is already running (gate wait or sub-agent wait).",
-      "spec": "specs/user-interaction/spec.md#REQ-mo-attach-command",
-      "acceptanceCriteria": [
-        "User message is appended to Main Agent session",
-        "New LLM loop iteration is triggered after message injection",
-        "Message injection works when agent is at a gate",
-        "Typecheck passes"
-      ],
-      "priority": 18,
-      "passes": false,
-      "notes": "Need to handle concurrency: if LLM loop is blocked on a tool call, the message should be queued."
-    },
-    {
-      "id": "T-019",
-      "title": "Implement mo attach CLI command",
-      "description": "Implement the `mo attach <issue-id>` CLI command. It connects to the Mohist server, subscribes to events for the issue via SSE, renders agent outputs and questions to stdout, and sends user stdin input as user_message events. Support Ctrl+C to detach without affecting the agent.",
-      "spec": "specs/user-interaction/spec.md#REQ-mo-attach-command",
-      "acceptanceCriteria": [
-        "`mo attach 42` connects to server and subscribes to issue events",
-        "Agent outputs are rendered to terminal",
-        "User input from stdin is sent as events",
-        "Ctrl+C detaches without stopping the agent",
-        "Typecheck passes"
-      ],
-      "priority": 19,
-      "passes": false,
-      "notes": "CLI is a thin client. Use SSE for event subscription, HTTP POST for user input."
-    },
-    {
-      "id": "T-020",
-      "title": "Implement HTTP API for questions and events",
-      "description": "Add REST endpoints: GET /api/questions (list pending), POST /api/questions/:id/reply (answer), POST /api/questions/:id/reject (dismiss), GET /api/issues/:id/events (SSE stream), POST /api/issues/:id/messages (inject user message).",
-      "spec": "specs/http-api/spec.md#REQ-api-provides-question-interaction",
-      "acceptanceCriteria": [
-        "GET /api/questions returns pending questions",
-        "POST /api/questions/:id/reply resolves the Deferred",
-        "GET /api/issues/:id/events streams events via SSE",
-        "POST /api/issues/:id/messages injects user message",
-        "Typecheck passes"
-      ],
-      "priority": 20,
-      "passes": false,
-      "notes": "Add routes to existing Express server in api/."
-    },
-    {
-      "id": "T-021",
-      "title": "Remove old workflow engine and agent runner",
-      "description": "Remove the deterministic workflow engine (workflow/engine.ts, workflow/issue-workflow.ts, workflow/stage-handlers.ts), agent runner (agent/runner.ts, agent/prompts.ts), hardcoded Stage enum from types/index.ts, and Task-related code. Clean up unused imports and references.",
-      "acceptanceCriteria": [
-        "workflow/engine.ts is removed",
-        "workflow/issue-workflow.ts is removed",
-        "agent/runner.ts and agent/prompts.ts are removed",
-        "Hardcoded Stage enum is replaced with dynamic stages",
-        "No broken imports remain",
-        "Typecheck passes"
-      ],
-      "priority": 21,
-      "passes": false,
-      "notes": "Do this last after the new system is working. Keep git history for reference."
-    },
-    {
-      "id": "T-022",
-      "title": "Implement rollback support",
-      "description": "Implement user-initiated rollback in the Main Agent. When the user requests rollback (via command or free text), the Main Agent cancels the current sub-agent (AbortController), updates the issue stage, appends a rollback event to workflow_log, and spawns a new sub-agent for the target stage.",
-      "spec": "specs/workflow-agent/spec.md#REQ-rollback-handling",
-      "acceptanceCriteria": [
-        "User rollback command cancels current sub-agent",
-        "Issue stage is updated to the rollback target",
-        "Rollback event is recorded in workflow_log",
-        "New sub-agent is spawned for the target stage",
-        "Typecheck passes"
-      ],
-      "priority": 22,
-      "passes": false,
-      "notes": "Main Agent LLM interprets user intent for rollback. Keep existing artifacts (code/files)."
-    },
-    {
-      "id": "T-023",
-      "title": "Implement mo status with workflow log",
-      "description": "Update the `mo status` command to derive progress from the workflow_log table. Display a timeline of events, current stage (from most recent stage_enter), sub-agent execution records, and duration stats.",
-      "spec": "specs/progress-reporting/spec.md#REQ-progress-from-workflow-log",
-      "acceptanceCriteria": [
-        "`mo status 42` shows event timeline from workflow_log",
-        "Current stage is derived from latest stage_enter event",
-        "Sub-agent spawn/done pairs are shown",
-        "Duration stats are calculated from event timestamps",
-        "Typecheck passes"
-      ],
-      "priority": 23,
-      "passes": false,
-      "notes": "Query workflow_log with `WHERE issue_id = ? ORDER BY timestamp`."
+      "notes": "Only delete after T-009 (start endpoint rewired) is confirmed working. Keep git history for reference. Do NOT delete the workflow/ and agent/ directories if they contain other files — only delete the specific files listed."
     }
   ]
 }
