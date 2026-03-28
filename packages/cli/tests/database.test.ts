@@ -3,7 +3,6 @@ import { DatabaseManager, resetDatabase, closeDatabase } from '../src/db/databas
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
-import { TaskRepo } from '../src/db/task-repo';
 import { ConfigRepo } from '../src/db/config-repo';
 import { CommentRepo } from '../src/db/comment-repo';
 import { LabelRepo } from '../src/db/label-repo';
@@ -276,64 +275,6 @@ describe('IssueRepo', () => {
 
     it('should return 1 for new project', () => {
       expect(repo.getNextNumber(projectId)).toBe(1);
-    });
-  });
-});
-
-describe('TaskRepo', () => {
-  let db: DatabaseManager;
-  let repo: TaskRepo;
-  let projectId: string;
-  let issueId: string;
-
-  beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
-    initializeDatabase(db);
-    
-    const projectRepo = new ProjectRepo(db);
-    const project = projectRepo.create({ name: 'Test', path: '/test' });
-    projectId = project.id;
-    
-    const issueRepo = new IssueRepo(db);
-    issueRepo.create({ number: 1, projectId, title: 'Test Issue' });
-    issueId = db.get<{ id: string }>('SELECT id FROM issues WHERE project_id = ? AND number = ?', [projectId, 1])?.id!;
-    
-    repo = new TaskRepo(db);
-  });
-
-  afterEach(() => {
-    closeDatabase();
-  });
-
-  describe('create', () => {
-    it('should create a task', () => {
-      const task = repo.create({
-        issueId,
-        projectId,
-        stage: Stage.Designing
-      });
-      
-      expect(task.id).toBeDefined();
-      expect(task.status).toBe('pending');
-    });
-  });
-
-  describe('findPending', () => {
-    it('should find pending tasks', () => {
-      repo.create({ issueId, projectId, stage: Stage.Designing });
-      repo.create({ issueId, projectId, stage: Stage.Implementing });
-      
-      const pending = repo.findPending();
-      expect(pending).toHaveLength(2);
-    });
-  });
-
-  describe('updateStatus', () => {
-    it('should update task status', () => {
-      const task = repo.create({ issueId, projectId, stage: Stage.Designing });
-      const updated = repo.updateStatus(task.id, 'running');
-      
-      expect(updated?.status).toBe('running');
     });
   });
 });

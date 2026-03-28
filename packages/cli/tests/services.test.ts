@@ -4,11 +4,9 @@ import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
-import { TaskRepo } from '../src/db/task-repo';
 import { ConfigRepo } from '../src/db/config-repo';
 import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
-import { WorkflowService } from '../src/services/workflow-service';
 import { ConfigService } from '../src/services/config-service';
 import { Stage, IssueStatus } from '../src/types';
 
@@ -160,7 +158,6 @@ describe('ProjectService', () => {
 describe('IssueService', () => {
   let db: DatabaseManager;
   let issueRepo: IssueRepo;
-  let taskRepo: TaskRepo;
   let service: IssueService;
   let projectId: string;
 
@@ -173,8 +170,7 @@ describe('IssueService', () => {
     projectId = project.id;
     
     issueRepo = new IssueRepo(db);
-    taskRepo = new TaskRepo(db);
-    service = new IssueService(issueRepo, taskRepo);
+    service = new IssueService(issueRepo);
   });
 
   afterEach(() => {
@@ -258,153 +254,6 @@ describe('IssueService', () => {
       
       expect(designing).toHaveLength(1);
       expect(drafts).toHaveLength(1);
-    });
-  });
-});
-
-describe('WorkflowService', () => {
-  let db: DatabaseManager;
-  let issueService: IssueService;
-  let workflowService: WorkflowService;
-  let projectId: string;
-
-  beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
-    initializeDatabase(db);
-    
-    const projectRepo = new ProjectRepo(db);
-    const project = projectRepo.create({ name: 'Test', path: '/test' });
-    projectId = project.id;
-    
-    const issueRepo = new IssueRepo(db);
-    const taskRepo = new TaskRepo(db);
-    issueService = new IssueService(issueRepo, taskRepo);
-    workflowService = new WorkflowService(issueService);
-  });
-
-  afterEach(() => {
-    closeDatabase();
-  });
-
-  describe('stage transitions', () => {
-    it('should get next stage', () => {
-      expect(workflowService.getNextStage(Stage.Draft)).toBe(Stage.Designing);
-      expect(workflowService.getNextStage(Stage.Designing)).toBe(Stage.WaitingDesignReview);
-      expect(workflowService.getNextStage(Stage.Done)).toBeNull();
-    });
-
-    it('should get previous stage', () => {
-      expect(workflowService.getPreviousStage(Stage.Done)).toBe(Stage.WaitingReview);
-      expect(workflowService.getPreviousStage(Stage.Draft)).toBeNull();
-    });
-
-    it('should check valid transition', () => {
-      expect(workflowService.canTransition(Stage.Draft, Stage.Designing)).toBe(true);
-      expect(workflowService.canTransition(Stage.Draft, Stage.Implementing)).toBe(false);
-    });
-  });
-
-  describe('user approval', () => {
-    it('should require approval at waiting-design-review', () => {
-      expect(workflowService.requiresUserApproval(Stage.WaitingDesignReview)).toBe(true);
-    });
-
-    it('should require approval at waiting-review', () => {
-      expect(workflowService.requiresUserApproval(Stage.WaitingReview)).toBe(true);
-    });
-
-    it('should not require approval at other stages', () => {
-      expect(workflowService.requiresUserApproval(Stage.Draft)).toBe(false);
-      expect(workflowService.requiresUserApproval(Stage.Designing)).toBe(false);
-      expect(workflowService.requiresUserApproval(Stage.Implementing)).toBe(false);
-      expect(workflowService.requiresUserApproval(Stage.Done)).toBe(false);
-    });
-  });
-
-  describe('startProcessing', () => {
-    it('should start processing draft issue', () => {
-      issueService.create({ projectId, title: 'Test' });
-      const result = workflowService.startProcessing(projectId, 1);
-      
-      expect(result.success).toBe(true);
-      expect(result.issue?.stage).toBe(Stage.Designing);
-    });
-
-    it('should fail for non-draft issue', () => {
-      issueService.create({ projectId, title: 'Test' });
-      issueService.transitionToStageByNumber(projectId, 1, Stage.Designing);
-      
-      const result = workflowService.startProcessing(projectId, 1);
-      
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('not in draft stage');
-    });
-
-    it('should fail for paused issue', () => {
-      issueService.create({ projectId, title: 'Test' });
-      issueService.pause(projectId, 1);
-      
-      const result = workflowService.startProcessing(projectId, 1);
-      
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('paused');
-    });
-
-    it('should fail for non-existent issue', () => {
-      const result = workflowService.startProcessing(projectId, 999);
-      
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('not found');
-    });
-  });
-
-  describe('approve', () => {
-    it('should approve at waiting-design-review', () => {
-      issueService.create({ projectId, title: 'Test' });
-      issueService.transitionToStageByNumber(projectId, 1, Stage.WaitingDesignReview);
-      
-      const result = workflowService.approve(projectId, 1);
-      
-      expect(result.success).toBe(true);
-      expect(result.issue?.stage).toBe(Stage.Implementing);
-    });
-
-    it('should approve at waiting-review', () => {
-      issueService.create({ projectId, title: 'Test' });
-      issueService.transitionToStageByNumber(projectId, 1, Stage.WaitingReview);
-      
-      const result = workflowService.approve(projectId, 1);
-      
-      expect(result.success).toBe(true);
-      expect(result.issue?.stage).toBe(Stage.Done);
-    });
-
-    it('should fail at non-approval stage', () => {
-      issueService.create({ projectId, title: 'Test' });
-      
-      const result = workflowService.approve(projectId, 1);
-      
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('does not require approval');
-    });
-  });
-
-  describe('getProgress', () => {
-    it('should return progress for each stage', () => {
-      expect(workflowService.getProgress(Stage.Draft)).toEqual({ current: 1, total: 6, percentage: 17 });
-      expect(workflowService.getProgress(Stage.Designing)).toEqual({ current: 2, total: 6, percentage: 33 });
-      expect(workflowService.getProgress(Stage.Done)).toEqual({ current: 6, total: 6, percentage: 100 });
-    });
-  });
-
-  describe('getStageInfo', () => {
-    it('should return stage info', () => {
-      const info = workflowService.getStageInfo(Stage.Draft);
-      
-      expect(info.name).toBe(Stage.Draft);
-      expect(info.description).toContain('waiting');
-      expect(info.requiresApproval).toBe(false);
-      expect(info.nextStage).toBe(Stage.Designing);
     });
   });
 });

@@ -12,7 +12,7 @@
         "npm run build passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Safe deletion — no active code imports these files. workflow-service.ts imports issue-workflow.ts but workflow-service.ts is deleted in T-004. After T-001, workflow-service.ts will have a broken import — that's expected and resolved by T-003+T-004."
     },
     {
@@ -25,7 +25,7 @@
         "npm run build passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Safe deletion — these tests only test deleted code. Run independently from T-001."
     },
     {
@@ -44,7 +44,7 @@
         "npm run build passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "After this task, WorkflowService is only referenced by services/index.ts (T-004) and IssueService no longer takes TaskRepo (T-005 updates IssueService itself). The start endpoint is active and must be preserved. Note: removing stateManager.getTaskRepo() from line 22 means IssueService constructor now takes only 1 argument — T-005 will update the IssueService class to match."
     },
     {
@@ -59,7 +59,7 @@
         "npm run build passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-003 removing all WorkflowService usage from api/issues.ts. After T-001 deleted issue-workflow.ts, workflow-service.ts has a broken import — but that's OK because T-004 deletes it entirely."
     },
     {
@@ -80,7 +80,7 @@
         "npm run build passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "The only legitimate TaskRepo usage was cascade delete in IssueService.delete()/deleteByProject() and StateManager.deleteProject(). All move to IssueRepo as direct SQL. StateManager.deleteProject() currently calls this.taskRepo.deleteByProject(id) then this.issueRepo.deleteByProject(id) — after this change, it calls this.issueRepo.deleteByProjectCascade(projectId) which handles both internally."
     },
     {
@@ -98,7 +98,7 @@
         "npm run build passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-005 removing all TaskRepo references from active code. Uses the existing lightweight migration mechanism (version check + function), not a new framework."
     },
     {
@@ -115,7 +115,7 @@
         "npm run build passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-003 and T-005 removing all code references to WaitingDesignReview, WaitingReview, and Task. After those tasks, the only remaining references should be in types/index.ts and http-server.ts. This task removes them."
     },
     {
@@ -132,7 +132,7 @@
         "npm run build passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-005 removing TaskRepo from StateManager (status.ts accesses TaskRepo via stateManager.getTaskRepo()). Also depends on T-008 API changes so CLI display matches."
     },
     {
@@ -147,7 +147,7 @@
         "npm run build passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Straightforward deletion. The approve command had git merge logic for waiting-review stage — that's dead code since M1 never produces waiting-review. Historical issues in waiting-review must be merged manually (git merge --no-ff + git worktree remove)."
     },
     {
@@ -163,7 +163,7 @@
         "npm run build passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "This is the final task. After T-001 through T-009, the only remaining old-workflow references should be in tests. Run npm test to verify all 4 pre-existing failures are resolved."
     }
   ]

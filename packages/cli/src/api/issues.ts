@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Issue, Stage, IssueStatus, Comment } from '../types';
-import { IssueService, WorkflowService } from '../services';
+import { IssueService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager, type LlmConfig } from '../agent-runtime';
 import { runMainAgent } from '../agents/main-agent';
@@ -18,10 +18,8 @@ export function createIssueRoutes(
   const router = Router();
   
   const issueService = new IssueService(
-    stateManager.getIssueRepo(),
-    stateManager.getTaskRepo()
+    stateManager.getIssueRepo()
   );
-  const workflowService = new WorkflowService(issueService);
 
   const getCurrentProjectId = (): string | null => {
     return stateManager.getCurrentProjectId();
@@ -135,8 +133,6 @@ export function createIssueRoutes(
       }
 
       const comments = stateManager.getCommentsByIssue(issue.id);
-      const progress = workflowService.getProgress(issue.stage);
-      const stageInfo = workflowService.getStageInfo(issue.stage);
       const project = stateManager.getProjectById(projectId);
 
       const response: ApiResponse = {
@@ -145,9 +141,7 @@ export function createIssueRoutes(
           ...issue,
           projectName: project?.name || 'unknown',
           projectPath: project?.path || '',
-          comments,
-          progress,
-          stageInfo
+          comments
         }
       };
       res.json(response);
@@ -361,145 +355,6 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: { issue: updatedIssue, message: `Issue #${number} started, agent is running` }
-      };
-      res.json(response);
-    } catch (error) {
-      const response: ApiResponse = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-      res.status(500).json(response);
-    }
-  });
-
-  router.post('/:number/approve', (req: Request, res: Response): void => {
-    try {
-      const number = parseInt(req.params.number);
-      const projectId = getCurrentProjectId();
-      
-      if (!projectId) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'No current project. Use: mo project use <name>'
-        };
-        res.status(400).json(response);
-        return;
-      }
-
-      const result = workflowService.approve(projectId, number);
-      
-      if (!result.success) {
-        const response: ApiResponse = {
-          success: false,
-          error: result.error
-        };
-        res.status(400).json(response);
-        return;
-      }
-
-      const issue = result.issue!;
-      
-      if (issue.stage !== Stage.Done) {
-        const task = stateManager.createTask(issue.id, projectId, issue.stage);
-        const response: ApiResponse = {
-          success: true,
-          data: { issue, taskId: task.id, message: `Issue #${number} approved, continuing to ${issue.stage}` }
-        };
-        res.json(response);
-      } else {
-        const response: ApiResponse = {
-          success: true,
-          data: { issue, message: `Issue #${number} completed!` }
-        };
-        res.json(response);
-      }
-    } catch (error) {
-      const response: ApiResponse = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-      res.status(500).json(response);
-    }
-  });
-
-  router.post('/:number/pause', (_req: Request, res: Response): void => {
-    const response: ApiResponse = {
-      success: false,
-      error: 'Pause is not supported in M1. Stop the mo-server process to halt a running agent.'
-    };
-    res.status(501).json(response);
-  });
-
-  router.post('/:number/resume', (req: Request, res: Response): void => {
-    try {
-      const number = parseInt(req.params.number);
-      const projectId = getCurrentProjectId();
-      
-      if (!projectId) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'No current project. Use: mo project use <name>'
-        };
-        res.status(400).json(response);
-        return;
-      }
-
-      const issue = issueService.getByNumber(projectId, number);
-      
-      if (!issue) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} not found`
-        };
-        res.status(404).json(response);
-        return;
-      }
-
-      const resumeableStages = [Stage.Designing, Stage.Implementing, Stage.WaitingDesignReview];
-      if (!resumeableStages.includes(issue.stage)) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} cannot be resumed from stage "${issue.stage}". Must be in designing, implementing, or waiting-design-review stage.`
-        };
-        res.status(400).json(response);
-        return;
-      }
-
-      const taskRepo = stateManager.getTaskRepo();
-      const existingTasks = taskRepo.findByIssueId(issue.id);
-      const hasActiveTask = existingTasks.some(
-        t => t.status === 'running' || t.status === 'pending'
-      );
-      if (hasActiveTask) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} already has an active task. Wait for it to complete or pause first.`
-        };
-        res.status(400).json(response);
-        return;
-      }
-
-      const resumed = issueService.resume(projectId, number);
-      if (!resumed) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Failed to resume Issue #${number}`
-        };
-        res.status(500).json(response);
-        return;
-      }
-
-      let task;
-      if (issue.stage === Stage.WaitingDesignReview) {
-        issueService.transitionToStage(resumed.id, Stage.Designing);
-        task = stateManager.createTask(issue.id, projectId, Stage.Designing);
-      } else {
-        task = stateManager.createTask(issue.id, projectId, issue.stage);
-      }
-
-      const response: ApiResponse = {
-        success: true,
-        data: { issue: resumed, taskId: task.id, message: `Issue #${number} resumed` }
       };
       res.json(response);
     } catch (error) {

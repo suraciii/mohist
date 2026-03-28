@@ -1,6 +1,6 @@
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -27,19 +27,10 @@ CREATE TABLE IF NOT EXISTS issues (
 );
 `;
 
-const CREATE_TASKS_TABLE = `
-CREATE TABLE IF NOT EXISTS tasks (
-  id           TEXT PRIMARY KEY,
-  issue_id     TEXT NOT NULL REFERENCES issues(id),
-  project_id   TEXT NOT NULL REFERENCES projects(id),
-  stage        TEXT NOT NULL,
-  status       TEXT NOT NULL,
-  agent_pid    INTEGER,
-  error        TEXT,
-  started_at   TEXT,
-  completed_at TEXT
-);
-`;
+const CREATE_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_issues_project_stage ON issues(project_id, stage);',
+  'CREATE INDEX IF NOT EXISTS idx_issues_project_status ON issues(project_id, status);',
+];
 
 const CREATE_CONFIG_TABLE = `
 CREATE TABLE IF NOT EXISTS config (
@@ -47,12 +38,6 @@ CREATE TABLE IF NOT EXISTS config (
   value TEXT NOT NULL
 );
 `;
-
-const CREATE_INDEXES = [
-  'CREATE INDEX IF NOT EXISTS idx_issues_project_stage ON issues(project_id, stage);',
-  'CREATE INDEX IF NOT EXISTS idx_issues_project_status ON issues(project_id, status);',
-  'CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);',
-];
 
 const CREATE_COMMENTS_TABLE = `
 CREATE TABLE IF NOT EXISTS comments (
@@ -71,7 +56,6 @@ export function runMigrations(db: DatabaseManager): void {
   db.transaction(() => {
     db.exec(CREATE_PROJECTS_TABLE);
     db.exec(CREATE_ISSUES_TABLE);
-    db.exec(CREATE_TASKS_TABLE);
     db.exec(CREATE_CONFIG_TABLE);
     
     for (const indexSql of CREATE_INDEXES) {
@@ -111,6 +95,10 @@ export function initializeDatabase(db: DatabaseManager): void {
   if (currentVersion < 2) {
     migrateToVersion2(db);
   }
+  
+  if (currentVersion < 3) {
+    migrateToVersion3(db);
+  }
 }
 
 function migrateToVersion2(db: DatabaseManager): void {
@@ -131,5 +119,13 @@ function migrateToVersion2(db: DatabaseManager): void {
     }
     
     setSchemaVersion(db, 2);
+  });
+}
+
+function migrateToVersion3(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec('DROP TABLE IF EXISTS tasks');
+    db.exec('DROP INDEX IF EXISTS idx_tasks_project_status');
+    setSchemaVersion(db, 3);
   });
 }

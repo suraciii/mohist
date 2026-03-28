@@ -1,5 +1,5 @@
 import { Issue, Stage, IssueStatus } from '../types';
-import { IssueRepo, TaskRepo, getDatabase } from '../db';
+import { IssueRepo, getDatabase } from '../db';
 
 export interface CreateIssueInput {
   projectId: string;
@@ -9,8 +9,7 @@ export interface CreateIssueInput {
 
 export class IssueService {
   constructor(
-    private issueRepo: IssueRepo,
-    private taskRepo: TaskRepo
+    private issueRepo: IssueRepo
   ) {}
 
   create(input: CreateIssueInput): Issue {
@@ -113,13 +112,11 @@ export class IssueService {
   }
 
   delete(issueId: string): boolean {
-    this.taskRepo.deleteByIssue(issueId);
-    return this.issueRepo.delete(issueId);
+    return this.issueRepo.deleteCascade(issueId);
   }
 
   deleteByProject(projectId: string): number {
-    this.taskRepo.deleteByProject(projectId);
-    return this.issueRepo.deleteByProject(projectId);
+    return this.issueRepo.deleteByProjectCascade(projectId);
   }
 
   count(projectId: string): number {

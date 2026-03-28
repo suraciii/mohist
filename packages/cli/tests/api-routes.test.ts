@@ -6,11 +6,9 @@ import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
-import { TaskRepo } from '../src/db/task-repo';
 import { ConfigRepo } from '../src/db/config-repo';
 import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
-import { WorkflowService } from '../src/services/workflow-service';
 import { ConfigService } from '../src/services/config-service';
 import { StateManager } from '../src/server/state-manager';
 import { createProjectRoutes } from '../src/api/projects';
@@ -22,11 +20,9 @@ describe('API Routes', () => {
   let db: DatabaseManager;
   let projectRepo: ProjectRepo;
   let issueRepo: IssueRepo;
-  let taskRepo: TaskRepo;
   let configRepo: ConfigRepo;
   let projectService: ProjectService;
   let issueService: IssueService;
-  let workflowService: WorkflowService;
   let configService: ConfigService;
   let stateManager: StateManager;
 
@@ -38,12 +34,10 @@ describe('API Routes', () => {
     
     projectRepo = stateManager.getProjectRepo();
     issueRepo = stateManager.getIssueRepo();
-    taskRepo = stateManager.getTaskRepo();
     configRepo = stateManager.getConfigRepo();
     
     projectService = new ProjectService(projectRepo, configRepo);
-    issueService = new IssueService(issueRepo, taskRepo);
-    workflowService = new WorkflowService(issueService);
+    issueService = new IssueService(issueRepo);
     configService = new ConfigService(configRepo);
   });
 
@@ -252,43 +246,7 @@ describe('API Routes', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
-        expect(response.body.data.taskId).toBeDefined();
-      });
-    });
-
-    describe('POST /api/issues/:number/approve', () => {
-      it('should approve issue at review stage', async () => {
-        issueService.create({ projectId, title: 'Test Issue' });
-        issueService.transitionToStageByNumber(projectId, 1, 'waiting-design-review' as any);
-
-        const response = await request(app).post('/api/issues/1/approve');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-      });
-    });
-
-    describe('POST /api/issues/:number/pause', () => {
-      it('should pause issue', async () => {
-        issueService.create({ projectId, title: 'Test Issue' });
-
-        const response = await request(app).post('/api/issues/1/pause');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-      });
-    });
-
-    describe('POST /api/issues/:number/resume', () => {
-      it('should resume issue', async () => {
-        const issue = issueService.create({ projectId, title: 'Test Issue' });
-        issueService.transitionToStage(issue.id, 'designing' as any);
-        issueService.pause(projectId, 1);
-
-        const response = await request(app).post('/api/issues/1/resume');
-
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
+        expect(response.body.data.issue.stage).toBe('designing');
       });
     });
   });

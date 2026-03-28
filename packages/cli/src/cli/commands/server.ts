@@ -181,56 +181,11 @@ export async function serverStatus(): Promise<void> {
       }
     }
 
-    try {
-      const statusData = await fetchServerStatus();
-      if (statusData) {
-        console.log(chalk.gray(`Workers: ${statusData.activeWorkers} active`));
-        console.log(chalk.gray(`Running tasks: ${statusData.runningTasks}`));
-        console.log(chalk.gray(`Queued tasks: ${statusData.queuedTasks}`));
-      }
-    } catch {
-      // status API unavailable, skip worker info
-    }
-    
     console.log(chalk.gray(`Logs: ${LOG_FILE}`));
   } else {
     console.log(chalk.red('Server is not running'));
     console.log(chalk.yellow('Start with: mo server start'));
   }
-}
-
-async function fetchServerStatus(): Promise<{
-  activeWorkers: number;
-  runningTasks: number;
-  queuedTasks: number;
-} | null> {
-  return new Promise((resolve) => {
-    const req = http.get('http://localhost:3456/api/status', (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (json.success && json.data) {
-            resolve({
-              activeWorkers: json.data.activeWorkers ?? 0,
-              runningTasks: json.data.runningTasks ?? 0,
-              queuedTasks: json.data.queuedTasks ?? 0,
-            });
-          } else {
-            resolve(null);
-          }
-        } catch {
-          resolve(null);
-        }
-      });
-    });
-    req.on('error', () => resolve(null));
-    req.setTimeout(2000, () => {
-      req.destroy();
-      resolve(null);
-    });
-  });
 }
 
 export async function serverLogs(lines: number = 50): Promise<void> {

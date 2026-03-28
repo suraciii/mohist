@@ -1,9 +1,7 @@
 export enum Stage {
   Draft = 'draft',
   Designing = 'designing',
-  WaitingDesignReview = 'waiting-design-review',
   Implementing = 'implementing',
-  WaitingReview = 'waiting-review',
   Done = 'done'
 }
 
@@ -34,18 +32,6 @@ export interface Project {
   updatedAt: string;
 }
 
-export interface Task {
-  id: string;
-  issueId: string;
-  projectId: string;
-  stage: Stage;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  agentPid?: number;
-  startedAt?: string;
-  completedAt?: string;
-  error?: string;
-}
-
 export interface Config {
   serverPort: number;
   pollInterval: number;
@@ -58,8 +44,6 @@ export interface ServerState {
   pid?: number;
   port: number;
   startedAt?: string;
-  activeTasks: number;
-  queuedTasks: number;
 }
 
 export interface ApiResponse<T = any> {
