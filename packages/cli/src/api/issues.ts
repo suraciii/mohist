@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { StateManager } from '../server/state-manager';
-import { ApiResponse, Issue, Stage, Comment } from '../types';
+import { ApiResponse, Issue, Stage, IssueStatus, Comment } from '../types';
 import { IssueService, WorkflowService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
-import { SessionManager } from '../agent-runtime';
+import { SessionManager, type LlmConfig } from '../agent-runtime';
 import { runMainAgent } from '../agents/main-agent';
 
 let activeAgentIssueId: string | null = null;
@@ -12,7 +12,8 @@ let activeAgentPromise: Promise<void> | null = null;
 export function createIssueRoutes(
   stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
-  sessionManager: SessionManager = new SessionManager()
+  sessionManager: SessionManager = new SessionManager(),
+  llmConfig?: LlmConfig
 ): Router {
   const router = Router();
   
@@ -344,12 +345,13 @@ export function createIssueRoutes(
               issueRepo: stateManager.getIssueRepo(),
               commentRepo: stateManager.getCommentRepo(),
               worktreePath,
+              llmConfig,
             },
             sessionManager,
           );
         } catch (err) {
           console.error(`Agent loop failed for issue #${number}:`, err);
-          stateManager.updateIssueStatus(issue.id, 'blocked' as any);
+          stateManager.updateIssueStatus(issue.id, IssueStatus.Blocked);
         } finally {
           activeAgentPromise = null;
           activeAgentIssueId = null;
@@ -420,52 +422,12 @@ export function createIssueRoutes(
     }
   });
 
-  router.post('/:number/pause', (req: Request, res: Response): void => {
-    try {
-      const number = parseInt(req.params.number);
-      const projectId = getCurrentProjectId();
-      
-      if (!projectId) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'No current project. Use: mo project use <name>'
-        };
-        res.status(400).json(response);
-        return;
-      }
-
-      const issue = issueService.pause(projectId, number);
-      
-      if (!issue) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} not found`
-        };
-        res.status(404).json(response);
-        return;
-      }
-
-      activeAgentPromise = null;
-      activeAgentIssueId = null;
-
-      const taskRepo = stateManager.getTaskRepo();
-      const pendingTasks = taskRepo.findByIssueId(issue.id).filter(t => t.status === 'pending');
-      for (const t of pendingTasks) {
-        taskRepo.updateStatus(t.id, 'failed', 'user_paused');
-      }
-
-      const response: ApiResponse = {
-        success: true,
-        data: { issue, message: `Issue #${number} paused` }
-      };
-      res.json(response);
-    } catch (error) {
-      const response: ApiResponse = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-      res.status(500).json(response);
-    }
+  router.post('/:number/pause', (_req: Request, res: Response): void => {
+    const response: ApiResponse = {
+      success: false,
+      error: 'Pause is not supported in M1. Stop the mo-server process to halt a running agent.'
+    };
+    res.status(501).json(response);
   });
 
   router.post('/:number/resume', (req: Request, res: Response): void => {

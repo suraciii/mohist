@@ -8,8 +8,33 @@ import { createLabelRoutes } from '../api/labels';
 import { ConfigService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
+import type { LlmConfig } from '../agent-runtime';
 import * as fs from 'fs';
 import * as path from 'path';
+
+const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-20250514';
+
+function buildLlmConfig(configRepo: { get(key: string): string | null }): LlmConfig | undefined {
+  const model = configRepo.get('llm.model');
+  const modelStr = model ?? DEFAULT_MODEL;
+  const slashIndex = modelStr.indexOf('/');
+  if (slashIndex === -1) return model ? { model } : undefined;
+
+  const providerID = modelStr.slice(0, slashIndex);
+  const baseURLKey = `llm.provider.${providerID}.options.baseURL`;
+  const baseURL = configRepo.get(baseURLKey);
+
+  const config: LlmConfig = {};
+  if (model) config.model = model;
+  if (baseURL) {
+    config.provider = {
+      [providerID]: { options: { baseURL } },
+    };
+  }
+
+  if (config.model || config.provider) return config;
+  return undefined;
+}
 
 function ensureDataDir(): void {
   const dataDir = path.join(process.env.HOME || '', '.mohist');
@@ -33,11 +58,13 @@ async function main(): Promise<void> {
 
   const worktreeManager = new WorktreeManager();
   const sessionManager = new SessionManager();
+
+  const llmConfig = buildLlmConfig(stateManager.getConfigRepo());
   
   const server = new HttpServer(config);
   
   server.addRouter('/api/projects', createProjectRoutes(stateManager));
-  server.addRouter('/api/issues', createIssueRoutes(stateManager, worktreeManager, sessionManager));
+  server.addRouter('/api/issues', createIssueRoutes(stateManager, worktreeManager, sessionManager, llmConfig));
   server.addRouter('/api/labels', createLabelRoutes(stateManager));
   server.addRouter('/api/config', createConfigRoutes(configService));
   server.addRouter('/api', createStatusRoutes(stateManager));

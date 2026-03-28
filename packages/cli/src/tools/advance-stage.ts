@@ -5,6 +5,12 @@ import { Stage } from '../types';
 
 const VALID_STAGES = new Set(Object.values(Stage));
 
+const M1_ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  [Stage.Draft]: [Stage.Designing],
+  [Stage.Designing]: [Stage.Implementing],
+  [Stage.Implementing]: [Stage.Done],
+};
+
 export interface AdvanceStageContext {
   issueRepo: IssueRepo;
 }
@@ -13,13 +19,13 @@ export interface AdvanceStageContext {
 export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstance<any> {
   return Tool.define('advance_stage', {
     description:
-      'Advance the current issue to a new workflow stage. Valid stages: draft, designing, waiting-design-review, implementing, waiting-review, done.',
+      'Advance the current issue to the next workflow stage. Allowed transitions: draft → designing, designing → implementing, implementing → done.',
     parameters: z.object({
       issue_id: z.string().describe('The internal ID of the issue to update'),
       stage: z
         .string()
         .describe(
-          'The target stage to advance to. One of: draft, designing, waiting-design-review, implementing, waiting-review, done'
+          'The target stage to advance to. One of: designing, implementing, done (depending on current stage)'
         ),
     }),
     execute: async (params) => {
@@ -32,6 +38,15 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
       const issue = context.issueRepo.findById(params.issue_id);
       if (!issue) {
         return `Error: issue not found with id "${params.issue_id}"`;
+      }
+
+      const allowed = M1_ALLOWED_TRANSITIONS[issue.stage];
+      if (!allowed) {
+        return `Error: issue is in stage "${issue.stage}" which is not supported in M1. No transitions are allowed from this stage.`;
+      }
+
+      if (!allowed.includes(stage)) {
+        return `Error: cannot advance from "${issue.stage}" to "${stage}". Allowed transitions from "${issue.stage}": ${allowed.join(', ')}`;
       }
 
       const updated = context.issueRepo.updateStage(params.issue_id, stage);

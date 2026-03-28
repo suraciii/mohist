@@ -1,0 +1,98 @@
+{
+  "project": "m1-review-fixes",
+  "description": "Fix 3 bugs and 3 review issues found during M1 agent architecture code review. B1: advance_stage whitelist, B2: pause race condition, B3: type safety, R2: stdout truncation, R4: LLM config passthrough, R6: brand residual.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix type safety: IssueStatus.Blocked in start endpoint",
+      "spec": "specs/http-api/spec.md#REQ-start-endpoint-uses-type-safe-enum-for-error-handling",
+      "description": "Replace `'blocked' as any` with `IssueStatus.Blocked` in api/issues.ts start endpoint error handler. Add `IssueStatus` to the existing types import.",
+      "acceptanceCriteria": [
+        "No `as any` cast in start endpoint error handler",
+        "IssueStatus is imported from '../types'",
+        "npm run build passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "One-line fix plus one import addition."
+    },
+    {
+      "id": "T-002",
+      "title": "Fix brand residual in status API",
+      "spec": "specs/http-api/spec.md#REQ-status-api-uses-correct-brand-name",
+      "description": "Replace 'crawlph project use <name>' with 'mo project use <name>' in api/status.ts line 41.",
+      "acceptanceCriteria": [
+        "No occurrence of 'crawlph' in api/status.ts",
+        "npm run build passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Fixed api/status.ts line 41 and cli/commands/quick.ts lines 127-129."
+    },
+    {
+      "id": "T-003",
+      "title": "Add M1 stage transition whitelist to advance_stage tool",
+      "spec": "specs/workflow-engine/spec.md#REQ-advance_stage-tool-enforces-m1-stage-transition-whitelist",
+      "description": "Add a hardcoded M1_ALLOWED_TRANSITIONS map in tools/advance-stage.ts. Before calling issueRepo.updateStage(), check that the current stage → target stage transition is in the whitelist. Reject with an error message listing allowed transitions if not. Update tool description to list only M1-relevant stages.",
+      "acceptanceCriteria": [
+        "Transition draft→designing succeeds",
+        "Transition designing→implementing succeeds",
+        "Transition implementing→done succeeds",
+        "Transition designing→done is rejected with error",
+        "Transition designing→waiting-design-review is rejected with error",
+        "Transition implementing→draft is rejected with error",
+        "Tool description lists only M1-relevant stages",
+        "npm run build passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Whitelist map: { 'draft': ['designing'], 'designing': ['implementing'], 'implementing': ['done'] }. Read current issue stage from DB before validating. Keep VALID_STAGES check as fallback for unknown stage values."
+    },
+    {
+      "id": "T-004",
+      "title": "Pass LLM config from config table to runMainAgent",
+      "spec": "specs/agent-runtime/spec.md#REQ-llm-config-is-loaded-from-config-table-and-passed-to-resolvemodel",
+      "description": "In server/index.ts, read llm config from configRepo (keys: llm.model, llm.provider.<id>.options.baseURL) and pass it through createIssueRoutes → start endpoint → runMainAgent. Update createIssueRoutes signature to accept the config. Update runMainAgent in agents/main-agent.ts to pass the config to resolveModel.",
+      "acceptanceCriteria": [
+        "LlmConfig is built from config table keys in server/index.ts",
+        "createIssueRoutes accepts LlmConfig parameter",
+        "Start endpoint passes LlmConfig to runMainAgent",
+        "resolveModel() receives the config instead of undefined",
+        "When no llm config keys exist, behavior is unchanged (default model + env vars)",
+        "npm run build passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "ConfigRepo is available via stateManager.getConfigRepo(). Read configRepo.get('llm.model'), extract providerID from model string (e.g. 'openai/gpt-4o' → 'openai'), then read configRepo.get('llm.provider.<providerID>.options.baseURL') dynamically. If llm.model is not set, use default model and derive providerID from it. Build LlmConfig object matching the interface in agent-runtime/llm.ts. MainAgentContext already has llmConfig field — just need to pass the value through."
+    },
+    {
+      "id": "T-005",
+      "title": "Disable pause endpoint for M1",
+      "spec": "specs/http-api/spec.md#REQ-api-provides-operation-interface",
+      "description": "Replace the pause endpoint body in api/issues.ts with a 501 response. The response should explain that pause is not supported in M1. Remove the module-level activeAgentPromise/activeAgentIssueId clearing from the pause handler since it is no longer reached.",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/pause returns 501 status code",
+        "Response body contains explanation about M1 not supporting pause",
+        "npm run build passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "M2 will re-enable pause with proper AbortController support. The 501 response makes the limitation explicit to CLI users."
+    },
+    {
+      "id": "T-006",
+      "title": "Add stdout truncation to spawn_agent tool",
+      "spec": "specs/agent-runtime/spec.md#REQ-spawn_agent-tool-truncates-subprocess-stdout",
+      "description": "In tools/spawn-agent.ts, when the subprocess succeeds and stdout exceeds 8000 characters, truncate to first 3000 + last 5000 characters with a truncation notice between them. Apply truncation only in the success path.",
+      "acceptanceCriteria": [
+        "Stdout under 8000 chars returned in full",
+        "Stdout over 8000 chars truncated to first 3000 + last 5000 + notice",
+        "Truncation notice includes total character count",
+        "npm run build passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Only truncate on success path. Error paths already show limited output. The notice format: '\\n... [truncated: {total} chars, showing first 3000 and last 5000] ...\\n'."
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+# Ralph Progress Log
+Started: 2026-03-27T16:50:24.956Z
+
+---
+
+[2026-03-28T12:00:00Z] T-001: Add AI SDK dependencies
+- Added ai@^6.0.141, @ai-sdk/anthropic@^3.0.64, zod@^4.3.6 to packages/cli
+- npm install succeeded (359 packages audited)
+- npm run build passed (tsc clean)
+- All acceptance criteria met
+- Next: T-002 Implement LLM provider resolver
+
+---
+
+[2026-03-28T16:30:00Z] T-002: Implement LLM provider resolver
+- Created agent-runtime/llm.ts with resolveModel(config) function
+- Installed @ai-sdk/openai (was missing, T-001 only added @ai-sdk/anthropic)
+- Supports anthropic and openai providers with env var API key detection
+- Default model: anthropic/claude-sonnet-4-20250514 when no config provided
+- Missing API key throws clear error with provider-specific env var names
+- baseURL option support for proxy configuration
+- Uses LanguageModelV3 type from @ai-sdk/provider
+- All 4 acceptance criteria verified: returns LanguageModel, clear errors on missing key, env-only fallback, typecheck passes
+- Design note: resolveModel accepts LlmConfig object (not ConfigRepo directly) for testability
+- Next: T-003 Implement tool system
+
+---
+
+[2026-03-28T17:00:00Z] T-003: Implement tool system
+- Created agent-runtime/tool.ts with Tool.define() and ToolRegistry class
+- Tool.define(id, { description, parameters, execute }) creates an AI SDK-compatible tool
+- Uses inputSchema (AI SDK v6 convention) with Zod parameter validation
+- Invalid parameters return validation error string to the LLM
+- ToolRegistry: register/get/getAll/clear/toToolSet methods
+- toToolSet() produces a ToolSet compatible with streamText()
+- All 4 acceptance criteria verified via runtime test
+- Note: AI SDK v6 uses inputSchema (not parameters) for tool definition
+- Next: T-004 Implement in-memory session manager
+
+---
+

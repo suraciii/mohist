@@ -139,38 +139,6 @@
       "priority": 9,
       "passes": true,
       "notes": "The start endpoint becomes fire-and-forget. The agent loop runs as a background async task. Error handling: if the agent loop throws, mark the issue as failed. D12: single issue — return error if an issue is already running."
-    },
-    {
-      "id": "T-010",
-      "title": "End-to-end integration test",
-      "description": "Verify the complete M1 flow: mo issue create → mo issue start → Main Agent calls spawn_agent (opencode) for design stage → advance_stage → spawn_agent for implement stage → advance_stage to done. The test should create a minimal issue, start it, and verify the agent progresses through stages to completion.",
-      "acceptanceCriteria": [
-        "mo issue create succeeds",
-        "mo issue start triggers Main Agent execution",
-        "Issue progresses through design → implement → done stages",
-        "mo issue show reports final stage as done",
-        "spawn_agent successfully spawns opencode subprocess"
-      ],
-      "priority": 10,
-      "passes": false,
-      "notes": "This is a manual integration test. Use a trivial issue like 'create a hello.txt file'. May need opencode installed and ANTHROPIC_API_KEY set. The test validates the full chain: API → session → agent loop → tools → opencode."
-    },
-    {
-      "id": "T-011",
-      "title": "Remove old workflow engine code",
-      "description": "Delete the old deterministic workflow engine and agent runner code that is no longer used: workflow/engine.ts, workflow/issue-workflow.ts, workflow/stage-handlers.ts, agent/runner.ts, agent/prompts.ts. Clean up unused imports in server/index.ts, api/issues.ts, and any other files that reference the deleted modules.",
-      "acceptanceCriteria": [
-        "workflow/engine.ts is deleted",
-        "workflow/issue-workflow.ts is deleted",
-        "workflow/stage-handlers.ts is deleted",
-        "agent/runner.ts is deleted",
-        "agent/prompts.ts is deleted",
-        "No broken imports remain",
-        "npm run build passes"
-      ],
-      "priority": 11,
-      "passes": false,
-      "notes": "Only delete after T-009 (start endpoint rewired) is confirmed working. Keep git history for reference. Do NOT delete the workflow/ and agent/ directories if they contain other files — only delete the specific files listed."
     }
   ]
 }

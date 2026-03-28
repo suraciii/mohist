@@ -4,6 +4,17 @@ import { Tool, type ToolInstance } from '../agent-runtime/tool';
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
 
+const TRUNCATE_THRESHOLD = 8000;
+const TRUNCATE_HEAD = 3000;
+const TRUNCATE_TAIL = 5000;
+
+function maybeTruncate(stdout: string): string {
+  if (stdout.length <= TRUNCATE_THRESHOLD) return stdout;
+  const head = stdout.slice(0, TRUNCATE_HEAD);
+  const tail = stdout.slice(-TRUNCATE_TAIL);
+  return `${head}\n... [truncated: ${stdout.length} chars, showing first ${TRUNCATE_HEAD} and last ${TRUNCATE_TAIL}] ...\n${tail}`;
+}
+
 interface SpawnAgentResult {
   success: boolean;
   stdout: string;
@@ -119,7 +130,7 @@ export function createSpawnAgentTool(defaultCwd?: string): ToolInstance<any> {
       if (result.success) {
         const output =
           result.stdout.length > 0
-            ? result.stdout
+            ? maybeTruncate(result.stdout)
             : '(agent completed with no output)';
         return `Success (exit code 0):\n${output}`;
       }

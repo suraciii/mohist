@@ -124,9 +124,9 @@ export function setupQuickCommands(program: Command): void {
           }
         } else {
           console.log(chalk.yellow('Usage:'));
-          console.log('  crawlph config --list');
-          console.log('  crawlph config <key>');
-          console.log('  crawlph config <key> <value>');
+          console.log('  mo config --list');
+          console.log('  mo config <key>');
+          console.log('  mo config <key> <value>');
         }
       } catch (error) {
         console.error(chalk.red(`Failed to manage config: ${error}`));
