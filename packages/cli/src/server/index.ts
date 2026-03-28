@@ -81,14 +81,8 @@ async function main(): Promise<void> {
 
   await server.start();
   
-  const { projects, activeTasks } = stateManager.recoverState();
-  
   console.log(`mohist server started on port ${config.serverPort}`);
   console.log(`Max concurrent agents: ${config.maxConcurrentAgents}`);
-  console.log(`Loaded ${projects.length} projects`);
-  if (activeTasks.length > 0) {
-    console.log(`Recovered ${activeTasks.length} tasks`);
-  }
 }
 
 main().catch((error) => {

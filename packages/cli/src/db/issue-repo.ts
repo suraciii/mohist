@@ -215,9 +215,17 @@ export class IssueRepo {
     return result.changes > 0;
   }
 
+  deleteCascade(issueId: string): boolean {
+    return this.delete(issueId);
+  }
+
   deleteByProject(projectId: string): number {
     const result = this.db.run('DELETE FROM issues WHERE project_id = ?', [projectId]);
     return result.changes;
+  }
+
+  deleteByProjectCascade(projectId: string): number {
+    return this.deleteByProject(projectId);
   }
 
   getNextNumber(projectId: string): number {

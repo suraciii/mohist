@@ -6,11 +6,9 @@ import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
-import { TaskRepo } from '../src/db/task-repo';
 import { ConfigRepo } from '../src/db/config-repo';
 import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
-import { WorkflowService } from '../src/services/workflow-service';
 import { ConfigService } from '../src/services/config-service';
 import { StateManager } from '../src/server/state-manager';
 import { createProjectRoutes } from '../src/api/projects';
@@ -29,11 +27,10 @@ describe('E2E: Single Issue Complete Flow', () => {
     
     const projectRepo = new ProjectRepo(db);
     const issueRepo = new IssueRepo(db);
-    const taskRepo = new TaskRepo(db);
     const configRepo = new ConfigRepo(db);
     
     const projectService = new ProjectService(projectRepo, configRepo);
-    const issueService = new IssueService(issueRepo, taskRepo);
+    const issueService = new IssueService(issueRepo);
     const configService = new ConfigService(configRepo);
     
     const stateManager = new StateManager();
@@ -54,7 +51,7 @@ describe('E2E: Single Issue Complete Flow', () => {
   });
 
   describe('Complete Issue Workflow', () => {
-    it('should complete full workflow: create -> start -> approve design -> approve implementation', async () => {
+    it('should complete full workflow: create -> start -> verify stage progression', async () => {
       // Step 1: Create an issue
       const createResponse = await request(app)
         .post('/api/issues')
@@ -75,90 +72,25 @@ describe('E2E: Single Issue Complete Flow', () => {
       expect(startResponse.status).toBe(200);
       expect(startResponse.body.success).toBe(true);
       expect(startResponse.body.data.issue.stage).toBe(Stage.Designing);
-      expect(startResponse.body.data.taskId).toBeDefined();
 
-      // Step 4: Simulate agent completing design (move to waiting-design-review)
-      // In real flow, this would be done by the agent
+      // Step 4: Verify show endpoint
       const showResponse1 = await request(app).get('/api/issues/1');
       expect(showResponse1.status).toBe(200);
+      expect(showResponse1.body.data.stage).toBe(Stage.Designing);
 
-      // Manually transition to simulate agent completion
-      const issueService = new IssueService(
-        new IssueRepo(db),
-        new TaskRepo(db)
-      );
-      issueService.transitionToStageByNumber(projectId, 1, Stage.WaitingDesignReview);
-
-      // Step 5: Approve design (moves to implementing)
-      const approveDesignResponse = await request(app).post('/api/issues/1/approve');
-      expect(approveDesignResponse.status).toBe(200);
-      expect(approveDesignResponse.body.success).toBe(true);
-      expect(approveDesignResponse.body.data.issue.stage).toBe(Stage.Implementing);
-
-      // Step 6: Simulate agent completing implementation
-      issueService.transitionToStageByNumber(projectId, 1, Stage.WaitingReview);
-
-      // Step 7: Approve implementation (moves to done)
-      const approveImplResponse = await request(app).post('/api/issues/1/approve');
-      expect(approveImplResponse.status).toBe(200);
-      expect(approveImplResponse.body.success).toBe(true);
-      expect(approveImplResponse.body.data.issue.stage).toBe(Stage.Done);
-
-      // Step 8: Verify final state
-      const finalResponse = await request(app).get('/api/issues/1');
-      expect(finalResponse.status).toBe(200);
-      expect(finalResponse.body.data.stage).toBe(Stage.Done);
-      expect(finalResponse.body.data.progress.percentage).toBe(100);
-
-      // Step 9: Verify status shows completed issue
+      // Step 5: Verify status shows designing issue
       const statusResponse = await request(app).get('/api/status');
       expect(statusResponse.status).toBe(200);
-      expect(statusResponse.body.data.issuesByStage.done).toBe(1);
+      expect(statusResponse.body.data.issuesByStage.designing).toBe(1);
     });
 
-    it('should handle pause/resume during workflow', async () => {
-      // Create and start issue
+    it('should prevent starting a non-draft issue', async () => {
       await request(app)
         .post('/api/issues')
-        .send({ title: 'Pause Test Issue' });
-      
+        .send({ title: 'Start Test Issue' });
+
       await request(app).post('/api/issues/1/start');
 
-      // Pause the issue
-      const pauseResponse = await request(app).post('/api/issues/1/pause');
-      expect(pauseResponse.status).toBe(200);
-      expect(pauseResponse.body.data.issue.status).toBe(IssueStatus.Paused);
-
-      // Verify cannot start a paused issue
-      const startPausedResponse = await request(app).post('/api/issues/1/start');
-      expect(startPausedResponse.status).toBe(400);
-      expect(startPausedResponse.body.error).toContain('paused');
-
-      // Resume the issue
-      const resumeResponse = await request(app).post('/api/issues/1/resume');
-      expect(resumeResponse.status).toBe(200);
-      expect(resumeResponse.body.data.issue.status).toBe(IssueStatus.Active);
-
-      // Verify issue can be worked on again
-      const showResponse = await request(app).get('/api/issues/1');
-      expect(showResponse.body.data.status).toBe(IssueStatus.Active);
-    });
-
-    it('should prevent invalid stage transitions', async () => {
-      // Create issue
-      await request(app)
-        .post('/api/issues')
-        .send({ title: 'Invalid Transition Test' });
-
-      // Try to approve without being at review stage
-      const approveResponse = await request(app).post('/api/issues/1/approve');
-      expect(approveResponse.status).toBe(400);
-      expect(approveResponse.body.error).toContain('does not require approval');
-
-      // Start processing
-      await request(app).post('/api/issues/1/start');
-
-      // Try to start again (already in designing)
       const startAgainResponse = await request(app).post('/api/issues/1/start');
       expect(startAgainResponse.status).toBe(400);
       expect(startAgainResponse.body.error).toContain('not in draft stage');

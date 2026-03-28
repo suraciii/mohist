@@ -1,0 +1,66 @@
+# Ralph Progress Log
+Started: 2026-03-28T00:56:01.357Z
+
+---
+
+## 2026-03-28 Iteration 1-2 (combined)
+
+### T-001: Delete old workflow and agent source files
+- Deleted `packages/cli/src/workflow/` directory (engine.ts, issue-workflow.ts, stage-handlers.ts)
+- Deleted `packages/cli/src/agent/` directory (runner.ts, prompts.ts)
+
+### T-002: Delete old workflow and agent test files
+- Deleted `packages/cli/tests/engine.test.ts`
+- Deleted `packages/cli/tests/agent-runner.test.ts`
+
+### T-003: Remove WorkflowService and dead endpoints from api/issues.ts
+- Removed WorkflowService import and instantiation
+- Removed /approve, /pause, /resume endpoints
+- Removed progress and stageInfo from show endpoint response
+- Removed TaskRepo from IssueService constructor call
+
+### T-004: Delete services/workflow-service.ts
+- Deleted `packages/cli/src/services/workflow-service.ts`
+- Removed WorkflowService, STAGE_ORDER, TransitionResult exports from services/index.ts
+
+### T-005: Remove TaskRepo from IssueService, StateManager, and server/index.ts
+- Removed TaskRepo from IssueService constructor, added cascade delete via IssueRepo
+- Added deleteCascade() and deleteByProjectCascade() to IssueRepo
+- Removed all task-related methods from StateManager
+- Removed recoverState() call from server/index.ts
+
+### T-006: Delete db/task-repo.ts, add migrateToVersion3
+- Deleted `packages/cli/src/db/task-repo.ts`
+- Removed TaskRepo exports from db/index.ts
+- Added migrateToVersion3() to drop tasks table, bumped SCHEMA_VERSION to 3
+- Removed CREATE_TASKS_TABLE and idx_tasks_project_status from runMigrations()
+
+### T-007: Remove WaitingDesignReview/WaitingReview from Stage enum, clean ServerState
+- Removed WaitingDesignReview and WaitingReview from Stage enum (now 4 values)
+- Removed Task interface from types/index.ts
+- Removed activeTasks and queuedTasks from ServerState
+
+### T-008: Clean api/status.ts and cli/commands/server.ts
+- Removed runningTasks, queuedTasks, activeWorkers from status response
+- Removed waitingDesignReview and waitingReview from issuesByStage
+- Removed TaskRepo references from api/status.ts
+- Cleaned cli/commands/server.ts display and fetchServerStatus return type
+
+### T-009: Remove dead CLI issue commands and formatStage cleanup
+- Removed approve, pause, resume subcommands from issue.ts
+- Removed waiting-design-review and waiting-review from formatStage() color map
+- Removed progress and stageInfo display blocks from show command
+
+### T-010: Fix remaining test files
+- Removed entire TaskRepo describe block from database.test.ts
+- Replaced approve/pause/resume expectations with close/reopen in cli-commands.test.ts
+- Removed DELETE FROM tasks from cascade methods in issue-repo.ts (tasks table gone)
+- All 123 tests pass, build passes clean
+
+### Learnings
+- Tasks T-001 through T-009 are highly interdependent; the previous iteration implemented them all together since T-001 alone breaks the build
+- The cascade delete methods in IssueRepo no longer need to touch the tasks table since it's dropped by migration v3
+- The `paused` IssueStatus and corresponding service methods (pause/resume) are still active in the M1 model — only the CLI commands and API endpoints for approve/pause/resume were removed
+
+---
+

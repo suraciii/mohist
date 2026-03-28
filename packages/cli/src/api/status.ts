@@ -56,23 +56,16 @@ export function createStatusRoutes(
 
       const issues = stateManager.loadIssues(currentId);
       const activeIssues = issues.filter(i => i.status === 'active');
-      const runningTasks = stateManager.getTaskRepo().countRunning();
-      const queuedTasks = stateManager.getTaskRepo().countPending();
 
       const status = {
         name: current.name,
         path: current.path,
         issues: issues.length,
         activeIssues: activeIssues.length,
-        runningTasks,
-        queuedTasks,
-        activeWorkers: 0,
         issuesByStage: {
           draft: issues.filter(i => i.stage === 'draft').length,
           designing: issues.filter(i => i.stage === 'designing').length,
-          waitingDesignReview: issues.filter(i => i.stage === 'waiting-design-review').length,
           implementing: issues.filter(i => i.stage === 'implementing').length,
-          waitingReview: issues.filter(i => i.stage === 'waiting-review').length,
           done: issues.filter(i => i.stage === 'done').length,
         }
       };

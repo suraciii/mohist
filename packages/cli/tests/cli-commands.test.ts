@@ -35,9 +35,8 @@ describe('CLI Commands', () => {
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'list')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'show')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'start')).toBe(true);
-      expect(issueCmd?.commands.some(cmd => cmd.name() === 'approve')).toBe(true);
-      expect(issueCmd?.commands.some(cmd => cmd.name() === 'pause')).toBe(true);
-      expect(issueCmd?.commands.some(cmd => cmd.name() === 'resume')).toBe(true);
+      expect(issueCmd?.commands.some(cmd => cmd.name() === 'close')).toBe(true);
+      expect(issueCmd?.commands.some(cmd => cmd.name() === 'reopen')).toBe(true);
     });
   });
   

@@ -79,9 +79,7 @@ function formatStage(stage: string): string {
   const colors: Record<string, typeof chalk.green> = {
     draft: chalk.gray,
     designing: chalk.blue,
-    'waiting-design-review': chalk.yellow,
     implementing: chalk.cyan,
-    'waiting-review': chalk.magenta,
     done: chalk.green
   };
   
@@ -232,19 +230,6 @@ export function setupIssueCommands(program: Command): void {
             });
           }
           
-          if (issue.progress) {
-            console.log(`\n  ${chalk.gray('Progress:')}`);
-            console.log(`  ${issue.progress.current}/${issue.progress.total} (${issue.progress.percentage}%)`);
-          }
-          
-          if (issue.stageInfo) {
-            console.log(`\n  ${chalk.gray('Stage Info:')}`);
-            console.log(`  ${issue.stageInfo.description}`);
-            if (issue.stageInfo.requiresApproval) {
-              console.log(`  ${chalk.yellow('⚠ Requires your approval to continue')}`);
-            }
-          }
-          
           console.log();
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
@@ -366,136 +351,6 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to start issue: ${error}`));
-      }
-    });
-
-  issue
-    .command('approve <number>')
-    .description('Approve the current stage of an issue')
-    .action(async (number) => {
-      try {
-        const detailResponse = await apiClient<ApiResponse<any>>(
-          'GET',
-          `/issues/${number}`
-        );
-
-        if (!detailResponse.success || !detailResponse.data) {
-          console.error(chalk.red(`Error: ${detailResponse.error}`));
-          return;
-        }
-
-        const issue = detailResponse.data;
-
-        if (issue.stage === 'waiting-review') {
-          const projectPath = issue.projectPath;
-          if (!projectPath) {
-            console.error(chalk.red('Error: No project path found. Cannot perform local merge.'));
-            return;
-          }
-
-          const branchName = `mo/issue-${number}`;
-          const defaultBranch = getDefaultBranch(projectPath);
-          console.log(chalk.gray(`Merging ${branchName} into ${defaultBranch}...`));
-
-          try {
-            execSync(`git merge --no-ff ${branchName}`, {
-              cwd: projectPath,
-              stdio: 'pipe'
-            });
-            console.log(chalk.green(`✓ Merged ${branchName} successfully`));
-          } catch (mergeError: any) {
-            console.error(chalk.red(`✗ Merge conflict detected`));
-            console.error(chalk.red(`  Resolve conflicts in ${projectPath}, then run:`));
-            console.error(chalk.yellow(`    git add . && git commit`));
-            console.error(chalk.yellow(`    mo issue approve ${number}`));
-            return;
-          }
-
-          const approveResponse = await apiClient<ApiResponse>(
-            'POST',
-            `/issues/${number}/approve`
-          );
-
-          if (approveResponse.success) {
-            console.log(chalk.green(`✓ Approved issue #${number}`));
-            if (approveResponse.data?.message) {
-              console.log(chalk.gray(`  ${approveResponse.data.message}`));
-            }
-
-            try {
-              const cleanupResponse = await apiClient<ApiResponse>(
-                'POST',
-                `/issues/${number}/cleanup`
-              );
-              if (cleanupResponse.success) {
-                console.log(chalk.green(`✓ Cleaned up worktree for issue #${number}`));
-              }
-            } catch (cleanupError) {
-              console.error(chalk.yellow(`Warning: Worktree cleanup failed: ${cleanupError}`));
-              console.error(chalk.yellow('  Run manually: mo issue cleanup not available. Use git worktree remove.'));
-            }
-          } else {
-            console.error(chalk.red(`Error: ${approveResponse.error}`));
-            console.error(chalk.yellow('  Merge succeeded but server approval failed. You may need to revert the merge:'));
-            console.error(chalk.yellow(`    git reset --hard HEAD~1`));
-          }
-        } else {
-          const response = await apiClient<ApiResponse>(
-            'POST',
-            `/issues/${number}/approve`
-          );
-
-          if (response.success) {
-            console.log(chalk.green(`✓ Approved issue #${number}`));
-            if (response.data?.message) {
-              console.log(chalk.gray(`  ${response.data.message}`));
-            }
-          } else {
-            console.error(chalk.red(`Error: ${response.error}`));
-          }
-        }
-      } catch (error) {
-        console.error(chalk.red(`Failed to approve issue: ${error}`));
-      }
-    });
-
-  issue
-    .command('pause <number>')
-    .description('Pause issue processing')
-    .action(async (number) => {
-      try {
-        const response = await apiClient<ApiResponse>(
-          'POST',
-          `/issues/${number}/pause`
-        );
-        
-        if (response.success) {
-          console.log(chalk.green(`✓ Paused issue #${number}`));
-        } else {
-          console.error(chalk.red(`Error: ${response.error}`));
-        }
-      } catch (error) {
-        console.error(chalk.red(`Failed to pause issue: ${error}`));
-      }
-    });
-
-  issue
-    .command('resume <number>')
-    .description('Resume issue processing')
-    .action(async (number) => {
-      try {
-        const response = await apiClient<ApiResponse>(
-          'POST',
-          `/issues/${number}/resume`
-        );
-        
-        if (response.success) {
-          console.log(chalk.green(`✓ Resumed issue #${number}`));
-        } else {
-          console.error(chalk.red(`Error: ${response.error}`));
-        }
-      } catch (error) {
-        console.error(chalk.red(`Failed to resume issue: ${error}`));
       }
     });
 

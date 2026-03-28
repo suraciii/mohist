@@ -12,9 +12,7 @@ export class HttpServer {
     this.app = express();
     this.state = {
       isRunning: false,
-      port: config.serverPort,
-      activeTasks: 0,
-      queuedTasks: 0
+      port: config.serverPort
     };
     this.setupMiddleware();
     this.setupRoutes();

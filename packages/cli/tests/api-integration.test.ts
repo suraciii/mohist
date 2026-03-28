@@ -45,20 +45,6 @@ describe('API Integration Tests', () => {
       expect(typeof StateManager).toBe('function');
     });
   });
-  
-  describe('Workflow Structure', () => {
-    it('should export stage transitions', async () => {
-      const { STAGE_TRANSITIONS, getNextStage, canStartAgent } = await import('../src/workflow/issue-workflow');
-      expect(STAGE_TRANSITIONS).toBeDefined();
-      expect(typeof getNextStage).toBe('function');
-      expect(typeof canStartAgent).toBe('function');
-    });
-    
-    it('should export stage handlers', async () => {
-      const { getStageHandler } = await import('../src/workflow/stage-handlers');
-      expect(typeof getStageHandler).toBe('function');
-    });
-  });
 });
 
 describe('Server Running Tests', () => {

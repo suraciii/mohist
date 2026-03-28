@@ -1,10 +1,9 @@
-import { Project, Issue, Task, Stage, IssueStatus, Comment } from '../types';
+import { Project, Issue, Stage, IssueStatus, Comment } from '../types';
 import { 
   getDatabase, 
   initializeDatabase,
   ProjectRepo, 
   IssueRepo, 
-  TaskRepo,
   ConfigRepo,
   CommentRepo,
   LabelRepo 
@@ -14,7 +13,6 @@ import { initializeDefaultConfig } from '../db/config-repo';
 export class StateManager {
   private projectRepo: ProjectRepo;
   private issueRepo: IssueRepo;
-  private taskRepo: TaskRepo;
   private configRepo: ConfigRepo;
   private commentRepo: CommentRepo;
   private labelRepo: LabelRepo;
@@ -26,7 +24,6 @@ export class StateManager {
     
     this.projectRepo = new ProjectRepo(db);
     this.issueRepo = new IssueRepo(db);
-    this.taskRepo = new TaskRepo(db);
     this.configRepo = new ConfigRepo(db);
     this.commentRepo = new CommentRepo(db);
     this.labelRepo = new LabelRepo(db);
@@ -60,8 +57,7 @@ export class StateManager {
   }
 
   deleteProject(id: string): boolean {
-    this.taskRepo.deleteByProject(id);
-    this.issueRepo.deleteByProject(id);
+    this.issueRepo.deleteByProjectCascade(id);
     return this.projectRepo.delete(id);
   }
 
@@ -96,52 +92,6 @@ export class StateManager {
     return this.issueRepo.updateStatus(issueId, status);
   }
 
-  loadTasks(projectId: string): Task[] {
-    return this.taskRepo.findAll({ projectId });
-  }
-
-  getRunningTasks(): Task[] {
-    return this.taskRepo.findRunning();
-  }
-
-  getPendingTasks(): Task[] {
-    return this.taskRepo.findPending();
-  }
-
-  createTask(issueId: string, projectId: string, stage: Stage): Task {
-    return this.taskRepo.create({
-      issueId,
-      projectId,
-      stage,
-    });
-  }
-
-  updateTaskStatus(taskId: string, status: Task['status'], error?: string): Task | null {
-    return this.taskRepo.updateStatus(taskId, status, error);
-  }
-
-  setTaskAgentPid(taskId: string, pid: number): void {
-    this.taskRepo.setAgentPid(taskId, pid);
-  }
-
-  clearTaskAgentPid(taskId: string): void {
-    this.taskRepo.clearAgentPid(taskId);
-  }
-
-  recoverState(): { projects: Project[]; activeTasks: Task[] } {
-    const projects = this.loadProjects();
-    const runningTasks = this.getRunningTasks();
-    
-    for (const task of runningTasks) {
-      this.taskRepo.updateStatus(task.id!, 'failed', 'Server restarted');
-    }
-    
-    return {
-      projects,
-      activeTasks: [],
-    };
-  }
-
   getCurrentProjectId(): string | null {
     return this.configRepo.get('currentProjectId');
   }
@@ -160,10 +110,6 @@ export class StateManager {
 
   getIssueRepo(): IssueRepo {
     return this.issueRepo;
-  }
-
-  getTaskRepo(): TaskRepo {
-    return this.taskRepo;
   }
 
   getConfigRepo(): ConfigRepo {
