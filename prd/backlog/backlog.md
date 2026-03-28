@@ -132,17 +132,51 @@
 |----|------|------|------|
 | B-120 | 删除旧 workflow/ 代码 | engine.ts、issue-workflow.ts、stage-handlers.ts | prd.json T-021 |
 | B-121 | 删除旧 agent/ 代码 | runner.ts、prompts.ts | prd.json T-021 |
-| B-122 | 更新 types/index.ts | Stage 枚举从硬编码改为动态字符串 | prd.json T-021 |
+| B-122 | 更新 types/index.ts | Stage 枚举从硬编码改为动态字符串（纳入 Stage 架构 PBI） | prd.json T-021 / Stage PBI |
 
 ---
 
-## 6. 跨 Milestone
+## 6. Stage 架构重设计 (PBI)
+
+> **背景**: 当前 Stage 枚举有 6 个值（draft/designing/waiting-design-review/implementing/waiting-review/done），其中 `waiting-*` 是旧确定性 engine 的 gate 占位符。AI agent 架构下，gate 应该是 stage 的属性（`gate: human`），不是独立的 stage。同时需要支持用户自定义 pipeline（如加 deploy 阶段）。
+
+**核心决策点**:
+
+| 决策 | 选项 | 影响 |
+|------|------|------|
+| Stage vs Status 分离 | Stage = 正在做什么，Status = 当前状态（active/waiting_approval/blocked） | 消除 `waiting-*` 阶段，Stage 枚举简化 |
+| Gate 模型 | A: gate 是 stage 属性（`gate_after: human`）<br>B: gate 是独立 stage（当前做法） | A 更干净，B 兼容旧代码 |
+| 默认阶段 | explore → plan → implement → verify（4 阶段） | 对齐 PRD，替代旧的 6 阶段 |
+| 可配置性 | 用户可增减/重排阶段，配 gate 策略和 agent type | M3 workflow.yaml 的设计输入 |
+| 阶段内 LLM 自由度 | Stage 是 Pipeline Model（有序、可控），Agent Actions 是 Label Model（LLM 自由决策） | 两层分离：pipeline 控制进度，LLM 控制执行 |
+
+**演进路径**:
+
+| 阶段 | Stage 定义 | 配置方式 |
+|------|-----------|---------|
+| M1 | 硬编码 3 阶段 (design → implement → done)，白名单校验 | system prompt |
+| M2 | 默认 4 阶段 + gate 属性 | config/table |
+| M3 | 可配置 pipeline，用户可加减阶段 | workflow.yaml |
+| 远期 | Pipeline as Code（条件分支、并行、插件） | workflow.yaml 扩展 |
+
+**影响范围**: `types/index.ts` Stage enum、DB schema、CLI/API 展示层、workflow.yaml schema、M2 gate 机制、M3 pipeline 引擎
+
+**关联**:
+- M2 B-020/B-021（ask_user + gate）需要此 PBI 的 gate 模型决策
+- M3 B-050/B-051（workflow.yaml）需要此 PBI 的可配置性决策
+- B-122（Stage 枚举改为动态字符串）是此 PBI 的实现任务
+- B-202（PRD 阶段对齐）与此 PBI 合并处理
+
+**来源**: 2026-03-28 explore 审查讨论
+
+---
+
+## 7. 跨 Milestone
 
 | ID | 事项 | 说明 | Milestone |
 |----|------|------|-----------|
 | B-200 | 多模型配置 | Main Agent 用便宜/快模型（haiku），Code Agent 用强模型（sonnet）。需要 provider 配置支持 model override | M3+ |
 | B-201 | LLM provider 配置格式 | ~/.mohist/config.json 结构定义（provider、model、api key 等） | M1（最小版）→ M3（完整版） |
-| B-202 | PRD 阶段与实现对齐 | PRD 定义 5 阶段 (Draft/Explore/Plan/Dev/Verify) 需要在实现中反映 | M3（workflow.yaml 阶段对齐 PRD） |
 | B-203 | recoverState() 重做 | 当前 server 重启后直接标记所有 running tasks 为 failed，agent 架构后应恢复 session | M4 |
 | B-204 | Provider 接口瘦身 | IssueProvider 定义了 github/lab 类型但只有 local 实现，接口设计过度 | M4 |
 | B-205 | Compaction 策略 | 长 issue 的 session messages 可能超过 context window，需要自动摘要机制 | 未来 |
