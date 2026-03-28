@@ -1,0 +1,170 @@
+{
+  "project": "m1-cleanup-old-workflow-code",
+  "description": "Remove all dead code from the old deterministic workflow engine after M1 agent architecture is complete. Delete workflow/ and agent/ directories, remove TaskRepo infrastructure, remove dead API endpoints and CLI commands, clean Stage enum, clean ServerState and server status display.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Delete old workflow and agent source files",
+      "description": "Delete the following files: workflow/engine.ts, workflow/issue-workflow.ts, workflow/stage-handlers.ts, agent/runner.ts, agent/prompts.ts. Delete the empty workflow/ and agent/ directories.",
+      "acceptanceCriteria": [
+        "packages/cli/src/workflow/ directory does not exist",
+        "packages/cli/src/agent/ directory does not exist",
+        "npm run build passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Safe deletion — no active code imports these files. workflow-service.ts imports issue-workflow.ts but workflow-service.ts is deleted in T-004. After T-001, workflow-service.ts will have a broken import — that's expected and resolved by T-003+T-004."
+    },
+    {
+      "id": "T-002",
+      "title": "Delete old workflow and agent test files",
+      "description": "Delete tests/engine.test.ts and tests/agent-runner.test.ts. These test the deleted workflow engine and agent runner.",
+      "acceptanceCriteria": [
+        "packages/cli/tests/engine.test.ts does not exist",
+        "packages/cli/tests/agent-runner.test.ts does not exist",
+        "npm run build passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Safe deletion — these tests only test deleted code. Run independently from T-001."
+    },
+    {
+      "id": "T-003",
+      "title": "Remove WorkflowService and dead endpoints from api/issues.ts",
+      "description": "In api/issues.ts: (1) Remove the WorkflowService import and instantiation (line 4, line 24). (2) Remove the /approve endpoint (lines 375-423). (3) Remove the /resume endpoint (lines 433-512). (4) Remove the /pause endpoint (lines 425-431). (5) Remove progress and stageInfo from the show endpoint response (lines 138-139, 149-150). (6) Remove TaskRepo from IssueService constructor call (line 22: remove stateManager.getTaskRepo() argument). Keep all active endpoints: list, create, show, update, comments, start, close, reopen, cleanup.",
+      "spec": "specs/http-api/spec.md#REQ-status-api-reflects-m1-stage-model",
+      "acceptanceCriteria": [
+        "No WorkflowService import in api/issues.ts",
+        "No WorkflowService instantiation in api/issues.ts",
+        "POST /:number/approve endpoint does not exist in api/issues.ts",
+        "POST /:number/resume endpoint does not exist in api/issues.ts",
+        "POST /:number/pause endpoint does not exist in api/issues.ts",
+        "GET /:number response does not include progress or stageInfo",
+        "IssueService constructor call does not pass TaskRepo",
+        "npm run build passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "After this task, WorkflowService is only referenced by services/index.ts (T-004) and IssueService no longer takes TaskRepo (T-005 updates IssueService itself). The start endpoint is active and must be preserved. Note: removing stateManager.getTaskRepo() from line 22 means IssueService constructor now takes only 1 argument — T-005 will update the IssueService class to match."
+    },
+    {
+      "id": "T-004",
+      "title": "Delete services/workflow-service.ts",
+      "description": "Delete services/workflow-service.ts and remove the WorkflowService, STAGE_ORDER, and TransitionResult exports from services/index.ts.",
+      "acceptanceCriteria": [
+        "services/workflow-service.ts does not exist",
+        "services/index.ts does not export WorkflowService",
+        "services/index.ts does not export STAGE_ORDER",
+        "services/index.ts does not export TransitionResult",
+        "npm run build passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Depends on T-003 removing all WorkflowService usage from api/issues.ts. After T-001 deleted issue-workflow.ts, workflow-service.ts has a broken import — but that's OK because T-004 deletes it entirely."
+    },
+    {
+      "id": "T-005",
+      "title": "Remove TaskRepo from IssueService, StateManager, and api/issues.ts constructor",
+      "description": "(1) In services/issue-service.ts: Remove TaskRepo import and constructor parameter. Inline cascade delete: change delete() to call this.issueRepo.deleteCascade(issueId), change deleteByProject() to call this.issueRepo.deleteByProjectCascade(projectId). Add deleteCascade() and deleteByProjectCascade() methods to db/issue-repo.ts that run DELETE FROM tasks before the main delete. (2) In server/state-manager.ts: Remove TaskRepo import, field (line 17), instantiation (line 29), getter getTaskRepo() (lines 165-167), and all task-related methods (loadTasks, getRunningTasks, getPendingTasks, createTask, updateTaskStatus, setTaskAgentPid, clearTaskAgentPid, recoverState). In deleteProject() (line 63), remove this.taskRepo.deleteByProject(id) — the cascade is now handled by IssueRepo. (3) In server/index.ts: Remove the recoverState() call (line 84) and the activeTasks log (lines 89-91). (4) In api/issues.ts: The IssueService constructor call was already fixed in T-003 (removed getTaskRepo() argument). No further changes needed here.",
+      "spec": "specs/workflow-engine/spec.md#REQ-task-infrastructure-is-removed",
+      "acceptanceCriteria": [
+        "IssueService constructor does not take TaskRepo parameter",
+        "IssueService does not import TaskRepo",
+        "IssueRepo has deleteCascade(issueId) method",
+        "IssueRepo has deleteByProjectCascade(projectId) method",
+        "StateManager does not import TaskRepo",
+        "StateManager has no task-related methods",
+        "StateManager has no recoverState method",
+        "server/index.ts does not call recoverState()",
+        "server/index.ts does not reference activeTasks",
+        "npm run build passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "The only legitimate TaskRepo usage was cascade delete in IssueService.delete()/deleteByProject() and StateManager.deleteProject(). All move to IssueRepo as direct SQL. StateManager.deleteProject() currently calls this.taskRepo.deleteByProject(id) then this.issueRepo.deleteByProject(id) — after this change, it calls this.issueRepo.deleteByProjectCascade(projectId) which handles both internally."
+    },
+    {
+      "id": "T-006",
+      "title": "Delete db/task-repo.ts, add migrateToVersion3 to drop tasks table",
+      "description": "(1) Delete db/task-repo.ts. (2) Remove TaskRepo, CreateTaskData, TaskQueryOptions exports from db/index.ts. (3) In db/migrations.ts: Add migrateToVersion3() that runs 'DROP TABLE IF EXISTS tasks' and 'DROP INDEX IF EXISTS idx_tasks_project_status'. Bump SCHEMA_VERSION to 3. Add version 3 check in initializeDatabase(). (4) Remove CREATE_TASKS_TABLE and the idx_tasks_project_status index from runMigrations() (since v3 drops the table, no point creating it for fresh installs either — but actually, fresh installs go through runMigrations at version 0 then immediately hit version 3 check; simpler to just let v3 drop it).",
+      "spec": "specs/workflow-engine/spec.md#REQ-task-infrastructure-is-removed",
+      "acceptanceCriteria": [
+        "db/task-repo.ts does not exist",
+        "db/index.ts does not export TaskRepo, CreateTaskData, or TaskQueryOptions",
+        "db/migrations.ts contains migrateToVersion3 function",
+        "SCHEMA_VERSION is 3",
+        "initializeDatabase calls migrateToVersion3 when currentVersion < 3",
+        "Server startup drops the tasks table if it exists",
+        "npm run build passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Depends on T-005 removing all TaskRepo references from active code. Uses the existing lightweight migration mechanism (version check + function), not a new framework."
+    },
+    {
+      "id": "T-007",
+      "title": "Remove WaitingDesignReview/WaitingReview from Stage enum, clean ServerState",
+      "description": "In types/index.ts: (1) Remove WaitingDesignReview and WaitingReview from Stage enum. (2) Remove the Task interface entirely. (3) Remove activeTasks and queuedTasks fields from ServerState. In server/http-server.ts: Remove activeTasks: 0 and queuedTasks: 0 from the ServerState init object (lines 16-17).",
+      "spec": "specs/workflow-engine/spec.md#REQ-stage-enum-contains-only-m1-stages",
+      "acceptanceCriteria": [
+        "Stage enum has exactly 4 values: draft, designing, implementing, done",
+        "No WaitingDesignReview or WaitingReview in types/index.ts",
+        "Task interface does not exist in types/index.ts",
+        "ServerState does not have activeTasks or queuedTasks fields",
+        "server/http-server.ts does not reference activeTasks or queuedTasks",
+        "npm run build passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Depends on T-003 and T-005 removing all code references to WaitingDesignReview, WaitingReview, and Task. After those tasks, the only remaining references should be in types/index.ts and http-server.ts. This task removes them."
+    },
+    {
+      "id": "T-008",
+      "title": "Clean api/status.ts and cli/commands/server.ts",
+      "description": "In api/status.ts: Remove runningTasks, queuedTasks, activeWorkers from the status response (lines 59-69). Remove waitingDesignReview and waitingReview from issuesByStage (lines 73, 75). Remove TaskRepo.countRunning() and countPending() calls (lines 59-60). In cli/commands/server.ts: Remove the 'Workers', 'Running tasks', and 'Queued tasks' display lines (lines 187-189). Clean up fetchServerStatus() return type (lines 202-218) — remove activeWorkers, runningTasks, queuedTasks fields. If fetchServerStatus() becomes empty, remove it entirely along with the try/catch block that calls it.",
+      "spec": "specs/http-api/spec.md#REQ-status-api-reflects-m1-stage-model",
+      "acceptanceCriteria": [
+        "Status response does not include runningTasks, queuedTasks, or activeWorkers",
+        "issuesByStage does not include waitingDesignReview or waitingReview",
+        "api/status.ts does not reference TaskRepo",
+        "cli/commands/server.ts does not display workers, running tasks, or queued tasks",
+        "cli/commands/server.ts fetchServerStatus does not reference activeWorkers, runningTasks, or queuedTasks",
+        "npm run build passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Depends on T-005 removing TaskRepo from StateManager (status.ts accesses TaskRepo via stateManager.getTaskRepo()). Also depends on T-008 API changes so CLI display matches."
+    },
+    {
+      "id": "T-009",
+      "title": "Remove dead CLI issue commands and formatStage cleanup",
+      "description": "In cli/commands/issue.ts: (1) Remove the approve subcommand (lines 372-460). (2) Remove the pause subcommand (lines 462-480). (3) Remove the resume subcommand (lines 482-500). (4) Remove 'waiting-design-review' and 'waiting-review' from formatStage() color map (lines 82-83). (5) Remove the progress display block in the show command (lines 235-238). (6) Remove the stageInfo display block in the show command (lines 240-246).",
+      "spec": "specs/cli-interface/spec.md#REQ-cli-removes-dead-workflow-commands",
+      "acceptanceCriteria": [
+        "mo issue --help does not list approve, pause, or resume",
+        "formatStage() does not map waiting-design-review or waiting-review",
+        "issue show command does not display progress or stageInfo",
+        "npm run build passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Straightforward deletion. The approve command had git merge logic for waiting-review stage — that's dead code since M1 never produces waiting-review. Historical issues in waiting-review must be merged manually (git merge --no-ff + git worktree remove)."
+    },
+    {
+      "id": "T-010",
+      "title": "Fix remaining test files",
+      "description": "Update all test files that reference deleted code: tests/services.test.ts (remove WorkflowService, TaskRepo references), tests/api-routes.test.ts (remove WorkflowService, stage-handlers, waiting-* stages, approve/resume/pause endpoint tests), tests/e2e.test.ts (remove waiting-* stage references, Task references), tests/api-integration.test.ts (remove stage-handlers import). The 4 pre-existing test failures (2 in api-routes.test.ts, 2 in e2e.test.ts) should be resolved.",
+      "spec": "specs/workflow-engine/spec.md#REQ-task-infrastructure-is-removed",
+      "acceptanceCriteria": [
+        "No test file imports WorkflowService, stage-handlers, TaskRepo, or AgentRunner",
+        "No test references WaitingDesignReview or WaitingReview stages",
+        "No test references Task type or TaskRepo",
+        "All tests pass (or only fail for reasons unrelated to old workflow code)",
+        "npm run build passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "This is the final task. After T-001 through T-009, the only remaining old-workflow references should be in tests. Run npm test to verify all 4 pre-existing failures are resolved."
+    }
+  ]
+}
