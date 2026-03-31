@@ -43,18 +43,8 @@ Server SHALL 提供 RESTful API 供 CLI 执行操作。
 
 #### Scenario: 启动 Issue 处理
 - **WHEN** CLI 请求 `POST /api/issues/:number/start`
-- **THEN** Issue 被加入任务队列
-- **AND** 返回任务 ID
-
-#### Scenario: 批准 PR
-- **WHEN** CLI 请求 `POST /api/prs/:number/approve`
-- **THEN** PR 被标记为已批准
-- **AND** 触发下一阶段
-
-#### Scenario: 暂停 Issue
-- **WHEN** CLI 请求 `POST /api/issues/:number/pause`
-- **THEN** Issue 状态变为 paused
-- **AND** 正在运行的 agent 被终止
+- **THEN** Main Agent 被启动处理该 Issue
+- **AND** 返回 Issue 信息和运行状态
 
 ### Requirement: API 提供配置接口
 
@@ -87,26 +77,26 @@ Server SHALL 返回清晰的错误响应。
 - **THEN** 返回 500 错误
 - **AND** 记录错误日志
 
-### Requirement: start endpoint uses type-safe enum for error handling
-The start endpoint SHALL use `IssueStatus.Blocked` (not a string cast) when setting the issue status on agent failure.
+### Requirement: Status API reflects M1 stage model
+The status API SHALL only report stages used in M1: draft, designing, implementing, done. The response SHALL NOT include task-related fields (runningTasks, queuedTasks, activeWorkers) or waiting-stage counts (waitingDesignReview, waitingReview). The `ServerState` interface SHALL NOT contain `activeTasks` or `queuedTasks` fields.
 
-#### Scenario: Agent loop fails
-- **WHEN** the agent loop for an issue throws an error
-- **THEN** the issue status SHALL be set to `IssueStatus.Blocked` using the enum value
-- **AND** no `as any` type assertion SHALL be used
+#### Scenario: Get current project status
+- **WHEN** CLI 请求 `GET /api/status`
+- **THEN** the response SHALL include `issuesByStage` with only `draft`, `designing`, `implementing`, `done` counts
+- **AND** the response SHALL NOT include `runningTasks`, `queuedTasks`, or `activeWorkers`
 
-### Requirement: status API uses correct brand name
-The status API SHALL use the correct brand name "mo" (not "crawlph") in all user-facing messages.
+#### Scenario: ServerState has no task fields
+- **WHEN** the ServerState interface is inspected
+- **THEN** it SHALL NOT contain `activeTasks` or `queuedTasks`
 
-#### Scenario: No current project
-- **WHEN** no current project is selected and a status request is made
-- **THEN** the error message SHALL say "mo project use <name>"
-- **AND** no occurrence of "crawlph" SHALL appear in the response
+#### Scenario: Issue show endpoint omits stale fields
+- **WHEN** CLI 请求 `GET /api/issues/:number`
+- **THEN** the response SHALL NOT include `progress` or `stageInfo` fields
+- **AND** the issue's current stage SHALL still be available in `issue.stage`
 
-### Requirement: API provides operation interface
-The pause endpoint SHALL return HTTP 501 for M1, with an explanation that pause is not supported.
+### Requirement: Removed endpoints return 404
+Endpoints that are removed (approve, resume, pause) SHALL return HTTP 404 instead of their previous behavior.
 
-#### Scenario: User attempts to pause an issue
-- **WHEN** a POST request is made to `/api/issues/:number/pause`
-- **THEN** the response SHALL have status code 501
-- **AND** the response body SHALL contain an explanation that pause is not supported in M1
+#### Scenario: Removed endpoint accessed
+- **WHEN** a request is made to `POST /api/issues/:number/approve`, `POST /api/issues/:number/resume`, or `POST /api/issues/:number/pause`
+- **THEN** the response SHALL have status code 404
