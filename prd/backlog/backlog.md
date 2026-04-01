@@ -6,11 +6,11 @@
 
 ## 1. 文档清理
 
-| ID | 事项 | 说明 | Milestone |
-|----|------|------|-----------|
-| B-001 | 归档 design/ 旧文档 | tech-spec.md、issueflow.md、workflow.md 描述的是旧架构（GitHub Labels、crawlph），应移入 archive 或标注为历史参考 | - |
-| B-002 | 更新 prd/ 文档 | prd/ 下文档仍使用旧名 crawlph，且 PRD 定义 5 阶段 (Explore/Plan/Dev/Verify) 与实现不一致 | - |
-| B-003 | 更新 openspec/specs/ 全局 spec | 大部分 spec 描述的是确定性状态机架构（如 workflow-engine、issue-workflow），agent 架构改造后需要更新或标注 REMOVED | M1 完成 |
+| ID | 事项 | 说明 | 状态 |
+|----|------|------|------|
+| B-001 | 归档 design/ 旧文档 | tech-spec.md、issueflow.md、workflow.md 描述的是旧架构（GitHub Labels、crawlph），应移入 archive 或标注为历史参考 | ✅ 已完成 (doc-cleanup-and-stage-model T-002) |
+| B-002 | 更新 prd/ 文档 | prd/ 下文档仍使用旧名 crawlph，且 PRD 定义 5 阶段 (Explore/Plan/Dev/Verify) 与实现不一致 | ✅ 已完成 (doc-cleanup-and-stage-model T-010~T-013) |
+| B-003 | 更新 openspec/specs/ 全局 spec | 大部分 spec 描述的是确定性状态机架构（如 workflow-engine、issue-workflow），agent 架构改造后需要更新或标注 REMOVED | ✅ 已完成 (doc-cleanup-and-stage-model T-006) |
 
 ---
 
@@ -20,7 +20,7 @@
 |----|------|------|-----------|
 | B-004 | apiClient 重复实现 | cli/commands/issue.ts 和 cli/commands/quick.ts 各自实现了一份完全相同的 apiClient() 函数（30+ 行），应抽到公共模块 | - |
 | B-005 | CLI 业务逻辑泄漏 | issue.ts approve 命令直接执行 git merge（违反 thin client 原则），合并逻辑应在 server 端 | - |
-| B-006 | config 中旧命名残留 | quick.ts:128-129 的 usage 提示仍为 "crawlph config" | - |
+| B-006 | ~~config 中旧命名残留~~ | ~~quick.ts:128-129 的 usage 提示仍为 "crawlph config"~~ | ✅ 已清理 |
 | B-007 | StateManager 和 WorkflowService 职责重叠 | 两个类都能修改 issue stage/status，StateManager 不检查规则，WorkflowService 检查规则但存在绕过路径 | M1（删除旧代码时解决） |
 
 ---
@@ -75,10 +75,10 @@
 
 | ID | 事项 | 说明 | 来源 |
 |----|------|------|------|
-| B-060 | 实现 Explore Agent | 需求探索，read-only + ask_user + add_comment，生成初步理解和问题列表 | design |
-| B-061 | 实现 Plan Agent | 方案设计，read + write，生成 design.md 和任务清单 | design |
-| B-062 | 实现 Verify Agent | 测试 + 审查，read + bash，运行测试、代码审查 | design |
-| B-063 | Sub-Agent 类型定义 | 4 个 agent 的 name、system prompt、tool set、model override 定义 | prd.json T-013 |
+| B-060 | 实现 Plan Agent | 方案设计，read + write，生成 design.md 和任务清单 | design |
+| B-061 | 实现 Build Agent | 代码实现，read + write + bash，内循环 write→test→fix | design |
+| B-062 | 实现 Check Agent | 测试 + 审查，read + bash，运行测试、代码审查 | design |
+| B-063 | Sub-Agent 类型定义 | agent 的 name、system prompt、tool set、model override 定义 | prd.json T-013 |
 
 ### 基础工具（给非 Code sub-agent 用）
 
@@ -88,7 +88,7 @@
 | B-071 | glob 工具 | 按模式查找文件 | prd.json T-006 |
 | B-072 | grep 工具 | 搜索文件内容 | prd.json T-006 |
 | B-073 | write_file 工具 | 写入文件（Plan Agent 用） | prd.json T-007 |
-| B-074 | bash 工具 | 执行 shell 命令（Verify Agent 用），可配置 timeout | prd.json T-007 |
+| B-074 | bash 工具 | 执行 shell 命令（Check Agent 用），可配置 timeout | prd.json T-007 |
 
 ### Main Agent prompt 配置化
 
@@ -132,42 +132,39 @@
 |----|------|------|------|
 | B-120 | 删除旧 workflow/ 代码 | engine.ts、issue-workflow.ts、stage-handlers.ts | prd.json T-021 |
 | B-121 | 删除旧 agent/ 代码 | runner.ts、prompts.ts | prd.json T-021 |
-| B-122 | 更新 types/index.ts | Stage 枚举从硬编码改为动态字符串（纳入 Stage 架构 PBI） | prd.json T-021 / Stage PBI |
+| B-122 | ~~更新 types/index.ts~~ | ~~Stage 枚举从硬编码改为动态字符串（纳入 Stage 架构 PBI）~~ | ✅ 已更新为 plan/build/check (doc-cleanup-and-stage-model T-007) |
 
 ---
 
-## 6. Stage 架构重设计 (PBI)
+## 6. Stage 架构 (已决策)
 
-> **背景**: 当前 Stage 枚举有 6 个值（draft/designing/waiting-design-review/implementing/waiting-review/done），其中 `waiting-*` 是旧确定性 engine 的 gate 占位符。AI agent 架构下，gate 应该是 stage 的属性（`gate: human`），不是独立的 stage。同时需要支持用户自定义 pipeline（如加 deploy 阶段）。
+> **决策结果**: PLAN → BUILD → CHECK 三阶段循环模型
+>
+> 详见 `design/plan.md`、`design/build.md`、`design/check.md` 和 `openspec/changes/doc-cleanup-and-stage-model/`
 
-**核心决策点**:
+**已决策**:
 
-| 决策 | 选项 | 影响 |
+| 决策 | 结论 | 理由 |
 |------|------|------|
-| Stage vs Status 分离 | Stage = 正在做什么，Status = 当前状态（active/waiting_approval/blocked） | 消除 `waiting-*` 阶段，Stage 枚举简化 |
-| Gate 模型 | A: gate 是 stage 属性（`gate_after: human`）<br>B: gate 是独立 stage（当前做法） | A 更干净，B 兼容旧代码 |
-| 默认阶段 | explore → plan → implement → verify（4 阶段） | 对齐 PRD，替代旧的 6 阶段 |
-| 可配置性 | 用户可增减/重排阶段，配 gate 策略和 agent type | M3 workflow.yaml 的设计输入 |
-| 阶段内 LLM 自由度 | Stage 是 Pipeline Model（有序、可控），Agent Actions 是 Label Model（LLM 自由决策） | 两层分离：pipeline 控制进度，LLM 控制执行 |
+| Stage 数量 | 3 stages: PLAN / BUILD / CHECK | 基于软件开发四种不确定性和 DevOps 反馈周期理论，3 stages 是最小完整反馈循环 |
+| Stage vs Status 分离 | Stage = pipeline 阶段（plan/build/check），Status = 运行时状态（active/paused/blocked） | 消除 `waiting-*` 阶段 |
+| Gate 模型 | gate 是 stage 属性（`gate_after: none \| human`） | 不是独立 Stage，消除 `waiting-design-review` 等伪阶段 |
+| Explore | Pipeline 外的交互模式，不是 Stage | 需求梳理是人类主导的对话活动，不应被 pipeline stage 约束 |
+| Draft | 不是 Stage，是 issue 创建状态 | 创建 issue 是一个动作，不是需要 agent 执行的阶段 |
+| 循环机制 | CHECK 失败 → 回到 PLAN | PDCA 循环，CHECK 发现问题带新信息重新规划 |
+
+**Stage 枚举**: `draft | plan | build | check | done`
 
 **演进路径**:
 
 | 阶段 | Stage 定义 | 配置方式 |
 |------|-----------|---------|
-| M1 | 硬编码 3 阶段 (design → implement → done)，白名单校验 | system prompt |
-| M2 | 默认 4 阶段 + gate 属性 | config/table |
+| M1 | 硬编码 3 阶段 (plan → build → check)，gate 属性 | system prompt |
+| M2 | 默认 3 阶段 + gate_after 机制 | config/table |
 | M3 | 可配置 pipeline，用户可加减阶段 | workflow.yaml |
 | 远期 | Pipeline as Code（条件分支、并行、插件） | workflow.yaml 扩展 |
 
-**影响范围**: `types/index.ts` Stage enum、DB schema、CLI/API 展示层、workflow.yaml schema、M2 gate 机制、M3 pipeline 引擎
-
-**关联**:
-- M2 B-020/B-021（ask_user + gate）需要此 PBI 的 gate 模型决策
-- M3 B-050/B-051（workflow.yaml）需要此 PBI 的可配置性决策
-- B-122（Stage 枚举改为动态字符串）是此 PBI 的实现任务
-- B-202（PRD 阶段对齐）与此 PBI 合并处理
-
-**来源**: 2026-03-28 explore 审查讨论
+**来源**: 2026-04-01 explore 讨论 → `talks/2026-04-01-stage-model.md`
 
 ---
 

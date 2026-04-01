@@ -16,9 +16,9 @@
 
 你的时间：
 ├── 描述想法: 2 分钟
-├── 对话澄清需求: 30 分钟
-├── 确认方案: 10 分钟
-├── 审查结果: 15 分钟
+├── Explore Mode 对话澄清需求: 30 分钟
+├── PLAN gate 确认方案: 10 分钟
+├── CHECK gate 审查结果: 15 分钟
 └── 总计: ~1 小时
 
 AI 自动执行的时间：
@@ -28,35 +28,37 @@ AI 自动执行的时间：
 ## 你在哪个阶段参与最多
 
 ```
-Draft    ██ 低      创建 Issue 就行
-Explore  ████████ 高   和 AI 对话，把需求聊清楚
-Plan     ████ 中      审查方案，确认可以开发
-Dev      █ 低        AI 自己写，你忙别的
-Verify   ████ 中      审查结果，决定合并
+Explore Mode  ████████ 高   和 AI 对话，把需求聊清楚
+PLAN gate     ████ 中       审查方案，确认可以开发
+BUILD         █ 低          AI 自己写，你忙别的
+CHECK gate    ████ 中       审查结果，决定完成
 ```
 
-## 你怎么和 crawlph 交互
+## 你怎么和 mohist 交互
 
 ### 查看进度
 
 ```
-$ crawlph status 42
+$ mo status 42
 
 Issue #42: 添加搜索功能
-阶段: 开发中 (3/5 任务完成)
+Stage: BUILD
 
-进度:
-✓ 添加搜索索引
-✓ 实现 SearchService  
-✓ 实现搜索 API
-● 添加搜索 UI (进行中)
-○ 测试
+PLAN:
+  ✓ 方案设计 (approved)
+BUILD:
+  ✓ 添加搜索索引
+  ✓ 实现 SearchService  
+  ● 实现搜索 API (进行中)
+  ○ 添加搜索 UI
+CHECK:
+  (pending)
 ```
 
 ### 追加指令
 
 ```
-$ crawlph attach 42
+$ mo attach 42
 
 > 搜索结果需要按相关度排序
 > 退出
@@ -65,15 +67,15 @@ $ crawlph attach 42
 ### 确认/合并
 
 ```
-$ crawlph approve 42    # 确认方案，开始开发
-$ crawlph merge 42      # 合并代码
+$ mo approve 42    # PLAN gate：确认方案，开始 BUILD
+$ mo approve 42    # CHECK gate：确认结果，完成 Issue
 ```
 
 ## 你可以随时说
 
-- **"可以规划了"** - 需求聊清楚了，开始定方案
-- **"可以开发了"** - 方案没问题，开始写代码
+- **"可以规划了"** - 需求聊清楚了，进入 PLAN
+- **"可以开发了"** - 方案没问题，进入 BUILD
 - **"暂停"** - 先停一下
 - **"继续"** - 恢复执行
-- **"合并"** - 审查通过，合并代码
+- **"完成"** - 审查通过，Issue 完成
 - **"取消"** - 不做了，关闭 Issue
