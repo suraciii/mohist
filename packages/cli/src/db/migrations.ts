@@ -1,6 +1,6 @@
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -99,6 +99,10 @@ export function initializeDatabase(db: DatabaseManager): void {
   if (currentVersion < 3) {
     migrateToVersion3(db);
   }
+  
+  if (currentVersion < 4) {
+    migrateToVersion4(db);
+  }
 }
 
 function migrateToVersion2(db: DatabaseManager): void {
@@ -127,5 +131,13 @@ function migrateToVersion3(db: DatabaseManager): void {
     db.exec('DROP TABLE IF EXISTS tasks');
     db.exec('DROP INDEX IF EXISTS idx_tasks_project_status');
     setSchemaVersion(db, 3);
+  });
+}
+
+function migrateToVersion4(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.run("UPDATE issues SET stage = 'plan' WHERE stage = 'designing'");
+    db.run("UPDATE issues SET stage = 'build' WHERE stage = 'implementing'");
+    setSchemaVersion(db, 4);
   });
 }

@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Server 可以作为后台进程启动
 
@@ -16,7 +16,7 @@ Server SHALL 能够作为独立的后台进程运行，持续监听 HTTP 请求�
 - **AND** server 将所有活跃 issue 标记为需要恢复
 - **AND** Agent Runtime 就绪后等待新的 issue 启动请求
 
-### Requirement: Server 管理 Issue pipeline
+### Requirement: Server 管理任务队列
 
 Server SHALL 管理 Issue pipeline 的调度和执行。
 

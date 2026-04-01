@@ -6,9 +6,10 @@ import { Stage } from '../types';
 const VALID_STAGES = new Set(Object.values(Stage));
 
 const M1_ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  [Stage.Draft]: [Stage.Designing],
-  [Stage.Designing]: [Stage.Implementing],
-  [Stage.Implementing]: [Stage.Done],
+  [Stage.Draft]: [Stage.Plan],
+  [Stage.Plan]: [Stage.Build],
+  [Stage.Build]: [Stage.Check],
+  [Stage.Check]: [Stage.Done, Stage.Plan],
 };
 
 export interface AdvanceStageContext {
@@ -19,13 +20,13 @@ export interface AdvanceStageContext {
 export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstance<any> {
   return Tool.define('advance_stage', {
     description:
-      'Advance the current issue to the next workflow stage. Allowed transitions: draft → designing, designing → implementing, implementing → done.',
+      'Advance the current issue to the next workflow stage. Allowed transitions: draft → plan, plan → build, build → check, check → done/plan.',
     parameters: z.object({
       issue_id: z.string().describe('The internal ID of the issue to update'),
       stage: z
         .string()
         .describe(
-          'The target stage to advance to. One of: designing, implementing, done (depending on current stage)'
+          'The target stage to advance to. One of: plan, build, check, done (depending on current stage)'
         ),
     }),
     execute: async (params) => {

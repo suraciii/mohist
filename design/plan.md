@@ -1,150 +1,57 @@
-# Plan 阶段
+# PLAN Stage
 
-## 概述
+## 职责
 
-制定技术方案，分解任务，创建 OpenSpec change。
+基于明确需求设计方案、分解任务。
 
-## 触发
+PLAN stage 专注于技术方案的制定。需求已在 Explore Mode 中梳理清晰（参见 pipeline-model spec 的两种交互模式），PLAN 接收的是明确的 Issue 描述。
 
-Explore 阶段完成 + 用户确认 "可以规划了"
+## 两种执行场景
 
-## 执行引擎
+### 首次执行
 
-opencode 会话
+Issue 从 `draft` 进入 `plan` 后首次执行：
 
-```
-opencode --message "/opsx:propose 搜索功能"
-```
+1. 探索代码库理解技术上下文
+2. 基于明确需求设计方案
+3. 分解任务并输出计划
 
-## Agent 行为
+### 修复执行
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│   1. 调用 OpenSpec 创建 change                                   │
-│      openspec new change add-search --schema ralph-driven       │
-│                                                                 │
-│   2. 读取 Issue Body（已梳理好的需求）                            │
-│                                                                 │
-│   3. 分析代码库，制定技术方案                                     │
-│                                                                 │
-│   4. 生成 artifacts:                                             │
-│      - proposal.md (为什么做，做什么)                            │
-│      - specs/ (详细规格)                                         │
-│      - design.md (技术设计)                                       │
-│      - prd.json (Ralph 任务列表)                                 │
-│                                                                 │
-│   5. 更新 Issue Body（添加方案摘要 + 任务清单 + change 链接）     │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+Issue 从 `check` 回到 `plan` 后修复执行：
 
-## 与 OpenSpec 的关系
+1. 分析 CHECK stage 的审查报告
+2. 制定修复计划
 
-Plan 阶段相当于 OpenSpec 的 `/opsx:propose`：
+## 工具集
 
-```
-crawlph Plan          OpenSpec
-─────────────────────────────────────────
-技术方案           →   proposal.md
-详细规格           →   specs/*/spec.md
-技术设计           →   design.md
-任务清单           →   prd.json
-```
+- `read`: 阅读代码库、理解上下文
+- `ask_user`: 向用户询问小问题（信息缺失、歧义）
+- `write`: 输出方案文档和任务清单
 
-## 输出
+## 产出物
 
-### Issue Body 更新
+- 技术方案文档
+- 任务清单（供 BUILD stage 执行）
 
-```markdown
-# 加一个搜索功能
+## Gate
 
-## 状态
-planning → developing (用户确认后)
+默认配置 `gate_after: human`：PLAN 完成后暂停，等待用户确认方案后再进入 BUILD。
 
-## 描述
-(Explore 阶段已产出)
+用户可以在 gate 处：
+- 批准方案 → 进入 BUILD
+- 要求修改 → 回到 PLAN
+- 标记大问题 → blocked，退出 Pipeline 回到 Explore Mode
 
-## 验收标准
-(Explore 阶段已产出)
-
-## 技术方案
-使用 PostgreSQL 全文搜索 (FTS)：
-- 添加 gin 索引到 articles 表
-- 实现 SearchService
-- 前端使用 React 组件
-
-关键决策：
-- 不引入 Elasticsearch（成本考虑）
-- 使用 PostgreSQL 内置 FTS（足够满足需求）
-
-## 任务
-- [ ] 添加搜索索引 (articles 表)
-- [ ] 实现 SearchService
-- [ ] 实现搜索 API
-- [ ] 添加搜索 UI 组件
-- [ ] 添加关键词高亮
-- [ ] 测试
-
-## OpenSpec
-openspec/changes/add-search/
-```
-
-### OpenSpec change 目录
+## Stage 结构
 
 ```
-openspec/changes/add-search/
-├── .openspec.yaml
-├── proposal.md
-├── design.md
-├── specs/
-│   └── search/
-│       └── spec.md
-└── prd.json
-```
-
-## prd.json 结构
-
-```json
-{
-  "project": "crawlph",
-  "description": "Add full-text search for articles",
-  "tasks": [
-    {
-      "id": "T-001",
-      "title": "Add search index to articles table",
-      "description": "Add GIN index for full-text search",
-      "acceptanceCriteria": [
-        "Migration runs successfully",
-        "Index is created",
-        "Typecheck passes"
-      ],
-      "priority": 1,
-      "passes": false
-    },
-    {
-      "id": "T-002",
-      "title": "Implement SearchService",
-      "description": "Create service class for search operations",
-      "acceptanceCriteria": [
-        "Can search by title and content",
-        "Returns ranked results",
-        "Tests pass"
-      ],
-      "priority": 2,
-      "passes": false
-    }
+PLAN {
+  jobs: [
+    { agent: "architect", task: "设计方案" }
   ]
+  gate_after: human
 }
 ```
 
-## 转换条件
-
-用户确认 "可以开发了" → 触发 Dev 阶段
-
-## 用户参与
-
-- 中度参与
-- 审查技术方案
-- 确认任务分解合理
-- 最终确认 "可以开发了"
+M1/M2 阶段只有单个 architect-agent Job。M3 可扩展为多 Job（如 architect 设计 + reviewer 审查并行）。

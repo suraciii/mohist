@@ -316,7 +316,7 @@ export function createIssueRoutes(
         return;
       }
 
-      stateManager.updateIssueStage(issue.id, Stage.Designing);
+      stateManager.updateIssueStage(issue.id, Stage.Plan);
       const updatedIssue = stateManager.getIssueByNumber(projectId, number)!;
 
       const project = stateManager.getProjectById(projectId);
