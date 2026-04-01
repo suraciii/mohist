@@ -13,9 +13,15 @@ test/agentic/
 │   └── entrypoint.sh                 # Server startup
 └── verify-<feature>/                 # Per-test
     ├── TESTPLAN.md                   # Agent-readable test plan (natural language + @ references)
-    ├── scripts/                      # Helper scripts (each does ONE thing)
-    │   └── <name>.sh
-    └── run.sh                        # podman build + run
+    └── scripts/                      # Helper scripts (each does ONE thing)
+        └── <name>.sh
+```
+
+## Commands
+
+```bash
+/test-create <feature>    # 创建测试计划
+/test-run <feature>       # 构建容器，执行测试计划
 ```
 
 ## TESTPLAN.md Convention
@@ -35,9 +41,6 @@ Example:
 3. 验证数据完整
 ```
 
-Agent 读懂"重启 server 并验证数据"，但进程管理（kill + 重启 + 等待健康检查）
-这种复杂操作委托给脚本。
-
 ## scripts/ Convention
 
 每个脚本只做 **一件事**，命名自解释：
@@ -48,25 +51,7 @@ scripts/restart-server.sh   # 停止 mo-server，重启，等待健康检查通�
 
 脚本应幂等、有明确退出码（0=成功，1=失败）、输出简明状态信息。
 
-## Running Tests
-
-```bash
-cd test/agentic/verify-m1-infra
-bash run.sh            # 构建容器，启动交互式 shell（server 已在运行）
-```
-
-容器内 agent 可读取 `/app/TESTPLAN.md` 并按步骤执行。
-
 ## Creating a New Test
 
-1. `mkdir -p test/agentic/verify-<feature>/scripts`
-2. Write `TESTPLAN.md` — 自然语言测试计划，复杂操作用 `@scripts/<name>.sh`
-3. Write `scripts/<name>.sh` — 每个只做一件事
-4. Write `run.sh` — podman build + run
-
-Layer B (需要 opencode) 时，加 per-test Containerfile：
-
-```dockerfile
-FROM mohist-test
-COPY test/agentic/shared/bin/opencode /usr/local/bin/opencode
-```
+1. `/test-create <feature>` — 自动探索代码库并生成 TESTPLAN.md + scripts
+2. 或手动：`mkdir -p test/agentic/verify-<feature>/scripts`，写 TESTPLAN.md 和脚本

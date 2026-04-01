@@ -5,18 +5,19 @@
 ```
 test/agentic/
 ├── shared/              # Shared infrastructure
-│   ├── Containerfile    # Base container (no opencode)
+│   ├── Containerfile    # Base container
 │   └── entrypoint.sh    # Starts mo-server
 └── verify-<feature>/
-    ├── TESTPLAN.md      # Natural language test plan
-    ├── test.sh          # Deterministic execution
-    └── run.sh           # podman build + run
+    ├── TESTPLAN.md      # Agent-readable test plan
+    └── scripts/         # Helper scripts (one script, one job)
+        └── <name>.sh
 ```
 
 ## Running
 
 ```bash
-cd test/agentic/verify-<feature> && bash run.sh
+/test-create <feature>   # Create test plan for a feature
+/test-run <feature>      # Build container and execute test plan
 ```
 
 ## Container
@@ -26,4 +27,3 @@ cd test/agentic/verify-<feature> && bash run.sh
 - Data: `/home/motest/.mohist/`
 - mohist source: `/opt/mohist-src` (built)
 - Server: `localhost:3456` (started by entrypoint)
-- No opencode (Layer A doesn't need it)
