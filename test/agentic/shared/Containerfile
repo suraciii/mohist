@@ -1,0 +1,49 @@
+# test/agentic/shared/Containerfile
+#
+# Base container for mohist agentic tests.
+#
+# Layer A tests: run as-is (bash test.sh)
+# Layer B tests: extend this image, add opencode binary
+#   FROM mohist-test
+#   COPY test/agentic/shared/bin/opencode /usr/local/bin/opencode
+
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+RUN if ! getent group ${GROUP_ID} > /dev/null 2>&1; then \
+        groupadd -g ${GROUP_ID} motest; \
+    else \
+        groupadd motest; \
+    fi && \
+    if ! getent passwd ${USER_ID} > /dev/null 2>&1; then \
+        useradd -u ${USER_ID} -g motest -m -s /bin/bash motest; \
+    else \
+        useradd -g motest -m -s /bin/bash motest; \
+    fi
+
+COPY --chown=motest:motest . /opt/mohist-src
+WORKDIR /opt/mohist-src
+RUN npm ci && npm run build
+
+ENV PATH="/opt/mohist-src/packages/cli/bin:${PATH}"
+
+RUN mkdir -p /app/workspace \
+    && mkdir -p /home/motest/.mohist \
+    && chown -R motest:motest /app \
+    && chown -R motest:motest /home/motest
+
+COPY test/agentic/shared/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+USER motest
+WORKDIR /app
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]
