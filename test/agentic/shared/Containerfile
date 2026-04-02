@@ -2,48 +2,22 @@
 #
 # Base container for mohist agentic tests.
 #
-# Layer A tests: run as-is (bash test.sh)
+# This image contains:
+#   - node:20-slim + python3/make/g++ (for native modules)
+#   - mohist source with npm dependencies and better-sqlite3 rebuilt
+#   - motest user (UID 1001)
+#   - /app/workspace, /home/motest/.mohist
+#   - entrypoint.sh (starts mo-server)
+#
 # Layer B tests: extend this image, add opencode binary
 #   FROM mohist-test
 #   COPY test/agentic/shared/bin/opencode /usr/local/bin/opencode
+#
+# To rebuild from scratch (slow, needs network):
+#   1. Start node:20-slim with --network=host
+#   2. apt-get install git curl jq python3 make g++
+#   3. Copy packages/cli, package.json, package-lock.json, node_modules
+#   4. npm rebuild better-sqlite3
+#   5. Set up motest user, entrypoint, commit as mohist-test
 
-FROM node:20-slim
-
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    jq \
-    && rm -rf /var/lib/apt/lists/*
-
-ARG USER_ID=1000
-ARG GROUP_ID=1000
-RUN if ! getent group ${GROUP_ID} > /dev/null 2>&1; then \
-        groupadd -g ${GROUP_ID} motest; \
-    else \
-        groupadd motest; \
-    fi && \
-    if ! getent passwd ${USER_ID} > /dev/null 2>&1; then \
-        useradd -u ${USER_ID} -g motest -m -s /bin/bash motest; \
-    else \
-        useradd -g motest -m -s /bin/bash motest; \
-    fi
-
-COPY --chown=motest:motest . /opt/mohist-src
-WORKDIR /opt/mohist-src
-RUN npm ci && npm run build
-
-ENV PATH="/opt/mohist-src/packages/cli/bin:${PATH}"
-
-RUN mkdir -p /app/workspace \
-    && mkdir -p /home/motest/.mohist \
-    && chown -R motest:motest /app \
-    && chown -R motest:motest /home/motest
-
-COPY test/agentic/shared/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-USER motest
-WORKDIR /app
-
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["bash"]
+FROM mohist-test
