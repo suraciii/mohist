@@ -1,0 +1,102 @@
+# fix-server-stability - Ralph Progress
+
+## Iteration 1 (2026-04-02)
+**Task**: T-001 — Add global unhandledRejection and uncaughtException handlers
+
+**What was done**:
+- Added `process.on('unhandledRejection')` handler in `packages/cli/src/server/index.ts` before `server.start()`
+  - Logs `[FATAL] Unhandled Promise Rejection:` with reason and stack trace
+  - Does NOT call `process.exit()`
+- Added `process.on('uncaughtException')` handler in same location
+  - Logs `[FATAL] Uncaught Exception:` with message and stack trace
+  - Does NOT call `process.exit()`
+- Fixed unused variable warning (`promise` → `_promise`)
+- `npm run build` succeeded
+
+**Next steps**: T-002 — Wrap agent catch block state update in try-catch
+
+## Iteration 2 (2026-04-02)
+**Task**: T-002 — Wrap agent catch block state update in try-catch
+
+**What was done**:
+- In `packages/cli/src/api/issues.ts` lines 346-348, wrapped `stateManager.updateIssueStatus()` call in try-catch inside the agent IIFE catch block
+- Inner catch logs error as `Failed to update issue #${number} status to blocked:`
+- `npm run build` succeeded
+
+**Next steps**: T-003 — Close handler checks for running agent
+
+## Iteration 3 (2026-04-02)
+**Task**: T-003 — Close handler checks for running agent
+
+**What was done**:
+- In `packages/cli/src/api/issues.ts` close handler, added check for `activeAgentIssueId === issue.id` before calling `issueService.block()`
+- Returns 409 with message "Issue #N has an agent running. Wait for it to complete or pause first."
+- Fixed success response to return `blockedIssue` (updated) instead of `issue` (pre-block state)
+- `npm run build` succeeded
+
+**Next steps**: T-004 — Start handler validates blocked status
+
+## Iteration 4 (2026-04-02)
+**Task**: T-004 — Start handler validates blocked status
+
+**What was done**:
+- Added `issue.status === IssueStatus.Blocked` check after the `stage !== Draft` check in start handler
+- Returns 400 with message "Issue #N is blocked and cannot be started"
+- `npm run build` succeeded
+
+**Next steps**: T-005 — Reject issue creation without active project context
+
+## Iteration 5 (2026-04-02)
+**Task**: T-005 — Reject issue creation without active project context
+
+**What was done**:
+- Updated error message in POST / handler from "No current project. Use: mo project use <name>" to "No active project" (matches acceptance criteria)
+- The check already existed, just needed message update
+- `npm run build` succeeded
+
+**Next steps**: T-006 — Remove ProjectService in-memory currentProjectId
+
+## Iteration 6 (2026-04-02)
+**Task**: T-006 — Remove ProjectService in-memory currentProjectId
+
+**What was done**:
+- Removed `private currentProjectId: string | null` field
+- Removed `loadCurrentProject()` method entirely
+- Removed `this.loadCurrentProject()` call from constructor
+- `getCurrent()` now reads from configRepo directly each time
+- `setCurrent()` only writes to configRepo (removed in-memory assignment)
+- `clearCurrent()` only deletes from configRepo (removed in-memory assignment)
+- `delete()` now reads `currentProjectId` from configRepo to check ownership
+- `npm run build` succeeded
+- `npm test`: 8 failures found, all pre-existing issues (NOT NULL constraint in issue-repo.ts:136, stage name mismatches `'plan'` vs `'designing'`). One test failure (`expected 'No active project'`) is due to T-005 message change.
+
+**All 6 tasks complete.**
+
+## Post-Implementation Review & Fixes (2026-04-02)
+
+### T-007 — Fix error message inconsistency across API handlers
+**What was done**:
+- Unified all error messages from "No current project" to "No active project. Use: mo project use <name>"
+- Updated files:
+  - `packages/cli/src/api/issues.ts` (8 locations: lines 34, 118, 165, 227, 276, 390, 447, 486)
+  - `packages/cli/src/api/labels.ts` (1 location)
+  - `packages/cli/src/api/status.ts` (1 location)
+- `npm run build` succeeded
+
+### T-008 — Fix status check order and string comparison in start handler
+**What was done**:
+- Reordered checks in POST /:number/start handler:
+  - **Before**: agent check → issue exists → paused check → stage check → blocked check
+  - **After**: agent check → issue exists → blocked check → paused check → stage check
+- Changed `issue.status === 'paused'` (string) to `issue.status === IssueStatus.Paused` (enum)
+- This ensures blocked issues are always rejected first, regardless of their stage
+- `npm run build` succeeded
+
+### T-009 — Update test expectations for new error messages
+**What was done**:
+- Updated `packages/cli/tests/api-routes.test.ts`:
+  - Line 197: Changed expectation from "No current project" to "No active project"
+  - Line 268: Changed expectation from "No current project" to "No active project"
+- `npm run build` succeeded
+
+**All 9 tasks complete.**

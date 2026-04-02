@@ -194,7 +194,7 @@ describe('API Routes', () => {
           .send({ title: 'Test Issue' });
 
         expect(response.status).toBe(400);
-        expect(response.body.error).toContain('No current project');
+        expect(response.body.error).toContain('No active project');
       });
     });
 
@@ -265,7 +265,7 @@ describe('API Routes', () => {
         const response = await request(app).get('/api/status');
 
         expect(response.status).toBe(400);
-        expect(response.body.error).toContain('No current project');
+        expect(response.body.error).toContain('No active project');
       });
 
       it('should return current project status', async () => {

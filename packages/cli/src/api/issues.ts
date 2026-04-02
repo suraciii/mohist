@@ -31,7 +31,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -85,7 +85,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project'
         };
         res.status(400).json(response);
         return;
@@ -162,7 +162,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -224,7 +224,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -273,7 +273,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -298,7 +298,16 @@ export function createIssueRoutes(
         return;
       }
 
-      if (issue.status === 'paused') {
+      if (issue.status === IssueStatus.Blocked) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is blocked and cannot be started`
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      if (issue.status === IssueStatus.Paused) {
         const response: ApiResponse = {
           success: false,
           error: `Issue #${number} is paused. Resume it first.`
@@ -345,7 +354,11 @@ export function createIssueRoutes(
           );
         } catch (err) {
           console.error(`Agent loop failed for issue #${number}:`, err);
-          stateManager.updateIssueStatus(issue.id, IssueStatus.Blocked);
+          try {
+            stateManager.updateIssueStatus(issue.id, IssueStatus.Blocked);
+          } catch (updateErr) {
+            console.error(`Failed to update issue #${number} status to blocked:`, updateErr);
+          }
         } finally {
           activeAgentPromise = null;
           activeAgentIssueId = null;
@@ -374,15 +387,33 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
       }
 
-      const issue = issueService.block(projectId, number);
-      
+      const issue = issueService.getByNumber(projectId, number);
       if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        res.status(404).json(response);
+        return;
+      }
+
+      if (activeAgentIssueId === issue.id) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} has an agent running. Wait for it to complete or pause first.`
+        };
+        res.status(409).json(response);
+        return;
+      }
+
+      const blockedIssue = issueService.block(projectId, number);
+      if (!blockedIssue) {
         const response: ApiResponse = {
           success: false,
           error: `Issue #${number} not found`
@@ -393,7 +424,7 @@ export function createIssueRoutes(
 
       const response: ApiResponse = {
         success: true,
-        data: { issue, message: `Issue #${number} closed` }
+        data: { issue: blockedIssue, message: `Issue #${number} closed` }
       };
       res.json(response);
     } catch (error) {
@@ -413,7 +444,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
@@ -452,7 +483,7 @@ export function createIssueRoutes(
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;

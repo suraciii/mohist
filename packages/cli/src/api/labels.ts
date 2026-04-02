@@ -12,7 +12,7 @@ export function createLabelRoutes(stateManager: StateManager): Router {
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
-          error: 'No current project. Use: mo project use <name>'
+          error: 'No active project. Use: mo project use <name>'
         };
         res.status(400).json(response);
         return;
