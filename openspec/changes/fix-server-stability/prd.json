@@ -1,0 +1,98 @@
+{
+  "project": "fix-server-stability",
+  "description": "Fix server process crashes, add error resilience, coordinate agent lifecycle, and unify project context management",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add global unhandledRejection and uncaughtException handlers",
+      "spec": "specs/error-resilience/spec.md",
+      "description": "Register process.on('unhandledRejection') and process.on('uncaughtException') in server/index.ts main(). Handlers log error with stack trace but do NOT exit the process.",
+      "acceptanceCriteria": [
+        "process.on('unhandledRejection') is registered in server/index.ts",
+        "process.on('uncaughtException') is registered in server/index.ts",
+        "Handler logs rejection reason and stack trace",
+        "Handler does not call process.exit()",
+        "npm run build succeeds"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Place handlers before server.start() in main(). Use console.error for logging."
+    },
+    {
+      "id": "T-002",
+      "title": "Wrap agent catch block state update in try-catch",
+      "spec": "specs/error-resilience/spec.md",
+      "description": "In api/issues.ts agent IIFE catch block (~line 348), wrap stateManager.updateIssueStatus() call in try-catch to prevent unhandled rejection when the status update itself throws.",
+      "acceptanceCriteria": [
+        "stateManager.updateIssueStatus() in agent catch block is wrapped in try-catch",
+        "Inner catch logs the error",
+        "npm run build succeeds"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "This is the known crash trigger point. The global handler from T-001 is a safety net; this is the direct fix."
+    },
+    {
+      "id": "T-003",
+      "title": "Close handler checks for running agent",
+      "spec": "specs/server-daemon/spec.md",
+      "description": "In the POST /:number/close handler, check if the target issue has an active agent (activeAgentIssueId). If so, return 409 Conflict with a message explaining the agent is running.",
+      "acceptanceCriteria": [
+        "Close handler checks activeAgentIssueId before proceeding",
+        "Returns 409 when agent is running on the target issue",
+        "Error message mentions 'agent is running'",
+        "Close still works when no agent is running",
+        "npm run build succeeds"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Unlike the start handler (which checks if ANY agent is running), close should check if `activeAgentIssueId === targetIssue.id`. Use: `if (activeAgentIssueId === issue.id)`."
+    },
+    {
+      "id": "T-004",
+      "title": "Start handler validates blocked status",
+      "spec": "specs/http-api/spec.md",
+      "description": "In POST /:number/start handler, add a check that rejects starting issues with blocked status (in addition to the existing stage check). Return 400 with error message containing 'blocked'.",
+      "acceptanceCriteria": [
+        "Start handler rejects blocked issues with 400",
+        "Error message contains 'blocked'",
+        "Start still works for active draft issues",
+        "npm run build succeeds"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Add after the existing stage !== Draft check."
+    },
+    {
+      "id": "T-005",
+      "title": "Reject issue creation without active project context",
+      "spec": "specs/http-api/spec.md",
+      "description": "In POST /api/issues handler, check getCurrentProjectId() returns non-null before creating. Return 400 with error message 'no active project' if null.",
+      "acceptanceCriteria": [
+        "POST /api/issues returns 400 when no current project is set",
+        "Error message contains 'no active project'",
+        "Issue creation still works when project context exists",
+        "npm run build succeeds"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "The getCurrentProjectId() function already exists in state-manager.ts."
+    },
+    {
+      "id": "T-006",
+      "title": "Remove ProjectService in-memory currentProjectId",
+      "spec": "specs/project-management/spec.md",
+      "description": "Remove the private currentProjectId field from ProjectService. Change getCurrent() to read from configRepo each time. Update setCurrentByName() to use setCurrent() which writes to configRepo. Remove loadCurrentProject() and its constructor call since it becomes dead code after removing the field.",
+      "acceptanceCriteria": [
+        "ProjectService has no private currentProjectId field",
+        "getCurrent() reads from configRepo",
+        "project list/show/use/close/reopen still work correctly",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "loadCurrentProject() becomes dead code after removing the field — remove it entirely along with its call in the constructor. After the change, ProjectService constructor takes projectRepo and configRepo but doesn't call loadCurrentProject()."
+    }
+  ]
+}
