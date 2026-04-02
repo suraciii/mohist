@@ -15,7 +15,7 @@
         "npm run build succeeds"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Place handlers before server.start() in main(). Use console.error for logging."
     },
     {
@@ -29,7 +29,7 @@
         "npm run build succeeds"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "This is the known crash trigger point. The global handler from T-001 is a safety net; this is the direct fix."
     },
     {
@@ -45,7 +45,7 @@
         "npm run build succeeds"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Unlike the start handler (which checks if ANY agent is running), close should check if `activeAgentIssueId === targetIssue.id`. Use: `if (activeAgentIssueId === issue.id)`."
     },
     {
@@ -60,7 +60,7 @@
         "npm run build succeeds"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Add after the existing stage !== Draft check."
     },
     {
@@ -75,7 +75,7 @@
         "npm run build succeeds"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "The getCurrentProjectId() function already exists in state-manager.ts."
     },
     {
@@ -91,8 +91,47 @@
         "npm test passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "loadCurrentProject() becomes dead code after removing the field — remove it entirely along with its call in the constructor. After the change, ProjectService constructor takes projectRepo and configRepo but doesn't call loadCurrentProject()."
+      "passes": true,
+    },
+    {
+      "id": "T-007",
+      "title": "Fix error message inconsistency across API handlers",
+      "description": "All API handlers currently use 'No current project. Use: mo project use <name>' error message except POST /api/issues which uses 'No active project'. Unify all error messages to 'No active project. Use: mo project use <name>' for consistency.",
+      "acceptanceCriteria": [
+        "All handlers in api/issues.ts use consistent error message",
+        "Handlers in api/labels.ts use consistent error message",
+        "Handlers in api/status.ts use consistent error message",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Files to update: issues.ts (lines 34, 118, 165, 227, 276, 390, 447, 486), labels.ts, status.ts"
+    },
+    {
+      "id": "T-008",
+      "title": "Fix status check order and string comparison in start handler",
+      "description": "In api/issues.ts POST /:number/start handler: (1) Move blocked status check BEFORE stage check so blocked issues are always rejected regardless of stage. (2) Fix string comparison 'paused' to use IssueStatus.Paused enum instead of string literal.",
+      "acceptanceCriteria": [
+        "Blocked status check occurs before stage check in start handler",
+        "issue.status === IssueStatus.Paused used instead of string 'paused'",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Current order: agent check → issue exists → paused check → stage check → blocked check. New order should be: agent check → issue exists → blocked check → paused check → stage check. Blocked should be checked first to ensure blocked issues are always rejected."
+    },
+    {
+      "id": "T-009",
+      "title": "Update test expectations for new error messages",
+      "description": "Update api-routes.test.ts to expect 'No active project' instead of 'No current project' to match the new unified error message format.",
+      "acceptanceCriteria": [
+        "Test at line 197 expects 'No active project'",
+        "Test at line 268 expects 'No active project'",
+        "npm test passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Must be done after T-007 to ensure tests match the updated error messages."
     }
-  ]
-}
