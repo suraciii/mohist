@@ -7,21 +7,12 @@ export interface CreateProjectData {
 }
 
 export class ProjectService {
-  private currentProjectId: string | null = null;
   private static CURRENT_PROJECT_KEY = 'currentProjectId';
 
   constructor(
     private projectRepo: ProjectRepo,
     private configRepo: ConfigRepo
   ) {
-    this.loadCurrentProject();
-  }
-
-  private loadCurrentProject(): void {
-    const savedId = this.configRepo.get(ProjectService.CURRENT_PROJECT_KEY);
-    if (savedId && this.projectRepo.findById(savedId)) {
-      this.currentProjectId = savedId;
-    }
   }
 
   create(data: CreateProjectData): Project {
@@ -58,12 +49,12 @@ export class ProjectService {
   }
 
   getCurrent(): Project | null {
-    if (!this.currentProjectId) return null;
-    return this.projectRepo.findById(this.currentProjectId);
+    const savedId = this.configRepo.get(ProjectService.CURRENT_PROJECT_KEY);
+    if (!savedId) return null;
+    return this.projectRepo.findById(savedId);
   }
 
   setCurrent(project: Project): void {
-    this.currentProjectId = project.id;
     this.configRepo.set(ProjectService.CURRENT_PROJECT_KEY, project.id);
   }
 
@@ -75,18 +66,18 @@ export class ProjectService {
   }
 
   clearCurrent(): void {
-    this.currentProjectId = null;
     this.configRepo.delete(ProjectService.CURRENT_PROJECT_KEY);
   }
 
   delete(id: string): boolean {
     const project = this.projectRepo.findById(id);
     if (!project) return false;
-    
-    if (this.currentProjectId === id) {
+
+    const currentId = this.configRepo.get(ProjectService.CURRENT_PROJECT_KEY);
+    if (currentId === id) {
       this.clearCurrent();
     }
-    
+
     return this.projectRepo.delete(id);
   }
 

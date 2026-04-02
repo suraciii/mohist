@@ -79,6 +79,18 @@ async function main(): Promise<void> {
     await server.stop();
   });
 
+  process.on('unhandledRejection', (reason, _promise) => {
+    console.error('[FATAL] Unhandled Promise Rejection:', reason);
+    if (reason instanceof Error) {
+      console.error('Stack trace:', reason.stack);
+    }
+  });
+
+  process.on('uncaughtException', (error) => {
+    console.error('[FATAL] Uncaught Exception:', error.message);
+    console.error('Stack trace:', error.stack);
+  });
+
   await server.start();
   
   console.log(`mohist server started on port ${config.serverPort}`);
