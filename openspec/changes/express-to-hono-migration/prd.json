@@ -1,0 +1,145 @@
+{
+  "project": "mohist",
+  "description": "Migrate HTTP framework from Express to Hono with 1:1 translation, keeping all API behavior unchanged",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Replace dependencies: remove express, add hono",
+      "description": "Remove express and @types/express from package.json. Add hono and @hono/node-server as dependencies. Run npm install to update lock file.",
+      "acceptanceCriteria": [
+        "express is not in package.json dependencies",
+        "@types/express is not in package.json devDependencies",
+        "hono is in package.json dependencies",
+        "@hono/node-server is in package.json dependencies",
+        "npm install succeeds",
+        "npm run typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "No @types/hono needed — hono ships its own types."
+    },
+    {
+      "id": "T-002",
+      "title": "Migrate HttpServer class to Hono",
+      "description": "Rewrite http-server.ts to use Hono instead of Express. Replace Express app with Hono instance, replace app.listen() with serve({ fetch, port }), replace app.use(path, router) with app.route(path, subApp). Keep the same public interface (addRouter, start, stop, getApp, getState).",
+      "acceptanceCriteria": [
+        "HttpServer uses Hono instead of Express",
+        "setupMiddleware registers Hono middleware (logger)",
+        "setupRoutes registers /api/health and /api/status",
+        "start() uses serve() from @hono/node-server",
+        "stop() properly closes the server",
+        "addRouter uses app.route() to mount sub-applications",
+        "npm run typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "serve() returns a Server instance — store it for stop(). Keep manual try/catch pattern, no onError middleware."
+    },
+    {
+      "id": "T-003",
+      "title": "Migrate api/projects.ts to Hono",
+      "description": "Convert projects.ts from Express Router to Hono. Replace Router() with new Hono(), replace (req, res) handlers with (c) handlers using c.req.json(), c.req.param(), c.json(). Keep all endpoints and error handling unchanged.",
+      "acceptanceCriteria": [
+        "createProjectRoutes returns Hono instance instead of Express Router",
+        "POST / creates project, returns 201",
+        "GET / lists projects",
+        "GET /:name returns project or 404",
+        "DELETE /:name deletes project",
+        "POST /:name/use sets current project",
+        "npm run typecheck passes",
+        "npm test api-routes.test.ts passes (projects section)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Hono handlers are async by nature. Use c.req.json() for body, c.req.param('name') for params."
+    },
+    {
+      "id": "T-004",
+      "title": "Migrate api/issues.ts to Hono",
+      "description": "Convert issues.ts from Express Router to Hono. This is the largest API file (518 lines). Replace all (req, res) handlers with (c) handlers. Keep the activeAgentIssueId/activeAgentPromise module state unchanged.",
+      "acceptanceCriteria": [
+        "createIssueRoutes returns Hono instance",
+        "GET / lists issues with optional stage/label filtering",
+        "POST / creates issue",
+        "GET /:number returns issue details with comments",
+        "PATCH /:number updates issue",
+        "POST /:number/comments adds comment",
+        "POST /:number/start launches agent",
+        "POST /:number/close blocks issue",
+        "POST /:number/reopen reopens issue",
+        "POST /:number/cleanup removes worktree",
+        "npm run typecheck passes",
+        "npm test api-routes.test.ts passes (issues section)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Most mechanical: req.body → await c.req.json(), req.params.number → c.req.param('number'), res.json(x) → c.json(x), res.status(n).json(x) → c.json(x, n)."
+    },
+    {
+      "id": "T-005",
+      "title": "Migrate api/config.ts, api/status.ts, api/labels.ts to Hono",
+      "description": "Convert the three smaller API files from Express Router to Hono. All follow the same pattern as T-003.",
+      "acceptanceCriteria": [
+        "createConfigRoutes returns Hono instance",
+        "createStatusRoutes returns Hono instance",
+        "createLabelRoutes returns Hono instance",
+        "GET /api/config returns config",
+        "PUT /api/config/:key updates config",
+        "GET /api/config/list returns all config",
+        "GET /api/status returns current project status",
+        "GET /api/status?all=true returns all projects status",
+        "GET /api/labels returns labels",
+        "npm run typecheck passes",
+        "npm test api-routes.test.ts passes (status and config sections)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "These are straightforward translations. status.ts has duplicate /health endpoint with http-server.ts — keep as-is."
+    },
+    {
+      "id": "T-006",
+      "title": "Update server/index.ts imports and wiring",
+      "description": "Update server/index.ts to work with the new Hono-based modules. No logic changes — just ensure imports resolve and addRouter calls work with Hono sub-apps.",
+      "acceptanceCriteria": [
+        "server/index.ts compiles without errors",
+        "All createXxxRoutes calls work with Hono instances",
+        "npm run typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Minimal changes expected — the addRouter interface should remain compatible."
+    },
+    {
+      "id": "T-007",
+      "title": "Update api-routes.test.ts to support Hono",
+      "description": "Update tests/api-routes.test.ts supertest setup to work with Hono. Replace express() test app setup with Hono app creation. Ensure all test infrastructure works.",
+      "acceptanceCriteria": [
+        "tests/api-routes.test.ts imports Hono instead of express for test app setup",
+        "Test setup creates Hono app with json middleware",
+        "All router tests use Hono instances",
+        "npm test passes for project routes",
+        "npm test passes for issue routes",
+        "npm test passes for status routes",
+        "npm test passes for config routes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "supertest works with any http.Server. Use @hono/node-server's createAdaptor or app.fetch directly. Test infrastructure must be ready before T-003~T-005."
+    },
+    {
+      "id": "T-008",
+      "title": "Remove error-handler.ts and all Express imports",
+      "description": "Remove error-handler.ts (currently unused — not wired into Express app). Search for any remaining Express imports across the codebase and remove them. Verify no Express references remain.",
+      "acceptanceCriteria": [
+        "No 'express' imports remain in src/",
+        "error-handler.ts is removed",
+        "npm test succeeds",
+        "npm run typecheck passes",
+        "npm run build succeeds"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "error-handler.ts was defined but never used (no app.use(errorHandler)). Just remove it."
+    }
+  ]
+}
