@@ -168,7 +168,34 @@
 
 ---
 
-## 7. 跨 Milestone
+## 7. Web UI
+
+### HTTP 框架迁移
+
+| ID | 事项 | 说明 | 来源 |
+|----|------|------|------|
+| B-300 | Express → Hono 迁移 | 迁移 HTTP 框架到 Hono，获得内置 SSE (streamSSE)、更好的类型安全、更好的静态文件服务。业务层/services/db 不受影响 | 2026-04-03 explore |
+
+### 嵌入式 Web UI
+
+| ID | 事项 | 说明 | 来源 |
+|----|------|------|------|
+| B-301 | 嵌入式 Web UI 架构 | 参考 opencode 做法：Vite build → 嵌入 server 二进制 → `mo server` 一条命令同时提供 API + UI | 2026-04-03 explore |
+| B-302 | 前端技术选型 | SolidJS (opencode 同款，无虚拟DOM) vs React (生态大)。UI 相对简单（看板+列表+详情），两者都够用 | 2026-04-03 explore |
+| B-303 | SSE 实时事件推送 | 三层架构：内部 Bus (PubSub) → SSE endpoint → 客户端。支持 Agent 进度实时展示 | 2026-04-03 explore |
+
+### Web UI 功能
+
+| ID | 事项 | 说明 | 来源 |
+|----|------|------|------|
+| B-310 | 看板视图 | Issue 按 stage (draft/plan/build/check/done) 分列展示 | 2026-04-03 explore |
+| B-311 | Issue 详情 | 描述、评论、Agent 输出流、状态变更历史 | 2026-04-03 explore |
+| B-312 | 项目切换 | 多项目之间切换，当前项目高亮 | 2026-04-03 explore |
+| B-313 | 操作能力（MVP 后） | 创建 Issue、启动 Agent、审批 gate、关闭/重开 Issue | 2026-04-03 explore |
+
+---
+
+## 8. 跨 Milestone
 
 | ID | 事项 | 说明 | Milestone |
 |----|------|------|-----------|
