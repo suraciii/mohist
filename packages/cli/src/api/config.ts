@@ -1,11 +1,11 @@
-import { Router, Request, Response } from 'express';
+import { Hono } from 'hono';
 import { ApiResponse, Config } from '../types';
 import { ConfigService } from '../services';
 
-export function createConfigRoutes(configService: ConfigService): Router {
-  const router = Router();
+export function createConfigRoutes(configService: ConfigService): Hono {
+  const app = new Hono();
 
-  router.get('/', (_req: Request, res: Response): void => {
+  app.get('/', async (c) => {
     try {
       const config = configService.getConfig();
 
@@ -13,28 +13,27 @@ export function createConfigRoutes(configService: ConfigService): Router {
         success: true,
         data: config
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.put('/:key', (req: Request, res: Response): void => {
+  app.put('/:key', async (c) => {
     try {
-      const key = req.params.key;
-      const { value } = req.body;
+      const key = c.req.param('key');
+      const { value } = await c.req.json();
 
       if (value === undefined) {
         const response: ApiResponse = {
           success: false,
           error: 'value is required'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const validation = configService.validate(key, String(value));
@@ -43,8 +42,7 @@ export function createConfigRoutes(configService: ConfigService): Router {
           success: false,
           error: validation.error
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       configService.set(key, value);
@@ -53,17 +51,17 @@ export function createConfigRoutes(configService: ConfigService): Router {
         success: true,
         data: { key, value }
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.get('/list', (_req: Request, res: Response): void => {
+  app.get('/list', async (c) => {
     try {
       const allConfig = configService.getAll();
       
@@ -80,15 +78,15 @@ export function createConfigRoutes(configService: ConfigService): Router {
         success: true,
         data: safeConfig
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  return router;
+  return app;
 }

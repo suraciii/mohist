@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Hono } from 'hono';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Issue, Stage, IssueStatus, Comment } from '../types';
 import { IssueService } from '../services';
@@ -14,8 +14,8 @@ export function createIssueRoutes(
   worktreeManager: WorktreeManager | null = null,
   sessionManager: SessionManager = new SessionManager(),
   llmConfig?: LlmConfig
-): Router {
-  const router = Router();
+): Hono {
+  const app = new Hono();
   
   const issueService = new IssueService(
     stateManager.getIssueRepo()
@@ -25,7 +25,7 @@ export function createIssueRoutes(
     return stateManager.getCurrentProjectId();
   };
 
-  router.get('/', (req: Request, res: Response): void => {
+  app.get('/', async (c) => {
     try {
       const projectId = getCurrentProjectId();
       if (!projectId) {
@@ -33,12 +33,11 @@ export function createIssueRoutes(
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
-      const stage = req.query.stage as Stage | undefined;
-      const label = req.query.label as string | undefined;
+      const stage = c.req.query('stage') as Stage | undefined;
+      const label = c.req.query('label') as string | undefined;
       
       let issues = stage 
         ? issueService.getByStage(projectId, stage)
@@ -58,27 +57,26 @@ export function createIssueRoutes(
         success: true,
         data: issuesWithProject
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.post('/', (req: Request, res: Response): void => {
+  app.post('/', async (c) => {
     try {
-      const { title, body, labels } = req.body;
+      const { title, body, labels } = await c.req.json();
       
       if (!title) {
         const response: ApiResponse = {
           success: false,
           error: 'title is required'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const projectId = getCurrentProjectId();
@@ -87,8 +85,7 @@ export function createIssueRoutes(
           success: false,
           error: 'No active project'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const issue = stateManager.createIssue(projectId, title, body, labels);
@@ -97,19 +94,19 @@ export function createIssueRoutes(
         success: true,
         data: issue
       };
-      res.status(201).json(response);
+      return c.json(response, 201);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.get('/:number', (req: Request, res: Response): void => {
+  app.get('/:number', async (c) => {
     try {
-      const number = parseInt(req.params.number);
+      const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
       
       if (!projectId) {
@@ -117,8 +114,7 @@ export function createIssueRoutes(
           success: false,
           error: 'No current project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const issue = issueService.getByNumber(projectId, number);
@@ -128,8 +124,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} not found`
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       const comments = stateManager.getCommentsByIssue(issue.id);
@@ -144,19 +139,19 @@ export function createIssueRoutes(
           comments
         }
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.patch('/:number', (req: Request, res: Response): void => {
+  app.patch('/:number', async (c) => {
     try {
-      const number = parseInt(req.params.number);
+      const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
       
       if (!projectId) {
@@ -164,8 +159,7 @@ export function createIssueRoutes(
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const issue = stateManager.getIssueByNumber(projectId, number);
@@ -174,11 +168,10 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} not found`
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
-      const { title, body, addLabels, removeLabels } = req.body;
+      const { title, body, addLabels, removeLabels } = await c.req.json();
       const updateData: Partial<{ title: string; body: string; labels: string[] }> = {};
       
       if (title !== undefined) updateData.title = title;
@@ -205,20 +198,20 @@ export function createIssueRoutes(
         success: true,
         data: updated || undefined
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.post('/:number/comments', (req: Request, res: Response): void => {
+  app.post('/:number/comments', async (c) => {
     try {
-      const number = parseInt(req.params.number);
-      const { body } = req.body;
+      const number = parseInt(c.req.param('number'));
+      const { body } = await c.req.json();
       const projectId = getCurrentProjectId();
       
       if (!projectId) {
@@ -226,8 +219,7 @@ export function createIssueRoutes(
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       if (!body) {
@@ -235,8 +227,7 @@ export function createIssueRoutes(
           success: false,
           error: 'body is required'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const issue = stateManager.getIssueByNumber(projectId, number);
@@ -245,8 +236,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} not found`
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       const comment = stateManager.createComment(issue.id, body);
@@ -255,19 +245,19 @@ export function createIssueRoutes(
         success: true,
         data: comment
       };
-      res.status(201).json(response);
+      return c.json(response, 201);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.post('/:number/start', async (req: Request, res: Response): Promise<void> => {
+  app.post('/:number/start', async (c) => {
     try {
-      const number = parseInt(req.params.number);
+      const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
       
       if (!projectId) {
@@ -275,8 +265,7 @@ export function createIssueRoutes(
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       if (activeAgentPromise) {
@@ -284,8 +273,7 @@ export function createIssueRoutes(
           success: false,
           error: `Another issue (#${activeAgentIssueId}) is already running. Wait for it to complete or pause first.`
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const issue = issueService.getByNumber(projectId, number);
@@ -294,8 +282,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} not found`
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       if (issue.status === IssueStatus.Blocked) {
@@ -303,8 +290,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} is blocked and cannot be started`
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       if (issue.status === IssueStatus.Paused) {
@@ -312,8 +298,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} is paused. Resume it first.`
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       if (issue.stage !== Stage.Draft) {
@@ -321,8 +306,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} is not in draft stage (current: ${issue.stage})`
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       stateManager.updateIssueStage(issue.id, Stage.Plan);
@@ -364,19 +348,19 @@ export function createIssueRoutes(
         success: true,
         data: { issue: updatedIssue, message: `Issue #${number} started, agent is running` }
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.post('/:number/close', (req: Request, res: Response): void => {
+  app.post('/:number/close', async (c) => {
     try {
-      const number = parseInt(req.params.number);
+      const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
       
       if (!projectId) {
@@ -384,8 +368,7 @@ export function createIssueRoutes(
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const issue = issueService.getByNumber(projectId, number);
@@ -394,8 +377,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} not found`
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       if (activeAgentIssueId === issue.id) {
@@ -403,8 +385,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} has an agent running. Wait for it to complete or pause first.`
         };
-        res.status(409).json(response);
-        return;
+        return c.json(response, 409);
       }
 
       const blockedIssue = issueService.block(projectId, number);
@@ -413,27 +394,26 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} not found`
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       const response: ApiResponse = {
         success: true,
         data: { issue: blockedIssue, message: `Issue #${number} closed` }
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.post('/:number/reopen', (req: Request, res: Response): void => {
+  app.post('/:number/reopen', async (c) => {
     try {
-      const number = parseInt(req.params.number);
+      const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
       
       if (!projectId) {
@@ -441,8 +421,7 @@ export function createIssueRoutes(
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const issue = issueService.resume(projectId, number);
@@ -452,27 +431,26 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} not found`
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       const response: ApiResponse = {
         success: true,
         data: { issue, message: `Issue #${number} reopened` }
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.post('/:number/cleanup', async (req: Request, res: Response): Promise<void> => {
+  app.post('/:number/cleanup', async (c) => {
     try {
-      const number = parseInt(req.params.number);
+      const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
 
       if (!projectId) {
@@ -480,8 +458,7 @@ export function createIssueRoutes(
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const issue = issueService.getByNumber(projectId, number);
@@ -490,8 +467,7 @@ export function createIssueRoutes(
           success: false,
           error: `Issue #${number} not found`
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       const project = stateManager.getProjectById(projectId);
@@ -504,15 +480,15 @@ export function createIssueRoutes(
         success: true,
         data: { issue, message: `Issue #${number} worktree cleaned up` }
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  return router;
+  return app;
 }

@@ -15,7 +15,7 @@
         "npm run typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "No @types/hono needed — hono ships its own types."
     },
     {
@@ -32,7 +32,7 @@
         "npm run typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "serve() returns a Server instance — store it for stop(). Keep manual try/catch pattern, no onError middleware."
     },
     {
@@ -50,7 +50,7 @@
         "npm test api-routes.test.ts passes (projects section)"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Hono handlers are async by nature. Use c.req.json() for body, c.req.param('name') for params."
     },
     {
@@ -72,7 +72,7 @@
         "npm test api-routes.test.ts passes (issues section)"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Most mechanical: req.body → await c.req.json(), req.params.number → c.req.param('number'), res.json(x) → c.json(x), res.status(n).json(x) → c.json(x, n)."
     },
     {
@@ -93,8 +93,8 @@
         "npm test api-routes.test.ts passes (status and config sections)"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "These are straightforward translations. status.ts has duplicate /health endpoint with http-server.ts — keep as-is."
+      "passes": true,
+      "notes": "These are straightforward translations. status.ts has duplicate /health endpoint with http-server.ts — keep as-is. Also removed error-handler.ts early (dead code, not imported anywhere) to unblock typecheck."
     },
     {
       "id": "T-006",
@@ -106,8 +106,8 @@
         "npm run typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "Minimal changes expected — the addRouter interface should remain compatible."
+      "passes": true,
+      "notes": "No changes needed. server/index.ts already compiles cleanly — it only uses HttpServer public interface and route factory functions, all migrated in T-002~T-005."
     },
     {
       "id": "T-007",
@@ -123,7 +123,7 @@
         "npm test passes for config routes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "supertest works with any http.Server. Use @hono/node-server's createAdaptor or app.fetch directly. Test infrastructure must be ready before T-003~T-005."
     },
     {
@@ -138,8 +138,8 @@
         "npm run build succeeds"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "error-handler.ts was defined but never used (no app.use(errorHandler)). Just remove it."
+      "passes": true,
+      "notes": "error-handler.ts was already removed in T-005. Fixed remaining Express references in tests/e2e.test.ts (migrated to Hono) and tests/api-integration.test.ts (replaced error-handler exports test with createLabelRoutes test). All tests pass, typecheck and build clean."
     }
   ]
 }

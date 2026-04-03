@@ -1,11 +1,11 @@
-import { Router, Request, Response } from 'express';
+import { Hono } from 'hono';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse } from '../types';
 
-export function createLabelRoutes(stateManager: StateManager): Router {
-  const router = Router();
+export function createLabelRoutes(stateManager: StateManager): Hono {
+  const app = new Hono();
 
-  router.get('/', (_req: Request, res: Response): void => {
+  app.get('/', async (c) => {
     try {
       const projectId = stateManager.getCurrentProjectId();
       
@@ -14,8 +14,7 @@ export function createLabelRoutes(stateManager: StateManager): Router {
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const labels = stateManager.getLabels(projectId);
@@ -24,15 +23,15 @@ export function createLabelRoutes(stateManager: StateManager): Router {
         success: true,
         data: labels
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  return router;
+  return app;
 }
