@@ -206,13 +206,13 @@ describe('IssueService', () => {
   describe('transitionToStageByNumber', () => {
     it('should transition issue stage', () => {
       service.create({ projectId, title: 'Test' });
-      const updated = service.transitionToStageByNumber(projectId, 1, Stage.Designing);
+      const updated = service.transitionToStageByNumber(projectId, 1, Stage.Plan);
       
-      expect(updated?.stage).toBe(Stage.Designing);
+      expect(updated?.stage).toBe(Stage.Plan);
     });
 
     it('should return null for non-existent issue', () => {
-      const result = service.transitionToStageByNumber(projectId, 999, Stage.Designing);
+      const result = service.transitionToStageByNumber(projectId, 999, Stage.Plan);
       expect(result).toBeNull();
     });
   });
@@ -247,12 +247,12 @@ describe('IssueService', () => {
     it('should filter issues by stage', () => {
       service.create({ projectId, title: 'Draft 1' });
       service.create({ projectId, title: 'Draft 2' });
-      service.transitionToStageByNumber(projectId, 1, Stage.Designing);
+      service.transitionToStageByNumber(projectId, 1, Stage.Plan);
       
-      const designing = service.getByStage(projectId, Stage.Designing);
+      const plan = service.getByStage(projectId, Stage.Plan);
       const drafts = service.getByStage(projectId, Stage.Draft);
       
-      expect(designing).toHaveLength(1);
+      expect(plan).toHaveLength(1);
       expect(drafts).toHaveLength(1);
     });
   });

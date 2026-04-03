@@ -10,7 +10,7 @@
         "TypeScript 编译通过"
       ],
       "priority": 1,
-      "passes": false
+      "passes": true
     },
     {
       "id": "T002",
@@ -28,7 +28,7 @@
         "opencode 不在 PATH 时返回错误信息而非崩溃"
       ],
       "priority": 2,
-      "passes": false
+      "passes": true
     },
     {
       "id": "T003",
@@ -42,7 +42,7 @@
         "YAML 格式错误时返回错误信息并使用默认 workflow"
       ],
       "priority": 3,
-      "passes": false
+      "passes": true
     },
     {
       "id": "T004",
@@ -59,7 +59,7 @@
         "build 通过"
       ],
       "priority": 4,
-      "passes": false
+      "passes": true
     },
     {
       "id": "T005",
@@ -72,7 +72,7 @@
         "build 通过"
       ],
       "priority": 5,
-      "passes": false
+      "passes": true
     },
     {
       "id": "T006",
@@ -85,7 +85,7 @@
         "opencode acp 子进程正确启动和退出"
       ],
       "priority": 6,
-      "passes": false
+      "passes": true
     }
   ]
 }

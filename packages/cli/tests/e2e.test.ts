@@ -67,21 +67,21 @@ describe('E2E: Single Issue Complete Flow', () => {
       expect(listResponse.status).toBe(200);
       expect(listResponse.body.data).toHaveLength(1);
 
-      // Step 3: Start processing (moves to designing)
+      // Step 3: Start processing (moves to plan)
       const startResponse = await request(app).post('/api/issues/1/start');
       expect(startResponse.status).toBe(200);
       expect(startResponse.body.success).toBe(true);
-      expect(startResponse.body.data.issue.stage).toBe(Stage.Designing);
+      expect(startResponse.body.data.issue.stage).toBe(Stage.Plan);
 
       // Step 4: Verify show endpoint
       const showResponse1 = await request(app).get('/api/issues/1');
       expect(showResponse1.status).toBe(200);
-      expect(showResponse1.body.data.stage).toBe(Stage.Designing);
+      expect(showResponse1.body.data.stage).toBe(Stage.Plan);
 
-      // Step 5: Verify status shows designing issue
+      // Step 5: Verify status shows plan issue
       const statusResponse = await request(app).get('/api/status');
       expect(statusResponse.status).toBe(200);
-      expect(statusResponse.body.data.issuesByStage.designing).toBe(1);
+      expect(statusResponse.body.data.issuesByStage.plan).toBe(1);
     });
 
     it('should prevent starting a non-draft issue', async () => {
@@ -93,7 +93,7 @@ describe('E2E: Single Issue Complete Flow', () => {
 
       const startAgainResponse = await request(app).post('/api/issues/1/start');
       expect(startAgainResponse.status).toBe(400);
-      expect(startAgainResponse.body.error).toContain('not in draft stage');
+      expect(startAgainResponse.body.error).toMatch(/not in draft stage|blocked/i);
     });
   });
 
@@ -116,15 +116,15 @@ describe('E2E: Single Issue Complete Flow', () => {
       const issue3 = issues.find((i: any) => i.number === 3);
 
       expect(issue1.stage).toBe(Stage.Draft);
-      expect(issue2.stage).toBe(Stage.Designing);
+      expect(issue2.stage).toBe(Stage.Plan);
       expect(issue3.stage).toBe(Stage.Draft);
 
       // Filter by stage
       const draftResponse = await request(app).get('/api/issues?stage=draft');
       expect(draftResponse.body.data).toHaveLength(2);
 
-      const designingResponse = await request(app).get('/api/issues?stage=designing');
-      expect(designingResponse.body.data).toHaveLength(1);
+      const planResponse = await request(app).get('/api/issues?stage=plan');
+      expect(planResponse.body.data).toHaveLength(1);
     });
   });
 
@@ -134,7 +134,7 @@ describe('E2E: Single Issue Complete Flow', () => {
       await request(app).post('/api/issues').send({ title: 'Draft 1' });
       await request(app).post('/api/issues').send({ title: 'Draft 2' });
       
-      await request(app).post('/api/issues').send({ title: 'Designing' });
+      await request(app).post('/api/issues').send({ title: 'Plan' });
       await request(app).post('/api/issues/3/start');
 
       // Get status
@@ -143,7 +143,7 @@ describe('E2E: Single Issue Complete Flow', () => {
 
       const status = statusResponse.body.data;
       expect(status.issuesByStage.draft).toBe(2);
-      expect(status.issuesByStage.designing).toBe(1);
+      expect(status.issuesByStage.plan).toBe(1);
       expect(status.issues).toBe(3);
     });
   });

@@ -246,7 +246,7 @@ describe('API Routes', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
-        expect(response.body.data.issue.stage).toBe('designing');
+        expect(response.body.data.issue.stage).toBe('plan');
       });
     });
   });

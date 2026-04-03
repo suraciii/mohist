@@ -249,9 +249,9 @@ describe('IssueRepo', () => {
     it('should update issue stage', () => {
       const issue = repo.create({ number: 1, projectId, title: 'Test' });
       const issueId = db.get<{ id: string }>('SELECT id FROM issues WHERE project_id = ? AND number = ?', [projectId, 1])?.id;
-      const updated = repo.updateStage(issueId!, Stage.Designing);
+      const updated = repo.updateStage(issueId!, Stage.Plan);
       
-      expect(updated?.stage).toBe(Stage.Designing);
+      expect(updated?.stage).toBe(Stage.Plan);
     });
   });
 

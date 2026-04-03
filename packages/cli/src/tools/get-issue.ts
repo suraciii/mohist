@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
 import { IssueRepo } from '../db/issue-repo';
+import type { Issue } from '../types';
 
 export interface GetIssueContext {
+  issue: Issue;
   issueRepo: IssueRepo;
 }
 
@@ -10,14 +12,12 @@ export interface GetIssueContext {
 export function createGetIssueTool(context: GetIssueContext): ToolInstance<any> {
   return Tool.define('get_issue', {
     description:
-      'Get the current state of an issue including title, body, stage, number, and labels.',
-    parameters: z.object({
-      issue_id: z.string().describe('The internal ID of the issue to retrieve'),
-    }),
-    execute: async (params) => {
-      const issue = context.issueRepo.findById(params.issue_id);
+      'Get the current state of the issue including title, body, stage, number, and labels.',
+    parameters: z.object({}).strict(),
+    execute: async () => {
+      const issue = context.issueRepo.findById(context.issue.id);
       if (!issue) {
-        return `Error: issue not found with id "${params.issue_id}"`;
+        return `Error: issue not found with id "${context.issue.id}"`;
       }
 
       return [

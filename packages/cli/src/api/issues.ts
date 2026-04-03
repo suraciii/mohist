@@ -339,16 +339,11 @@ export function createIssueRoutes(
         try {
           await runMainAgent(
             {
-              id: issue.id,
-              number: issue.number,
-              title: issue.title,
-              body: issue.body,
-            },
-            {
               issueRepo: stateManager.getIssueRepo(),
               commentRepo: stateManager.getCommentRepo(),
               worktreePath,
               llmConfig,
+              issue: updatedIssue,
             },
             sessionManager,
           );
