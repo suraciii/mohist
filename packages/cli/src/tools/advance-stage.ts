@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
 import { IssueRepo } from '../db/issue-repo';
+import type { Issue } from '../types';
 import { Stage } from '../types';
 
 const VALID_STAGES = new Set(Object.values(Stage));
@@ -13,6 +14,7 @@ const M1_ALLOWED_TRANSITIONS: Record<string, string[]> = {
 };
 
 export interface AdvanceStageContext {
+  issue: Issue;
   issueRepo: IssueRepo;
 }
 
@@ -22,7 +24,6 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
     description:
       'Advance the current issue to the next workflow stage. Allowed transitions: draft → plan, plan → build, build → check, check → done/plan.',
     parameters: z.object({
-      issue_id: z.string().describe('The internal ID of the issue to update'),
       stage: z
         .string()
         .describe(
@@ -31,14 +32,10 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
     }),
     execute: async (params) => {
       const stage = params.stage as Stage;
+      const issue = context.issue;
 
       if (!VALID_STAGES.has(stage)) {
         return `Error: invalid stage "${stage}". Valid stages: ${Array.from(VALID_STAGES).join(', ')}`;
-      }
-
-      const issue = context.issueRepo.findById(params.issue_id);
-      if (!issue) {
-        return `Error: issue not found with id "${params.issue_id}"`;
       }
 
       const allowed = M1_ALLOWED_TRANSITIONS[issue.stage];
@@ -50,9 +47,9 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
         return `Error: cannot advance from "${issue.stage}" to "${stage}". Allowed transitions from "${issue.stage}": ${allowed.join(', ')}`;
       }
 
-      const updated = context.issueRepo.updateStage(params.issue_id, stage);
+      const updated = context.issueRepo.updateStage(issue.id, stage);
       if (!updated) {
-        return `Error: failed to update issue "${params.issue_id}" to stage "${stage}"`;
+        return `Error: failed to update issue "${issue.id}" to stage "${stage}"`;
       }
 
       return `Issue #${issue.number} advanced from "${issue.stage}" to "${stage}"`;

@@ -2,7 +2,9 @@ import { resolveModel, type LlmConfig, SessionManager, ToolRegistry, runAgentLoo
 import type { AgentLoopResult } from '../agent-runtime';
 import { IssueRepo } from '../db/issue-repo';
 import { CommentRepo } from '../db/comment-repo';
-import { createSpawnAgentTool } from '../tools/spawn-agent';
+import type { Issue } from '../types';
+import { createSpawnCoderTool } from '../tools/spawn-coder';
+import { createReadWorkflowTool } from '../tools/read-workflow';
 import { createAdvanceStageTool } from '../tools/advance-stage';
 import { createAddCommentTool } from '../tools/add-comment';
 import { createGetIssueTool } from '../tools/get-issue';
@@ -12,63 +14,68 @@ export interface MainAgentContext {
   commentRepo: CommentRepo;
   worktreePath: string;
   llmConfig?: LlmConfig;
+  issue: Issue;
 }
 
-interface IssueInfo {
-  id: string;
-  number: number;
-  title: string;
-  body?: string;
-}
-
-function buildSystemPrompt(issue: IssueInfo): string {
-  return `You are the Mohist workflow orchestrator. You drive issues from creation to completion using a three-stage workflow: plan → build → check → done.
+function buildSystemPrompt(issue: Issue): string {
+  return `You are the Mohist workflow orchestrator. You drive issues through configurable workflow stages by spawning opencode acp coding agents.
 
 ## Current Issue
+- ID: ${issue.id}
 - Number: #${issue.number}
 - Title: ${issue.title}
+- Stage: ${issue.stage}
 ${issue.body ? `- Description: ${issue.body}` : ''}
 
-## Workflow Stages
-1. **plan** — Analyze the issue, explore the codebase, and produce a plan. Use \`spawn_agent\` with a code agent.
-2. **build** — Implement the solution based on the plan. Use \`spawn_agent\` with a code agent to write the code.
-3. **check** — Verify the implementation: run tests, check for errors, ensure correctness. Use \`spawn_agent\` with a code agent.
-4. **done** — The issue is complete. Call \`advance_stage\` with stage "done" when all work is finished.
+## How It Works
+1. First, call \`read_workflow\` to read the workflow configuration. It returns the available stages, their prompt templates, and settings.
+2. For each stage, call \`spawn_coder\` with the stage's prompt template and variables from the issue and previous stage results.
+3. After spawn_coder completes, call \`advance_stage\` to move to the next stage.
+4. If a stage has \`approval: true\`, do NOT advance to the next stage. Instead, add a comment summarizing the result and stop. The user will manually continue later.
+5. Continue until the issue reaches "done".
 
 ## Available Tools
-- **spawn_agent**: Spawn an opencode subprocess to execute tasks in the issue worktree. Use this for all code work (planning, implementation, verification).
-- **advance_stage**: Move the issue to the next workflow stage. Always call this after completing a stage.
-- **add_comment**: Record observations, decisions, or progress notes on the issue.
+- **read_workflow**: Read the workflow configuration (stages, prompt templates, approval flags). Call this first.
+- **spawn_coder**: Spawn an opencode acp oneshot session to execute a coding task. Provide \`taskTemplate\` (from the workflow stage prompt) and \`variables\` (issue info + previous stage outputs).
+- **advance_stage**: Move the issue to the next stage. Only pass the target stage name.
+- **add_comment**: Record progress notes, decisions, or summaries on the issue.
 - **get_issue**: Check the current state of the issue at any time.
 
+## Variables for spawn_coder
+When calling spawn_coder, pass these variables in the \`variables\` object:
+- \`issue\`: { number, title, body } — current issue info
+- \`plan.output\`: the text result from the plan stage (after plan completes)
+- \`build.output\`: the text result from the build stage (after build completes)
+- \`check.output\`: the text result from the check stage (after check completes)
+
 ## Instructions
-1. Start by reading the issue details with \`get_issue\`.
-2. For the **plan** stage: call \`spawn_agent\` to explore the codebase and create a plan. Then call \`advance_stage\` with stage "build".
-3. For the **build** stage: call \`spawn_agent\` to implement the solution. Then call \`advance_stage\` with stage "check".
-4. For the **check** stage: call \`spawn_agent\` to verify the implementation (run tests, lint, typecheck). Then call \`advance_stage\` with stage "done".
-5. After advancing to "done", add a final comment summarizing what was accomplished.
+1. Call \`read_workflow\` to understand the workflow stages.
+2. Find the current stage in the workflow and use its prompt template.
+3. Call \`spawn_coder\` with the prompt template and variables.
+4. After spawn_coder returns, call \`advance_stage\` with the next stage.
+5. If the stage has \`approval: true\`, add a comment and stop instead of advancing.
+6. Repeat until done.
 
 ## Error Handling
-- If \`spawn_agent\` fails, analyze the error and retry with a more specific task description.
-- If an issue persists after 2 retries, add a comment explaining the problem and advance to "done" anyway.
-- Keep task descriptions clear and specific for the code agent.`;
+- If spawn_coder fails, analyze the error. You may retry with a more specific task, or advance to done with a comment explaining the failure.
+- If check stage reveals issues, you may advance back to build to fix them.`;
 }
 
 export async function runMainAgent(
-  issue: IssueInfo,
   context: MainAgentContext,
   sessionManager: SessionManager,
 ): Promise<AgentLoopResult> {
   const model = resolveModel(context.llmConfig);
 
   const toolRegistry = new ToolRegistry();
-  toolRegistry.register(createSpawnAgentTool(context.worktreePath));
-  toolRegistry.register(createAdvanceStageTool({ issueRepo: context.issueRepo }));
-  toolRegistry.register(createAddCommentTool({ commentRepo: context.commentRepo }));
-  toolRegistry.register(createGetIssueTool({ issueRepo: context.issueRepo }));
+  toolRegistry.register(createSpawnCoderTool({ worktreePath: context.worktreePath }));
+  toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath }));
+  toolRegistry.register(createAdvanceStageTool({ issue: context.issue, issueRepo: context.issueRepo }));
+  toolRegistry.register(createAddCommentTool({ issue: context.issue, commentRepo: context.commentRepo }));
+  toolRegistry.register(createGetIssueTool({ issue: context.issue, issueRepo: context.issueRepo }));
 
-  const session = sessionManager.create(Number(issue.id));
-  const system = buildSystemPrompt(issue);
+  const session = sessionManager.create(Number(context.issue.id));
+  const system = buildSystemPrompt(context.issue);
 
   const result = await runAgentLoop(session, sessionManager, toolRegistry, model, {
     system,
