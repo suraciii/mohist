@@ -183,6 +183,7 @@
 | B-301 | 嵌入式 Web UI 架构 | 参考 opencode 做法：Vite build → 嵌入 server 二进制 → `mo server` 一条命令同时提供 API + UI | 2026-04-03 explore |
 | B-302 | 前端技术选型 | SolidJS (opencode 同款，无虚拟DOM) vs React (生态大)。UI 相对简单（看板+列表+详情），两者都够用 | 2026-04-03 explore |
 | B-303 | SSE 实时事件推送 | 三层架构：内部 Bus (PubSub) → SSE endpoint → 客户端。支持 Agent 进度实时展示 | 2026-04-03 explore |
+| B-304 | 实时进度分阶段实现 | MVP (Level 1): 状态级事件（stage_changed/comment_added/agent_done/error），数据已在 SQLite 中，Bus 包裹现有 repo 操作即可。Level 2 (后续): 动作级事件（tool_call/tool_result），需要接通 Vercel AI SDK stream 和 ACP sessionUpdate | 2026-04-03 explore |
 
 ### Web UI 功能
 
