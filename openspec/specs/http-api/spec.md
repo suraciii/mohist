@@ -2,7 +2,7 @@
 
 ### Requirement: API 提供项目管理接口
 
-Server SHALL 提供项目管理的 RESTful API。
+Server SHALL 提供项目管理的 RESTful API，基于 Hono 框架实现。
 
 #### Scenario: 列出项目
 - **WHEN** CLI 请求 `GET /api/projects`
@@ -23,7 +23,7 @@ Server SHALL 提供项目管理的 RESTful API。
 
 ### Requirement: API 提供状态查询接口
 
-Server SHALL 提供 RESTful API 供 CLI 查询状态。
+Server SHALL 提供 RESTful API 供 CLI 查询状态，基于 Hono 框架实现。
 
 #### Scenario: 获取全局状态
 - **WHEN** CLI 请求 `GET /api/status`
@@ -39,7 +39,7 @@ Server SHALL 提供 RESTful API 供 CLI 查询状态。
 
 ### Requirement: API 提供操作接口
 
-Server SHALL 提供 RESTful API 供 CLI 执行操作。
+Server SHALL 提供 RESTful API 供 CLI 执行操作，基于 Hono 框架实现。
 
 #### Scenario: 启动 Issue 处理
 - **WHEN** CLI 请求 `POST /api/issues/:number/start`
@@ -48,7 +48,7 @@ Server SHALL 提供 RESTful API 供 CLI 执行操作。
 
 ### Requirement: API 提供配置接口
 
-Server SHALL 提供配置管理的 RESTful API。
+Server SHALL 提供配置管理的 RESTful API，基于 Hono 框架实现。
 
 #### Scenario: 获取配置
 - **WHEN** CLI 请求 `GET /api/config`
@@ -60,7 +60,7 @@ Server SHALL 提供配置管理的 RESTful API。
 
 ### Requirement: API 处理错误情况
 
-Server SHALL 返回清晰的错误响应。
+Server SHALL 返回清晰的错误响应，基于 Hono 框架实现。
 
 #### Scenario: Server 未运行时
 - **WHEN** CLI 请求任何 API

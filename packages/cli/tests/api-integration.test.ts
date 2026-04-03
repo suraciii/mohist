@@ -23,14 +23,9 @@ describe('API Integration Tests', () => {
       expect(typeof createConfigRoutes).toBe('function');
     });
     
-    it('should export errorHandler', async () => {
-      const { errorHandler } = await import('../src/api/error-handler');
-      expect(typeof errorHandler).toBe('function');
-    });
-    
-    it('should export notFoundHandler', async () => {
-      const { notFoundHandler } = await import('../src/api/error-handler');
-      expect(typeof notFoundHandler).toBe('function');
+    it('should export createLabelRoutes', async () => {
+      const { createLabelRoutes } = await import('../src/api/labels');
+      expect(typeof createLabelRoutes).toBe('function');
     });
   });
   

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import express from 'express';
+import http from 'node:http';
+import { Hono } from 'hono';
 import request from 'supertest';
 import { resetDatabase, closeDatabase } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
@@ -15,6 +16,34 @@ import { createProjectRoutes } from '../src/api/projects';
 import { createIssueRoutes } from '../src/api/issues';
 import { createStatusRoutes } from '../src/api/status';
 import { createConfigRoutes } from '../src/api/config';
+
+function createTestServer(app: Hono): http.Server {
+  return http.createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const bodyStr = chunks.length > 0 ? Buffer.concat(chunks).toString() : undefined;
+    const initHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (typeof value === 'string') initHeaders[key] = value;
+      else if (Array.isArray(value)) initHeaders[key] = value.join(', ');
+    }
+    const response = await app.fetch(new Request(`http://localhost${req.url}`, {
+      method: req.method,
+      headers: initHeaders,
+      body: bodyStr,
+    }));
+    res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+    }
+    res.end();
+  });
+}
 
 describe('API Routes', () => {
   let db: DatabaseManager;
@@ -46,17 +75,17 @@ describe('API Routes', () => {
   });
 
   describe('Project Routes', () => {
-    let app: express.Express;
+    let server: http.Server;
 
     beforeEach(() => {
-      app = express();
-      app.use(express.json());
-      app.use('/api/projects', createProjectRoutes(stateManager));
+      const app = new Hono();
+      app.route('/api/projects', createProjectRoutes(stateManager));
+      server = createTestServer(app);
     });
 
     describe('POST /api/projects', () => {
       it('should create a project', async () => {
-        const response = await request(app)
+        const response = await request(server)
           .post('/api/projects')
           .send({ name: 'Test Project', path: '/test/path' });
 
@@ -67,7 +96,7 @@ describe('API Routes', () => {
       });
 
       it('should require name and path', async () => {
-        const response = await request(app)
+        const response = await request(server)
           .post('/api/projects')
           .send({ name: 'Test Project' });
 
@@ -76,11 +105,11 @@ describe('API Routes', () => {
       });
 
       it('should reject duplicate project name', async () => {
-        await request(app)
+        await request(server)
           .post('/api/projects')
           .send({ name: 'Test Project', path: '/test/path' });
 
-        const response = await request(app)
+        const response = await request(server)
           .post('/api/projects')
           .send({ name: 'Test Project', path: '/other/path' });
 
@@ -91,14 +120,14 @@ describe('API Routes', () => {
 
     describe('GET /api/projects', () => {
       it('should list projects', async () => {
-        await request(app)
+        await request(server)
           .post('/api/projects')
           .send({ name: 'Project 1', path: '/path/1' });
-        await request(app)
+        await request(server)
           .post('/api/projects')
           .send({ name: 'Project 2', path: '/path/2' });
 
-        const response = await request(app).get('/api/projects');
+        const response = await request(server).get('/api/projects');
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
@@ -108,18 +137,18 @@ describe('API Routes', () => {
 
     describe('GET /api/projects/:name', () => {
       it('should return project details', async () => {
-        await request(app)
+        await request(server)
           .post('/api/projects')
           .send({ name: 'Test Project', path: '/test/path' });
 
-        const response = await request(app).get('/api/projects/Test Project');
+        const response = await request(server).get('/api/projects/Test Project');
 
         expect(response.status).toBe(200);
         expect(response.body.data.name).toBe('Test Project');
       });
 
       it('should return 404 for non-existent project', async () => {
-        const response = await request(app).get('/api/projects/NonExistent');
+        const response = await request(server).get('/api/projects/NonExistent');
 
         expect(response.status).toBe(404);
       });
@@ -127,11 +156,11 @@ describe('API Routes', () => {
 
     describe('DELETE /api/projects/:name', () => {
       it('should delete project', async () => {
-        await request(app)
+        await request(server)
           .post('/api/projects')
           .send({ name: 'Test Project', path: '/test/path' });
 
-        const response = await request(app).delete('/api/projects/Test Project');
+        const response = await request(server).delete('/api/projects/Test Project');
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
@@ -140,11 +169,11 @@ describe('API Routes', () => {
 
     describe('POST /api/projects/:name/use', () => {
       it('should set current project', async () => {
-        await request(app)
+        await request(server)
           .post('/api/projects')
           .send({ name: 'Test Project', path: '/test/path' });
 
-        const response = await request(app).post('/api/projects/Test Project/use');
+        const response = await request(server).post('/api/projects/Test Project/use');
 
         expect(response.status).toBe(200);
         expect(response.body.data.name).toBe('Test Project');
@@ -153,13 +182,13 @@ describe('API Routes', () => {
   });
 
   describe('Issue Routes', () => {
-    let app: express.Express;
+    let server: http.Server;
     let projectId: string;
 
     beforeEach(async () => {
-      app = express();
-      app.use(express.json());
-      app.use('/api/issues', createIssueRoutes(stateManager));
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(stateManager));
+      server = createTestServer(app);
       
       const project = projectService.create({ name: 'Test Project', path: '/test/path' });
       projectId = project.id;
@@ -168,7 +197,7 @@ describe('API Routes', () => {
 
     describe('POST /api/issues', () => {
       it('should create an issue', async () => {
-        const response = await request(app)
+        const response = await request(server)
           .post('/api/issues')
           .send({ title: 'Test Issue', body: 'Test body' });
 
@@ -179,7 +208,7 @@ describe('API Routes', () => {
       });
 
       it('should require title', async () => {
-        const response = await request(app)
+        const response = await request(server)
           .post('/api/issues')
           .send({ body: 'Test body' });
 
@@ -189,7 +218,7 @@ describe('API Routes', () => {
       it('should return error when no current project', async () => {
         projectService.clearCurrent();
         
-        const response = await request(app)
+        const response = await request(server)
           .post('/api/issues')
           .send({ title: 'Test Issue' });
 
@@ -203,7 +232,7 @@ describe('API Routes', () => {
         issueService.create({ projectId, title: 'Issue 1' });
         issueService.create({ projectId, title: 'Issue 2' });
 
-        const response = await request(app).get('/api/issues');
+        const response = await request(server).get('/api/issues');
 
         expect(response.status).toBe(200);
         expect(response.body.data).toHaveLength(2);
@@ -213,7 +242,7 @@ describe('API Routes', () => {
         issueService.create({ projectId, title: 'Test' });
         issueService.transitionToStageByNumber(projectId, 1, 'designing' as any);
 
-        const response = await request(app).get('/api/issues?stage=designing');
+        const response = await request(server).get('/api/issues?stage=designing');
 
         expect(response.status).toBe(200);
         expect(response.body.data).toHaveLength(1);
@@ -224,7 +253,7 @@ describe('API Routes', () => {
       it('should return issue details', async () => {
         issueService.create({ projectId, title: 'Test Issue' });
 
-        const response = await request(app).get('/api/issues/1');
+        const response = await request(server).get('/api/issues/1');
 
         expect(response.status).toBe(200);
         expect(response.body.data.number).toBe(1);
@@ -232,7 +261,7 @@ describe('API Routes', () => {
       });
 
       it('should return 404 for non-existent issue', async () => {
-        const response = await request(app).get('/api/issues/999');
+        const response = await request(server).get('/api/issues/999');
 
         expect(response.status).toBe(404);
       });
@@ -242,7 +271,7 @@ describe('API Routes', () => {
       it('should start processing an issue', async () => {
         issueService.create({ projectId, title: 'Test Issue' });
 
-        const response = await request(app).post('/api/issues/1/start');
+        const response = await request(server).post('/api/issues/1/start');
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
@@ -252,17 +281,17 @@ describe('API Routes', () => {
   });
 
   describe('Status Routes', () => {
-    let app: express.Express;
+    let server: http.Server;
 
     beforeEach(() => {
-      app = express();
-      app.use(express.json());
-      app.use('/api', createStatusRoutes(stateManager));
+      const app = new Hono();
+      app.route('/api', createStatusRoutes(stateManager));
+      server = createTestServer(app);
     });
 
     describe('GET /api/status', () => {
       it('should return error when no current project', async () => {
-        const response = await request(app).get('/api/status');
+        const response = await request(server).get('/api/status');
 
         expect(response.status).toBe(400);
         expect(response.body.error).toContain('No active project');
@@ -272,7 +301,7 @@ describe('API Routes', () => {
         const project = projectService.create({ name: 'Test Project', path: '/test/path' });
         projectService.setCurrent(project);
 
-        const response = await request(app).get('/api/status');
+        const response = await request(server).get('/api/status');
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
@@ -285,7 +314,7 @@ describe('API Routes', () => {
         projectService.create({ name: 'Project 1', path: '/path/1' });
         projectService.create({ name: 'Project 2', path: '/path/2' });
 
-        const response = await request(app).get('/api/status?all=true');
+        const response = await request(server).get('/api/status?all=true');
 
         expect(response.status).toBe(200);
         expect(response.body.data).toHaveLength(2);
@@ -294,17 +323,17 @@ describe('API Routes', () => {
   });
 
   describe('Config Routes', () => {
-    let app: express.Express;
+    let server: http.Server;
 
     beforeEach(() => {
-      app = express();
-      app.use(express.json());
-      app.use('/api/config', createConfigRoutes(configService));
+      const app = new Hono();
+      app.route('/api/config', createConfigRoutes(configService));
+      server = createTestServer(app);
     });
 
     describe('GET /api/config', () => {
       it('should return config', async () => {
-        const response = await request(app).get('/api/config');
+        const response = await request(server).get('/api/config');
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
@@ -314,7 +343,7 @@ describe('API Routes', () => {
 
     describe('PUT /api/config/:key', () => {
       it('should update config value', async () => {
-        const response = await request(app)
+        const response = await request(server)
           .put('/api/config/server.port')
           .send({ value: 4000 });
 
@@ -323,7 +352,7 @@ describe('API Routes', () => {
       });
 
       it('should validate port range', async () => {
-        const response = await request(app)
+        const response = await request(server)
           .put('/api/config/server.port')
           .send({ value: 99999 });
 
@@ -333,7 +362,7 @@ describe('API Routes', () => {
 
     describe('GET /api/config/list', () => {
       it('should return all config values', async () => {
-        const response = await request(app).get('/api/config/list');
+        const response = await request(server).get('/api/config/list');
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);

@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import express from 'express';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import http from 'node:http';
+import { Hono } from 'hono';
 import request from 'supertest';
 import { resetDatabase, closeDatabase } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
@@ -16,9 +17,38 @@ import { createIssueRoutes } from '../src/api/issues';
 import { createStatusRoutes } from '../src/api/status';
 import { Stage, IssueStatus } from '../src/types';
 
+function createTestServer(app: Hono): http.Server {
+  return http.createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const bodyStr = chunks.length > 0 ? Buffer.concat(chunks).toString() : undefined;
+    const initHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (typeof value === 'string') initHeaders[key] = value;
+      else if (Array.isArray(value)) initHeaders[key] = value.join(', ');
+    }
+    const response = await app.fetch(new Request(`http://localhost${req.url}`, {
+      method: req.method,
+      headers: initHeaders,
+      body: bodyStr,
+    }));
+    res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+    }
+    res.end();
+  });
+}
+
 describe('E2E: Single Issue Complete Flow', () => {
   let db: DatabaseManager;
-  let app: express.Express;
+  let app: Hono;
+  let server: http.Server;
   let projectId: string;
 
   beforeEach(() => {
@@ -35,11 +65,15 @@ describe('E2E: Single Issue Complete Flow', () => {
     
     const stateManager = new StateManager();
     
-    app = express();
-    app.use(express.json());
-    app.use('/api/projects', createProjectRoutes(stateManager));
-    app.use('/api/issues', createIssueRoutes(stateManager));
-    app.use('/api', createStatusRoutes(stateManager));
+    app = new Hono();
+    app.route('/api/projects', createProjectRoutes(stateManager));
+    app.route('/api/issues', createIssueRoutes(stateManager));
+    app.route('/api', createStatusRoutes(stateManager));
+
+    server = createTestServer(app);
+    server.listen(0);
+    const addr = server.address() as import('net').AddressInfo;
+    (app as any).__port = addr.port;
     
     const project = projectService.create({ name: 'E2E Test Project', path: '/test/e2e' });
     projectId = project.id;
@@ -47,13 +81,19 @@ describe('E2E: Single Issue Complete Flow', () => {
   });
 
   afterEach(() => {
+    server.close();
     closeDatabase();
   });
 
+  function getAppUrl(): string {
+    return `http://localhost:${(app as any).__port}`;
+  }
+
   describe('Complete Issue Workflow', () => {
     it('should complete full workflow: create -> start -> verify stage progression', async () => {
-      // Step 1: Create an issue
-      const createResponse = await request(app)
+      const baseUrl = getAppUrl();
+
+      const createResponse = await request(baseUrl)
         .post('/api/issues')
         .send({ title: 'E2E Test Issue', body: 'Test the complete workflow' });
       
@@ -62,36 +102,34 @@ describe('E2E: Single Issue Complete Flow', () => {
       expect(createResponse.body.data.number).toBe(1);
       expect(createResponse.body.data.stage).toBe(Stage.Draft);
 
-      // Step 2: Verify issue appears in list
-      const listResponse = await request(app).get('/api/issues');
+      const listResponse = await request(baseUrl).get('/api/issues');
       expect(listResponse.status).toBe(200);
       expect(listResponse.body.data).toHaveLength(1);
 
-      // Step 3: Start processing (moves to plan)
-      const startResponse = await request(app).post('/api/issues/1/start');
+      const startResponse = await request(baseUrl).post('/api/issues/1/start');
       expect(startResponse.status).toBe(200);
       expect(startResponse.body.success).toBe(true);
       expect(startResponse.body.data.issue.stage).toBe(Stage.Plan);
 
-      // Step 4: Verify show endpoint
-      const showResponse1 = await request(app).get('/api/issues/1');
+      const showResponse1 = await request(baseUrl).get('/api/issues/1');
       expect(showResponse1.status).toBe(200);
       expect(showResponse1.body.data.stage).toBe(Stage.Plan);
 
-      // Step 5: Verify status shows plan issue
-      const statusResponse = await request(app).get('/api/status');
+      const statusResponse = await request(baseUrl).get('/api/status');
       expect(statusResponse.status).toBe(200);
       expect(statusResponse.body.data.issuesByStage.plan).toBe(1);
     });
 
     it('should prevent starting a non-draft issue', async () => {
-      await request(app)
+      const baseUrl = getAppUrl();
+
+      await request(baseUrl)
         .post('/api/issues')
         .send({ title: 'Start Test Issue' });
 
-      await request(app).post('/api/issues/1/start');
+      await request(baseUrl).post('/api/issues/1/start');
 
-      const startAgainResponse = await request(app).post('/api/issues/1/start');
+      const startAgainResponse = await request(baseUrl).post('/api/issues/1/start');
       expect(startAgainResponse.status).toBe(400);
       expect(startAgainResponse.body.error).toMatch(/not in draft stage|blocked/i);
     });
@@ -99,16 +137,15 @@ describe('E2E: Single Issue Complete Flow', () => {
 
   describe('Multi-Issue Workflow', () => {
     it('should handle multiple issues independently', async () => {
-      // Create 3 issues
-      await request(app).post('/api/issues').send({ title: 'Issue 1' });
-      await request(app).post('/api/issues').send({ title: 'Issue 2' });
-      await request(app).post('/api/issues').send({ title: 'Issue 3' });
+      const baseUrl = getAppUrl();
 
-      // Start only issue 2
-      await request(app).post('/api/issues/2/start');
+      await request(baseUrl).post('/api/issues').send({ title: 'Issue 1' });
+      await request(baseUrl).post('/api/issues').send({ title: 'Issue 2' });
+      await request(baseUrl).post('/api/issues').send({ title: 'Issue 3' });
 
-      // Verify issues are at different stages
-      const response = await request(app).get('/api/issues');
+      await request(baseUrl).post('/api/issues/2/start');
+
+      const response = await request(baseUrl).get('/api/issues');
       const issues = response.body.data;
 
       const issue1 = issues.find((i: any) => i.number === 1);
@@ -119,26 +156,25 @@ describe('E2E: Single Issue Complete Flow', () => {
       expect(issue2.stage).toBe(Stage.Plan);
       expect(issue3.stage).toBe(Stage.Draft);
 
-      // Filter by stage
-      const draftResponse = await request(app).get('/api/issues?stage=draft');
+      const draftResponse = await request(baseUrl).get('/api/issues?stage=draft');
       expect(draftResponse.body.data).toHaveLength(2);
 
-      const planResponse = await request(app).get('/api/issues?stage=plan');
+      const planResponse = await request(baseUrl).get('/api/issues?stage=plan');
       expect(planResponse.body.data).toHaveLength(1);
     });
   });
 
   describe('Project Status', () => {
     it('should track issue counts by stage', async () => {
-      // Create multiple issues at different stages
-      await request(app).post('/api/issues').send({ title: 'Draft 1' });
-      await request(app).post('/api/issues').send({ title: 'Draft 2' });
-      
-      await request(app).post('/api/issues').send({ title: 'Plan' });
-      await request(app).post('/api/issues/3/start');
+      const baseUrl = getAppUrl();
 
-      // Get status
-      const statusResponse = await request(app).get('/api/status');
+      await request(baseUrl).post('/api/issues').send({ title: 'Draft 1' });
+      await request(baseUrl).post('/api/issues').send({ title: 'Draft 2' });
+      
+      await request(baseUrl).post('/api/issues').send({ title: 'Plan' });
+      await request(baseUrl).post('/api/issues/3/start');
+
+      const statusResponse = await request(baseUrl).get('/api/status');
       expect(statusResponse.status).toBe(200);
 
       const status = statusResponse.body.data;

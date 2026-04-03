@@ -1,21 +1,20 @@
-import { Router, Request, Response } from 'express';
+import { Hono } from 'hono';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Project } from '../types';
 
-export function createProjectRoutes(stateManager: StateManager): Router {
-  const router = Router();
+export function createProjectRoutes(stateManager: StateManager): Hono {
+  const app = new Hono();
 
-  router.post('/', (req: Request, res: Response): void => {
+  app.post('/', async (c) => {
     try {
-      const { name, path } = req.body;
-      
+      const { name, path } = await c.req.json();
+
       if (!name || !path) {
         const response: ApiResponse = {
           success: false,
           error: 'name and path are required'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const existing = stateManager.getProjectByName(name);
@@ -24,8 +23,7 @@ export function createProjectRoutes(stateManager: StateManager): Router {
           success: false,
           error: 'Project with this name already exists'
         };
-        res.status(409).json(response);
-        return;
+        return c.json(response, 409);
       }
 
       const project = stateManager.saveProject({ name, path });
@@ -34,71 +32,69 @@ export function createProjectRoutes(stateManager: StateManager): Router {
         success: true,
         data: project
       };
-      res.status(201).json(response);
+      return c.json(response, 201);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.get('/', (_req: Request, res: Response): void => {
+  app.get('/', async (c) => {
     try {
       const projects = stateManager.loadProjects();
       const response: ApiResponse<Project[]> = {
         success: true,
         data: projects
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.get('/:name', (req: Request, res: Response): void => {
+  app.get('/:name', async (c) => {
     try {
-      const project = stateManager.getProjectByName(req.params.name);
-      
+      const project = stateManager.getProjectByName(c.req.param('name'));
+
       if (!project) {
         const response: ApiResponse = {
           success: false,
           error: 'Project not found'
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       const response: ApiResponse<Project> = {
         success: true,
         data: project
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.delete('/:name', (req: Request, res: Response): void => {
+  app.delete('/:name', async (c) => {
     try {
-      const project = stateManager.getProjectByName(req.params.name);
-      
+      const project = stateManager.getProjectByName(c.req.param('name'));
+
       if (!project) {
         const response: ApiResponse = {
           success: false,
           error: 'Project not found'
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       stateManager.deleteProject(project.id);
@@ -106,27 +102,26 @@ export function createProjectRoutes(stateManager: StateManager): Router {
       const response: ApiResponse = {
         success: true
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.post('/:name/use', (req: Request, res: Response): void => {
+  app.post('/:name/use', async (c) => {
     try {
-      const project = stateManager.getProjectByName(req.params.name);
-      
+      const project = stateManager.getProjectByName(c.req.param('name'));
+
       if (!project) {
         const response: ApiResponse = {
           success: false,
           error: 'Project not found'
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       stateManager.setCurrentProjectId(project.id);
@@ -135,15 +130,15 @@ export function createProjectRoutes(stateManager: StateManager): Router {
         success: true,
         data: project
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  return router;
+  return app;
 }

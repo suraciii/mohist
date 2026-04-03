@@ -1,15 +1,17 @@
-import express, { Express, Request, Response, Router } from 'express';
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
 import { Config, ServerState } from '../types';
 
 export class HttpServer {
-  private app: Express;
-  private server: any;
+  private app: Hono;
+  private server: ReturnType<typeof serve> | null;
   private config: Config;
   private state: ServerState;
 
   constructor(config: Config) {
     this.config = config;
-    this.app = express();
+    this.app = new Hono();
+    this.server = null;
     this.state = {
       isRunning: false,
       port: config.serverPort
@@ -19,33 +21,30 @@ export class HttpServer {
   }
 
   private setupMiddleware(): void {
-    this.app.use(express.json());
-    this.app.use(express.urlencoded({ extended: true }));
-    
-    this.app.use((req: Request, _res: Response, next) => {
-      console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
-      next();
+    this.app.use('*', async (c, next) => {
+      console.log(`${new Date().toISOString()} ${c.req.method} ${c.req.path}`);
+      await next();
     });
   }
 
   private setupRoutes(): void {
-    this.app.get('/api/health', (_req: Request, res: Response) => {
-      res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    this.app.get('/api/health', (c) => {
+      return c.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
-    this.app.get('/api/status', (_req: Request, res: Response) => {
-      res.json({
+    this.app.get('/api/status', (c) => {
+      return c.json({
         success: true,
         data: this.state
       });
     });
   }
 
-  public addRouter(path: string, router: Router): void {
-    this.app.use(path, router);
+  public addRouter(path: string, router: Hono): void {
+    this.app.route(path, router);
   }
 
-  public getApp(): Express {
+  public getApp(): Hono {
     return this.app;
   }
 
@@ -55,12 +54,15 @@ export class HttpServer {
 
   public start(): Promise<void> {
     return new Promise((resolve) => {
-      this.server = this.app.listen(this.config.serverPort, () => {
-        this.state.isRunning = true;
-        this.state.startedAt = new Date().toISOString();
-        console.log(`Server listening on port ${this.config.serverPort}`);
-        resolve();
-      });
+      this.server = serve(
+        { fetch: this.app.fetch, port: this.config.serverPort },
+        (info) => {
+          this.state.isRunning = true;
+          this.state.startedAt = new Date().toISOString();
+          console.log(`Server listening on port ${info.port}`);
+          resolve();
+        }
+      );
     });
   }
 
@@ -71,7 +73,7 @@ export class HttpServer {
         return;
       }
 
-      this.server.close((err: Error) => {
+      this.server.close((err?: Error) => {
         if (err) {
           reject(err);
         } else {

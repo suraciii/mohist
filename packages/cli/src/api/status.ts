@@ -1,15 +1,15 @@
-import { Router, Request, Response } from 'express';
+import { Hono } from 'hono';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse } from '../types';
 
 export function createStatusRoutes(
   stateManager: StateManager
-): Router {
-  const router = Router();
+): Hono {
+  const app = new Hono();
 
-  router.get('/status', (req: Request, res: Response): void => {
+  app.get('/status', async (c) => {
     try {
-      const all = req.query.all === 'true';
+      const all = c.req.query('all') === 'true';
       
       if (all) {
         const projects = stateManager.loadProjects();
@@ -30,8 +30,7 @@ export function createStatusRoutes(
           success: true,
           data: status
         };
-        res.json(response);
-        return;
+        return c.json(response);
       }
 
       const currentId = stateManager.getCurrentProjectId();
@@ -40,8 +39,7 @@ export function createStatusRoutes(
           success: false,
           error: 'No active project. Use: mo project use <name>'
         };
-        res.status(400).json(response);
-        return;
+        return c.json(response, 400);
       }
 
       const current = stateManager.getProjectById(currentId);
@@ -50,8 +48,7 @@ export function createStatusRoutes(
           success: false,
           error: 'Current project not found'
         };
-        res.status(404).json(response);
-        return;
+        return c.json(response, 404);
       }
 
       const issues = stateManager.loadIssues(currentId);
@@ -75,19 +72,19 @@ export function createStatusRoutes(
         success: true,
         data: status
       };
-      res.json(response);
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
-      res.status(500).json(response);
+      return c.json(response, 500);
     }
   });
 
-  router.get('/health', (_req: Request, res: Response): void => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  app.get('/health', async (c) => {
+    return c.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  return router;
+  return app;
 }
