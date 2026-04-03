@@ -8,3 +8,6 @@
 [submodule "opensrc/opencode"]
 	path = opensrc/opencode
 	url = https://github.com/anomalyco/opencode
+[submodule "opensrc/nanoclaw"]
+	path = opensrc/nanoclaw
+	url = https://github.com/qwibitai/nanoclaw.git
