@@ -15,6 +15,8 @@ mohist 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLit
 | `docs/` | 用户文档 | README、CONTRIBUTING、使用指南 |
 | `talks/` | 设计讨论 | 日期归档的架构探索与设计决策记录，文件名格式：`YYYY-MM-DD-<主题>.md` |
 | `openspec/` | 变更管理 | OpenSpec 变更提案、任务追踪 |
+| `opensrc/openclaw/` | 参考源码 | openclaw 项目源代码，供架构参考 |
+| `opensrc/nanoclaw/` | 参考源码 | nanoclaw 项目源代码，极简 AI agent 框架（~8K 行），供架构参考 |
 
 ## 核心实现结构
 
