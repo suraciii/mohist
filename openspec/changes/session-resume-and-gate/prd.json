@@ -1,0 +1,114 @@
+{
+  "project": "mohist",
+  "description": "Session resume and gate approval - fix session continuity so approve resumes context instead of creating blank session",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add session pause/resume/findByIssueId to SessionManager",
+      "spec": "specs/agent-runtime/spec.md",
+      "description": "Extend Session interface with status field (active/paused/closed). Add pause(), resume(), findByIssueId() methods to SessionManager. Update close() to set status=closed. Ensure appendMessage works on both active and paused sessions but rejects closed sessions.",
+      "acceptanceCriteria": [
+        "sessionManager.findByIssueId() returns active or paused session, undefined for closed/missing",
+        "sessionManager.pause() sets status to paused, preserves messages",
+        "sessionManager.resume() sets status to active, preserves messages",
+        "appendMessage works on active and paused sessions, throws on closed",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Add status field to Session interface with default 'active'. Don't change create/close signatures, just extend behavior."
+    },
+    {
+      "id": "T-002",
+      "title": "Add resume method to AgentRunnerService",
+      "spec": "specs/session-resume/spec.md",
+      "description": "Add resume(issueId, message) method to AgentRunnerService. It should find the paused session from an internal Map<number, Session>, append the user message, resume the session, and call runMainAgent with the existing session. Add session management: on agent completion or error, close session and clean up the map. On start(), store session in paused map when agent finishes (for gate pause).",
+      "acceptanceCriteria": [
+        "agentRunner.resume() finds paused session, appends message, resumes agent loop",
+        "agentRunner.resume() throws when no paused session exists for issueId",
+        "agentRunner.resume() throws when agent is already running on another issue",
+        "Paused session is cleaned up after agent completes or errors",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Need to modify start() to not close session after agent completes - instead check if agent stopped at a gate and pause the session. The start() method needs to store the session in the paused map. This requires start() to know about the session object - may need to restructure runMainAgent return value or pass sessionManager into start()."
+    },
+    {
+      "id": "T-003",
+      "title": "Support resume mode in runMainAgent",
+      "spec": "specs/session-resume/spec.md",
+      "description": "Modify runMainAgent to accept an optional existing session parameter. When provided, skip sessionManager.create() and use the existing session. When the agent loop finishes normally and session was resumed (not new), pause the session and return it for the caller to store. When the agent finishes with done stage or error, close the session. Add callback or return mechanism so AgentRunnerService knows whether to pause or close.",
+      "acceptanceCriteria": [
+        "runMainAgent with existing session continues on that session's message history",
+        "runMainAgent without session creates new session (backward compatible)",
+        "When agent stops at approval gate, session is paused not closed",
+        "When agent reaches done stage, session is closed",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The tricky part is determining whether the agent stopped at a gate vs completed normally. Options: (1) check issue stage after agent loop - if at a stage whose next stage has approval:true, it's a gate pause. (2) Return a flag from runMainAgent. Option 1 is simpler and doesn't require changing the agent prompt. The AgentRunnerService.start() already has access to issue state."
+    },
+    {
+      "id": "T-004",
+      "title": "Update approve API to use resume instead of start",
+      "spec": "specs/session-resume/spec.md",
+      "description": "Change POST /issues/:number/approve in api/issues.ts to call agentRunner.resume() instead of agentRunner.start(). Remove the redundant worktree creation (already exists from start). The approve endpoint should verify the issue is at an approval gate, then resume the agent.",
+      "acceptanceCriteria": [
+        "approve endpoint calls agentRunner.resume() with approval message",
+        "approve endpoint does not create a new worktree",
+        "approve endpoint returns error when no paused session exists",
+        "approve endpoint returns error when agent already running",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "The current approve implementation (api/issues.ts:490-583) has issues: it creates a new worktree, calls start() which creates a new session. Replace the agentRunner.start() call with agentRunner.resume(). Keep the gate validation logic."
+    },
+    {
+      "id": "T-005",
+      "title": "Fix default workflow check stage approval",
+      "spec": "specs/pipeline-model/spec.md",
+      "description": "Update DEFAULT_WORKFLOW in workflow-loader.ts to add approval: true to the check stage. This ensures check gate exists (user reviews check results before marking done).",
+      "acceptanceCriteria": [
+        "Default workflow check stage has approval: true",
+        "Default workflow build stage keeps approval: true",
+        "Default workflow plan stage keeps approval: false",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Simple config change in workflow-loader.ts DEFAULT_WORKFLOW."
+    },
+    {
+      "id": "T-006",
+      "title": "Add mo issue approve CLI command",
+      "spec": "specs/session-resume/spec.md",
+      "description": "Add 'approve <number>' subcommand to issue CLI (cli/commands/issue.ts). It should call POST /api/issues/:number/approve and display success/error message. Follow existing CLI patterns (apiClient, chalk formatting).",
+      "acceptanceCriteria": [
+        "mo issue approve 1 calls POST /api/issues/1/approve",
+        "Success message displayed on approval",
+        "Error message displayed when approval fails",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Follow the pattern of existing issue subcommands like 'start' or 'close'."
+    },
+    {
+      "id": "T-007",
+      "title": "E2E verification: build passes and tests pass",
+      "spec": "",
+      "description": "Run build and tests to verify all changes work together. No new test files needed - verify existing tests still pass and typecheck is clean.",
+      "acceptanceCriteria": [
+        "npm run build succeeds",
+        "npm test passes (if tests exist)",
+        "No TypeScript errors"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Final verification step."
+    }
+  ]
+}
