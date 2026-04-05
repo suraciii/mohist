@@ -5,7 +5,6 @@ import { IssueService } from '../services';
 import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager, type LlmConfig } from '../agent-runtime';
-import { loadWorkflow } from '../workflow/workflow-loader';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -518,30 +517,6 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const project = stateManager.getProjectById(projectId);
-      let worktreePath = process.cwd();
-      if (worktreeManager && project) {
-        worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
-      }
-
-      const workflow = loadWorkflow(worktreePath);
-      if (typeof workflow === 'string') {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} has no workflow configured`
-        };
-        return c.json(response, 400);
-      }
-
-      const currentStageConfig = workflow.stages.find((s) => s.stage === issue.stage);
-      if (!currentStageConfig?.approval) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} is not at an approval gate (current stage: ${issue.stage})`
-        };
-        return c.json(response, 400);
-      }
-
       if (!agentRunner) {
         const response: ApiResponse = {
           success: false,
@@ -550,16 +525,29 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      const comments = stateManager.getCommentsByIssue(issue.id);
-      const latestComment = comments.length > 0 ? comments[comments.length - 1] : null;
+      if (!agentRunner.hasPausedSession(number)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `No paused session found for issue #${number}`
+        };
+        return c.json(response, 400);
+      }
 
-      agentRunner.start(
+      const project = stateManager.getProjectById(projectId);
+      let worktreePath = process.cwd();
+      if (worktreeManager && project) {
+        const existingPath = worktreeManager.getPath(project.name, issue.number);
+        worktreePath = existingPath || process.cwd();
+      }
+
+      agentRunner.resume(
         issue,
         projectId,
         stateManager.getIssueRepo(),
         stateManager.getCommentRepo(),
         worktreePath,
         sessionManager,
+        '[System] User approved. Continue to next stage.',
         llmConfig,
         (issueId, status) => stateManager.updateIssueStatus(issueId, status),
       );
@@ -568,8 +556,7 @@ export function createIssueRoutes(
         success: true,
         data: {
           issue,
-          context: latestComment?.body || null,
-          message: `Issue #${number} approved, agent is running`
+          message: `Issue #${number} approved, agent resumed`
         }
       };
       return c.json(response);

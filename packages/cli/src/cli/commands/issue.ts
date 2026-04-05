@@ -355,6 +355,26 @@ export function setupIssueCommands(program: Command): void {
     });
 
   issue
+    .command('approve <number>')
+    .description('Approve an issue at an approval gate')
+    .action(async (number) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          `/issues/${number}/approve`
+        );
+        
+        if (response.success) {
+          console.log(chalk.green(`✓ Issue #${number} approved, agent resumed`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to approve issue: ${error}`));
+      }
+    });
+
+  issue
     .command('diff <number>')
     .description('Show diff between issue branch and main')
     .action(async (number) => {

@@ -144,6 +144,11 @@ export class WorktreeManager {
     return worktrees;
   }
 
+  getPath(projectName: string, issueNumber: number): string | null {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+    return fs.existsSync(worktreePath) ? worktreePath : null;
+  }
+
   exists(projectName: string, issueNumber: number): boolean {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     return fs.existsSync(worktreePath);

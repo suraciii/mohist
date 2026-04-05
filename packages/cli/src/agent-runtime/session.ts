@@ -1,11 +1,14 @@
 import type { ModelMessage } from 'ai';
 
+export type SessionStatus = 'active' | 'paused' | 'closed';
+
 export interface Session {
   id: string;
   issueId: number;
   messages: ModelMessage[];
   createdAt: Date;
   closedAt: Date | null;
+  status: SessionStatus;
 }
 
 function generateSessionId(): string {
@@ -22,6 +25,7 @@ export class SessionManager {
       messages: [],
       createdAt: new Date(),
       closedAt: null,
+      status: 'active',
     };
     this.sessions.set(session.id, session);
     return session;
@@ -32,7 +36,7 @@ export class SessionManager {
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
-    if (session.closedAt) {
+    if (session.status === 'closed') {
       throw new Error(`Session is closed: ${sessionId}`);
     }
     session.messages.push(message);
@@ -56,6 +60,38 @@ export class SessionManager {
       throw new Error(`Session not found: ${sessionId}`);
     }
     session.closedAt = new Date();
+    session.status = 'closed';
+  }
+
+  pause(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (session.status === 'closed') {
+      throw new Error(`Cannot pause a closed session: ${sessionId}`);
+    }
+    session.status = 'paused';
+  }
+
+  resume(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (session.status !== 'paused') {
+      throw new Error(`Cannot resume a session that is not paused: ${sessionId}`);
+    }
+    session.status = 'active';
+  }
+
+  findByIssueId(issueId: number): Session | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.issueId === issueId && session.status !== 'closed') {
+        return session;
+      }
+    }
+    return undefined;
   }
 
   remove(sessionId: string): void {
