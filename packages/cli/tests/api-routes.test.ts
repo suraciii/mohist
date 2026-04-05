@@ -11,6 +11,7 @@ import { ConfigRepo } from '../src/db/config-repo';
 import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
 import { ConfigService } from '../src/services/config-service';
+import { EventBus, AgentRunnerService } from '../src/services';
 import { StateManager } from '../src/server/state-manager';
 import { createProjectRoutes } from '../src/api/projects';
 import { createIssueRoutes } from '../src/api/issues';
@@ -187,7 +188,9 @@ describe('API Routes', () => {
 
     beforeEach(async () => {
       const app = new Hono();
-      app.route('/api/issues', createIssueRoutes(stateManager));
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+      app.route('/api/issues', createIssueRoutes(stateManager, undefined, undefined, undefined, agentRunner));
       server = createTestServer(app);
       
       const project = projectService.create({ name: 'Test Project', path: '/test/path' });

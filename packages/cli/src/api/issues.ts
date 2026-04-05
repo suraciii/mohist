@@ -2,18 +2,21 @@ import { Hono } from 'hono';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Issue, Stage, IssueStatus, Comment } from '../types';
 import { IssueService } from '../services';
+import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager, type LlmConfig } from '../agent-runtime';
-import { runMainAgent } from '../agents/main-agent';
+import { loadWorkflow } from '../workflow/workflow-loader';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
-let activeAgentIssueId: string | null = null;
-let activeAgentPromise: Promise<void> | null = null;
+const execFileAsync = promisify(execFile);
 
 export function createIssueRoutes(
   stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
   sessionManager: SessionManager = new SessionManager(),
-  llmConfig?: LlmConfig
+  llmConfig?: LlmConfig,
+  agentRunner?: AgentRunnerService,
 ): Hono {
   const app = new Hono();
   
@@ -27,7 +30,7 @@ export function createIssueRoutes(
 
   app.get('/', async (c) => {
     try {
-      const projectId = getCurrentProjectId();
+      const projectId = c.req.query('projectId') || getCurrentProjectId();
       if (!projectId) {
         const response: ApiResponse = {
           success: false,
@@ -268,10 +271,11 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (activeAgentPromise) {
+      if (agentRunner && agentRunner.isRunning()) {
+        const status = agentRunner.getStatus();
         const response: ApiResponse = {
           success: false,
-          error: `Another issue (#${activeAgentIssueId}) is already running. Wait for it to complete or pause first.`
+          error: `Another issue (#${status.issueNumber}) is already running. Wait for it to complete or pause first.`
         };
         return c.json(response, 400);
       }
@@ -318,31 +322,24 @@ export function createIssueRoutes(
         worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
       }
 
-      activeAgentIssueId = issue.id;
-      activeAgentPromise = (async () => {
-        try {
-          await runMainAgent(
-            {
-              issueRepo: stateManager.getIssueRepo(),
-              commentRepo: stateManager.getCommentRepo(),
-              worktreePath,
-              llmConfig,
-              issue: updatedIssue,
-            },
-            sessionManager,
-          );
-        } catch (err) {
-          console.error(`Agent loop failed for issue #${number}:`, err);
-          try {
-            stateManager.updateIssueStatus(issue.id, IssueStatus.Blocked);
-          } catch (updateErr) {
-            console.error(`Failed to update issue #${number} status to blocked:`, updateErr);
-          }
-        } finally {
-          activeAgentPromise = null;
-          activeAgentIssueId = null;
-        }
-      })();
+      if (!agentRunner) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'AgentRunnerService not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      agentRunner.start(
+        updatedIssue,
+        projectId,
+        stateManager.getIssueRepo(),
+        stateManager.getCommentRepo(),
+        worktreePath,
+        sessionManager,
+        llmConfig,
+        (issueId, status) => stateManager.updateIssueStatus(issueId, status),
+      );
 
       const response: ApiResponse = {
         success: true,
@@ -380,7 +377,7 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      if (activeAgentIssueId === issue.id) {
+      if (agentRunner && agentRunner.getActiveIssueId() === issue.id) {
         const response: ApiResponse = {
           success: false,
           error: `Issue #${number} has an agent running. Wait for it to complete or pause first.`
@@ -479,6 +476,198 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: { issue, message: `Issue #${number} worktree cleaned up` }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/approve', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      if (agentRunner && agentRunner.isRunning()) {
+        const status = agentRunner.getStatus();
+        const response: ApiResponse = {
+          success: false,
+          error: `Another issue (#${status.issueNumber}) is already running. Wait for it to complete first.`
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = stateManager.getProjectById(projectId);
+      let worktreePath = process.cwd();
+      if (worktreeManager && project) {
+        worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
+      }
+
+      const workflow = loadWorkflow(worktreePath);
+      if (typeof workflow === 'string') {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} has no workflow configured`
+        };
+        return c.json(response, 400);
+      }
+
+      const currentStageConfig = workflow.stages.find((s) => s.stage === issue.stage);
+      if (!currentStageConfig?.approval) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is not at an approval gate (current stage: ${issue.stage})`
+        };
+        return c.json(response, 400);
+      }
+
+      if (!agentRunner) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'AgentRunnerService not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const comments = stateManager.getCommentsByIssue(issue.id);
+      const latestComment = comments.length > 0 ? comments[comments.length - 1] : null;
+
+      agentRunner.start(
+        issue,
+        projectId,
+        stateManager.getIssueRepo(),
+        stateManager.getCommentRepo(),
+        worktreePath,
+        sessionManager,
+        llmConfig,
+        (issueId, status) => stateManager.updateIssueStatus(issueId, status),
+      );
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          issue,
+          context: latestComment?.body || null,
+          message: `Issue #${number} approved, agent is running`
+        }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/diff', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = stateManager.getProjectById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        const response: ApiResponse = {
+          success: true,
+          data: { files: [] }
+        };
+        return c.json(response);
+      }
+
+      let defaultBranch = 'main';
+      try {
+        const result = await execFileAsync(
+          'git',
+          ['symbolic-ref', 'refs/remotes/origin/HEAD'],
+          { cwd: project.path }
+        );
+        defaultBranch = result.stdout.trim().replace('refs/remotes/origin/', '');
+      } catch {
+        try {
+          const result = await execFileAsync(
+            'git',
+            ['rev-parse', '--abbrev-ref', 'HEAD'],
+            { cwd: project.path }
+          );
+          defaultBranch = result.stdout.trim();
+        } catch {
+          // fallback to 'main'
+        }
+      }
+
+      const branchName = `mo/issue-${number}`;
+      const diffOutput = await execFileAsync(
+        'git',
+        ['diff', `${defaultBranch}...${branchName}`, '--stat'],
+        { cwd: project.path }
+      );
+
+      const files: Array<{ file: string; additions: number; deletions: number }> = [];
+      const lines = diffOutput.stdout.trim().split('\n');
+      for (const line of lines) {
+        const match = line.match(/^(.+?)\s*\|\s*(\d+)\s*([+-]+)$/);
+        if (match) {
+          const diffSymbols = match[3] || '';
+          const additions = diffSymbols.split('+').length - 1;
+          const deletions = diffSymbols.split('-').length - 1;
+          files.push({
+            file: match[1].trim(),
+            additions,
+            deletions,
+          });
+        }
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: { files }
       };
       return c.json(response);
     } catch (error) {

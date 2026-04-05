@@ -5,7 +5,9 @@ import { createIssueRoutes } from '../api/issues';
 import { createConfigRoutes } from '../api/config';
 import { createStatusRoutes } from '../api/status';
 import { createLabelRoutes } from '../api/labels';
-import { ConfigService } from '../services';
+import { createEventRoutes } from '../api/events';
+import { createAgentRoutes } from '../api/agent';
+import { ConfigService, EventBus, AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
 import type { LlmConfig } from '../agent-runtime';
@@ -58,16 +60,23 @@ async function main(): Promise<void> {
 
   const worktreeManager = new WorktreeManager();
   const sessionManager = new SessionManager();
+  const eventBus = new EventBus();
+  const agentRunner = new AgentRunnerService(eventBus);
 
   const llmConfig = buildLlmConfig(stateManager.getConfigRepo());
   
   const server = new HttpServer(config);
   
   server.addRouter('/api/projects', createProjectRoutes(stateManager));
-  server.addRouter('/api/issues', createIssueRoutes(stateManager, worktreeManager, sessionManager, llmConfig));
+  server.addRouter('/api/issues', createIssueRoutes(stateManager, worktreeManager, sessionManager, llmConfig, agentRunner));
   server.addRouter('/api/labels', createLabelRoutes(stateManager));
   server.addRouter('/api/config', createConfigRoutes(configService));
   server.addRouter('/api', createStatusRoutes(stateManager));
+  server.addRouter('/api/events', createEventRoutes(eventBus));
+  server.addRouter('/api/agent', createAgentRoutes(agentRunner));
+
+  const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
+  server.serveStaticFiles(webDistDir);
 
   process.on('SIGTERM', async () => {
     console.log('Received SIGTERM, shutting down gracefully...');

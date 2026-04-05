@@ -1,0 +1,314 @@
+# Ralph Progress Log
+Started: 2026-04-04T18:31:09.733Z
+
+---
+
+## 2026-04-05T00:00:00Z — T-001: Initialize React SPA project with Vite
+
+**Status**: Completed
+
+**What was done**:
+- Created `packages/cli/web/` with Vite + React 19 + TypeScript setup
+- Configured Tailwind CSS v4 via `@tailwindcss/vite` plugin
+- Set up API proxy from Vite dev server (port 5173) to Hono backend (port 3456)
+- Added `build:web` and `dev:web` scripts to parent `package.json`
+- Created placeholder App component with Tailwind styles
+
+**Acceptance criteria met**:
+- `npm run build` produces `dist/` with `index.html`, JS bundle (194KB), CSS bundle (5KB)
+- Vite dev server configured on port 5173 with `/api/*` proxy to `localhost:3456`
+- Tailwind CSS v4 configured via `@import "tailwindcss"` + `@tailwindcss/vite` plugin
+- React renders placeholder page at `/`
+
+**Learnings**:
+- Server default port is 3456 (from `ConfigService.KEYS.SERVER_PORT`)
+- Tailwind CSS v4 uses `@import "tailwindcss"` instead of v3's `@tailwind` directives
+- Web project has its own `package.json` and `tsconfig.json` separate from the main project
+
+**Next**: T-002 — Implement EventBus module
+
+---
+
+## 2026-04-05T12:00:00Z — T-002: Implement EventBus module
+
+**Status**: Completed
+
+**What was done**:
+- Created `EventBus` class in `src/services/event-bus.ts` with `emit()`, `on()`, `off()`, `removeAllListeners()` methods
+- Defined typed `EventMap` with all 6 event types: `stage_changed`, `comment_added`, `agent_started`, `agent_completed`, `agent_error`, `approval_requested`
+- Created singleton `eventBus` instance exported for shared use
+- Exported from `services/index.ts`
+
+**Acceptance criteria met**:
+- `EventBus` class supports `emit(event, data)` and `on(event, listener)`
+- `EventBus` singleton is exportable for shared use (`eventBus`)
+- Typecheck passes
+
+**Learnings**:
+- Used `Set<ListenerEntry>` (wrapped object) instead of `Set<Function>` for proper equality comparison
+- Listener errors are swallowed to avoid disrupting other listeners — this is a design choice for robustness
+- `EventMap` type provides compile-time type safety for event names and their payloads
+
+**Next**: T-003 — Extract AgentRunnerService from issues.ts
+
+---
+
+## 2026-04-05T02:41:00Z — T-003: Extract AgentRunnerService from issues.ts
+
+**Status**: Completed
+
+**What was done**:
+- Created `AgentRunnerService` class in `src/services/agent-runner-service.ts`
+- Service encapsulates `activeIssueId`, `activeIssueNumber`, `activePromise` state (previously module-level vars in issues.ts)
+- Provides `start()`, `getStatus()`, `isRunning()`, `getActiveIssueId()` methods
+- `start()` wraps `runMainAgent` with lifecycle event emission: `agent_started`, `agent_completed`, `agent_error`
+- On error, calls `updateIssueStatus(issueId, Blocked)` callback and emits `agent_error`
+- Wired `AgentRunnerService` into server startup (`server/index.ts`) with `EventBus` injection
+- Updated `createIssueRoutes()` to accept optional `agentRunner` parameter
+- `POST /:number/start` now delegates to `agentRunner.start()` instead of inline async IIFE
+- `POST /:number/close` uses `agentRunner.getActiveIssueId()` to check for running agents
+- Removed module-level `activeAgentIssueId` and `activeAgentPromise` variables from issues.ts
+- Updated test fixtures to pass `AgentRunnerService` instance
+
+**Acceptance criteria met**:
+- `AgentRunnerService` class encapsulates agent state tracking
+- `start()` method runs `runMainAgent` with lifecycle event emission
+- `getStatus()` returns `{ running, issueId, issueNumber }`
+- `isRunning()` returns boolean
+- `agent_started`/`agent_completed`/`agent_error` events emitted via EventBus
+- `issues.ts` `POST /:number/start` uses `AgentRunnerService` instead of module-level vars
+- Typecheck passes
+
+**Learnings**:
+- `AgentRunnerService` constructor takes `EventBus` (not singleton) for testability
+- The `projectId` is captured by the async IIFE closure, no need to store it as instance field
+- `updateIssueStatus` callback pattern avoids importing `StateManager` into the service layer
+- Tests that create `AgentRunnerService` with `new EventBus()` don't need real LLM keys — agent errors are handled gracefully
+
+**Next**: T-004 — Inject EventBus into Agent tools
+
+---
+
+## 2026-04-05T03:00:00Z — T-004: Inject EventBus into Agent tools
+
+**Status**: Completed
+
+**What was done**:
+- Added optional `eventBus?: EventBus` field to `AdvanceStageContext` in `advance-stage.ts`
+- Added optional `worktreePath?: string` field to `AdvanceStageContext` for loading workflow config
+- After successful `issueRepo.updateStage()`, emits `stage_changed` event with `{ issueId, projectId, from, to }`
+- After `stage_changed`, loads workflow config via `loadWorkflow()` and checks if target stage has `approval: true`
+- If approval gate detected, emits `approval_requested` event with `{ issueId, projectId, stage }`
+- Added optional `eventBus?: EventBus` field to `AddCommentContext` in `add-comment.ts`
+- After successful `commentRepo.create()`, emits `comment_added` event with `{ issueId, projectId, commentId, body, createdAt }`
+- Added optional `eventBus?: EventBus` field to `MainAgentContext` in `main-agent.ts`
+- `runMainAgent()` passes `eventBus` and `worktreePath` to `createAdvanceStageTool()`
+- `runMainAgent()` passes `eventBus` to `createAddCommentTool()`
+- Updated `AgentRunnerService.start()` to include `eventBus` in the `MainAgentContext` passed to `runMainAgent()`
+
+**Acceptance criteria met**:
+- `advance_stage` tool emits `stage_changed` after `issueRepo.updateStage()`
+- `add_comment` tool emits `comment_added` after `commentRepo.create()`
+- `advance_stage` tool emits `approval_requested` when target stage has `approval: true`
+- EventBus is injected via tool context (not imported as singleton)
+- Existing tool behavior unchanged when EventBus is not provided (all fields optional)
+- Typecheck passes
+
+**Learnings**:
+- `advance_stage` needs `worktreePath` to call `loadWorkflow()` for checking approval gates
+- The approval check only fires if `worktreePath` is provided — when not available, approval events simply won't fire
+- `loadWorkflow()` returns either a `WorkflowConfig` or a string error — need to check `typeof` before accessing `.stages`
+
+**Next**: T-005 — Implement SSE endpoint
+
+---
+
+## 2026-04-05T02:43:00Z — T-005: Implement SSE endpoint
+
+**Status**: Completed
+
+**What was done**:
+- Created `src/api/events.ts` with `createEventRoutes(eventBus)` factory function
+- Implemented `GET /api/events` SSE endpoint using Hono's `streamSSE` helper
+- Supports optional `projectId` query parameter for project-scoped event filtering
+- All 6 event types forwarded: `stage_changed`, `comment_added`, `agent_started`, `agent_completed`, `agent_error`, `approval_requested`
+- Each SSE connection registers a handler per event type on the EventBus, unsubscribes on client disconnect via `AbortSignal`
+- Wired route into server startup at `/api/events` in `server/index.ts`
+
+**Acceptance criteria met**:
+- `GET /api/events` returns SSE stream with `Content-Type: text/event-stream` (via Hono `streamSSE`)
+- `GET /api/events?projectId=xxx` filters events by comparing `data.projectId`
+- `stage_changed` events include `projectId` for filtering (inherited from EventMap type)
+- All 6 event types are forwarded to SSE clients
+- Connection cleanup on client disconnect (`AbortSignal` → `eventBus.off()`)
+- Typecheck passes
+
+**Learnings**:
+- Hono's `streamSSE` is imported from `hono/streaming`, not from `hono` directly
+- EventBus `on<T>()` uses generics per event type, so a catch-all listener approach requires creating a separate handler per event type via closure
+- `stream.sleep(Infinity)` keeps the SSE connection alive
+- The `AbortSignal` from `c.req.raw.signal` fires on client disconnect
+
+**Next**: T-006 — Add new API endpoints for Web UI
+
+---
+
+## 2026-04-05T02:47:00Z — T-006: Add new API endpoints for Web UI
+
+**Status**: Completed
+
+**What was done**:
+- Added `POST /api/issues/:number/approve` endpoint to `issues.ts`
+  - Validates issue exists and is at an approval gate (current stage has `approval: true` in workflow config)
+  - Returns 400 if agent already running
+  - Returns 400 if issue not at approval gate
+  - Extracts latest comment from DB as context
+  - Reuses existing worktree (via `worktreeManager.create()` which returns path if exists)
+  - Starts new agent session via `agentRunner.start()`
+- Added `GET /api/issues/:number/diff` endpoint to `issues.ts`
+  - Returns empty files array if no worktree exists
+  - Detects default branch via `git symbolic-ref refs/remotes/origin/HEAD` with fallback
+  - Runs `git diff <default>...mo/issue-<n> --stat` in project path
+  - Parses `--stat` output into `{ file, additions, deletions }` array
+- Created `src/api/agent.ts` with `createAgentRoutes(agentRunner)` factory function
+  - Implements `GET /api/agent/status` returning `{ running, issueId, issueNumber }`
+- Wired agent routes into server at `/api/agent` in `server/index.ts`
+
+**Acceptance criteria met**:
+- `POST /api/issues/:number/approve` starts new agent session for gate issues
+- `POST /api/issues/:number/approve` returns 400 for non-gate issues
+- `POST /api/issues/:number/approve` returns 400 if agent already running
+- Approve extracts plan output from latest agent comment for context
+- `GET /api/agent/status` returns `{ running, issueId, issueNumber }`
+- `GET /api/issues/:number/diff` returns changed files list using WorktreeManager
+- Typecheck passes
+
+**Learnings**:
+- Approval gate validation: check `workflow.stages.find(s => s.stage === issue.stage)?.approval`
+- `worktreeManager.create()` is idempotent — returns existing path if worktree already exists
+- `git diff --stat` output format: `file | N insertions(+) deletions(-)` — regex parsing needed
+- Default branch detection: `git symbolic-ref refs/remotes/origin/HEAD` → fallback to `git rev-parse --abbrev-ref HEAD` → fallback to `main`
+
+**Next**: T-007 — Embed static files in Hono server
+
+---
+
+## 2026-04-05T12:00:00Z — T-007: Embed static files in Hono server
+
+**Status**: Completed
+
+**What was done**:
+- Added `serveStaticFiles(webDistDir)` method to `HttpServer` class in `src/server/http-server.ts`
+- Used `@hono/node-server/serve-static` middleware for serving `/assets/*` static files
+- Added catch-all `app.get('*')` route for SPA fallback — serves `index.html` for non-API, non-static paths
+- Gracefully handles missing `web/dist/` directory (logs message, skips static serving)
+- Wired `serveStaticFiles()` call in `server/index.ts` after all API routers are registered
+- API routes take priority since they're registered first via `addRouter()`
+
+**Acceptance criteria met**:
+- Server serves `index.html` at `/` (via SPA fallback catch-all)
+- Server serves JS/CSS assets from `/assets/*` (via `serveStatic` middleware)
+- Non-API, non-static paths return `index.html` (SPA fallback)
+- API routes (`/api/*`) are not intercepted by static serving (registered first)
+- Typecheck passes
+
+**Learnings**:
+- `@hono/node-server/serve-static` is already available as a dependency, no new packages needed
+- Hono route matching is order-dependent — API routers registered before static middleware ensures API priority
+- `serveStatic({ root: resolvedDir })` serves files from the resolved directory at the matched path prefix
+- `path.join(__dirname, '..', '..', 'web', 'dist')` correctly resolves from `dist/server/` to `web/dist/`
+
+**Next**: T-008 — Implement frontend API client and TanStack Query setup
+
+---
+
+## 2026-04-05T18:00:00Z — T-008: Implement frontend API client and TanStack Query setup
+
+**Status**: Completed
+
+**What was done**:
+- Created `web/src/lib/types.ts` with all frontend type definitions mirroring backend types (Stage, IssueStatus, Issue, Project, Comment, ApiResponse, AgentStatus, DiffFile, EventMap)
+- Created `web/src/lib/api.ts` with typed API client module covering all REST endpoints: projects, issues, comments, labels, agent status, approve, diff, start, close, reopen
+- Created `web/src/hooks/useQueries.ts` with TanStack Query hooks: `useProjects()`, `useIssues()`, `useIssue()`, `useLabels()`, `useAgentStatus()`
+- Updated `web/src/main.tsx` to wrap app with `QueryClientProvider` (staleTime: 10s, retry: 1)
+- Installed `@tanstack/react-query` and `react-router-dom` dependencies
+
+**Acceptance criteria met**:
+- API client module exports typed functions for all endpoints
+- TanStack Query `QueryClientProvider` wraps the app
+- `useIssues()` hook fetches issues with optional stage/label filters
+- `useAgentStatus()` hook fetches agent status with 5s refetch interval
+- Typecheck passes (`tsc --noEmit` clean)
+- Build succeeds (223KB JS, 5KB CSS gzipped to 69KB/1.8KB)
+
+**Learnings**:
+- Used inline `import()` type expressions in api.ts to avoid circular dependency with types.ts
+- `useAgentStatus()` uses `refetchInterval: 5000` for near-real-time status polling
+- `react-router-dom` installed now for T-010/T-011 routing
+
+**Next**: T-009 — Implement kanban board page
+
+---
+
+## 2026-04-05T18:30:00Z — T-009: Implement kanban board page
+
+**Status**: Completed
+
+**What was done**:
+- Created `web/src/components/IssueCard.tsx` — issue card component showing number, title (truncated), labels, status indicator (paused/blocked), agent running indicator (animated pulse), and approval gate badge (amber warning icon)
+- Created `web/src/components/StageColumn.tsx` — stage column with header (colored dot + label + count) and scrollable issue list with empty state
+- Created `web/src/components/KanbanBoard.tsx` — main kanban layout with 5 columns (Draft, Plan, Build, Check, Done) using flexbox, groups issues by stage via useMemo
+- Updated `web/src/App.tsx` — fetches projects/issues/agentStatus via TanStack Query hooks, filters issues by first project, renders KanbanBoard with loading state
+- Approval gate detection: checks if issue stage is in `APPROVAL_STAGES` set (currently `Build`) and status is `Active`
+
+**Acceptance criteria met**:
+- Kanban displays 5 columns with correct stage names (Draft, Plan, Build, Check, Done)
+- Issue cards show number, title, labels
+- Cards in paused/blocked status show visual indicator ("Paused" / "Closed" text)
+- Agent running indicator appears (blue animated pulse) when agent is active on an issue
+- Approval gate badge appears for issues waiting at gate (amber "Waiting for approval" with warning icon)
+- Empty columns show "No issues" empty state
+- Typecheck passes (`tsc --noEmit` clean)
+- Build succeeds (239KB JS, 11.7KB CSS)
+
+**Learnings**:
+- `APPROVAL_STAGES` is hardcoded as `[Stage.Build]` — this mirrors the backend `DEFAULT_WORKFLOW` where only `build` has `approval: true`
+- Approval gate badge only shows when status is `Active` (not `Paused` or `Blocked`) to avoid showing badge on closed issues
+- Issue cards are `<a>` links to `/issue/:number` for navigation to detail page (T-011)
+- Stage column uses `min-w-[280px] max-w-[320px] flex-1` for responsive column sizing
+
+**Next**: T-010 — Implement project selector in header
+
+---
+
+## 2026-04-05T20:00:00Z — T-010: Implement project selector in header
+
+**Status**: Completed
+
+**What was done**:
+- Created `web/src/context/ProjectContext.tsx` — React context for managing selected project state across the app. Provides `projectId`, `setProjectId`, `projects`, `setProjects`, and `currentProject` via `useProject()` hook.
+- Created `web/src/components/Header.tsx` — header component with mohist logo, project selector dropdown (with click-outside-to-close), and "New Issue" button.
+- Modified backend `GET /api/issues` in `src/api/issues.ts` to accept optional `projectId` query parameter. When provided, uses it instead of `stateManager.getCurrentProjectId()`.
+- Updated `web/src/lib/api.ts` — `getIssues()` now accepts `projectId` param and sends it as query parameter.
+- Updated `web/src/hooks/useQueries.ts` — `useIssues()` now accepts `projectId` param, includes it in query key for automatic refetch on project change, and disables query when no project is selected.
+- Updated `web/src/App.tsx` — wraps app in `ProjectProvider`, uses `useProject()` context to sync fetched projects and pass `projectId` to `useIssues()`.
+- Single project: renders project name as plain text (no dropdown). Multiple projects: renders clickable dropdown with project name and path.
+- New Issue button uses `prompt()` for title input (placeholder — T-012 will add proper dialog).
+
+**Acceptance criteria met**:
+- Header displays project selector with current project
+- Dropdown lists all available projects (name + path)
+- Selecting a project refreshes kanban data (TanStack Query key includes `projectId`)
+- Single project shows name without dropdown
+- SSE connection can reconnect with new `projectId` on switch (context provides `projectId` for T-013)
+- Typecheck passes (both backend `tsc --noEmit` and frontend `tsc --noEmit` clean)
+- Build succeeds (241KB JS, 13.4KB CSS)
+
+**Learnings**:
+- Backend `GET /issues` already used `stateManager.getCurrentProjectId()` — added `c.req.query('projectId')` fallback to support Web UI project switching without modifying server-side state
+- TanStack Query automatically refetches when query key changes, so project switch naturally triggers data refresh
+- `useIssues()` disabled when no `projectId` — prevents API errors during initial load
+- Project context uses `useState` + `useCallback` — simple enough, no need for `useReducer`
+
+**Next**: T-011 — Implement issue detail page
+
