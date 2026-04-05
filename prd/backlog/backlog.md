@@ -194,6 +194,14 @@
 | B-312 | 项目切换 | 多项目之间切换，当前项目高亮 | 2026-04-03 explore |
 | B-313 | 操作能力（MVP 后） | 创建 Issue、启动 Agent、审批 gate、关闭/重开 Issue | 2026-04-03 explore |
 
+### ACP 执行可观测性
+
+| ID | 事项 | 说明 | 来源 |
+|----|------|------|------|
+| B-320 | ACP sessionUpdate 事件捕获 | 当前 spawn-coder.ts 只收集 agent_message_chunk，丢弃了 plan/tool_call/tool_call_update 等事件。应在 oneshot 执行过程中捕获所有 sessionUpdate 事件，用于执行后诊断和实时进度展示。不需要 persistent session，oneshot 过程中事件已经在发送 | 2026-04-05 explore |
+| B-321 | 执行日志持久化 | 将捕获的 ACP 事件存入 workflow_log 表（B-100），支持事后按时间线回放：哪些文件被读取/修改、哪些命令被执行、成功/失败状态。mohist agent 可基于日志做失败分析，用户可在 Web UI 查看 | 2026-04-05 explore |
+| B-322 | 输出截断问题 | 当前 spawn-coder.ts 对 agent 输出硬截断 8000 字符（head 3000 + tail 5000），build 阶段容易丢失关键信息。应改为完整输出存文件或数据库，返回摘要而非截断 | 2026-04-05 explore |
+
 ---
 
 ## 8. 跨 Milestone
