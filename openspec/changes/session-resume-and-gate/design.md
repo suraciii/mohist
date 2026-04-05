@@ -42,11 +42,18 @@ Session 状态: active → paused → active → closed
                 start    gate    approve    done/error
 ```
 
-### D3: AgentRunnerService 持有 sessionIssueMap
+### D3: AgentRunnerService 持有 pausedSessions Map
 
 **决策**: AgentRunnerService 内部维护 `Map<number, Session>`（issueId → paused session）。resume() 时从 map 中取出 session，注入用户消息，运行 agent loop。
 
-**理由**: SessionManager 是通用的内存存储，不知道哪些 session 是 "可恢复的"。AgentRunnerService 作为 agent 生命周期管理者，持有对 paused session 的引用是合理的职责。当 agent 正常完成或出错时，从 map 中清除。
+**理由**: SessionManager 是通用的内存存储，不知道哪些 session 是 "可恢复的"。AgentRunnerService 作为 agent 生命周期管理者，持有对 paused session 的引用是合理的职责。
+
+**与 D1 的关系澄清**: D1 的 findByIssueId() 用于查找任意 session，而 D3 的 Map 用于明确标记"哪些 issue 当前有 paused session"。这是一种职责分离：SessionManager 管存储，AgentRunnerService 管业务生命周期。如果只用 findByIssueId()，可能找到错误的 session（如之前的已关闭 session）。
+
+**清理策略（补充）**: 
+- 正常完成（done）或出错时：从 Map 中删除
+- Issue 关闭时：清理关联的 paused session
+- Server 启动时：清理所有残留的 paused session（防止重启后残留脏数据）
 
 ### D4: resume 注入用户消息而非重置 system prompt
 
@@ -62,6 +69,16 @@ Session 状态: active → paused → active → closed
 
 注意：这与 pipeline-model spec 中 `plan: gate_after: human` 的默认配置有语义差异——approval 放在下一阶段 entry 上 vs 当前阶段 exit 上。两种模型等价，只是表达方式不同。当前实现用 "approval on next stage" 表达 "gate after current stage"。
 
+**术语映射澄清（补充）**:
+```
+PRD Intent          →  Code Implementation
+─────────────────────────────────────────────
+PLAN gate_after: human   →  BUILD stage approval: true
+BUILD gate_after: none   →  CHECK stage approval: false  
+CHECK gate_after: human  →  DONE stage approval: true (or terminal gate)
+```
+在 M3 实现 workflow.yaml 可配置时统一术语，当前阶段保持此映射并在代码中注释说明。
+
 ### D6: mo approve CLI 直接调 HTTP API
 
 **决策**: 新增 `mo issue approve <number>` 命令，调用 `POST /api/issues/:number/approve`。
@@ -73,5 +90,11 @@ Session 状态: active → paused → active → closed
 **[内存 session 在 server 重启时丢失]** → 已知 M1 限制。approve 后如果 server 重启，无法恢复。M4 通过 session 持久化解决。当前阶段可通过文档说明规避。
 
 **[paused session 内存占用]** → 单 issue 串行模式下只有一个 paused session，内存可忽略。如果后续有多 issue 并发需求，需要 session 超时清理机制。
+
+**[paused session 清理策略（补充）]** → 需要明确的清理时机：
+1. 正常完成（done）或出错时：从 AgentRunnerService.pausedSessions Map 中删除
+2. Issue 关闭时：清理关联的 paused session（防止僵尸 session）
+3. Server 启动时：清理所有残留的 paused session（防止重启后残留脏数据）
+4. （可选）超时机制：paused session 保留 24 小时后自动清理
 
 **[默认 workflow approval 位置语义]** → approval 在 "下一个要进入的阶段" 上，而非 "刚完成的阶段" 上。这与 PRD 的 gate_after 语义等价但表达不同。在 M3 实现 workflow.yaml 可配置时统一术语。
