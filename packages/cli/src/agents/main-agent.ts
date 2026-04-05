@@ -1,4 +1,4 @@
-import { resolveModel, type LlmConfig, SessionManager, ToolRegistry, runAgentLoop } from '../agent-runtime';
+import { resolveModel, type LlmConfig, SessionManager, type Session, ToolRegistry, runAgentLoop } from '../agent-runtime';
 import type { AgentLoopResult } from '../agent-runtime';
 import { IssueRepo } from '../db/issue-repo';
 import { CommentRepo } from '../db/comment-repo';
@@ -63,10 +63,16 @@ When calling spawn_coder, pass these variables in the \`variables\` object:
 - If check stage reveals issues, you may advance back to build to fix them.`;
 }
 
+export interface MainAgentResult {
+  loopResult: AgentLoopResult;
+  session: Session;
+}
+
 export async function runMainAgent(
   context: MainAgentContext,
   sessionManager: SessionManager,
-): Promise<AgentLoopResult> {
+  existingSession?: Session,
+): Promise<MainAgentResult> {
   const model = resolveModel(context.llmConfig);
 
   const toolRegistry = new ToolRegistry();
@@ -76,14 +82,12 @@ export async function runMainAgent(
   toolRegistry.register(createAddCommentTool({ issue: context.issue, commentRepo: context.commentRepo, eventBus: context.eventBus }));
   toolRegistry.register(createGetIssueTool({ issue: context.issue, issueRepo: context.issueRepo }));
 
-  const session = sessionManager.create(Number(context.issue.id));
+  const session = existingSession ?? sessionManager.create(Number(context.issue.id));
   const system = buildSystemPrompt(context.issue);
 
-  const result = await runAgentLoop(session, sessionManager, toolRegistry, model, {
+  const loopResult = await runAgentLoop(session, sessionManager, toolRegistry, model, {
     system,
   });
 
-  sessionManager.close(session.id);
-
-  return result;
+  return { loopResult, session };
 }

@@ -15,7 +15,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Add status field to Session interface with default 'active'. Don't change create/close signatures, just extend behavior."
     },
     {
@@ -31,7 +31,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Need to modify start() to not close session after agent completes - instead check if agent stopped at a gate and pause the session. The start() method needs to store the session in the paused map. This requires start() to know about the session object - may need to restructure runMainAgent return value or pass sessionManager into start()."
     },
     {
@@ -47,7 +47,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "The tricky part is determining whether the agent stopped at a gate vs completed normally. Options: (1) check issue stage after agent loop - if at a stage whose next stage has approval:true, it's a gate pause. (2) Return a flag from runMainAgent. Option 1 is simpler and doesn't require changing the agent prompt. The AgentRunnerService.start() already has access to issue state."
     },
     {
@@ -63,7 +63,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "The current approve implementation (api/issues.ts:490-583) has issues: it creates a new worktree, calls start() which creates a new session. Replace the agentRunner.start() call with agentRunner.resume(). Keep the gate validation logic."
     },
     {
@@ -78,7 +78,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Simple config change in workflow-loader.ts DEFAULT_WORKFLOW."
     },
     {
@@ -93,7 +93,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Follow the pattern of existing issue subcommands like 'start' or 'close'."
     },
     {
@@ -107,7 +107,7 @@
         "No TypeScript errors"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Final verification step."
     }
   ]

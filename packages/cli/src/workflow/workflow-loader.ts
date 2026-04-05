@@ -34,7 +34,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
       stage: 'check',
       prompt:
         '检查 {issue.title} 的实现：运行测试、lint、typecheck，报告问题',
-      approval: false,
+      approval: true,
       timeout: 600,
     },
   ],

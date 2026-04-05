@@ -36,7 +36,10 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
     }),
     execute: async (params) => {
       const stage = params.stage as Stage;
-      const issue = context.issue;
+      const issue = context.issueRepo.findById(context.issue.id);
+      if (!issue) {
+        return `Error: issue "${context.issue.id}" not found`;
+      }
 
       if (!VALID_STAGES.has(stage)) {
         return `Error: invalid stage "${stage}". Valid stages: ${Array.from(VALID_STAGES).join(', ')}`;
@@ -51,6 +54,7 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
         return `Error: cannot advance from "${issue.stage}" to "${stage}". Allowed transitions from "${issue.stage}": ${allowed.join(', ')}`;
       }
 
+      const fromStage = issue.stage;
       const updated = context.issueRepo.updateStage(issue.id, stage);
       if (!updated) {
         return `Error: failed to update issue "${issue.id}" to stage "${stage}"`;
@@ -60,7 +64,7 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
         context.eventBus.emit('stage_changed', {
           issueId: issue.id,
           projectId: issue.projectId,
-          from: issue.stage,
+          from: fromStage,
           to: stage,
         });
 
@@ -79,7 +83,7 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
         }
       }
 
-      return `Issue #${issue.number} advanced from "${issue.stage}" to "${stage}"`;
+      return `Issue #${issue.number} advanced from "${fromStage}" to "${stage}"`;
     },
   });
 }
