@@ -1,0 +1,77 @@
+# Ralph Progress Log
+Started: 2026-04-05T00:43:25.836Z
+
+---
+
+## [2026-04-05] T-011: Implement issue detail page
+
+**Status**: Completed
+
+**What was done**:
+- Created `packages/cli/web/src/components/IssueDetailPage.tsx` with full issue detail view
+- Stage progress bar: horizontal bar showing all 5 workflow stages (draft/plan/build/check/done) with current stage highlighted using blue filled circles and connecting lines
+- Comments list: chronological display with timestamps, empty state when no comments
+- Approval gate action area: detects approval gate (build stage + active status + agent not running), shows last agent comment as plan output, Approve & Continue + Skip buttons. Uses useMutation for approve API call with cache invalidation.
+- Git diff summary: shows changed files with additions/deletions for build/check/done stages. Hidden for draft/plan stages.
+- Issue metadata sidebar: stage, status, project name, created/updated timestamps
+- Updated `App.tsx`: wrapped with BrowserRouter, extracted KanbanView component, added `/issue/:number` route
+- Added `useIssueDiff` hook to `useQueries.ts`
+- Header is now shared across both routes (kanban and detail)
+
+**Key learnings**:
+- Comments are included inline in the `GET /issues/:number` response (no separate endpoint needed)
+- Workflow approval gates are detected client-side by checking if current stage is in APPROVAL_STAGES set + status is Active + agent not running
+- The diff endpoint returns empty `{ files: [] }` when no worktree exists, so the UI naturally hides the diff section
+- SPA fallback on server (T-007) ensures `/issue/:number` deep links work correctly
+
+---
+
+## [2026-04-05] T-012: Implement issue action dialogs
+
+**Status**: Completed
+
+**What was done**:
+- Created `Dialog.tsx`: reusable modal with backdrop, Escape key close, click-outside close
+- Created `CreateIssueDialog.tsx`: title + description + label picker form, wired to `api.createIssue`, invalidates issues query on success
+- Created `EditIssueDialog.tsx`: pre-populated title/body/labels form, computes label add/remove diffs, wired to `api.updateIssue`
+- Updated `Header.tsx`: replaced `prompt()` with `CreateIssueDialog` component, removed unused `useQueryClient` import
+- Updated `IssueDetailPage.tsx`:
+  - Edit button (pencil icon) next to issue title opens `EditIssueDialog`
+  - Actions sidebar section with Start (draft only), Close (active non-draft), Reopen (blocked) buttons
+  - Start button disabled when any agent is running
+  - Add comment form at bottom of comments section with textarea and Comment button
+  - All actions use `useMutation` with loading/error states and query invalidation
+
+**Key learnings**:
+- The project doesn't use shadcn/ui - all components are built with plain Tailwind CSS matching existing patterns
+- Label editing uses `addLabels`/`removeLabels` params on PATCH endpoint (not a full labels array replace)
+- Close/reopen APIs exist at `POST /:number/close` and `POST /:number/reopen`
+  - Start button should be disabled globally when any agent is running (single agent constraint)
+
+---
+
+## [2026-04-05] T-013: Implement SSE client and real-time updates
+
+**Status**: Completed
+
+**What was done**:
+- Created `packages/cli/web/src/hooks/useSSE.ts`: SSE client hook using native `EventSource` API
+  - Connects to `/api/events?projectId=xxx` with current project ID
+  - Listens to all 6 event types: stage_changed, comment_added, agent_started, agent_completed, agent_error, approval_requested
+  - Automatic reconnection after disconnect (3s delay)
+  - Closes old connection and creates new one when projectId changes (project switch)
+- Integrated with TanStack Query cache invalidation:
+  - stage_changed → invalidate ['issues'] (refreshes kanban + detail pages)
+  - comment_added → invalidate ['issues'] (comments are embedded in issue responses)
+  - agent_started/completed/error → invalidate ['agent-status'] + ['issues']
+  - approval_requested → invalidate ['issues']
+- Wired into `App.tsx`: `useSSE(projectId)` called in `AppContent` with project from context
+- The existing `useAgentStatus` refetchInterval (5s) can remain as fallback; SSE provides instant updates
+
+**Key learnings**:
+- `EventSource` auto-reconnects natively for connection errors, but explicit error handling with `es.onerror` + manual reconnect gives more control (avoiding duplicate connections)
+- Comments are embedded in the issue response, so invalidating ['issues'] prefix is sufficient for both kanban and detail page comment refresh
+- The `useSSE` hook must be placed inside `ProjectProvider` (not alongside it) since it depends on `useQueryClient` and `useProject`
+
+---
+

@@ -3,6 +3,8 @@ import { Tool, type ToolInstance } from '../agent-runtime/tool';
 import { IssueRepo } from '../db/issue-repo';
 import type { Issue } from '../types';
 import { Stage } from '../types';
+import { loadWorkflow } from '../workflow/workflow-loader';
+import type { EventBus } from '../services/event-bus';
 
 const VALID_STAGES = new Set(Object.values(Stage));
 
@@ -16,6 +18,8 @@ const M1_ALLOWED_TRANSITIONS: Record<string, string[]> = {
 export interface AdvanceStageContext {
   issue: Issue;
   issueRepo: IssueRepo;
+  worktreePath?: string;
+  eventBus?: EventBus;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,6 +54,29 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
       const updated = context.issueRepo.updateStage(issue.id, stage);
       if (!updated) {
         return `Error: failed to update issue "${issue.id}" to stage "${stage}"`;
+      }
+
+      if (context.eventBus) {
+        context.eventBus.emit('stage_changed', {
+          issueId: issue.id,
+          projectId: issue.projectId,
+          from: issue.stage,
+          to: stage,
+        });
+
+        if (context.worktreePath) {
+          const workflow = loadWorkflow(context.worktreePath);
+          if (typeof workflow !== 'string') {
+            const targetStageConfig = workflow.stages.find((s) => s.stage === stage);
+            if (targetStageConfig?.approval) {
+              context.eventBus.emit('approval_requested', {
+                issueId: issue.id,
+                projectId: issue.projectId,
+                stage,
+              });
+            }
+          }
+        }
       }
 
       return `Issue #${issue.number} advanced from "${issue.stage}" to "${stage}"`;

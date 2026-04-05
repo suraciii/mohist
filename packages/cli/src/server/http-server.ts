@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Config, ServerState } from '../types';
 
 export class HttpServer {
@@ -42,6 +45,26 @@ export class HttpServer {
 
   public addRouter(path: string, router: Hono): void {
     this.app.route(path, router);
+  }
+
+  public serveStaticFiles(webDistDir: string): void {
+    const resolvedDir = path.resolve(webDistDir);
+
+    if (!fs.existsSync(resolvedDir)) {
+      console.log(`Web dist directory not found: ${resolvedDir}, skipping static file serving`);
+      return;
+    }
+
+    this.app.use('/assets/*', serveStatic({ root: resolvedDir }));
+
+    this.app.get('*', async (c) => {
+      const indexPath = path.join(resolvedDir, 'index.html');
+      if (!fs.existsSync(indexPath)) {
+        return c.notFound();
+      }
+      const content = fs.readFileSync(indexPath, 'utf-8');
+      return c.html(content);
+    });
   }
 
   public getApp(): Hono {

@@ -16,7 +16,9 @@
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "lint": "eslint src --ext .ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:web": "cd web && npm install && npm run build",
+    "dev:web": "cd web && npm run dev"
   },
   "keywords": [
     "automation",

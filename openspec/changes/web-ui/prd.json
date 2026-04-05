@@ -1,0 +1,228 @@
+{
+  "project": "mohist",
+  "description": "Web UI for mohist - embedded React SPA with kanban view, issue detail, SSE real-time events via in-process EventBus, and issue management operations with Stop & Resume approval gates",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Initialize React SPA project with Vite",
+      "spec": "specs/embedded-web-ui/spec.md",
+      "description": "Create packages/cli/web/ directory with Vite + React + TypeScript setup. Configure Vite with React plugin, Tailwind CSS, and API proxy to backend. Add build:web and dev:web scripts to package.json.",
+      "acceptanceCriteria": [
+        "npm run build:web produces dist/ with index.html and JS/CSS bundles",
+        "npm run dev:web starts Vite dev server on port 5173 with /api/* proxy",
+        "Tailwind CSS is configured and applies base styles",
+        "React renders a placeholder page at /"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Use @vitejs/plugin-react, tailwindcss v4, @tailwindcss/vite"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement EventBus module",
+      "spec": "specs/web-ui-realtime/spec.md",
+      "description": "Create a simple in-process EventBus class with emit/on/off methods. Create singleton instance. This will be injected into Agent tools (advance_stage, add_comment) and consumed by SSE endpoint.",
+      "acceptanceCriteria": [
+        "EventBus class supports emit(event, data) and on(event, listener)",
+        "EventBus singleton is exportable for shared use",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Keep it simple - a Map<string, Set<listener>> is sufficient. No external deps needed."
+    },
+    {
+      "id": "T-003",
+      "title": "Extract AgentRunnerService from issues.ts",
+      "spec": "specs/web-ui-realtime/spec.md",
+      "description": "Extract agent running logic from issues.ts module-level variables (activeAgentIssueId, activeAgentPromise) into a proper AgentRunnerService class. Service provides start(), getStatus(), isRunning() methods. Inject EventBus to emit agent_started/agent_completed/agent_error events. Wire AgentRunnerService into server startup and API routes.",
+      "acceptanceCriteria": [
+        "AgentRunnerService class encapsulates agent state tracking",
+        "start() method runs runMainAgent with lifecycle event emission",
+        "getStatus() returns { running, issueId, issueNumber }",
+        "isRunning() returns boolean",
+        "agent_started/agent_completed/agent_error events emitted via EventBus",
+        "issues.ts POST /:number/start uses AgentRunnerService instead of module-level vars",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "This is prerequisite for GET /api/agent/status and SSE agent lifecycle events. Extract the pattern from issues.ts lines 9-10, 321-345."
+    },
+    {
+      "id": "T-004",
+      "title": "Inject EventBus into Agent tools",
+      "spec": "specs/web-ui-realtime/spec.md",
+      "description": "Inject EventBus into advance_stage and add_comment tools. advance_stage emits stage_changed after successful DB write. add_comment emits comment_added after successful DB write. When advance_stage detects approval gate (next stage has approval:true), emit approval_requested event.",
+      "acceptanceCriteria": [
+        "advance_stage tool emits stage_changed after issueRepo.updateStage()",
+        "add_comment tool emits comment_added after commentRepo.create()",
+        "advance_stage tool emits approval_requested when target stage has approval:true",
+        "EventBus is injected via tool context (not imported as singleton)",
+        "Existing tool behavior unchanged when EventBus is not provided",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Add optional eventBus field to AdvanceStageContext and AddCommentContext. Emit after successful DB write only."
+    },
+    {
+      "id": "T-005",
+      "title": "Implement SSE endpoint",
+      "spec": "specs/web-ui-realtime/spec.md",
+      "description": "Add GET /api/events SSE endpoint using Hono streamSSE. Support optional projectId query parameter for project-scoped filtering. Subscribe to EventBus and forward events to connected clients. Support all event types: stage_changed, comment_added, agent_started, agent_completed, agent_error, approval_requested.",
+      "acceptanceCriteria": [
+        "GET /api/events returns SSE stream with Content-Type text/event-stream",
+        "GET /api/events?projectId=xxx filters events to specified project",
+        "stage_changed events include projectId for filtering",
+        "All 6 event types are forwarded to SSE clients",
+        "Connection cleanup on client disconnect (remove EventBus listener)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Use Hono's streamSSE helper. Each SSE connection subscribes to EventBus with its own listener, unsubscribes on close."
+    },
+    {
+      "id": "T-006",
+      "title": "Add new API endpoints for Web UI",
+      "spec": "specs/http-api/spec.md",
+      "description": "Add POST /api/issues/:number/approve, GET /api/issues/:number/diff, GET /api/agent/status endpoints. Approve endpoint: validates issue is at approval gate (next stage has approval:true), resumes by spawning new agent session with context from comments. Diff endpoint: uses WorktreeManager to get git diff for issue's worktree branch. Agent status: delegates to AgentRunnerService.getStatus().",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/approve starts new agent session for gate issues",
+        "POST /api/issues/:number/approve returns 400 for non-gate issues",
+        "POST /api/issues/:number/approve returns 400 if agent already running",
+        "Approve extracts plan output from latest agent comment for context",
+        "GET /api/agent/status returns { running, issueId, issueNumber }",
+        "GET /api/issues/:number/diff returns changed files list using WorktreeManager",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Approve logic: (1) load issue, (2) validate stage has approval gate, (3) load latest comment as context, (4) create new MainAgent session with context, (5) AgentRunnerService.start(). Diff needs WorktreeManager.list() or similar."
+    },
+    {
+      "id": "T-007",
+      "title": "Embed static files in Hono server",
+      "spec": "specs/embedded-web-ui/spec.md",
+      "description": "Configure Hono to serve static files from the Vite build output. Add SPA fallback (serve index.html for non-API routes). Ensure API routes take priority over static files.",
+      "acceptanceCriteria": [
+        "Server serves index.html at /",
+        "Server serves JS/CSS assets from /assets/*",
+        "Non-API, non-static paths return index.html (SPA fallback)",
+        "API routes (/api/*) are not intercepted by static serving",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Use @hono/node-server serveStatic or hono/serve-static"
+    },
+    {
+      "id": "T-008",
+      "title": "Implement frontend API client and TanStack Query setup",
+      "spec": "specs/web-ui-kanban/spec.md",
+      "description": "Create API client module for all REST endpoints. Set up TanStack Query with QueryClientProvider. Create hooks for fetching projects, issues, comments, labels, and agent status.",
+      "acceptanceCriteria": [
+        "API client module exports typed functions for all endpoints",
+        "TanStack Query QueryClientProvider wraps the app",
+        "useIssues() hook fetches issues filtered by current project",
+        "useAgentStatus() hook fetches agent status",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Use fetch API directly, no axios needed"
+    },
+    {
+      "id": "T-009",
+      "title": "Implement kanban board page",
+      "spec": "specs/web-ui-kanban/spec.md",
+      "description": "Build the main kanban view with 5 stage columns (draft, plan, build, check, done). Each issue displays as a card with number, title, labels, and status. Show agent running indicator and approval gate badge on relevant cards.",
+      "acceptanceCriteria": [
+        "Kanban displays 5 columns with correct stage names",
+        "Issue cards show number, title, labels",
+        "Cards in paused/blocked status show visual indicator",
+        "Agent running indicator appears when agent is active on an issue",
+        "Approval gate badge appears for issues waiting at gate",
+        "Empty columns show empty state",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Use CSS grid or flexbox for columns. Cards should be clickable to navigate to detail."
+    },
+    {
+      "id": "T-010",
+      "title": "Implement project selector in header",
+      "spec": "specs/web-ui-project-switch/spec.md",
+      "description": "Add header component with mohist logo, project selector dropdown, and new issue button. Project selector fetches projects list and allows switching. All data refreshes when project changes. SSE connection reconnects with new projectId on project switch.",
+      "acceptanceCriteria": [
+        "Header displays project selector with current project",
+        "Dropdown lists all available projects",
+        "Selecting a project refreshes kanban data",
+        "Single project shows name without dropdown",
+        "SSE connection reconnects with new projectId on switch",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Store current project in React state, pass to all query hooks and SSE connection"
+    },
+    {
+      "id": "T-011",
+      "title": "Implement issue detail page",
+      "spec": "specs/web-ui-issue-detail/spec.md",
+      "description": "Build issue detail page with stage progress bar, description, comments list, approval gate action area, and git diff summary. Use React Router for /issue/:number route.",
+      "acceptanceCriteria": [
+        "Detail page displays all issue fields",
+        "Stage progress bar shows current position in workflow",
+        "Comments listed chronologically with timestamps",
+        "Approval action area shows when gate is active with Approve & Skip buttons",
+        "Git diff section shows changed files for build/check/done stages",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Use React Router useParams() for issue number. Detect approval gate by checking if current stage has approval:true in workflow config."
+    },
+    {
+      "id": "T-012",
+      "title": "Implement issue action dialogs",
+      "spec": "specs/web-ui-issue-actions/spec.md",
+      "description": "Add create issue dialog, edit issue dialog, close/reopen buttons, start issue button, and add comment form. Wire all actions to API endpoints and invalidate TanStack Query cache on success.",
+      "acceptanceCriteria": [
+        "Create issue dialog creates issue and refreshes kanban",
+        "Edit issue dialog updates title/body/labels",
+        "Close button sets status to blocked",
+        "Reopen button sets status to active",
+        "Start button triggers agent for draft issues",
+        "Start button disabled when agent already running",
+        "Add comment form appends comment to list",
+        "All actions show loading/error states",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Use shadcn/ui Dialog, Button, Input, Textarea components"
+    },
+    {
+      "id": "T-013",
+      "title": "Implement SSE client and real-time updates",
+      "spec": "specs/web-ui-realtime/spec.md",
+      "description": "Create SSE client hook that connects to /api/events?projectId=xxx and dispatches events. Integrate with TanStack Query to invalidate relevant queries on events (stage_changed → invalidate issues, comment_added → invalidate comments). Handle reconnection on disconnect.",
+      "acceptanceCriteria": [
+        "SSE hook connects to /api/events?projectId=xxx and receives events",
+        "stage_changed event triggers issues query refetch",
+        "comment_added event triggers comments query refetch",
+        "agent_started/completed/error events trigger agent status refetch",
+        "approval_requested event triggers issues refetch",
+        "Automatic reconnection after disconnect",
+        "SSE reconnects with new projectId on project switch",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Use EventSource API with reconnection logic. Close old connection and create new one on project switch."
+    }
+  ]
+}
