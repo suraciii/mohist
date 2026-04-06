@@ -16,50 +16,84 @@
         "No new npm dependencies"
       ],
       "priority": 1,
+      "done": true,
       "notes": "SSE format: lines starting with 'event:' set event type, lines starting with 'data:' set data, empty line dispatches. Keep it simple."
     },
     {
       "id": "T-002",
       "title": "Implement event formatter",
       "spec": "specs/cli-interface/spec.md",
-      "description": "Create a formatter function that takes an SSE event (type + parsed JSON data) and returns a formatted string with timestamp, symbol, event description, and issue info. Use chalk for coloring.",
+      "description": "Create a formatter function that takes an SSE event (type + parsed JSON data) and returns a formatted string with timestamp, symbol, event description, and issue info. Use chalk for coloring. Supported event types: agent_started, agent_completed, agent_paused, agent_error, stage_changed, comment_added, approval_requested.",
       "acceptanceCriteria": [
         "Each event type has a distinct color and symbol",
         "Format: [HH:MM:SS] SYMBOL event description  issue #N ...",
-        "agent_started: green, agent_completed: green, agent_paused: yellow, agent_error: red, stage_changed: cyan, comment_added: white, approval_requested: yellow, question_asked: yellow, question_answered: green",
-        "Timestamp uses local time"
+        "agent_started: green >>, agent_completed: green ok, agent_paused: yellow ||, agent_error: red !!, stage_changed: cyan ->, comment_added: white ##, approval_requested: yellow ??",
+        "Timestamp uses local time",
+        "Handles unknown event types gracefully (prints raw data)"
       ],
       "priority": 2,
-      "notes": "Don't use emoji. Use ASCII symbols: >>, ->, ##, ||, ok, !!."
+      "done": true,
+      "notes": "Don't use emoji. Use ASCII symbols: >>, ->, ##, ||, ok, !!, ??."
     },
     {
       "id": "T-003",
       "title": "Implement mo attach command",
       "spec": "specs/cli-interface/spec.md",
-      "description": "Create cli/commands/attach.ts with setupAttachCommand(program). Command options: --project <name> (optional, defaults to current project), --follow (auto-reconnect on disconnect). The command should: call requireServer(), resolve project ID if --project specified, build SSE URL with projectId filter, connect and print events, handle SIGINT for graceful detach.",
+      "description": "Create cli/commands/attach.ts with setupAttachCommand(program). Command options: --project <name> (optional, defaults to current project), --follow (auto-reconnect on disconnect with 2s delay). The command should: call requireServer(), resolve project name to ID via API if --project specified, build SSE URL with projectId filter, connect and print events, handle SIGINT/SIGTERM for graceful detach.",
       "acceptanceCriteria": [
         "mo attach command registered in Commander program",
-        "mo attach --project myapp filters by project",
+        "mo attach --project myapp filters by project (resolve name to ID via /api/projects)",
         "mo attach --follow reconnects on disconnect with 2s delay",
         "Ctrl+C prints 'Detached.' and exits cleanly",
-        "Server not running shows friendly error"
+        "SIGTERM handled same as SIGINT",
+        "Server not running shows error: 'Error: Server is not running' and 'Start the server with: mo server start'"
       ],
       "priority": 3,
-      "notes": "Follow the pattern of existing command files (issue.ts, project.ts). Register in cli/index.ts."
+      "done": true,
+      "notes": "Follow the pattern of existing command files (issue.ts, project.ts). Register in cli/index.ts. Use existing requireServer() from cli/index.ts."
     },
     {
       "id": "T-004",
-      "title": "Verify build and manual test",
+      "title": "Add unit tests for SSE client and formatter",
       "spec": "",
-      "description": "Build, typecheck, and manual test: start server, run mo attach in another terminal, start an issue, verify events appear in attach output.",
+      "description": "Add automated tests for SSE client parser and event formatter functions. Mock http module for SSE tests.",
+      "acceptanceCriteria": [
+        "Tests for connectSSE: parsing events, handling multi-line data, error handling",
+        "Tests for formatEvent: all 7 event types, unknown events, timestamp formatting",
+        "All tests pass with npm test"
+      ],
+      "priority": 4,
+      "done": true,
+      "notes": "Mock http.get for unit testing. Create test fixtures for SSE event streams."
+    },
+    {
+      "id": "T-005",
+      "title": "Backend fix: add agent_paused to SSE subscriptions",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Add 'agent_paused' to ALL_EVENT_TYPES array in /api/events.ts to enable pause events to be sent via SSE.",
+      "acceptanceCriteria": [
+        "agent_paused added to ALL_EVENT_TYPES array",
+        "When agent pauses, || agent paused message appears in mo attach output"
+      ],
+      "priority": 5,
+      "done": true,
+      "notes": "This is a necessary backend fix. Without it, agent_paused events won't reach the client."
+    },
+    {
+      "id": "T-006",
+      "title": "Build and manual integration test",
+      "spec": "",
+      "description": "Build, typecheck, and manual test: start server, run mo attach in another terminal, start an issue, verify events appear in attach output. Test reconnect with --follow by restarting server.",
       "acceptanceCriteria": [
         "npm run build succeeds",
         "Typecheck passes",
         "mo attach connects and displays events",
-        "Ctrl+C exits cleanly"
+        "Ctrl+C exits cleanly",
+        "mo attach --follow reconnects after server restart"
       ],
-      "priority": 4,
-      "notes": "The manual test is straightforward — just run mo attach alongside a running agent."
+      "priority": 6,
+      "done": true,
+      "notes": "Manual test checklist: 1) Start server, 2) Run mo attach, 3) Create and start issue, 4) Verify events flow, 5) Stop server (verify --follow reconnects), 6) Restart server (verify events continue), 7) Ctrl+C to detach."
     }
   ]
 }
