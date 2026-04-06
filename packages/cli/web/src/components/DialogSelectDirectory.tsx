@@ -162,6 +162,8 @@ export function DialogSelectDirectory({ open, onClose, onSelect }: Props) {
             const parentCollapsed = collapseHome(parent, home)
             setInputValue(parentCollapsed + '/' + common)
           }
+          setResults([])
+          setSelectedIndex(0)
         } catch {
           // ignore
         }
