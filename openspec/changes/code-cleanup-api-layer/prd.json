@@ -1,0 +1,156 @@
+{
+  "project": "mohist",
+  "description": "Code cleanup - unify API layer to use Service layer, extract shared CLI apiClient, slim down StateManager",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extract shared CLI apiClient to cli/api-client.ts",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Create `packages/cli/src/cli/api-client.ts` with the shared `apiClient` function and `API_BASE` constant extracted from the current copy in issue.ts. Then update issue.ts, quick.ts, and project.ts to import from the shared module instead of defining locally.",
+      "acceptanceCriteria": [
+        "cli/api-client.ts exists and exports apiClient function and API_BASE constant",
+        "cli/commands/issue.ts imports apiClient from ../api-client, no local apiClient definition",
+        "cli/commands/quick.ts imports apiClient from ../api-client, no local apiClient definition",
+        "cli/commands/project.ts imports apiClient from ../api-client, no local apiClient definition",
+        "No file contains duplicate API_BASE constant definition",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Pure mechanical extraction. The three copies are identical. Be careful about relative import paths — issue.ts and quick.ts and project.ts are all in cli/commands/ so the import is '../api-client'."
+    },
+    {
+      "id": "T-002",
+      "title": "Add missing methods to IssueService with CommentRepo",
+      "spec": "specs/http-api/spec.md",
+      "description": "Add CommentRepo to IssueService constructor and add methods: create(title, body, labels) with labels support, update(id, data) for title/body/labels, createComment(issueId, body), getCommentsByIssue(issueId). Change constructor to accept both IssueRepo and CommentRepo.",
+      "acceptanceCriteria": [
+        "IssueService constructor accepts CommentRepo as second parameter",
+        "IssueService.create accepts labels parameter",
+        "IssueService.update(id, {title?, body?, labels?}) exists",
+        "IssueService.createComment(issueId, body) exists and returns Comment",
+        "IssueService.getCommentsByIssue(issueId) exists and returns Comment[]",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "IssueService currently only has IssueRepo. Need to add CommentRepo dependency. Look at StateManager for how these methods wrap repo calls."
+    },
+    {
+      "id": "T-003",
+      "title": "Add cascade delete and getCurrentId to ProjectService",
+      "spec": "specs/http-api/spec.md",
+      "description": "Add IssueRepo to ProjectService constructor for cascade delete. Update delete() to call issueRepo.deleteByProjectCascade before deleting project. Add getCurrentId() method that returns projectId string (not Project object) for places that need just the ID.",
+      "acceptanceCriteria": [
+        "ProjectService constructor accepts IssueRepo as third parameter",
+        "ProjectService.delete cascades issue deletion via issueRepo.deleteByProjectCascade",
+        "ProjectService.getCurrentId() exists and returns string | null (just the ID from config)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "ProjectService currently only has ProjectRepo and ConfigRepo. getCurrent() returns Project|null but API layer often needs just the ID string. StateManager.getCurrentProjectId() returns string|null directly from config."
+    },
+    {
+      "id": "T-004",
+      "title": "Refactor api/issues.ts to use IssueService and ProjectService",
+      "spec": "specs/http-api/spec.md",
+      "description": "Change createIssueRoutes to accept issueService and projectService instead of stateManager. Replace stateManager CRUD calls with service calls: createIssue→issueService.create, getIssueByNumber→issueService.getByNumber, updateIssueStage→issueService.transitionToStage, createComment→issueService.createComment, getCommentsByIssue→issueService.getCommentsByIssue. Replace getCurrentProjectId calls with projectService.getCurrentId(). Keep stateManager only for repo getters passed to agentRunner.",
+      "acceptanceCriteria": [
+        "createIssueRoutes signature takes issueService and projectService, not stateManager",
+        "No stateManager.createIssue, stateManager.getIssueByNumber, stateManager.updateIssueStage, stateManager.createComment, stateManager.getCommentsByIssue calls",
+        "No stateManager.getCurrentProjectId calls (use projectService.getCurrentId())",
+        "stateManager only appears for repo getters (getIssueRepo, getCommentRepo) passed to agentRunner",
+        "All endpoints still work: GET /api/issues, POST /api/issues, GET /api/issues/:number, PATCH /api/issues/:number, POST /api/issues/:number/comments, POST /api/issues/:number/start, POST /api/issues/:number/close, POST /api/issues/:number/reopen, POST /api/issues/:number/approve",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "This is the biggest task. The start/approve endpoints still need stateManager.getIssueRepo() and stateManager.getCommentRepo() for passing to agentRunner — that's fine per design D4. Focus on replacing CRUD calls, not orchestration."
+    },
+    {
+      "id": "T-005",
+      "title": "Refactor api/projects.ts to use ProjectService",
+      "spec": "specs/http-api/spec.md",
+      "description": "Change createProjectRoutes to accept projectService instead of stateManager. Replace all stateManager calls with projectService calls: loadProjects→projectService.getAll, getProjectByName→projectService.getByName, saveProject→projectService.create, deleteProject→projectService.delete, setCurrentProjectId→projectService.setCurrent.",
+      "acceptanceCriteria": [
+        "createProjectRoutes signature takes projectService, not stateManager",
+        "No stateManager calls in api/projects.ts",
+        "GET /api/projects works",
+        "POST /api/projects works",
+        "DELETE /api/projects/:name works",
+        "POST /api/projects/:name/use works",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "ProjectService already has getAll, getByName, create. Delete now has cascade. setCurrentByName is cleaner than current two-step."
+    },
+    {
+      "id": "T-006",
+      "title": "Refactor api/status.ts and api/labels.ts to use Services",
+      "spec": "specs/http-api/spec.md",
+      "description": "Update api/status.ts to accept projectService and issueService instead of stateManager. Replace stateManager calls: loadProjects→projectService.getAll, loadIssues→issueService.getByProject, getProjectById→projectService.getById, getCurrentProjectId→projectService.getCurrentId. Update api/labels.ts similarly.",
+      "acceptanceCriteria": [
+        "createStatusRoutes signature takes projectService and issueService, not stateManager",
+        "createLabelRoutes signature takes projectService, not stateManager",
+        "No stateManager.loadProjects, stateManager.loadIssues, stateManager.getProjectById, stateManager.getCurrentProjectId in status.ts",
+        "No stateManager.getCurrentProjectId, stateManager.getLabels in labels.ts",
+        "GET /api/status works (both with and without ?all=true)",
+        "GET /api/labels works",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "labels.ts uses getLabels which returns all labels for a project — this might need a new method in IssueService or we can query via repo. status.ts does cross-domain aggregation which is the legitimate use case for having both services."
+    },
+    {
+      "id": "T-007",
+      "title": "Update server/index.ts to inject Services into routes",
+      "spec": "specs/http-api/spec.md",
+      "description": "Update server/index.ts to create IssueService and ProjectService instances with proper repo injection and pass them to all route factories. IssueService needs IssueRepo and CommentRepo. ProjectService needs ProjectRepo, ConfigRepo, and IssueRepo (for cascade delete).",
+      "acceptanceCriteria": [
+        "server/index.ts creates IssueService with IssueRepo and CommentRepo",
+        "server/index.ts creates ProjectService with ProjectRepo, ConfigRepo, and IssueRepo",
+        "createIssueRoutes receives issueService, projectService, and stateManager (for repo getters)",
+        "createProjectRoutes receives projectService",
+        "createStatusRoutes receives projectService and issueService",
+        "createLabelRoutes receives projectService",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "This wires everything together. StateManager is still needed for creating repos and passing to routes that need repo getters."
+    },
+    {
+      "id": "T-008",
+      "title": "Remove redundant CRUD methods from StateManager",
+      "spec": "specs/http-api/spec.md",
+      "description": "Remove all CRUD methods from StateManager that are now handled by Services: createIssue, getIssueByNumber, updateIssueStage, updateIssueStatus, getCommentsByIssue, createComment, getLabels, loadProjects, loadIssues, getProjectById, getProjectByName, saveProject, deleteProject, getCurrentProjectId, setCurrentProjectId, clearCurrentProject, updateIssueLabels, addIssueLabel, removeIssueLabel. Keep only: getProjectRepo, getIssueRepo, getCommentRepo, getConfigRepo, getLabelRepo, isInitialized.",
+      "acceptanceCriteria": [
+        "StateManager only has repo getters (getProjectRepo, getIssueRepo, getCommentRepo, getConfigRepo, getLabelRepo) and isInitialized",
+        "No compile errors from removed methods",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Final step — after all consumers migrated, removing these methods should cause zero compile errors."
+    },
+    {
+      "id": "T-009",
+      "title": "Update backlog and verify build",
+      "spec": "",
+      "description": "Update prd/backlog/backlog.md: mark B-005 as resolved, mark B-004 and B-007 as resolved. Run full build to verify everything compiles and tests pass.",
+      "acceptanceCriteria": [
+        "B-004 marked as resolved in backlog.md",
+        "B-005 marked as resolved in backlog.md",
+        "B-007 marked as resolved in backlog.md",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Final verification."
+    }
+  ]
+}
