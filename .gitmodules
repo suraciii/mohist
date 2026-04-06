@@ -11,3 +11,6 @@
 [submodule "opensrc/nanoclaw"]
 	path = opensrc/nanoclaw
 	url = https://github.com/qwibitai/nanoclaw.git
+[submodule "opensrc/OpenSpec"]
+	path = opensrc/OpenSpec
+	url = https://github.com/suraciii/OpenSpec.git
