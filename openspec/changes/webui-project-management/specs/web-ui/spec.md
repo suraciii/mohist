@@ -2,11 +2,12 @@
 
 ### Requirement: WebUI 支持通过对话框创建项目
 
-WebUI SHALL 提供 `CreateProjectDialog` 组件，允许用户输入项目名称和工作目录路径来创建新项目。创建成功后 SHALL 自动切换到新项目并刷新项目列表。
+WebUI SHALL 提供 `CreateProjectDialog` 组件，允许用户输入项目名称并通过 `DialogSelectDirectory` 选择工作目录路径来创建新项目。创建成功后 SHALL 自动切换到新项目并刷新项目列表。
 
 #### Scenario: 成功创建项目
 - **WHEN** 用户在 Header 下拉菜单点击 "New Project"
-- **AND** 在对话框中输入名称 "my-project" 和路径 "/home/user/repos/my-project"
+- **AND** 在对话框中输入名称 "my-project"
+- **AND** 通过目录浏览器选择路径 "/home/user/repos/my-project"
 - **AND** 点击 "Create"
 - **THEN** 发送 `POST /api/projects` 请求（body: `{name, path}`）
 - **AND** 项目列表自动刷新
@@ -20,11 +21,40 @@ WebUI SHALL 提供 `CreateProjectDialog` 组件，允许用户输入项目名称
 - **AND** 对话框保持打开状态
 
 #### Scenario: 路径字段为空（验证失败）
-- **WHEN** 用户只输入名称，路径留空
+- **WHEN** 用户只输入名称，未选择路径
 - **AND** 点击 "Create"
 - **THEN** 前端验证阻止提交
 - **AND** 显示 "Path is required" 错误提示
 - **AND** 不发送 API 请求
+
+### Requirement: WebUI 提供搜索式目录浏览器
+
+WebUI SHALL 提供 `DialogSelectDirectory` 组件，允许用户通过搜索、路径输入、Tab 补全和最近项目列表来选择目录。
+
+#### Scenario: 模糊搜索目录
+- **WHEN** 用户在搜索框中输入纯文本 "myapp"（不含 `/` 或 `~`）
+- **THEN** 调用 `GET /api/fs/search?query=myapp&limit=50`
+- **AND** 结果按 fuzzysort 相关度排序显示
+
+#### Scenario: 路径输入逐段浏览
+- **WHEN** 用户在搜索框中输入路径 "~/repos/my"
+- **THEN** 解析为 HOME 起始的绝对路径
+- **AND** 逐段调用 `GET /api/fs/list` 获取每级子目录
+- **AND** 对最后一段 "my" 使用 fuzzysort 匹配
+
+#### Scenario: Tab 键路径补全
+- **WHEN** 用户输入 "~/repos/my-app" 并按 Tab
+- **AND** 存在唯一匹配目录 "my-app-backend"
+- **THEN** 搜索框自动补全为 "~/repos/my-app-backend/"
+
+#### Scenario: 显示最近项目
+- **WHEN** DialogSelectDirectory 打开
+- **THEN** 顶部显示已创建的项目列表（最多 5 个），按最近更新时间排序
+
+#### Scenario: 选择目录
+- **WHEN** 用户点击某个目录项
+- **THEN** DialogSelectDirectory 关闭
+- **AND** 选中的绝对路径传递给调用方（CreateProjectDialog 的 path 字段）
 
 ### Requirement: WebUI 支持删除项目
 
