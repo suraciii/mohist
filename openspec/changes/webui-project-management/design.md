@@ -7,14 +7,15 @@ Mohist WebUI 使用 React + TanStack React Query + Tailwind CSS 构建，通过 
 **Goals:**
 - 用户可以在 WebUI 创建和删除项目，无需依赖 CLI
 - 无项目时显示引导状态而非卡在 "Loading..."
+- 搜索式目录浏览器选择项目路径（参考 OpenCode DialogSelectDirectory）
 - 复用现有 `Dialog` 组件和 Tailwind 设计风格，保持 UI 一致性
 
 **Non-Goals:**
 - 项目编辑（改名/改路径）— 后端 API 路由未提供 PATCH 端点
-- **~~Path 字段可选~~** — 后端 API 要求 path 必填（已修正）
-- 内置文件浏览器 — Path 字段使用手动输入
 - 多项目并行视图 — 保持当前单项目选择模式
 - 项目统计/详情页
+- 文件浏览（只浏览目录，不浏览文件内容）
+- Desktop 原生文件夹选择器 — 纯 Web 实现
 
 ## Decisions
 
@@ -44,8 +45,78 @@ Mohist WebUI 使用 React + TanStack React Query + Tailwind CSS 构建，通过 
 
 **理由**: 与现有 `createIssue` 等模式一致，mutation 成功后 invalidate `['projects']` query cache。
 
+### 5. 路径选择使用搜索式目录浏览器
+
+**选择**: `DialogSelectDirectory` 组件，支持路径搜索、Tab 补全、最近项目列表
+
+**替代方案**: 手动文本输入 `<input type="text">`
+
+**理由**: 手动输入路径体验差，用户需要精确记忆路径。搜索式目录浏览器让用户通过模糊搜索快速定位目录，大幅降低输入成本。参考 OpenCode 的实现（`DialogSelectDirectory`），功能经过大量用户验证。
+
+### 6. 后端文件系统 API 设计
+
+**选择**: 新增两个 API 端点，使用 Node.js `fs.readdir` + 系统 `find` 命令
+
+```
+GET /api/fs/list?path=/home/user/repos
+  → fs.readdir(path, { withFileTypes: true })
+  → 过滤: 只返回 directories，排除 .开头的隐藏目录
+  → 返回: { name: string, absolute: string }[]
+
+GET /api/fs/search?query=myapp&limit=50
+  → find $HOME -type d -maxdepth 4 -iname "*query*"
+  → 路径遍历防护: resolve 后必须在 HOME 下
+  → 返回: { name: string, absolute: string }[]
+```
+
+**替代方案**: 引入 ripgrep 做搜索
+
+**理由**: `find` 命令在所有 Unix 系统可用，零新后端依赖。maxdepth=4 限制搜索深度，覆盖绝大多数项目结构同时避免全盘扫描。
+
+### 7. 模糊匹配在前端完成
+
+**选择**: 前端引入 `fuzzysort`（~2KB），后端只负责列出/搜索目录
+
+**理由**: 职责清晰 — 后端返回候选列表，前端做模糊排序和过滤。`fuzzysort` 非常轻量，OpenCode 也使用同样的库。
+
+### 8. 浏览范围：HOME 起始，不限制
+
+**选择**: 搜索起始点为用户 HOME 目录，路径输入支持绝对路径和 `~` 前缀
+
+**理由**: mohist server 纯本地运行，用户本身有终端完整权限，不存在远程安全边界。限制浏览范围只会带来困扰（项目可能在 `/opt`、`/var` 等位置）。
+
+### 9. DialogSelectDirectory 的交互设计
+
+参考 OpenCode 实现，核心交互：
+
+```
+┌─────────────────────────────────────────┐
+│  Select Project Directory          [X]  │
+├─────────────────────────────────────────┤
+│                                         │
+│  🔍 ~/repos/my-app_                     │  ← 搜索输入框
+│                                         │
+│  ── Recent Projects ────────────────────│
+│  📁 ~/repos/mohist/                     │  ← 已创建的项目
+│  📁 ~/repos/other-app/                  │
+│                                         │
+│  ── Directories ─────────────────────── │
+│  📁 ~/repos/my-app-backend/             │  ← 搜索结果
+│  📁 ~/repos/my-app-frontend/            │
+│  📁 ~/repos/my-app-api/                 │
+│                                         │
+│     [Cancel]            [Select]        │
+└─────────────────────────────────────────┘
+```
+
+- 路径模式（含 `/` 或 `~`）：逐段调用 `/api/fs/list`，fuzzysort 匹配每段目录名
+- 搜索模式（纯文本）：调用 `/api/fs/search`，fuzzysort 排序结果
+- Tab 键：自动补全当前路径片段
+- 选择后：填充 CreateProjectDialog 的 path 字段
+
 ## Risks / Trade-offs
 
-- **[无后端改动]** → 零后端风险，但依赖现有 API 行为正确（已验证）
-- **[Path 手动输入]** → 用户可能输入无效路径。缓解：Path 字段非必填，后端可接受空路径，用户后续通过 CLI 修改
+- **[后端新增 API]** → 新增 `api/fs.ts`，需要路径遍历防护。缓解：resolve 后校验路径合法性
+- **[find 命令跨平台]** → Windows 下 `find` 语义不同。缓解：Windows 下使用 `dir /s /ad /b`，或后续引入 ripgrep
+- **[大目录性能]** → HOME 下目录可能很多。缓解：list API 只列当前层级；search API 限制 maxdepth=4 和 limit=50
 - **[删除级联]** → 删除项目会级联删除所有 issues。缓解：确认对话框明确提示
