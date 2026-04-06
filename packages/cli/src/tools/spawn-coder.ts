@@ -12,6 +12,8 @@ import type {
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
+import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { EventBus } from '../services/event-bus';
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
 
@@ -62,7 +64,11 @@ function killProc(proc: import('child_process').ChildProcess): void {
 async function runAcpOneshot(
   cwd: string,
   task: string,
-  timeout: number
+  timeout: number,
+  issueId: string,
+  workflowLogRepo?: WorkflowLogRepo,
+  eventBus?: EventBus,
+  projectId: string = '',
 ): Promise<{ text: string; error?: string }> {
   const proc = spawn('opencode', ['acp'], {
     cwd,
@@ -101,13 +107,40 @@ async function runAcpOneshot(
   const connection = new ClientSideConnection(
     (_agent) => ({
       sessionUpdate: async (notification: SessionNotification) => {
-        const update = notification.update;
-        if (
-          update.sessionUpdate === 'agent_message_chunk' &&
-          update.content &&
-          'text' in update.content
-        ) {
-          agentText += (update.content as { text: string }).text;
+        try {
+          const update = notification.update;
+          const eventType = update.sessionUpdate;
+
+          if (
+            eventType === 'agent_message_chunk' &&
+            update.content &&
+            'text' in update.content
+          ) {
+            agentText += (update.content as { text: string }).text;
+          }
+
+          if (workflowLogRepo) {
+            workflowLogRepo.insert(
+              issueId,
+              sessionId || null,
+              eventType,
+              update as unknown as Record<string, unknown>,
+            );
+          }
+
+          if (eventType === 'tool_call' && eventBus) {
+            const toolData = update as Record<string, unknown>;
+            const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
+            eventBus.emit('tool_call', {
+              issueId,
+              projectId,
+              toolName: (toolCallData?.toolName as string) ?? '',
+              status: (toolCallData?.status as string) ?? '',
+              locations: toolCallData?.locations as string[] | undefined,
+            });
+          }
+        } catch (err) {
+          console.error('[spawn_coder] sessionUpdate error:', err);
         }
       },
       requestPermission: async (
@@ -188,6 +221,10 @@ async function runAcpOneshot(
 
 export interface SpawnCoderContext {
   worktreePath?: string;
+  issueId?: string;
+  projectId?: string;
+  workflowLogRepo?: WorkflowLogRepo;
+  eventBus?: EventBus;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -241,7 +278,15 @@ export function createSpawnCoderTool(
       );
       console.log(`[spawn_coder] Task: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}`);
 
-      const result = await runAcpOneshot(cwd, task, timeout);
+      const result = await runAcpOneshot(
+        cwd,
+        task,
+        timeout,
+        context?.issueId ?? '',
+        context?.workflowLogRepo,
+        context?.eventBus,
+        context?.projectId ?? '',
+      );
 
       if (result.error && !result.text) {
         return `Error: ${result.error}`;

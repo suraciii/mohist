@@ -6,6 +6,7 @@ import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager, type LlmConfig } from '../agent-runtime';
+import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -19,6 +20,7 @@ export function createIssueRoutes(
   sessionManager: SessionManager = new SessionManager(),
   llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
+  workflowLogRepo?: WorkflowLogRepo,
 ): Hono {
   const app = new Hono();
 
@@ -653,6 +655,59 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: { files }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/logs', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      if (!workflowLogRepo) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'WorkflowLog not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const eventType = c.req.query('eventType') as string | undefined;
+      const logs = workflowLogRepo.findByIssueId(issue.id, eventType);
+      const entries = logs.map(log => ({
+        id: log.id,
+        eventType: log.eventType,
+        data: (() => { try { return JSON.parse(log.data); } catch { return log.data; } })(),
+        createdAt: log.createdAt,
+      }));
+
+      const response: ApiResponse = {
+        success: true,
+        data: entries
       };
       return c.json(response);
     } catch (error) {

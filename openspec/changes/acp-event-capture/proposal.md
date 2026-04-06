@@ -30,10 +30,15 @@
 
 ## Impact
 
-- `tools/spawn-coder.ts`: 扩展 sessionUpdate handler，接收 WorkflowLogRepo，持久化事件，emit action events
-- `db/schema.ts`: 新增 workflow_log 表（migration v5）
-- `db/workflow-log-repo.ts`: 新增 repo 文件
-- `services/event-bus.ts`: EventMap 添加新事件类型
-- `api/events.ts`: ALL_EVENT_TYPES 添加新事件类型
-- `agents/main-agent.ts`: 传入 WorkflowLogRepo 到 spawn_coder tool
-- `server/index.ts`: 创建 WorkflowLogRepo 并注入
+- `tools/spawn-coder.ts`: 
+  - `SpawnCoderContext` 新增 `issueId: string` 和 `eventBus?: EventBus`
+  - `runAcpOneshot` 签名新增 `issueId`, `workflowLogRepo`, `eventBus` 参数
+  - sessionUpdate handler 新增 try/catch 错误处理
+  - 捕获所有 ACP 事件类型，持久化到 workflow_log
+  - 收到 tool_call 时通过 EventBus emit
+- `db/migrations.ts`: 新增 migration v5 创建 workflow_log 表
+- `db/workflow-log-repo.ts`: 新增 repo 文件（insert, findByIssueId, findById, findBySessionId）
+- `services/event-bus.ts`: EventMap 添加 `tool_call` 事件类型
+- `api/events.ts`: ALL_EVENT_TYPES 添加 `tool_call`
+- `agents/main-agent.ts`: `MainAgentContext` 新增 `workflowLogRepo` 字段，传入 spawn_coder tool
+- `server/index.ts`: 创建 WorkflowLogRepo 实例，注入到 MainAgentContext 和 API routes

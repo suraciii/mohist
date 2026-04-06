@@ -1,6 +1,6 @@
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -103,6 +103,10 @@ export function initializeDatabase(db: DatabaseManager): void {
   if (currentVersion < 4) {
     migrateToVersion4(db);
   }
+  
+  if (currentVersion < 5) {
+    migrateToVersion5(db);
+  }
 }
 
 function migrateToVersion2(db: DatabaseManager): void {
@@ -139,5 +143,31 @@ function migrateToVersion4(db: DatabaseManager): void {
     db.run("UPDATE issues SET stage = 'plan' WHERE stage = 'designing'");
     db.run("UPDATE issues SET stage = 'build' WHERE stage = 'implementing'");
     setSchemaVersion(db, 4);
+  });
+}
+
+const CREATE_WORKFLOW_LOG_TABLE = `
+CREATE TABLE IF NOT EXISTS workflow_log (
+  id          TEXT PRIMARY KEY,
+  issue_id    TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  session_id  TEXT,
+  event_type  TEXT NOT NULL,
+  data        TEXT NOT NULL DEFAULT '{}',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`;
+
+const CREATE_WORKFLOW_LOG_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_workflow_log_issue_created ON workflow_log(issue_id, created_at);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_log_issue_event ON workflow_log(issue_id, event_type);',
+];
+
+function migrateToVersion5(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_WORKFLOW_LOG_TABLE);
+    for (const indexSql of CREATE_WORKFLOW_LOG_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 5);
   });
 }
