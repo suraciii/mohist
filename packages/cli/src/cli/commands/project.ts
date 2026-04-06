@@ -3,9 +3,14 @@ import chalk from 'chalk';
 import * as path from 'path';
 import { ApiResponse, Project } from '../../types';
 import { apiClient } from '../api-client';
+import { requireServer } from '../index';
 
 export function setupProjectCommands(program: Command): void {
   const project = program.command('project').description('Manage projects');
+
+  project.hook('preAction', async () => {
+    await requireServer();
+  });
 
   project
     .command('create <name>')

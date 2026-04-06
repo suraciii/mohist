@@ -8,37 +8,82 @@ import { EventBus } from './event-bus';
 import { Stage } from '../types';
 import { loadWorkflow } from '../workflow/workflow-loader';
 
+export interface RunningAgent {
+  issueId: string;
+  issueNumber: number;
+  promise: Promise<void>;
+  projectId: string;
+}
+
 export interface AgentStatus {
   running: boolean;
   issueId: string | null;
   issueNumber: number | null;
+  activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>;
+  queueDepth: number;
+}
+
+export interface QueuedAgent {
+  issueId: string;
+  issueNumber: number;
+  projectId: string;
+  issue: Issue;
+  issueRepo: IssueRepo;
+  commentRepo: CommentRepo;
+  worktreePath: string;
+  sessionManager: SessionManager;
+  llmConfig?: LlmConfig;
+  updateIssueStatus?: (issueId: string, status: IssueStatus) => void;
 }
 
 export class AgentRunnerService {
-  private activeIssueId: string | null = null;
-  private activeIssueNumber: number | null = null;
-  private activePromise: Promise<void> | null = null;
+  private activeAgents = new Map<string, RunningAgent>();
+  private agentQueue: QueuedAgent[] = [];
   private pausedSessions = new Map<number, Session>();
+  private readonly maxConcurrentAgents: number;
 
   constructor(
     private readonly eventBus: EventBus,
     private readonly workflowLogRepo?: WorkflowLogRepo,
-  ) {}
+    maxConcurrentAgents: number = 8,
+  ) {
+    this.maxConcurrentAgents = maxConcurrentAgents;
+    console.log(`AgentRunnerService initialized with maxConcurrentAgents: ${this.maxConcurrentAgents}`);
+  }
 
-  isRunning(): boolean {
-    return this.activePromise !== null;
+  getMaxConcurrentAgents(): number {
+    return this.maxConcurrentAgents;
+  }
+
+  isRunning(issueId?: string): boolean {
+    if (issueId !== undefined) {
+      return this.activeAgents.has(issueId);
+    }
+    return this.activeAgents.size > 0;
   }
 
   getStatus(): AgentStatus {
+    const agents = Array.from(this.activeAgents.values()).map((a) => ({
+      issueId: a.issueId,
+      issueNumber: a.issueNumber,
+      projectId: a.projectId,
+    }));
+
+    const first = agents[0];
+
     return {
-      running: this.activePromise !== null,
-      issueId: this.activeIssueId,
-      issueNumber: this.activeIssueNumber,
+      running: this.activeAgents.size > 0,
+      issueId: first != null ? first.issueId : null,
+      issueNumber: first != null ? first.issueNumber : null,
+      activeAgents: agents,
+      queueDepth: this.agentQueue.length,
     };
   }
 
   getActiveIssueId(): string | null {
-    return this.activeIssueId;
+    if (this.activeAgents.size === 0) return null;
+    const first = this.activeAgents.values().next().value;
+    return first != null ? first.issueId : null;
   }
 
   hasPausedSession(issueNumber: number): boolean {
@@ -61,7 +106,27 @@ export class AgentRunnerService {
     return nextStageConfig?.approval === true;
   }
 
-  start(
+  getQueueSize(): number {
+    return this.agentQueue.length;
+  }
+
+  private processQueue(): void {
+    while (this.agentQueue.length > 0 && this.activeAgents.size < this.maxConcurrentAgents) {
+      const queued = this.agentQueue.shift()!;
+      this.executeAgent(
+        queued.issue,
+        queued.projectId,
+        queued.issueRepo,
+        queued.commentRepo,
+        queued.worktreePath,
+        queued.sessionManager,
+        queued.llmConfig,
+        queued.updateIssueStatus,
+      );
+    }
+  }
+
+  private executeAgent(
     issue: Issue,
     projectId: string,
     issueRepo: IssueRepo,
@@ -71,16 +136,9 @@ export class AgentRunnerService {
     llmConfig?: LlmConfig,
     updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
   ): void {
-    if (this.activePromise) {
-      throw new Error(`Agent already running on issue #${this.activeIssueNumber}`);
-    }
-
-    this.activeIssueId = issue.id;
-    this.activeIssueNumber = issue.number;
-
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
 
-    this.activePromise = (async () => {
+    const promise = (async () => {
       let session: Session | undefined;
       try {
         const result = await runMainAgent(
@@ -127,11 +185,51 @@ export class AgentRunnerService {
           error: errorMsg,
         });
       } finally {
-        this.activePromise = null;
-        this.activeIssueId = null;
-        this.activeIssueNumber = null;
+        this.activeAgents.delete(issue.id);
+        this.processQueue();
       }
     })();
+
+    this.activeAgents.set(issue.id, {
+      issueId: issue.id,
+      issueNumber: issue.number,
+      promise,
+      projectId,
+    });
+  }
+
+  start(
+    issue: Issue,
+    projectId: string,
+    issueRepo: IssueRepo,
+    commentRepo: CommentRepo,
+    worktreePath: string,
+    sessionManager: SessionManager,
+    llmConfig?: LlmConfig,
+    updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
+  ): { started: boolean; queuePosition?: number } {
+    if (this.activeAgents.has(issue.id)) {
+      return { started: false, queuePosition: 0 };
+    }
+
+    if (this.activeAgents.size >= this.maxConcurrentAgents) {
+      this.agentQueue.push({
+        issueId: issue.id,
+        issueNumber: issue.number,
+        projectId,
+        issue,
+        issueRepo,
+        commentRepo,
+        worktreePath,
+        sessionManager,
+        llmConfig,
+        updateIssueStatus,
+      });
+      return { started: false, queuePosition: this.agentQueue.length };
+    }
+
+    this.executeAgent(issue, projectId, issueRepo, commentRepo, worktreePath, sessionManager, llmConfig, updateIssueStatus);
+    return { started: true };
   }
 
   resume(
@@ -145,8 +243,8 @@ export class AgentRunnerService {
     llmConfig?: LlmConfig,
     updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
   ): void {
-    if (this.activePromise) {
-      throw new Error(`Agent already running on issue #${this.activeIssueNumber}`);
+    if (this.activeAgents.has(issue.id)) {
+      throw new Error(`Issue #${issue.number} is already running`);
     }
 
     const session = this.pausedSessions.get(issue.number);
@@ -155,8 +253,6 @@ export class AgentRunnerService {
     }
 
     this.pausedSessions.delete(issue.number);
-    this.activeIssueId = issue.id;
-    this.activeIssueNumber = issue.number;
 
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
 
@@ -166,7 +262,7 @@ export class AgentRunnerService {
     });
     sessionManager.resume(session.id);
 
-    this.activePromise = (async () => {
+    const promise = (async () => {
       try {
         const { session: updatedSession } = await runMainAgent(
           {
@@ -210,10 +306,16 @@ export class AgentRunnerService {
           error: errorMsg,
         });
       } finally {
-        this.activePromise = null;
-        this.activeIssueId = null;
-        this.activeIssueNumber = null;
+        this.activeAgents.delete(issue.id);
+        this.processQueue();
       }
     })();
+
+    this.activeAgents.set(issue.id, {
+      issueId: issue.id,
+      issueNumber: issue.number,
+      promise,
+      projectId,
+    });
   }
 }
