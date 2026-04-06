@@ -7,7 +7,7 @@
 	url = https://github.com/openclaw/openclaw.git
 [submodule "opensrc/opencode"]
 	path = opensrc/opencode
-	url = https://github.com/anomalyco/opencode
+	url = https://github.com/anomalyco/opencode.git
 [submodule "opensrc/nanoclaw"]
 	path = opensrc/nanoclaw
 	url = https://github.com/qwibitai/nanoclaw.git
