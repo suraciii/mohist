@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
-import { StateManager } from '../server/state-manager';
+import { ProjectService } from '../services/project-service';
+import { IssueService } from '../services/issue-service';
 import { ApiResponse } from '../types';
 
 export function createStatusRoutes(
-  stateManager: StateManager
+  projectService: ProjectService,
+  issueService: IssueService
 ): Hono {
   const app = new Hono();
 
@@ -12,9 +14,10 @@ export function createStatusRoutes(
       const all = c.req.query('all') === 'true';
       
       if (all) {
-        const projects = stateManager.loadProjects();
+        const projects = projectService.getAll();
+        const currentId = projectService.getCurrentId();
         const status = projects.map(p => {
-          const issues = stateManager.loadIssues(p.id);
+          const issues = issueService.getByProject(p.id);
           const activeIssues = issues.filter(i => i.status === 'active').length;
           
           return {
@@ -22,7 +25,7 @@ export function createStatusRoutes(
             path: p.path,
             issues: issues.length,
             activeIssues,
-            isCurrent: stateManager.getCurrentProjectId() === p.id
+            isCurrent: currentId === p.id
           };
         });
         
@@ -33,7 +36,7 @@ export function createStatusRoutes(
         return c.json(response);
       }
 
-      const currentId = stateManager.getCurrentProjectId();
+      const currentId = projectService.getCurrentId();
       if (!currentId) {
         const response: ApiResponse = {
           success: false,
@@ -42,7 +45,7 @@ export function createStatusRoutes(
         return c.json(response, 400);
       }
 
-      const current = stateManager.getProjectById(currentId);
+      const current = projectService.getById(currentId);
       if (!current) {
         const response: ApiResponse = {
           success: false,
@@ -51,7 +54,7 @@ export function createStatusRoutes(
         return c.json(response, 404);
       }
 
-      const issues = stateManager.loadIssues(currentId);
+      const issues = issueService.getByProject(currentId);
       const activeIssues = issues.filter(i => i.status === 'active');
 
       const status = {

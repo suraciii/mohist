@@ -1,5 +1,5 @@
 import { Project } from '../types';
-import { ProjectRepo, ConfigRepo } from '../db';
+import { ProjectRepo, ConfigRepo, IssueRepo, LabelRepo } from '../db';
 
 export interface CreateProjectData {
   name: string;
@@ -11,7 +11,9 @@ export class ProjectService {
 
   constructor(
     private projectRepo: ProjectRepo,
-    private configRepo: ConfigRepo
+    private configRepo: ConfigRepo,
+    private issueRepo: IssueRepo,
+    private labelRepo: LabelRepo
   ) {
   }
 
@@ -54,6 +56,10 @@ export class ProjectService {
     return this.projectRepo.findById(savedId);
   }
 
+  getCurrentId(): string | null {
+    return this.configRepo.get(ProjectService.CURRENT_PROJECT_KEY);
+  }
+
   setCurrent(project: Project): void {
     this.configRepo.set(ProjectService.CURRENT_PROJECT_KEY, project.id);
   }
@@ -72,6 +78,8 @@ export class ProjectService {
   delete(id: string): boolean {
     const project = this.projectRepo.findById(id);
     if (!project) return false;
+
+    this.issueRepo.deleteByProjectCascade(id);
 
     const currentId = this.configRepo.get(ProjectService.CURRENT_PROJECT_KEY);
     if (currentId === id) {
@@ -93,5 +101,9 @@ export class ProjectService {
 
   exists(name: string): boolean {
     return this.projectRepo.findByName(name) !== null;
+  }
+
+  getLabels(projectId: string): string[] {
+    return this.labelRepo.findAllUsed(projectId);
   }
 }
