@@ -28,6 +28,7 @@ function useSSE(projectId: string | null) {
           }
           case 'agent_started':
           case 'agent_completed':
+          case 'agent_paused':
           case 'agent_error': {
             queryClient.invalidateQueries({ queryKey: ['agent-status'] })
             queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -63,6 +64,7 @@ function useSSE(projectId: string | null) {
       'comment_added',
       'agent_started',
       'agent_completed',
+      'agent_paused',
       'agent_error',
       'approval_requested',
     ]

@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   const worktreeManager = new WorktreeManager();
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
-  const agentRunner = new AgentRunnerService(eventBus);
+  const agentRunner = new AgentRunnerService(eventBus, configService.getMaxConcurrentAgents());
 
   const llmConfig = buildLlmConfig(stateManager.getConfigRepo());
   

@@ -8,6 +8,7 @@ const ALL_EVENT_TYPES: EventName[] = [
   'comment_added',
   'agent_started',
   'agent_completed',
+  'agent_paused',
   'agent_error',
   'approval_requested',
 ];
