@@ -29,13 +29,13 @@ CLI SHALL NOT 包含业务逻辑，所有逻辑在 server 侧。
 
 ### Requirement: CLI 检测 server 状态
 
-CLI SHALL 在执行命令前检测 server 是否运行。
+CLI SHALL 在执行命令前检测 server 是否运行。所有需要 server 的 CLI 命令 SHALL 在执行前检查 server 是否可用。server 不可用时 SHALL 打印友好错误信息并退出，而非抛出 ECONNREFUSED。
 
 #### Scenario: Server 未运行
 - **WHEN** 用户执行需要 server 的命令
 - **AND** server 未运行
-- **THEN** CLI 返回错误 "Server is not running"
-- **AND** CLI 提示 "Start with: mo server start"
+- **THEN** CLI 输出 "Server is not running. Start with: mo server start" 并以非零 exit code 退出
+- **AND** 不输出 Node.js 的 ECONNREFUSED 堆栈信息
 
 #### Scenario: Server 运行中
 - **WHEN** 用户执行需要 server 的命令
@@ -164,3 +164,11 @@ CLI 命令模块 SHALL 共享同一个 `apiClient` 实现，不各自定义重�
 #### Scenario: apiClient 行为不变
 - **WHEN** CLI 通过共享 `apiClient` 调用 server API
 - **THEN** 行为与重构前完全一致（HTTP 请求、JSON 解析、错误处理）
+
+### Requirement: CLI 阶段名与实现一致
+
+CLI 输出中的阶段名 SHALL 使用当前实现的阶段名：`draft`、`plan`、`build`、`check`、`done`。
+
+#### Scenario: issue list 显示正确阶段名
+- **WHEN** 用户运行 `mo issue list`
+- **THEN** 阶段列显示 `plan`/`build`/`check`/`done`（而非旧的 `designing`/`implementing`）
