@@ -6,7 +6,7 @@
 
 用户无法在 agent 暂停时发送自由文本消息——比如 "等一下，方向不对，改用 PostgreSQL" 或 "先别 build，plan 里的方案 2 更好"。
 
-`message-injection` 让用户可以在 agent session 暂停时（gate 审批点或 ask_user 等待回复时）发送任意消息。消息会被追加到 session 中，触发新的 LLM loop 迭代。
+`message-injection` 让用户可以在 agent session 暂停时（gate 审批点）发送任意消息。消息会被追加到 session 中，触发新的 LLM loop 迭代。
 
 这是 ask-user 的补充——ask_user 是 agent 主动提问，message-injection 是用户主动插话。
 
