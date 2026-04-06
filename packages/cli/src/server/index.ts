@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo);
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, configService.getMaxConcurrentAgents());
 
   const llmConfig = buildLlmConfig(stateManager.getConfigRepo());
   

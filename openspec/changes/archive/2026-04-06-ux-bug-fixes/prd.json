@@ -13,6 +13,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
+      "passes": true,
       "notes": "One-line fix. Just add the string to the array."
     },
     {
@@ -27,6 +28,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
+      "passes": true,
       "notes": "Follow the same pattern as existing event handlers in useSSE.ts. The invalidation key should match what useQueries.ts uses."
     },
     {
@@ -40,6 +42,7 @@
         "Web UI build passes"
       ],
       "priority": 3,
+      "passes": true,
       "notes": "Simple removal. If the button has surrounding layout (flex container etc.), adjust as needed so the Approve button still looks good."
     },
     {
@@ -53,6 +56,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
+      "passes": true,
       "notes": "Search for 'designing' and 'implementing' across cli/ directory to catch all occurrences."
     },
     {
@@ -68,6 +72,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
+      "passes": true,
       "notes": "requireServer is already defined in cli/index.ts:30. Just import and call it in the action handlers. Be careful about the import path."
     },
     {
@@ -82,6 +87,7 @@
         "Manual test: start server, create issue, start agent, verify approval panel appears automatically"
       ],
       "priority": 6,
+      "passes": true,
       "notes": "Final verification step."
     }
   ]
