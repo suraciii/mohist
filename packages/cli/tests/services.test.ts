@@ -13,6 +13,7 @@ import { Stage, IssueStatus } from '../src/types';
 describe('ProjectService', () => {
   let db: DatabaseManager;
   let projectRepo: ProjectRepo;
+  let issueRepo: IssueRepo;
   let configRepo: ConfigRepo;
   let service: ProjectService;
 
@@ -21,8 +22,9 @@ describe('ProjectService', () => {
     initializeDatabase(db);
     
     projectRepo = new ProjectRepo(db);
+    issueRepo = new IssueRepo(db);
     configRepo = new ConfigRepo(db);
-    service = new ProjectService(projectRepo, configRepo);
+    service = new ProjectService(projectRepo, configRepo, issueRepo);
   });
 
   afterEach(() => {

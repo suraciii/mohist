@@ -7,7 +7,7 @@ import { createStatusRoutes } from '../api/status';
 import { createLabelRoutes } from '../api/labels';
 import { createEventRoutes } from '../api/events';
 import { createAgentRoutes } from '../api/agent';
-import { ConfigService, EventBus, AgentRunnerService } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
 import type { LlmConfig } from '../agent-runtime';
@@ -58,6 +58,9 @@ async function main(): Promise<void> {
   const configService = new ConfigService(stateManager.getConfigRepo());
   const config = configService.getConfig();
 
+  const issueService = new IssueService(stateManager.getIssueRepo(), stateManager.getCommentRepo());
+  const projectService = new ProjectService(stateManager.getProjectRepo(), stateManager.getConfigRepo(), stateManager.getIssueRepo(), stateManager.getLabelRepo());
+
   const worktreeManager = new WorktreeManager();
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
@@ -67,11 +70,11 @@ async function main(): Promise<void> {
   
   const server = new HttpServer(config);
   
-  server.addRouter('/api/projects', createProjectRoutes(stateManager));
-  server.addRouter('/api/issues', createIssueRoutes(stateManager, worktreeManager, sessionManager, llmConfig, agentRunner));
-  server.addRouter('/api/labels', createLabelRoutes(stateManager));
+  server.addRouter('/api/projects', createProjectRoutes(projectService));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner));
+  server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
-  server.addRouter('/api', createStatusRoutes(stateManager));
+  server.addRouter('/api', createStatusRoutes(projectService, issueService));
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
 
