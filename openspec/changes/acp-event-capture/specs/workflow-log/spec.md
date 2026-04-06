@@ -28,3 +28,8 @@ API SHALL 提供查询某个 issue 执行日志的端点。
 - **WHEN** 请求 `GET /api/issues/:number/logs`
 - **THEN** 返回该 issue 的所有 workflow_log 记录，按 created_at 升序排列
 - **AND** 支持可选的 `?eventType=tool_call` 过滤
+
+##### Scenario: 按 session 聚合事件
+- **WHEN** 查询某个 session_id 的所有事件
+- **THEN** 返回该 ACP session 的所有 workflow_log 记录，按 created_at 升序排列
+- **AND** 可用于重放某次 spawn_coder 的完整执行过程

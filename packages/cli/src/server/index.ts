@@ -64,14 +64,15 @@ async function main(): Promise<void> {
   const worktreeManager = new WorktreeManager();
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
-  const agentRunner = new AgentRunnerService(eventBus);
+  const workflowLogRepo = stateManager.getWorkflowLogRepo();
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo);
 
   const llmConfig = buildLlmConfig(stateManager.getConfigRepo());
   
   const server = new HttpServer(config);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner, workflowLogRepo));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
   server.addRouter('/api', createStatusRoutes(projectService, issueService));

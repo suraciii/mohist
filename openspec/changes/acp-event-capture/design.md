@@ -43,11 +43,44 @@ CREATE INDEX idx_workflow_log_issue ON workflow_log(issue_id, created_at);
 
 **替代方案**：为每种事件类型建独立列（tool_name, file_path, diff 等）。不采用——事件类型多且结构各异，会导致大量 nullable 列。
 
-### D2: spawn_coder 接收 WorkflowLogRepo 作为参数
+### D2: spawn_coder 接收 WorkflowLogRepo 和 issueId 作为参数
 
-`createSpawnCoderTool({ worktreePath, workflowLogRepo })`。Tool 的 execute 函数在处理 sessionUpdate 时将事件写入 workflow_log。
+```
+AgentRunnerService.start()
+  └→ runMainAgent({ issue, ..., workflowLogRepo })
+        └→ createSpawnCoderTool({ worktreePath, issueId: issue.id, workflowLogRepo })
+              └→ runAcpOneshot(cwd, task, timeout, issueId, workflowLogRepo)
+                    └→ sessionUpdate handler → workflow_log(issue_id)
+```
 
-**替代方案**：在 AgentRunnerService 层面包装 spawn_coder，service 层负责日志记录。不采用——sessionUpdate 事件在 spawn_coder 内部产生，外包会增加复杂度。
+`createSpawnCoderTool` 签名：
+```typescript
+interface SpawnCoderContext {
+  worktreePath?: string;
+  issueId: string;           // 用于关联 workflow_log 记录
+  workflowLogRepo?: WorkflowLogRepo;  // 写入事件
+  eventBus?: EventBus;       // 推送 tool_call 事件
+}
+```
+
+`runAcpOneshot` 签名：
+```typescript
+async function runAcpOneshot(
+  cwd: string,
+  task: string,
+  timeout: number,
+  issueId: string,
+  workflowLogRepo?: WorkflowLogRepo,
+  eventBus?: EventBus,
+): Promise<{ text: string; error?: string }>
+```
+
+**issueId 传递路径**：
+- `AgentRunnerService.start()` 有 `issue: Issue` 参数，从中取出 `issue.id`
+- 通过 `MainAgentContext.issue.id` 传给 `createSpawnCoderTool`
+- 工具执行时通过 `params` context 传给 `runAcpOneshot`
+
+**替代方案**：在 AgentRunnerService 层面包装 spawn_coder，service 层负责日志记录。不采用——sessionUpdate 事件在 spawn_coder 内部产生，外包会增加复杂度，且会丢失事件时序。
 
 ### D3: EventBus 只推送低频 action 事件
 
@@ -69,8 +102,55 @@ EventBus 推送用于 Web UI 的状态更新（如 "agent is editing foo.ts"）�
 
 理由：Main Agent 的 loop 事件（read_workflow、advance_stage 等）已经通过 EventBus 的事件和 comments 记录了。需要额外记录的是子 agent 的执行细节，这些目前完全丢失。
 
+### D6: sessionUpdate 错误处理策略
+
+每个 sessionUpdate 事件处理器用 try/catch 包裹，单个事件的解析错误不影响其他事件处理，也不中断整个 oneshot 流程。
+
+```typescript
+sessionUpdate: async (notification: SessionNotification) => {
+  try {
+    const update = notification.update;
+    // 处理各种事件类型...
+  } catch (err) {
+    console.error('[spawn_coder] sessionUpdate error:', err);
+    // 不中断，继续处理下一个事件
+  }
+}
+```
+
+**workflow_log 写入失败策略**：
+- 写入失败 → `console.error` 记录 → **继续执行**（不影响 agent 正常返回）
+- EventBus emit 失败 → silent swallow（已有策略）
+
+### D7: EventBus 修改与 ask-user change 的协调
+
+`acp-event-capture T-004` 和 `ask-user T-003` 都修改 `services/event-bus.ts` 的 `EventMap` 和 `api/events.ts` 的 `ALL_EVENT_TYPES`。
+
+**执行顺序约定**：
+1. 先完成 `acp-event-capture T-004`（添加 `tool_call`）
+2. 再完成 `ask-user T-003`（添加 `question_asked`, `question_answered`）
+
+两个 change 不同时修改同一文件。实现前需确认对方未占用。
+
+### D8: WorkflowLogRepo 方法集
+
+根据 spec/workflow-log/spec.md，WorkflowLogRepo 需要以下方法：
+
+```typescript
+class WorkflowLogRepo {
+  insert(issueId: string, sessionId: string | null, eventType: string, data: object): WorkflowLogEntry
+  findByIssueId(issueId: string, eventType?: string): WorkflowLogEntry[]
+  findById(id: string): WorkflowLogEntry | null
+  findBySessionId(sessionId: string): WorkflowLogEntry[]  // 用于关联同一次 spawn 的事件
+}
+```
+
+**排序**：所有查询结果按 `created_at ASC` 排列（时序一致）。
+
 ## Risks / Trade-offs
 
 - **[Risk] workflow_log 数据量增长快** → 每次 spawn_coder 可能产生几十到几百条事件。对于一个 issue 的完整 plan→build→check 流程，估计 100-500 条记录。SQLite 处理这个量级没有问题。可考虑后续添加清理策略。
 - **[Risk] JSON data 列查询效率** → SQLite 的 `json_extract()` 有性能开销，但通过 `(issue_id, created_at)` 复合索引可以高效过滤。查询场景主要是 "查看某个 issue 的所有日志"，这个模式很适合索引。
 - **[Low] 不修改现有行为** → 只增加写入，不改变读取路径，回归风险极低
+- **[Risk] EventBus 类型冲突** → `ask-user` change 也修改 EventMap 和 ALL_EVENT_TYPES。需约定执行顺序，避免同时修改同一文件。
+- **[Risk] issueId 传递断裂** → 如果任何一环遗漏 issueId，workflow_log 记录会缺失 issue_id。通过 D2 的完整传递路径确保每个环节都传递。

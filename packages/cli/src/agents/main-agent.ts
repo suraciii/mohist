@@ -3,6 +3,7 @@ import type { AgentLoopResult } from '../agent-runtime';
 import { IssueRepo } from '../db/issue-repo';
 import { CommentRepo } from '../db/comment-repo';
 import type { Issue } from '../types';
+import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { createSpawnCoderTool } from '../tools/spawn-coder';
 import { createReadWorkflowTool } from '../tools/read-workflow';
 import { createAdvanceStageTool } from '../tools/advance-stage';
@@ -17,6 +18,7 @@ export interface MainAgentContext {
   llmConfig?: LlmConfig;
   issue: Issue;
   eventBus?: EventBus;
+  workflowLogRepo?: WorkflowLogRepo;
 }
 
 function buildSystemPrompt(issue: Issue): string {
@@ -76,7 +78,13 @@ export async function runMainAgent(
   const model = resolveModel(context.llmConfig);
 
   const toolRegistry = new ToolRegistry();
-  toolRegistry.register(createSpawnCoderTool({ worktreePath: context.worktreePath }));
+  toolRegistry.register(createSpawnCoderTool({
+    worktreePath: context.worktreePath,
+    issueId: context.issue.id,
+    projectId: context.issue.projectId,
+    workflowLogRepo: context.workflowLogRepo,
+    eventBus: context.eventBus,
+  }));
   toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath }));
   toolRegistry.register(createAdvanceStageTool({ issue: context.issue, issueRepo: context.issueRepo, worktreePath: context.worktreePath, eventBus: context.eventBus }));
   toolRegistry.register(createAddCommentTool({ issue: context.issue, commentRepo: context.commentRepo, eventBus: context.eventBus }));

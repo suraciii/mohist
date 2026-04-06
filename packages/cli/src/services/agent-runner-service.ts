@@ -1,5 +1,6 @@
 import type { IssueRepo } from '../db/issue-repo';
 import type { CommentRepo } from '../db/comment-repo';
+import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { SessionManager, type Session, type LlmConfig } from '../agent-runtime';
 import { runMainAgent } from '../agents/main-agent';
 import { IssueStatus, type Issue } from '../types';
@@ -21,6 +22,7 @@ export class AgentRunnerService {
 
   constructor(
     private readonly eventBus: EventBus,
+    private readonly workflowLogRepo?: WorkflowLogRepo,
   ) {}
 
   isRunning(): boolean {
@@ -89,6 +91,7 @@ export class AgentRunnerService {
             llmConfig,
             issue,
             eventBus: this.eventBus,
+            workflowLogRepo: this.workflowLogRepo,
           },
           sessionManager,
         );
@@ -173,6 +176,7 @@ export class AgentRunnerService {
             llmConfig,
             issue,
             eventBus: this.eventBus,
+            workflowLogRepo: this.workflowLogRepo,
           },
           sessionManager,
           session,

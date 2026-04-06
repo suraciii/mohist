@@ -5,3 +5,4 @@ export { IssueRepo, type CreateIssueData, type IssueQueryOptions } from './issue
 export { ConfigRepo, DEFAULT_CONFIG, initializeDefaultConfig } from './config-repo';
 export { CommentRepo, type CreateCommentData } from './comment-repo';
 export { LabelRepo } from './label-repo';
+export { WorkflowLogRepo, type WorkflowLogEntry } from './workflow-log-repo';
