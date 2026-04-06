@@ -269,15 +269,6 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (agentRunner && agentRunner.isRunning()) {
-        const status = agentRunner.getStatus();
-        const response: ApiResponse = {
-          success: false,
-          error: `Another issue (#${status.issueNumber}) is already running. Wait for it to complete or pause first.`
-        };
-        return c.json(response, 400);
-      }
-
       const issue = issueService.getByNumber(projectId, number);
       if (!issue) {
         const response: ApiResponse = {
@@ -290,7 +281,7 @@ export function createIssueRoutes(
       if (issue.status === IssueStatus.Blocked) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is blocked and cannot be started`
+          error: `Issue #${number} is blocked. Run: mo issue reopen ${number}`
         };
         return c.json(response, 400);
       }
@@ -298,7 +289,7 @@ export function createIssueRoutes(
       if (issue.status === IssueStatus.Paused) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is paused. Resume it first.`
+          error: `Issue #${number} is paused. Run: mo issue approve ${number} to resume`
         };
         return c.json(response, 400);
       }
@@ -306,7 +297,7 @@ export function createIssueRoutes(
       if (issue.stage !== Stage.Draft) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is not in draft stage (current: ${issue.stage})`
+          error: `Issue #${number} is not in draft stage (current: ${issue.stage}). Only draft issues can be started.`
         };
         return c.json(response, 400);
       }
@@ -328,7 +319,15 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      agentRunner.start(
+      if (agentRunner.isRunning(updatedIssue.id)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} already has an agent running`
+        };
+        return c.json(response, 409);
+      }
+
+      const startResult = agentRunner.start(
         updatedIssue,
         projectId,
         stateManager.getIssueRepo(),
@@ -339,11 +338,30 @@ export function createIssueRoutes(
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 
+      if (startResult.started) {
+        const response: ApiResponse = {
+          success: true,
+          data: {
+            issue: updatedIssue,
+            message: `Issue #${number} started, agent is running`,
+            queuePosition: 0,
+            runningAgents: agentRunner.getStatus().activeAgents.length,
+          }
+        };
+        return c.json(response);
+      }
+
+      const maxConcurrent = agentRunner.getMaxConcurrentAgents();
       const response: ApiResponse = {
         success: true,
-        data: { issue: updatedIssue, message: `Issue #${number} started, agent is running` }
+        data: {
+          issue: updatedIssue,
+          message: `Issue #${number} queued, position: ${startResult.queuePosition}/${maxConcurrent}`,
+          queuePosition: startResult.queuePosition,
+          runningAgents: agentRunner.getStatus().activeAgents.length,
+        }
       };
-      return c.json(response);
+      return c.json(response, 202);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
@@ -375,7 +393,7 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      if (agentRunner && agentRunner.getActiveIssueId() === issue.id) {
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
         const response: ApiResponse = {
           success: false,
           error: `Issue #${number} has an agent running. Wait for it to complete or pause first.`
@@ -498,15 +516,6 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (agentRunner && agentRunner.isRunning()) {
-        const status = agentRunner.getStatus();
-        const response: ApiResponse = {
-          success: false,
-          error: `Another issue (#${status.issueNumber}) is already running. Wait for it to complete first.`
-        };
-        return c.json(response, 400);
-      }
-
       const issue = issueService.getByNumber(projectId, number);
       if (!issue) {
         const response: ApiResponse = {
@@ -514,6 +523,14 @@ export function createIssueRoutes(
           error: `Issue #${number} not found`
         };
         return c.json(response, 404);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is already running. Wait for it to complete first.`
+        };
+        return c.json(response, 400);
       }
 
       if (!agentRunner) {
@@ -527,7 +544,7 @@ export function createIssueRoutes(
       if (!agentRunner.hasPausedSession(number)) {
         const response: ApiResponse = {
           success: false,
-          error: `No paused session found for issue #${number}`
+          error: `No paused session for issue #${number}. The session may have expired due to server restart. Try: mo issue reopen ${number} then mo issue start ${number}`
         };
         return c.json(response, 400);
       }

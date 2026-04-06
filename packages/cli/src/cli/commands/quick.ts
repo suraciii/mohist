@@ -2,13 +2,19 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { ApiResponse } from '../../types';
 import { apiClient } from '../api-client';
+import { requireServer } from '../index';
 
 export function setupQuickCommands(program: Command): void {
-  program
+  const statusCmd = program
     .command('status')
     .description('Show current project status')
-    .option('--all', 'Show all projects status')
-    .action(async (options) => {
+    .option('--all', 'Show all projects status');
+
+  statusCmd.hook('preAction', async () => {
+    await requireServer();
+  });
+
+  statusCmd.action(async (options) => {
       try {
         const path = options.all ? '/status?all=true' : '/status';
         const response = await apiClient<ApiResponse>('GET', path);
@@ -28,13 +34,18 @@ export function setupQuickCommands(program: Command): void {
       }
     });
 
-  program
+  const configCmd = program
     .command('config')
     .description('Manage configuration')
     .argument('[key]', 'Config key')
     .argument('[value]', 'Config value')
-    .option('-l, --list', 'List all config')
-    .action(async (key, value, options) => {
+    .option('-l, --list', 'List all config');
+
+  configCmd.hook('preAction', async () => {
+    await requireServer();
+  });
+
+  configCmd.action(async (key, value, options) => {
       try {
         if (options.list) {
           const response = await apiClient<ApiResponse<{ [key: string]: any }>>(

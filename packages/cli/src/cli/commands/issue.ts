@@ -6,6 +6,7 @@ import * as path from 'path';
 import { ApiResponse, Issue } from '../../types';
 import { slugify } from '../../utils/slugify';
 import { apiClient } from '../api-client';
+import { requireServer } from '../index';
 
 function getDefaultBranch(projectPath: string): string {
   try {
@@ -31,8 +32,9 @@ function getDefaultBranch(projectPath: string): string {
 function formatStage(stage: string): string {
   const colors: Record<string, typeof chalk.green> = {
     draft: chalk.gray,
-    designing: chalk.blue,
-    implementing: chalk.cyan,
+    plan: chalk.blue,
+    build: chalk.cyan,
+    check: chalk.yellow,
     done: chalk.green
   };
   
@@ -77,6 +79,10 @@ function parseLabelFlags(flags: string[] | undefined): { add: string[]; remove: 
 
 export function setupIssueCommands(program: Command): void {
   const issue = program.command('issue').description('Manage issues');
+
+  issue.hook('preAction', async () => {
+    await requireServer();
+  });
 
   issue
     .command('create <title>')
@@ -447,6 +453,10 @@ export function setupIssueCommands(program: Command): void {
 
 export function setupLabelCommands(program: Command): void {
   const label = program.command('label').description('Manage labels');
+
+  label.hook('preAction', async () => {
+    await requireServer();
+  });
 
   label
     .command('list')
