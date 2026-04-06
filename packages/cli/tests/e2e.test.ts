@@ -8,6 +8,8 @@ import { DatabaseManager } from '../src/db/database';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ConfigRepo } from '../src/db/config-repo';
+import { CommentRepo } from '../src/db/comment-repo';
+import { LabelRepo } from '../src/db/label-repo';
 import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
 import { ConfigService } from '../src/services/config-service';
@@ -59,19 +61,21 @@ describe('E2E: Single Issue Complete Flow', () => {
     const projectRepo = new ProjectRepo(db);
     const issueRepo = new IssueRepo(db);
     const configRepo = new ConfigRepo(db);
+    const commentRepo = new CommentRepo(db);
+    const labelRepo = new LabelRepo(db);
     
-    const projectService = new ProjectService(projectRepo, configRepo);
-    const issueService = new IssueService(issueRepo);
+    const projectService = new ProjectService(projectRepo, configRepo, issueRepo, labelRepo);
+    const issueService = new IssueService(issueRepo, commentRepo);
     const configService = new ConfigService(configRepo);
     
     const stateManager = new StateManager();
     
     app = new Hono();
-    app.route('/api/projects', createProjectRoutes(stateManager));
+    app.route('/api/projects', createProjectRoutes(projectService));
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus);
-    app.route('/api/issues', createIssueRoutes(stateManager, undefined, undefined, undefined, agentRunner));
-    app.route('/api', createStatusRoutes(stateManager));
+    app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner));
+    app.route('/api', createStatusRoutes(projectService, issueService));
 
     server = createTestServer(app);
     server.listen(0);

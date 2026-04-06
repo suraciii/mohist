@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { StateManager } from '../server/state-manager';
+import { ProjectService } from '../services/project-service';
 import { ApiResponse, Project } from '../types';
 
-export function createProjectRoutes(stateManager: StateManager): Hono {
+export function createProjectRoutes(projectService: ProjectService): Hono {
   const app = new Hono();
 
   app.post('/', async (c) => {
@@ -17,7 +17,7 @@ export function createProjectRoutes(stateManager: StateManager): Hono {
         return c.json(response, 400);
       }
 
-      const existing = stateManager.getProjectByName(name);
+      const existing = projectService.getByName(name);
       if (existing) {
         const response: ApiResponse = {
           success: false,
@@ -26,7 +26,7 @@ export function createProjectRoutes(stateManager: StateManager): Hono {
         return c.json(response, 409);
       }
 
-      const project = stateManager.saveProject({ name, path });
+      const project = projectService.create({ name, path });
 
       const response: ApiResponse<Project> = {
         success: true,
@@ -44,7 +44,7 @@ export function createProjectRoutes(stateManager: StateManager): Hono {
 
   app.get('/', async (c) => {
     try {
-      const projects = stateManager.loadProjects();
+      const projects = projectService.getAll();
       const response: ApiResponse<Project[]> = {
         success: true,
         data: projects
@@ -61,7 +61,7 @@ export function createProjectRoutes(stateManager: StateManager): Hono {
 
   app.get('/:name', async (c) => {
     try {
-      const project = stateManager.getProjectByName(c.req.param('name'));
+      const project = projectService.getByName(c.req.param('name'));
 
       if (!project) {
         const response: ApiResponse = {
@@ -87,7 +87,7 @@ export function createProjectRoutes(stateManager: StateManager): Hono {
 
   app.delete('/:name', async (c) => {
     try {
-      const project = stateManager.getProjectByName(c.req.param('name'));
+      const project = projectService.getByName(c.req.param('name'));
 
       if (!project) {
         const response: ApiResponse = {
@@ -97,7 +97,7 @@ export function createProjectRoutes(stateManager: StateManager): Hono {
         return c.json(response, 404);
       }
 
-      stateManager.deleteProject(project.id);
+      projectService.delete(project.id);
 
       const response: ApiResponse = {
         success: true
@@ -114,7 +114,7 @@ export function createProjectRoutes(stateManager: StateManager): Hono {
 
   app.post('/:name/use', async (c) => {
     try {
-      const project = stateManager.getProjectByName(c.req.param('name'));
+      const project = projectService.getByName(c.req.param('name'));
 
       if (!project) {
         const response: ApiResponse = {
@@ -124,7 +124,7 @@ export function createProjectRoutes(stateManager: StateManager): Hono {
         return c.json(response, 404);
       }
 
-      stateManager.setCurrentProjectId(project.id);
+      projectService.setCurrent(project);
 
       const response: ApiResponse<Project> = {
         success: true,

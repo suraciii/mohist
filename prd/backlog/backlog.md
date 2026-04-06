@@ -18,10 +18,10 @@
 
 | ID | 事项 | 说明 | Milestone |
 |----|------|------|-----------|
-| B-004 | apiClient 重复实现 | cli/commands/issue.ts 和 cli/commands/quick.ts 各自实现了一份完全相同的 apiClient() 函数（30+ 行），应抽到公共模块 | - |
-| B-005 | CLI 业务逻辑泄漏 | issue.ts approve 命令直接执行 git merge（违反 thin client 原则），合并逻辑应在 server 端 | - |
+| B-004 | apiClient 重复实现 | cli/commands/issue.ts 和 cli/commands/quick.ts 各自实现了一份完全相同的 apiClient() 函数（30+ 行），应抽到公共模块 | ✅ 已完成 (code-cleanup-api-layer T-001) |
+| B-005 | CLI 业务逻辑泄漏 | issue.ts approve 命令直接执行 git merge（违反 thin client 原则），合并逻辑应在 server 端 | ✅ 已完成 (code-cleanup-api-layer T-004) |
 | B-006 | ~~config 中旧命名残留~~ | ~~quick.ts:128-129 的 usage 提示仍为 "crawlph config"~~ | ✅ 已清理 |
-| B-007 | StateManager 和 WorkflowService 职责重叠 | 两个类都能修改 issue stage/status，StateManager 不检查规则，WorkflowService 检查规则但存在绕过路径 | M1（删除旧代码时解决） |
+| B-007 | StateManager 和 WorkflowService 职责重叠 | 两个类都能修改 issue stage/status，StateManager 不检查规则，WorkflowService 检查规则但存在绕过路径 | ✅ 已完成 (code-cleanup-api-layer T-008) |
 
 ---
 

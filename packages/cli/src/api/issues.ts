@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Issue, Stage, IssueStatus, Comment } from '../types';
 import { IssueService } from '../services';
+import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager, type LlmConfig } from '../agent-runtime';
@@ -11,6 +12,8 @@ import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 
 export function createIssueRoutes(
+  issueService: IssueService,
+  projectService: ProjectService,
   stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
   sessionManager: SessionManager = new SessionManager(),
@@ -18,13 +21,9 @@ export function createIssueRoutes(
   agentRunner?: AgentRunnerService,
 ): Hono {
   const app = new Hono();
-  
-  const issueService = new IssueService(
-    stateManager.getIssueRepo()
-  );
 
   const getCurrentProjectId = (): string | null => {
-    return stateManager.getCurrentProjectId();
+    return projectService.getCurrentId();
   };
 
   app.get('/', async (c) => {
@@ -49,7 +48,7 @@ export function createIssueRoutes(
         issues = issues.filter(issue => issue.labels.includes(label));
       }
 
-      const project = stateManager.getProjectById(projectId);
+      const project = projectService.getById(projectId);
       const issuesWithProject = issues.map(issue => ({
         ...issue,
         projectName: project?.name || 'unknown'
@@ -90,7 +89,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const issue = stateManager.createIssue(projectId, title, body, labels);
+      const issue = issueService.create({ projectId, title, body, labels });
 
       const response: ApiResponse<Issue> = {
         success: true,
@@ -129,8 +128,8 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const comments = stateManager.getCommentsByIssue(issue.id);
-      const project = stateManager.getProjectById(projectId);
+      const comments = issueService.getCommentsByIssue(issue.id);
+      const project = projectService.getById(projectId);
 
       const response: ApiResponse = {
         success: true,
@@ -164,7 +163,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const issue = stateManager.getIssueByNumber(projectId, number);
+      const issue = issueService.getByNumber(projectId, number);
       if (!issue) {
         const response: ApiResponse = {
           success: false,
@@ -193,8 +192,8 @@ export function createIssueRoutes(
         updateData.labels = currentLabels;
       }
 
-      stateManager.getIssueRepo().update(issue.id, updateData);
-      const updated = stateManager.getIssueByNumber(projectId, number);
+      issueService.update(issue.id, updateData);
+      const updated = issueService.getByNumber(projectId, number);
 
       const response: ApiResponse<Issue> = {
         success: true,
@@ -232,7 +231,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const issue = stateManager.getIssueByNumber(projectId, number);
+      const issue = issueService.getByNumber(projectId, number);
       if (!issue) {
         const response: ApiResponse = {
           success: false,
@@ -241,7 +240,7 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const comment = stateManager.createComment(issue.id, body);
+      const comment = issueService.createComment(issue.id, body);
 
       const response: ApiResponse<Comment> = {
         success: true,
@@ -312,10 +311,10 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      stateManager.updateIssueStage(issue.id, Stage.Plan);
-      const updatedIssue = stateManager.getIssueByNumber(projectId, number)!;
+      issueService.transitionToStage(issue.id, Stage.Plan);
+      const updatedIssue = issueService.getByNumber(projectId, number)!;
 
-      const project = stateManager.getProjectById(projectId);
+      const project = projectService.getById(projectId);
       let worktreePath = process.cwd();
       if (worktreeManager && project) {
         worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
@@ -337,7 +336,7 @@ export function createIssueRoutes(
         worktreePath,
         sessionManager,
         llmConfig,
-        (issueId, status) => stateManager.updateIssueStatus(issueId, status),
+        (issueId, status) => issueService.setStatus(issueId, status),
       );
 
       const response: ApiResponse = {
@@ -466,7 +465,7 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const project = stateManager.getProjectById(projectId);
+      const project = projectService.getById(projectId);
 
       if (worktreeManager && project) {
         await worktreeManager.remove(project.path, project.name, issue.number);
@@ -533,7 +532,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const project = stateManager.getProjectById(projectId);
+      const project = projectService.getById(projectId);
       let worktreePath = process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
@@ -549,7 +548,7 @@ export function createIssueRoutes(
         sessionManager,
         '[System] User approved. Continue to next stage.',
         llmConfig,
-        (issueId, status) => stateManager.updateIssueStatus(issueId, status),
+        (issueId, status) => issueService.setStatus(issueId, status),
       );
 
       const response: ApiResponse = {
@@ -591,7 +590,7 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const project = stateManager.getProjectById(projectId);
+      const project = projectService.getById(projectId);
       if (!project) {
         const response: ApiResponse = {
           success: false,
@@ -625,7 +624,6 @@ export function createIssueRoutes(
           );
           defaultBranch = result.stdout.trim();
         } catch {
-          // fallback to 'main'
         }
       }
 

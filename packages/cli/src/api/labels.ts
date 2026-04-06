@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
-import { StateManager } from '../server/state-manager';
+import { ProjectService } from '../services/project-service';
 import { ApiResponse } from '../types';
 
-export function createLabelRoutes(stateManager: StateManager): Hono {
+export function createLabelRoutes(projectService: ProjectService): Hono {
   const app = new Hono();
 
   app.get('/', async (c) => {
     try {
-      const projectId = stateManager.getCurrentProjectId();
+      const projectId = projectService.getCurrentId();
       
       if (!projectId) {
         const response: ApiResponse = {
@@ -17,7 +17,7 @@ export function createLabelRoutes(stateManager: StateManager): Hono {
         return c.json(response, 400);
       }
 
-      const labels = stateManager.getLabels(projectId);
+      const labels = projectService.getLabels(projectId);
 
       const response: ApiResponse<string[]> = {
         success: true,
