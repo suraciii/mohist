@@ -1,0 +1,69 @@
+{
+  "project": "mohist",
+  "description": "Add message injection API, interactive mo attach stdin, and Web UI message input for free-text user messages to paused agent sessions",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add POST /api/issues/:number/messages endpoint",
+      "spec": "specs/http-api/spec.md",
+      "description": "Add message injection endpoint to api/issues.ts. It should: (1) Check hasPausedSession(issueNumber), (2) Call agentRunner.resume() with user message, (3) Return 200 on success, 409 if agent not paused, 404 if issue not found. Need agentRunnerService injected into the route factory.",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/messages { message: string } returns 200",
+        "Returns 409 when agent is not paused",
+        "Returns 404 when issue doesn't exist",
+        "Message is injected into agent session and agent resumes",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "notes": "The route factory already receives agentRunnerService (check current signature). If not, add it."
+    },
+    {
+      "id": "T-002",
+      "title": "Extend mo attach with interactive stdin",
+      "spec": "",
+      "description": "Extend cli/commands/attach.ts to support interactive mode. When agent_paused event is received, show a prompt (e.g., '> ') and read stdin lines. Each line is sent as POST /api/issues/:number/messages. When agent resumes, disable stdin prompt. Use Node.js readline module.",
+      "acceptanceCriteria": [
+        "mo attach shows input prompt when agent_paused event received",
+        "User can type message and press Enter to send",
+        "Message sent via POST /api/issues/:number/messages",
+        "Prompt disabled when agent resumes (agent_started event)",
+        "SSE output and stdin prompt don't garble each other",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "notes": "Use readline.createInterface for stdin. On agent_paused, call rl.prompt(). On agent_started, call rl.close() or hide prompt. Need to track which issue is paused."
+    },
+    {
+      "id": "T-003",
+      "title": "Add message input to Web UI",
+      "spec": "",
+      "description": "Add a message input area to IssueDetailPage.tsx that appears when agent is paused. Include a text input and 'Send' button. On submit, call POST /api/issues/:number/messages. Clear input on success. Show inline error if agent is not paused (race condition).",
+      "acceptanceCriteria": [
+        "Message input area visible when agent status is 'paused'",
+        "User can type and send message",
+        "Message sent via API on submit",
+        "Input cleared after successful send",
+        "Error displayed if send fails (409 etc.)",
+        "Web UI build passes"
+      ],
+      "priority": 3,
+      "notes": "Add a sendMessage mutation hook in useQueries.ts. The input area should be near the approval panel."
+    },
+    {
+      "id": "T-004",
+      "title": "Verify build and manual test",
+      "spec": "",
+      "description": "Build, typecheck, and manual test: start server, start issue, wait for gate pause, send message via API/curl, verify agent resumes. Test mo attach interactive mode. Test Web UI message input.",
+      "acceptanceCriteria": [
+        "npm run build succeeds",
+        "Web UI build succeeds",
+        "Typecheck passes",
+        "Message injection works via API",
+        "mo attach interactive mode works",
+        "Web UI message input works"
+      ],
+      "priority": 4,
+      "notes": "Test three channels: API (curl), mo attach (stdin), Web UI (browser)."
+    }
+  ]
+}

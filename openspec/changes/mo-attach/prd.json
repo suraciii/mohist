@@ -1,0 +1,65 @@
+{
+  "project": "mohist",
+  "description": "Implement mo attach CLI command for real-time agent monitoring via SSE",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement SSE client parser",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Create a simple SSE client using Node.js built-in http module. It should: (1) Connect to a URL via http.get, (2) Parse SSE format (event: and data: lines), (3) Emit parsed events via callback, (4) Handle connection errors and close. This is a utility function, not a class.",
+      "acceptanceCriteria": [
+        "Function connectSSE(url, { onEvent, onError, onClose }) implemented",
+        "Correctly parses event: and data: lines",
+        "Handles multi-line data (concatenates with newlines)",
+        "Calls onClose when connection ends",
+        "Calls onError on connection failure",
+        "No new npm dependencies"
+      ],
+      "priority": 1,
+      "notes": "SSE format: lines starting with 'event:' set event type, lines starting with 'data:' set data, empty line dispatches. Keep it simple."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement event formatter",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Create a formatter function that takes an SSE event (type + parsed JSON data) and returns a formatted string with timestamp, symbol, event description, and issue info. Use chalk for coloring.",
+      "acceptanceCriteria": [
+        "Each event type has a distinct color and symbol",
+        "Format: [HH:MM:SS] SYMBOL event description  issue #N ...",
+        "agent_started: green, agent_completed: green, agent_paused: yellow, agent_error: red, stage_changed: cyan, comment_added: white, approval_requested: yellow, question_asked: yellow, question_answered: green",
+        "Timestamp uses local time"
+      ],
+      "priority": 2,
+      "notes": "Don't use emoji. Use ASCII symbols: >>, ->, ##, ||, ok, !!."
+    },
+    {
+      "id": "T-003",
+      "title": "Implement mo attach command",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Create cli/commands/attach.ts with setupAttachCommand(program). Command options: --project <name> (optional, defaults to current project), --follow (auto-reconnect on disconnect). The command should: call requireServer(), resolve project ID if --project specified, build SSE URL with projectId filter, connect and print events, handle SIGINT for graceful detach.",
+      "acceptanceCriteria": [
+        "mo attach command registered in Commander program",
+        "mo attach --project myapp filters by project",
+        "mo attach --follow reconnects on disconnect with 2s delay",
+        "Ctrl+C prints 'Detached.' and exits cleanly",
+        "Server not running shows friendly error"
+      ],
+      "priority": 3,
+      "notes": "Follow the pattern of existing command files (issue.ts, project.ts). Register in cli/index.ts."
+    },
+    {
+      "id": "T-004",
+      "title": "Verify build and manual test",
+      "spec": "",
+      "description": "Build, typecheck, and manual test: start server, run mo attach in another terminal, start an issue, verify events appear in attach output.",
+      "acceptanceCriteria": [
+        "npm run build succeeds",
+        "Typecheck passes",
+        "mo attach connects and displays events",
+        "Ctrl+C exits cleanly"
+      ],
+      "priority": 4,
+      "notes": "The manual test is straightforward — just run mo attach alongside a running agent."
+    }
+  ]
+}

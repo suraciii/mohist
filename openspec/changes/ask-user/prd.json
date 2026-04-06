@@ -1,0 +1,149 @@
+{
+  "project": "mohist",
+  "description": "Implement ask_user tool for Main Agent to ask questions during execution, with question API and Web UI panel",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add questions table migration (v6)",
+      "spec": "specs/ask-user-tool/spec.md",
+      "description": "Add migration v6 to db/schema.ts creating questions table: id TEXT PK, issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, question TEXT NOT NULL, answer TEXT, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, answered_at TEXT.",
+      "acceptanceCriteria": [
+        "Migration v6 runs successfully",
+        "questions table exists with correct schema",
+        "Existing tables unaffected"
+      ],
+      "priority": 1,
+      "notes": "Follow existing migration pattern."
+    },
+    {
+      "id": "T-002",
+      "title": "Create QuestionRepo",
+      "spec": "specs/ask-user-tool/spec.md",
+      "description": "Create db/question-repo.ts with QuestionRepo class. Methods: create(issueId, question), answer(id, answer), findByIssueId(issueId), findById(id), expire(id), findPendingByIssueId(issueId).",
+      "acceptanceCriteria": [
+        "QuestionRepo with all required methods",
+        "create generates UUID and sets created_at",
+        "answer updates status, answer text, and answered_at",
+        "findByIssueId returns ordered by created_at DESC",
+        "findPendingByIssueId filters status='pending'",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "notes": "Follow CommentRepo pattern."
+    },
+    {
+      "id": "T-003",
+      "title": "Add question events to EventBus",
+      "spec": "specs/event-bus/spec.md",
+      "description": "Add 'question_asked' and 'question_answered' to EventMap. Add to ALL_EVENT_TYPES in api/events.ts.",
+      "acceptanceCriteria": [
+        "EventMap includes question_asked and question_answered types",
+        "ALL_EVENT_TYPES includes both new types",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "notes": "Straightforward addition to the type union and array."
+    },
+    {
+      "id": "T-004",
+      "title": "Implement ask_user tool",
+      "spec": "specs/ask-user-tool/spec.md",
+      "description": "Create tools/ask-user.ts implementing the ask_user tool. It should: (1) accept question string parameter, (2) create question record via QuestionRepo, (3) emit question_asked event, (4) return a Promise that blocks until resolved via a pending resolver Map, (5) include 24h timeout (configurable) with Promise.race. Export createAskUserTool factory function accepting { questionRepo, eventBus, projectId, timeoutMs? }.",
+      "acceptanceCriteria": [
+        "tools/ask-user.ts exists with createAskUserTool factory",
+        "Tool ID is 'ask_user'",
+        "execute creates question in DB, emits event, returns blocking Promise",
+        "Timeout resolves with default message after 24h",
+        "Pending resolver Map allows external resolution",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "notes": "The key design: a module-level or instance-level Map<string, Function> stores resolvers. The factory function returns both the tool definition AND a resolveQuestion(id, answer) function that the API handler can call."
+    },
+    {
+      "id": "T-005",
+      "title": "Create questions API routes",
+      "spec": "specs/question-api/spec.md",
+      "description": "Create api/questions.ts with: GET /api/questions?issueId=xxx (list), GET /api/questions/:id (detail), POST /api/questions/:id/reply (answer). The reply endpoint must call ask_user tool's resolver to unblock the agent.",
+      "acceptanceCriteria": [
+        "GET /api/questions?issueId=xxx returns questions array",
+        "POST /api/questions/:id/reply { answer } updates DB and resolves Promise",
+        "reply endpoint emits question_answered event",
+        "Returns 404 for non-existent question IDs",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "notes": "The reply handler needs access to the ask_user resolver. This means the ask_user module must export a way to resolve questions externally. Design this as a shared service or singleton."
+    },
+    {
+      "id": "T-006",
+      "title": "Register ask_user tool in Main Agent and update prompt",
+      "spec": "specs/ask-user-tool/spec.md",
+      "description": "Register ask_user tool in agents/main-agent.ts. Update buildSystemPrompt to include ask_user usage guidelines: when to use (ambiguous requirements, user decision needed), when not to use (can solve with tools, clear best practice), one question at a time, specific and actionable questions.",
+      "acceptanceCriteria": [
+        "ask_user tool registered in main-agent.ts ToolRegistry",
+        "System prompt includes ask_user description and usage guidelines",
+        "Main agent can call ask_user during execution",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "notes": "The system prompt update is important — it guides the LLM on when to use ask_user vs solving independently."
+    },
+    {
+      "id": "T-007",
+      "title": "Wire everything in server/index.ts",
+      "spec": "",
+      "description": "Create QuestionRepo in server/index.ts. Create ask_user tool instance with proper dependencies. Pass to main-agent context. Mount questions API routes.",
+      "acceptanceCriteria": [
+        "QuestionRepo created and passed to ask_user tool factory",
+        "ask_user tool registered in main agent",
+        "Questions API routes mounted on server",
+        "End-to-end: agent can ask question, user can reply via API, agent continues",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "notes": "The tricky part is sharing the resolver between the tool and the API handler. Consider a shared AskUserService singleton."
+    },
+    {
+      "id": "T-008",
+      "title": "Add question panel to Web UI",
+      "spec": "specs/question-api/spec.md",
+      "description": "Add question panel to IssueDetailPage.tsx: (1) Listen for question_asked SSE event, (2) Show pending questions with input field, (3) Submit calls POST /api/questions/:id/reply, (4) On question_answered, refresh and remove from pending. Add types for question events in types.ts.",
+      "acceptanceCriteria": [
+        "IssueDetailPage shows question panel when pending questions exist",
+        "User can type and submit answer",
+        "Panel updates after answer submitted",
+        "No panel shown when no pending questions",
+        "Web UI build passes"
+      ],
+      "priority": 8,
+      "notes": "Keep the UI simple — a section below the comments area. Use the existing SSE hook pattern."
+    },
+    {
+      "id": "T-009",
+      "title": "Handle server restart pending questions",
+      "spec": "specs/ask-user-tool/spec.md",
+      "description": "On server startup, query all pending questions from DB and mark them as expired (since the agent session is lost on restart). This prevents orphaned questions.",
+      "acceptanceCriteria": [
+        "On server start, pending questions in DB are marked as expired",
+        "No orphaned pending questions after restart"
+      ],
+      "priority": 9,
+      "notes": "Simple cleanup: in server startup, call questionRepo.expireAllPending()."
+    },
+    {
+      "id": "T-010",
+      "title": "Verify build and end-to-end test",
+      "spec": "",
+      "description": "Run full build (CLI + Web UI), typecheck, and manual end-to-end test: start server, create issue with ambiguous requirement, start agent, verify agent asks question, reply via API, verify agent continues.",
+      "acceptanceCriteria": [
+        "npm run build succeeds",
+        "Web UI build succeeds",
+        "Typecheck passes",
+        "End-to-end: ask_user flow works through full cycle"
+      ],
+      "priority": 10,
+      "notes": "The manual test is the real acceptance test. The issue description should be ambiguous enough to trigger a question."
+    }
+  ]
+}
