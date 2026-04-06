@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useIssues, useProjects, useAgentStatus } from './hooks/useQueries'
 import useSSE from './hooks/useSSE'
@@ -6,12 +6,14 @@ import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
 import { Header } from './components/Header'
 import { IssueDetailPage } from './components/IssueDetailPage'
+import { CreateProjectDialog } from './components/CreateProjectDialog'
 
 function KanbanView() {
   const { projectId, setProjectId, setProjects } = useProject()
-  const { data: projects } = useProjects()
+  const { data: projects, isLoading: projectsLoading } = useProjects()
   const { data: issues, isLoading } = useIssues(projectId ? { projectId } : undefined)
   const { data: agentStatus } = useAgentStatus()
+  const [showCreateProject, setShowCreateProject] = useState(false)
 
   useEffect(() => {
     if (projects && projects.length > 0) {
@@ -21,6 +23,29 @@ function KanbanView() {
       }
     }
   }, [projects, projectId, setProjectId, setProjects])
+
+  if (projectsLoading) {
+    return null
+  }
+
+  if (projects && projects.length === 0) {
+    return (
+      <>
+        <div className="flex items-center justify-center flex-1">
+          <div className="text-center">
+            <div className="text-gray-400 text-lg mb-4">No projects yet</div>
+            <button
+              onClick={() => setShowCreateProject(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+            >
+              Create Project
+            </button>
+          </div>
+        </div>
+        <CreateProjectDialog open={showCreateProject} onClose={() => setShowCreateProject(false)} />
+      </>
+    )
+  }
 
   return (
     <>

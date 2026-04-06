@@ -72,3 +72,8 @@ export type EventMap = {
 }
 
 export type EventName = keyof EventMap
+
+export interface DirEntry {
+  name: string
+  absolute: string
+}

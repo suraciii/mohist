@@ -17,7 +17,7 @@
         "Routes registered in server and accessible via /api/fs/*"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Use os.homedir() for HOME. For /api/fs/search on Unix: child_process.execFile('find', [home, '-type', 'd', '-maxdepth', '4', '-iname', `*${query}*`]). Windows fallback: dir /s /ad /b can be deferred to later. Use path.resolve() and .startsWith(home) for traversal guard."
     },
     {
@@ -35,7 +35,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing api.ts patterns. DirEntry type: { name: string, absolute: string }."
     },
     {
@@ -50,7 +50,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing mutation patterns in useQueries.ts if any, otherwise use standard useMutation."
     },
     {
@@ -69,7 +69,7 @@
         "Follows existing Dialog/Tailwind styling patterns"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Props: { open: boolean, onClose: () => void, onSelect: (path: string) => void }. Use os.homedir equivalent from api or a new /api/fs/home endpoint, or pass homeDir from ProjectContext. The path parsing logic (~ expansion, absolute vs relative, parent navigation) should mirror OpenCode's dialog-select-directory.tsx utility functions."
     },
     {
@@ -84,7 +84,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Modify App.tsx or KanbanBoard.tsx to conditionally render empty state. CreateProjectDialog will be wired in T-007."
     },
     {
@@ -101,7 +101,7 @@
         "Follows existing Dialog/CreateIssueDialog patterns and Tailwind styling"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Path field is read-only display — user must use the directory picker to select. This prevents invalid path input."
     },
     {
@@ -118,7 +118,7 @@
         "Header.tsx open state bug fixed (dropdown and dialog use separate state)"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "The existing Header.tsx has a bug where the dropdown open state and CreateIssueDialog share the same state variable. This should be fixed by using separate useState for each."
     }
   ]

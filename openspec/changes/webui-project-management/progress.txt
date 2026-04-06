@@ -1,0 +1,157 @@
+# Ralph Progress Log
+Started: 2026-04-06T08:01:28.398Z
+
+---
+## T-001: Add filesystem API endpoints (backend)
+Completed: 2026-04-06T16:04:00Z
+
+Created `packages/cli/src/api/fs.ts` with two endpoints:
+- `GET /api/fs/list?path=...` - directory listing via fs.readdirSync, filters to directories only, excludes hidden dirs (starting with .), returns `{ name, absolute }[]`
+- `GET /api/fs/search?query=...&limit=50` - fuzzy directory search via system `find` command with maxdepth=4, path traversal guard ensuring resolved path stays under HOME, returns `{ name, absolute }[]`
+
+Registered routes in `server/index.ts` at `/api/fs`.
+
+Both endpoints follow existing API patterns: factory function (`createFsRoutes`), `ApiResponse<T>` wrapper, try/catch error handling, 400 for validation errors, 500 for internal errors.
+
+Build passes. All 161 tests pass (1 pre-existing failure in cli-commands.test.ts unrelated to this change).
+
+Learnings:
+- `~` prefix expansion handled manually via `os.homedir()` replacement
+- Path traversal guard: `path.resolve()` then `startsWith(home)` check
+- `find` command uses `-iname` for case-insensitive matching
+- No service dependency needed - fs.ts is self-contained using Node.js fs/path/os/child_process
+
+---
+## T-002: Add project management and filesystem methods to API client
+Completed: 2026-04-06T16:30:00Z
+
+Added to `packages/cli/web/src/lib/api.ts`:
+- `createProject({name, path})` - POST /api/projects, returns Project
+- `deleteProject(name)` - DELETE /api/projects/:name, returns {message}
+- `useProject(name)` - POST /api/projects/:name/use, returns Project
+- `listDirectories(path)` - GET /api/fs/list?path=..., returns DirEntry[]
+- `searchDirectories(query, limit=50)` - GET /api/fs/search?query=...&limit=..., returns DirEntry[]
+
+Added `DirEntry` type to `types.ts`: `{ name: string, absolute: string }`.
+
+Added `fuzzysort` (v3.1.0) to web package.json dependencies. npm install successful, typecheck passes.
+
+Learnings:
+- Followed existing api.ts patterns: all methods use the `request<T>()` helper with ApiResponse wrapper
+- Used `encodeURIComponent` for path params (project names may contain special chars)
+- listDirectories uses URLSearchParams for clean query string construction
+- searchDirectories has default limit=50 matching backend default
+
+---
+## T-003: Add project mutation hooks to useQueries
+Completed: 2026-04-06T17:00:00Z
+
+Added three mutation hooks to `packages/cli/web/src/hooks/useQueries.ts`:
+- `useCreateProject()` - calls api.createProject, invalidates ['projects'] on success
+- `useDeleteProject()` - calls api.deleteProject, invalidates ['projects'] on success
+- `useUseProject()` - calls api.useProject, invalidates ['projects'] on success
+
+Each hook uses `useMutation` from @tanstack/react-query with `useQueryClient` to invalidate the projects query cache on success.
+
+Import updated: added `useMutation` and `useQueryClient` alongside existing `useQuery`.
+
+Typecheck passes (npx tsc --noEmit).
+
+Learnings:
+- Followed standard useMutation pattern: mutationFn + onSuccess with queryClient.invalidateQueries
+- Each mutation has a focused single-parameter mutationFn matching the corresponding api method signature
+
+---
+## T-004: Create DialogSelectDirectory component
+Completed: 2026-04-06T18:00:00Z
+
+Created `packages/cli/web/src/components/DialogSelectDirectory.tsx` with:
+- Search input supporting path mode (`~/path` or `/absolute`) and search mode (plain text)
+- Path mode: parses parent/fragment, calls `api.listDirectories(parent)`, fuzzysort filters by fragment
+- Search mode: calls `api.searchDirectories(query)`, fuzzysort ranks results by relevance
+- Tab key: auto-completes current path segment (unique match appends `/`, multiple matches complete to common prefix)
+- Recent projects section (up to 5) shown when input is empty, sourced from `useProject().projects`
+- Directory list with folder icons, keyboard navigation (ArrowUp/Down/Enter)
+- Clicking a directory calls `onSelect(absolutePath)` and closes dialog
+- Hidden directories excluded (backend already filters `.prefix` dirs)
+- Reuses existing `Dialog` component and Tailwind styling patterns
+
+Also added supporting infrastructure:
+- Backend: `GET /api/fs/home` endpoint in `api/fs.ts` returning `os.homedir()` (needed for `~` expansion on frontend)
+- Frontend: `api.getHomeDir()` method in `api.ts`
+
+Both backend and frontend typecheck pass (`tsc --noEmit`).
+
+Learnings:
+- React 19 `useRef` requires an initial value argument (e.g., `useRef<T>(undefined)`)
+- fuzzysort v3 uses `import fuzzysort from 'fuzzysort'` with built-in types
+- Used `useCallback` for `fetchPathResults` and `handleKeyDown` to avoid stale closures
+- Debounced search input (200ms) to avoid excessive API calls
+- `allItems` computed from either recent projects or search results for unified Select button behavior
+
+---
+## T-005: Add empty state for no projects
+Completed: 2026-04-06T19:00:00Z
+
+Modified `packages/cli/web/src/App.tsx` in `KanbanView` component:
+- Added `projectsLoading` from `useProjects()` to distinguish "still loading" from "loaded but empty"
+- When `projectsLoading` is true: returns null (no "Loading..." flash for projects)
+- When `projects` is loaded but empty (`projects.length === 0`): renders empty state with "No projects yet" message and "Create Project" button
+- When projects exist: renders KanbanBoard as before (with "Loading..." for issues)
+- Added `showCreateProject` state for the button, wired placeholder (actual dialog in T-007)
+
+Typecheck passes (npx tsc --noEmit).
+
+Learnings:
+- Used `isLoading` alias from useProjects to distinguish project loading state from issue loading state
+- The empty state replaces both the "Loading..." text and KanbanBoard when no projects exist
+- `showCreateProject` state is a placeholder — T-007 will replace it with CreateProjectDialog
+
+---
+## T-006: Create CreateProjectDialog component
+Completed: 2026-04-06T19:30:00Z
+
+Created `packages/cli/web/src/components/CreateProjectDialog.tsx` with:
+- Name text input (required) with autoFocus
+- Path display (read-only input) + "Browse" button that opens DialogSelectDirectory
+- Create button disabled when name or path is empty
+- On success: calls useUseProject to switch to new project, then closes dialog (project list auto-refreshes via query invalidation)
+- On 409 conflict: detects "already exists" in error message, shows dedicated inline error
+- On other errors: shows generic error message from API
+- Nested DialogSelectDirectory with separate open state (`browseOpen`)
+- Follows CreateIssueDialog patterns exactly: same Dialog wrapper, same input/button Tailwind classes, same error display
+
+Typecheck passes (npx tsc --noEmit).
+
+Learnings:
+- 409 conflict detection uses error message text ("already exists") rather than status code, since the api.ts `request()` helper throws with the JSON error message, not the HTTP status
+- DialogSelectDirectory is rendered as a sibling to the main Dialog (not nested inside), both managed by separate open states — avoids z-index/overlay conflicts
+- useCreateProject + useUseProject are chained: create first, then switch on success, then close
+
+---
+## T-007: Add project actions to Header dropdown and wire dialogs
+Completed: 2026-04-06T20:00:00Z
+
+Rewrote `packages/cli/web/src/components/Header.tsx`:
+- **Fixed open state collision bug**: Split single `open` state into `dropdownOpen` (project selector dropdown), `createIssueOpen` (New Issue dialog), `createProjectOpen` (New Project dialog), `deleteConfirmOpen` (delete confirmation)
+- Added "New Project" item to project dropdown menu (closes dropdown, opens CreateProjectDialog)
+- Added "Delete Project" item to project dropdown (red text, closes dropdown, opens confirmation dialog)
+- Delete confirmation dialog using existing Dialog component: shows project name, warns about cascading issue deletion, Cancel/Delete buttons
+- On delete success: filters current project from list, switches to first remaining project (or null for empty state), calls useProject to update backend
+- Dropdown only shows when 2+ projects exist (single project shows plain text, zero shows "No projects")
+
+Updated `packages/cli/web/src/App.tsx`:
+- Empty state "Create Project" button now renders CreateProjectDialog with `showCreateProject` state (replaced T-007 placeholder comment)
+- Dialog renders alongside empty state (sibling, not nested)
+
+Updated `packages/cli/web/src/context/ProjectContext.tsx`:
+- `setProjectId` type changed from `(id: string) => void` to `(id: string | null) => void` to support clearing project when all projects deleted
+
+Typecheck passes (npx tsc --noEmit).
+
+Learnings:
+- The original bug was that both the dropdown menu and CreateIssueDialog shared the same `open` state variable — clicking "New Issue" would open both the dropdown and dialog simultaneously
+- Delete cascading is handled by the backend (DELETE /api/projects/:name removes all issues), frontend just needs confirmation + state cleanup
+- When switching projects after delete, need to call both `setProjectId` (local state) and `switchProject.mutate` (backend session update)
+
+

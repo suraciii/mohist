@@ -65,4 +65,32 @@ export const api = {
   getLabels: () => request<string[]>('/labels'),
 
   getAgentStatus: () => request<import('./types').AgentStatus>('/agent/status'),
+
+  createProject: (data: { name: string; path: string }) =>
+    request<import('./types').Project>('/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  deleteProject: (name: string) =>
+    request<{ message: string }>(`/projects/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+
+  useProject: (name: string) =>
+    request<import('./types').Project>(`/projects/${encodeURIComponent(name)}/use`, {
+      method: 'POST',
+    }),
+
+  listDirectories: (path: string) => {
+    const search = new URLSearchParams({ path })
+    return request<import('./types').DirEntry[]>(`/fs/list?${search.toString()}`)
+  },
+
+  searchDirectories: (query: string, limit: number = 50) => {
+    const search = new URLSearchParams({ query, limit: String(limit) })
+    return request<import('./types').DirEntry[]>(`/fs/search?${search.toString()}`)
+  },
+
+  getHomeDir: () => request<string>('/fs/home'),
 }
