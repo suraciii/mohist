@@ -1,0 +1,83 @@
+{
+  "project": "webui-project-management",
+  "description": "WebUI project CRUD management - create, delete projects and empty state guidance",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add project management methods to API client",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Add createProject, deleteProject, useProject methods to api.ts, corresponding to POST /api/projects, DELETE /api/projects/:name, POST /api/projects/:name/use.",
+      "acceptanceCriteria": [
+        "api.createProject({name, path}) sends POST /api/projects and returns Project",
+        "api.deleteProject(name) sends DELETE /api/projects/:name",
+        "api.useProject(name) sends POST /api/projects/:name/use and returns Project",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Follow existing api.ts patterns. No new dependencies needed."
+    },
+    {
+      "id": "T-002",
+      "title": "Add project mutation hooks to useQueries",
+      "spec": "specs/project-management/spec.md",
+      "description": "Add useCreateProject, useDeleteProject, useUseProject mutations using useMutation. Each mutation SHALL invalidate ['projects'] query on success.",
+      "acceptanceCriteria": [
+        "useCreateProject calls api.createProject and invalidates ['projects'] on success",
+        "useDeleteProject calls api.deleteProject and invalidates ['projects'] on success",
+        "useUseProject calls api.useProject and invalidates ['projects'] on success",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Follow existing mutation patterns in useQueries.ts if any, otherwise use standard useMutation."
+    },
+    {
+      "id": "T-003",
+      "title": "Add empty state for no projects",
+      "spec": "specs/web-ui/spec.md",
+      "description": "When projects array is empty, show empty state with 'No projects yet' message and 'Create Project' button instead of KanbanBoard and 'Loading...' text. CreateProjectDialog not required for this task (can be placeholder button).",
+      "acceptanceCriteria": [
+        "When projects.length === 0: empty state is shown with message",
+        "Empty state has placeholder button for 'Create Project'",
+        "No 'Loading...' text shown when projects list is loaded but empty",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Modify App.tsx or KanbanBoard.tsx to conditionally render empty state. CreateProjectDialog will be wired in T-005."
+    },
+    {
+      "id": "T-004",
+      "title": "Create CreateProjectDialog component",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Create a dialog component with name input (required) and path input (required). Reuse existing Dialog component. Handle 409 conflict error with inline message.",
+      "acceptanceCriteria": [
+        "Dialog has name text input (required) and path text input (required)",
+        "Create button disabled when name or path is empty",
+        "On success: closes dialog, project list refreshes, current project switches to new project",
+        "On 409 error: shows 'Project name already exists' error, dialog stays open",
+        "Follows existing Dialog/CreateIssueDialog patterns and Tailwind styling"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Reference CreateIssueDialog.tsx for pattern. Use useCreateProject mutation from T-002."
+    },
+    {
+      "id": "T-005",
+      "title": "Add project actions to Header dropdown and wire dialogs",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Add 'New Project' and 'Delete Project' items to the Header project dropdown. Wire empty state's 'Create Project' button to open CreateProjectDialog. Wire 'Delete Project' to show confirm dialog then call deleteProject mutation.",
+      "acceptanceCriteria": [
+        "Header dropdown shows 'New Project' option that opens CreateProjectDialog",
+        "Header dropdown shows 'Delete Project' option (only when projects exist)",
+        "Empty state 'Create Project' button opens CreateProjectDialog",
+        "Delete shows confirmation dialog before calling API",
+        "After delete: project list refreshes, switches to first remaining project if current was deleted, or shows empty state if none left"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Can reuse a simple confirm pattern or Dialog for delete confirmation."
+    }
+  ]
+}
