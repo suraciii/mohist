@@ -27,6 +27,7 @@ export function CreateProjectDialog({ open, onClose }: Props) {
     setName('')
     setPath('')
     setSwitchError('')
+    createProject.reset()
     onClose()
   }
 
