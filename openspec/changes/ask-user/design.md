@@ -114,9 +114,45 @@ POST   /api/questions/:id/expire     — 标记过期（可选，超时自动处
 
 不需要复杂的通知系统（toast、badge），只需在 Issue 详情页中展示。
 
+### D8: ask_user 阻塞与 message-injection 的边界
+
+当 agent 被 ask_user 阻塞时，session 状态仍为 active（不是 paused），`hasPausedSession()` 返回 false。此时 message-injection API（`POST /api/issues/:number/messages`）会返回 409。
+
+这是预期行为，不需要特殊处理。两种交互方式在时序上互斥：
+
+```
+agent 运行中 (session active):
+  - ask_user 可能触发 → Question Panel 可见
+  - message-injection 不可用 → 409
+
+agent gate 暂停 (session paused):
+  - ask_user 不可能触发（agent 没在跑）
+  - approve + message-injection 可用
+```
+
+用户在同一时刻只会看到 Question Panel 或 Gate+Message，不会同时出现。
+
+### D9: Web UI 三状态布局
+
+Issue 详情页按 agent 状态展示不同的交互区域：
+
+```
+agent 正在运行:
+  Comments + (可选) Question Panel
+
+agent gate 暂停:
+  Comments + Gate Panel ([Approve] 按钮) + Message Input
+
+agent 空闲 (done/closed):
+  Comments (无交互区域)
+```
+
+Gate Panel 中 approve 按钮在上（主要动作），message input 在下（次要动作），上下排列。
+
 ## Risks / Trade-offs
 
 - **[Risk] 用户永远不回复，agent 永久阻塞** → 超时机制（D4）解决。超时后 agent 收到默认回复可以自主决策
 - **[Risk] Server 重启丢失内存 resolver** → DB 持久化（D2）+ 启动时恢复 pending questions 的提示。重启后 pending questions 仍在 DB 中，可以在 Web UI 显示。但 resolver 已丢失，agent session 也已丢失（sessions 不持久化），所以重启后实际上 agent 已经不在运行了。pending questions 可以标记为 expired
 - **[Risk] ask_user 被滥用（agent 每步都问）** → System prompt 引导（D6）限制使用场景。后续可以添加 ask_user 频率限制
 - **[Low] 单 agent 约束** → `AgentRunnerService` 已保证同时只有一个 agent 在运行，不存在并发问题
+- **[Decided] ask_user 阻塞时 message-injection 返回 409** → 预期行为（D8）。两种交互时序互斥，Web UI 按状态切换显示

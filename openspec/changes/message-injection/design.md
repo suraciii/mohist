@@ -69,17 +69,19 @@ Body: { message: string }
 
 ### D5: 注入消息与 gate 审批的关系
 
-消息注入和 gate 审批是两种并行的交互方式：
-- **Approve**：固定语义，自动 append 预定义消息并 resume
-- **Message**：自由文本，用户写什么就 append 什么
+消息注入和 gate 审批是两种独立的交互方式：
+- **Approve**：确定性操作，固定消息，保证 advance stage
+- **Message**：自由文本，agent 由 LLM 自行决策下一步
 
-两者都调用 `resume()`，可以共存。用户可以 approve，也可以发 "approve but check the error handling first"。
+两者都调用 `resume()`，但互斥——谁先到谁生效（session 从 paused 变 active 后另一个不可用）。approve 不被 message-injection 吸收，保持独立语义。
 
-如果用户发了消息但没有 approve，agent 收到的是自由文本，它会根据 LLM 判断决定下一步（可能 advance stage，也可能不 advance）。这给了用户更大的控制力。
+### D6: ask_user 阻塞时的行为
+
+当 agent 被 ask_user 阻塞时，session 状态为 active，message-injection API 返回 409。这是预期行为——用户应通过 question reply API 回复问题，而不是发送自由文本。详见 ask-user design D8。
 
 ## Risks / Trade-offs
 
 - **[Risk] 用户发送无关消息干扰 agent** → 这是用户自己的选择。agent 的 LLM 会根据消息内容决策
 - **[Risk] mo attach 交互模式的终端渲染** → SSE 输出和 stdin 提示可能交错。使用 readline 的 prompt 功能，SSE 输出时先清除当前 prompt 行再输出事件，再重新显示 prompt
 - **[Low] 后端已有能力** → resume() 已存在，只是暴露 API，风险极低
-- **[Depends on] ask-user** → 如果 agent 因为 ask_user 暂停，message injection 也可以用来回复（调用 resolve）。但这需要 ask-user change 先完成
+- **[Depends on] ask-user** → ask-user 先完成。agent 被 ask_user 阻塞时 message-injection 返回 409（预期行为，见 D6）
