@@ -11,6 +11,7 @@ const ALL_EVENT_TYPES: EventName[] = [
   'agent_error',
   'approval_requested',
   'tool_call',
+  'agent_paused',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {

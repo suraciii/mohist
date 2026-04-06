@@ -5,6 +5,7 @@ import { startServer, stopServer, serverStatus, serverLogs } from './commands/se
 import { setupProjectCommands, setupInitCommand } from './commands/project';
 import { setupIssueCommands, setupLabelCommands } from './commands/issue';
 import { setupQuickCommands } from './commands/quick';
+import { setupAttachCommand } from './commands/attach';
 
 const program = new Command();
 
@@ -79,5 +80,6 @@ setupInitCommand(program);
 setupIssueCommands(program);
 setupLabelCommands(program);
 setupQuickCommands(program);
+setupAttachCommand(program);
 
 program.parse();

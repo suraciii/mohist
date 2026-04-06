@@ -59,6 +59,32 @@ export function createProjectRoutes(projectService: ProjectService): Hono {
     }
   });
 
+  app.get('/current', async (c) => {
+    try {
+      const project = projectService.getCurrent();
+
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No current project'
+        };
+        return c.json(response, 404);
+      }
+
+      const response: ApiResponse<Project> = {
+        success: true,
+        data: project
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
   app.get('/:name', async (c) => {
     try {
       const project = projectService.getByName(c.req.param('name'));
