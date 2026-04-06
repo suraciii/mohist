@@ -1,15 +1,17 @@
-import { Issue, Stage, IssueStatus } from '../types';
-import { IssueRepo, getDatabase } from '../db';
+import { Issue, Stage, IssueStatus, Comment } from '../types';
+import { IssueRepo, CommentRepo } from '../db';
 
 export interface CreateIssueInput {
   projectId: string;
   title: string;
   body?: string;
+  labels?: string[];
 }
 
 export class IssueService {
   constructor(
-    private issueRepo: IssueRepo
+    private issueRepo: IssueRepo,
+    private commentRepo: CommentRepo
   ) {}
 
   create(input: CreateIssueInput): Issue {
@@ -20,6 +22,7 @@ export class IssueService {
       projectId: input.projectId,
       title: input.title,
       body: input.body,
+      labels: input.labels,
     });
   }
 
@@ -55,22 +58,10 @@ export class IssueService {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
     
-    const issueRow = this.findIssueRowId(projectId, number);
-    if (!issueRow) return null;
-    
-    const updated = this.issueRepo.updateStage(issueRow, stage);
+    const updated = this.issueRepo.updateStage(issue.id, stage);
     if (!updated) return null;
     
     return this.issueRepo.findByNumber(projectId, number);
-  }
-
-  private findIssueRowId(projectId: string, number: number): string | null {
-    const db = getDatabase();
-    const row = db.get<{ id: string }>(
-      'SELECT id FROM issues WHERE project_id = ? AND number = ?',
-      [projectId, number]
-    );
-    return row?.id || null;
   }
 
   setStatus(issueId: string, status: IssueStatus): Issue | null {
@@ -81,34 +72,33 @@ export class IssueService {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
     
-    const issueRow = this.findIssueRowId(projectId, number);
-    if (!issueRow) return null;
-    
-    return this.issueRepo.updateStatus(issueRow, IssueStatus.Paused);
+    return this.issueRepo.updateStatus(issue.id, IssueStatus.Paused);
   }
 
   resume(projectId: string, number: number): Issue | null {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
     
-    const issueRow = this.findIssueRowId(projectId, number);
-    if (!issueRow) return null;
-    
-    return this.issueRepo.updateStatus(issueRow, IssueStatus.Active);
+    return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
   }
 
   block(projectId: string, number: number): Issue | null {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
     
-    const issueRow = this.findIssueRowId(projectId, number);
-    if (!issueRow) return null;
-    
-    return this.issueRepo.updateStatus(issueRow, IssueStatus.Blocked);
+    return this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[] }>): Issue | null {
     return this.issueRepo.update(issueId, data);
+  }
+
+  createComment(issueId: string, body: string): Comment {
+    return this.commentRepo.create({ issueId, body });
+  }
+
+  getCommentsByIssue(issueId: string): Comment[] {
+    return this.commentRepo.findByIssue(issueId);
   }
 
   delete(issueId: string): boolean {

@@ -16,7 +16,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Pure mechanical extraction. The three copies are identical. Be careful about relative import paths — issue.ts and quick.ts and project.ts are all in cli/commands/ so the import is '../api-client'."
     },
     {
@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "IssueService currently only has IssueRepo. Need to add CommentRepo dependency. Look at StateManager for how these methods wrap repo calls."
     },
     {
@@ -48,7 +48,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "ProjectService currently only has ProjectRepo and ConfigRepo. getCurrent() returns Project|null but API layer often needs just the ID string. StateManager.getCurrentProjectId() returns string|null directly from config."
     },
     {
@@ -65,7 +65,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "This is the biggest task. The start/approve endpoints still need stateManager.getIssueRepo() and stateManager.getCommentRepo() for passing to agentRunner — that's fine per design D4. Focus on replacing CRUD calls, not orchestration."
     },
     {
@@ -83,7 +83,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "ProjectService already has getAll, getByName, create. Delete now has cascade. setCurrentByName is cleaner than current two-step."
     },
     {
@@ -101,7 +101,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "labels.ts uses getLabels which returns all labels for a project — this might need a new method in IssueService or we can query via repo. status.ts does cross-domain aggregation which is the legitimate use case for having both services."
     },
     {
@@ -119,7 +119,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "This wires everything together. StateManager is still needed for creating repos and passing to routes that need repo getters."
     },
     {
@@ -133,7 +133,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Final step — after all consumers migrated, removing these methods should cause zero compile errors."
     },
     {
@@ -149,7 +149,7 @@
         "npm test passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Final verification."
     }
   ]

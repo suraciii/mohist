@@ -13,6 +13,8 @@ import { IssueService } from '../src/services/issue-service';
 import { ConfigService } from '../src/services/config-service';
 import { EventBus, AgentRunnerService } from '../src/services';
 import { StateManager } from '../src/server/state-manager';
+import { CommentRepo } from '../src/db/comment-repo';
+import { LabelRepo } from '../src/db/label-repo';
 import { createProjectRoutes } from '../src/api/projects';
 import { createIssueRoutes } from '../src/api/issues';
 import { createStatusRoutes } from '../src/api/status';
@@ -66,8 +68,10 @@ describe('API Routes', () => {
     issueRepo = stateManager.getIssueRepo();
     configRepo = stateManager.getConfigRepo();
     
-    projectService = new ProjectService(projectRepo, configRepo);
-    issueService = new IssueService(issueRepo);
+    const commentRepo = stateManager.getCommentRepo();
+    const labelRepo = stateManager.getLabelRepo();
+    projectService = new ProjectService(projectRepo, configRepo, issueRepo, labelRepo);
+    issueService = new IssueService(issueRepo, commentRepo);
     configService = new ConfigService(configRepo);
   });
 
@@ -80,7 +84,7 @@ describe('API Routes', () => {
 
     beforeEach(() => {
       const app = new Hono();
-      app.route('/api/projects', createProjectRoutes(stateManager));
+      app.route('/api/projects', createProjectRoutes(projectService));
       server = createTestServer(app);
     });
 
@@ -190,7 +194,7 @@ describe('API Routes', () => {
       const app = new Hono();
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus);
-      app.route('/api/issues', createIssueRoutes(stateManager, undefined, undefined, undefined, agentRunner));
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner));
       server = createTestServer(app);
       
       const project = projectService.create({ name: 'Test Project', path: '/test/path' });
@@ -288,7 +292,7 @@ describe('API Routes', () => {
 
     beforeEach(() => {
       const app = new Hono();
-      app.route('/api', createStatusRoutes(stateManager));
+      app.route('/api', createStatusRoutes(projectService, issueService));
       server = createTestServer(app);
     });
 
