@@ -3,7 +3,7 @@ import type { Project } from '../lib/types'
 
 interface ProjectContextValue {
   projectId: string | null
-  setProjectId: (id: string) => void
+  setProjectId: (id: string | null) => void
   projects: Project[]
   setProjects: (projects: Project[]) => void
   currentProject: Project | null
@@ -15,7 +15,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [projectId, setProjectIdState] = useState<string | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
 
-  const setProjectId = useCallback((id: string) => {
+  const setProjectId = useCallback((id: string | null) => {
     setProjectIdState(id)
   }, [])
 

@@ -7,6 +7,7 @@ import { createStatusRoutes } from '../api/status';
 import { createLabelRoutes } from '../api/labels';
 import { createEventRoutes } from '../api/events';
 import { createAgentRoutes } from '../api/agent';
+import { createFsRoutes } from '../api/fs';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
@@ -78,6 +79,7 @@ async function main(): Promise<void> {
   server.addRouter('/api', createStatusRoutes(projectService, issueService));
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
+  server.addRouter('/api/fs', createFsRoutes());
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
   server.serveStaticFiles(webDistDir);

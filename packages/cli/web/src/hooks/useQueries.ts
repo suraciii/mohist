@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 
 export function useProjects() {
@@ -44,5 +44,35 @@ export function useAgentStatus() {
     queryKey: ['agent-status'],
     queryFn: () => api.getAgentStatus(),
     refetchInterval: 5000,
+  })
+}
+
+export function useCreateProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { name: string; path: string }) => api.createProject(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => api.deleteProject(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+export function useUseProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => api.useProject(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
   })
 }
