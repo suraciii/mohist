@@ -1,0 +1,88 @@
+{
+  "project": "mohist",
+  "description": "Fix UX bugs: agent_paused SSE event missing, Skip button dead link, CLI old stage names, missing server guard",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add agent_paused to SSE ALL_EVENT_TYPES",
+      "spec": "specs/event-bus/spec.md",
+      "description": "Add 'agent_paused' to the ALL_EVENT_TYPES array in api/events.ts. The EventBus already emits this event from AgentRunnerService, but SSE doesn't forward it.",
+      "acceptanceCriteria": [
+        "api/events.ts ALL_EVENT_TYPES includes 'agent_paused'",
+        "SSE client receives event: agent_paused when agent pauses at gate",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "notes": "One-line fix. Just add the string to the array."
+    },
+    {
+      "id": "T-002",
+      "title": "Register agent_paused in Web UI SSE hook and types",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Add agent_paused event type to web/src/lib/types.ts SSEEvent union. Register agent_paused handler in useSSE.ts that invalidates issue queries (invalidateQueries({ queryKey: ['issues'] }) and specific issue query).",
+      "acceptanceCriteria": [
+        "web/src/lib/types.ts includes agent_paused in SSEEvent type",
+        "useSSE.ts handles agent_paused event and triggers query invalidation",
+        "When agent pauses, issue detail page automatically shows approval panel without manual refresh",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "notes": "Follow the same pattern as existing event handlers in useSSE.ts. The invalidation key should match what useQueries.ts uses."
+    },
+    {
+      "id": "T-003",
+      "title": "Remove dead Skip button from IssueDetailPage",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Remove the Skip button from the approval panel in IssueDetailPage.tsx. There's no backend API for reject/skip, so the button is misleading.",
+      "acceptanceCriteria": [
+        "No Skip button rendered in the approval panel",
+        "Only 'Approve & Continue' button is shown",
+        "Web UI build passes"
+      ],
+      "priority": 3,
+      "notes": "Simple removal. If the button has surrounding layout (flex container etc.), adjust as needed so the Approve button still looks good."
+    },
+    {
+      "id": "T-004",
+      "title": "Update CLI formatStage to use current stage names",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Update formatStage() in cli/commands/issue.ts to use plan/build/check instead of designing/implementing. Also check for any other hardcoded old stage names in CLI code.",
+      "acceptanceCriteria": [
+        "formatStage() returns 'plan' for Stage.Plan, 'build' for Stage.Build, 'check' for Stage.Check",
+        "No references to 'designing' or 'implementing' in CLI code",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "notes": "Search for 'designing' and 'implementing' across cli/ directory to catch all occurrences."
+    },
+    {
+      "id": "T-005",
+      "title": "Add requireServer guard to CLI commands",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Import and call requireServer() at the entry of each CLI command handler in issue.ts, project.ts, and quick.ts. Do NOT add it to server commands or init command.",
+      "acceptanceCriteria": [
+        "mo issue list shows friendly error when server is not running",
+        "mo project list shows friendly error when server is not running",
+        "mo server start still works without requireServer check",
+        "mo init still works without requireServer check",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "notes": "requireServer is already defined in cli/index.ts:30. Just import and call it in the action handlers. Be careful about the import path."
+    },
+    {
+      "id": "T-006",
+      "title": "Verify build and manual test",
+      "spec": "",
+      "description": "Run full build (npm run build in packages/cli, npm run build in packages/cli/web), run typecheck, verify all fixes work.",
+      "acceptanceCriteria": [
+        "npm run build succeeds in packages/cli",
+        "Web UI build succeeds",
+        "Typecheck passes",
+        "Manual test: start server, create issue, start agent, verify approval panel appears automatically"
+      ],
+      "priority": 6,
+      "notes": "Final verification step."
+    }
+  ]
+}

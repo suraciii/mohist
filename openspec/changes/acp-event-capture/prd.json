@@ -1,0 +1,109 @@
+{
+  "project": "mohist",
+  "description": "Capture all ACP events from spawn_coder, persist to workflow_log table, emit action events via EventBus",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add workflow_log table migration (v5)",
+      "spec": "specs/workflow-log/spec.md",
+      "description": "Add migration v5 to db/schema.ts creating workflow_log table with columns: id TEXT PK, issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE, session_id TEXT, event_type TEXT NOT NULL, data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL. Add indexes on (issue_id, created_at) and (issue_id, event_type).",
+      "acceptanceCriteria": [
+        "Migration v5 runs successfully on existing database",
+        "workflow_log table exists with correct schema",
+        "Indexes created on (issue_id, created_at) and (issue_id, event_type)",
+        "Existing tables unaffected"
+      ],
+      "priority": 1,
+      "notes": "Follow the existing migration pattern in db/schema.ts (sequential if currentVersion < N checks)."
+    },
+    {
+      "id": "T-002",
+      "title": "Create WorkflowLogRepo",
+      "spec": "specs/workflow-log/spec.md",
+      "description": "Create db/workflow-log-repo.ts with WorkflowLogRepo class. Methods: insert(issueId, sessionId, eventType, data), findByIssueId(issueId, eventType?), findById(id). Use the same pattern as existing repos (constructor takes Database).",
+      "acceptanceCriteria": [
+        "WorkflowLogRepo class exists with insert, findByIssueId, findById methods",
+        "insert generates UUID id and sets created_at",
+        "findByIssueId returns records ordered by created_at ASC",
+        "findByIssueId supports optional eventType filter",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "notes": "Look at CommentRepo for the pattern. UUID generation uses crypto.randomUUID()."
+    },
+    {
+      "id": "T-003",
+      "title": "Extend spawn_coder to capture all ACP events",
+      "spec": "specs/agent-runtime/spec.md",
+      "description": "Modify spawn-coder.ts to accept WorkflowLogRepo parameter. In the sessionUpdate handler, instead of only capturing agent_message_chunk, capture ALL event types and write them to workflow_log via the repo. Keep the existing agentText concatenation for the return value.",
+      "acceptanceCriteria": [
+        "createSpawnCoderTool accepts optional workflowLogRepo parameter",
+        "All sessionUpdate event types are persisted to workflow_log",
+        "agent_message_chunk events are still concatenated into agentText for return value",
+        "Return value format unchanged (truncated agentText string)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "notes": "The sessionUpdate handler is in the oneshot flow. Each event should be wrapped in try/catch to avoid one bad event killing the whole spawn. Keep the existing agentText logic untouched."
+    },
+    {
+      "id": "T-004",
+      "title": "Add tool_call event to EventBus",
+      "spec": "specs/agent-runtime/spec.md",
+      "description": "Add 'tool_call' event type to EventMap in event-bus.ts with payload: { issueId, projectId, toolName, status, locations? }. Emit from spawn_coder when receiving tool_call ACP events. Add to ALL_EVENT_TYPES in api/events.ts.",
+      "acceptanceCriteria": [
+        "EventMap includes 'tool_call' event type",
+        "spawn_coder emits tool_call event via EventBus when receiving ACP tool_call",
+        "ALL_EVENT_TYPES in events.ts includes 'tool_call'",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "notes": "Only emit for tool_call, not tool_call_update (to avoid high frequency). Include toolName and status from the ACP event."
+    },
+    {
+      "id": "T-005",
+      "title": "Add GET /api/issues/:number/logs endpoint",
+      "spec": "specs/workflow-log/spec.md",
+      "description": "Add API endpoint to retrieve workflow_log entries for an issue. GET /api/issues/:number/logs with optional ?eventType= filter. Returns array of { id, eventType, data, createdAt }.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/logs returns 200 with array of log entries",
+        "Entries ordered by created_at ASC",
+        "?eventType=tool_call filter works",
+        "Returns empty array for issues with no logs",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "notes": "Add to api/issues.ts following existing patterns. Need WorkflowLogRepo injected into the route factory."
+    },
+    {
+      "id": "T-006",
+      "title": "Wire WorkflowLogRepo into server and agent",
+      "spec": "specs/agent-runtime/spec.md",
+      "description": "Create WorkflowLogRepo in server/index.ts. Pass it to createSpawnCoderTool in main-agent.ts. Pass it to createIssueRoutes for the logs endpoint.",
+      "acceptanceCriteria": [
+        "server/index.ts creates WorkflowLogRepo instance",
+        "main-agent.ts receives workflowLogRepo and passes to createSpawnCoderTool",
+        "api/issues.ts receives workflowLogRepo for logs endpoint",
+        "End-to-end: spawn_coder events are persisted and queryable via API",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "notes": "This is the wiring task. The main-agent.ts needs to accept workflowLogRepo in its context parameter."
+    },
+    {
+      "id": "T-007",
+      "title": "Verify build and test",
+      "spec": "",
+      "description": "Run full build, typecheck, and manual test: start server, create issue, start agent, check workflow_log table has entries, query via API.",
+      "acceptanceCriteria": [
+        "npm run build succeeds",
+        "npm test passes",
+        "Typecheck passes",
+        "Manual: workflow_log table has entries after agent run",
+        "Manual: GET /api/issues/:number/logs returns entries"
+      ],
+      "priority": 7,
+      "notes": "Final verification."
+    }
+  ]
+}
