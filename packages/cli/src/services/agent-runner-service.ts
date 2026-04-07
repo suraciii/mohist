@@ -1,5 +1,6 @@
 import type { IssueRepo } from '../db/issue-repo';
 import type { CommentRepo } from '../db/comment-repo';
+import type { QuestionRepo } from '../db/question-repo';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { SessionManager, type Session, type LlmConfig } from '../agent-runtime';
 import { runMainAgent } from '../agents/main-agent';
@@ -30,6 +31,7 @@ export interface QueuedAgent {
   issue: Issue;
   issueRepo: IssueRepo;
   commentRepo: CommentRepo;
+  questionRepo?: QuestionRepo;
   worktreePath: string;
   sessionManager: SessionManager;
   llmConfig?: LlmConfig;
@@ -118,6 +120,7 @@ export class AgentRunnerService {
         queued.projectId,
         queued.issueRepo,
         queued.commentRepo,
+        queued.questionRepo,
         queued.worktreePath,
         queued.sessionManager,
         queued.llmConfig,
@@ -131,6 +134,7 @@ export class AgentRunnerService {
     projectId: string,
     issueRepo: IssueRepo,
     commentRepo: CommentRepo,
+    questionRepo: QuestionRepo | undefined,
     worktreePath: string,
     sessionManager: SessionManager,
     llmConfig?: LlmConfig,
@@ -145,6 +149,7 @@ export class AgentRunnerService {
           {
             issueRepo,
             commentRepo,
+            questionRepo,
             worktreePath,
             llmConfig,
             issue,
@@ -203,6 +208,7 @@ export class AgentRunnerService {
     projectId: string,
     issueRepo: IssueRepo,
     commentRepo: CommentRepo,
+    questionRepo: QuestionRepo | undefined,
     worktreePath: string,
     sessionManager: SessionManager,
     llmConfig?: LlmConfig,
@@ -220,6 +226,7 @@ export class AgentRunnerService {
         issue,
         issueRepo,
         commentRepo,
+        questionRepo,
         worktreePath,
         sessionManager,
         llmConfig,
@@ -228,7 +235,7 @@ export class AgentRunnerService {
       return { started: false, queuePosition: this.agentQueue.length };
     }
 
-    this.executeAgent(issue, projectId, issueRepo, commentRepo, worktreePath, sessionManager, llmConfig, updateIssueStatus);
+    this.executeAgent(issue, projectId, issueRepo, commentRepo, questionRepo, worktreePath, sessionManager, llmConfig, updateIssueStatus);
     return { started: true };
   }
 
@@ -237,6 +244,7 @@ export class AgentRunnerService {
     projectId: string,
     issueRepo: IssueRepo,
     commentRepo: CommentRepo,
+    questionRepo: QuestionRepo | undefined,
     worktreePath: string,
     sessionManager: SessionManager,
     message: string,
@@ -268,6 +276,7 @@ export class AgentRunnerService {
           {
             issueRepo,
             commentRepo,
+            questionRepo,
             worktreePath,
             llmConfig,
             issue,

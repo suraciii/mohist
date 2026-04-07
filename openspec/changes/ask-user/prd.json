@@ -13,6 +13,7 @@
         "Existing tables unaffected"
       ],
       "priority": 1,
+      "passes": true,
       "notes": "Follow existing migration pattern."
     },
     {
@@ -29,6 +30,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
+      "passes": true,
       "notes": "Follow CommentRepo pattern."
     },
     {
@@ -42,6 +44,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
+      "passes": true,
       "notes": "Straightforward addition to the type union and array."
     },
     {
@@ -58,6 +61,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
+      "passes": true,
       "notes": "The key design: a module-level or instance-level Map<string, Function> stores resolvers. The factory function returns both the tool definition AND a resolveQuestion(id, answer) function that the API handler can call."
     },
     {
@@ -73,6 +77,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
+      "passes": true,
       "notes": "The reply handler needs access to the ask_user resolver. This means the ask_user module must export a way to resolve questions externally. Design this as a shared service or singleton."
     },
     {
@@ -87,6 +92,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
+      "passes": true,
       "notes": "The system prompt update is important — it guides the LLM on when to use ask_user vs solving independently."
     },
     {
@@ -102,6 +108,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
+      "passes": true,
       "notes": "The tricky part is sharing the resolver between the tool and the API handler. Consider a shared AskUserService singleton."
     },
     {
@@ -117,6 +124,7 @@
         "Web UI build passes"
       ],
       "priority": 8,
+      "passes": true,
       "notes": "Keep the UI simple — a section below the comments area. Use the existing SSE hook pattern."
     },
     {
@@ -129,6 +137,7 @@
         "No orphaned pending questions after restart"
       ],
       "priority": 9,
+      "passes": true,
       "notes": "Simple cleanup: in server startup, call questionRepo.expireAllPending()."
     },
     {
@@ -143,6 +152,7 @@
         "End-to-end: ask_user flow works through full cycle"
       ],
       "priority": 10,
+      "passes": true,
       "notes": "The manual test is the real acceptance test. The issue description should be ambiguous enough to trigger a question."
     }
   ]

@@ -43,6 +43,16 @@ export interface Comment {
   createdAt: string
 }
 
+export interface Question {
+  id: string
+  issueId: string
+  question: string
+  answer?: string
+  status: 'pending' | 'answered' | 'expired'
+  createdAt: string
+  answeredAt?: string
+}
+
 export interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
@@ -69,6 +79,8 @@ export type EventMap = {
   agent_paused: { issueId: string; projectId: string }
   agent_error: { issueId: string; projectId: string; error: string }
   approval_requested: { issueId: string; projectId: string; stage: string }
+  question_asked: { issueId: string; projectId: string; questionId: string; question: string }
+  question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
 }
 
 export type EventName = keyof EventMap

@@ -6,6 +6,7 @@ import type { DiffFile } from '../lib/types'
 import { api } from '../lib/api'
 import { useIssue, useIssueDiff, useAgentStatus } from '../hooks/useQueries'
 import { EditIssueDialog } from './EditIssueDialog'
+import { QuestionPanel } from './QuestionPanel'
 
 const STAGES = [Stage.Draft, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
@@ -401,6 +402,10 @@ export function IssueDetailPage() {
                     </div>
                   )}
                 </div>
+              )}
+
+              {isAgentRunningOnThis && (
+                <QuestionPanel issueId={issue.id} />
               )}
 
               {isAgentRunningOnThis && (

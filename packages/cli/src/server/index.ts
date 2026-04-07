@@ -8,6 +8,7 @@ import { createLabelRoutes } from '../api/labels';
 import { createEventRoutes } from '../api/events';
 import { createAgentRoutes } from '../api/agent';
 import { createFsRoutes } from '../api/fs';
+import { createQuestionRoutes } from '../api/questions';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
@@ -69,11 +70,17 @@ async function main(): Promise<void> {
   const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, configService.getMaxConcurrentAgents());
 
   const llmConfig = buildLlmConfig(stateManager.getConfigRepo());
-  
+
+  const expiredCount = stateManager.getQuestionRepo().expireAllPending();
+  if (expiredCount > 0) {
+    console.log(`Expired ${expiredCount} orphaned pending question(s) from previous session`);
+  }
+
   const server = new HttpServer(config);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
   server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner, workflowLogRepo));
+  server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
   server.addRouter('/api', createStatusRoutes(projectService, issueService));

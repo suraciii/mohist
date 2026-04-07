@@ -62,6 +62,15 @@ export const api = {
       body: JSON.stringify({ body }),
     }),
 
+  getQuestions: (issueId: string) =>
+    request<import('./types').Question[]>(`/questions?issueId=${encodeURIComponent(issueId)}`),
+
+  replyQuestion: (questionId: string, answer: string) =>
+    request<import('./types').Question>(`/questions/${questionId}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ answer }),
+    }),
+
   getLabels: () => request<string[]>('/labels'),
 
   getAgentStatus: () => request<import('./types').AgentStatus>('/agent/status'),
