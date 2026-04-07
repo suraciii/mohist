@@ -59,3 +59,15 @@ export interface Comment {
   body: string;
   createdAt: string;
 }
+
+export type QuestionStatus = 'pending' | 'answered' | 'expired';
+
+export interface Question {
+  id: string;
+  issueId: string;
+  question: string;
+  answer?: string;
+  status: QuestionStatus;
+  createdAt: string;
+  answeredAt?: string;
+}

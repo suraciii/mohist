@@ -38,6 +38,14 @@ function useSSE(projectId: string | null) {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
+          case 'question_asked':
+          case 'question_answered': {
+            const { issueId } = parsed as EventMap['question_asked']
+            if (issueId) {
+              queryClient.invalidateQueries({ queryKey: ['questions', issueId] })
+            }
+            break
+          }
         }
       } catch {
         // ignore malformed events
@@ -67,6 +75,8 @@ function useSSE(projectId: string | null) {
       'agent_paused',
       'agent_error',
       'approval_requested',
+      'question_asked',
+      'question_answered',
     ]
 
     for (const type of eventTypes) {

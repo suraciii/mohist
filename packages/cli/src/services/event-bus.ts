@@ -7,6 +7,8 @@ export type EventMap = {
   agent_error: { issueId: string; projectId: string; error: string };
   approval_requested: { issueId: string; projectId: string; stage: string };
   tool_call: { issueId: string; projectId: string; toolName: string; status: string; locations?: string[] };
+  question_asked: { issueId: string; projectId: string; questionId: string; question: string };
+  question_answered: { issueId: string; projectId: string; questionId: string; answer: string };
 };
 
 export type EventName = keyof EventMap;

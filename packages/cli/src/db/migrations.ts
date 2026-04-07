@@ -1,6 +1,6 @@
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -107,6 +107,10 @@ export function initializeDatabase(db: DatabaseManager): void {
   if (currentVersion < 5) {
     migrateToVersion5(db);
   }
+  
+  if (currentVersion < 6) {
+    migrateToVersion6(db);
+  }
 }
 
 function migrateToVersion2(db: DatabaseManager): void {
@@ -169,5 +173,32 @@ function migrateToVersion5(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 5);
+  });
+}
+
+const CREATE_QUESTIONS_TABLE = `
+CREATE TABLE IF NOT EXISTS questions (
+  id          TEXT PRIMARY KEY,
+  issue_id    TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  question    TEXT NOT NULL,
+  answer      TEXT,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  created_at  TEXT NOT NULL,
+  answered_at TEXT
+);
+`;
+
+const CREATE_QUESTIONS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_questions_issue_id ON questions(issue_id);',
+  'CREATE INDEX IF NOT EXISTS idx_questions_status ON questions(status);',
+];
+
+function migrateToVersion6(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_QUESTIONS_TABLE);
+    for (const indexSql of CREATE_QUESTIONS_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 6);
   });
 }

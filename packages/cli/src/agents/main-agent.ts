@@ -2,6 +2,7 @@ import { resolveModel, type LlmConfig, SessionManager, type Session, ToolRegistr
 import type { AgentLoopResult } from '../agent-runtime';
 import { IssueRepo } from '../db/issue-repo';
 import { CommentRepo } from '../db/comment-repo';
+import { QuestionRepo } from '../db/question-repo';
 import type { Issue } from '../types';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { createSpawnCoderTool } from '../tools/spawn-coder';
@@ -9,11 +10,13 @@ import { createReadWorkflowTool } from '../tools/read-workflow';
 import { createAdvanceStageTool } from '../tools/advance-stage';
 import { createAddCommentTool } from '../tools/add-comment';
 import { createGetIssueTool } from '../tools/get-issue';
+import { createAskUserTool } from '../tools/ask-user';
 import type { EventBus } from '../services/event-bus';
 
 export interface MainAgentContext {
   issueRepo: IssueRepo;
   commentRepo: CommentRepo;
+  questionRepo?: QuestionRepo;
   worktreePath: string;
   llmConfig?: LlmConfig;
   issue: Issue;
@@ -44,6 +47,22 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
 - **advance_stage**: Move the issue to the next stage. Only pass the target stage name.
 - **add_comment**: Record progress notes, decisions, or summaries on the issue.
 - **get_issue**: Check the current state of the issue at any time.
+- **ask_user**: Ask the user a question and wait for their reply. The tool blocks until the user responds or a 24h timeout expires.
+
+## When to Use ask_user
+- Requirements are ambiguous and you need clarification
+- There are multiple valid approaches and you need the user to decide
+- You discover a potential issue or trade-off that the user should be aware of
+
+## When NOT to Use ask_user
+- You can solve the problem with the available tools (spawn_coder, etc.)
+- There is a clear best practice or convention to follow
+- The question is purely technical and you have enough information to decide
+
+## ask_user Guidelines
+- Ask one question at a time
+- Make questions specific and actionable (avoid open-ended questions)
+- Provide context and options when asking, e.g. "Should I use approach A (benefit X) or approach B (benefit Y)?"
 
 ## Variables for spawn_coder
 When calling spawn_coder, pass these variables in the \`variables\` object:
@@ -89,6 +108,14 @@ export async function runMainAgent(
   toolRegistry.register(createAdvanceStageTool({ issue: context.issue, issueRepo: context.issueRepo, worktreePath: context.worktreePath, eventBus: context.eventBus }));
   toolRegistry.register(createAddCommentTool({ issue: context.issue, commentRepo: context.commentRepo, eventBus: context.eventBus }));
   toolRegistry.register(createGetIssueTool({ issue: context.issue, issueRepo: context.issueRepo }));
+  if (context.questionRepo && context.eventBus) {
+    toolRegistry.register(createAskUserTool({
+      questionRepo: context.questionRepo,
+      eventBus: context.eventBus,
+      issueId: context.issue.id,
+      projectId: context.issue.projectId,
+    }));
+  }
 
   const session = existingSession ?? sessionManager.create(Number(context.issue.id));
   const system = buildSystemPrompt(context.issue);

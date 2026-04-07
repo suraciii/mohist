@@ -47,6 +47,14 @@ export function useAgentStatus() {
   })
 }
 
+export function useQuestions(issueId: string) {
+  return useQuery({
+    queryKey: ['questions', issueId],
+    queryFn: () => api.getQuestions(issueId),
+    enabled: !!issueId,
+  })
+}
+
 export function useCreateProject() {
   const queryClient = useQueryClient()
   return useMutation({

@@ -6,7 +6,8 @@ import {
   ConfigRepo,
   CommentRepo,
   LabelRepo,
-  WorkflowLogRepo
+  WorkflowLogRepo,
+  QuestionRepo
 } from '../db';
 import { initializeDefaultConfig } from '../db/config-repo';
 
@@ -17,6 +18,7 @@ export class StateManager {
   private commentRepo: CommentRepo;
   private labelRepo: LabelRepo;
   private workflowLogRepo: WorkflowLogRepo;
+  private questionRepo: QuestionRepo;
   private initialized: boolean = false;
 
   constructor() {
@@ -29,6 +31,7 @@ export class StateManager {
     this.commentRepo = new CommentRepo(db);
     this.labelRepo = new LabelRepo(db);
     this.workflowLogRepo = new WorkflowLogRepo(db);
+    this.questionRepo = new QuestionRepo(db);
     
     initializeDefaultConfig(this.configRepo);
     this.initialized = true;
@@ -60,6 +63,10 @@ export class StateManager {
 
   getWorkflowLogRepo(): WorkflowLogRepo {
     return this.workflowLogRepo;
+  }
+
+  getQuestionRepo(): QuestionRepo {
+    return this.questionRepo;
   }
 }
 
