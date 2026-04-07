@@ -1,0 +1,251 @@
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import type { SSEStreamingApi } from 'hono/streaming';
+import { ApiResponse, ExploreSession, ToolCallRecord } from '../types';
+import { ExploreService, IssueService } from '../services';
+import { runExploreAgent } from '../agents/explore-agent';
+import { ExploreSessionRepo } from '../db/explore-session-repo';
+import { ProjectService } from '../services/project-service';
+import type { LlmConfig } from '../agent-runtime';
+
+export function createExploreRoutes(
+  exploreService: ExploreService,
+  issueService: IssueService,
+  projectService: ProjectService,
+  exploreSessionRepo: ExploreSessionRepo,
+  llmConfig?: LlmConfig,
+): Hono {
+  const app = new Hono();
+
+  const getCurrentProjectId = (): string | null => {
+    return projectService.getCurrentId();
+  };
+
+  app.post('/', async (c) => {
+    try {
+      const body = await c.req.json();
+      const projectId = body.projectId || getCurrentProjectId();
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>',
+        };
+        return c.json(response, 400);
+      }
+
+      const title = body.title || 'New Exploration';
+      const session = exploreService.createSession({ projectId, title });
+      const response: ApiResponse<ExploreSession> = {
+        success: true,
+        data: session,
+      };
+      return c.json(response, 201);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create session',
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/', async (c) => {
+    try {
+      const projectId = c.req.query('projectId') || getCurrentProjectId();
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>',
+        };
+        return c.json(response, 400);
+      }
+
+      const sessions = exploreService.listSessions(projectId);
+      const response: ApiResponse<ExploreSession[]> = {
+        success: true,
+        data: sessions,
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list sessions',
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:id', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const result = exploreService.getSession(id);
+      if (!result) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Session not found',
+        };
+        return c.json(response, 404);
+      }
+
+      const response: ApiResponse<typeof result> = {
+        success: true,
+        data: result,
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get session',
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.delete('/:id', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const session = exploreService.getSession(id);
+      if (!session) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Session not found',
+        };
+        return c.json(response, 404);
+      }
+
+      exploreService.deleteSession(id);
+      const response: ApiResponse = {
+        success: true,
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete session',
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:id/messages', async (c) => {
+    try {
+      const sessionId = c.req.param('id');
+      const sessionData = exploreService.getSession(sessionId);
+      if (!sessionData) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Session not found',
+        };
+        return c.json(response, 404);
+      }
+
+      const body = await c.req.json();
+      const userContent = body.content;
+      if (!userContent || typeof userContent !== 'string') {
+        const response: ApiResponse = {
+          success: false,
+          error: 'content is required',
+        };
+        return c.json(response, 400);
+      }
+
+      const session = sessionData.session;
+      const project = projectService.getById(session.projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found',
+        };
+        return c.json(response, 400);
+      }
+
+      exploreService.addMessage(sessionId, 'user', userContent);
+
+      const existingMessages = exploreService.getMessages(sessionId);
+      const historyMessages = existingMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const agentContext = {
+        projectPath: project.path,
+        sessionId,
+        projectId: session.projectId,
+        llmConfig,
+        issueService,
+        exploreSessionRepo,
+      };
+
+      const result = runExploreAgent(agentContext, historyMessages);
+
+      return streamSSE(c, async (stream: SSEStreamingApi) => {
+        try {
+          const toolCallRecords: ToolCallRecord[] = [];
+          let assistantContent = '';
+          let createdIssueId: string | null = null;
+
+          for await (const part of result.fullStream) {
+            if (part.type === 'text-delta') {
+              assistantContent += part.text;
+              await stream.writeSSE({
+                data: JSON.stringify({ type: 'chunk', content: part.text }),
+              });
+            } else if (part.type === 'tool-call') {
+              // tool-call has args as the tool input
+            } else if (part.type === 'tool-result') {
+              const toolCall = part.toolCall;
+              const record: ToolCallRecord = {
+                name: toolCall.toolName,
+                args: toolCall.args as Record<string, unknown>,
+                result: part.result,
+              };
+              toolCallRecords.push(record);
+              await stream.writeSSE({
+                data: JSON.stringify({
+                  type: 'tool_call',
+                  tool: toolCall.toolName,
+                  args: toolCall.args,
+                  result: part.result,
+                }),
+              });
+            }
+          }
+
+          const finalText = await result.text;
+          const updatedSession = exploreSessionRepo.findById(sessionId);
+          if (updatedSession && updatedSession.issueId && !createdIssueId) {
+            createdIssueId = updatedSession.issueId;
+          }
+
+          exploreService.addMessage(
+            sessionId,
+            'assistant',
+            finalText,
+            toolCallRecords.length > 0 ? toolCallRecords : undefined,
+          );
+
+          await stream.writeSSE({
+            data: JSON.stringify({ type: 'done', issueId: createdIssueId }),
+          });
+        } catch (error) {
+          console.error('[explore] Stream error:', error);
+          await stream.writeSSE({
+            data: JSON.stringify({
+              type: 'done',
+              issueId: null,
+              error: error instanceof Error ? error.message : 'Stream error',
+            }),
+          });
+        }
+      });
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to send message',
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  return app;
+}

@@ -15,7 +15,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing repo patterns (issue-repo.ts, comment-repo.ts). Use better-sqlite3."
     },
     {
@@ -32,7 +32,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "These are reusable tools for future sub-agents too. Keep them generic (accept projectPath as context parameter)."
     },
     {
@@ -47,7 +47,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Needs IssueService and ExploreSessionRepo injected via context."
     },
     {
@@ -63,7 +63,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "The system prompt should instruct the agent to be curious, read code to verify assumptions, use ASCII diagrams, and propose crystallization when requirements converge."
     },
     {
@@ -80,7 +80,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Pure service layer, no HTTP concerns."
     },
     {
@@ -98,7 +98,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "The streaming endpoint should use streamText() directly (not runAgentLoop which consumes the entire stream). Forward tool_call and text chunk events via SSE as they arrive. Persist user and assistant messages to DB after stream completes."
     },
     {
@@ -113,7 +113,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing event patterns (approval_requested, question_asked)."
     },
     {
@@ -133,7 +133,7 @@
         "Build succeeds"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Use existing React + TanStack Query + Tailwind patterns. For markdown rendering, consider react-markdown or a lightweight alternative. For SSE streaming, create a custom hook similar to useSSE but for request-response pattern."
     },
     {
@@ -147,7 +147,7 @@
         "Build succeeds"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Integrate with existing IssueDetailPage route."
     }
   ]
