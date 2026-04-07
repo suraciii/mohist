@@ -61,6 +61,19 @@ Server SHALL 提供 RESTful API 供 CLI 执行操作，基于 Hono 框架实现�
 - **THEN** Main Agent 被启动处理该 Issue
 - **AND** 返回 Issue 信息和运行状态
 
+### Requirement: API 提供问题管理接口
+
+API SHALL 提供问题管理的 RESTful 端点。
+
+#### Scenario: 列出 issue 的问题
+- **WHEN** 请求 `GET /api/questions?issueId=xxx`
+- **THEN** 返回指定 issue 的所有问题，按创建时间降序排列
+
+#### Scenario: 回复问题
+- **WHEN** 请求 `POST /api/questions/:id/reply` with `{ answer: string }`
+- **THEN** 问题状态更新为 answered
+- **AND** ask_user 工具的阻塞 Promise 被 resolve
+
 ### Requirement: API 提供配置接口
 
 Server SHALL 提供配置管理的 RESTful API，基于 Hono 框架实现。

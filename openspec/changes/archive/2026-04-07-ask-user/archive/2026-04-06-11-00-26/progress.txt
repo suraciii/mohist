@@ -1,0 +1,20 @@
+# Ralph Progress Log
+Started: 2026-04-06T10:49:46.139Z
+
+---
+
+## 2026-04-06 T-001: Add questions table migration (v6)
+
+**Done**: Added migration v6 to `packages/cli/src/db/migrations.ts`
+- Created `questions` table with schema: id, issue_id, question, answer, status, created_at, answered_at
+- Added indexes on `issue_id` and `status`
+- Updated `SCHEMA_VERSION` from 5 to 6
+- Added `migrateToVersion6()` call in `initializeDatabase()`
+- Followed existing migration pattern (CREATE TABLE + indexes in transaction)
+
+**Verification**: Build passes, typecheck passes, existing tests pass (pre-existing failure in cli-commands.test.ts unrelated)
+
+**Learnings**: Migration file is at `db/migrations.ts` (not `db/schema.ts` as task description suggested). Pattern: add `CREATE_TABLE` const, add `CREATE_INDEXES` array, add `migrateToVersionN` function, add conditional in `initializeDatabase`.
+
+**Next**: T-002 Create QuestionRepo (follow CommentRepo pattern)
+
