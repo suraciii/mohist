@@ -89,3 +89,33 @@ export interface DirEntry {
   name: string
   absolute: string
 }
+
+export interface ExploreSession {
+  id: string
+  projectId: string
+  issueId: string | null
+  title: string
+  status: 'active' | 'crystallized' | 'archived'
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ExploreMessage {
+  id: string
+  sessionId: string
+  role: 'user' | 'assistant'
+  content: string
+  toolCalls: ToolCallRecord[] | null
+  createdAt: string
+}
+
+export interface ToolCallRecord {
+  name: string
+  args: Record<string, unknown>
+  result: unknown
+}
+
+export interface ExploreSessionWithMessages {
+  session: ExploreSession
+  messages: ExploreMessage[]
+}

@@ -9,7 +9,8 @@ import { createEventRoutes } from '../api/events';
 import { createAgentRoutes } from '../api/agent';
 import { createFsRoutes } from '../api/fs';
 import { createQuestionRoutes } from '../api/questions';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService } from '../services';
+import { createExploreRoutes } from '../api/explore';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
 import type { LlmConfig } from '../agent-runtime';
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
 
   const issueService = new IssueService(stateManager.getIssueRepo(), stateManager.getCommentRepo());
   const projectService = new ProjectService(stateManager.getProjectRepo(), stateManager.getConfigRepo(), stateManager.getIssueRepo(), stateManager.getLabelRepo());
+  const exploreService = new ExploreService(stateManager.getExploreSessionRepo(), stateManager.getExploreMessageRepo());
 
   const worktreeManager = new WorktreeManager();
   const sessionManager = new SessionManager();
@@ -87,6 +89,7 @@ async function main(): Promise<void> {
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
   server.addRouter('/api/fs', createFsRoutes());
+  server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), llmConfig));
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
   server.serveStaticFiles(webDistDir);

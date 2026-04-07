@@ -108,4 +108,19 @@ export const api = {
   },
 
   getHomeDir: () => request<string>('/fs/home'),
+
+  createExploreSession: (data: { projectId?: string; title?: string }) =>
+    request<import('./types').ExploreSession>('/explore', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listExploreSessions: (projectId: string) =>
+    request<import('./types').ExploreSession[]>(`/explore?projectId=${encodeURIComponent(projectId)}`),
+
+  getExploreSession: (id: string) =>
+    request<import('./types').ExploreSessionWithMessages>(`/explore/${encodeURIComponent(id)}`),
+
+  deleteExploreSession: (id: string) =>
+    request<{ message: string }>(`/explore/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }

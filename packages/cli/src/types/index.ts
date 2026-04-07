@@ -71,3 +71,34 @@ export interface Question {
   createdAt: string;
   answeredAt?: string;
 }
+
+export enum ExploreStatus {
+  Active = 'active',
+  Crystallized = 'crystallized',
+  Archived = 'archived',
+}
+
+export interface ExploreSession {
+  id: string;
+  projectId: string;
+  issueId: string | null;
+  title: string;
+  status: ExploreStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ToolCallRecord {
+  name: string;
+  args: Record<string, unknown>;
+  result: unknown;
+}
+
+export interface ExploreMessage {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  toolCalls: ToolCallRecord[] | null;
+  createdAt: string;
+}

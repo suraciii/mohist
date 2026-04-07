@@ -1,6 +1,6 @@
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -111,6 +111,10 @@ export function initializeDatabase(db: DatabaseManager): void {
   if (currentVersion < 6) {
     migrateToVersion6(db);
   }
+
+  if (currentVersion < 7) {
+    migrateToVersion7(db);
+  }
 }
 
 function migrateToVersion2(db: DatabaseManager): void {
@@ -200,5 +204,45 @@ function migrateToVersion6(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 6);
+  });
+}
+
+const CREATE_EXPLORE_SESSIONS_TABLE = `
+CREATE TABLE IF NOT EXISTS explore_sessions (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id),
+  issue_id    TEXT REFERENCES issues(id),
+  title       TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'active',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+`;
+
+const CREATE_EXPLORE_MESSAGES_TABLE = `
+CREATE TABLE IF NOT EXISTS explore_messages (
+  id          TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL REFERENCES explore_sessions(id) ON DELETE CASCADE,
+  role        TEXT NOT NULL,
+  content     TEXT NOT NULL,
+  tool_calls  TEXT,
+  created_at  TEXT NOT NULL
+);
+`;
+
+const CREATE_EXPLORE_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_explore_sessions_project ON explore_sessions(project_id);',
+  'CREATE INDEX IF NOT EXISTS idx_explore_sessions_updated ON explore_sessions(updated_at);',
+  'CREATE INDEX IF NOT EXISTS idx_explore_messages_session ON explore_messages(session_id);',
+];
+
+function migrateToVersion7(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_EXPLORE_SESSIONS_TABLE);
+    db.exec(CREATE_EXPLORE_MESSAGES_TABLE);
+    for (const indexSql of CREATE_EXPLORE_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 7);
   });
 }

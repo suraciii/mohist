@@ -9,6 +9,7 @@ export type EventMap = {
   tool_call: { issueId: string; projectId: string; toolName: string; status: string; locations?: string[] };
   question_asked: { issueId: string; projectId: string; questionId: string; question: string };
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string };
+  explore_crystallized: { sessionId: string; issueId: string; projectId: string };
 };
 
 export type EventName = keyof EventMap;

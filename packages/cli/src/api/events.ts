@@ -14,6 +14,7 @@ const ALL_EVENT_TYPES: EventName[] = [
   'tool_call',
   'question_asked',
   'question_answered',
+  'explore_crystallized',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {

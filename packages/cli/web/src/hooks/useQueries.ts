@@ -96,3 +96,29 @@ export function useUseProject() {
     },
   })
 }
+
+export function useExploreSession(id: string) {
+  return useQuery({
+    queryKey: ['explore', id],
+    queryFn: () => api.getExploreSession(id),
+    enabled: !!id,
+  })
+}
+
+export function useExploreSessions(projectId: string) {
+  return useQuery({
+    queryKey: ['explore-sessions', projectId],
+    queryFn: () => api.listExploreSessions(projectId),
+    enabled: !!projectId,
+  })
+}
+
+export function useCreateExploreSession() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { projectId?: string; title?: string }) => api.createExploreSession(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['explore-sessions'] })
+    },
+  })
+}

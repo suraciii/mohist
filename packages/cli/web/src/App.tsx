@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { useIssues, useProjects, useAgentStatus } from './hooks/useQueries'
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
+import { useIssues, useProjects, useAgentStatus, useExploreSessions, useCreateExploreSession } from './hooks/useQueries'
 import useSSE from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
 import { Header } from './components/Header'
 import { IssueDetailPage } from './components/IssueDetailPage'
+import { ExplorePage } from './components/ExplorePage'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
 
 function KanbanView() {
@@ -63,6 +64,36 @@ function KanbanView() {
   )
 }
 
+function ExploreRedirect() {
+  const { projectId } = useProject()
+  const navigate = useNavigate()
+  const { data: sessions } = useExploreSessions(projectId || '')
+  const createSession = useCreateExploreSession()
+
+  useEffect(() => {
+    if (!projectId) return
+    if (sessions && sessions.length > 0) {
+      const active = sessions.find((s) => s.status === 'active') || sessions[0]
+      navigate(`/explore/${active.id}`, { replace: true })
+    } else {
+      createSession.mutate(
+        { projectId, title: 'New Exploration' },
+        {
+          onSuccess: (session) => {
+            navigate(`/explore/${session.id}`, { replace: true })
+          },
+        },
+      )
+    }
+  }, [projectId, sessions, navigate, createSession])
+
+  return (
+    <div className="flex items-center justify-center flex-1">
+      <div className="text-gray-400">Loading...</div>
+    </div>
+  )
+}
+
 function AppContent() {
   const { projectId } = useProject()
   useSSE(projectId)
@@ -73,6 +104,8 @@ function AppContent() {
       <Routes>
         <Route path="/" element={<KanbanView />} />
         <Route path="/issue/:number" element={<IssueDetailPage />} />
+        <Route path="/explore" element={<ExploreRedirect />} />
+        <Route path="/explore/:id" element={<ExplorePage />} />
       </Routes>
     </div>
   )
