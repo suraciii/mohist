@@ -4,7 +4,7 @@ import { connectSSE } from '../sse-client';
 import type { ClientRequest } from 'http';
 import { formatEvent } from '../event-formatter';
 import { apiClient, API_BASE } from '../api-client';
-import { requireServer } from '../index';
+import { requireServer } from '../server-check';
 
 const SSE_BASE = API_BASE.replace('/api', '');
 

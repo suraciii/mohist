@@ -6,7 +6,7 @@ import * as path from 'path';
 import { ApiResponse, Issue } from '../../types';
 import { slugify } from '../../utils/slugify';
 import { apiClient } from '../api-client';
-import { requireServer } from '../index';
+import { requireServer } from '../server-check';
 
 function getDefaultBranch(projectPath: string): string {
   try {

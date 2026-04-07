@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { ApiResponse } from '../../types';
 import { apiClient } from '../api-client';
-import { requireServer } from '../index';
+import { requireServer } from '../server-check';
 
 export function setupQuickCommands(program: Command): void {
   const statusCmd = program

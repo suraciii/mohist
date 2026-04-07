@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import * as path from 'path';
 import { ApiResponse, Project } from '../../types';
 import { apiClient } from '../api-client';
-import { requireServer } from '../index';
+import { requireServer } from '../server-check';
 
 export function setupProjectCommands(program: Command): void {
   const project = program.command('project').description('Manage projects');
