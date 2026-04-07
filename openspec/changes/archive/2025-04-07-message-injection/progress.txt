@@ -1,0 +1,48 @@
+# Ralph Progress Log
+Started: 2026-04-07T02:33:22.683Z
+
+---
+
+[T-002] 2026-04-07 - Extend mo attach with interactive stdin
+- Added readline.createInterface for stdin input handling
+- On agent_paused event: parse issueId, show prompt with instructions
+- On agent_started/agent_completed: hide prompt, clear pausedIssue state
+- hidePrompt() clears current prompt line before SSE output to prevent garbling
+- User input sent via POST /api/issues/:number/messages using existing apiClient
+- Supports 'quit'/'exit' commands to detach
+- Typecheck passes, CLI command tests pass
+
+---
+
+[T-001] 2026-04-07 - Add POST /api/issues/:number/messages endpoint
+- Added POST /:number/messages route to api/issues.ts
+- Follows same pattern as approve endpoint but accepts user message body
+- Returns 404 (issue not found), 400 (invalid input), 409 (agent not paused), 500 (internal error)
+- Reuses existing AgentRunnerService.resume() with user-provided message
+- Typecheck passes
+
+---
+
+[T-003] 2026-04-07 - Add message input to Web UI
+- Added api.sendMessage() method to web API client (POST /issues/:number/messages)
+- Added useSendMessage mutation hook in useQueries.ts with cache invalidation
+- Added message input area to IssueDetailPage.tsx, visible when isApprovalGate (agent paused)
+- Blue-themed panel with textarea and Send button, placed below the Approval panel
+- Input cleared on successful send, inline error display on failure (409 etc.)
+- Web UI build (tsc + vite) passes
+
+---
+
+[T-004] 2026-04-07 - Verify build and manual test
+- npm run build (tsc): PASSES
+- Web UI build (tsc + vite): PASSES
+- Typecheck (tsc --noEmit): PASSES
+- All 166 tests pass (9 test files, 1 skipped pre-existing)
+- Bug fix: agent_paused event now includes issueNumber (numeric) in addition to issueId (UUID)
+  - Updated EventMap type in event-bus.ts
+  - Updated both emit calls in agent-runner-service.ts (start + resume paths)
+  - Updated attach.ts to use parsed.issueNumber instead of parseInt(parsed.issueId)
+  - Without this fix, mo attach would send POST /issues/NaN/messages when agent paused
+- Manual testing (API/mo attach/Web UI) requires running server - deferred to user acceptance
+
+---

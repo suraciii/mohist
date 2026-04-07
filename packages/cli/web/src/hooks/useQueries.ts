@@ -75,6 +75,18 @@ export function useDeleteProject() {
   })
 }
 
+export function useSendMessage(issueNumber: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (message: string) => api.sendMessage(issueNumber, message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+}
+
 export function useUseProject() {
   const queryClient = useQueryClient()
   return useMutation({

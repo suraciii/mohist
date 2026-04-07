@@ -3,7 +3,7 @@ export type EventMap = {
   comment_added: { issueId: string; projectId: string; commentId: string; body: string; createdAt: string };
   agent_started: { issueId: string; projectId: string };
   agent_completed: { issueId: string; projectId: string };
-  agent_paused: { issueId: string; projectId: string };
+  agent_paused: { issueId: string; projectId: string; issueNumber: number };
   agent_error: { issueId: string; projectId: string; error: string };
   approval_requested: { issueId: string; projectId: string; stage: string };
   tool_call: { issueId: string; projectId: string; toolName: string; status: string; locations?: string[] };

@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useAgentStatus } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useAgentStatus, useSendMessage } from '../hooks/useQueries'
 import { EditIssueDialog } from './EditIssueDialog'
 import { QuestionPanel } from './QuestionPanel'
 
@@ -46,6 +46,7 @@ export function IssueDetailPage() {
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
+  const [messageText, setMessageText] = useState('')
 
   const { data: issue, isLoading } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
@@ -88,6 +89,8 @@ export function IssueDetailPage() {
       setCommentText('')
     },
   })
+
+  const sendMessageMutation = useSendMessage(issueNumber)
 
   if (isLoading || !issue) {
     return (
@@ -401,6 +404,43 @@ export function IssueDetailPage() {
                       {approveMutation.error.message}
                     </div>
                   )}
+                </div>
+              )}
+
+              {isApprovalGate && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                  <h2 className="text-sm font-semibold text-blue-800 mb-2">Send Message</h2>
+                  <p className="text-xs text-blue-600 mb-3">
+                    Send a free-text message to the agent. The agent will decide the next step
+                    based on your message.
+                  </p>
+                  <textarea
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    placeholder="Type a message to the agent..."
+                    rows={3}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                  />
+                  <div className="flex items-center justify-between mt-2">
+                    {sendMessageMutation.error && (
+                      <span className="text-xs text-red-500">
+                        {sendMessageMutation.error.message}
+                      </span>
+                    )}
+                    <div className="ml-auto">
+                      <button
+                        onClick={() => {
+                          sendMessageMutation.mutate(messageText, {
+                            onSuccess: () => setMessageText(''),
+                          })
+                        }}
+                        disabled={!messageText.trim() || sendMessageMutation.isPending}
+                        className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 

@@ -589,6 +589,90 @@ export function createIssueRoutes(
     }
   });
 
+  app.post('/:number/messages', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const { message } = await c.req.json();
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      if (!message || typeof message !== 'string') {
+        const response: ApiResponse = {
+          success: false,
+          error: 'message is required and must be a string'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (!agentRunner) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'AgentRunnerService not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      if (!agentRunner.hasPausedSession(number)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Agent is not paused for issue #${number}`
+        };
+        return c.json(response, 409);
+      }
+
+      const project = projectService.getById(projectId);
+      let worktreePath = process.cwd();
+      if (worktreeManager && project) {
+        const existingPath = worktreeManager.getPath(project.name, issue.number);
+        worktreePath = existingPath || process.cwd();
+      }
+
+      agentRunner.resume(
+        issue,
+        projectId,
+        stateManager.getIssueRepo(),
+        stateManager.getCommentRepo(),
+        stateManager.getQuestionRepo(),
+        worktreePath,
+        sessionManager,
+        message,
+        llmConfig,
+        (issueId, status) => issueService.setStatus(issueId, status),
+      );
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          issue,
+          message: `Message sent to issue #${number}, agent resumed`
+        }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
   app.get('/:number/diff', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));

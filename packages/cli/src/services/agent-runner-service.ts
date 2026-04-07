@@ -167,7 +167,7 @@ export class AgentRunnerService {
         if (shouldPause) {
           sessionManager.pause(session.id);
           this.pausedSessions.set(issue.number, session);
-          this.eventBus.emit('agent_paused', { issueId: issue.id, projectId });
+          this.eventBus.emit('agent_paused', { issueId: issue.id, projectId, issueNumber: issue.number });
         } else {
           sessionManager.close(session.id);
         }
@@ -294,7 +294,7 @@ export class AgentRunnerService {
         if (shouldPause) {
           sessionManager.pause(updatedSession.id);
           this.pausedSessions.set(issue.number, updatedSession);
-          this.eventBus.emit('agent_paused', { issueId: issue.id, projectId });
+          this.eventBus.emit('agent_paused', { issueId: issue.id, projectId, issueNumber: issue.number });
         } else {
           sessionManager.close(updatedSession.id);
         }

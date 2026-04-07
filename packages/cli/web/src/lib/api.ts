@@ -71,6 +71,12 @@ export const api = {
       body: JSON.stringify({ answer }),
     }),
 
+  sendMessage: (issueNumber: number, message: string) =>
+    request<{ message: string }>(`/issues/${issueNumber}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+
   getLabels: () => request<string[]>('/labels'),
 
   getAgentStatus: () => request<import('./types').AgentStatus>('/agent/status'),
