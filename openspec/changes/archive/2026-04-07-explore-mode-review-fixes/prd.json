@@ -11,7 +11,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Simple one-line fix in packages/cli/src/tools/read-file.ts line 34."
     },
     {
@@ -24,7 +24,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Follow the same pattern as globWalk in glob-tool.ts lines 54-57."
     },
     {
@@ -39,8 +39,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Follow add-comment.ts pattern which receives eventBus via context."
+      "passes": true,
+      "notes": "Follow add-comment.ts pattern which receives eventBus via context. Added eventBus: EventBus to CreateIssueToolContext, ExploreAgentContext, and createExploreRoutes signature. Wired through server/index.ts."
     },
     {
       "id": "T-004",
@@ -51,8 +51,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "Use ReturnType<typeof streamText> or import the specific type from the AI SDK."
+      "passes": true,
+      "notes": "Used ReturnType<typeof streamText> as explicit return type. Removed any and eslint-disable comment."
     },
     {
       "id": "T-005",
@@ -64,8 +64,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "getSession() already returns null for non-existent sessions. Use it for validation."
+      "passes": true,
+      "notes": "Added session existence check in addMessage throwing Error if session not found. Removed unused touch() method from ExploreSessionRepo."
     },
     {
       "id": "T-006",
@@ -83,8 +83,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "The create_issue tool returns 'Issue #${issue.number} created...'. Use /Issue #(\\d+)/ regex. Key file: packages/cli/src/api/explore.ts. Must adjust history building: add user message to history array in memory before agent call, then persist both messages after success."
+      "passes": true,
+      "notes": "Moved user message persistence from before agent call to after success. Added user message to history in memory via spread. Fixed tool-result type access (part.toolName/part.input/part.output). Captured issue number from create_issue tool output via regex with DB fallback. Both messages persist only on success."
     },
     {
       "id": "T-007",
@@ -102,8 +102,8 @@
         "Build succeeds"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "Must use typography v0.6.0+ for Tailwind v4 compatibility. Add @plugin directive to packages/cli/web/src/index.css. Use existing error banner pattern from IssueDetailPage."
+      "passes": true,
+      "notes": "Installed @tailwindcss/typography@0.5.19 (0.6.0 not yet released). Added @plugin directive. Added streamError state to useExploreStream, set on done+error and catch. Added error banner in ExplorePage. Added onError handler and error display in ExploreRedirect. Build succeeds."
     }
   ]
 }

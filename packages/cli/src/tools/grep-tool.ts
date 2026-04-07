@@ -9,7 +9,13 @@ export interface GrepContext {
 
 function walkFiles(dir: string, include?: string): string[] {
   const results: string[] = [];
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
 
   for (const entry of entries) {
     if (entry.name === 'node_modules' || entry.name === '.git') continue;

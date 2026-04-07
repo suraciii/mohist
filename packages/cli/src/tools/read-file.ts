@@ -31,7 +31,7 @@ export function createReadFileTool(context: ReadFileContext): ToolInstance<any> 
     execute: async (params) => {
       const resolved = path.resolve(context.projectPath, params.path);
 
-      if (!resolved.startsWith(context.projectPath)) {
+      if (!resolved.startsWith(context.projectPath + path.sep) && resolved !== context.projectPath) {
         return 'Error: path is outside the project directory';
       }
 

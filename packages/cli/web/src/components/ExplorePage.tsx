@@ -16,6 +16,7 @@ export function ExplorePage() {
     streamContent,
     streamToolCalls,
     streamIssueId,
+    streamError,
     send,
   } = useExploreStream()
 
@@ -78,6 +79,12 @@ export function ExplorePage() {
           </div>
         </div>
       </div>
+
+      {streamError && (
+        <div className="mx-6 mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+          {streamError}
+        </div>
+      )}
 
       <ExploreChat
         messages={messages || []}

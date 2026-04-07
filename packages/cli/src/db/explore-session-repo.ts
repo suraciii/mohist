@@ -101,11 +101,4 @@ export class ExploreSessionRepo {
     return this.findById(id);
   }
 
-  touch(id: string): void {
-    const now = new Date().toISOString();
-    this.db.run(
-      'UPDATE explore_sessions SET updated_at = ? WHERE id = ?',
-      [now, id]
-    );
-  }
 }

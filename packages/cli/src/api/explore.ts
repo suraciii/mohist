@@ -7,12 +7,14 @@ import { runExploreAgent } from '../agents/explore-agent';
 import { ExploreSessionRepo } from '../db/explore-session-repo';
 import { ProjectService } from '../services/project-service';
 import type { LlmConfig } from '../agent-runtime';
+import type { EventBus } from '../services/event-bus';
 
 export function createExploreRoutes(
   exploreService: ExploreService,
   issueService: IssueService,
   projectService: ProjectService,
   exploreSessionRepo: ExploreSessionRepo,
+  eventBus: EventBus,
   llmConfig?: LlmConfig,
 ): Hono {
   const app = new Hono();
@@ -159,13 +161,14 @@ export function createExploreRoutes(
         return c.json(response, 400);
       }
 
-      exploreService.addMessage(sessionId, 'user', userContent);
-
       const existingMessages = exploreService.getMessages(sessionId);
-      const historyMessages = existingMessages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      const historyMessages = [
+        ...existingMessages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        { role: 'user' as const, content: userContent },
+      ];
 
       const agentContext = {
         projectPath: project.path,
@@ -174,6 +177,7 @@ export function createExploreRoutes(
         llmConfig,
         issueService,
         exploreSessionRepo,
+        eventBus,
       };
 
       const result = runExploreAgent(agentContext, historyMessages);
@@ -193,30 +197,43 @@ export function createExploreRoutes(
             } else if (part.type === 'tool-call') {
               // tool-call has args as the tool input
             } else if (part.type === 'tool-result') {
-              const toolCall = part.toolCall;
               const record: ToolCallRecord = {
-                name: toolCall.toolName,
-                args: toolCall.args as Record<string, unknown>,
-                result: part.result,
+                name: part.toolName,
+                args: part.input as Record<string, unknown>,
+                result: part.output,
               };
               toolCallRecords.push(record);
+
+              if (part.toolName === 'create_issue') {
+                const outputStr = String(part.output ?? '');
+                const match = outputStr.match(/Issue #(\d+)/);
+                if (match) {
+                  createdIssueId = match[1];
+                }
+              }
+
               await stream.writeSSE({
                 data: JSON.stringify({
                   type: 'tool_call',
-                  tool: toolCall.toolName,
-                  args: toolCall.args,
-                  result: part.result,
+                  tool: part.toolName,
+                  args: part.input,
+                  result: part.output,
                 }),
               });
             }
           }
 
           const finalText = await result.text;
-          const updatedSession = exploreSessionRepo.findById(sessionId);
-          if (updatedSession && updatedSession.issueId && !createdIssueId) {
-            createdIssueId = updatedSession.issueId;
+
+          if (!createdIssueId) {
+            const updatedSession = exploreSessionRepo.findById(sessionId);
+            if (updatedSession?.issueId) {
+              const issue = issueService.getById(updatedSession.issueId);
+              createdIssueId = issue ? String(issue.number) : null;
+            }
           }
 
+          exploreService.addMessage(sessionId, 'user', userContent);
           exploreService.addMessage(
             sessionId,
             'assistant',

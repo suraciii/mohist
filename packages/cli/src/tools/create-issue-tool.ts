@@ -2,13 +2,14 @@ import { z } from 'zod';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
 import { IssueService } from '../services/issue-service';
 import { ExploreSessionRepo } from '../db/explore-session-repo';
-import { eventBus } from '../services';
+import type { EventBus } from '../services/event-bus';
 
 export interface CreateIssueToolContext {
   issueService: IssueService;
   exploreSessionRepo: ExploreSessionRepo;
   sessionId: string;
   projectId: string;
+  eventBus: EventBus;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,7 +39,7 @@ export function createCreateIssueTool(context: CreateIssueToolContext): ToolInst
 
       context.exploreSessionRepo.crystallize(context.sessionId, issue.id);
 
-      eventBus.emit('explore_crystallized', {
+      context.eventBus.emit('explore_crystallized', {
         sessionId: context.sessionId,
         issueId: issue.id,
         projectId: context.projectId,
