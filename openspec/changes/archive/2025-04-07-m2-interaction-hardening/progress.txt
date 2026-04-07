@@ -1,0 +1,77 @@
+# Ralph Progress Log
+Started: 2026-04-07T08:21:46.528Z
+
+---
+## 2026-04-07T08:30:00Z - T-001: AgentRunnerService 追踪 ask_user 等待状态
+
+**Changes:**
+- `services/agent-runner-service.ts`: Added `WaitingQuestion` interface, `waitingQuestions` Map, `setWaiting`/`clearWaiting`/`getWaitingQuestions` methods. Injected `onWaitingChange` callback in both `executeAgent` and `resume` to update waiting state. Added `clearWaiting` in `finally` blocks to clean up on agent completion/error.
+- `tools/ask-user.ts`: Added optional `onWaitingChange` callback to `AskUserContext`. Call `onWaitingChange(issueId, questionId)` on question create, `onWaitingChange(issueId, null)` on answer or timeout.
+- `agents/main-agent.ts`: Added `onWaitingChange` to `MainAgentContext` interface. Pass it through to `createAskUserTool`.
+
+**Verification:** Typecheck passes. All 6 acceptance criteria met.
+
+**Next:** T-002 (Agent status API 暴露 waitingQuestions)
+
+---
+## 2026-04-07T09:00:00Z - T-002: Agent status API 暴露 waitingQuestions
+
+**Changes:**
+- `services/agent-runner-service.ts`: Extended `AgentStatus` interface with `waitingQuestions: Array<{ issueId, issueNumber, projectId, questionId, question }>`. Updated `getStatus()` to join `waitingQuestions` Map entries with `activeAgents` to populate issueNumber and projectId. No route changes needed — `GET /api/agent/status` automatically returns the new field.
+
+**Learnings:** The `waitingQuestions` Map is keyed by `issueId` (same key as `activeAgents`), making the join straightforward. Fallback to `0`/`''` for issueNumber/projectId if agent entry missing (defensive, shouldn't happen in practice).
+
+**Verification:** Typecheck passes. All 4 acceptance criteria met.
+
+**Next:** T-003 (修复 question_asked 事件 projectId)
+
+---
+## 2026-04-07T10:00:00Z - T-003: 修复 question_asked 事件 projectId
+
+**Changes:**
+- `tools/ask-user.ts`: Added `issueRepo?: IssueRepo` to `AskUserContext`. In `execute`, when `context.projectId` is undefined, falls back to `context.issueRepo.findById(issueId)?.projectId`. The `question_asked` event now emits the resolved projectId instead of always falling back to empty string.
+- `agents/main-agent.ts`: Passes `context.issueRepo` to `createAskUserTool`.
+
+**Learnings:** The fallback is defensive — if issueRepo is not provided or findById returns null, projectId falls back to empty string (same as before). The IssueRepo.findById method already exists, no DB changes needed.
+
+**Verification:** Typecheck passes. All 6 acceptance criteria met.
+
+**Next:** T-004 (修复 question_answered 事件 projectId 和 API 构造函数)
+
+---
+## 2026-04-07T10:30:00Z - T-004: 修复 question_answered 事件 projectId 和 API 构造函数
+
+**Changes:**
+- `api/questions.ts`: Added `IssueRepo` import and parameter to `createQuestionRoutes(questionRepo, issueRepo, eventBus)`. In reply handler, query `issueRepo.findById(updatedQuestion.issueId)` to resolve `projectId`, replacing the hardcoded empty string.
+- `server/index.ts`: Updated `createQuestionRoutes` call to pass `stateManager.getIssueRepo()` as second argument.
+
+**Learnings:** Minimal change — just add IssueRepo dependency and a findById lookup. The fallback to empty string (`?? ''`) is defensive for cases where the issue was deleted (unlikely but safe).
+
+**Verification:** Typecheck passes. All 4 acceptance criteria met.
+
+**Next:** T-005 (SSE 心跳检测和异常断开清理)
+
+---
+## 2026-04-07T16:51:00Z - T-005: SSE 心跳检测和异常断开清理
+
+**Changes:**
+- `api/events.ts`: Restructured SSE handler with unified `cleanup()` function (idempotent via `cleanedUp` flag). Added `safeWriteSSE` wrapper that catches write failures and triggers cleanup. Event handlers now check `cleanedUp` guard before processing. Added 30-second heartbeat via `stream.writeln(': heartbeat')` with write-failure detection. Abort handler and post-sleep cleanup both use the same `cleanup()` path. 30-minute `MAX_CONNECTION_DURATION` retained as final fallback.
+
+**Learnings:** Hono's `SSEMessage` type has no `comment` field — used `stream.writeln(': heartbeat')` from `StreamingApi` base class instead. The `writeln` returns `Promise<StreamingApi>` so `.catch()` is needed for error detection. Idempotent cleanup pattern (`cleanedUp` flag) prevents double-removal of event listeners.
+
+**Verification:** Typecheck passes. All 166 tests pass. All 4 acceptance criteria met.
+
+**Next:** T-006 (Server 重启检测可恢复 issues)
+
+---
+## 2026-04-07T17:30:00Z - T-006: Server 重启检测可恢复 issues
+
+**Changes:**
+- `services/agent-runner-service.ts`: Added `RecoverableIssue` interface and `recoverableIssues` field to `AgentStatus`. Added `issueRepo` parameter to constructor (optional, third positional). Added `detectRecoverableIssues()` method that queries `issueRepo.findAll({ status: IssueStatus.Active })` and filters out `Stage.Draft`. Results cached at construction time and included in `getStatus()`. Logs detected recoverable issues at startup.
+- `server/index.ts`: Passes `stateManager.getIssueRepo()` as third argument to `AgentRunnerService` constructor.
+
+**Learnings:** Constructor parameter order: eventBus, workflowLogRepo, issueRepo, maxConcurrentAgents. `issueRepo` is optional — if not provided, `recoverableIssues` defaults to empty array (graceful degradation). Detection is one-time at startup, not live — this matches the spec (detect orphaned issues from previous session).
+
+**Verification:** Typecheck passes. All 7 acceptance criteria met.
+
+**Result:** All 6 tasks complete. Change m2-interaction-hardening is DONE.

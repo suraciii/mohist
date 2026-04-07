@@ -73,6 +73,16 @@ API SHALL 提供问题管理的 RESTful 端点。
 - **WHEN** 请求 `POST /api/questions/:id/reply` with `{ answer: string }`
 - **THEN** 问题状态更新为 answered
 - **AND** ask_user 工具的阻塞 Promise 被 resolve
+- **AND** EventBus emit `question_answered` 事件，payload 包含从 issues 表查询的正确 projectId
+
+### Requirement: question_answered 事件携带正确 projectId
+
+`POST /api/questions/:id/reply` 端点在 emit `question_answered` 事件时，SHALL 通过 join issues 表查询该 question 对应 issue 的 projectId，并在事件 payload 中携带。SHALL NOT 使用空字符串作为 projectId。
+
+#### Scenario: 回复问题时事件携带正确 projectId
+- **WHEN** 用户 POST `POST /api/questions/:id/reply` with `{ answer: "JSON" }`
+- **THEN** API 通过 question.issueId join issues 表查询 projectId
+- **AND** `question_answered` 事件的 payload.projectId 为查询到的值（非空字符串）
 
 ### Requirement: API 提供配置接口
 
@@ -205,6 +215,33 @@ StateManager SHALL 仅提供 repo 实例的 getter 和数据库初始化，不�
 - **WHEN** server 启动并注册 labels 路由
 - **THEN** `createLabelRoutes` 接收 `projectService` 参数
 - **AND** handler 中不出现 `stateManager.getCurrentProjectId`、`stateManager.getLabels`
+
+### Requirement: Agent status API 返回可恢复 issues
+
+`GET /api/agent/status` 返回值 SHALL 包含 `recoverableIssues` 数组，列出所有 `status = 'active'` 但无对应 agent session 的 issue（即上次 server 运行时未完成的 issue）。每个条目包含 `{ issueNumber, stage }`。
+
+#### Scenario: Server 重启后检测可恢复 issues
+- **WHEN** server 重启
+- **AND** 数据库中存在 `status = 'active'` 且 `stage` 不是 `draft` 的 issues
+- **THEN** `GET /api/agent/status` 返回的 `recoverableIssues` 数组包含这些 issue 的 number 和 stage
+
+#### Scenario: 所有 issue 正常完成时无可恢复项
+- **WHEN** 所有 issue 的 status 都不是 `active`
+- **THEN** `GET /api/agent/status` 返回的 `recoverableIssues` 为空数组
+
+### Requirement: Agent status API 暴露 ask_user 等待状态
+
+`GET /api/agent/status` 返回值 SHALL 包含 `waitingQuestions` 数组，包含当前所有在 ask_user 中等待回答的 agent 信息：`{ issueId, issueNumber, projectId, questionId, question }`。
+
+#### Scenario: agent 在 ask_user 中等待
+- **WHEN** Main Agent 调用 ask_user 工具并阻塞等待回答
+- **THEN** `GET /api/agent/status` 返回的 `waitingQuestions` 数组包含该 issue 的条目
+- **AND** 条目包含 issueId、issueNumber、projectId、questionId 和 question 内容
+
+#### Scenario: 用户回答后等待状态清除
+- **WHEN** 用户通过 `POST /api/questions/:id/reply` 回答了一个问题
+- **THEN** `waitingQuestions` 数组中对应条目被移除
+- **AND** `GET /api/agent/status` 不再包含该 issue
 
 ### Requirement: API 支持自由文本消息注入
 
