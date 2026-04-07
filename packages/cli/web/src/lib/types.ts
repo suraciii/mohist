@@ -81,6 +81,7 @@ export type EventMap = {
   approval_requested: { issueId: string; projectId: string; stage: string }
   question_asked: { issueId: string; projectId: string; questionId: string; question: string }
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
+  explore_crystallized: { sessionId: string; issueId: string; projectId: string }
 }
 
 export type EventName = keyof EventMap

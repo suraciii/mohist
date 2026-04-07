@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
   server.addRouter('/api/fs', createFsRoutes());
-  server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), llmConfig));
+  server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), eventBus, llmConfig));
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
   server.serveStaticFiles(webDistDir);

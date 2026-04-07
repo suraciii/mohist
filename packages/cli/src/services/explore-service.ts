@@ -47,6 +47,10 @@ export class ExploreService {
     content: string,
     toolCalls?: ToolCallRecord[]
   ): ExploreMessage {
+    const session = this.sessionRepo.findById(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
     return this.messageRepo.create({
       sessionId,
       role,

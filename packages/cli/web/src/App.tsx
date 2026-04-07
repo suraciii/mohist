@@ -69,23 +69,43 @@ function ExploreRedirect() {
   const navigate = useNavigate()
   const { data: sessions } = useExploreSessions(projectId || '')
   const createSession = useCreateExploreSession()
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!projectId) return
     if (sessions && sessions.length > 0) {
       const active = sessions.find((s) => s.status === 'active') || sessions[0]
       navigate(`/explore/${active.id}`, { replace: true })
-    } else {
+    } else if (!createSession.isPending) {
       createSession.mutate(
         { projectId, title: 'New Exploration' },
         {
           onSuccess: (session) => {
             navigate(`/explore/${session.id}`, { replace: true })
           },
+          onError: (err) => {
+            setError(err instanceof Error ? err.message : 'Failed to create session')
+          },
         },
       )
     }
   }, [projectId, sessions, navigate, createSession])
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center flex-1">
+        <div className="text-center">
+          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600 mb-2">{error}</div>
+          <button
+            onClick={() => navigate('/')}
+            className="text-sm text-blue-600 hover:text-blue-700"
+          >
+            Go back
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center justify-center flex-1">

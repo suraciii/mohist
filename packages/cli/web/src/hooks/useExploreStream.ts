@@ -16,6 +16,7 @@ interface UseExploreStreamReturn {
   streamContent: string
   streamToolCalls: ToolCallRecord[]
   streamIssueId: string | null
+  streamError: string | null
   send: (sessionId: string, content: string) => Promise<void>
   reset: () => void
 }
@@ -25,12 +26,14 @@ export function useExploreStream(): UseExploreStreamReturn {
   const [streamContent, setStreamContent] = useState('')
   const [streamToolCalls, setStreamToolCalls] = useState<ToolCallRecord[]>([])
   const [streamIssueId, setStreamIssueId] = useState<string | null>(null)
+  const [streamError, setStreamError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   const reset = useCallback(() => {
     setStreamContent('')
     setStreamToolCalls([])
     setStreamIssueId(null)
+    setStreamError(null)
   }, [])
 
   const send = useCallback(async (sessionId: string, content: string) => {
@@ -92,6 +95,9 @@ export function useExploreStream(): UseExploreStreamReturn {
               if (event.issueId) {
                 setStreamIssueId(event.issueId)
               }
+              if (event.error) {
+                setStreamError(event.error)
+              }
             }
           } catch {
             // skip malformed JSON
@@ -101,11 +107,12 @@ export function useExploreStream(): UseExploreStreamReturn {
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       console.error('[explore] Stream error:', err)
+      setStreamError(err instanceof Error ? err.message : 'Stream error')
     } finally {
       setStreaming(false)
       abortRef.current = null
     }
   }, [reset])
 
-  return { streaming, streamContent, streamToolCalls, streamIssueId, send, reset }
+  return { streaming, streamContent, streamToolCalls, streamIssueId, streamError, send, reset }
 }
