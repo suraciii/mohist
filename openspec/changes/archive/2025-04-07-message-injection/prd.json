@@ -15,6 +15,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
+      "done": true,
+      "passes": true,
       "notes": "The route factory already receives agentRunnerService (check current signature). If not, add it."
     },
     {
@@ -31,6 +33,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
+      "done": true,
+      "passes": true,
       "notes": "Use readline.createInterface for stdin. On agent_paused, call rl.prompt(). On agent_started, call rl.close() or hide prompt. Need to track which issue is paused."
     },
     {
@@ -47,6 +51,8 @@
         "Web UI build passes"
       ],
       "priority": 3,
+      "done": true,
+      "passes": true,
       "notes": "Add a sendMessage mutation hook in useQueries.ts. The input area should be near the approval panel."
     },
     {
@@ -63,6 +69,8 @@
         "Web UI message input works"
       ],
       "priority": 4,
+      "done": true,
+      "passes": true,
       "notes": "Test three channels: API (curl), mo attach (stdin), Web UI (browser)."
     }
   ]
