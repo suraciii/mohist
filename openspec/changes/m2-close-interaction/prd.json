@@ -1,0 +1,64 @@
+{
+  "project": "mohist",
+  "description": "Close M2 milestone: update backlog B-032/B-033, add ask_user question handling to mo attach via smart input routing",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add question event formatting to event-formatter",
+      "spec": "specs/attach-unified-interaction/spec.md",
+      "description": "Add question_asked and question_answered to EVENT_CONFIGS in event-formatter.ts so mo attach displays formatted output for these events.",
+      "acceptanceCriteria": [
+        "question_asked event displays formatted line with issue ID and question text",
+        "question_answered event displays formatted confirmation line",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Add questionId and question fields to EventData interface. Use '??' symbol and chalk.yellow for question_asked, '✓' and chalk.green for question_answered."
+    },
+    {
+      "id": "T-002",
+      "title": "Add QUESTION_MODE state and question_asked/question_answered handling to mo attach",
+      "spec": "specs/attach-unified-interaction/spec.md",
+      "description": "Extend attach.ts to track QUESTION_MODE alongside GATE_MODE. On question_asked, enter QUESTION_MODE storing questionId. On question_answered for current questionId, return to IDLE. On agent_started/agent_completed, clear QUESTION_MODE.",
+      "acceptanceCriteria": [
+        "question_asked event transitions to QUESTION_MODE with prompt showing the question",
+        "question_answered event for current questionId returns to IDLE",
+        "agent_started/agent_completed clears QUESTION_MODE",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Add waitingQuestion state: { questionId, question, issueId } | null. Refactor pausedIssue into a unified interaction state or keep as separate variables. Update the onEvent handler to process question_asked and question_answered."
+    },
+    {
+      "id": "T-003",
+      "title": "Route user input in QUESTION_MODE to questions reply API",
+      "spec": "specs/attach-unified-interaction/spec.md",
+      "description": "In the readline on('line') handler, check if in QUESTION_MODE and route input to POST /questions/:id/reply instead of POST /messages. Display error on 409/410 and return to IDLE.",
+      "acceptanceCriteria": [
+        "User input in QUESTION_MODE sends answer to /api/questions/<questionId>/reply",
+        "Successful reply clears QUESTION_MODE and returns to IDLE",
+        "API error (409/410) displays error message and returns to IDLE",
+        "User input in IDLE displays 'No paused agent or pending question'",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Refactor the readline handler to check QUESTION_MODE first, then GATE_MODE, then IDLE. The existing GATE_MODE and IDLE paths remain unchanged."
+    },
+    {
+      "id": "T-004",
+      "title": "Update backlog B-032 and B-033 status",
+      "spec": "",
+      "description": "Update prd/backlog/backlog.md: mark B-032 as completed (SSE is the implemented protocol), mark B-033 as completed (resolved via mo attach unified interaction).",
+      "acceptanceCriteria": [
+        "B-032 status shows completed with reference to implementation",
+        "B-033 status shows completed with reference to mo attach solution"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
