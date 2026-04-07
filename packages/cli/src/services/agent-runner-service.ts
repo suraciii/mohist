@@ -16,11 +16,18 @@ export interface RunningAgent {
   projectId: string;
 }
 
+export interface RecoverableIssue {
+  issueNumber: number;
+  stage: string;
+}
+
 export interface AgentStatus {
   running: boolean;
   issueId: string | null;
   issueNumber: number | null;
   activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>;
+  waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>;
+  recoverableIssues: RecoverableIssue[];
   queueDepth: number;
 }
 
@@ -38,23 +45,55 @@ export interface QueuedAgent {
   updateIssueStatus?: (issueId: string, status: IssueStatus) => void;
 }
 
+export interface WaitingQuestion {
+  questionId: string;
+  question: string;
+}
+
 export class AgentRunnerService {
   private activeAgents = new Map<string, RunningAgent>();
   private agentQueue: QueuedAgent[] = [];
   private pausedSessions = new Map<number, Session>();
+  private waitingQuestions = new Map<string, WaitingQuestion>();
   private readonly maxConcurrentAgents: number;
+  private readonly recoverableIssues: RecoverableIssue[];
 
   constructor(
     private readonly eventBus: EventBus,
     private readonly workflowLogRepo?: WorkflowLogRepo,
+    private readonly issueRepo?: IssueRepo,
     maxConcurrentAgents: number = 8,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
+    this.recoverableIssues = this.detectRecoverableIssues();
     console.log(`AgentRunnerService initialized with maxConcurrentAgents: ${this.maxConcurrentAgents}`);
+    if (this.recoverableIssues.length > 0) {
+      console.log(`Detected ${this.recoverableIssues.length} recoverable issue(s): ${this.recoverableIssues.map(i => `#${i.issueNumber} (${i.stage})`).join(', ')}`);
+    }
+  }
+
+  private detectRecoverableIssues(): RecoverableIssue[] {
+    if (!this.issueRepo) return [];
+    const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active });
+    return activeIssues
+      .filter(issue => issue.stage !== Stage.Draft)
+      .map(issue => ({ issueNumber: issue.number, stage: issue.stage }));
   }
 
   getMaxConcurrentAgents(): number {
     return this.maxConcurrentAgents;
+  }
+
+  setWaiting(issueId: string, questionId: string, question: string): void {
+    this.waitingQuestions.set(issueId, { questionId, question });
+  }
+
+  clearWaiting(issueId: string): void {
+    this.waitingQuestions.delete(issueId);
+  }
+
+  getWaitingQuestions(): Map<string, WaitingQuestion> {
+    return this.waitingQuestions;
   }
 
   isRunning(issueId?: string): boolean {
@@ -71,6 +110,17 @@ export class AgentRunnerService {
       projectId: a.projectId,
     }));
 
+    const waiting = Array.from(this.waitingQuestions.entries()).map(([issueId, wq]) => {
+      const agent = this.activeAgents.get(issueId);
+      return {
+        issueId,
+        issueNumber: agent?.issueNumber ?? 0,
+        projectId: agent?.projectId ?? '',
+        questionId: wq.questionId,
+        question: wq.question,
+      };
+    });
+
     const first = agents[0];
 
     return {
@@ -78,6 +128,8 @@ export class AgentRunnerService {
       issueId: first != null ? first.issueId : null,
       issueNumber: first != null ? first.issueNumber : null,
       activeAgents: agents,
+      waitingQuestions: waiting,
+      recoverableIssues: this.recoverableIssues,
       queueDepth: this.agentQueue.length,
     };
   }
@@ -155,6 +207,13 @@ export class AgentRunnerService {
             issue,
             eventBus: this.eventBus,
             workflowLogRepo: this.workflowLogRepo,
+            onWaitingChange: (issueId, questionId, question) => {
+              if (questionId && question) {
+                this.setWaiting(issueId, questionId, question);
+              } else {
+                this.clearWaiting(issueId);
+              }
+            },
           },
           sessionManager,
         );
@@ -191,6 +250,7 @@ export class AgentRunnerService {
         });
       } finally {
         this.activeAgents.delete(issue.id);
+        this.clearWaiting(issue.id);
         this.processQueue();
       }
     })();
@@ -282,6 +342,13 @@ export class AgentRunnerService {
             issue,
             eventBus: this.eventBus,
             workflowLogRepo: this.workflowLogRepo,
+            onWaitingChange: (issueId, questionId, question) => {
+              if (questionId && question) {
+                this.setWaiting(issueId, questionId, question);
+              } else {
+                this.clearWaiting(issueId);
+              }
+            },
           },
           sessionManager,
           session,
@@ -316,6 +383,7 @@ export class AgentRunnerService {
         });
       } finally {
         this.activeAgents.delete(issue.id);
+        this.clearWaiting(issue.id);
         this.processQueue();
       }
     })();

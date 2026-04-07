@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
 import type { QuestionRepo } from '../db/question-repo';
+import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 
 const DEFAULT_TIMEOUT_MS = 24 * 60 * 60 * 1000;
@@ -14,10 +15,12 @@ const pendingResolvers = new Map<string, PendingResolver>();
 
 export interface AskUserContext {
   questionRepo: QuestionRepo;
+  issueRepo?: IssueRepo;
   eventBus: EventBus;
   issueId?: string;
   projectId?: string;
   timeoutMs?: number;
+  onWaitingChange?: (issueId: string, questionId: string | null, question?: string) => void;
 }
 
 export function hasPendingResolver(questionId: string): boolean {
@@ -61,28 +64,47 @@ export function createAskUserTool(
 
       const q = context.questionRepo.create(issueId, params.question);
 
+      let projectId = context.projectId;
+      if (!projectId && context.issueRepo) {
+        const issue = context.issueRepo.findById(issueId);
+        if (issue) {
+          projectId = issue.projectId;
+        }
+      }
+
       context.eventBus.emit('question_asked', {
         issueId,
-        projectId: context.projectId ?? '',
+        projectId: projectId ?? '',
         questionId: q.id,
         question: params.question,
       });
+
+      context.onWaitingChange?.(issueId, q.id, params.question);
 
       console.log(
         `[ask_user] Question ${q.id} created for issue ${issueId}: ${params.question.slice(0, 100)}`
       );
 
       const answer = await new Promise<string>((resolve) => {
+        const cleanup = (resolvedQuestionId?: string) => {
+          context.onWaitingChange?.(issueId, null, resolvedQuestionId);
+        };
         const timer = setTimeout(() => {
           pendingResolvers.delete(q.id);
           context.questionRepo.expire(q.id);
           console.log(
             `[ask_user] Question ${q.id} expired after ${timeoutMs}ms`
           );
+          cleanup(q.id);
           resolve('No answer received within timeout. Proceed with your best judgment.');
         }, timeoutMs);
 
-        pendingResolvers.set(q.id, { resolve, timer });
+        const wrappedResolve = (answer: string) => {
+          cleanup(q.id);
+          resolve(answer);
+        };
+
+        pendingResolvers.set(q.id, { resolve: wrappedResolve, timer });
       });
 
       return `用户回答: ${answer}`;

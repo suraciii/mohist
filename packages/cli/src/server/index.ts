@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, configService.getMaxConcurrentAgents());
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents());
 
   const llmConfig = buildLlmConfig(stateManager.getConfigRepo());
 
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
   server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner, workflowLogRepo));
-  server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), eventBus));
+  server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
   server.addRouter('/api', createStatusRoutes(projectService, issueService));

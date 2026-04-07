@@ -1,0 +1,103 @@
+{
+  "project": "mohist",
+  "description": "M2 交互层加固：修复 ask_user 状态不透明、question 事件 projectId 缺失、Server 重启 issue 卡死、SSE listener 泄漏",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "AgentRunnerService 追踪 ask_user 等待状态",
+      "spec": "specs/agent-waiting-state/spec.md#Requirement: AgentRunnerService 追踪 ask_user 等待状态",
+      "description": "在 AgentRunnerService 新增 waitingQuestions Map，提供 setWaiting/clearWaiting 方法。修改 AskUserContext 新增可选 onWaitingChange 回调，ask_user tool 在创建问题/回答/超时时调用回调通知 AgentRunnerService。",
+      "acceptanceCriteria": [
+        "AgentRunnerService 新增 waitingQuestions Map 和 setWaiting/clearWaiting 方法",
+        "AskUserContext 新增可选 onWaitingChange 回调字段",
+        "ask_user tool 创建问题时调用 onWaitingChange(issueId, questionId)",
+        "ask_user tool 回答或超时后调用 onWaitingChange(issueId, null)",
+        "main-agent.ts 创建 ask_user tool 时注入 onWaitingChange 回调",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "回调是可选的，不传则退化为当前行为。main-agent.ts 需要接收 onWaitingChange 参数。"
+    },
+    {
+      "id": "T-002",
+      "title": "Agent status API 暴露 waitingQuestions",
+      "spec": "specs/agent-waiting-state/spec.md#Requirement: Agent status API 暴露 ask_user 等待状态",
+      "description": "扩展 AgentStatus 接口新增 waitingQuestions 数组，AgentRunnerService.getStatus() 从 waitingQuestions Map + activeAgents 组装返回值。扩展 /api/agent/status 路由返回新字段。",
+      "acceptanceCriteria": [
+        "AgentStatus 接口新增 waitingQuestions: Array<{ issueId, issueNumber, projectId, questionId, question }>",
+        "getStatus() 返回值包含 waitingQuestions",
+        "GET /api/agent/status 响应包含 waitingQuestions 字段",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "需要在 executeAgent 中传入 issueNumber 和 projectId 以便组装 waitingQuestions 条目。"
+    },
+    {
+      "id": "T-003",
+      "title": "修复 question_asked 事件 projectId",
+      "spec": "specs/ask-user-tool/spec.md#Requirement: ask_user 工具阻塞等待用户回复",
+      "description": "修复 ask_user tool 中 question_asked 事件的 projectId。修改 AskUserContext 新增 issueRepo 字段。当 context.projectId 为 undefined 时，通过 issueRepo.findById(issueId) 查询 issue 获取 projectId。",
+      "acceptanceCriteria": [
+        "AskUserContext 新增 issueRepo 字段",
+        "当 context.projectId 有值时直接使用",
+        "当 context.projectId 为 undefined 时通过 issueRepo 查询获取",
+        "question_asked 事件的 projectId 不为空字符串",
+        "main-agent.ts 创建 ask_user tool 时传入 issueRepo",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "需要 main-agent.ts 传入 issueRepo 到 createAskUserTool"
+    },
+    {
+      "id": "T-004",
+      "title": "修复 question_answered 事件 projectId 和 API 构造函数",
+      "spec": "specs/http-api/spec.md#Requirement: question_answered 事件携带正确 projectId",
+      "description": "修改 questions API 路由，新增 IssueRepo 依赖。在 reply handler 中通过 question.issueId join issues 表查询 projectId，替换硬编码空字符串。同时修改 createQuestionRoutes 签名以支持后续任务。",
+      "acceptanceCriteria": [
+        "createQuestionRoutes 接收 questionRepo, issueRepo, eventBus 参数",
+        "POST /api/questions/:id/reply 的 question_answered 事件携带正确 projectId（非空字符串）",
+        "server/index.ts 传入 questionRepo, issueRepo, eventBus 到 createQuestionRoutes",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "构造函数签名变更，为 T-006 做准备"
+    },
+    {
+      "id": "T-005",
+      "title": "SSE 心跳检测和异常断开清理",
+      "spec": "specs/event-bus/spec.md#Requirement: SSE 连接心跳检测",
+      "description": "在 events.ts 的 streamSSE handler 中实现 30 秒心跳注释（: heartbeat）。监听 stream.writeSSE 写入失败，失败时立即清理所有 listener 并结束 stream。",
+      "acceptanceCriteria": [
+        "SSE 连接每 30 秒发送 : heartbeat 注释",
+        "stream.writeSSE 失败时清理该连接所有 listener 并结束 stream",
+        "30 分钟 MAX_CONNECTION_DURATION 仍作为最终兜底",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "心跳和 writeSSE 失败检测可以合并实现。"
+    },
+    {
+      "id": "T-006",
+      "title": "Server 重启检测可恢复 issues",
+      "spec": "specs/http-api/spec.md#Requirement: Agent status API 返回可恢复 issues",
+      "description": "在 AgentRunnerService 新增 recoverableIssues 检测逻辑。启动时扫描 status=active 且非 draft stage 的 issues。扩展 AgentStatus 新增 recoverableIssues 数组。",
+      "acceptanceCriteria": [
+        "AgentStatus 接口新增 recoverableIssues: Array<{ issueNumber, stage }>",
+        "AgentRunnerService 构造时接受 eventBus, workflowLogRepo, issueRepo, maxConcurrentAgents 参数",
+        "AgentRunnerService 启动时扫描 active issues 并存储到 recoverableIssues",
+        "getStatus() 返回 recoverableIssues",
+        "GET /api/agent/status 响应包含 recoverableIssues 字段",
+        "server/index.ts 传入 eventBus, workflowLogRepo, issueRepo, maxConcurrentAgents 到 AgentRunnerService",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "T-004 已完成 createQuestionRoutes 构造函数变更。本任务修改 AgentRunnerService 构造函数，与 T-004 独立。"
+    }
+  ]
+}

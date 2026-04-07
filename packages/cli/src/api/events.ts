@@ -25,45 +25,57 @@ export function createEventRoutes(eventBus: EventBus): Hono {
 
     return streamSSE(c, async (stream: SSEStreamingApi) => {
       type Handler = (data: any) => void;
+      let cleanedUp = false;
+      let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+      const handlers = new Map<EventName, Handler>();
+
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        c.req.raw.signal.removeEventListener('abort', onAbort);
+        for (const [eventType, handler] of handlers) {
+          eventBus.off(eventType, handler);
+        }
+      };
+
+      const safeWriteSSE = (message: Parameters<typeof stream.writeSSE>[0]) => {
+        stream.writeSSE(message).catch(() => cleanup());
+      };
 
       const createHandler = (eventName: EventName): Handler => {
         return (data: any) => {
+          if (cleanedUp) return;
           if (projectId) {
             const d = data as { projectId?: string };
             if (d.projectId && d.projectId !== projectId) {
               return;
             }
           }
-          stream.writeSSE({
+          safeWriteSSE({
             event: eventName,
             data: JSON.stringify(data),
           });
         };
       };
 
-      const handlers = new Map<EventName, Handler>();
       for (const eventType of ALL_EVENT_TYPES) {
         const handler = createHandler(eventType);
         handlers.set(eventType, handler);
         eventBus.on(eventType, handler);
       }
 
-      const abortHandler = () => {
-        for (const [eventType, handler] of handlers) {
-          eventBus.off(eventType, handler);
-        }
-      };
-      c.req.raw.signal.addEventListener('abort', abortHandler);
+      const onAbort = () => cleanup();
+      c.req.raw.signal.addEventListener('abort', onAbort);
 
-      // Keep connection alive for max 30 minutes to prevent resource leaks
-      const MAX_CONNECTION_DURATION = 30 * 60 * 1000; // 30 minutes
+      const HEARTBEAT_INTERVAL = 30 * 1000;
+      heartbeatTimer = setInterval(() => {
+        stream.writeln(': heartbeat').catch(() => cleanup());
+      }, HEARTBEAT_INTERVAL);
+
+      const MAX_CONNECTION_DURATION = 30 * 60 * 1000;
       await stream.sleep(MAX_CONNECTION_DURATION);
-
-      // Clean up on normal completion
-      c.req.raw.signal.removeEventListener('abort', abortHandler);
-      for (const [eventType, handler] of handlers) {
-        eventBus.off(eventType, handler);
-      }
+      cleanup();
     });
   });
 

@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
 import { QuestionRepo } from '../db/question-repo';
+import { IssueRepo } from '../db/issue-repo';
 import { EventBus } from '../services/event-bus';
 import { ApiResponse, Question } from '../types';
 import { resolveQuestion, hasPendingResolver } from '../tools/ask-user';
 
 export function createQuestionRoutes(
   questionRepo: QuestionRepo,
+  issueRepo: IssueRepo,
   eventBus: EventBus,
 ): Hono {
   const app = new Hono();
@@ -126,10 +128,14 @@ export function createQuestionRoutes(
         console.warn(`[questions API] Question ${id} DB updated but resolver lost. Agent may have timed out between checks.`);
       }
 
+      // Resolve projectId from issue
+      const issue = issueRepo.findById(updatedQuestion.issueId);
+      const projectId = issue?.projectId ?? '';
+
       // Emit event
       eventBus.emit('question_answered', {
         issueId: updatedQuestion.issueId,
-        projectId: '', // Will be filled by caller context if needed
+        projectId,
         questionId: id,
         answer: answer,
       });

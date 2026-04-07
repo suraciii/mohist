@@ -22,6 +22,7 @@ export interface MainAgentContext {
   issue: Issue;
   eventBus?: EventBus;
   workflowLogRepo?: WorkflowLogRepo;
+  onWaitingChange?: (issueId: string, questionId: string | null, question?: string) => void;
 }
 
 function buildSystemPrompt(issue: Issue): string {
@@ -111,9 +112,11 @@ export async function runMainAgent(
   if (context.questionRepo && context.eventBus) {
     toolRegistry.register(createAskUserTool({
       questionRepo: context.questionRepo,
+      issueRepo: context.issueRepo,
       eventBus: context.eventBus,
       issueId: context.issue.id,
       projectId: context.issue.projectId,
+      onWaitingChange: context.onWaitingChange,
     }));
   }
 
