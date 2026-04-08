@@ -1,0 +1,25 @@
+# Ralph Progress Log
+Started: 2026-04-08T06:35:15.257Z
+
+---
+
+## Iteration 1 - 2026-04-08
+
+### T-001: 数据库 migration: 新增 base_branch 列 ✓
+- **Status**: Already implemented (pre-existing in migrations.ts)
+- **Verification**: migrateToVersion8 adds base_branch column with DEFAULT 'main', detectBaseBranchSync handles path-not-exists and non-git-repo cases, SCHEMA_VERSION=8, build passes
+- **Learnings**: Migration was already in place from earlier work
+
+### T-002: Project 模型和 Repo 层支持 baseBranch ✓
+- **Status**: Completed
+- **Changes**:
+  - `types/index.ts`: Added `baseBranch: string` to Project interface
+  - `db/project-repo.ts`: Updated ProjectRow with `base_branch`, rowToProject mapping, create() with default 'main', update() with baseBranch support
+  - `services/project-service.ts`: Added optional `baseBranch` to CreateProjectData, passes default to repo
+  - `project/manager.ts`: Added baseBranch: 'main' to Project literal
+  - `project/detector.ts`: Added baseBranch to detected Project
+- **Learnings**: Made baseBranch optional in ProjectRepo.create() with default 'main' to avoid breaking existing callers. Service layer and API callers work without changes since CreateProjectData.baseBranch is optional.
+- **Next**: T-003 - Extract detectBaseBranch into standalone function
+
+---
+

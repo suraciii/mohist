@@ -1,9 +1,11 @@
 import { Project } from '../types';
 import { ProjectRepo, ConfigRepo, IssueRepo, LabelRepo } from '../db';
+import { detectBaseBranch } from '../git/detect-base-branch';
 
 export interface CreateProjectData {
   name: string;
   path: string;
+  baseBranch?: string;
 }
 
 export class ProjectService {
@@ -17,7 +19,7 @@ export class ProjectService {
   ) {
   }
 
-  create(data: CreateProjectData): Project {
+  async create(data: CreateProjectData): Promise<Project> {
     const existing = this.projectRepo.findByName(data.name);
     if (existing) {
       throw new Error(`Project "${data.name}" already exists`);
@@ -28,10 +30,19 @@ export class ProjectService {
       throw new Error(`Path "${data.path}" is already used by project "${existingByPath.name}"`);
     }
     
+    const baseBranch = data.baseBranch ?? await detectBaseBranch(data.path);
+    
     return this.projectRepo.create({
       name: data.name,
       path: data.path,
+      baseBranch,
     });
+  }
+
+  update(name: string, data: { baseBranch?: string }): Project | null {
+    const project = this.projectRepo.findByName(name);
+    if (!project) return null;
+    return this.projectRepo.update(project.id, data);
   }
 
   getById(id: string): Project | null {

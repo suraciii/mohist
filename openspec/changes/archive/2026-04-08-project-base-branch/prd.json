@@ -15,7 +15,7 @@
         "npm run build 通过"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "检测逻辑: git symbolic-ref refs/remotes/origin/HEAD，解析出分支名；migration 永不失败"
     },
     {
@@ -30,7 +30,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -45,7 +45,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -60,7 +60,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -74,7 +74,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -90,7 +90,7 @@
         "npm run build 通过"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "智能 fetch 通过 .git/mohist-last-fetch 文件记录时间戳"
     },
     {
@@ -103,7 +103,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -117,7 +117,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "代码清理任务，利用已有的 baseBranch 字段"
     }
   ]
