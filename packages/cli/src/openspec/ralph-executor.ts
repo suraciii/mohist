@@ -31,14 +31,18 @@ export function categorizeFailure(error: string): FailureCategory {
 
   const dependencyPatterns = [
     'cannot find module',
-    'cannot find',
     'module not found',
+    'err_module_not_found',
     'no such module',
     'dependency',
     'unmet dependency',
     'peer dependency',
-    "cannot find package",
-    "failed to resolve",
+    'cannot find package',
+    'package not found',
+    'failed to resolve',
+    'could not be resolved',
+    'import error',
+    'unresolved import',
   ];
   for (const pattern of dependencyPatterns) {
     if (lowerError.includes(pattern)) {
@@ -54,8 +58,22 @@ export function categorizeFailure(error: string): FailureCategory {
     'enoent',
     'no such file or directory',
     'command not found',
-    'env',
     'environment',
+    'econnrefused',
+    'econnreset',
+    'network error',
+    'network request failed',
+    'spawn error',
+    'spawn failed',
+    'spawn enoent',
+    'eacces',
+    'heap out of memory',
+    'out of memory',
+    'enospc',
+    'disk full',
+    'segmentation fault',
+    'sigsegv',
+    'sigkill',
   ];
   for (const pattern of environmentPatterns) {
     if (lowerError.includes(pattern)) {

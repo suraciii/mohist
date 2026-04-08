@@ -293,30 +293,127 @@ describe('RalphExecutor class', () => {
 });
 
 describe('Failure categorization', () => {
-  it('should categorize timeout errors', () => {
-    expect(categorizeFailure('Timed out after 1800000ms')).toBe('timeout');
-    expect(categorizeFailure('Request timeout')).toBe('timeout');
-    expect(categorizeFailure('TIMEOUT ERROR')).toBe('timeout');
+  describe('timeout category', () => {
+    it('should categorize timeout errors', () => {
+      expect(categorizeFailure('Timed out after 1800000ms')).toBe('timeout');
+      expect(categorizeFailure('Request timeout')).toBe('timeout');
+      expect(categorizeFailure('TIMEOUT ERROR')).toBe('timeout');
+    });
+
+    it('should match "timed out" case-insensitively', () => {
+      expect(categorizeFailure('Operation timed out')).toBe('timeout');
+      expect(categorizeFailure('TIMED OUT waiting for response')).toBe('timeout');
+    });
   });
 
-  it('should categorize dependency errors', () => {
-    expect(categorizeFailure('Cannot find module express')).toBe('dependency');
-    expect(categorizeFailure('Module not found: foo')).toBe('dependency');
-    expect(categorizeFailure('Cannot find package @types/node')).toBe('dependency');
-    expect(categorizeFailure('Failed to resolve dependency')).toBe('dependency');
+  describe('dependency category', () => {
+    it('should categorize module not found errors', () => {
+      expect(categorizeFailure('Cannot find module express')).toBe('dependency');
+      expect(categorizeFailure('Module not found: foo')).toBe('dependency');
+      expect(categorizeFailure('ERR_MODULE_NOT_FOUND')).toBe('dependency');
+      expect(categorizeFailure('No such module: xyz')).toBe('dependency');
+    });
+
+    it('should categorize package resolution errors', () => {
+      expect(categorizeFailure('Cannot find package @types/node')).toBe('dependency');
+      expect(categorizeFailure('Package not found: lodash')).toBe('dependency');
+      expect(categorizeFailure('Failed to resolve dependency')).toBe('dependency');
+      expect(categorizeFailure('Could not be resolved from /src')).toBe('dependency');
+    });
+
+    it('should categorize import errors', () => {
+      expect(categorizeFailure('Import error: missing export')).toBe('dependency');
+      expect(categorizeFailure('Unresolved import ./utils')).toBe('dependency');
+    });
+
+    it('should categorize npm dependency errors', () => {
+      expect(categorizeFailure('Unmet dependency: react@18')).toBe('dependency');
+      expect(categorizeFailure('Peer dependency missing: webpack')).toBe('dependency');
+      expect(categorizeFailure('dependency not installed')).toBe('dependency');
+    });
   });
 
-  it('should categorize environment errors', () => {
-    expect(categorizeFailure('npm install failed')).toBe('environment');
-    expect(categorizeFailure('ENOENT: no such file')).toBe('environment');
-    expect(categorizeFailure('Permission denied')).toBe('environment');
-    expect(categorizeFailure('Command not found: npm')).toBe('environment');
+  describe('environment category', () => {
+    it('should categorize npm/install errors', () => {
+      expect(categorizeFailure('npm install failed')).toBe('environment');
+      expect(categorizeFailure('node_modules missing')).toBe('environment');
+      expect(categorizeFailure('Install failed: network')).toBe('environment');
+    });
+
+    it('should categorize file system errors', () => {
+      expect(categorizeFailure('ENOENT: no such file')).toBe('environment');
+      expect(categorizeFailure('Permission denied: /root')).toBe('environment');
+      expect(categorizeFailure('No such file or directory')).toBe('environment');
+    });
+
+    it('should categorize command errors', () => {
+      expect(categorizeFailure('Command not found: npm')).toBe('environment');
+      expect(categorizeFailure('spawn ENOENT')).toBe('environment');
+      expect(categorizeFailure('Spawn error: process failed')).toBe('environment');
+      expect(categorizeFailure('Spawn failed: git')).toBe('environment');
+    });
+
+    it('should categorize network errors', () => {
+      expect(categorizeFailure('ECONNREFUSED: connection refused')).toBe('environment');
+      expect(categorizeFailure('ECONNRESET: connection reset')).toBe('environment');
+      expect(categorizeFailure('Network error: fetch failed')).toBe('environment');
+      expect(categorizeFailure('Network request failed: connection refused')).toBe('environment');
+    });
+
+    it('should categorize memory errors', () => {
+      expect(categorizeFailure('FATAL ERROR: heap out of memory')).toBe('environment');
+      expect(categorizeFailure('JavaScript out of memory')).toBe('environment');
+    });
+
+    it('should categorize system errors', () => {
+      expect(categorizeFailure('EACCES: permission denied')).toBe('environment');
+      expect(categorizeFailure('ENOSPC: no space left on device')).toBe('environment');
+      expect(categorizeFailure('Disk full: cannot write')).toBe('environment');
+      expect(categorizeFailure('Segmentation fault (core dumped)')).toBe('environment');
+    });
+
+    it('should categorize environment variable errors', () => {
+      expect(categorizeFailure('Missing environment variable API_KEY')).toBe('environment');
+    });
   });
 
-  it('should default to AC not met for other errors', () => {
-    expect(categorizeFailure('Test assertion failed')).toBe('ac_not_met');
-    expect(categorizeFailure('AC not satisfied')).toBe('ac_not_met');
-    expect(categorizeFailure('Missing validation')).toBe('ac_not_met');
+  describe('ac_not_met (default) category', () => {
+    it('should categorize test assertion failures', () => {
+      expect(categorizeFailure('Test assertion failed')).toBe('ac_not_met');
+      expect(categorizeFailure('expect(received).toBe(expected)')).toBe('ac_not_met');
+      expect(categorizeFailure('FAIL src/app.test.ts')).toBe('ac_not_met');
+    });
+
+    it('should categorize compilation/typecheck errors', () => {
+      expect(categorizeFailure('Type error: string is not assignable')).toBe('ac_not_met');
+      expect(categorizeFailure('SyntaxError: Unexpected token')).toBe('ac_not_met');
+      expect(categorizeFailure('error TS2322: type mismatch')).toBe('ac_not_met');
+    });
+
+    it('should categorize lint errors', () => {
+      expect(categorizeFailure('Lint error: unused variable')).toBe('ac_not_met');
+      expect(categorizeFailure('eslint: no-unused-vars')).toBe('ac_not_met');
+    });
+
+    it('should categorize generic implementation errors', () => {
+      expect(categorizeFailure('AC not satisfied')).toBe('ac_not_met');
+      expect(categorizeFailure('Missing validation')).toBe('ac_not_met');
+      expect(categorizeFailure('Unknown error')).toBe('ac_not_met');
+    });
+  });
+
+  describe('precedence rules', () => {
+    it('should classify timeout before dependency', () => {
+      expect(categorizeFailure('Timeout: cannot find module')).toBe('timeout');
+    });
+
+    it('should classify timeout before environment', () => {
+      expect(categorizeFailure('Timeout waiting for npm install')).toBe('timeout');
+    });
+
+    it('should classify dependency before environment', () => {
+      expect(categorizeFailure('Cannot find module in node_modules')).toBe('dependency');
+    });
   });
 
   it('should have correct config for each category', () => {
