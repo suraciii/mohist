@@ -7,7 +7,7 @@ export function createProjectRoutes(projectService: ProjectService): Hono {
 
   app.post('/', async (c) => {
     try {
-      const { name, path } = await c.req.json();
+      const { name, path, baseBranch } = await c.req.json();
 
       if (!name || !path) {
         const response: ApiResponse = {
@@ -26,13 +26,49 @@ export function createProjectRoutes(projectService: ProjectService): Hono {
         return c.json(response, 409);
       }
 
-      const project = projectService.create({ name, path });
+      const project = await projectService.create({ name, path, baseBranch });
 
       const response: ApiResponse<Project> = {
         success: true,
         data: project
       };
       return c.json(response, 201);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.patch('/:name', async (c) => {
+    try {
+      const { baseBranch } = await c.req.json();
+      
+      if (baseBranch === undefined) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'baseBranch is required'
+        };
+        return c.json(response, 400);
+      }
+
+      const project = projectService.update(c.req.param('name'), { baseBranch });
+
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      const response: ApiResponse<Project> = {
+        success: true,
+        data: project
+      };
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,

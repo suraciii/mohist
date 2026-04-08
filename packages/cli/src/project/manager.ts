@@ -15,6 +15,7 @@ export class ProjectManager {
       id,
       name,
       path: projectPath,
+      baseBranch: 'main',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };

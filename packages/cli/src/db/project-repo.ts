@@ -6,6 +6,7 @@ interface ProjectRow {
   id: string;
   name: string;
   path: string;
+  base_branch: string;
   created_at: string;
   updated_at: string;
 }
@@ -15,6 +16,7 @@ function rowToProject(row: ProjectRow): Project {
     id: row.id,
     name: row.name,
     path: row.path,
+    baseBranch: row.base_branch ?? 'main',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -25,19 +27,21 @@ function rowToProject(row: ProjectRow): Project {
 export class ProjectRepo {
   constructor(private db: DatabaseManager) {}
 
-  create(data: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Project {
+  create(data: { name: string; path: string; baseBranch?: string }): Project {
     const now = new Date().toISOString();
     const id = uuidv4();
+    const baseBranch = data.baseBranch ?? 'main';
     
     this.db.run(
-      `INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-      [id, data.name, data.path, now, now]
+      `INSERT INTO projects (id, name, path, base_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, data.name, data.path, baseBranch, now, now]
     );
     
     return {
       id,
       name: data.name,
       path: data.path,
+      baseBranch,
       createdAt: now,
       updatedAt: now,
     };
@@ -86,6 +90,10 @@ export class ProjectRepo {
     if (data.path !== undefined) {
       updates.push('path = ?');
       values.push(data.path);
+    }
+    if (data.baseBranch !== undefined) {
+      updates.push('base_branch = ?');
+      values.push(data.baseBranch);
     }
     
     if (updates.length === 0) return existing;

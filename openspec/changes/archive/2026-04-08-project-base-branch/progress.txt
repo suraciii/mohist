@@ -1,0 +1,33 @@
+# Ralph Progress Log
+Started: 2026-04-08T08:06:29.855Z
+
+---
+## T-007: API 调用 WorktreeManager 时传入 baseBranch
+**Timestamp**: 2026-04-08T08:15:00.000Z
+
+**Task**: 修改 issues.ts 中 start issue 路由，从 project 对象读取 baseBranch 传入 WorktreeManager.create()
+
+**Changes**:
+- Updated `/api/issues/:number/start` route to pass `project.baseBranch` to `worktreeManager.create(project.path, project.name, issue.number, project.baseBranch)`
+
+**Learnings**:
+- WorktreeManager.create() already had baseBranch parameter with default 'main' - only needed to pass the value from project
+- resume/retry routes don't create new worktrees, they reuse existing paths via worktreeManager.getPath(), so no changes needed there
+- Verified type compatibility: Project interface already has baseBranch: string
+
+---
+## T-008: 简化 diff 端点，使用 project.baseBranch
+**Timestamp**: 2026-04-08T14:50:00.000Z
+
+**Task**: 修改 issues.ts 中的 diff 端点，移除动态分支检测逻辑，直接使用 project.baseBranch
+
+**Changes**:
+- Removed ~18 lines of dynamic branch detection code (git symbolic-ref / git rev-parse fallback)
+- Replaced `defaultBranch` variable with direct use of `project.baseBranch`
+- Diff command now uses `${project.baseBranch}...${branchName}` instead of `${defaultBranch}...${branchName}`
+
+**Learnings**:
+- The diff endpoint was duplicating branch detection logic already available in project.baseBranch
+- execFileAsync is still needed for the actual git diff command, so imports cannot be removed
+- Simplified code is cleaner and avoids redundant git operations on each diff request
+
