@@ -22,15 +22,27 @@ function generateSlug(title: string): string {
 }
 
 function findNextVersion(changesDir: string, baseName: string): string {
-  if (!fs.existsSync(path.join(changesDir, baseName))) {
-    return baseName;
-  }
+  const existing = fs.readdirSync(changesDir);
 
-  let version = 2;
-  while (fs.existsSync(path.join(changesDir, `${baseName}-v${version}`))) {
-    version++;
+  const exactMatch = new RegExp(`^${baseName}(-v\\d+)?$`);
+  const versions = existing
+    .filter(name => exactMatch.test(name))
+    .map(name => {
+      const match = name.match(/-v(\d+)$/);
+      return match ? parseInt(match[1], 10) : 1;
+    });
+
+  const maxVersion = versions.length > 0 ? Math.max(...versions) : 0;
+  const nextName = maxVersion === 0 ? baseName : `${baseName}-v${maxVersion + 1}`;
+
+  if (!fs.existsSync(path.join(changesDir, nextName))) {
+    return nextName;
   }
-  return `${baseName}-v${version}`;
+  let v = maxVersion + 1;
+  while (fs.existsSync(path.join(changesDir, `${baseName}-v${v}`))) {
+    v++;
+  }
+  return `${baseName}-v${v}`;
 }
 
 function findExistingChange(changesDir: string, issueNumber: number): string | null {
@@ -73,7 +85,7 @@ export function createChange(
       const existingPath = path.join(changesDir, existingName);
       fs.rmSync(existingPath, { recursive: true, force: true });
       changeName = baseName;
-      isNew = false;
+      isNew = true;
     } else {
       changeName = findNextVersion(changesDir, baseName);
       isNew = true;
