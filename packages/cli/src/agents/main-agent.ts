@@ -13,6 +13,11 @@ import { createGetIssueTool } from '../tools/get-issue';
 import { createAskUserTool } from '../tools/ask-user';
 import { createRunRalphLoopTool } from '../tools/run-ralph-loop';
 import { createArchiveChangeTool } from '../tools/archive-change';
+import { createReadPrdTool } from '../tools/read-prd';
+import { createReadSpecTool } from '../tools/read-spec';
+import { createStoreLearningTool, createLoadLearningsTool } from '../tools/session-memory';
+import { createUpdateTaskStatusTool, createGetTaskStatusTool } from '../tools/task-status';
+import { createSelfReviewTool, createGeneratePrdTool } from '../tools/self-review';
 import type { EventBus } from '../services/event-bus';
 
 export interface MainAgentContext {
@@ -138,6 +143,14 @@ export async function runMainAgent(
     issue: context.issue,
     worktreePath: context.worktreePath,
   }));
+  toolRegistry.register(createReadPrdTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createReadSpecTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createStoreLearningTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createLoadLearningsTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createUpdateTaskStatusTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createGetTaskStatusTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createSelfReviewTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createGeneratePrdTool({ projectPath: context.worktreePath }));
 
   const session = existingSession ?? sessionManager.create(Number(context.issue.id));
   const system = buildSystemPrompt(context.issue);
