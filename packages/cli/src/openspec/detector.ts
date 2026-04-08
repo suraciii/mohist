@@ -40,35 +40,45 @@ function findMatchingChanges(changeDirs: string[], issuePrefix: string): string[
   });
 }
 
-export function detectOpenSpecChange(worktreePath: string, issue: Issue): OpenSpecChange | null {
-  const changeDir = path.join(worktreePath, '.mohist-specs', 'changes');
-  
-  if (!fs.existsSync(changeDir)) {
+export function findChangeDir(cwd: string, issueNumber: number): string | null {
+  const changesDir = path.join(cwd, '.mohist-specs', 'changes');
+
+  if (!fs.existsSync(changesDir)) {
     return null;
   }
-  
-  const entries = fs.readdirSync(changeDir, { withFileTypes: true });
+
+  const entries = fs.readdirSync(changesDir, { withFileTypes: true });
   const changeDirs = entries
     .filter(e => e.isDirectory())
     .map(e => e.name);
-  
-  const issuePrefix = `${issue.number}-`;
+
+  const issuePrefix = `${issueNumber}-`;
   const matchingChanges = findMatchingChanges(changeDirs, issuePrefix);
-  
+
   if (matchingChanges.length === 0) {
     return null;
   }
 
-  const matchingChange = matchingChanges.length === 1
+  const bestMatch = matchingChanges.length === 1
     ? matchingChanges[0]
     : matchingChanges.sort((a, b) => extractVersion(b) - extractVersion(a))[0];
-  const changePath = path.join(changeDir, matchingChange);
+
+  return path.join(changesDir, bestMatch);
+}
+
+export function detectOpenSpecChange(worktreePath: string, issue: Issue): OpenSpecChange | null {
+  const changePath = findChangeDir(worktreePath, issue.number);
+
+  if (!changePath) {
+    return null;
+  }
+
   const prdPath = path.join(changePath, 'prd.json');
-  
+
   if (!fs.existsSync(prdPath)) {
     return null;
   }
-  
+
   return {
     changePath,
     prdPath,

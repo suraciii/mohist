@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { detectOpenSpecChange } from '../src/openspec/detector';
+import { detectOpenSpecChange, findChangeDir } from '../src/openspec/detector';
 import type { Issue } from '../src/types';
 
 describe('detectOpenSpecChange', () => {
@@ -263,5 +263,65 @@ describe('detectOpenSpecChange', () => {
 
     const result = detectOpenSpecChange(tempDir, issue);
     expect(result).toBeNull();
+  });
+});
+
+describe('findChangeDir', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('should return null when .mohist-specs/changes does not exist', () => {
+    expect(findChangeDir(tempDir, 42)).toBeNull();
+  });
+
+  it('should return null when no change directory matches issue number', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    fs.mkdirSync(path.join(changesDir, '43-another-issue'), { recursive: true });
+    expect(findChangeDir(tempDir, 42)).toBeNull();
+  });
+
+  it('should return change path for matching issue number', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changeDir = path.join(changesDir, '42-fix');
+    fs.mkdirSync(changeDir, { recursive: true });
+    expect(findChangeDir(tempDir, 42)).toBe(changeDir);
+  });
+
+  it('should return latest versioned change', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    fs.mkdirSync(path.join(changesDir, '42-fix'), { recursive: true });
+    fs.mkdirSync(path.join(changesDir, '42-fix-v2'), { recursive: true });
+    fs.mkdirSync(path.join(changesDir, '42-fix-v3'), { recursive: true });
+    expect(findChangeDir(tempDir, 42)).toBe(path.join(changesDir, '42-fix-v3'));
+  });
+
+  it('should handle multi-hyphen slugs', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changeDir = path.join(changesDir, '42-add-user-authentication');
+    fs.mkdirSync(changeDir, { recursive: true });
+    expect(findChangeDir(tempDir, 42)).toBe(changeDir);
+  });
+
+  it('should pick best match across multiple slugs', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    fs.mkdirSync(path.join(changesDir, '42-fix'), { recursive: true });
+    fs.mkdirSync(path.join(changesDir, '42-fix-v2'), { recursive: true });
+    fs.mkdirSync(path.join(changesDir, '42-other'), { recursive: true });
+    const result = findChangeDir(tempDir, 42);
+    expect(result).not.toBeNull();
+    expect([path.join(changesDir, '42-fix-v2'), path.join(changesDir, '42-other')]).toContain(result);
+  });
+
+  it('should not match different issue numbers', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    fs.mkdirSync(path.join(changesDir, '420-fix'), { recursive: true });
+    expect(findChangeDir(tempDir, 42)).toBeNull();
   });
 });
