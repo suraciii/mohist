@@ -65,3 +65,11 @@ Learnings:
 - categorizeFailure checks timeout first, so test strings containing "timeout" always classify as timeout regardless of other keywords
 - The 'env' pattern was matching unintended substrings; replaced with explicit 'environment'
 Next steps: T-006 (register 8 missing tools to main-agent)
+
+## 2026-04-09 T-006
+- Added 8 missing tool imports and registrations to main-agent.ts: read_prd, read_spec, store_learning, load_learnings, update_task_status, get_task_status, run_self_review, generate_prd
+- All tools use { projectPath: context.worktreePath } context pattern
+- Updated agent-workflow-e2e.test.ts: registered all 13 tools, updated count assertion from 5 to 13
+- Build passes, all 21 tests pass
+- Learning: The OpenSpec tools use `projectPath` (not `cwd` or `worktreePath`) as their context property name
+- Next: T-007 (Plan Stage OpenSpec awareness) or T-008 (change-creator bug fix)
