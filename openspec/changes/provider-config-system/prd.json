@@ -1,0 +1,115 @@
+{
+  "project": "mohist",
+  "description": "实现 mohist 的 LLM provider 配置系统：全局 JSONC 配置文件、内置 provider 注册表、动态 provider 解析、CLI providers 命令组",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "安装 jsonc-parser 依赖，创建 config 模块骨架",
+      "spec": "specs/provider-config/spec.md",
+      "description": "安装 jsonc-parser npm 包。创建 packages/cli/src/config/ 目录，包含 config-schema.ts（Zod schema 定义）和 builtin-providers.ts（内置 provider 注册表）。定义 ConfigInfo Zod schema 和 BUILTIN_PROVIDERS 常量。",
+      "acceptanceCriteria": [
+        "jsonc-parser 已添加到 package.json dependencies",
+        "config-schema.ts 导出 ConfigInfo Zod schema，支持 $schema, model, provider, server, agent 字段",
+        "builtin-providers.ts 导出 BUILTIN_PROVIDERS，包含 anthropic, openai, glm, kimi, minimax, deepseek, qwen",
+        "每个内置 provider 包含 sdk, name, baseURL, envVars 字段",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Zod schema 中 provider 值类型应包含 name?, apiKey?, baseURL?, sdk? 字段，使用 .passthrough() 或 .strip() 容忍额外字段"
+    },
+    {
+      "id": "T-002",
+      "title": "实现 ConfigLoader — 加载、解析、校验、合并 config.jsonc",
+      "spec": "specs/provider-config/spec.md",
+      "description": "创建 packages/cli/src/config/config-loader.ts。实现 load() 方法：读取 ~/.mohist/config.jsonc，用 jsonc-parser 解析，Zod 校验，合并内置注册表默认值。实现 getProviderConfig(providerID) 方法，按优先级合并：config.jsonc apiKey > 环境变量 > 内置默认值。实现 writeConfig() 原子写入（临时文件 + rename）。首次创建时设置权限 0600。",
+      "acceptanceCriteria": [
+        "load() 在文件不存在时返回默认配置，不报错",
+        "load() 正确解析 JSONC 注释（// 和 /* */）",
+        "load() 在 JSON 语法错误时抛出明确错误含文件路径",
+        "getProviderConfig() 按优先级合并 apiKey：config.jsonc > 环境变量",
+        "getProviderConfig() 按优先级合并 baseURL：config.jsonc > 内置注册表",
+        "writeConfig() 使用临时文件 + rename 原子写入",
+        "writeConfig() 创建文件时设置权限 0600",
+        "~/.mohist/ 目录不存在时创建，权限 0700",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "ConfigLoader 应为无状态的工具类或单例，不依赖 Server/SQLite。环境变量映射使用内置注册表的 envVars 字段。"
+    },
+    {
+      "id": "T-003",
+      "title": "重写 resolveModel() — 动态 provider 解析",
+      "spec": "specs/provider-registry/spec.md",
+      "description": "重写 packages/cli/src/agent-runtime/llm.ts。移除硬编码 switch-case 和 PROVIDER_ENV。接受 ConfigLoader 返回的 resolved provider 信息（sdk 类型、apiKey、baseURL），根据 sdk 类型动态创建 createAnthropic / createOpenAI 实例。未注册的 providerID 自动作为 openai-compatible。更新 LlmConfig 接口匹配新结构。",
+      "acceptanceCriteria": [
+        "resolveModel() 支持 sdk 类型 anthropic（createAnthropic）",
+        "resolveModel() 支持 sdk 类型 openai（createOpenAI）",
+        "resolveModel() 支持 sdk 类型 openai-compatible（createOpenAI with baseURL）",
+        "未注册的 providerID 自动作为 openai-compatible",
+        "model 字符串无 '/' 时抛出格式错误",
+        "apiKey 缺失时抛出明确错误，包含 providerID、环境变量名、config 路径",
+        "无 model 配置时默认使用 anthropic/claude-sonnet-4-20250514",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "resolveModel 的参数需要调整：不再接收简单的 LlmConfig，而是接收 ConfigLoader 解析后的 resolved provider map。考虑定义 ResolvedProvider { sdk, apiKey, baseURL } 类型。"
+    },
+    {
+      "id": "T-004",
+      "title": "改造 Server 启动流程 — 使用 ConfigLoader",
+      "spec": "specs/server-daemon/spec.md",
+      "description": "修改 packages/cli/src/server/index.ts。移除 buildLlmConfig() 函数（从 SQLite 读 llm.* 键的逻辑）。Server 启动时初始化 ConfigLoader.load()，获取 resolved provider 配置，传递给 agent-runtime。处理 config.jsonc 不存在（用默认值）和解析失败（打印错误并退出）两种情况。",
+      "acceptanceCriteria": [
+        "Server 启动时初始化 ConfigLoader 并加载 config.jsonc",
+        "resolved provider 配置传递给 agent-runtime 的 resolveModel()",
+        "config.jsonc 不存在时 Server 正常启动，使用环境变量 fallback",
+        "config.jsonc 解析失败时 Server 打印错误并以非零退出码退出",
+        "SQLite 中 llm.* 键不再被读取（buildLlmConfig 函数已移除）",
+        "已有功能（issue CRUD, agent 启动, SSE 事件）不受影响",
+        "npm run build 成功",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "需要确保 agent-runtime 中所有调用 resolveModel 的地方（main agent, explore agent 等）都使用新的 ConfigLoader 结果。检查 server/index.ts 中 llmConfig 的所有传递路径。"
+    },
+    {
+      "id": "T-005",
+      "title": "实现 mo providers CLI 命令组",
+      "spec": "specs/provider-cli/spec.md",
+      "description": "创建 packages/cli/src/cli/commands/providers.ts。实现 providers 命令组（Commander）：list（列出所有 provider 状态，掩码显示 apiKey）、login（交互式输入 apiKey，写入 config.jsonc）、logout（删除 apiKey）。在 cli/index.ts 中注册 providers 命令。providers 命令直接操作 config.jsonc，不需要 server 运行。",
+      "acceptanceCriteria": [
+        "mo providers --help 显示命令组描述和子命令",
+        "mo providers list 显示所有内置 provider 的状态表格",
+        "已配置的 provider 显示掩码后 apiKey（sk-***...xyz 格式）",
+        "环境变量中的 apiKey 也能被检测并显示（标记来源为 env）",
+        "mo providers login <id> 提示输入 apiKey 并写入 config.jsonc",
+        "mo providers login 对未注册 provider 提示输入 baseURL",
+        "mo providers logout <id> 从 config.jsonc 删除 apiKey",
+        "providers 命令在 server 未运行时正常执行",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "使用 Node.js 内置 readline 模块做交互。apiKey 掩码：保留前3后3字符，中间用 ***。cli/index.ts 中 providers 命令不需要 checkServer 检测。"
+    },
+    {
+      "id": "T-006",
+      "title": "编写测试 — config-loader 和 resolveModel",
+      "spec": "specs/provider-config/spec.md",
+      "description": "为 ConfigLoader 和 resolveModel 编写 vitest 测试。覆盖：JSONC 解析、Zod 校验、配置合并优先级、内置注册表查询、动态 provider 创建、错误处理。使用临时目录避免污染真实配置。",
+      "acceptanceCriteria": [
+        "ConfigLoader 测试覆盖：文件不存在、JSONC 注释、校验错误、apiKey 合并优先级、baseURL 合并、原子写入",
+        "resolveModel 测试覆盖：anthropic/openai/openai-compatible 三种 SDK、未注册 provider fallback、model 格式错误、apiKey 缺失错误",
+        "npm test 全部通过",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "使用 vitest 的 beforeEach 在临时目录创建测试用的 config.jsonc。mock process.env 测试环境变量 fallback。"
+    }
+  ]
+}
