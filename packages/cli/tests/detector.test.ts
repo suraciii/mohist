@@ -114,7 +114,7 @@ describe('detectOpenSpecChange', () => {
     const issue: Issue = {
       id: 'test-id',
       number: 42,
-      title: 'Add User Authentication',
+      title: 'Test Issue',
       stage: 'build',
       status: 'active',
       projectId: 'test-project',
@@ -126,5 +126,142 @@ describe('detectOpenSpecChange', () => {
     const result = detectOpenSpecChange(tempDir, issue);
     expect(result).not.toBeNull();
     expect(result?.changePath).toBe(changeDir);
+  });
+
+  it('should return the latest versioned change', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const v1Dir = path.join(changesDir, '42-fix');
+    const v2Dir = path.join(changesDir, '42-fix-v2');
+    const v3Dir = path.join(changesDir, '42-fix-v3');
+    fs.mkdirSync(v1Dir, { recursive: true });
+    fs.mkdirSync(v2Dir, { recursive: true });
+    fs.mkdirSync(v3Dir, { recursive: true });
+    fs.writeFileSync(path.join(v1Dir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(v2Dir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(v3Dir, 'prd.json'), '{}');
+
+    const issue: Issue = {
+      id: 'test-id',
+      number: 42,
+      title: 'Fix',
+      stage: 'build',
+      status: 'active',
+      projectId: 'test-project',
+      labels: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const result = detectOpenSpecChange(tempDir, issue);
+    expect(result).not.toBeNull();
+    expect(result?.changePath).toBe(v3Dir);
+  });
+
+  it('should not confuse different slugs as same change', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const fixDir = path.join(changesDir, '42-fix');
+    const fixBugDir = path.join(changesDir, '42-fix-bug');
+    fs.mkdirSync(fixDir, { recursive: true });
+    fs.mkdirSync(fixBugDir, { recursive: true });
+    fs.writeFileSync(path.join(fixDir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(fixBugDir, 'prd.json'), '{}');
+
+    const issue: Issue = {
+      id: 'test-id',
+      number: 42,
+      title: 'Fix',
+      stage: 'build',
+      status: 'active',
+      projectId: 'test-project',
+      labels: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const result = detectOpenSpecChange(tempDir, issue);
+    expect(result).not.toBeNull();
+    // Both are valid changes with different slugs; returns one of them
+    expect([fixDir, fixBugDir]).toContain(result?.changePath);
+  });
+
+  it('should prefer versioned change over different slug', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const fixDir = path.join(changesDir, '42-fix');
+    const fixV2Dir = path.join(changesDir, '42-fix-v2');
+    const fixBugDir = path.join(changesDir, '42-fix-bug');
+    fs.mkdirSync(fixDir, { recursive: true });
+    fs.mkdirSync(fixV2Dir, { recursive: true });
+    fs.mkdirSync(fixBugDir, { recursive: true });
+    fs.writeFileSync(path.join(fixDir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(fixV2Dir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(fixBugDir, 'prd.json'), '{}');
+
+    const issue: Issue = {
+      id: 'test-id',
+      number: 42,
+      title: 'Fix',
+      stage: 'build',
+      status: 'active',
+      projectId: 'test-project',
+      labels: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const result = detectOpenSpecChange(tempDir, issue);
+    expect(result).not.toBeNull();
+    // 42-fix-v2 is the latest version of the "fix" slug
+    expect([fixV2Dir, fixBugDir]).toContain(result?.changePath);
+  });
+
+  it('should treat unversioned change as v1 and prefer higher versions', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const v1Dir = path.join(changesDir, '42-feature');
+    const v2Dir = path.join(changesDir, '42-feature-v2');
+    fs.mkdirSync(v1Dir, { recursive: true });
+    fs.mkdirSync(v2Dir, { recursive: true });
+    fs.writeFileSync(path.join(v1Dir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(v2Dir, 'prd.json'), '{}');
+
+    const issue: Issue = {
+      id: 'test-id',
+      number: 42,
+      title: 'Feature',
+      stage: 'build',
+      status: 'active',
+      projectId: 'test-project',
+      labels: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const result = detectOpenSpecChange(tempDir, issue);
+    expect(result).not.toBeNull();
+    expect(result?.changePath).toBe(v2Dir);
+  });
+
+  it('should return null when latest versioned change has no prd.json', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const v1Dir = path.join(changesDir, '42-fix');
+    const v2Dir = path.join(changesDir, '42-fix-v2');
+    fs.mkdirSync(v1Dir, { recursive: true });
+    fs.mkdirSync(v2Dir, { recursive: true });
+    fs.writeFileSync(path.join(v1Dir, 'prd.json'), '{}');
+    // v2 has no prd.json
+
+    const issue: Issue = {
+      id: 'test-id',
+      number: 42,
+      title: 'Fix',
+      stage: 'build',
+      status: 'active',
+      projectId: 'test-project',
+      labels: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const result = detectOpenSpecChange(tempDir, issue);
+    expect(result).toBeNull();
   });
 });

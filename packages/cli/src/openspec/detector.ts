@@ -12,6 +12,34 @@ export interface OpenSpecChange {
   specsPath: string;
 }
 
+function extractVersion(dirName: string): number {
+  const match = dirName.match(/-v(\d+)$/);
+  return match ? parseInt(match[1], 10) : 1;
+}
+
+function getSlug(dirName: string, issuePrefix: string): string | null {
+  if (!dirName.startsWith(issuePrefix)) return null;
+  const suffix = dirName.slice(issuePrefix.length);
+  if (!suffix) return null;
+  const versionMatch = suffix.match(/^(.+)-v(\d+)$/);
+  return versionMatch ? versionMatch[1] : suffix;
+}
+
+function findMatchingChanges(changeDirs: string[], issuePrefix: string): string[] {
+  const groups = new Map<string, string[]>();
+
+  for (const dir of changeDirs) {
+    const slug = getSlug(dir, issuePrefix);
+    if (slug === null) continue;
+    if (!groups.has(slug)) groups.set(slug, []);
+    groups.get(slug)!.push(dir);
+  }
+
+  return Array.from(groups.values()).map(dirs => {
+    return dirs.sort((a, b) => extractVersion(b) - extractVersion(a))[0];
+  });
+}
+
 export function detectOpenSpecChange(worktreePath: string, issue: Issue): OpenSpecChange | null {
   const changeDir = path.join(worktreePath, '.mohist-specs', 'changes');
   
@@ -25,12 +53,15 @@ export function detectOpenSpecChange(worktreePath: string, issue: Issue): OpenSp
     .map(e => e.name);
   
   const issuePrefix = `${issue.number}-`;
-  const matchingChange = changeDirs.find(dir => dir.startsWith(issuePrefix));
+  const matchingChanges = findMatchingChanges(changeDirs, issuePrefix);
   
-  if (!matchingChange) {
+  if (matchingChanges.length === 0) {
     return null;
   }
-  
+
+  const matchingChange = matchingChanges.length === 1
+    ? matchingChanges[0]
+    : matchingChanges.sort((a, b) => extractVersion(b) - extractVersion(a))[0];
   const changePath = path.join(changeDir, matchingChange);
   const prdPath = path.join(changePath, 'prd.json');
   
