@@ -115,6 +115,18 @@ interface TaskStatusEntry {
 }
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
+const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024; // 2MB
+
+export function truncateAgentText(text: string): string {
+  if (text.length <= MAX_AGENT_TEXT_LENGTH) {
+    return text;
+  }
+  const keepLength = Math.floor(MAX_AGENT_TEXT_LENGTH / 2);
+  const head = text.slice(0, keepLength);
+  const tail = text.slice(-keepLength);
+  const truncated = text.length - MAX_AGENT_TEXT_LENGTH;
+  return `${head}\n\n...[truncated ${truncated} characters]...\n\n${tail}`;
+}
 
 export function getOrderValue(order: number | string | undefined): number {
   if (order === undefined) return 999999;
@@ -188,6 +200,7 @@ async function executeTaskWithSpawn(
 
     let cleanupDone = false;
     let agentText = '';
+    let agentTextTruncated = false;
     let sessionId = '';
     let timeoutId: NodeJS.Timeout | null = null;
 
@@ -235,7 +248,13 @@ async function executeTaskWithSpawn(
               update.content &&
               'text' in update.content
             ) {
-              agentText += (update.content as { text: string }).text;
+              if (!agentTextTruncated) {
+                agentText += (update.content as { text: string }).text;
+                if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
+                  agentText = truncateAgentText(agentText);
+                  agentTextTruncated = true;
+                }
+              }
             }
           } catch (err) {
             console.error('[ralph-executor] sessionUpdate error:', err);

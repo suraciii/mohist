@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { runRalphLoop, sortTasksByOrder, getOrderValue, readTaskStatus, readPrdTasks, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS } from '../src/openspec/ralph-executor';
+import { runRalphLoop, sortTasksByOrder, getOrderValue, readTaskStatus, readPrdTasks, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS, truncateAgentText } from '../src/openspec/ralph-executor';
 import type { OpenSpecChange } from '../src/openspec/detector';
 
 describe('ralph-executor utilities', () => {
@@ -428,5 +428,42 @@ describe('resource cleanup', () => {
 
     expect(killCount).toBe(1);
     expect(results.every(r => r === true)).toBe(true);
+  });
+});
+
+describe('agentText truncation', () => {
+  const MAX = 2 * 1024 * 1024;
+
+  it('should not truncate text under 2MB', () => {
+    const text = 'a'.repeat(MAX - 1);
+    expect(truncateAgentText(text)).toBe(text);
+  });
+
+  it('should not truncate text exactly at 2MB', () => {
+    const text = 'a'.repeat(MAX);
+    expect(truncateAgentText(text)).toBe(text);
+  });
+
+  it('should truncate text over 2MB preserving head and tail', () => {
+    const head = 'HEAD'.repeat(100);
+    const middle = 'M'.repeat(MAX + 100000);
+    const tail = 'TAIL'.repeat(100);
+    const text = head + middle + tail;
+
+    const result = truncateAgentText(text);
+
+    expect(result.length).toBeLessThan(text.length);
+    expect(result.startsWith(head)).toBe(true);
+    expect(result.endsWith(tail)).toBe(true);
+    expect(result).toContain('...[truncated ');
+    expect(result).toContain(' characters]...');
+  });
+
+  it('should report correct truncated character count', () => {
+    const text = 'a'.repeat(MAX + 5000);
+    const result = truncateAgentText(text);
+    const match = result.match(/\.\.\.\[truncated (\d+) characters\]\.\.\./);
+    expect(match).not.toBeNull();
+    expect(parseInt(match![1], 10)).toBe(5000);
   });
 });

@@ -22,3 +22,10 @@ Started: 2026-04-08T15:27:14.849Z
 - T-003: Limit agentText max length to 2MB
 
 ---
+
+## 2026-04-08T23:35 - T-003 限制 agentText 最大长度为 2MB
+- Added `MAX_AGENT_TEXT_LENGTH` constant (2MB) and `truncateAgentText()` export function in ralph-executor.ts
+- Modified sessionUpdate handler to accumulate text normally until 2MB exceeded, then truncate (head+tail) and stop further accumulation via `agentTextTruncated` flag
+- Added 4 unit tests: under-limit, exact-limit, over-limit with head/tail preservation, correct truncated count
+- All 32 tests pass, build succeeds
+- Next: T-004 (enhance detector for multiple changes)
