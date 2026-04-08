@@ -2,22 +2,22 @@ name: openspec-workflow
 version: "1.0"
 
 stages:
-  - name: plan
+  - stage: plan
     description: Generate Change artifacts with self-review
     entry: mo propose <issue>
     exit: prd.json exists
 
-  - name: review
+  - stage: review
     description: Human review and approval
     entry: user action
     exit: user approved
 
-  - name: build
+  - stage: build
     description: Ralph-style task loop execution
     entry: auto (after approval)
     exit: all tasks completed
 
-  - name: check
+  - stage: check
     description: Auto tests + human acceptance + archival
     entry: auto
     exit: user approved + archived
