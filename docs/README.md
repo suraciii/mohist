@@ -1,10 +1,10 @@
 # crawlph
 
-AI-powered GitHub workflow automation tool that manages Issues through a 7-stage workflow using AI agents.
+AI-powered GitHub workflow automation tool that manages Issues through a structured workflow using AI agents.
 
 ## Features
 
-- **7-Stage Workflow**: draft → designing → waiting-design-review → implementing → waiting-review → merging → done
+- **Structured Workflow**: draft → plan → build → check → done (with optional review stage)
 - **AI Agents**: Automatic design and implementation using opencode agents
 - **User Checkpoints**: Review and approve designs and implementations before proceeding
 - **Single PR Mode**: Each issue has one PR that accumulates both design and implementation
@@ -141,22 +141,21 @@ crawlph config pollInterval 60000
 
 ## Workflow
 
-The workflow has 7 stages:
+The workflow has 5 stages (with an optional review stage):
 
 1. **draft**: Initial state for new issues
-2. **designing**: AI agent creates a design document
-3. **waiting-design-review**: Waiting for user to review and approve the design
-4. **implementing**: AI agent implements the design
-5. **waiting-review**: Waiting for user to review and approve the implementation
-6. **merging**: PR is being merged
-7. **done**: Issue completed and PR merged
+2. **plan**: AI agent explores the issue and creates design/plan
+3. **review**: (Optional) Human review and approval of plan artifacts
+4. **build**: AI agent implements the plan
+5. **check**: Run tests, verify implementation, and archive
+6. **done**: Issue completed
 
 ### User Checkpoints
 
-At two critical points, the workflow pauses for user review:
+At critical points, the workflow pauses for user review:
 
-- **Design Review**: After designing stage, review the design document and approve with `crawlph pr approve`
-- **Implementation Review**: After implementing stage, review the code and approve with `crawlph pr approve`
+- **Review Stage** (optional): After plan stage, review the Change artifacts and approve with `mo issue approve`
+- **Check Stage**: After build stage, review the code and approve with `mo issue approve`
 
 ## OpenSpec Workflow
 
@@ -200,7 +199,7 @@ mo issue approve 42
 
 ### Documentation
 
-- [OpenSpec Usage Guide](OPENSEPCE-USAGE.md) - Detailed usage
+- [OpenSpec Usage Guide](OPENSPEC-USAGE.md) - Detailed usage
 - [Workflow Examples](workflow-example/) - Configuration templates
 - [Troubleshooting](TROUBLESHOOTING.md) - Common issues and solutions
 
