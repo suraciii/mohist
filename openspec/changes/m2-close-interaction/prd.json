@@ -29,7 +29,7 @@
       ],
       "priority": 2,
       "passes": false,
-      "notes": "Add waitingQuestion state: { questionId, question, issueId } | null. Refactor pausedIssue into a unified interaction state or keep as separate variables. Update the onEvent handler to process question_asked and question_answered."
+      "notes": "Use single InteractionState type variable instead of pausedIssue, containing three states: IDLE, GATE_MODE, QUESTION_MODE. Reference design.md D1 decision. State transitions: agent_paused → GATE_MODE, question_asked → QUESTION_MODE, agent_started/agent_completed/question_answered → IDLE."
     },
     {
       "id": "T-003",
@@ -45,7 +45,7 @@
       ],
       "priority": 3,
       "passes": false,
-      "notes": "Refactor the readline handler to check QUESTION_MODE first, then GATE_MODE, then IDLE. The existing GATE_MODE and IDLE paths remain unchanged."
+      "notes": "Refactor the readline handler to check InteractionState.type: QUESTION_MODE first (route to /questions/:id/reply), then GATE_MODE (route to /issues/:number/messages), then IDLE (show 'No paused agent or pending question'). Use switch statement or if-else chain based on state.type."
     },
     {
       "id": "T-004",
