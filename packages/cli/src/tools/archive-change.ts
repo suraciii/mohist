@@ -126,9 +126,10 @@ export function createArchiveChangeTool(context: ArchiveChangeContext): ToolInst
         const versionedName = `${datePrefix}-${changeName}-v${version}`;
         const versionedPath = path.join(archiveDir, versionedName);
         
+        const report = generateReport(change.changePath, `${changeName}-v${version}`, versionedPath);
+        
         fs.renameSync(change.changePath, versionedPath);
         
-        const report = generateReport(change.changePath, `${changeName}-v${version}`, versionedPath);
         const reportPath = path.join(versionedPath, 'execution-report.json');
         fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
 
@@ -136,9 +137,10 @@ export function createArchiveChangeTool(context: ArchiveChangeContext): ToolInst
           `Execution report saved to ${reportPath}`;
       }
 
+      const report = generateReport(change.changePath, changeName, archivePath);
+
       fs.renameSync(change.changePath, archivePath);
 
-      const report = generateReport(change.changePath, changeName, archivePath);
       const reportPath = path.join(archivePath, 'execution-report.json');
       fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
 
