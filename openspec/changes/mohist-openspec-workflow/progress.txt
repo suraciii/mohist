@@ -1,26 +1,30 @@
 # Ralph Progress Log
-Started: 2026-04-08T09:29:08.186Z
+Started: 2026-04-08T09:42:57.973Z
 
 ---
+## T-005-B: 实现任务上下文组装器
+Timestamp: 2026-04-08T17:49:30Z
+Task ID: T-005-B
+What was done:
+- Created `packages/cli/src/openspec/context-assembler.ts` with:
+  - `buildTaskContext()` function to assemble complete task context
+  - `loadLearningsFromDir()` to load session learnings from JSON files
+  - `formatLearningsForPrompt()` to format learnings for prompt inclusion
+  - `formatTaskForPrompt()` to format task details
+  - `formatRetryContext()` for retry scenarios with failure context
+  - `ContextAssembler` class for convenient context assembly
+- Created `packages/cli/tests/context-assembler.test.ts` with 14 unit tests covering:
+  - Task formatting
+  - Learnings formatting and loading
+  - Retry context formatting
+  - Complete context assembly with all components
+  - Edge cases (missing files, nested spec paths)
 
-## 2026-04-08T15:37:00Z - T-005-A COMPLETED
+Learnings:
+- Spec file paths in tasks (e.g., `specs/auth/spec.md`) are relative to the change directory, not the specs subdirectory
+- The `session-memories/` directory stores individual JSON files per task, sorted by task ID numerically
 
-**Task**: 实现OpenSpec Change检测器
-
-**What was done**:
-- Created `packages/cli/src/openspec/detector.ts` with `detectOpenSpecChange()` function
-- Detects `.mohist-specs/changes/{issue-number}-{slug}/` directory
-- Checks for `prd.json` existence
-- Returns complete Change path information (prd, task-status, session-memories, proposal, design, specs)
-- Created comprehensive unit tests in `tests/detector.test.ts`
-- All 5 tests passing ✅
-
-**Learnings**:
-- OpenSpec workflow needs to detect Changes by issue number prefix matching
-- Change directory naming convention: `{issue-number}-{slug}`
-- Detector should return all relevant paths for downstream tools
-
-**Next**: T-005-B (实现任务上下文组装器) - needs to read proposal, design, spec files and assemble complete context
-
----
+Next steps:
+- Implement T-005-C: Ralph 循环控制器 (ralph-executor.ts)
+- Depends on T-005-B being complete
 
