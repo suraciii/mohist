@@ -213,3 +213,34 @@
 | B-203 | recoverState() 重做 | 当前 server 重启后直接标记所有 running tasks 为 failed，agent 架构后应恢复 session | M4 |
 | B-204 | Provider 接口瘦身 | IssueProvider 定义了 github/lab 类型但只有 local 实现，接口设计过度 | M4 |
 | B-205 | Compaction 策略 | 长 issue 的 session messages 可能超过 context window，需要自动摘要机制 | 未来 |
+
+---
+
+## 9. 用户反馈想法
+
+来自实际使用中的想法，待评估和规划。
+
+### 智能代理行为
+
+| ID | 事项 | 说明 | 来源 |
+|----|------|------|------|
+| B-400 | mohist agent 应像人类一样响应 opencode | 当 opencode agent 询问问题时，mohist 应先尝试自己理解并解决，不能解决再询问用户 | 用户反馈 |
+
+### 多渠道交互
+
+| ID | 事项 | 说明 | 来源 |
+|----|------|------|------|
+| B-401 | 支持 IM 交互（Telegram 等） | 用户可通过 Telegram 等即时通讯工具与 mohist 交互，而不仅限于 CLI | 用户反馈 |
+
+### 第三方集成
+
+| ID | 事项 | 说明 | 来源 |
+|----|------|------|------|
+| B-403 | GitHub 集成同步 | 将 mohist 的 issue/issue comments/pr comments 同步到 GitHub，实现双向数据同步 | 用户反馈 |
+
+### 模型配置
+
+| ID | 事项 | 说明 | 来源 |
+|----|------|------|------|
+| B-402 | 允许切换 explore 使用的 model | 用户可配置 explore 模式使用的 LLM 模型（如从默认模型切换到更强的模型） | 用户反馈 |
+
