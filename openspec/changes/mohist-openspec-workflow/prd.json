@@ -85,29 +85,87 @@
       "passes": true
     },
     {
-      "id": "T-005",
-      "order": 5,
+      "id": "T-005-A",
+      "order": "5-A",
       "capability": "main-agent",
-      "requirement_ref": "REQ-005",
-      "title": "实现 Ralph 循环执行逻辑",
-      "description": "扩展 main-agent 支持 Ralph-style 任务循环：读取 prd.json，逐个执行 task，验证 AC",
+      "requirement_ref": "REQ-005-A",
+      "title": "实现 OpenSpec Change 检测器",
+      "description": "创建detector模块检测Change目录和prd.json存在性",
       "acceptance_criteria": [
-        "Main-agent 读取 prd.json 和 task-status.json",
-        "按顺序执行每个 pending task",
-        "组装完整上下文 (proposal + design + spec + learnings)",
-        "调用 spawn_coder 执行任务",
-        "验证 AC 是否满足",
-        "更新 task-status.json",
-        "存储 learning 到 session-memories/",
-        "循环直到所有任务完成"
+        "detector.ts 实现detectOpenSpecChange函数",
+        "检测.mohist-specs/changes/{issue-number}-{slug}/",
+        "检测prd.json存在性",
+        "返回Change路径信息（prd, task-status, session-memories等）",
+        "包含单元测试"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-005-B",
+      "order": "5-B",
+      "capability": "main-agent",
+      "requirement_ref": "REQ-005-B",
+      "title": "实现任务上下文组装器",
+      "description": "创建context-assembler.ts组装完整任务上下文（proposal+design+spec+learnings）",
+      "acceptance_criteria": [
+        "读取proposal.md和design.md",
+        "根据task.spec_file读取对应spec文件",
+        "从session-memories/加载历史learnings",
+        "组装成完整的prompt字符串",
+        "包含单元测试"
       ],
       "dependencies": [
-        "T-001",
-        "T-002",
-        "T-003",
-        "T-004"
+        "T-005-A"
       ],
-      "estimated_effort": "large",
+      "estimated_effort": "small",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": false
+    },
+    {
+      "id": "T-005-C",
+      "order": "5-C",
+      "capability": "main-agent",
+      "requirement_ref": "REQ-005-C",
+      "title": "实现 Ralph 循环控制器",
+      "description": "创建ralph-executor.ts实现任务循环执行逻辑",
+      "acceptance_criteria": [
+        "读取prd.json获取task列表",
+        "按order排序选择pending task",
+        "循环调用spawn_coder执行每个task",
+        "每次执行使用完整上下文",
+        "支持从指定task恢复执行",
+        "包含单元测试"
+      ],
+      "dependencies": [
+        "T-005-A",
+        "T-005-B"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": false
+    },
+    {
+      "id": "T-005-D",
+      "order": "5-D",
+      "capability": "main-agent",
+      "requirement_ref": "REQ-005-D",
+      "title": "集成 Ralph 循环到 main-agent",
+      "description": "修改main-agent在build stage使用Ralph循环",
+      "acceptance_criteria": [
+        "main-agent.ts在build stage检测Change",
+        "如果检测到Change，使用Ralph循环",
+        "如果没有Change，使用传统spawn_coder",
+        "正确传递上下文给spawn_coder",
+        "向后兼容现有workflow",
+        "包含集成测试"
+      ],
+      "dependencies": [
+        "T-005-C"
+      ],
+      "estimated_effort": "medium",
       "spec_file": "specs/ralph-task-execution/spec.md",
       "passes": false
     },
@@ -128,7 +186,7 @@
         "用户介入后能从失败 task 恢复"
       ],
       "dependencies": [
-        "T-005"
+        "T-005-D"
       ],
       "estimated_effort": "large",
       "spec_file": "specs/ralph-task-execution/spec.md",
@@ -150,7 +208,7 @@
         "通过后生成 prd.json"
       ],
       "dependencies": [
-        "T-005"
+        "T-005-D"
       ],
       "estimated_effort": "large",
       "spec_file": "specs/agent-spec-generation/spec.md",
@@ -171,7 +229,7 @@
         "向后兼容：没有 Change 的 issue 走传统流程"
       ],
       "dependencies": [
-        "T-005"
+        "T-005-D"
       ],
       "estimated_effort": "medium",
       "spec_file": "specs/workflow-definition/spec.md",
@@ -237,7 +295,7 @@
         "生成执行报告"
       ],
       "dependencies": [
-        "T-005"
+        "T-005-D"
       ],
       "estimated_effort": "medium",
       "spec_file": "specs/workflow-definition/spec.md",
@@ -268,7 +326,7 @@
     }
   ],
   "metadata": {
-    "total_tasks": 12,
+    "total_tasks": 15,
     "capabilities_covered": [
       "core-tools",
       "main-agent",

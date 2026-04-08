@@ -1,0 +1,25 @@
+# Ralph Progress Log
+Started: 2026-04-08T08:20:18.927Z
+
+---
+
+## 2026-04-08T16:58:00Z — T-004: 实现 task-status 工具集
+
+**Completed**: Created `packages/cli/src/tools/task-status.ts` with `update_task_status` and `get_task_status` tools.
+
+**What was done**:
+- Implemented `createUpdateTaskStatusTool`: updates task status, auto-increments attempts, creates task-status.json if not exists (requires all_task_ids), auto-advances current_task_index to next pending/in_progress task
+- Implemented `createGetTaskStatusTool`: reads and formats task-status.json with summary (completed/failed/pending/in_progress/skipped counts) and next task info
+- Supports all 5 statuses: pending, in_progress, completed, failed, skipped
+- Error tracking: stores error on failure, clears on completion/skip
+- Path validation: same pattern as existing tools (project boundary check)
+- 22 unit tests in `tests/task-status.test.ts` covering creation, updates, status transitions, error handling, edge cases
+
+**Learnings**:
+- Followed same patterns as session-memory.ts and read-prd.ts for consistency
+- current_task_index auto-advances to first pending/in_progress task after each update
+- When all tasks are done, current_task_index is set past the end (equal to tasks.length)
+- Skipped tasks also clear error field (same as completed)
+
+**Next**: T-005 (Ralph 循环执行逻辑) - depends on T-001 through T-004, all now complete
+

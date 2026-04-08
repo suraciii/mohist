@@ -1,0 +1,26 @@
+# Ralph Progress Log
+Started: 2026-04-08T09:29:08.186Z
+
+---
+
+## 2026-04-08T15:37:00Z - T-005-A COMPLETED
+
+**Task**: 实现OpenSpec Change检测器
+
+**What was done**:
+- Created `packages/cli/src/openspec/detector.ts` with `detectOpenSpecChange()` function
+- Detects `.mohist-specs/changes/{issue-number}-{slug}/` directory
+- Checks for `prd.json` existence
+- Returns complete Change path information (prd, task-status, session-memories, proposal, design, specs)
+- Created comprehensive unit tests in `tests/detector.test.ts`
+- All 5 tests passing ✅
+
+**Learnings**:
+- OpenSpec workflow needs to detect Changes by issue number prefix matching
+- Change directory naming convention: `{issue-number}-{slug}`
+- Detector should return all relevant paths for downstream tools
+
+**Next**: T-005-B (实现任务上下文组装器) - needs to read proposal, design, spec files and assemble complete context
+
+---
+
