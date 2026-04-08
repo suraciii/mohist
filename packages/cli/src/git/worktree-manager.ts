@@ -6,6 +6,9 @@ import { slugify } from '../utils/slugify';
 
 const execFileAsync = promisify(execFile);
 
+const FETCH_CACHE_FILE = 'mohist-last-fetch';
+const FETCH_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
+
 export interface WorktreeInfo {
   worktreePath: string;
   branch: string;
@@ -26,12 +29,45 @@ function getWorktreePath(projectName: string, issueNumber: number): string {
   return path.join(getWorktreeBaseDir(projectName), `issue-${issueNumber}`);
 }
 
+function getLastFetchTime(projectPath: string): number {
+  const cacheFile = path.join(projectPath, '.git', FETCH_CACHE_FILE);
+  try {
+    const content = fs.readFileSync(cacheFile, 'utf-8').trim();
+    return parseInt(content, 10);
+  } catch {
+    return 0;
+  }
+}
+
+function writeLastFetchTime(projectPath: string, time: number): void {
+  const cacheFile = path.join(projectPath, '.git', FETCH_CACHE_FILE);
+  fs.writeFileSync(cacheFile, time.toString(), 'utf-8');
+}
+
+async function smartFetch(projectPath: string): Promise<void> {
+  const lastFetch = getLastFetchTime(projectPath);
+  if (Date.now() - lastFetch > FETCH_CACHE_MAX_AGE_MS) {
+    await execFileAsync('git', ['fetch', 'origin'], { cwd: projectPath });
+    writeLastFetchTime(projectPath, Date.now());
+  }
+}
+
+async function branchExists(projectPath: string, branch: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--verify', branch], { cwd: projectPath });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class WorktreeManager {
 
   async create(
     projectPath: string,
     projectName: string,
-    issueNumber: number
+    issueNumber: number,
+    baseBranch: string = 'main'
   ): Promise<string> {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     const branch = getBranchName(issueNumber);
@@ -51,10 +87,24 @@ export class WorktreeManager {
     const baseDir = getWorktreeBaseDir(projectName);
     fs.mkdirSync(baseDir, { recursive: true });
 
+    await smartFetch(projectPath);
+
+    let startPoint = `origin/${baseBranch}`;
+    const originExists = await branchExists(projectPath, `origin/${baseBranch}`);
+
+    if (!originExists) {
+      const localExists = await branchExists(projectPath, baseBranch);
+      if (localExists) {
+        startPoint = baseBranch;
+      } else {
+        throw new Error(`Branch '${baseBranch}' not found locally or on origin`);
+      }
+    }
+
     try {
       await execFileAsync(
         'git',
-        ['worktree', 'add', worktreePath, '-b', branch],
+        ['worktree', 'add', worktreePath, '-b', branch, startPoint],
         { cwd: projectPath }
       );
     } catch (error: any) {

@@ -1,6 +1,8 @@
+import { execFileSync } from 'child_process';
+import * as fs from 'fs';
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -114,6 +116,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 7) {
     migrateToVersion7(db);
+  }
+
+  if (currentVersion < 8) {
+    migrateToVersion8(db);
   }
 }
 
@@ -244,5 +250,58 @@ function migrateToVersion7(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 7);
+  });
+}
+
+function detectBaseBranchSync(projectPath: string): string {
+  try {
+    if (!fs.existsSync(projectPath)) {
+      return 'main';
+    }
+    const gitDir = execFileSync(
+      'git',
+      ['rev-parse', '--git-dir'],
+      { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }
+    ).trim();
+    if (!gitDir) {
+      return 'main';
+    }
+    const ref = execFileSync(
+      'git',
+      ['symbolic-ref', 'refs/remotes/origin/HEAD'],
+      { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }
+    ).trim();
+    const match = ref.match(/^refs\/remotes\/origin\/(.+)$/);
+    return match ? match[1] : 'main';
+  } catch {
+    return 'main';
+  }
+}
+
+function migrateToVersion8(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(projects)"
+    );
+    const hasBaseBranch = tableInfo.some(col => col.name === 'base_branch');
+
+    if (!hasBaseBranch) {
+      db.exec("ALTER TABLE projects ADD COLUMN base_branch TEXT DEFAULT 'main'");
+    }
+
+    const projects = db.all<{ id: string; path: string; base_branch: string | null }>(
+      'SELECT id, path, base_branch FROM projects'
+    );
+    for (const project of projects) {
+      if (project.base_branch == null) {
+        const branch = detectBaseBranchSync(project.path);
+        db.run(
+          'UPDATE projects SET base_branch = ? WHERE id = ?',
+          [branch, project.id]
+        );
+      }
+    }
+
+    setSchemaVersion(db, 8);
   });
 }

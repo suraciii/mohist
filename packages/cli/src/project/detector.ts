@@ -28,6 +28,7 @@ export class DirectoryDetector {
           id: config.id || 'detected',
           name: config.name || path.basename(currentDir),
           path: currentDir,
+          baseBranch: config.baseBranch || 'main',
           createdAt: config.createdAt || new Date().toISOString(),
           updatedAt: config.updatedAt || new Date().toISOString()
         };
