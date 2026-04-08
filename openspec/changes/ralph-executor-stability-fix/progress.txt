@@ -97,3 +97,12 @@ Next steps: T-006 (register 8 missing tools to main-agent)
 ### Next steps
 - T-008: Fix change-creator isNew and findNextVersion bugs
 - T-009: Unify detection logic (will refactor detection to shared findChangeDir)
+
+[2026-04-09T00:19:00Z] T-008 completed
+- Fixed isNew = false → isNew = true when force=true in change-creator.ts (line 88)
+- Rewrote findNextVersion to use exact regex matching ^${baseName}(-v\\d+)?$ to avoid matching unrelated directories like "42-fix-bug" when looking for "42-fix"
+- findNextVersion now collects all version numbers (including baseName as v1) and finds true max + 1
+- Added 10 unit tests in tests/change-creator.test.ts covering both bug scenarios, version gaps, slug isolation, force behavior, sequential versions, metadata
+- All tests pass, typecheck clean
+- Note: api/propose.ts route tests deferred to T-013 (end-to-end verification)
+- Next: T-009 (unify detection logic)
