@@ -10,6 +10,9 @@ interface EventData {
   createdAt?: string;
   error?: string;
   stage?: string;
+  questionId?: string;
+  question?: string;
+  answer?: string;
 }
 
 interface EventConfig {
@@ -26,6 +29,8 @@ const EVENT_CONFIGS: Record<string, EventConfig> = {
   stage_changed: { symbol: '->', color: chalk.cyan, description: 'stage changed' },
   comment_added: { symbol: '##', color: chalk.white, description: 'comment added' },
   approval_requested: { symbol: '??', color: chalk.yellow, description: 'approval requested' },
+  question_asked: { symbol: '??', color: chalk.yellow, description: 'question asked' },
+  question_answered: { symbol: '✓', color: chalk.green, description: 'question answered' },
 };
 
 function formatTimestamp(): string {
@@ -47,6 +52,9 @@ function formatIssueSuffix(data: EventData): string {
     }
     if (data.error) {
       return `${prefix}: ${data.error}`;
+    }
+    if (data.question) {
+      return `${prefix}: "${data.question}"`;
     }
     if (data.body) {
       return `${prefix}: "${data.body}"`;

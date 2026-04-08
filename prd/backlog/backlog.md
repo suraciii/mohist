@@ -48,8 +48,8 @@
 |----|------|------|------|
 | B-030 | 实现 mo attach CLI 命令 | 连接 server，订阅 issue 事件（SSE），渲染 agent 输出到终端，stdin 发送用户消息 | design D7 |
 | B-031 | 实现用户消息注入 | 外部消息注入到 Main Agent session，触发新 LLM loop 迭代 | design D7 |
-| B-032 | mo attach 连接协议确定 | HTTP polling vs SSE vs WebSocket | design Open Question |
-| B-033 | ask_user 与自由文本的冲突处理 | sub-agent 被 ask_user 阻塞时用户发自由文本，Main Agent LLM 如何决策 | design D7 |
+| B-032 | ~~mo attach 连接协议确定~~ | ✅ 已完成 — SSE 已为实现事实，通过 `mo attach` SSE 订阅实现 (m2-close-interaction) |
+| B-033 | ~~ask_user 与自由文本的冲突处理~~ | ✅ 已完成 — 通过 `mo attach` 统一交互入口解决，QUESTION_MODE 自动路由用户输入到 `/questions/:id/reply` (m2-close-interaction) |
 
 ### HTTP API 扩展
 
