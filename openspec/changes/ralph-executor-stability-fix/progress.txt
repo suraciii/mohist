@@ -29,3 +29,23 @@ Started: 2026-04-08T15:27:14.849Z
 - Added 4 unit tests: under-limit, exact-limit, over-limit with head/tail preservation, correct truncated count
 - All 32 tests pass, build succeeds
 - Next: T-004 (enhance detector for multiple changes)
+
+---
+
+## 2026-04-08T23:45 - T-004 增强 detector 处理多个 changes
+
+### What was done
+- Refactored `detectOpenSpecChange` in detector.ts to properly handle multiple matching changes
+- Added `extractVersion()` helper to parse `-v{N}` suffix (defaults to v1)
+- Added `getSlug()` helper to extract the base slug (everything after `{issueNumber}-`, minus `-v{N}`)
+- Added `findMatchingChanges()` that groups directories by slug, picks highest version per group, then selects the overall latest
+- Added 5 new unit tests: multi-version selection, slug separation, versioned vs unversioned, missing prd.json on latest, prefer versioned over different slug
+- All 10 detector tests pass, typecheck clean
+
+### Learnings
+- Design doc's regex `^[issuePrefix][^-]+(-v\d+)?$` was too strict — real directory names contain hyphens (e.g. `42-test-issue`)
+- Correct approach: group by slug (strip `-v{N}` suffix), sort versions within each group, then pick highest version across groups
+- `42-fix` and `42-fix-bug` are correctly treated as different changes (different slugs)
+
+### Next steps
+- T-005: Verify failure classification logic coverage
