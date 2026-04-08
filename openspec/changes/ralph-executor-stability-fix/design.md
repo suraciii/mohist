@@ -8,50 +8,93 @@ packages/cli/src/
 ├── openspec/
 │   ├── ralph-executor.ts     - 资源泄漏/竞态/内存
 │   ├── detector.ts           - 多 Change + 重复检测
-│   └── change-creator.ts     - isNew/findNextVersion bug
+│   ├── change-creator.ts     - isNew/findNextVersion bug
+│   └── context-assembler.ts  - 不受影响
 ├── agents/
-│   └── main-agent.ts         - 8 个工具未注册
+│   └── main-agent.ts         - 8 个工具未注册 + plan 无感知
 ├── workflow/
-│   └── workflow-loader.ts    - 重复检测逻辑
-└── tools/
-    ├── read-prd.ts           - 已实现未注册
-    ├── read-spec.ts          - 已实现未注册
-    ├── session-memory.ts     - 已实现未注册
-    ├── task-status.ts        - 已实现未注册
-    └── self-review.ts        - 已实现未注册
+│   └── workflow-loader.ts    - 缺少 review stage + 重复检测
+├── tools/
+│   ├── advance-stage.ts      - Review 不在转换表中
+│   ├── archive-change.ts     - rename 后读旧路径
+│   ├── read-prd.ts           - 已实现未注册
+│   ├── read-spec.ts          - 已实现未注册
+│   ├── session-memory.ts     - 已实现未注册
+│   ├── task-status.ts        - 已实现未注册
+│   └── self-review.ts        - 已实现未注册
+└── docs/
+    ├── OPENSEPCE-USAGE.md    - 拼写错误
+    ├── README.md             - 旧 workflow 描述
+    └── workflow-example/
+        └── workflow-openspec.yaml - schema 不匹配
 ```
 
-**端到端流程断点:**
+**端到端流程断点（当前状态）:**
 ```
 mo propose 42
     │
     ▼
-┌──────────────────────────────────────────────────────────┐
-│  Plan Stage                                              │
-│                                                          │
-│  Agent 收到 prompt: "分析 issue #42..."                   │
+┌─ Plan Stage ─────────────────────────────────────────────┐
+│  Agent 收到 prompt: "分析 issue #42..."                    │
 │       │                                                  │
-│       ├─ Agent 想调用 run_self_review → ❌ 工具不存在      │
-│       ├─ Agent 想调用 generate_prd    → ❌ 工具不存在      │
-│       ├─ Agent 想调用 store_learning  → ❌ 工具不存在      │
+│       ├─ 想调用 run_self_review → ❌ 工具不存在            │
+│       ├─ 想调用 generate_prd    → ❌ 工具不存在            │
+│       ├─ 想调用 store_learning  → ❌ 工具不存在            │
 │       │                                                  │
-│       └─ 只能用 spawn_coder 产出临时计划 → 断开！          │
+│       └─ 只能用 spawn_coder 产出临时计划                    │
 │                                                          │
-│  期望: 创建 specs → self-review → generate prd.json      │
-│  实际: 无 OpenSpec 感知，产出临时文本计划                   │
+│  advance_stage("build")  ← review 被完全跳过              │
 └──────────────────────────────────────────────────────────┘
     │
-    ▼ (advance_stage → build)
-┌──────────────────────────────────────────────────────────┐
-│  Build Stage                                             │
-│                                                          │
-│  read_workflow 检测到 OpenSpec 模式                       │
-│  Agent 调用 run_ralph_loop                               │
+    ▼
+┌─ Build Stage ─────────────────────────────────────────────┐
+│  read_workflow: mode = traditional (无 prd.json)           │
+│  Agent: spawn_coder (传统模式，非 Ralph 循环)              │
+└──────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─ Check Stage ─────────────────────────────────────────────┐
+│  Agent: spawn_coder("运行测试、lint...")                   │
+│  archive_change 可用，但报告数据为空                        │
+└──────────────────────────────────────────────────────────┘
+```
+
+**修复后目标流程:**
+```
+mo propose 42
+    │
+    ▼
+┌─ Plan Stage (OpenSpec 模式) ──────────────────────────────┐
+│  Agent 感知 OpenSpec 模式（通过系统提示）                   │
 │       │                                                  │
-│       ├─ detectOpenSpecChange → 找不到 prd.json          │
-│       │   (因为 plan 阶段从未生成)                        │
-│       │                                                  │
-│       └─ 返回 "No OpenSpec Change found" → 降级传统模式   │
+│       ├─ spawn_coder: 探索代码库，创建 specs               │
+│       ├─ run_self_review: 验证 specs 完整性               │
+│       ├─ generate_prd: 生成 prd.json                     │
+│       └─ advance_stage("review")                          │
+└──────────────────────────────────────────────────────────┘
+    │
+    ▼ (approval gate: 用户审查)
+┌─ Review Stage ────────────────────────────────────────────┐
+│  approval: true → 等待用户审批                             │
+│  用户满意 → 手动继续                                      │
+└──────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─ Build Stage (Ralph 循环) ────────────────────────────────┐
+│  read_workflow: mode = openspec (prd.json 存在)            │
+│  run_ralph_loop: 逐 task 执行                              │
+│       ├─ 读取 prd.json → 按序执行 task                     │
+│       ├─ 每次组装完整上下文 (proposal+design+spec+learnings)│
+│       ├─ 失败分类 + 重试 + 学习记录                        │
+│       └─ 全部完成 → advance_stage("check")                │
+└──────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─ Check Stage ─────────────────────────────────────────────┐
+│  spawn_coder: 运行测试、lint、typecheck                     │
+│  approval: true → 用户验收                                 │
+│  archive_change: 归档 Change + 生成执行报告                 │
+│  advance_stage("done")                                     │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -61,7 +104,6 @@ mo propose 42
 
 **决策**: 使用 `try-finally` 确保 cleanup 执行，添加 connection 关闭
 
-**实现**:
 ```typescript
 async function executeTaskWithSpawn(...): Promise<SpawnResult> {
   const stream = ndJsonStream(input, output);
@@ -80,11 +122,6 @@ async function executeTaskWithSpawn(...): Promise<SpawnResult> {
   }
 }
 ```
-
-**理由**:
-- 无论成功或失败，资源都得到清理
-- 添加显式的 connection.close() 和 stream.cancel()
-- finally 块确保即使抛出异常也执行清理
 
 #### D2: 竞态条件修复
 
@@ -152,16 +189,11 @@ enum FailureType {
 }
 ```
 
-#### D6: 工具注册策略（新增）
+#### D6: 工具注册策略
 
-**决策**: 在 main-agent.ts 中注册所有 OpenSpec 工具，按 stage 按需使用
-
-**当前状态**: 只有 `run_ralph_loop` 被注册
-
-**方案**: 注册全部 8 个工具，让 Agent 自行决定何时调用
+**决策**: 在 main-agent.ts 中注册所有 OpenSpec 工具，让 Agent 自行决定何时调用
 
 ```typescript
-// main-agent.ts - 新增注册
 toolRegistry.register(createReadPrdTool({ cwd: context.worktreePath }));
 toolRegistry.register(createReadSpecTool({ cwd: context.worktreePath }));
 toolRegistry.register(createStoreLearningTool({ cwd: context.worktreePath }));
@@ -172,73 +204,42 @@ toolRegistry.register(createRunSelfReviewTool({ cwd: context.worktreePath }));
 toolRegistry.register(createGeneratePrdTool({ cwd: context.worktreePath }));
 ```
 
-**工具参数**: 所有工具需要 `cwd` 参数以定位 `.mohist-specs/` 目录
+#### D7: Plan Stage OpenSpec 感知
 
-**理由**:
-- 工具已实现且有测试，只需注册
-- Agent 通过系统提示引导按 stage 使用
-- 不需要额外的 stage 判断逻辑——工具本身是通用的
-
-**替代方案**: 只在特定 stage 注册特定工具
-- 放弃原因：需要动态修改 ToolRegistry，增加复杂度；Agent 已通过 stage 信息知道当前阶段
-
-#### D7: Plan Stage OpenSpec 感知（新增）
-
-**决策**: 在 buildSystemPrompt 中根据 workflow 检测结果动态注入 OpenSpec 指令
-
-**实现**:
+**决策**: 在 buildSystemPrompt 中根据 OpenSpec 检测结果动态注入指令
 
 ```
-当 workflow.openspec.mode === 'openspec' 时，plan stage 指令:
-1. 使用 read_workflow 检查当前 workflow 和 OpenSpec 状态
-2. 探索代码库，理解需求
-3. 在 .mohist-specs/changes/{change-name}/ 下创建:
+当检测到 OpenSpec Change 目录时，plan stage 指令:
+1. 使用 spawn_coder 探索代码库，在 Change 目录下创建:
    - proposal.md: 问题描述和方案概述
    - design.md: 技术设计
    - specs/{capability}/spec.md: 按能力分解的需求规格
-4. 使用 run_self_review 验证 specs 完整性
-5. 审查通过后使用 generate_prd 生成 prd.json
-6. advance_stage 到 build
+2. 使用 run_self_review 验证 specs 完整性（最多 3 次迭代）
+3. 审查通过后使用 generate_prd 生成 prd.json
+4. advance_stage 到 review（而非直接到 build）
 
-当 workflow.openspec.mode === 'traditional' 时，使用原有 plan prompt。
+当无 Change 目录时，使用原有 plan prompt。
 ```
 
-**集成点**: `main-agent.ts` 的 `buildSystemPrompt()` 函数需要接收 workflow 配置
+**集成点**: `main-agent.ts` 的 `buildSystemPrompt()` 需要接收 worktreePath 以检测 Change
 
-**依赖**: 需要 D6（工具注册）先完成
+**依赖**: D6（工具注册）、D10（review stage）
 
-#### D8: change-creator bug 修复（新增）
+#### D8: change-creator bug 修复
 
 **Bug 1: isNew 标记**
 
 ```typescript
-// 修复前
 if (force) {
   fs.rmSync(existingPath, { recursive: true, force: true });
   changeName = baseName;
-  isNew = false;  // ← 错误
-}
-
-// 修复后
-if (force) {
-  fs.rmSync(existingPath, { recursive: true, force: true });
-  changeName = baseName;
-  isNew = true;   // ← 删旧建新，语义上是新建
+  isNew = true;   // 删旧建新，语义上是新建
 }
 ```
 
 **Bug 2: findNextVersion 冲突**
 
 ```typescript
-// 修复前：从 baseName 开始找，忽略已存在的版本化目录
-function findNextVersion(changesDir: string, baseName: string): string {
-  if (!fs.existsSync(path.join(changesDir, baseName))) {
-    return baseName;  // ← 可能与已有 v2 冲突
-  }
-  // ...
-}
-
-// 修复后：收集所有版本号，找到最大值 +1
 function findNextVersion(changesDir: string, baseName: string): string {
   const existing = fs.readdirSync(changesDir);
   const versions = existing
@@ -254,7 +255,6 @@ function findNextVersion(changesDir: string, baseName: string): string {
   if (!fs.existsSync(path.join(changesDir, nextName))) {
     return nextName;
   }
-  // 安全回退：递增直到找到可用名
   let v = maxVersion + 1;
   while (fs.existsSync(path.join(changesDir, `${baseName}-v${v}`))) {
     v++;
@@ -263,47 +263,115 @@ function findNextVersion(changesDir: string, baseName: string): string {
 }
 ```
 
-#### D9: 统一检测逻辑（新增）
+#### D9: 统一检测逻辑
 
-**决策**: detector.ts 作为唯一检测入口，workflow-loader 调用它
-
-**当前状态**:
-```
-workflow-loader.ts::detectOpenSpecForIssue()  → 三态: traditional / change-exists / openspec
-detector.ts::detectOpenSpecChange()           → 二态: null / OpenSpecChange (仅当 prd.json 存在)
-```
-
-**方案**: 保留 detector.ts 的 `detectOpenSpecChange()` 作为底层实现，workflow-loader 的 `detectOpenSpecForIssue()` 调用它并增加"Change 目录存在但无 prd.json"的中间态
+**决策**: 提取 `findChangeDir()` 共享函数，两个检测入口都调用它
 
 ```typescript
-// workflow-loader.ts
-export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSpecDetection {
-  const changeDir = findChangeDir(cwd, issueNumber);  // 复用 detector 的目录查找
-  
-  if (!changeDir) {
-    return { detected: false, mode: 'traditional' };
-  }
+// detector.ts - 新增导出
+export function findChangeDir(cwd: string, issueNumber: number): string | null {
+  const changesDir = path.join(cwd, '.mohist-specs', 'changes');
+  if (!fs.existsSync(changesDir)) return null;
 
-  const prdPath = path.join(changeDir, 'prd.json');
-  
-  if (!fs.existsSync(prdPath)) {
-    return { detected: true, changePath: changeDir, mode: 'traditional' };
-  }
+  const entries = fs.readdirSync(changesDir, { withFileTypes: true });
+  const prefix = `${issueNumber}-`;
+  const matching = entries
+    .filter(e => e.isDirectory() && e.name.startsWith(prefix))
+    .map(e => e.name)
+    .sort((a, b) => {
+      const vA = parseInt(a.match(/-v(\d+)$/)?.[1] ?? '1', 10);
+      const vB = parseInt(b.match(/-v(\d+)$/)?.[1] ?? '1', 10);
+      return vB - vA;
+    });
 
-  return { detected: true, changePath: changeDir, prdPath, mode: 'openspec' };
+  return matching.length > 0
+    ? path.join(changesDir, matching[0])
+    : null;
 }
 ```
 
-**同时**: 将 detector.ts 的目录查找逻辑提取为共享函数 `findChangeDir()`
+`workflow-loader.ts` 和 `detector.ts` 都调用 `findChangeDir()`。
+
+#### D10: Review 阶段集成（新增）
+
+**决策**: 在默认 workflow 和转换表中加入 review stage
+
+**当前状态**:
+```typescript
+// advance-stage.ts - 缺少 Review
+const M1_ALLOWED_TRANSITIONS = {
+  [Stage.Draft]: [Stage.Plan],
+  [Stage.Plan]: [Stage.Build],       // ← 应包含 Review
+  [Stage.Build]: [Stage.Check],
+  [Stage.Check]: [Stage.Done, Stage.Plan],
+};
+
+// workflow-loader.ts - 缺少 review stage
+stages: [plan, build, check]         // ← 应包含 review
+```
+
+**修复后**:
+```typescript
+// advance-stage.ts
+const M1_ALLOWED_TRANSITIONS = {
+  [Stage.Draft]: [Stage.Plan],
+  [Stage.Plan]: [Stage.Review, Stage.Build],  // review 可选
+  [Stage.Review]: [Stage.Build],
+  [Stage.Build]: [Stage.Check],
+  [Stage.Check]: [Stage.Done, Stage.Plan],
+};
+```
+
+```typescript
+// workflow-loader.ts - 默认 workflow
+stages: [
+  { stage: 'plan', prompt: '...', approval: false, timeout: 600 },
+  { stage: 'review', prompt: '审查 Change 产物（proposal/design/specs），确认质量', approval: true, timeout: 120 },
+  { stage: 'build', prompt: '...', approval: true, timeout: 1800 },
+  { stage: 'check', prompt: '...', approval: true, timeout: 600 },
+]
+```
+
+**关键设计点**:
+- `plan → review` 和 `plan → build` 都允许：传统 issue 直接 plan→build，OpenSpec issue plan→review→build
+- Agent 通过 `read_workflow` 的 OpenSpec 检测结果决定走哪条路径
+- review stage 的 `approval: true` 确保用户有机会审查 specs
+- review stage 的 prompt 简短，因为审查主要靠人工
+
+**向后兼容**: 传统 issue 走 `plan → build` 跳过 review，因为 agent 的系统提示会根据 OpenSpec 检测结果引导行为。
+
+#### D11: archive_change 报告时序修复（新增）
+
+**问题**: `renameSync` 在 L129/139 执行后，`generateReport` 在 L131/141 仍用 `change.changePath`（旧路径）读取 task-status 和 session-memories，但这些文件已移动。
+
+**修复**: 在 `renameSync` 之前生成报告，或在 `renameSync` 之后使用新路径。
+
+```typescript
+// 方案: 先生成报告再移动
+const report = generateReport(change.changePath, changeName, archivePath);
+
+fs.renameSync(change.changePath, archivePath);
+
+const reportPath = path.join(archivePath, 'execution-report.json');
+fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
+```
+
+#### D12: 文档修复（新增）
+
+1. 重命名 `docs/OPENSEPCE-USAGE.md` → `docs/OPENSPEC-USAGE.md`
+2. 更新 `docs/workflow-example/workflow-openspec.yaml`：`stages[].name` → `stages[].stage`
+3. 更新 `docs/README.md`：移除旧的 7-stage 描述，替换为当前 `draft → plan → review → build → check → done`
 
 ### 测试策略
 
 1. **单元测试**: 模拟 connection/stream 关闭验证
 2. **集成测试**: 长任务执行后检查资源释放
 3. **边界测试**: agentText 达到 10MB 时的行为
-4. **工具注册测试**: 验证 main-agent 注册的工具数量和列表
+4. **工具注册测试**: 验证 main-agent 注册的工具数量（≥15）
 5. **change-creator 测试**: isNew 语义、findNextVersion 冲突处理
 6. **检测统一测试**: 两个入口返回一致结果
+7. **转换表测试**: plan→review→build、plan→build 都允许
+8. **archive-change 测试**: 报告在移动前生成，内容完整
 
 ### 回滚策略
 
@@ -317,18 +385,24 @@ export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSp
 ```
 ralph-executor-stability-fix
     │
-    ├── D1~D5: ralph-executor 稳定性修复
-    │   └── 依赖: context-assembler.ts (已稳定)
+    ├── D1~D3: ralph-executor 稳定性修复 (T-001~T-003)
     │
-    ├── D6: 工具注册
-    │   └── 依赖: tools/* (已实现)
+    ├── D4: 多 Change 处理 (T-004)
+    │   └── D9: 统一检测 (T-009, 依赖 T-004)
     │
-    ├── D7: Plan Stage 感知
-    │   └── 依赖: D6 (工具注册)
+    ├── D5: 失败分类框架 (T-005, 依赖 T-001, T-002)
     │
-    ├── D8: change-creator bug 修复
-    │   └── 独立，无依赖
+    ├── D6: 工具注册 (T-006)
+    │   └── D7: Plan 感知 (T-007, 依赖 T-006)
     │
-    └── D9: 统一检测逻辑
-        └── 依赖: D4 (多 Change 处理)
+    ├── D8: change-creator bug (T-008, 独立)
+    │
+    ├── D10: Review 阶段集成 (T-011, 独立)
+    │   └── D7 依赖 D10 (plan→review 转换)
+    │
+    ├── D11: archive 报告修复 (T-012, 独立)
+    │
+    ├── D12: 文档修复 (T-013, 独立)
+    │
+    └── T-014: 端到端验证 (依赖全部)
 ```

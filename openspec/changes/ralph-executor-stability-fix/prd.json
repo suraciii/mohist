@@ -126,16 +126,16 @@
       "capability": "plan-stage-integration",
       "requirement_ref": "D7",
       "title": "实现 Plan Stage OpenSpec 感知",
-      "description": "更新 buildSystemPrompt 使其在 OpenSpec 模式下引导 Agent 执行 specs 创建、self-review 和 prd.json 生成",
+      "description": "更新 buildSystemPrompt 使其在 OpenSpec 模式下引导 Agent 执行 specs 创建、self-review、prd.json 生成，然后 advance_stage 到 review",
       "acceptance_criteria": [
-        "buildSystemPrompt 接收 workflow 配置参数",
-        "当 openspec.mode === 'openspec' 时注入 OpenSpec plan 指令",
-        "指令包含：创建 proposal/design/specs、运行 self-review、生成 prd.json",
-        "当 mode === 'traditional' 时保持原有 prompt 不变",
+        "buildSystemPrompt 接收 worktreePath 参数以检测 Change 目录",
+        "当 Change 目录存在时注入 OpenSpec plan 指令",
+        "指令包含：创建 proposal/design/specs、运行 self-review、生成 prd.json、advance 到 review",
+        "当无 Change 目录时保持原有 plan prompt",
         "Agent 在 plan 阶段能自主完成 specs → review → prd 流程",
         "测试覆盖 OpenSpec 和 traditional 两种模式"
       ],
-      "dependencies": ["T-006"],
+      "dependencies": ["T-006", "T-011"],
       "estimated_effort": "medium",
       "spec_file": "design.md",
       "passes": false
@@ -152,8 +152,7 @@
         "findNextVersion 收集所有版本号（含 baseName）找最大值 +1",
         "不会产生与已有目录冲突的名称",
         "添加 change-creator 单元测试覆盖两个 bug 场景",
-        "添加 api/propose.ts 路由测试",
-        "添加 cli/commands/propose.ts 命令测试"
+        "添加 api/propose.ts 路由测试"
       ],
       "dependencies": [],
       "estimated_effort": "medium",
@@ -166,14 +165,14 @@
       "capability": "detection-unification",
       "requirement_ref": "D9",
       "title": "统一检测逻辑消除重复",
-      "description": "将 detector.ts 和 workflow-loader.ts 的检测逻辑统一，提取共享函数 findChangeDir",
+      "description": "提取 findChangeDir() 共享函数，workflow-loader 和 detector 都调用它",
       "acceptance_criteria": [
-        "在 detector.ts 中提取 findChangeDir() 共享函数",
-        "workflow-loader.ts 的 detectOpenSpecForIssue 调用共享函数",
-        "detector.ts 的 detectOpenSpecChange 也调用共享函数",
-        "两个入口对相同输入返回一致结果",
-        "更新 detector.test.ts 和 workflow-loader-detection.test.ts",
-        "多 Change 场景下两个入口都返回最新版本"
+        "在 detector.ts 中导出 findChangeDir() 函数",
+        "detectOpenSpecChange 内部调用 findChangeDir",
+        "workflow-loader.ts 的 detectOpenSpecForIssue 调用 findChangeDir",
+        "两个入口对相同输入返回一致的 change 目录",
+        "多 Change 场景下两个入口都返回最新版本",
+        "更新 detector.test.ts 和 workflow-loader-detection.test.ts"
       ],
       "dependencies": ["T-004"],
       "estimated_effort": "small",
@@ -183,6 +182,64 @@
     {
       "id": "T-010",
       "order": 10,
+      "capability": "workflow-stage",
+      "requirement_ref": "D10",
+      "title": "将 Review 阶段加入工作流",
+      "description": "在 advance-stage.ts 的 M1_ALLOWED_TRANSITIONS 和 workflow-loader.ts 的默认 workflow 中加入 review stage",
+      "acceptance_criteria": [
+        "M1_ALLOWED_TRANSITIONS 包含 Plan→Review 和 Review→Build",
+        "Plan→Build 仍然允许（传统 issue 向后兼容）",
+        "默认 workflow 包含 review stage，approval: true",
+        "review stage 有合适的 prompt（审查 Change 产物）",
+        "更新 advance-stage 的 description 提及 review 转换",
+        "添加转换表测试覆盖新增路径"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": false
+    },
+    {
+      "id": "T-011",
+      "order": 11,
+      "capability": "bug-fix",
+      "requirement_ref": "D11",
+      "title": "修复 archive_change 报告生成时序",
+      "description": "修复 archive-change.ts 中 renameSync 后用旧路径读取文件导致报告数据为空的问题",
+      "acceptance_criteria": [
+        "generateReport 在 renameSync 之前调用",
+        "报告包含正确的 tasksCompleted/tasksFailed 数量",
+        "报告包含正确的 sessionMemoriesCount",
+        "添加 archive-change 单元测试验证报告内容",
+        "测试归档冲突场景（同日归档两次）"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": false
+    },
+    {
+      "id": "T-012",
+      "order": 12,
+      "capability": "documentation",
+      "requirement_ref": "D12",
+      "title": "修复文档拼写和 schema 不匹配",
+      "description": "修复 OPENSEPCE 拼写错误、示例 YAML schema、README 旧 workflow 描述",
+      "acceptance_criteria": [
+        "重命名 OPENSEPCE-USAGE.md → OPENSPEC-USAGE.md",
+        "更新 docs/README.md 中引用该文件的链接",
+        "workflow-openspec.yaml 使用 stages[].stage 而非 stages[].name",
+        "docs/README.md 描述当前 4-stage workflow (plan/review/build/check)",
+        "验证示例 YAML 能被 workflow-loader.ts 正确解析"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": false
+    },
+    {
+      "id": "T-013",
+      "order": 13,
       "capability": "testing",
       "requirement_ref": "TEST",
       "title": "端到端验证和测试更新",
@@ -191,18 +248,19 @@
         "更新 ralph-executor.test.ts 测试清理逻辑",
         "添加竞态条件测试用例",
         "添加 agentText 截断测试",
-        "更新 agent-workflow-e2e.test.ts 工具数量断言",
+        "更新 agent-workflow-e2e.test.ts 工具数量断言（≥15）",
+        "添加 skip-to-review 端点测试",
         "确保全部测试通过",
         "npm run build 通过"
       ],
-      "dependencies": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007", "T-008", "T-009"],
+      "dependencies": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007", "T-008", "T-009", "T-010", "T-011", "T-012"],
       "estimated_effort": "medium",
       "spec_file": "design.md",
       "passes": false
     }
   ],
   "metadata": {
-    "total_tasks": 10,
+    "total_tasks": 13,
     "capabilities_covered": [
       "resource-cleanup",
       "concurrency-fix",
@@ -213,6 +271,8 @@
       "plan-stage-integration",
       "bug-fix",
       "detection-unification",
+      "workflow-stage",
+      "documentation",
       "testing"
     ],
     "session_memory_path": "./session-memories/",
