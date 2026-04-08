@@ -212,7 +212,7 @@
       ],
       "estimated_effort": "large",
       "spec_file": "specs/agent-spec-generation/spec.md",
-      "passes": false
+      "passes": true
     },
     {
       "id": "T-008",
