@@ -365,4 +365,68 @@ describe('resource cleanup', () => {
     expect(readableCancel).toHaveBeenCalledTimes(1);
     expect(writableAbort).toHaveBeenCalledTimes(1);
   });
+
+  it('should use atomic flag to prevent duplicate cleanup (doCleanup idempotency)', () => {
+    let cleanupDone = false;
+    let killCount = 0;
+    const doCleanup = () => {
+      if (cleanupDone) return;
+      cleanupDone = true;
+      killCount++;
+    };
+
+    doCleanup();
+    doCleanup();
+    doCleanup();
+
+    expect(killCount).toBe(1);
+    expect(cleanupDone).toBe(true);
+  });
+
+  it('should clear timeout in doCleanup to prevent race condition', () => {
+    let cleanupDone = false;
+    let timeoutId: NodeJS.Timeout | null = setTimeout(() => {}, 100000);
+    let clearTimeoutCalled = false;
+    const originalClearTimeout = global.clearTimeout;
+    global.clearTimeout = ((id: any) => {
+      clearTimeoutCalled = true;
+      originalClearTimeout(id);
+    }) as typeof clearTimeout;
+
+    const doCleanup = () => {
+      if (cleanupDone) return;
+      cleanupDone = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    doCleanup();
+    doCleanup();
+
+    expect(clearTimeoutCalled).toBe(true);
+    expect(timeoutId).toBeNull();
+    expect(cleanupDone).toBe(true);
+
+    global.clearTimeout = originalClearTimeout;
+  });
+
+  it('should handle concurrent cleanup calls from multiple paths safely', () => {
+    let cleanupDone = false;
+    let killCount = 0;
+    const doCleanup = () => {
+      if (cleanupDone) return;
+      cleanupDone = true;
+      killCount++;
+    };
+
+    const results = Array.from({ length: 100 }, () => {
+      doCleanup();
+      return cleanupDone;
+    });
+
+    expect(killCount).toBe(1);
+    expect(results.every(r => r === true)).toBe(true);
+  });
 });

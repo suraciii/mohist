@@ -186,20 +186,25 @@ async function executeTaskWithSpawn(
       ),
     });
 
-    let procExited = false;
+    let cleanupDone = false;
     let agentText = '';
     let sessionId = '';
     let timeoutId: NodeJS.Timeout | null = null;
 
-    const ensureKill = () => {
-      if (!procExited) {
-        procExited = true;
-        try { proc.kill('SIGTERM'); } catch { /* already exited */ }
-        setTimeout(() => {
-          try { proc.kill('SIGKILL'); } catch { /* already exited */ }
-        }, 5000);
+    const doCleanup = () => {
+      if (cleanupDone) return;
+      cleanupDone = true;
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
       }
-      if (timeoutId) clearTimeout(timeoutId);
+
+      try { proc.kill('SIGTERM'); } catch { /* already exited */ }
+
+      setTimeout(() => {
+        try { proc.kill('SIGKILL'); } catch { /* already exited */ }
+      }, 5000);
     };
 
     const input = Writable.toWeb(proc.stdin) as WritableStream<Uint8Array>;
@@ -216,7 +221,7 @@ async function executeTaskWithSpawn(
           console.error(`[ralph-executor] Cleanup ${index} failed:`, result.reason);
         }
       });
-      ensureKill();
+      doCleanup();
     };
 
     const connection = new ClientSideConnection(

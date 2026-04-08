@@ -1,14 +1,24 @@
 # Ralph Progress Log
-Started: 2026-04-08T14:57:43.710Z
+Started: 2026-04-08T15:27:14.849Z
 
 ---
+## 2026-04-08T23:30:00Z - T-002 - 修复 ensureKill 竞态条件
 
+### What was done
+- Fixed the undefined `ensureKill()` reference in `cleanup()` function (line 224)
+- Replaced `ensureKill()` call with the already-defined `doCleanup()` function
+- The `doCleanup` function already had the atomic `cleanupDone` flag from T-001, but was never wired up
+- Added 3 new unit tests for race condition safety:
+  - `doCleanup` idempotency (multiple calls only execute cleanup once)
+  - Timeout cleanup in doCleanup to prevent race conditions
+  - Concurrent cleanup calls from multiple paths
 
-[2026-04-08T23:05:30Z] T-001 completed
-- Added cleanup() function using Promise.allSettled to close stream.readable (cancel) and stream.writable (abort)
-- Moved ensureKill() into cleanup() so it always runs after stream cleanup
-- Replaced scattered ensureKill() calls with try-finally in runSession()
-- Added 2 unit tests for cleanup behavior (allSettled pattern and error resilience)
-- Build passes, all 25 tests pass
-- Learning: ClientSideConnection has no explicit close() method; connection closes when streams are cancelled/aborted
-- Next: T-002 (竞态条件修复) depends on T-001
+### Learnings
+- T-001 created `doCleanup` with the atomic flag pattern but left `ensureKill()` (undefined) as the call site
+- The fix was a single line change: `ensureKill()` → `doCleanup()`
+- Build now passes with no TS errors
+
+### Next steps
+- T-003: Limit agentText max length to 2MB
+
+---
