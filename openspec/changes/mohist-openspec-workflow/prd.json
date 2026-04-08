@@ -19,7 +19,8 @@
       ],
       "dependencies": [],
       "estimated_effort": "small",
-      "spec_file": "specs/core-tools.md"
+      "spec_file": "specs/core-tools.md",
+      "passes": true
     },
     {
       "id": "T-002",
@@ -34,9 +35,12 @@
         "支持读取特定 requirement",
         "包含单元测试"
       ],
-      "dependencies": ["T-001"],
+      "dependencies": [
+        "T-001"
+      ],
       "estimated_effort": "small",
-      "spec_file": "specs/core-tools.md"
+      "spec_file": "specs/core-tools.md",
+      "passes": true
     },
     {
       "id": "T-003",
@@ -52,9 +56,12 @@
         "文件命名规范: {task-id}.json",
         "包含单元测试"
       ],
-      "dependencies": ["T-001"],
+      "dependencies": [
+        "T-001"
+      ],
       "estimated_effort": "medium",
-      "spec_file": "specs/session-memory/spec.md"
+      "spec_file": "specs/session-memory/spec.md",
+      "passes": true
     },
     {
       "id": "T-004",
@@ -70,9 +77,12 @@
         "支持状态: pending, in_progress, completed, failed, skipped",
         "包含单元测试"
       ],
-      "dependencies": ["T-001"],
+      "dependencies": [
+        "T-001"
+      ],
       "estimated_effort": "medium",
-      "spec_file": "specs/ralph-task-execution/spec.md"
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": true
     },
     {
       "id": "T-005",
@@ -91,9 +101,15 @@
         "存储 learning 到 session-memories/",
         "循环直到所有任务完成"
       ],
-      "dependencies": ["T-001", "T-002", "T-003", "T-004"],
+      "dependencies": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
       "estimated_effort": "large",
-      "spec_file": "specs/ralph-task-execution/spec.md"
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": false
     },
     {
       "id": "T-006",
@@ -111,9 +127,12 @@
         "超过最大重试次数时暂停",
         "用户介入后能从失败 task 恢复"
       ],
-      "dependencies": ["T-005"],
+      "dependencies": [
+        "T-005"
+      ],
       "estimated_effort": "large",
-      "spec_file": "specs/ralph-task-execution/spec.md"
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": false
     },
     {
       "id": "T-007",
@@ -130,9 +149,12 @@
         "达到 3 次上限仍未通过则标记 stage 失败",
         "通过后生成 prd.json"
       ],
-      "dependencies": ["T-005"],
+      "dependencies": [
+        "T-005"
+      ],
       "estimated_effort": "large",
-      "spec_file": "specs/agent-spec-generation/spec.md"
+      "spec_file": "specs/agent-spec-generation/spec.md",
+      "passes": false
     },
     {
       "id": "T-008",
@@ -148,9 +170,12 @@
         "plan stage 检测 Change 目录存在性",
         "向后兼容：没有 Change 的 issue 走传统流程"
       ],
-      "dependencies": ["T-005"],
+      "dependencies": [
+        "T-005"
+      ],
       "estimated_effort": "medium",
-      "spec_file": "specs/workflow-definition/spec.md"
+      "spec_file": "specs/workflow-definition/spec.md",
+      "passes": false
     },
     {
       "id": "T-009",
@@ -167,9 +192,13 @@
         "正确生成 {issue-number}-{slug} 命名",
         "包含帮助文档和错误处理"
       ],
-      "dependencies": ["T-007", "T-008"],
+      "dependencies": [
+        "T-007",
+        "T-008"
+      ],
       "estimated_effort": "medium",
-      "spec_file": "specs/change-artifacts/spec.md"
+      "spec_file": "specs/change-artifacts/spec.md",
+      "passes": false
     },
     {
       "id": "T-010",
@@ -185,9 +214,12 @@
         "正确设置 stage 为 review",
         "包含帮助文档"
       ],
-      "dependencies": ["T-009"],
+      "dependencies": [
+        "T-009"
+      ],
       "estimated_effort": "small",
-      "spec_file": "specs/workflow-definition/spec.md"
+      "spec_file": "specs/workflow-definition/spec.md",
+      "passes": false
     },
     {
       "id": "T-011",
@@ -204,9 +236,12 @@
         "归档包含所有产物和 session-memories",
         "生成执行报告"
       ],
-      "dependencies": ["T-005"],
+      "dependencies": [
+        "T-005"
+      ],
       "estimated_effort": "medium",
-      "spec_file": "specs/workflow-definition/spec.md"
+      "spec_file": "specs/workflow-definition/spec.md",
+      "passes": false
     },
     {
       "id": "T-012",
@@ -222,9 +257,14 @@
         "TROUBLESHOOTING.md: 常见问题和解决方案",
         "更新主 README 添加 OpenSpec workflow 章节"
       ],
-      "dependencies": ["T-009", "T-010", "T-011"],
+      "dependencies": [
+        "T-009",
+        "T-010",
+        "T-011"
+      ],
       "estimated_effort": "medium",
-      "spec_file": "specs/specs-project-storage/spec.md"
+      "spec_file": "specs/specs-project-storage/spec.md",
+      "passes": false
     }
   ],
   "metadata": {
