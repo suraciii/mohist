@@ -73,3 +73,27 @@ Next steps: T-006 (register 8 missing tools to main-agent)
 - Build passes, all 21 tests pass
 - Learning: The OpenSpec tools use `projectPath` (not `cwd` or `worktreePath`) as their context property name
 - Next: T-007 (Plan Stage OpenSpec awareness) or T-008 (change-creator bug fix)
+
+---
+
+## 2026-04-09 T-007 - 实现 Plan Stage OpenSpec 感知（异步预检测）
+
+### What was done
+- Added `metadata: Record<string, unknown>` field to Session interface and initialized in SessionManager.create()
+- Modified `runMainAgent` to call `detectOpenSpecForIssue` via `Promise.resolve()` (async wrapper) before the agent loop starts
+- Cached detection result in `session.metadata['openSpecDetection']`
+- Modified `buildSystemPrompt` to accept `OpenSpecDetection` parameter instead of doing sync IO
+- When Change directory exists (detected=true, mode=traditional): injected OpenSpec plan stage instructions (create specs, run self-review, generate prd, advance to review)
+- When Change with prd.json exists (mode=openspec): injected stage-appropriate next-step guidance
+- When no Change detected: uses original base prompt unchanged
+- Updated Available Tools section in prompt to document all 8 newly registered OpenSpec tools
+- Build passes, all 305 tests pass
+
+### Learnings
+- `runMainAgent` was already async — the key change was adding the pre-detection call before the loop starts
+- Session didn't have arbitrary key-value storage, so added a `metadata` field — this is minimal and forward-compatible
+- Used `Promise.resolve()` to wrap sync detection for async compat; can be replaced with true async when T-009 creates `findChangeDirAsync`
+
+### Next steps
+- T-008: Fix change-creator isNew and findNextVersion bugs
+- T-009: Unify detection logic (will refactor detection to shared findChangeDir)
