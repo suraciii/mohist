@@ -1,0 +1,84 @@
+{
+  "version": "1.0",
+  "change_id": "example-add-user-auth",
+  "issue_reference": 42,
+  "generated_at": "2024-01-15T10:00:00Z",
+  "tasks": [
+    {
+      "id": "T-001",
+      "order": 1,
+      "capability": "auth-backend",
+      "requirement_ref": "REQ-001",
+      "title": "Implement user model and database schema",
+      "description": "Create User model with email, password_hash fields. Add migration.",
+      "acceptance_criteria": [
+        "User model has email and password_hash fields",
+        "Migration creates users table",
+        "Unit tests for model validation"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "specs/auth-backend.md",
+      "passes": true
+    },
+    {
+      "id": "T-002",
+      "order": 2,
+      "capability": "auth-backend",
+      "requirement_ref": "REQ-002",
+      "title": "Implement registration endpoint",
+      "description": "POST /auth/register endpoint with email validation and password hashing.",
+      "acceptance_criteria": [
+        "POST /auth/register accepts email and password",
+        "Validates email format",
+        "Hashes password before storage",
+        "Returns user without password_hash"
+      ],
+      "dependencies": ["T-001"],
+      "estimated_effort": "medium",
+      "spec_file": "specs/auth-backend.md",
+      "passes": true
+    },
+    {
+      "id": "T-003",
+      "order": 3,
+      "capability": "auth-backend",
+      "requirement_ref": "REQ-003",
+      "title": "Implement login endpoint",
+      "description": "POST /auth/login endpoint with JWT token generation.",
+      "acceptance_criteria": [
+        "POST /auth/login accepts email and password",
+        "Returns JWT on valid credentials",
+        "Returns 401 on invalid credentials"
+      ],
+      "dependencies": ["T-002"],
+      "estimated_effort": "medium",
+      "spec_file": "specs/auth-backend.md",
+      "passes": true
+    },
+    {
+      "id": "T-004",
+      "order": 4,
+      "capability": "auth-frontend",
+      "requirement_ref": "REQ-004",
+      "title": "Implement login form UI",
+      "description": "Create login form component with email and password fields.",
+      "acceptance_criteria": [
+        "Form has email and password fields",
+        "Shows validation errors",
+        "Calls /auth/login on submit",
+        "Stores JWT in localStorage on success"
+      ],
+      "dependencies": ["T-003"],
+      "estimated_effort": "medium",
+      "spec_file": "specs/auth-frontend.md",
+      "passes": false
+    }
+  ],
+  "metadata": {
+    "total_tasks": 4,
+    "capabilities_covered": ["auth-backend", "auth-frontend"],
+    "session_memory_path": "./session-memories/",
+    "task_status_path": "./task-status.json"
+  }
+}
