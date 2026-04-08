@@ -206,6 +206,19 @@ async function executeTaskWithSpawn(
     const output = Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>;
     const stream = ndJsonStream(input, output);
 
+    const cleanup = async () => {
+      const results = await Promise.allSettled([
+        stream.readable.cancel().catch(() => {}),
+        stream.writable.abort().catch(() => {}),
+      ]);
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`[ralph-executor] Cleanup ${index} failed:`, result.reason);
+        }
+      });
+      ensureKill();
+    };
+
     const connection = new ClientSideConnection(
       () => ({
         sessionUpdate: async (notification: SessionNotification) => {
@@ -250,7 +263,6 @@ async function executeTaskWithSpawn(
         ]);
 
         if (initResult === 'timeout') {
-          ensureKill();
           resolve({ success: false, output: agentText, error: 'Timed out during initialize' });
           return;
         }
@@ -261,7 +273,6 @@ async function executeTaskWithSpawn(
         ]);
 
         if (sessionResult === 'timeout') {
-          ensureKill();
           resolve({ success: false, output: agentText, error: 'Timed out during newSession' });
           return;
         }
@@ -275,17 +286,16 @@ async function executeTaskWithSpawn(
 
         if (promptResult === 'timeout') {
           try { await connection.cancel({ sessionId }); } catch { /* cancel may fail */ }
-          ensureKill();
           resolve({ success: false, output: agentText, error: `Timed out after ${DEFAULT_TIMEOUT / 1000}s` });
           return;
         }
 
-        ensureKill();
         resolve({ success: true, output: agentText });
       } catch (err) {
-        ensureKill();
         const message = err instanceof Error ? err.message : String(err);
         resolve({ success: false, output: agentText, error: message });
+      } finally {
+        await cleanup();
       }
     };
 
