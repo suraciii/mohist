@@ -132,3 +132,11 @@ Next steps: T-006 (register 8 missing tools to main-agent)
 - All 334 tests pass, typecheck clean
 - Learning: Dynamic stages work cleanly by defaulting `approval` to `true` when stage not found in workflow config; no changes needed to workflow-loader.ts
 - Next: T-011, T-012, T-013 remain
+
+[2026-04-09T00:42:30Z] T-011 修复 archive_change 报告生成时序
+- 将 generateReport 调用移到 renameSync 之前（两个代码路径：冲突和非冲突）
+- 修复前：renameSync 移动目录后，generateReport 用旧路径 change.changePath 读取文件，返回空数据
+- 修复后：先从旧路径读取数据生成报告，再移动目录，最后将报告写入新路径
+- 构建通过，334 个测试全部通过
+- 无 archive-change 专属测试文件（T-013 端到端验证任务会补充）
+- Next: T-012 修复文档拼写和 schema 不匹配
