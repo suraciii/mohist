@@ -10,7 +10,8 @@ const VALID_STAGES = new Set(Object.values(Stage));
 
 const M1_ALLOWED_TRANSITIONS: Record<string, string[]> = {
   [Stage.Draft]: [Stage.Plan],
-  [Stage.Plan]: [Stage.Build],
+  [Stage.Plan]: [Stage.Build, Stage.Review],
+  [Stage.Review]: [Stage.Build],
   [Stage.Build]: [Stage.Check],
   [Stage.Check]: [Stage.Done, Stage.Plan],
 };
@@ -26,7 +27,7 @@ export interface AdvanceStageContext {
 export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstance<any> {
   return Tool.define('advance_stage', {
     description:
-      'Advance the current issue to the next workflow stage. Allowed transitions: draft → plan, plan → build, build → check, check → done/plan.',
+      'Advance the current issue to the next workflow stage. Allowed transitions: draft → plan, plan → build/review, review → build, build → check, check → done/plan.',
     parameters: z.object({
       stage: z
         .string()
@@ -72,7 +73,8 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
           const workflow = loadWorkflow(context.worktreePath);
           if (typeof workflow !== 'string') {
             const targetStageConfig = workflow.stages.find((s) => s.stage === stage);
-            if (targetStageConfig?.approval) {
+            const approval = targetStageConfig?.approval ?? true;
+            if (approval) {
               context.eventBus.emit('approval_requested', {
                 issueId: issue.id,
                 projectId: issue.projectId,

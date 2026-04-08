@@ -198,7 +198,7 @@
       "dependencies": [],
       "estimated_effort": "medium",
       "spec_file": "design.md",
-      "passes": false
+      "passes": true
     },
     {
       "id": "T-011",

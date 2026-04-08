@@ -116,3 +116,19 @@ Next steps: T-006 (register 8 missing tools to main-agent)
 - All 28 tests pass, typecheck clean
 - Learning: The existing `getSlug`/`findMatchingChanges` approach already handles multi-hyphen slugs correctly; no need for the simpler regex from design doc
 - Next: T-010, T-011, T-012 remain
+
+## 2026-04-09 T-010: 实现动态 Review Stage（向后兼容）
+- Added `Stage.Review` transitions to `M1_ALLOWED_TRANSITIONS` in advance-stage.ts:
+  - `Plan → [Build, Review]` (Review is optional)
+  - `Review → [Build]`
+- Changed approval logic: stages not in workflow config default to `{approval: true}` (dynamic stages like Review)
+- Updated tool description to reflect new transitions
+- Default workflow stays `[plan, build, check]` — fully backward compatible
+- Added 10 unit tests in tests/advance-stage.test.ts covering:
+  - Plan→Build, Plan→Review, Review→Build transitions
+  - Rejected transitions (Review→Plan, Build→Review)
+  - Approval emission for dynamic stages (Review) and existing stages
+  - No approval for Plan stage
+- All 334 tests pass, typecheck clean
+- Learning: Dynamic stages work cleanly by defaulting `approval` to `true` when stage not found in workflow config; no changes needed to workflow-loader.ts
+- Next: T-011, T-012, T-013 remain
