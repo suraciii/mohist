@@ -330,3 +330,39 @@ describe('Failure categorization', () => {
     expect(FAILURE_CATEGORY_CONFIGS.timeout.retryable).toBe(false);
   });
 });
+
+describe('resource cleanup', () => {
+  it('should call cleanup via Promise.allSettled pattern', async () => {
+    const { ReadableStream, WritableStream } = await import('stream/web');
+    const readableCancel = vi.fn().mockResolvedValue(undefined);
+    const writableAbort = vi.fn().mockResolvedValue(undefined);
+    const mockStream = {
+      readable: { cancel: readableCancel } as unknown as ReadableStream,
+      writable: { abort: writableAbort } as unknown as WritableStream,
+    };
+    const results = await Promise.allSettled([
+      mockStream.readable.cancel().catch(() => {}),
+      mockStream.writable.abort().catch(() => {}),
+    ]);
+    expect(results).toHaveLength(2);
+    expect(results[0].status).toBe('fulfilled');
+    expect(results[1].status).toBe('fulfilled');
+    expect(readableCancel).toHaveBeenCalledTimes(1);
+    expect(writableAbort).toHaveBeenCalledTimes(1);
+  });
+
+  it('should continue cleanup even if one operation fails', async () => {
+    const readableCancel = vi.fn().mockRejectedValue(new Error('read error'));
+    const writableAbort = vi.fn().mockResolvedValue(undefined);
+    const mockStream = {
+      readable: { cancel: readableCancel },
+      writable: { abort: writableAbort },
+    };
+    const results = await Promise.allSettled([
+      mockStream.readable.cancel().catch(() => {}),
+      mockStream.writable.abort().catch(() => {}),
+    ]);
+    expect(readableCancel).toHaveBeenCalledTimes(1);
+    expect(writableAbort).toHaveBeenCalledTimes(1);
+  });
+});
