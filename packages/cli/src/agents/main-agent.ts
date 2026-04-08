@@ -11,6 +11,7 @@ import { createAdvanceStageTool } from '../tools/advance-stage';
 import { createAddCommentTool } from '../tools/add-comment';
 import { createGetIssueTool } from '../tools/get-issue';
 import { createAskUserTool } from '../tools/ask-user';
+import { createRunRalphLoopTool } from '../tools/run-ralph-loop';
 import type { EventBus } from '../services/event-bus';
 
 export interface MainAgentContext {
@@ -45,10 +46,18 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
 ## Available Tools
 - **read_workflow**: Read the workflow configuration (stages, prompt templates, approval flags). Call this first.
 - **spawn_coder**: Spawn an opencode acp oneshot session to execute a coding task. Provide \`taskTemplate\` (from the workflow stage prompt) and \`variables\` (issue info + previous stage outputs).
+- **run_ralph_loop**: Run Ralph task loop for OpenSpec workflow. Use in build stage when OpenSpec Change is detected. Detects Change directory and executes tasks from prd.json sequentially.
 - **advance_stage**: Move the issue to the next stage. Only pass the target stage name.
 - **add_comment**: Record progress notes, decisions, or summaries on the issue.
 - **get_issue**: Check the current state of the issue at any time.
 - **ask_user**: Ask the user a question and wait for their reply. The tool blocks until the user responds or a 24h timeout expires.
+
+## Ralph Loop (OpenSpec Workflow)
+When in build stage and an OpenSpec Change is detected (via .mohist-specs/changes/{issue-number}-{slug}/ containing prd.json):
+1. Use \`run_ralph_loop\` instead of \`spawn_coder\` to execute the Ralph task loop
+2. The Ralph loop will iterate through tasks in prd.json sequentially
+3. Each task gets assembled context (proposal + design + spec + learnings)
+4. If no Change is detected, use traditional \`spawn_coder\` approach
 
 ## When to Use ask_user
 - Requirements are ambiguous and you need clarification
@@ -119,6 +128,11 @@ export async function runMainAgent(
       onWaitingChange: context.onWaitingChange,
     }));
   }
+  toolRegistry.register(createRunRalphLoopTool({
+    worktreePath: context.worktreePath,
+    issueId: context.issue.id,
+    projectId: context.issue.projectId,
+  }));
 
   const session = existingSession ?? sessionManager.create(Number(context.issue.id));
   const system = buildSystemPrompt(context.issue);
