@@ -75,52 +75,82 @@
 
 1. 修复资源泄漏问题，确保连接和 stream 正确关闭
 2. 消除竞态条件，确保进程清理的原子性
-3. 限制 agentText 最大长度，防止 OOM
-4. 增强 detector.ts，正确处理多个 matching changes 的情况
-5. 添加失败类型分类框架，为 T-006 实现做准备
+3. 限制 agentText 最大长度（2MB），防止 OOM
+4. 增强 detector，正确处理多个 matching changes（精确匹配）
+5. 验证失败分类逻辑覆盖率（ralph-executor 已实现）
 6. 将 8 个缺失工具注册到 main-agent，打通 plan→build 端到端流程
-7. 更新 plan stage 系统提示，加入 OpenSpec 模式指令
-8. 修复 change-creator.ts 的 isNew 和 findNextVersion bug
-9. 统一检测逻辑，消除 workflow-loader 和 detector 的重复
-10. 将 Review 阶段加入工作流转换表和默认 workflow
-11. 修复 archive_change 在 rename 后读取旧路径的 bug
-12. 修复文档拼写错误和 schema 不匹配
+7. 更新 plan stage 系统提示，使用**异步预检测**避免时序问题
+8. 修复 change-creator 的 isNew 和 findNextVersion bug（精确匹配）
+9. 统一检测逻辑，消除重复
+10. 实现**动态 Review Stage**（向后兼容：默认 workflow 不变）
+11. 修复 archive_change 报告时序
+12. 修复文档拼写和 schema 不匹配
 13. 补充缺失的测试覆盖
+
+### 关键设计改进（基于深度分析）
+
+| 设计决策 | 原方案 | 改进后 | 原因 |
+|---------|--------|--------|------|
+| **D3 内存限制** | 10MB | **2MB** | 30分钟任务约180万字符，2MB刚好覆盖，避免浪费内存 |
+| **D4/D8/D9 匹配逻辑** | `startsWith` | **精确正则匹配** | 避免 `42-fix` 误匹配 `42-fix-bug` 或 `42-fix-view` |
+| **D5 失败分类** | 新建框架 | **验证现有实现** | `categorizeFailure` 已在 ralph-executor 中实现，避免重复 |
+| **D7 Plan感知** | 同步检测 | **异步预检测+Session缓存** | 避免每次agent loop同步IO，解决Change中途创建的时序问题 |
+| **D10 Review阶段** | 添加默认workflow | **动态Stage（转换允许，配置不变）** | **保证100%向后兼容**，现有项目workflow无需变更 |
+| **D2 竞态条件** | 原子标志 | **原子标志+timeout清理** | 防止timeout在cleanup后仍然触发 |
+
+**向后兼容保证:**
+- ✅ 默认 workflow 保持 `[plan, build, check]` 不变
+- ✅ 现有项目的 issue 状态流转不受影响
+- ✅ 检测逻辑精确匹配，不意外匹配到相似目录名
+- ✅ 所有修复都通过扩展而非修改现有接口
+
+**风险缓解:**
+- T-007（Plan感知）和 T-010（Review阶段）经过重新设计，解决了原方案的核心缺陷
+- 任务估算调整：T-010 从 small 提升到 medium，T-007 依赖更明确
 
 **Non-Goals:**
 
 - 不修改 Ralph 循环的核心业务逻辑（任务排序、上下文组装）
 - 不更改 ACP 协议交互方式
-- 不实现完整的 T-006 失败处理（仅添加分类框架）
+- 不实现完整的 T-006 失败处理（仅验证现有分类逻辑）
 - 不添加程序化的自动测试执行工具（check stage 保持 prompt 驱动）
+- **默认 workflow 保持 [plan, build, check] 不变**（通过动态 stage 支持 review）
+- **不修改 workflow 配置格式**（向后兼容现有项目）
+- **不添加新的 stage 类型**（review 是可选过渡，非强制 stage）
 
 ## 范围
 
 **文件变更:**
-- `packages/cli/src/openspec/ralph-executor.ts` - 资源泄漏/竞态/内存修复
-- `packages/cli/src/openspec/detector.ts` - 多 Change 处理 + 统一检测
-- `packages/cli/src/openspec/change-creator.ts` - bug 修复
-- `packages/cli/src/agents/main-agent.ts` - 注册 8 个缺失工具 + plan 感知
-- `packages/cli/src/workflow/workflow-loader.ts` - 消除重复检测逻辑 + 添加 review stage
-- `packages/cli/src/tools/advance-stage.ts` - 添加 review 转换
-- `packages/cli/src/tools/archive-change.ts` - 修复报告生成时序
-- `docs/` - 修复拼写和 schema
-- `packages/cli/tests/` - 更新和新增测试
+- `packages/cli/src/openspec/ralph-executor.ts` - 资源泄漏/竞态/内存修复（D1-D3）
+- `packages/cli/src/openspec/detector.ts` - 多 Change 处理 + 统一检测（D4/D9，精确匹配）
+- `packages/cli/src/openspec/change-creator.ts` - bug 修复（D8，精确匹配）
+- `packages/cli/src/agents/main-agent.ts` - 注册 8 个缺失工具 + **异步预检测** Plan 感知（D6/D7）
+- `packages/cli/src/workflow/workflow-loader.ts` - 消除重复检测逻辑（D9），**默认 workflow 不变**（D10动态stage）
+- `packages/cli/src/tools/advance-stage.ts` - **允许 review 转换**（D10动态stage）
+- `packages/cli/src/tools/archive-change.ts` - 修复报告生成时序（D11）
+- `docs/` - 修复拼写和 schema（D12）
+- `packages/cli/tests/` - 更新和新增测试（T-013）
+
+**关键变更说明:**
+1. **main-agent.ts**: `runMainAgent` 改为 async，启动时预检测 OpenSpec 状态
+2. **workflow-loader.ts**: 默认 workflow 保持 `[plan, build, check]`，不添加 review
+3. **advance-stage.ts**: 允许 `plan→review` 和 `review→build` 转换，支持动态 stage
 
 **影响:**
 - 阻塞: `mohist-openspec-workflow` 端到端流程可用性
 
 ## 成功标准
 
-- [ ] 所有 task 执行后资源完全释放
-- [ ] agentText 长度限制在 10MB 以内
-- [ ] detector 能正确处理多个 changes 的情况
+- [ ] 所有 task 执行后资源完全释放（connection.close + stream.cancel）
+- [ ] agentText 长度限制在 **2MB** 以内，保留开头和结尾截断
+- [ ] detector 能正确处理多个 changes，使用**精确正则匹配**避免误匹配
 - [ ] main-agent 注册所有 OpenSpec 相关工具（≥15 个）
-- [ ] plan stage 在 OpenSpec 模式下能触发 self-review 并生成 prd.json
-- [ ] Review 阶段存在于默认 workflow 和转换表中（plan→review→build）
-- [ ] change-creator 的 isNew 和 findNextVersion 行为正确
-- [ ] 检测逻辑统一到单一入口
-- [ ] archive_change 报告在目录移动前生成或使用正确路径
+- [ ] plan stage 使用**异步预检测**，无同步 IO 阻塞
+- [ ] **动态 Review Stage**：允许 plan→review→build，但默认 workflow 不变
+- [ ] change-creator 的 isNew 和 findNextVersion 行为正确（精确匹配）
+- [ ] 检测逻辑统一到单一入口（findChangeDir）
+- [ ] archive_change 报告在 rename 前生成，内容完整
 - [ ] 文档无拼写错误，示例 YAML 与 parser 一致
 - [ ] 测试覆盖率保持在 90% 以上
-- [ ] 向后兼容：无 Change 的 issue 继续走传统流程
+- [ ] **向后兼容：默认 workflow 不变，现有项目不受影响**
+- [ ] **向后兼容：检测逻辑精确匹配，不意外匹配相似目录**
