@@ -2,6 +2,7 @@ import { HttpServer } from './http-server';
 import { getStateManager } from './state-manager';
 import { createProjectRoutes } from '../api/projects';
 import { createIssueRoutes } from '../api/issues';
+import { createProposeRoutes } from '../api/propose';
 import { createConfigRoutes } from '../api/config';
 import { createStatusRoutes } from '../api/status';
 import { createLabelRoutes } from '../api/labels';
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
   server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner, workflowLogRepo));
+  server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));

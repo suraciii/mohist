@@ -4,6 +4,7 @@ import { setupProjectCommands, setupInitCommand } from './commands/project';
 import { setupIssueCommands, setupLabelCommands } from './commands/issue';
 import { setupQuickCommands } from './commands/quick';
 import { setupAttachCommand } from './commands/attach';
+import { setupProposeCommands } from './commands/propose';
 export { requireServer, formatError } from './server-check';
 
 const program = new Command();
@@ -53,5 +54,6 @@ setupIssueCommands(program);
 setupLabelCommands(program);
 setupQuickCommands(program);
 setupAttachCommand(program);
+setupProposeCommands(program);
 
 program.parse();

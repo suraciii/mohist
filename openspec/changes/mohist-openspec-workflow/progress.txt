@@ -1,22 +1,29 @@
 # Ralph Progress Log
-Started: 2026-04-08T11:56:48.315Z
+Started: 2026-04-08T12:27:30.178Z
 
 ---
 
-### 2026-04-08T20:07:00Z | T-008 | 实现 Change 自动检测
+## T-009: 实现 mo propose 命令
+**Completed:** 2026-04-08T20:31:00Z
 
 **What was done:**
-- Added `OpenSpecDetection` and `WorkflowConfigWithDetection` interfaces to `workflow-loader.ts`
-- Implemented `detectOpenSpecForIssue(cwd, issueNumber)` that checks `.mohist-specs/changes/{num}-*/prd.json` existence
-- Implemented `loadWorkflowWithDetection(cwd, issueNumber)` combining workflow loading with detection
-- Updated `read-workflow.ts` to use `loadWorkflowWithDetection` and include OpenSpec detection section in output
-- Updated `main-agent.ts` to pass `issueNumber` to read-workflow context, updated system prompt
-- Wrote 9 unit tests covering all detection scenarios (no dir, no match, no prd, with prd, etc.)
-- All 275 tests pass, build succeeds
+- Created `packages/cli/src/cli/commands/propose.ts` - CLI command `mo propose <issue-number>` with `--force` flag
+- Created `packages/cli/src/api/propose.ts` - API endpoint `POST /propose/:number/propose` to handle the propose request
+- Updated `packages/cli/src/cli/index.ts` to register the new propose commands
+- Updated `packages/cli/src/server/index.ts` to register the propose API routes
+
+**Key implementation details:**
+- The `createChange()` function in `change-creator.ts` already handles Change directory creation with proper versioning (-v2, -v3)
+- The API endpoint creates/uses worktree, creates Change, transitions issue to plan stage, and starts agent
+- CLI command requires server to be running (uses `requireServer()` hook)
 
 **Learnings:**
-- Detection has 3 states: not detected, detected-but-no-prd (plan in progress), detected-with-prd (use Ralph)
-- The `detectOpenSpecForIssue` function only needs issue number, not full Issue object, keeping workflow-loader decoupled from types
+- Existing `change-creator.ts` provides the core Change creation logic needed
+- The server architecture uses Hono routers with dependency injection pattern
+- CLI commands follow a setup pattern with hooks for pre-action validation
 
-**Next steps:** T-009 (mo propose command), T-010 (resume --skip-to-review), T-011 (check stage extension)
+**Next steps:**
+- T-010: 实现 resume --skip-to-review 选项
+- T-011: 实现 check stage 扩展
+- T-012: 编写用户文档和示例
 

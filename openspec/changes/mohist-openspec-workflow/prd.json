@@ -256,7 +256,7 @@
       ],
       "estimated_effort": "medium",
       "spec_file": "specs/change-artifacts/spec.md",
-      "passes": false
+      "passes": true
     },
     {
       "id": "T-010",
