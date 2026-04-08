@@ -15,7 +15,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Zod schema 中 provider 值类型应包含 name?, apiKey?, baseURL?, sdk? 字段，使用 .passthrough() 或 .strip() 容忍额外字段"
     },
     {
@@ -35,7 +35,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "ConfigLoader 应为无状态的工具类或单例，不依赖 Server/SQLite。环境变量映射使用内置注册表的 envVars 字段。"
     },
     {
@@ -54,7 +54,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "resolveModel 的参数需要调整：不再接收简单的 LlmConfig，而是接收 ConfigLoader 解析后的 resolved provider map。考虑定义 ResolvedProvider { sdk, apiKey, baseURL } 类型。"
     },
     {
@@ -73,7 +73,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "需要确保 agent-runtime 中所有调用 resolveModel 的地方（main agent, explore agent 等）都使用新的 ConfigLoader 结果。检查 server/index.ts 中 llmConfig 的所有传递路径。"
     },
     {
@@ -93,7 +93,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "使用 Node.js 内置 readline 模块做交互。apiKey 掩码：保留前3后3字符，中间用 ***。cli/index.ts 中 providers 命令不需要 checkServer 检测。"
     },
     {
@@ -108,7 +108,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "使用 vitest 的 beforeEach 在临时目录创建测试用的 config.jsonc。mock process.env 测试环境变量 fallback。"
     }
   ]
