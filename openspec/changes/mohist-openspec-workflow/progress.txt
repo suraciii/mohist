@@ -28,3 +28,35 @@ Next steps:
 - Implement T-005-C: Ralph 循环控制器 (ralph-executor.ts)
 - Depends on T-005-B being complete
 
+---
+## T-005-C: 实现 Ralph 循环控制器
+Timestamp: 2026-04-08T17:57:30Z
+Task ID: T-005-C
+What was done:
+- Created `packages/cli/src/openspec/ralph-executor.ts` with:
+  - `runRalphLoop()` function to execute tasks sequentially from prd.json
+  - `RalphExecutor` class for convenient execution
+  - `getOrderValue()`, `sortTasksByOrder()` utility functions
+  - `readTaskStatus()`, `readPrdTasks()` helper functions
+  - Support for task retry with maxRetries option
+  - Task status initialization and tracking via task-status.json
+  - Context callbacks: onTaskStart, onTaskComplete, onLoopComplete
+  - Resume support via resumeFromTaskIndex option
+- Created `packages/cli/tests/ralph-executor.test.ts` with 18 unit tests covering:
+  - Order value parsing
+  - Task sorting
+  - Task status and PRD reading
+  - Ralph loop execution with status tracking
+  - Task completion skipping when already done
+  - RalphExecutor class instantiation
+
+Learnings:
+- The ACP protocol is the same as used in spawn-coder.ts - can reuse the connection pattern
+- Task status tracking happens via task-status.json file in change directory
+- Tasks that are already completed/succeeded are skipped in subsequent runs
+- maxRetries=0 is useful for testing without actual spawn_coder execution
+
+Next steps:
+- Implement T-005-D: 集成 Ralph 循环到 main-agent
+- Depends on T-005-C being complete
+
