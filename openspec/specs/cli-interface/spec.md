@@ -239,3 +239,23 @@ CLI 输出中的阶段名 SHALL 使用当前实现的阶段名：`draft`、`plan
 #### Scenario: issue list 显示正确阶段名
 - **WHEN** 用户运行 `mo issue list`
 - **THEN** 阶段列显示 `plan`/`build`/`check`/`done`（而非旧的 `designing`/`implementing`）
+
+### Requirement: CLI 提供 provider 管理命令 [NEW]
+
+CLI SHALL 提供 `mo providers` 命令组用于管理 LLM provider 配置，不需要 server 运行。
+
+#### Scenario: 列出所有 provider
+- **WHEN** 用户执行 `mo providers list`
+- **THEN** CLI 显示所有内置 provider 的状态表格（ID、名称、配置状态、掩码后的 API Key、baseURL）
+- **AND** 命令在 server 未运行时也能正常工作
+
+#### Scenario: 配置 provider API Key
+- **WHEN** 用户执行 `mo providers login <providerID>`
+- **THEN** CLI 交互式提示输入 API Key（输入隐藏）
+- **AND** 保存到 `~/.mohist/config.jsonc`
+- **AND** 显示确认信息
+
+#### Scenario: 删除 provider 配置
+- **WHEN** 用户执行 `mo providers logout <providerID>`
+- **THEN** CLI 从 config.jsonc 删除该 provider 的 apiKey
+- **AND** 显示确认信息

@@ -14,32 +14,9 @@ import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectServi
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
 import type { LlmConfig } from '../agent-runtime';
+import { load as loadConfig } from '../config/config-loader';
 import * as fs from 'fs';
 import * as path from 'path';
-
-const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-20250514';
-
-function buildLlmConfig(configRepo: { get(key: string): string | null }): LlmConfig | undefined {
-  const model = configRepo.get('llm.model');
-  const modelStr = model ?? DEFAULT_MODEL;
-  const slashIndex = modelStr.indexOf('/');
-  if (slashIndex === -1) return model ? { model } : undefined;
-
-  const providerID = modelStr.slice(0, slashIndex);
-  const baseURLKey = `llm.provider.${providerID}.options.baseURL`;
-  const baseURL = configRepo.get(baseURLKey);
-
-  const config: LlmConfig = {};
-  if (model) config.model = model;
-  if (baseURL) {
-    config.provider = {
-      [providerID]: { options: { baseURL } },
-    };
-  }
-
-  if (config.model || config.provider) return config;
-  return undefined;
-}
 
 function ensureDataDir(): void {
   const dataDir = path.join(process.env.HOME || '', '.mohist');
@@ -71,7 +48,13 @@ async function main(): Promise<void> {
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
   const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents());
 
-  const llmConfig = buildLlmConfig(stateManager.getConfigRepo());
+  let llmConfig: LlmConfig | undefined;
+  try {
+    llmConfig = loadConfig();
+  } catch (err) {
+    console.error('Failed to load config:', err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
 
   const expiredCount = stateManager.getQuestionRepo().expireAllPending();
   if (expiredCount > 0) {

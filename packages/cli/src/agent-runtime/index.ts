@@ -1,5 +1,5 @@
 export { resolveModel } from './llm';
-export type { LlmConfig, LlmProviderOptions } from './llm';
+export type { LlmConfig } from './llm';
 export { Tool, ToolRegistry } from './tool';
 export type { ToolDefinition, ToolInstance } from './tool';
 export { SessionManager } from './session';

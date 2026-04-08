@@ -17,21 +17,21 @@ The spawn_agent tool SHALL truncate subprocess stdout when it exceeds 8000 chara
 - **WHEN** opencode subprocess returns stdout of exactly 8000 characters
 - **THEN** the full stdout SHALL be returned without truncation
 
-### Requirement: LLM config is loaded from config table and passed to resolveModel
-The system SHALL read LLM configuration from the config table (keys: `llm.model`, `llm.provider.<id>.options.baseURL`) and pass it to `resolveModel()` so that user-configured model and proxy settings take effect.
+### Requirement: LLM config is loaded from config.jsonc and passed to resolveModel [UPDATED]
+The system SHALL read LLM configuration from `~/.mohist/config.jsonc` (NOT from SQLite config table) and pass it to `resolveModel()` so that user-configured model and proxy settings take effect. The old `llm.*` config keys in SQLite are deprecated and ignored.
 
-#### Scenario: LLM model configured in config table
-- **WHEN** `llm.model` is set to "anthropic/claude-sonnet-4-20250514" in config table
+#### Scenario: LLM model configured in config.jsonc
+- **WHEN** `model` is set to "anthropic/claude-sonnet-4-20250514" in config.jsonc
 - **THEN** `resolveModel()` SHALL use that model instead of the hardcoded default
 
-#### Scenario: LLM proxy configured in config table
-- **WHEN** `llm.provider.anthropic.options.baseURL` is set in config table
+#### Scenario: LLM proxy configured in config.jsonc
+- **WHEN** `provider.anthropic.baseURL` is set in config.jsonc
 - **THEN** `resolveModel()` SHALL create the provider with that baseURL
 
-#### Scenario: No LLM config in config table
-- **WHEN** no `llm.model` key exists in config table
+#### Scenario: No LLM config in config.jsonc
+- **WHEN** config.jsonc does not exist or has no `model` field
 - **THEN** `resolveModel()` SHALL use the default model (`anthropic/claude-sonnet-4-20250514`)
-- **AND** SHALL detect API key from environment variables
+- **AND** SHALL detect API key from environment variables (ANTHROPIC_API_KEY, etc.)
 
 ### Requirement: LLM tool loop
 The system SHALL implement an LLM tool loop using Vercel AI SDK v5 `streamText()` with `maxSteps`. The loop SHALL support: tool definition with Zod schema, automatic tool calling cycle (LLM returns tool_call → execute → feed result back → continue), and text generation until LLM stops.
@@ -113,18 +113,23 @@ The system SHALL support spawning opencode as a subprocess from the Main Agent v
 - **THEN** the stderr output and exit code SHALL be returned to the Main Agent
 - **THEN** the Main Agent LLM SHALL decide how to handle the failure
 
-### Requirement: LLM provider configuration
-The system SHALL support configuring LLM providers via config table (accessed through existing ConfigRepo). The configuration SHALL include: default model in "provider/model-id" format (e.g. "anthropic/claude-sonnet-4"), and per-provider options (baseURL, apiKey). API keys SHALL be detected from environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY), shared with opencode.
+### Requirement: LLM provider configuration [UPDATED]
+The system SHALL support configuring LLM providers via `~/.mohist/config.jsonc` (NOT via SQLite ConfigRepo). The configuration SHALL include: default model in "provider/model-id" format (e.g. "anthropic/claude-sonnet-4-20250514"), and per-provider config (apiKey, baseURL, sdk). API keys SHALL be detected from: 1) config.jsonc `provider.<id>.apiKey` (priority), 2) environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.).
 
-#### Scenario: Load provider config
+#### Scenario: Load provider config from config.jsonc
 - **WHEN** Mohist server starts
-- **THEN** the system SHALL load llm config from the config table
-- **THEN** the system SHALL detect API key from environment variables
+- **THEN** the system SHALL load config.jsonc via ConfigLoader
+- **THEN** the system SHALL detect API key from config.jsonc or environment variables
 - **THEN** the configured model SHALL be used for LLM calls
 
-#### Scenario: Config with proxy
-- **WHEN** llm.provider.<id>.options.baseURL is set in config
+#### Scenario: Config with proxy in config.jsonc
+- **WHEN** `provider.<id>.baseURL` is set in config.jsonc
 - **THEN** the system SHALL use that baseURL for the provider's API calls
+
+#### Scenario: Deprecated SQLite llm.* config ignored
+- **WHEN** SQLite config table contains `llm.model` or `llm.provider.*` keys
+- **THEN** these keys SHALL be ignored
+- **AND** the system SHALL use config.jsonc exclusively for LLM configuration
 
 ### Requirement: spawn_coder 捕获所有 ACP 事件
 
