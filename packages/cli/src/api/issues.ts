@@ -310,7 +310,7 @@ export function createIssueRoutes(
       const project = projectService.getById(projectId);
       let worktreePath = process.cwd();
       if (worktreeManager && project) {
-        worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
+        worktreePath = await worktreeManager.create(project.path, project.name, issue.number, project.baseBranch);
       }
 
       if (!agentRunner) {
@@ -712,30 +712,10 @@ export function createIssueRoutes(
         return c.json(response);
       }
 
-      let defaultBranch = 'main';
-      try {
-        const result = await execFileAsync(
-          'git',
-          ['symbolic-ref', 'refs/remotes/origin/HEAD'],
-          { cwd: project.path }
-        );
-        defaultBranch = result.stdout.trim().replace('refs/remotes/origin/', '');
-      } catch {
-        try {
-          const result = await execFileAsync(
-            'git',
-            ['rev-parse', '--abbrev-ref', 'HEAD'],
-            { cwd: project.path }
-          );
-          defaultBranch = result.stdout.trim();
-        } catch {
-        }
-      }
-
       const branchName = `mo/issue-${number}`;
       const diffOutput = await execFileAsync(
         'git',
-        ['diff', `${defaultBranch}...${branchName}`, '--stat'],
+        ['diff', `${project.baseBranch}...${branchName}`, '--stat'],
         { cwd: project.path }
       );
 

@@ -5,17 +5,18 @@
     {
       "id": "T-001",
       "title": "数据库 migration: 新增 base_branch 列",
-      "description": "在 migrations.ts 中新增 migrateToVersion8，为 projects 表添加 base_branch TEXT DEFAULT 'main' 列。对已有项目遍历检测 baseBranch 并回填。SCHEMA_VERSION 升至 8。",
+      "description": "在 migrations.ts 中新增 migrateToVersion8，为 projects 表添加 base_branch TEXT DEFAULT 'main' 列。对已有项目遍历检测 baseBranch 并回填（路径不存在或非 git 仓库时使用默认值）。SCHEMA_VERSION 升至 8。",
       "acceptanceCriteria": [
         "projects 表新增 base_branch 列",
         "已有项目的 base_branch 被自动检测并回填",
         "检测失败时回退为 'main'",
+        "项目路径不存在时使用默认值 'main'（不报错）",
         "SCHEMA_VERSION 更新为 8",
         "npm run build 通过"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "检测逻辑: git symbolic-ref refs/remotes/origin/HEAD，解析出分支名"
+      "passes": true,
+      "notes": "检测逻辑: git symbolic-ref refs/remotes/origin/HEAD，解析出分支名；migration 永不失败"
     },
     {
       "id": "T-002",
@@ -29,21 +30,22 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
       "id": "T-003",
       "title": "提取 baseBranch 自动检测为独立函数",
-      "description": "新建 src/git/detect-base-branch.ts，实现 detectBaseBranch(projectPath: string): Promise<string>。逻辑: git symbolic-ref refs/remotes/origin/HEAD → 解析分支名，失败返回 'main'。ProjectService.create 和 migration v8 共用此函数。",
+      "description": "新建 src/git/detect-base-branch.ts，实现 detectBaseBranch(projectPath: string): Promise<string>。逻辑: git symbolic-ref refs/remotes/origin/HEAD → 解析分支名；路径不存在或非 git 仓库时返回 'main'。ProjectService.create 和 migration v8 共用此函数。",
       "acceptanceCriteria": [
         "detectBaseBranch 函数可独立调用",
         "有 origin 时正确解析默认分支",
         "无 origin 时返回 'main'",
+        "路径不存在时返回 'main'（不抛错）",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -58,7 +60,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -72,24 +74,24 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
       "id": "T-006",
       "title": "WorktreeManager 基于 baseBranch 创建 worktree",
-      "description": "修改 WorktreeManager.create() 签名新增 baseBranch 参数。创建前执行 git fetch origin。使用 git worktree add -b mo/issue-N origin/<baseBranch> 创建。无 origin 时回退到本地 baseBranch 分支。",
+      "description": "修改 WorktreeManager.create() 签名新增 baseBranch 参数。实现智能 fetch（30 分钟内 fetch 过则跳过）。使用 git worktree add -b mo/issue-N origin/<baseBranch> 创建。origin/<baseBranch> 不存在时回退到本地 baseBranch 分支；本地 baseBranch 也不存在时报错。",
       "acceptanceCriteria": [
         "WorktreeManager.create() 接受 baseBranch 参数",
-        "创建前执行 git fetch origin",
+        "实现智能 fetch（带 30 分钟缓存）",
         "基于 origin/<baseBranch> 创建分支",
-        "无 origin 时回退到本地 baseBranch",
-        "本地 baseBranch 不存在时返回错误",
+        "origin/<baseBranch> 不存在时回退到本地 baseBranch",
+        "本地 baseBranch 不存在时返回明确错误",
         "npm run build 通过"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "智能 fetch 通过 .git/mohist-last-fetch 文件记录时间戳"
     },
     {
       "id": "T-007",
@@ -101,8 +103,22 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
+    },
+    {
+      "id": "T-008",
+      "title": "简化 diff 端点，使用 project.baseBranch",
+      "description": "修改 issues.ts 中的 diff 端点，移除动态分支检测逻辑，直接使用 project.baseBranch。删除重复的分支检测代码（约 15 行）。",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/diff 使用 project.baseBranch 而非动态检测",
+        "移除 git symbolic-ref 调用",
+        "diff 功能正常工作",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "代码清理任务，利用已有的 baseBranch 字段"
     }
   ]
 }

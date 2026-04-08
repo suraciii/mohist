@@ -16,19 +16,30 @@ export function setupProjectCommands(program: Command): void {
     .command('create <name>')
     .description('Create a new project')
     .option('--path <path>', 'Project path (default: current directory)')
+    .option('--base-branch <branch>', 'Base branch for worktrees')
     .action(async (name, options) => {
       try {
         const projectPath = options.path || process.cwd();
         
+        const payload: { name: string; path: string; baseBranch?: string } = {
+          name,
+          path: projectPath
+        };
+        
+        if (options.baseBranch) {
+          payload.baseBranch = options.baseBranch;
+        }
+        
         const response = await apiClient<ApiResponse<Project>>(
           'POST',
           '/projects',
-          { name, path: projectPath }
+          payload
         );
         
         if (response.success && response.data) {
           console.log(chalk.green(`✓ Project created: ${response.data.name}`));
           console.log(chalk.gray(`  Path: ${response.data.path}`));
+          console.log(chalk.gray(`  Base branch: ${response.data.baseBranch}`));
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
         }
@@ -52,7 +63,7 @@ export function setupProjectCommands(program: Command): void {
           
           console.log(chalk.bold('\nProjects:\n'));
           response.data.forEach((p, i) => {
-            console.log(`  ${i + 1}. ${chalk.cyan(p.name)} - ${chalk.gray(p.path)}`);
+            console.log(`  ${i + 1}. ${chalk.cyan(p.name)} - ${chalk.gray(p.path)} [base: ${p.baseBranch}]`);
           });
           console.log();
         }

@@ -1,0 +1,49 @@
+# Ralph Progress Log
+Started: 2026-04-08T07:46:04.542Z
+
+---
+
+## 2026-04-08T08:50:00.000Z - T-003 Completed
+
+**Task**: T-003 - 提取 baseBranch 自动检测为独立函数
+
+**Learnings**:
+- Created `src/git/detect-base-branch.ts` with async `detectBaseBranch(projectPath: string): Promise<string>`
+- Function uses `git symbolic-ref refs/remotes/origin/HEAD` to detect default branch
+- Returns 'main' for non-existent paths, non-git repos, or missing origin (graceful fallback)
+- Async version complements existing sync `detectBaseBranchSync` in migrations.ts
+- Typecheck passes
+---
+
+## 2026-04-08T09:15:00.000Z - T-004 Completed
+
+**Task**: T-004 - ProjectService 和 API 支持 baseBranch
+
+**Learnings**:
+- ProjectService.create() is now async and calls detectBaseBranch(path) when baseBranch not provided
+- API POST /api/projects now accepts optional baseBranch field in request body
+- Added PATCH /api/projects/:name endpoint to update project baseBranch
+- Build passes with these changes
+---
+
+## 2026-04-08T09:35:00.000Z - T-005 Completed
+
+**Task**: T-005 - CLI 新增 --base-branch 选项
+
+**Learnings**:
+- Added `--base-branch <branch>` option to `mo project create` command
+- Payload includes baseBranch only when option is provided (allowing server auto-detection)
+- Project list now displays baseBranch in format `[base: <branch>]`
+- Build passes
+
+## 2026-04-08T10:05:00.000Z - T-006 Completed
+
+**Task**: T-006 - WorktreeManager 基于 baseBranch 创建 worktree
+
+**Learnings**:
+- Modified WorktreeManager.create() to accept `baseBranch` parameter (defaults to 'main')
+- Implemented smart fetch with 30-minute cache via `.git/mohist-last-fetch` timestamp file
+- Worktree creation now uses `git worktree add <path> -b mo/issue-N origin/<baseBranch>` as start point
+- Fallback logic: if `origin/<baseBranch>` doesn't exist, try local `<baseBranch>`; if neither exists, throw clear error
+- Build passes
+
