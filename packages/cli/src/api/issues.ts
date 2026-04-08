@@ -7,6 +7,7 @@ import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager, type LlmConfig } from '../agent-runtime';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
+import { detectOpenSpecChange } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -495,6 +496,70 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: { issue, message: `Issue #${number} worktree cleaned up` }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/skip-to-review', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      const worktreePath = worktreeManager?.getPath(project.name, issue.number) || project.path;
+      const change = detectOpenSpecChange(worktreePath, issue);
+
+      if (!change) {
+        const response: ApiResponse = {
+          success: false,
+          error: `No OpenSpec Change found for issue #${number}. Use "mo propose ${number}" first.`
+        };
+        return c.json(response, 400);
+      }
+
+      issueService.transitionToStage(issue.id, Stage.Review);
+      issueService.setStatus(issue.id, IssueStatus.Active);
+
+      const updatedIssue = issueService.getByNumber(projectId, number);
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          issue: updatedIssue,
+          message: `Issue #${number} resumed, skipping to review stage. Change: ${change.changePath}`
+        }
       };
       return c.json(response);
     } catch (error) {

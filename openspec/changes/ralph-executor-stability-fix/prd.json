@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "change_id": "ralph-executor-stability-fix",
-  "issue_reference": "Fix ralph-executor stability issues",
+  "issue_reference": "Fix OpenSpec workflow stability and integration completeness",
   "generated_at": "2026-04-08T20:00:00Z",
   "tasks": [
     {
@@ -37,9 +37,7 @@
         "验证多次调用不会重复执行 kill",
         "更新单元测试验证竞态安全性"
       ],
-      "dependencies": [
-        "T-001"
-      ],
+      "dependencies": ["T-001"],
       "estimated_effort": "small",
       "spec_file": "design.md",
       "passes": false
@@ -98,10 +96,7 @@
         "在 ralph-executor 中集成分类器",
         "添加单元测试"
       ],
-      "dependencies": [
-        "T-001",
-        "T-002"
-      ],
+      "dependencies": ["T-001", "T-002"],
       "estimated_effort": "medium",
       "spec_file": "design.md",
       "passes": false
@@ -109,38 +104,115 @@
     {
       "id": "T-006",
       "order": 6,
+      "capability": "tool-registration",
+      "requirement_ref": "D6",
+      "title": "注册 8 个缺失工具到 main-agent",
+      "description": "将 read_prd, read_spec, store_learning, load_learnings, update_task_status, get_task_status, run_self_review, generate_prd 注册到 main-agent 的 ToolRegistry",
+      "acceptance_criteria": [
+        "main-agent.ts 中注册全部 8 个工具",
+        "每个工具传入正确的 cwd (worktreePath)",
+        "更新 agent-workflow-e2e.test.ts 中的工具数量断言",
+        "验证工具注册后 Agent 能发现并调用这些工具",
+        "构建通过，测试通过"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": false
+    },
+    {
+      "id": "T-007",
+      "order": 7,
+      "capability": "plan-stage-integration",
+      "requirement_ref": "D7",
+      "title": "实现 Plan Stage OpenSpec 感知",
+      "description": "更新 buildSystemPrompt 使其在 OpenSpec 模式下引导 Agent 执行 specs 创建、self-review 和 prd.json 生成",
+      "acceptance_criteria": [
+        "buildSystemPrompt 接收 workflow 配置参数",
+        "当 openspec.mode === 'openspec' 时注入 OpenSpec plan 指令",
+        "指令包含：创建 proposal/design/specs、运行 self-review、生成 prd.json",
+        "当 mode === 'traditional' 时保持原有 prompt 不变",
+        "Agent 在 plan 阶段能自主完成 specs → review → prd 流程",
+        "测试覆盖 OpenSpec 和 traditional 两种模式"
+      ],
+      "dependencies": ["T-006"],
+      "estimated_effort": "medium",
+      "spec_file": "design.md",
+      "passes": false
+    },
+    {
+      "id": "T-008",
+      "order": 8,
+      "capability": "bug-fix",
+      "requirement_ref": "D8",
+      "title": "修复 change-creator 的 isNew 和 findNextVersion bug",
+      "description": "修复 change-creator.ts 中 --force 时 isNew 标记错误和 findNextVersion 版本冲突问题",
+      "acceptance_criteria": [
+        "--force 时 isNew 设为 true",
+        "findNextVersion 收集所有版本号（含 baseName）找最大值 +1",
+        "不会产生与已有目录冲突的名称",
+        "添加 change-creator 单元测试覆盖两个 bug 场景",
+        "添加 api/propose.ts 路由测试",
+        "添加 cli/commands/propose.ts 命令测试"
+      ],
+      "dependencies": [],
+      "estimated_effort": "medium",
+      "spec_file": "design.md",
+      "passes": false
+    },
+    {
+      "id": "T-009",
+      "order": 9,
+      "capability": "detection-unification",
+      "requirement_ref": "D9",
+      "title": "统一检测逻辑消除重复",
+      "description": "将 detector.ts 和 workflow-loader.ts 的检测逻辑统一，提取共享函数 findChangeDir",
+      "acceptance_criteria": [
+        "在 detector.ts 中提取 findChangeDir() 共享函数",
+        "workflow-loader.ts 的 detectOpenSpecForIssue 调用共享函数",
+        "detector.ts 的 detectOpenSpecChange 也调用共享函数",
+        "两个入口对相同输入返回一致结果",
+        "更新 detector.test.ts 和 workflow-loader-detection.test.ts",
+        "多 Change 场景下两个入口都返回最新版本"
+      ],
+      "dependencies": ["T-004"],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": false
+    },
+    {
+      "id": "T-010",
+      "order": 10,
       "capability": "testing",
       "requirement_ref": "TEST",
-      "title": "更新测试和验证",
-      "description": "更新所有相关测试，确保修复后的代码有完整测试覆盖",
+      "title": "端到端验证和测试更新",
+      "description": "运行全量测试，更新受影响的测试断言，确保所有修复正确集成",
       "acceptance_criteria": [
         "更新 ralph-executor.test.ts 测试清理逻辑",
         "添加竞态条件测试用例",
         "添加 agentText 截断测试",
-        "更新 detector.test.ts 测试多版本场景",
-        "确保测试覆盖率 >= 90%",
-        "运行全量测试通过"
+        "更新 agent-workflow-e2e.test.ts 工具数量断言",
+        "确保全部测试通过",
+        "npm run build 通过"
       ],
-      "dependencies": [
-        "T-001",
-        "T-002",
-        "T-003",
-        "T-004",
-        "T-005"
-      ],
+      "dependencies": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007", "T-008", "T-009"],
       "estimated_effort": "medium",
       "spec_file": "design.md",
       "passes": false
     }
   ],
   "metadata": {
-    "total_tasks": 6,
+    "total_tasks": 10,
     "capabilities_covered": [
       "resource-cleanup",
       "concurrency-fix",
       "memory-safety",
       "detector-enhancement",
       "failure-classification",
+      "tool-registration",
+      "plan-stage-integration",
+      "bug-fix",
+      "detection-unification",
       "testing"
     ],
     "session_memory_path": "./session-memories/",
