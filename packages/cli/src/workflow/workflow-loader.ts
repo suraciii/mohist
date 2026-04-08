@@ -14,6 +14,17 @@ export interface WorkflowConfig {
   source: string;
 }
 
+export interface OpenSpecDetection {
+  detected: boolean;
+  changePath?: string;
+  prdPath?: string;
+  mode: 'openspec' | 'traditional';
+}
+
+export interface WorkflowConfigWithDetection extends WorkflowConfig {
+  openspec: OpenSpecDetection;
+}
+
 const DEFAULT_WORKFLOW: WorkflowConfig = {
   stages: [
     {
@@ -95,4 +106,37 @@ export function loadWorkflow(cwd: string): WorkflowConfig | string {
   }
 
   return DEFAULT_WORKFLOW;
+}
+
+export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSpecDetection {
+  const changesDir = path.join(cwd, '.mohist-specs', 'changes');
+
+  if (!fs.existsSync(changesDir)) {
+    return { detected: false, mode: 'traditional' };
+  }
+
+  const entries = fs.readdirSync(changesDir, { withFileTypes: true });
+  const issuePrefix = `${issueNumber}-`;
+  const matching = entries.find(e => e.isDirectory() && e.name.startsWith(issuePrefix));
+
+  if (!matching) {
+    return { detected: false, mode: 'traditional' };
+  }
+
+  const changePath = path.join(changesDir, matching.name);
+  const prdPath = path.join(changePath, 'prd.json');
+
+  if (!fs.existsSync(prdPath)) {
+    return { detected: true, changePath, mode: 'traditional' };
+  }
+
+  return { detected: true, changePath, prdPath, mode: 'openspec' };
+}
+
+export function loadWorkflowWithDetection(cwd: string, issueNumber: number): WorkflowConfigWithDetection | string {
+  const workflow = loadWorkflow(cwd);
+  if (typeof workflow === 'string') return workflow;
+
+  const openspec = detectOpenSpecForIssue(cwd, issueNumber);
+  return { ...workflow, openspec };
 }
