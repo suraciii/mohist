@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { runRalphLoop, sortTasksByOrder, getOrderValue, readTaskStatus, readPrdTasks, RalphExecutor } from '../src/openspec/ralph-executor';
+import { runRalphLoop, sortTasksByOrder, getOrderValue, readTaskStatus, readPrdTasks, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS } from '../src/openspec/ralph-executor';
 import type { OpenSpecChange } from '../src/openspec/detector';
 
 describe('ralph-executor utilities', () => {
@@ -289,5 +289,44 @@ describe('RalphExecutor class', () => {
       projectPath: tempDir,
     });
     expect(executor).toBeDefined();
+  });
+});
+
+describe('Failure categorization', () => {
+  it('should categorize timeout errors', () => {
+    expect(categorizeFailure('Timed out after 1800000ms')).toBe('timeout');
+    expect(categorizeFailure('Request timeout')).toBe('timeout');
+    expect(categorizeFailure('TIMEOUT ERROR')).toBe('timeout');
+  });
+
+  it('should categorize dependency errors', () => {
+    expect(categorizeFailure('Cannot find module express')).toBe('dependency');
+    expect(categorizeFailure('Module not found: foo')).toBe('dependency');
+    expect(categorizeFailure('Cannot find package @types/node')).toBe('dependency');
+    expect(categorizeFailure('Failed to resolve dependency')).toBe('dependency');
+  });
+
+  it('should categorize environment errors', () => {
+    expect(categorizeFailure('npm install failed')).toBe('environment');
+    expect(categorizeFailure('ENOENT: no such file')).toBe('environment');
+    expect(categorizeFailure('Permission denied')).toBe('environment');
+    expect(categorizeFailure('Command not found: npm')).toBe('environment');
+  });
+
+  it('should default to AC not met for other errors', () => {
+    expect(categorizeFailure('Test assertion failed')).toBe('ac_not_met');
+    expect(categorizeFailure('AC not satisfied')).toBe('ac_not_met');
+    expect(categorizeFailure('Missing validation')).toBe('ac_not_met');
+  });
+
+  it('should have correct config for each category', () => {
+    expect(FAILURE_CATEGORY_CONFIGS.ac_not_met.maxAttempts).toBe(3);
+    expect(FAILURE_CATEGORY_CONFIGS.ac_not_met.retryable).toBe(true);
+    expect(FAILURE_CATEGORY_CONFIGS.environment.maxAttempts).toBe(2);
+    expect(FAILURE_CATEGORY_CONFIGS.environment.retryable).toBe(true);
+    expect(FAILURE_CATEGORY_CONFIGS.dependency.maxAttempts).toBe(1);
+    expect(FAILURE_CATEGORY_CONFIGS.dependency.retryable).toBe(false);
+    expect(FAILURE_CATEGORY_CONFIGS.timeout.maxAttempts).toBe(1);
+    expect(FAILURE_CATEGORY_CONFIGS.timeout.retryable).toBe(false);
   });
 });

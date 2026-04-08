@@ -190,7 +190,7 @@
       ],
       "estimated_effort": "large",
       "spec_file": "specs/ralph-task-execution/spec.md",
-      "passes": false
+      "passes": true
     },
     {
       "id": "T-007",
