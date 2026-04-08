@@ -1,23 +1,12 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModelV3 } from '@ai-sdk/provider';
+import type { ConfigInfo } from '../config/config-schema';
+import { getProviderConfig, getConfigPath } from '../config/config-loader';
 
-const PROVIDER_ENV: Record<string, string[]> = {
-  anthropic: ['ANTHROPIC_API_KEY'],
-  openai: ['OPENAI_API_KEY'],
-};
+export type LlmConfig = ConfigInfo;
 
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-20250514';
-
-export interface LlmProviderOptions {
-  baseURL?: string;
-  apiKey?: string;
-}
-
-export interface LlmConfig {
-  model?: string;
-  provider?: Record<string, { options?: LlmProviderOptions }>;
-}
 
 export function resolveModel(config?: LlmConfig): LanguageModelV3 {
   const modelStr = config?.model ?? DEFAULT_MODEL;
@@ -37,34 +26,30 @@ export function resolveModel(config?: LlmConfig): LanguageModelV3 {
     );
   }
 
-  const envVars = PROVIDER_ENV[providerID];
-  if (!envVars) {
+  const resolved = getProviderConfig(config ?? {}, providerID);
+
+  if (!resolved.apiKey) {
+    const envHint = resolved.envVars.length > 0
+      ? ` or set ${resolved.envVars.join(', ')} environment variable`
+      : '';
     throw new Error(
-      `Unsupported provider: "${providerID}". Supported providers: ${Object.keys(PROVIDER_ENV).join(', ')}.`
+      `API key not found for provider "${providerID}". Set provider.${providerID}.apiKey in ${getConfigPath()}${envHint}.`
     );
   }
 
-  const apiKey = envVars.map((e) => process.env[e]).find(Boolean);
-  if (!apiKey) {
-    throw new Error(
-      `API key not found for provider "${providerID}". Set one of: ${envVars.join(', ')} environment variables.`
-    );
+  const sdkOpts: Record<string, string> = { apiKey: resolved.apiKey };
+  if (resolved.baseURL) {
+    sdkOpts.baseURL = resolved.baseURL;
   }
 
-  const options: Record<string, string> = { apiKey };
-  const providerOptions = config?.provider?.[providerID]?.options;
-  if (providerOptions) {
-    if (providerOptions.baseURL) {
-      options.baseURL = providerOptions.baseURL;
-    }
-  }
-
-  switch (providerID) {
+  switch (resolved.sdk) {
     case 'anthropic':
-      return createAnthropic(options)(modelID);
+      return createAnthropic(sdkOpts)(modelID);
     case 'openai':
-      return createOpenAI(options)(modelID);
+      return createOpenAI(sdkOpts)(modelID);
+    case 'openai-compatible':
+      return createOpenAI(sdkOpts)(modelID);
     default:
-      throw new Error(`Unsupported provider: "${providerID}".`);
+      return createOpenAI(sdkOpts)(modelID);
   }
 }
