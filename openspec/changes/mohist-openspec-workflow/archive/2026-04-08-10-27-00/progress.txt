@@ -1,0 +1,62 @@
+# Ralph Progress Log
+Started: 2026-04-08T09:42:57.973Z
+
+---
+## T-005-B: 实现任务上下文组装器
+Timestamp: 2026-04-08T17:49:30Z
+Task ID: T-005-B
+What was done:
+- Created `packages/cli/src/openspec/context-assembler.ts` with:
+  - `buildTaskContext()` function to assemble complete task context
+  - `loadLearningsFromDir()` to load session learnings from JSON files
+  - `formatLearningsForPrompt()` to format learnings for prompt inclusion
+  - `formatTaskForPrompt()` to format task details
+  - `formatRetryContext()` for retry scenarios with failure context
+  - `ContextAssembler` class for convenient context assembly
+- Created `packages/cli/tests/context-assembler.test.ts` with 14 unit tests covering:
+  - Task formatting
+  - Learnings formatting and loading
+  - Retry context formatting
+  - Complete context assembly with all components
+  - Edge cases (missing files, nested spec paths)
+
+Learnings:
+- Spec file paths in tasks (e.g., `specs/auth/spec.md`) are relative to the change directory, not the specs subdirectory
+- The `session-memories/` directory stores individual JSON files per task, sorted by task ID numerically
+
+Next steps:
+- Implement T-005-C: Ralph 循环控制器 (ralph-executor.ts)
+- Depends on T-005-B being complete
+
+---
+## T-005-C: 实现 Ralph 循环控制器
+Timestamp: 2026-04-08T17:57:30Z
+Task ID: T-005-C
+What was done:
+- Created `packages/cli/src/openspec/ralph-executor.ts` with:
+  - `runRalphLoop()` function to execute tasks sequentially from prd.json
+  - `RalphExecutor` class for convenient execution
+  - `getOrderValue()`, `sortTasksByOrder()` utility functions
+  - `readTaskStatus()`, `readPrdTasks()` helper functions
+  - Support for task retry with maxRetries option
+  - Task status initialization and tracking via task-status.json
+  - Context callbacks: onTaskStart, onTaskComplete, onLoopComplete
+  - Resume support via resumeFromTaskIndex option
+- Created `packages/cli/tests/ralph-executor.test.ts` with 18 unit tests covering:
+  - Order value parsing
+  - Task sorting
+  - Task status and PRD reading
+  - Ralph loop execution with status tracking
+  - Task completion skipping when already done
+  - RalphExecutor class instantiation
+
+Learnings:
+- The ACP protocol is the same as used in spawn-coder.ts - can reuse the connection pattern
+- Task status tracking happens via task-status.json file in change directory
+- Tasks that are already completed/succeeded are skipped in subsequent runs
+- maxRetries=0 is useful for testing without actual spawn_coder execution
+
+Next steps:
+- Implement T-005-D: 集成 Ralph 循环到 main-agent
+- Depends on T-005-C being complete
+
