@@ -299,7 +299,7 @@
       ],
       "estimated_effort": "medium",
       "spec_file": "specs/workflow-definition/spec.md",
-      "passes": false
+      "passes": true
     },
     {
       "id": "T-012",

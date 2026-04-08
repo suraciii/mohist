@@ -12,6 +12,7 @@ import { createAddCommentTool } from '../tools/add-comment';
 import { createGetIssueTool } from '../tools/get-issue';
 import { createAskUserTool } from '../tools/ask-user';
 import { createRunRalphLoopTool } from '../tools/run-ralph-loop';
+import { createArchiveChangeTool } from '../tools/archive-change';
 import type { EventBus } from '../services/event-bus';
 
 export interface MainAgentContext {
@@ -132,6 +133,10 @@ export async function runMainAgent(
     worktreePath: context.worktreePath,
     issueId: context.issue.id,
     projectId: context.issue.projectId,
+  }));
+  toolRegistry.register(createArchiveChangeTool({
+    issue: context.issue,
+    worktreePath: context.worktreePath,
   }));
 
   const session = existingSession ?? sessionManager.create(Number(context.issue.id));

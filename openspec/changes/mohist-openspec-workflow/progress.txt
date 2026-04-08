@@ -1,26 +1,19 @@
 # Ralph Progress Log
-Started: 2026-04-08T13:04:35.998Z
+Started: 2026-04-08T13:18:24.724Z
 
 ---
-[2026-04-08T15:30:00Z] T-010 - 实现 resume --skip-to-review 选项
-
-Task: 扩展 mo issue resume 命令支持从 plan 失败恢复
-
-Changes made:
-1. Added Stage.Review to the Stage enum in types/index.ts (4-stage workflow: plan → review → build → check)
-2. Added POST /issues/:number/skip-to-review endpoint in api/issues.ts
-   - Detects OpenSpec Change using detectOpenSpecChange()
-   - Validates that a Change exists before proceeding
-   - Transitions issue stage to Review and status to Active
-3. Added `mo issue resume <number> --skip-to-review` CLI command in cli/commands/issue.ts
-   - Uses --skip-to-review option to invoke the new API endpoint
-   - Provides clear feedback about the skip action
-
+T-011: 2026-04-08T14:45:00Z
+Task: 实现 check stage 扩展
+What was done:
+  - Created archive_change tool (src/tools/archive-change.ts) for archiving OpenSpec Change directories
+  - Tool moves Change from .mohist-specs/changes/{name}/ to .mohist-specs/archive/YYYY-MM-DD-{name}/
+  - Generates execution report with task completion stats, session memories count, and artifact list
+  - Registered tool in main-agent.ts
 Learnings:
-- The detector.ts module provides clean interface for detecting OpenSpec Changes
-- CLI option parsing in commander uses .option() with action having (number, options) signature
-
+  - Existing workflow check stage already has approval: true gate
+  - The archival should happen after user approves the check stage
+  - Need to ensure session-memories are preserved in archive
 Next steps:
-- All 12 tasks now have passes:true, T-011 and T-012 remain incomplete but are not blocking
-- T-011 (check stage extension) and T-012 (documentation) are pending implementation
+  - The main-agent prompt should instruct agent to call archive_change after approval
+  - Consider adding unit tests for archive_change tool
 
