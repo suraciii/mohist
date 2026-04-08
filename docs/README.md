@@ -158,6 +158,52 @@ At two critical points, the workflow pauses for user review:
 - **Design Review**: After designing stage, review the design document and approve with `crawlph pr approve`
 - **Implementation Review**: After implementing stage, review the code and approve with `crawlph pr approve`
 
+## OpenSpec Workflow
+
+For complex issues, Mohist supports the **OpenSpec workflow** with structured task decomposition and Ralph-style execution:
+
+```
+plan → review → build → check → done
+```
+
+### Key Features
+
+- **Change Artifacts**: Structured proposal/design/specs stored in `.mohist-specs/changes/`
+- **Ralph Loop**: Task-by-task execution with full context and failure recovery
+- **Self-Review**: Agent validates specs before human review (up to 3 iterations)
+- **Session Memory**: Learnings passed between tasks
+
+### Quick Start
+
+```bash
+# Start server
+mo server start
+
+# Create Change for issue #42 (starts plan stage)
+mo propose 42
+
+# After review, approve to start build
+mo issue approve 42
+
+# Build executes tasks automatically
+# When done, approve to archive
+mo issue approve 42
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `mo propose <issue>` | Create Change and start plan |
+| `mo propose <issue> --force` | Overwrite existing Change |
+| `mo issue resume <id> --skip-to-review` | Resume after manual fixes |
+
+### Documentation
+
+- [OpenSpec Usage Guide](OPENSEPCE-USAGE.md) - Detailed usage
+- [Workflow Examples](workflow-example/) - Configuration templates
+- [Troubleshooting](TROUBLESHOOTING.md) - Common issues and solutions
+
 ## Configuration
 
 Configuration is stored in `~/.crawlph/config.json`:

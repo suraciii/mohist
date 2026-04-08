@@ -322,7 +322,7 @@
       ],
       "estimated_effort": "medium",
       "spec_file": "specs/specs-project-storage/spec.md",
-      "passes": false
+      "passes": true
     }
   ],
   "metadata": {
