@@ -178,7 +178,7 @@
       "dependencies": ["T-004"],
       "estimated_effort": "small",
       "spec_file": "design.md",
-      "passes": false
+      "passes": true
     },
     {
       "id": "T-010",

@@ -75,6 +75,34 @@ describe('detectOpenSpecForIssue', () => {
     expect(result.mode).toBe('openspec');
     expect(result.changePath).toBe(changeDir);
   });
+
+  it('should return latest versioned change using unified findChangeDir', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const v1Dir = path.join(changesDir, '42-fix');
+    const v2Dir = path.join(changesDir, '42-fix-v2');
+    fs.mkdirSync(v1Dir, { recursive: true });
+    fs.mkdirSync(v2Dir, { recursive: true });
+    fs.writeFileSync(path.join(v2Dir, 'prd.json'), '{}');
+
+    const result = detectOpenSpecForIssue(tempDir, 42);
+    expect(result.detected).toBe(true);
+    expect(result.mode).toBe('openspec');
+    expect(result.changePath).toBe(v2Dir);
+  });
+
+  it('should return detected+traditional for latest version without prd.json', () => {
+    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const v1Dir = path.join(changesDir, '42-fix');
+    const v2Dir = path.join(changesDir, '42-fix-v2');
+    fs.mkdirSync(v1Dir, { recursive: true });
+    fs.mkdirSync(v2Dir, { recursive: true });
+    fs.writeFileSync(path.join(v1Dir, 'prd.json'), '{}');
+
+    const result = detectOpenSpecForIssue(tempDir, 42);
+    expect(result.detected).toBe(true);
+    expect(result.changePath).toBe(v2Dir);
+    expect(result.mode).toBe('traditional');
+  });
 });
 
 describe('loadWorkflowWithDetection', () => {

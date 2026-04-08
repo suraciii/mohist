@@ -106,3 +106,13 @@ Next steps: T-006 (register 8 missing tools to main-agent)
 - All tests pass, typecheck clean
 - Note: api/propose.ts route tests deferred to T-013 (end-to-end verification)
 - Next: T-009 (unify detection logic)
+
+## 2026-04-09 T-009 统一检测逻辑消除重复
+- Extracted `findChangeDir()` from detector.ts, reusing existing `findMatchingChanges` + `getSlug` logic
+- Refactored `detectOpenSpecChange` to delegate directory resolution to `findChangeDir`
+- Refactored `detectOpenSpecForIssue` in workflow-loader.ts to import and call `findChangeDir`
+- Added 7 unit tests for `findChangeDir` in detector.test.ts
+- Added 2 tests for version-aware detection in workflow-loader-detection.test.ts
+- All 28 tests pass, typecheck clean
+- Learning: The existing `getSlug`/`findMatchingChanges` approach already handles multi-hyphen slugs correctly; no need for the simpler regex from design doc
+- Next: T-010, T-011, T-012 remain

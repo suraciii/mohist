@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
+import { findChangeDir } from '../openspec/detector';
 
 export interface WorkflowStage {
   stage: string;
@@ -109,21 +110,12 @@ export function loadWorkflow(cwd: string): WorkflowConfig | string {
 }
 
 export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSpecDetection {
-  const changesDir = path.join(cwd, '.mohist-specs', 'changes');
+  const changePath = findChangeDir(cwd, issueNumber);
 
-  if (!fs.existsSync(changesDir)) {
+  if (!changePath) {
     return { detected: false, mode: 'traditional' };
   }
 
-  const entries = fs.readdirSync(changesDir, { withFileTypes: true });
-  const issuePrefix = `${issueNumber}-`;
-  const matching = entries.find(e => e.isDirectory() && e.name.startsWith(issuePrefix));
-
-  if (!matching) {
-    return { detected: false, mode: 'traditional' };
-  }
-
-  const changePath = path.join(changesDir, matching.name);
   const prdPath = path.join(changePath, 'prd.json');
 
   if (!fs.existsSync(prdPath)) {
