@@ -53,11 +53,11 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
 - **ask_user**: Ask the user a question and wait for their reply. The tool blocks until the user responds or a 24h timeout expires.
 
 ## Ralph Loop (OpenSpec Workflow)
-When in build stage and an OpenSpec Change is detected (via .mohist-specs/changes/{issue-number}-{slug}/ containing prd.json):
-1. Use \`run_ralph_loop\` instead of \`spawn_coder\` to execute the Ralph task loop
-2. The Ralph loop will iterate through tasks in prd.json sequentially
-3. Each task gets assembled context (proposal + design + spec + learnings)
-4. If no Change is detected, use traditional \`spawn_coder\` approach
+When you call \`read_workflow\`, it will automatically detect whether an OpenSpec Change exists for this issue and report the execution mode.
+- If execution mode is "Ralph-style task loop": use \`run_ralph_loop\` in the build stage instead of \`spawn_coder\`
+- If execution mode is "Traditional": use \`spawn_coder\` for all stages as usual
+- Detection is based on the presence of \`.mohist-specs/changes/{issue-number}-{slug}/prd.json\`
+- A Change directory without prd.json means plan stage is still in progress
 
 ## When to Use ask_user
 - Requirements are ambiguous and you need clarification
@@ -114,7 +114,7 @@ export async function runMainAgent(
     workflowLogRepo: context.workflowLogRepo,
     eventBus: context.eventBus,
   }));
-  toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath }));
+  toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath, issueNumber: context.issue.number }));
   toolRegistry.register(createAdvanceStageTool({ issue: context.issue, issueRepo: context.issueRepo, worktreePath: context.worktreePath, eventBus: context.eventBus }));
   toolRegistry.register(createAddCommentTool({ issue: context.issue, commentRepo: context.commentRepo, eventBus: context.eventBus }));
   toolRegistry.register(createGetIssueTool({ issue: context.issue, issueRepo: context.issueRepo }));
