@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { spawn } from 'child_process';
 import { Writable, Readable } from 'stream';
 import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
@@ -6,6 +7,64 @@ import type { SessionNotification, RequestPermissionRequest, RequestPermissionRe
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
+
+export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout';
+
+export interface FailureCategoryConfig {
+  maxAttempts: number;
+  retryable: boolean;
+}
+
+export const FAILURE_CATEGORY_CONFIGS: Record<FailureCategory, FailureCategoryConfig> = {
+  ac_not_met: { maxAttempts: 3, retryable: true },
+  environment: { maxAttempts: 2, retryable: true },
+  dependency: { maxAttempts: 1, retryable: false },
+  timeout: { maxAttempts: 1, retryable: false },
+};
+
+export function categorizeFailure(error: string): FailureCategory {
+  const lowerError = error.toLowerCase();
+
+  if (lowerError.includes('timeout') || lowerError.includes('timed out')) {
+    return 'timeout';
+  }
+
+  const dependencyPatterns = [
+    'cannot find module',
+    'cannot find',
+    'module not found',
+    'no such module',
+    'dependency',
+    'unmet dependency',
+    'peer dependency',
+    "cannot find package",
+    "failed to resolve",
+  ];
+  for (const pattern of dependencyPatterns) {
+    if (lowerError.includes(pattern)) {
+      return 'dependency';
+    }
+  }
+
+  const environmentPatterns = [
+    'npm install',
+    'install failed',
+    'node_modules',
+    'permission denied',
+    'enoent',
+    'no such file or directory',
+    'command not found',
+    'env',
+    'environment',
+  ];
+  for (const pattern of environmentPatterns) {
+    if (lowerError.includes(pattern)) {
+      return 'environment';
+    }
+  }
+
+  return 'ac_not_met';
+}
 
 export interface RalphExecutorContext {
   worktreePath: string;
@@ -15,6 +74,7 @@ export interface RalphExecutorContext {
   onTaskStart?: (task: Task) => void;
   onTaskComplete?: (task: Task, success: boolean, output: string) => void;
   onLoopComplete?: (results: RalphLoopResult) => void;
+  onAskUser?: (question: string, taskId: string) => Promise<string>;
 }
 
 export interface RalphLoopResult {
@@ -23,6 +83,9 @@ export interface RalphLoopResult {
   total: number;
   taskResults: TaskResult[];
   success: boolean;
+  paused?: boolean;
+  pausedTaskId?: string;
+  pauseReason?: string;
 }
 
 export interface TaskResult {
@@ -291,12 +354,68 @@ export interface RalphExecutorOptions extends RalphTaskOptions {
   resumeFromTaskIndex?: number;
 }
 
+async function storeFailureLearning(
+  change: OpenSpecChange,
+  task: Task,
+  failureReason: string,
+  category: FailureCategory,
+  attempt: number
+): Promise<void> {
+  const memoriesDir = change.sessionMemoriesPath;
+  if (!fs.existsSync(memoriesDir)) {
+    fs.mkdirSync(memoriesDir, { recursive: true });
+  }
+
+  const taskIdSanitized = task.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const timestamp = new Date().toISOString();
+
+  const learningPath = path.join(memoriesDir, `${taskIdSanitized}.json`);
+
+  const learning = {
+    task_id: task.id,
+    timestamp,
+    insights: [],
+    adjustments: generateAdjustmentsFromCategory(category, failureReason),
+    success: false,
+    execution_summary: `Failed on attempt ${attempt}: ${failureReason.slice(0, 200)}`,
+    failure_reason: failureReason,
+    failed_attempts: attempt,
+    failure_category: category,
+  };
+
+  fs.writeFileSync(learningPath, JSON.stringify(learning, null, 2), 'utf-8');
+}
+
+function generateAdjustmentsFromCategory(category: FailureCategory, _error: string): string[] {
+  const adjustments: string[] = [];
+
+  switch (category) {
+    case 'ac_not_met':
+      adjustments.push('Review acceptance criteria carefully before implementing');
+      adjustments.push('Verify implementation satisfies all AC requirements');
+      break;
+    case 'environment':
+      adjustments.push('Check environment setup and dependencies');
+      adjustments.push('Ensure npm install completes successfully before building');
+      break;
+    case 'dependency':
+      adjustments.push('Resolve code dependencies before proceeding');
+      adjustments.push('May need to restructure code to use available exports');
+      break;
+    case 'timeout':
+      adjustments.push('Consider breaking this task into smaller subtasks');
+      adjustments.push('The task may be too complex for a single execution');
+      break;
+  }
+
+  return adjustments;
+}
+
 export async function runRalphLoop(
   change: OpenSpecChange,
   context: RalphExecutorContext,
   options: RalphExecutorOptions = {}
 ): Promise<RalphLoopResult> {
-  const maxRetries = options.maxRetries ?? 3;
   const resumeFromTaskIndex = options.resumeFromTaskIndex;
 
   const tasks = readPrdTasks(change.prdPath);
@@ -342,8 +461,13 @@ export async function runRalphLoop(
     });
 
     let lastError: string | undefined;
+    let lastCategory: FailureCategory = 'ac_not_met';
     let taskSuccess = false;
     let attemptsUsed = 0;
+    let shouldPause = false;
+    let pauseReason: string | undefined;
+
+    const maxRetries = options.maxRetries ?? 3;
 
     for (let attempt = currentAttempts + 1; attempt <= maxRetries + currentAttempts; attempt++) {
       const prompt = attempt > 1
@@ -367,10 +491,27 @@ export async function runRalphLoop(
         context.onTaskComplete?.(task, true, result.output);
         break;
       } else {
-        lastError = result.error;
-        if (attempt < maxRetries + currentAttempts) {
-          options.onRetry?.(task, attempt, result.error ?? 'Unknown error');
+        lastError = result.error ?? 'Unknown error';
+        lastCategory = categorizeFailure(lastError);
+
+        const categoryConfig = FAILURE_CATEGORY_CONFIGS[lastCategory];
+        const effectiveMaxAttempts = Math.min(maxRetries, categoryConfig.maxAttempts);
+
+        await storeFailureLearning(change, task, lastError, lastCategory, attempt);
+
+        if (!categoryConfig.retryable) {
+          shouldPause = true;
+          pauseReason = `${lastCategory} failure: ${lastError}. This cannot be retried automatically.`;
+          break;
         }
+
+        if (attempt >= effectiveMaxAttempts + currentAttempts) {
+          shouldPause = true;
+          pauseReason = `Max retries (${effectiveMaxAttempts}) exceeded for ${lastCategory} failure: ${lastError}`;
+          break;
+        }
+
+        options.onRetry?.(task, attempt, lastError);
       }
     }
 
@@ -384,6 +525,32 @@ export async function runRalphLoop(
       });
       updateTaskStatusEntry(change.taskStatusPath, task.id, 'failed', lastError);
       context.onTaskComplete?.(task, false, lastError ?? 'Max retries exceeded');
+
+      if (shouldPause && context.onAskUser) {
+        const question = `Task ${task.id} failed and requires user intervention.\n\nReason: ${pauseReason}\n\nOptions:\n1. Retry this task\n2. Skip this task and continue\n3. Abort the build\n\nWhat would you like to do?`;
+        const answer = await context.onAskUser(question, task.id);
+
+        if (answer.toLowerCase().includes('skip')) {
+          updateTaskStatusEntry(change.taskStatusPath, task.id, 'skipped');
+          taskResults[taskResults.length - 1].status = 'skipped';
+        } else if (answer.toLowerCase().includes('retry')) {
+          i--;
+          continue;
+        } else {
+          const result: RalphLoopResult = {
+            completed,
+            failed,
+            total: sortedTasks.length,
+            taskResults,
+            success: false,
+            paused: true,
+            pausedTaskId: task.id,
+            pauseReason,
+          };
+          context.onLoopComplete?.(result);
+          return result;
+        }
+      }
     } else {
       completed++;
       taskResults.push({
