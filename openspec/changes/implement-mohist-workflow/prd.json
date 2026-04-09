@@ -126,9 +126,9 @@
         "Can resume from failed task"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-005"],
-      "notes": "Add updateTaskStatus method to ChangeArtifactsManager"
+      "notes": "updateTaskStatus method implemented in ChangeArtifactsManager, used by WorkflowController during Build phase"
     },
     {
       "id": "T-006",
@@ -143,9 +143,9 @@
         "Provides default Prompt template"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-002"],
-      "notes": "CRITICAL: Currently only runs 'npm run build'. Should try 'npm test' first."
+      "notes": "ReviewerAgent fully implemented with review method, multi-dimensional analysis (correctness, complexity, test_coverage, security), and structured output"
     },
     {
       "id": "T-006-1",
