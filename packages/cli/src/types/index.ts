@@ -37,6 +37,16 @@ export enum IssueStatus {
   Blocked = 'blocked'
 }
 
+export type ApprovalStatus = 'pending' | 'awaiting' | 'approved' | 'rejected';
+
+export interface ApprovalState {
+  stage: Stage;
+  status: ApprovalStatus;
+  output: unknown;
+  requestedAt: string;
+  respondedAt?: string;
+}
+
 export interface Issue {
   id: string;
   number: number;
@@ -48,6 +58,7 @@ export interface Issue {
   labels: string[];
   createdAt: string;
   updatedAt: string;
+  approvalState?: ApprovalState;
 }
 
 export interface Project {
