@@ -46,12 +46,13 @@ mohist 的 LLM 配置系统在之前的工作中已经建立了 provider 注册�
 创建 `LlmError` 类继承 `Error`，携带 `code` 字段。在 `resolveModel()` 的现有抛错点改用 `LlmError`。
 
 错误码映射：
-- `LLM_NOT_CONFIGURED` — apiKey 不存在
+- `LLM_NOT_CONFIGURED` — apiKey 不存在或 config.jsonc 不存在
+- `LLM_CONFIG_INVALID` — config.jsonc 存在但 JSONC 语法错误
 - `LLM_AUTH_FAILED` — provider 返回 401/403（future，当前不改 stream 层）
 - `LLM_RATE_LIMITED` — provider 返回 429（future）
 - `LLM_PROVIDER_ERROR` — provider 返回 5xx（future）
 
-当前只实现 `LLM_NOT_CONFIGURED`，其余为 API 层 catch 中的预留分类。
+当前只实现 `LLM_NOT_CONFIGURED` 和 `LLM_CONFIG_INVALID`，其余为 API 层 catch 中的预留分类。
 
 **为什么不用 error message 解析**: 字符串解析脆弱，自定义类型可靠且可扩展。
 
@@ -73,10 +74,18 @@ mohist 的 LLM 配置系统在之前的工作中已经建立了 provider 注册�
 
 前端在 `ExplorePage` 加载时查询 status API 的 `llm` 字段。如果 `configured === false`，渲染引导卡片替代聊天界面。
 
-引导卡片展示：配置文件路径、支持的 provider 列表、配置示例。
+引导卡片展示：配置文件路径、支持的 provider 列表（anthropic、glm、openai）、配置示例（含 anthropic 和 glm 的 JSONC 示例）、刷新按钮。
+
+### Decision 5: 刷新按钮机制
+
+引导卡片包含刷新按钮，点击后重新查询 status API。这是为了让用户在手动修改配置文件后能即时看到效果，无需刷新整个页面。
+
+**实现方式**: 前端利用 react-query 的 `refetch` 功能，刷新按钮触发 status API 重新请求。如果返回 `configured: true`，则切换到正常聊天界面。
 
 ## Risks / Trade-offs
 
 - **[resolveModel 被多调用一次]** → status 端点每次请求都调用 resolveModel，对性能无影响（纯内存操作，无网络请求）
-- **[status 端点返回的 provider/model 信息可能过时]** → 用户运行时修改 config.jsonc 后需要刷新页面才能更新状态，这是可接受的 trade-off
+- **[status 端点返回的 provider/model 信息可能过时]** → 用户运行时修改 config.jsonc 后需要点击刷新按钮才能更新状态，这是可接受的 trade-off
 - **[只覆盖 Explore 页面]** → Issues 的 start 端点也会受影响，但 agent 错误通过 SSE/eventBus 传播，当前只做 API 层 code 字段，前端引导留给后续
+- **[配置热重载的考虑]** → 如果 mohist 后续支持 config 热重载（不重启 server），需要确认 `resolveModel()` 是纯函数还是有副作用。当前实现假设 `resolveModel()` 每次调用都会读取最新配置，如有缓存逻辑需同步调整
+- **[并发场景]** → 多次快速请求 status 端点会并发调用 `resolveModel()`，需确保无副作用或竞态条件

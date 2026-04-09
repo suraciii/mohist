@@ -123,4 +123,13 @@ export const api = {
 
   deleteExploreSession: (id: string) =>
     request<{ message: string }>(`/explore/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  getStatus: () => request<{
+    name: string
+    path: string
+    issues: number
+    activeIssues: number
+    issuesByStage: Record<string, number>
+    llm: { configured: false; provider?: undefined; model?: undefined } | { configured: true; provider: string; model: string }
+  }>('/status'),
 }
