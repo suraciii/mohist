@@ -55,6 +55,9 @@ export function useExploreStream(): UseExploreStreamReturn {
 
       if (!res.ok) {
         const json = await res.json()
+        if (json.code === 'LLM_NOT_CONFIGURED') {
+          throw new Error('LLM provider not configured. Please configure your API key in ~/.mohist/config.jsonc')
+        }
         throw new Error(json.error || `Request failed: ${res.status}`)
       }
 

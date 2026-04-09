@@ -1,37 +1,10 @@
 # Ralph Progress Log
-Started: 2026-04-09T05:22:08.717Z
+Started: 2026-04-09T05:39:29.891Z
 
 ---
-
-2026-04-09T13:24:00.000Z | T-002 | Status API 增加 LLM 状态字段
-- 修改 api/status.ts: 增加 llmConfig 可选参数，通过 try/catch 调用 resolveModel() 判断配置状态
-- 修改 server/index.ts: 传递 llmConfig 给 createStatusRoutes
-- TypeScript 类型处理: 使用联合类型 { configured: false; provider?: undefined; model?: undefined } | { configured: true; provider: string; model: string }
-- 注意: resolveModel() 调用时无需使用其返回值，仅需判断是否抛错
-- Pre-existing test failures in services.test.ts and api-routes.test.ts (SQLite UNIQUE constraint issues)
-- Next: T-003 API 错误响应增加 code 字段
-
----
-
-2026-04-09T13:32:00.000Z | T-003 | API 错误响应增加 code 字段
-- 修改 api/explore.ts: 在 POST /:id/messages 的 catch 块中检测 LlmError 并附加 code 字段
-- 添加 import { LlmError } from '../agent-runtime/llm'
-- 修改响应类型为 ApiResponse & { code?: string }
-- instanceof LlmError 检查只在 error 为 LlmError 时添加 code 字段
-- TypeScript 类型检查通过
-- Pre-existing test failures in api-routes.test.ts (NOT NULL constraint, 404 status) - 与本次修改无关
-- Next: T-004 Explore 页面 LLM 状态检查与引导卡片
-
----
-
-2026-04-09T14:02:00.000Z | T-004 | Explore 页面 LLM 状态检查与引导卡片
-- 修改 web/src/lib/api.ts: 添加 getStatus() 函数请求 /api/status
-- 修改 web/src/hooks/useQueries.ts: 添加 useStatus hook，retry: false 确保失败不阻塞
-- 修改 web/src/components/ExplorePage.tsx:
-  - 添加 LlmGuidanceCard 组件显示引导卡片
-  - 卡片包含配置文件路径 ~/.mohist/config.jsonc、配置示例、支持 provider 列表（anthropic/glm/openai）、刷新按钮
-  - 使用 statusData?.llm?.configured !== false 判断，失败时不阻塞（statusData 可能为 undefined）
-  - llm 未配置时显示引导卡片替代聊天界面
-- TypeScript build 通过
-- Next: T-005 Explore 页面分类错误提示
-
+- 2026-04-09T06:07:00Z - T-005: Explore 页面分类错误提示
+  - Updated useExploreStream.ts to parse `code` field from non-ok API responses
+  - When code is `LLM_NOT_CONFIGURED`, displays user-friendly guidance message instead of raw error
+  - Build passes without errors
+  - No learnings needed for this straightforward task
+  - Next: commit and check if all tasks complete
