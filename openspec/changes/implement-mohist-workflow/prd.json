@@ -94,9 +94,9 @@
         "Supports custom prompt override"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-004"],
-      "notes": "Makes prompts user-customizable"
+      "notes": "Created prompt-loader.ts, planner-default.yaml, planner-self-review.yaml. Agent loads from file at runtime."
     },
     {
       "id": "T-005",
