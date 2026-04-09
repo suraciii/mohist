@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
-  server.addRouter('/api', createStatusRoutes(projectService, issueService));
+  server.addRouter('/api', createStatusRoutes(projectService, issueService, llmConfig));
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
   server.addRouter('/api/fs', createFsRoutes());

@@ -26,6 +26,12 @@ Server SHALL 提供 RESTful API 供 CLI 查询状态，基于 Hono 框架实现�
 - **THEN** 错误响应 SHALL 包含 `{ success: false, error: "<message>", code: "LLM_NOT_CONFIGURED" }`
 - **AND** HTTP 状态码为 500
 
+#### Scenario: LLM 配置格式错误时的错误响应
+- **WHEN** Explore 或其他 LLM 依赖端点因 `LlmError` 失败
+- **AND** `error.code` 为 `"LLM_CONFIG_INVALID"`
+- **THEN** 错误响应 SHALL 包含 `{ success: false, error: "<message>", code: "LLM_CONFIG_INVALID" }`
+- **AND** HTTP 状态码为 500
+
 #### Scenario: 非 LLM 错误响应不变
 - **WHEN** API 处理非 LLM 相关错误
 - **THEN** 错误响应格式保持不变，不包含 `code` 字段
