@@ -117,7 +117,7 @@
         "Legacy stages (draft, check) not in DEFAULT_WORKFLOW but still transition via STAGE_TRANSITIONS"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "shouldPauseAtCurrentStage checks NEXT stage's approval flag. Only new flow stages in DEFAULT_WORKFLOW — legacy stages get findIndex=-1 which returns false (no pause), correct behavior."
     },
     {

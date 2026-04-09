@@ -43,3 +43,17 @@ Next steps: T-006 (Add findPendingApprovalByIssueId to IssueRepo).
 Learnings: The existing findPendingApproval(projectId) method provided a good template. The new method follows the same pattern but queries by issue ID instead of project ID. Tests follow the same pattern as other IssueRepo tests in database.test.ts.
 
 Next steps: T-007 (Add duplicate execution prevention to AgentRunnerService).
+
+---
+2026-04-09T12:40:43Z | T-007 | Added duplicate execution prevention to AgentRunnerService.start(). Before launching agent, now calls issueRepo.findPendingApprovalByIssueId(issue.id) to check for pending approval. If pending approval exists, returns { started: false, error: "Issue #N has pending approval. Use resume or submit_approval first." }. Added unit test file tests/agent-runner-service.test.ts with two tests: (1) start() returns started:false with error when approval pending, (2) start() proceeds normally when no pending approval. Both tests pass, typecheck passes.
+
+Learnings: The findPendingApprovalByIssueId method from T-006 is now utilized. The issue object passed to start() has the approvalState set, but the check needs to be done via issueRepo to ensure we're getting current state from DB, not just the cached object. The test pattern from database.test.ts for IssueRepo was useful reference.
+
+Next steps: T-008 (Update DEFAULT_WORKFLOW with new flow stages and approval flags).
+
+---
+2026-04-09T13:15:00Z | T-008 | Updated DEFAULT_WORKFLOW in workflow-loader.ts to new flow stages: explore, plan, build, review, done. Set approval: true for plan stage (pauses after explore, before plan execution) and review stage (pauses after build, before done). Set approval: false for explore, build, done. Legacy stages (draft, check) not included in DEFAULT_WORKFLOW - they work via STAGE_TRANSITIONS alone since shouldPauseAtCurrentStage returns false when stage not found. Typecheck passes.
+
+Learnings: shouldPauseAtCurrentStage checks the NEXT stage's approval flag, not current. When currentStage is "explore", it looks up workflow.stages[exploreIndex + 1] which is "plan" with approval:true, so it pauses correctly before plan execution. Legacy stages get findIndex=-1 which returns false (no pause), which is correct behavior since they don't need approval in the new flow system.
+
+Next steps: T-009 (Integrate RalphExecutor into executeBuildStage without onAskUser).
