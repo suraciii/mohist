@@ -1,0 +1,302 @@
+{
+  "project": "mohist",
+  "description": "Fix critical implementation issues in Mohist Workflow system (Revised)",
+  "generated_at": "2026-04-09",
+  "revision": "2.0",
+  "revision_note": "Revised to leverage existing pause mechanism in AgentRunnerService instead of adding shouldPause marker",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create types/workflow-results.ts with unified interfaces",
+      "description": "Create single source of truth for PlanResult and ReviewResult interfaces",
+      "acceptance_criteria": [
+        "Create types/workflow-results.ts file",
+        "Define PlanResult interface with all required fields (success, changePath, artifacts, selfReviewNotes, iterations, duration, error)",
+        "Define ReviewResult interface with all required fields (passed, dimensions, overallReasoning, fixSuggestions, duration)",
+        "Export both interfaces and related types"
+      ],
+      "priority": 1,
+      "estimated_effort": "30 minutes",
+      "dependencies": []
+    },
+    {
+      "id": "T-002",
+      "title": "Update workflow-controller.ts to use unified interfaces",
+      "description": "Import PlanResult and ReviewResult from types/workflow-results.ts",
+      "acceptance_criteria": [
+        "Import interfaces from types/workflow-results.ts",
+        "Remove local interface definitions",
+        "All imports updated correctly",
+        "TypeScript compilation passes"
+      ],
+      "priority": 1,
+      "estimated_effort": "20 minutes",
+      "dependencies": ["T-001"]
+    },
+    {
+      "id": "T-003",
+      "title": "Update planner-agent.ts to use unified interfaces",
+      "description": "Import PlanResult from types/workflow-results.ts",
+      "acceptance_criteria": [
+        "Import PlanResult from types/workflow-results.ts",
+        "Remove local interface definition if exists",
+        "TypeScript compilation passes"
+      ],
+      "priority": 1,
+      "estimated_effort": "15 minutes",
+      "dependencies": ["T-001"]
+    },
+    {
+      "id": "T-004",
+      "title": "Update reviewer-agent.ts to use unified interfaces",
+      "description": "Import ReviewResult from types/workflow-results.ts",
+      "acceptance_criteria": [
+        "Import ReviewResult from types/workflow-results.ts",
+        "Remove local interface definition if exists",
+        "TypeScript compilation passes"
+      ],
+      "priority": 1,
+      "estimated_effort": "15 minutes",
+      "dependencies": ["T-001"]
+    },
+    {
+      "id": "T-005",
+      "title": "Update advance-stage.ts to use STAGE_TRANSITIONS",
+      "description": "Replace M1_ALLOWED_TRANSITIONS with STAGE_TRANSITIONS from types/index.ts",
+      "acceptance_criteria": [
+        "Import STAGE_TRANSITIONS and isValidTransition from types/index.ts",
+        "Remove M1_ALLOWED_TRANSITIONS constant",
+        "Update transition validation logic to use imported functions",
+        "All valid transitions work correctly (Explore→Plan, Plan→Build, Build→Review, Review→Done/Build)"
+      ],
+      "priority": 1,
+      "estimated_effort": "30 minutes",
+      "dependencies": []
+    },
+    {
+      "id": "T-006",
+      "title": "Fix findPendingApproval to support issue-level query",
+      "description": "Add findPendingApprovalByIssueId method to IssueRepo",
+      "acceptance_criteria": [
+        "Add findPendingApprovalByIssueId(issueId: string) method",
+        "Method queries by issue id and approval_state status",
+        "Returns Issue | null",
+        "Add unit tests for the new method"
+      ],
+      "priority": 1,
+      "estimated_effort": "30 minutes",
+      "dependencies": []
+    },
+    {
+      "id": "T-007",
+      "title": "Add duplicate execution prevention to AgentRunnerService",
+      "description": "Check for pending approval before starting agent",
+      "acceptance_criteria": [
+        "In AgentRunnerService.start(), check if issue has pending approval",
+        "Use findPendingApprovalByIssueId to check",
+        "If pending approval exists, return error instead of starting",
+        "Error message instructs user to use resume or submit_approval"
+      ],
+      "priority": 1,
+      "estimated_effort": "30 minutes",
+      "dependencies": ["T-006"]
+    },
+    {
+      "id": "T-008",
+      "title": "Ensure workflow.yaml has correct approval configuration",
+      "description": "Verify and update workflow.yaml with proper stage approval settings",
+      "acceptance_criteria": [
+        "Review current workflow.yaml configuration",
+        "Ensure Plan stage has approval: true (or next stage has approval: true)",
+        "Ensure Review stage has approval: true (or next stage has approval: true)",
+        "Ensure Explore/Build/Done have appropriate approval settings",
+        "Support both new (Explore→Review) and old (Draft→Check) stage flows"
+      ],
+      "priority": 2,
+      "estimated_effort": "30 minutes",
+      "dependencies": []
+    },
+    {
+      "id": "T-009",
+      "title": "Investigate RalphExecutor integration requirements",
+      "description": "Research how to properly integrate RalphExecutor into Build stage",
+      "acceptance_criteria": [
+        "Review RalphExecutor.execute() interface and requirements",
+        "Understand OpenSpecChange detection and creation",
+        "Identify how onAskUser callback should interact with AgentRunnerService pause",
+        "Document integration approach"
+      ],
+      "priority": 2,
+      "estimated_effort": "1 hour",
+      "dependencies": []
+    },
+    {
+      "id": "T-010",
+      "title": "Modify executeBuildStage to integrate RalphExecutor",
+      "description": "Update Build stage execution to use RalphExecutor for OpenSpec tasks",
+      "acceptance_criteria": [
+        "Check for prd.json existence in change directory",
+        "If exists and has tasks, use RalphExecutor.execute()",
+        "Pass correct context to RalphExecutor (worktreePath, projectPath, issueId)",
+        "Handle RalphLoopResult correctly (success, failed, paused states)",
+        "If no prd.json, fall back to current spawn_coder behavior"
+      ],
+      "priority": 2,
+      "estimated_effort": "2 hours",
+      "dependencies": ["T-009"]
+    },
+    {
+      "id": "T-011",
+      "title": "Implement onAskUser to pause conversion",
+      "description": "Convert RalphExecutor onAskUser callback to AgentRunnerService pause",
+      "acceptance_criteria": [
+        "When onAskUser is called, emit event to trigger pause",
+        "Store question and taskId for later retrieval",
+        "Return user response when available after resume",
+        "Handle timeout and cancellation scenarios"
+      ],
+      "priority": 2,
+      "estimated_effort": "1.5 hours",
+      "dependencies": ["T-010"]
+    },
+    {
+      "id": "T-012",
+      "title": "Implement robust JSON parsing in Planner Agent",
+      "description": "Add multi-strategy JSON parsing with fallback for artifact generation",
+      "acceptance_criteria": [
+        "Implement parseArtifactsWithFallback method",
+        "Strategy 1: Direct JSON.parse()",
+        "Strategy 2: Markdown code block extraction (```json)",
+        "Strategy 3: Relaxed parsing (remove comments, fix trailing commas)",
+        "Strategy 4: Regex-based field extraction (last resort)",
+        "Returns null with error logged if all strategies fail",
+        "Retry logic with more explicit prompts on failure"
+      ],
+      "priority": 3,
+      "estimated_effort": "1.5 hours",
+      "dependencies": []
+    },
+    {
+      "id": "T-013",
+      "title": "Conservatively simplify Main Agent system prompt",
+      "description": "Remove deprecated tool references while keeping prompt structure",
+      "acceptance_criteria": [
+        "Remove references to run_ralph_loop tool",
+        "Keep 80%+ of existing prompt content",
+        "Add clear instructions for execute_stage usage",
+        "Ensure OpenSpec-related instructions remain (still needed)",
+        "Test that agent behavior remains consistent"
+      ],
+      "priority": 3,
+      "estimated_effort": "1 hour",
+      "dependencies": []
+    },
+    {
+      "id": "T-014",
+      "title": "Update tests for unified interfaces",
+      "description": "Update all tests to use correct interface shapes from types/workflow-results",
+      "acceptance_criteria": [
+        "Update workflow-controller.test.ts mocks with correct PlanResult/ReviewResult shapes",
+        "Update reviewer-agent.test.ts if needed",
+        "Update planner-agent.test.ts if needed",
+        "All tests compile and pass"
+      ],
+      "priority": 3,
+      "estimated_effort": "1 hour",
+      "dependencies": ["T-002", "T-003", "T-004"]
+    },
+    {
+      "id": "T-015",
+      "title": "Add integration test for pause/resume flow",
+      "description": "Create end-to-end test for pause and resume mechanism",
+      "acceptance_criteria": [
+        "Test AgentRunnerService.pause() saves session correctly",
+        "Test AgentRunnerService.resume() restores session correctly",
+        "Test workflow continues after resume",
+        "Test approval state is cleared after resume"
+      ],
+      "priority": 3,
+      "estimated_effort": "2 hours",
+      "dependencies": ["T-007", "T-008"]
+    },
+    {
+      "id": "T-016",
+      "title": "Test Build stage with OpenSpec integration",
+      "description": "Verify Build stage correctly executes RalphExecutor for OpenSpec tasks",
+      "acceptance_criteria": [
+        "Test with prd.json present - uses RalphExecutor",
+        "Test with prd.json absent - uses spawn_coder",
+        "Test task failure handling",
+        "Test onAskUser pause integration"
+      ],
+      "priority": 3,
+      "estimated_effort": "2 hours",
+      "dependencies": ["T-010", "T-011"]
+    },
+    {
+      "id": "T-017",
+      "title": "Test backward compatibility",
+      "description": "Verify old issues with Draft/Check stages still work",
+      "acceptance_criteria": [
+        "Create test issue with Draft stage",
+        "Verify Draft → Plan transition works",
+        "Create test issue with Check stage",
+        "Verify Check → Done/Plan transitions work"
+      ],
+      "priority": 3,
+      "estimated_effort": "1 hour",
+      "dependencies": ["T-005", "T-008"]
+    },
+    {
+      "id": "T-018",
+      "title": "Run full test suite and fix failures",
+      "description": "Execute complete test suite and fix any failures",
+      "acceptance_criteria": [
+        "All unit tests pass (>80% coverage)",
+        "All integration tests pass",
+        "No TypeScript compilation errors",
+        "No lint errors",
+        "Manual smoke test passes"
+      ],
+      "priority": 4,
+      "estimated_effort": "2 hours",
+      "dependencies": ["T-014", "T-015", "T-016", "T-017"]
+    },
+    {
+      "id": "T-019",
+      "title": "Create workflow execution manual test script",
+      "description": "Create script for manual end-to-end workflow testing",
+      "acceptance_criteria": [
+        "Create scripts/test-workflow.sh",
+        "Script creates test issue",
+        "Script executes through Plan stage",
+        "Script verifies pause behavior",
+        "Script submits approval and resumes",
+        "Script verifies Build stage execution"
+      ],
+      "priority": 4,
+      "estimated_effort": "1 hour",
+      "dependencies": ["T-018"]
+    },
+    {
+      "id": "T-020",
+      "title": "Update documentation",
+      "description": "Update workflow documentation with changes",
+      "acceptance_criteria": [
+        "Document pause/resume mechanism",
+        "Document Build stage OpenSpec integration",
+        "Document backward compatibility",
+        "Update AGENTS.md if needed"
+      ],
+      "priority": 5,
+      "estimated_effort": "1 hour",
+      "dependencies": ["T-018"]
+    }
+  ],
+  "metadata": {
+    "total_tasks": 20,
+    "capabilities_covered": ["workflow-controller", "agent-system", "state-management"],
+    "estimated_total_effort": "18-20 hours",
+    "revision_summary": "Removed shouldPause approach, leveraging existing AgentRunnerService pause mechanism instead"
+  }
+}
