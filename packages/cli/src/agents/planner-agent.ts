@@ -7,6 +7,7 @@ import { streamText } from 'ai';
 import { createReadFileTool } from '../tools/read-file';
 import { createGlobTool } from '../tools/glob-tool';
 import { createGrepTool } from '../tools/grep-tool';
+import { createWriteFileTool } from '../tools/write-file';
 
 const DEFAULT_MAX_ITERATIONS = 3;
 
@@ -245,6 +246,15 @@ Be concise - provide a summary of your findings.`;
     return registry;
   }
 
+  private buildArtifactToolRegistry(cwd: string): ToolRegistry {
+    const registry = new ToolRegistry();
+    registry.register(createReadFileTool({ projectPath: cwd }));
+    registry.register(createGlobTool({ projectPath: cwd }));
+    registry.register(createGrepTool({ projectPath: cwd }));
+    registry.register(createWriteFileTool({ projectPath: cwd }));
+    return registry;
+  }
+
   private parseCodebaseFindings(findings: string): CodebaseInfo {
     const keyFiles: string[] = [];
     const patterns: string[] = [];
@@ -274,45 +284,38 @@ Be concise - provide a summary of your findings.`;
     changeDir: string
   ): Promise<{ proposal: string; design: string; specs: Map<string, string>; prd: unknown }> {
     const model = resolveModel(this.llmConfig);
-    const toolRegistry = this.buildExploreToolRegistry(process.cwd());
+    const toolRegistry = this.buildArtifactToolRegistry(process.cwd());
 
     const prompt_text = `You are a Planner Agent creating design artifacts for this issue:
 
 Issue #${issue.number}: ${issue.title}
-${issue.body ? `\nDescription:\n${issue.body}\n` : ''}
+${issue.body ? '\nDescription:\n' + issue.body + '\n' : ''}
 
 Codebase Findings:
 - Key Files: ${codebaseInfo.keyFiles.join(', ') || 'None identified'}
 - Patterns: ${codebaseInfo.patterns.join(', ') || 'None identified'}
 - Architecture: ${codebaseInfo.architecture}
 
-Create the following artifacts in ${changeDir}:
+You MUST use the write_file tool to create the following artifacts in the change directory:
 
 1. **proposal.md** - Problem statement and solution overview
-2. **design.md** - Technical design decisions
-3. **specs/*.md** - One spec file per capability (use GIVEN/WHEN/THEN format)
+2. **design.md** - Technical design decisions  
+3. **specs/*.md** - One spec file per capability
 4. **prd.json** - Task breakdown with tasks array
 
-Each spec file should follow this format:
-\`\`\`markdown
-## ADDED Requirements
+Generate high-quality artifacts that cover all requirements. After creating all files, report which files were created.`;
 
-### Requirement: {capability}
-
-#### Scenario: {scenario}
-- **GIVEN** {context}
-- **WHEN** {action}
-- **THEN** {expected outcome}
-\`\`\`
-
-Generate high-quality artifacts that cover all requirements.`;
-
-    await streamText({
+    // Execute the stream and wait for completion
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const streamResult: any = await streamText({
       model,
-      system: 'You are a Planner Agent. Create high-quality design artifacts.',
+      system: 'You are a Planner Agent. Create high-quality design artifacts using the write_file tool. You have access to read_file, glob, grep, and write_file tools.',
       messages: [{ role: 'user', content: prompt_text }],
       tools: toolRegistry.toToolSet(),
     });
+
+    // Wait for the result to complete (agent may make multiple tool calls)
+    await streamResult.text;
 
     return this.readGeneratedArtifacts(changeDir);
   }
@@ -420,25 +423,31 @@ Be critical but fair.`;
     changeDir: string
   ): Promise<{ proposal: string; design: string; specs: Map<string, string>; prd: unknown }> {
     const model = resolveModel(this.llmConfig);
-    const toolRegistry = this.buildExploreToolRegistry(process.cwd());
+    const toolRegistry = this.buildArtifactToolRegistry(process.cwd());
 
-    const prompt_text = `Fix the following issues in the design artifacts:
+    const issuesList = issues.map((issue, i) => `${i + 1}. ${issue}`).join('\n');
+    const prompt_text = `Fix the following issues in the design artifacts located in ${changeDir}:
 
-${issues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}
+${issuesList}
 
 Current artifacts:
 - Proposal: ${artifacts.proposal.slice(0, 500)}...
 - Design: ${artifacts.design.slice(0, 500)}...
 - Specs: ${Array.from(artifacts.specs.keys()).join(', ')}
 
-Rewrite the affected files to address these issues. Focus on the specific problems identified.`;
+Use the write_file tool to rewrite the affected files and address these issues. Focus on the specific problems identified. After fixing, report which files were updated.`;
 
-    await streamText({
+    // Execute the stream and wait for completion
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const streamResult: any = await streamText({
       model,
-      system: 'You are a Planner Agent. Fix the identified issues in the design artifacts.',
+      system: 'You are a Planner Agent. Fix the identified issues in the design artifacts using write_file tool.',
       messages: [{ role: 'user', content: prompt_text }],
       tools: toolRegistry.toToolSet(),
     });
+
+    // Wait for the result to complete
+    await streamResult.text;
 
     return this.readGeneratedArtifacts(changeDir);
   }
