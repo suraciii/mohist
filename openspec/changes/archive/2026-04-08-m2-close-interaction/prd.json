@@ -13,7 +13,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Add questionId and question fields to EventData interface. Use '??' symbol and chalk.yellow for question_asked, '✓' and chalk.green for question_answered."
     },
     {
@@ -28,8 +28,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Add waitingQuestion state: { questionId, question, issueId } | null. Refactor pausedIssue into a unified interaction state or keep as separate variables. Update the onEvent handler to process question_asked and question_answered."
+      "passes": true,
+      "notes": "Use single InteractionState type variable instead of pausedIssue, containing three states: IDLE, GATE_MODE, QUESTION_MODE. Reference design.md D1 decision. State transitions: agent_paused → GATE_MODE, question_asked → QUESTION_MODE, agent_started/agent_completed/question_answered → IDLE."
     },
     {
       "id": "T-003",
@@ -44,8 +44,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Refactor the readline handler to check QUESTION_MODE first, then GATE_MODE, then IDLE. The existing GATE_MODE and IDLE paths remain unchanged."
+      "passes": true,
+      "notes": "Refactor the readline handler to check InteractionState.type: QUESTION_MODE first (route to /questions/:id/reply), then GATE_MODE (route to /issues/:number/messages), then IDLE (show 'No paused agent or pending question'). Use switch statement or if-else chain based on state.type."
     },
     {
       "id": "T-004",
@@ -57,8 +57,8 @@
         "B-033 status shows completed with reference to mo attach solution"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "B-032 marked completed (SSE is implemented protocol). B-033 marked completed (resolved via mo attach unified interaction with QUESTION_MODE routing)."
     }
   ]
 }

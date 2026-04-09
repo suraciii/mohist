@@ -1,0 +1,45 @@
+# Ralph Progress Log
+Started: 2026-04-08T02:24:04.930Z
+
+---
+
+## 2026-04-08 - T-001: Add question event formatting to event-formatter
+- Added `questionId`, `question`, `answer` fields to EventData interface
+- Added `question_asked` (??, yellow) and `question_answered` (✓, green) to EVENT_CONFIGS
+- Updated formatIssueSuffix to handle `question` field before `body` (prioritizes question text over body)
+- Typecheck passes
+- Progress: 1/4 complete
+
+---
+
+## 2026-04-08 - T-002: Add QUESTION_MODE state and question_asked/question_answered handling to mo attach
+- Replaced `PausedIssue` interface and `pausedIssue` variable with `InteractionState` discriminated union type (IDLE | GATE_MODE | QUESTION_MODE)
+- Updated readline handler to route user input based on state: GATE_MODE sends messages, QUESTION_MODE sends answers (POST /questions/:id/reply), IDLE shows "No paused agent or pending question"
+- Added `showQuestionPrompt()` with boxed visual display matching design.md D4
+- Added `question_asked` event handler → transitions to QUESTION_MODE with questionId, question text, and issueId
+- Added `question_answered` event handler → returns to IDLE when questionId matches current
+- Updated `agent_started`/`agent_completed` to unconditionally reset to IDLE (clears both GATE_MODE and QUESTION_MODE)
+- Added quit warning in QUESTION_MODE per design.md D5
+- Typecheck passes
+- Learnings: The InteractionState discriminated union pattern from design.md D1 works well — single variable, compile-time mutual exclusion, single cleanup point
+- Progress: 2/4 complete
+
+---
+
+## 2026-04-08 - T-003: Route user input in QUESTION_MODE to questions reply API
+- Verified existing implementation: QUESTION_MODE routing already implemented in attach.ts (lines 119-142)
+- POST to /questions/${questionId}/reply with { answer: trimmed } confirmed
+- 409/410 error handling displays "Question expired or already answered" and returns to IDLE
+- IDLE state displays "No paused agent or pending question" (line 144)
+- Typecheck passes
+- Learnings: T-002 and T-003 were implemented together in a single prior session — the readline handler refactor covered both state transitions AND input routing in one pass
+- Progress: 3/4 complete
+
+---
+
+## 2026-04-08 - T-004: Update backlog B-032 and B-033 status
+- Marked B-032 as completed: SSE is the implemented protocol for `mo attach` event subscription
+- Marked B-033 as completed: Resolved via `mo attach` unified interaction — QUESTION_MODE auto-routes user input to `/questions/:id/reply`
+- Both entries struck through and annotated with `(m2-close-interaction)` reference
+- Progress: 4/4 complete — ALL TASKS DONE
+
