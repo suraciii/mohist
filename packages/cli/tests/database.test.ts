@@ -277,6 +277,37 @@ describe('IssueRepo', () => {
       expect(repo.getNextNumber(projectId)).toBe(1);
     });
   });
+
+  describe('findPendingApprovalByIssueId', () => {
+    it('should return issue when approval_state.status is awaiting', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test' });
+      repo.setApprovalState(issue.id, { status: 'awaiting', approvedBy: undefined, approvedAt: undefined });
+      
+      const found = repo.findPendingApprovalByIssueId(issue.id);
+      expect(found).not.toBeNull();
+      expect(found?.id).toBe(issue.id);
+    });
+
+    it('should return null when issue has no approval state', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test' });
+      
+      const found = repo.findPendingApprovalByIssueId(issue.id);
+      expect(found).toBeNull();
+    });
+
+    it('should return null when approval_state.status is not awaiting', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test' });
+      repo.setApprovalState(issue.id, { status: 'approved', approvedBy: 'user1', approvedAt: '2024-01-01' });
+      
+      const found = repo.findPendingApprovalByIssueId(issue.id);
+      expect(found).toBeNull();
+    });
+
+    it('should return null when issue not found', () => {
+      const found = repo.findPendingApprovalByIssueId('nonexistent-id');
+      expect(found).toBeNull();
+    });
+  });
 });
 
 describe('ConfigRepo', () => {
