@@ -159,6 +159,7 @@ export async function runMainAgent(
     projectId: context.issue.projectId,
     workflowLogRepo: context.workflowLogRepo,
     eventBus: context.eventBus,
+    toolRegistry,
   }));
   toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath, issueNumber: context.issue.number }));
   toolRegistry.register(createAdvanceStageTool({ issue: context.issue, issueRepo: context.issueRepo, worktreePath: context.worktreePath, eventBus: context.eventBus }));
