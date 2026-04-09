@@ -19,6 +19,7 @@ import { createStoreLearningTool, createLoadLearningsTool } from '../tools/sessi
 import { createUpdateTaskStatusTool, createGetTaskStatusTool } from '../tools/task-status';
 import { createSelfReviewTool, createGeneratePrdTool } from '../tools/self-review';
 import { createExecuteStageTool } from '../tools/execute-stage';
+import { createSubmitApprovalTool } from '../tools/submit-approval';
 import type { EventBus } from '../services/event-bus';
 import { detectOpenSpecForIssue, type OpenSpecDetection } from '../workflow/workflow-loader';
 import { WorkflowController, createWorkflowController } from '../workflow/workflow-controller';
@@ -56,11 +57,9 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
    - Build stage: Sequential task execution using Coder Agent
    - Review stage: Reviewer Agent reviews code quality
 3. If execute_stage returns requiresApproval: true:
-   - Present the results to the user
-   - Use ask_user to get approval decision (approve/request changes/abort)
-   - If approved, call advance_stage to move to next stage
-   - If changes requested, the current stage will be re-executed
-   - If aborted, stop the workflow
+   - The approval state has been persisted
+   - Present the results summary to the user
+   - Call submit_approval with your decision (approve/request_changes/abort)
 4. If requiresApproval: false and execution was successful, automatically advance to next stage
 5. Continue until the issue reaches "done".
 
@@ -71,7 +70,8 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
 - **advance_stage**: Move the issue to the next stage. Only pass the target stage name.
 - **add_comment**: Record progress notes, decisions, or summaries on the issue.
 - **get_issue**: Check the current state of the issue at any time.
-- **ask_user**: Ask the user a question and wait for their reply. The tool blocks until the user responds or a 24h timeout expires.
+- **submit_approval**: Submit user approval decision after execute_stage returns requiresApproval: true. Options: approve (proceed to next stage), request_changes (retry current stage), abort (stop workflow).
+- **ask_user**: Ask the user a question and wait for their reply (for clarifications, not stage approvals).
 - **read_prd**: Read the prd.json file for the current OpenSpec Change.
 - **read_spec**: Read a spec file from the current OpenSpec Change.
 - **store_learning** / **load_learnings**: Store and retrieve session learnings for the current Change.
@@ -92,6 +92,7 @@ When you call \`read_workflow\`, it will automatically detect whether an OpenSpe
 - You discover a potential issue or trade-off that the user should be aware of
 
 ## When NOT to Use ask_user
+- For stage approvals (use submit_approval instead)
 - You can solve the problem with the available tools (spawn_coder, etc.)
 - There is a clear best practice or convention to follow
 - The question is purely technical and you have enough information to decide
@@ -113,18 +114,19 @@ When calling spawn_coder, pass these variables in the \`variables\` object:
 2. Call execute_stage with the current stage name.
 3. Parse the result:
    - If success: true and requiresApproval: false: Execution completed, call advance_stage to next stage
-   - If success: true and requiresApproval: true: Present results to user and call ask_user for approval
+   - If success: true and requiresApproval: true: Present results summary to user and call submit_approval
    - If success: false: Analyze error, add comment, and decide whether to retry or abort
-4. For Plan and Review stages, always expect requiresApproval: true and get user confirmation
+4. For Plan and Review stages, always expect requiresApproval: true
 5. For Build stage, if successful, automatically advance to Review
 
 ## User Approval Flow
-When requiresApproval: true:
-1. Present a clear summary of the results
-2. Call ask_user with specific options:
-   - "Approve and continue" → call advance_stage to next stage
-   - "Request changes" → the stage will be re-executed (for Plan/Review)
-   - "Abort workflow" → stop execution and add comment
+When execute_stage returns requiresApproval: true:
+1. The system has persisted the approval state
+2. Present a clear summary of the results to the user
+3. Call submit_approval with:
+   - "approve" → use advance_stage to move to next stage
+   - "request_changes" → the stage will be re-executed
+   - "abort" → stop execution and add comment
 
 ## Error Handling
 - If execute_stage fails, analyze the error message
@@ -232,6 +234,11 @@ export async function runMainAgent(
   toolRegistry.register(createGeneratePrdTool({ projectPath: context.worktreePath }));
   toolRegistry.register(createExecuteStageTool({
     workflowController,
+    issue: context.issue,
+    issueRepo: context.issueRepo,
+  }));
+  toolRegistry.register(createSubmitApprovalTool({
+    issueRepo: context.issueRepo,
     issue: context.issue,
   }));
 
