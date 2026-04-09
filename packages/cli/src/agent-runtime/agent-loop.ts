@@ -41,6 +41,7 @@ export async function runAgentLoop(
   });
 
   let stepIndex = 0;
+  const toolStartTimes = new Map<string, number>();
 
   for await (const part of result.fullStream) {
     if (part.type === 'text-delta') {
@@ -55,6 +56,7 @@ export async function runAgentLoop(
     } else if (part.type === 'tool-call') {
       const executionId = crypto.randomUUID();
       toolRegistry.setCurrentExecutionId(executionId);
+      toolStartTimes.set(executionId, Date.now());
       stepIndex++;
       if (eventBus && eventContext) {
         eventBus.emit('main_tool_call', {
@@ -64,10 +66,13 @@ export async function runAgentLoop(
           toolName: part.toolName,
           state: 'started',
           args: JSON.stringify(part.input),
+          stepIndex,
         });
       }
     } else if (part.type === 'tool-result') {
       const executionId = toolRegistry.getCurrentExecutionId() ?? crypto.randomUUID();
+      const startTime = toolStartTimes.get(executionId);
+      const duration = startTime ? Date.now() - startTime : undefined;
       if (eventBus && eventContext) {
         eventBus.emit('main_tool_call', {
           issueId: eventContext.issueId,
@@ -76,11 +81,16 @@ export async function runAgentLoop(
           toolName: part.toolName,
           state: 'completed',
           result: part.output,
+          duration,
+          stepIndex,
         });
       }
+      toolStartTimes.delete(executionId);
       toolRegistry.clearCurrentExecutionId();
     } else if (part.type === 'tool-error') {
       const executionId = toolRegistry.getCurrentExecutionId() ?? crypto.randomUUID();
+      const startTime = toolStartTimes.get(executionId);
+      const duration = startTime ? Date.now() - startTime : undefined;
       if (eventBus && eventContext) {
         eventBus.emit('main_tool_call', {
           issueId: eventContext.issueId,
@@ -89,8 +99,11 @@ export async function runAgentLoop(
           toolName: (part as { toolName?: string }).toolName ?? 'unknown',
           state: 'failed',
           error: (part as { error?: string }).error ?? 'Unknown error',
+          duration,
+          stepIndex,
         });
       }
+      toolStartTimes.delete(executionId);
       toolRegistry.clearCurrentExecutionId();
     }
   }

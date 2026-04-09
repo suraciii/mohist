@@ -402,7 +402,7 @@ export async function runRalphLoop(
       updateTaskStatusEntry(change.taskStatusPath, task.id, 'in_progress');
 
       if (attempt === currentAttempts + 1) {
-        emitTaskUpdate(task.id, i, remainingTasks.length, 'started', 1);
+        emitTaskUpdate(task.id, i, remainingTasks.length, 'started', attempt);
       }
 
       const result = await runAcpSession({
