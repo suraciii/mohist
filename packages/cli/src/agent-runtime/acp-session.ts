@@ -35,7 +35,7 @@ export interface AcpSessionResult {
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024;
 
-function truncateAgentText(text: string): string {
+export function truncateAgentText(text: string): string {
   if (text.length <= MAX_AGENT_TEXT_LENGTH) {
     return text;
   }

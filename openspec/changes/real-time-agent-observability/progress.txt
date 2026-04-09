@@ -18,3 +18,21 @@ Started: 2026-04-09T08:07:32.947Z
 **Next steps:**
 - T-006: Integration tests for end-to-end event flow verification
 
+---
+## 2026-04-09T16:39:00Z - T-006 - 集成测试：端到端事件流验证
+
+**What was done:**
+- Created `tests/event-flow-integration.test.ts` with 21 integration tests covering all acceptance criteria
+- Tests cover: EventBus basics, runAgentLoop event emission (agent_text_chunk, main_tool_call started/completed/failed), ToolRegistry executionId slot (store/retrieve, fallback, concurrent independence), runAcpSession event emission (coder_text_chunk, coder_tool_call, no-executionId suppression, no-eventBus resilience), ralph executor event emission (ralph_task_update, ralph_loop_progress, failed status, no-eventBus resilience), executionId L0<->L1 correlation, SSE event type coverage
+- Fixed pre-existing bug: exported `truncateAgentText` from `acp-session.ts` and fixed import in `ralph-executor.test.ts`
+- Mocked `ai` (streamText only, kept real `tool`/`stepCountIs`), `child_process`, and `@agentclientprotocol/sdk`
+- Used `vi.doMock` for ralph executor tests to mock `runAcpSession`
+
+**Learnings:**
+- Must use `importOriginal` when mocking `ai` module to preserve `tool` export needed by `Tool.define`
+- `vi.doMock`/`vi.doUnmock` allows per-test module overrides without global side effects
+- EventBus emit is synchronous, so listeners fire before `clearCurrentExecutionId()` is called — test assertions must account for this ordering
+
+**Next steps:**
+- All 6 tasks complete. Change is ready for archive.
+
