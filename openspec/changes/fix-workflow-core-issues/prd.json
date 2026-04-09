@@ -133,7 +133,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "No onAskUser avoids deadlock inside tool execution. Failed tasks surfaced via stage-level approval."
     },
     {
