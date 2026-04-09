@@ -92,8 +92,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "依赖 T-001（runAcpSession）和 T-002（事件类型）和 T-003（coder 事件推送）。executionId 从 RalphExecutorContext 传入，由 run-ralph-loop tool 的 context 提供。"
+      "passes": true,
+      "notes": "run-ralph-loop tool now receives ToolRegistry, reads executionId from it, passes to RalphExecutorContext. runAcpSession in ralph-executor.ts now receives executionId/eventBus/issueId/projectId, enabling coder_text_chunk and coder_tool_call events from ralph tasks. Event emission helpers (emitTaskUpdate/emitLoopProgress) were already implemented."
     },
     {
       "id": "T-006",

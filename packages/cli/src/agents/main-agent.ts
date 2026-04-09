@@ -178,6 +178,8 @@ export async function runMainAgent(
     worktreePath: context.worktreePath,
     issueId: context.issue.id,
     projectId: context.issue.projectId,
+    eventBus: context.eventBus,
+    toolRegistry,
   }));
   toolRegistry.register(createArchiveChangeTool({
     issue: context.issue,

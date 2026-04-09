@@ -4,6 +4,7 @@ import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
 import { runAcpSession } from '../agent-runtime/acp-session';
+import type { EventBus } from '../services/event-bus';
 
 export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout';
 
@@ -86,6 +87,8 @@ export interface RalphExecutorContext {
   projectPath: string;
   issueId?: string;
   projectId?: string;
+  eventBus?: EventBus;
+  executionId?: string;
   onTaskStart?: (task: Task) => void;
   onTaskComplete?: (task: Task, success: boolean, output: string) => void;
   onLoopComplete?: (results: RalphLoopResult) => void;
@@ -327,6 +330,40 @@ export async function runRalphLoop(
 
   let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
 
+  const emitTaskUpdate = (
+    taskId: string,
+    taskIndex: number,
+    totalTasks: number,
+    status: 'started' | 'completed' | 'failed' | 'retrying',
+    attempt?: number,
+    error?: string
+  ) => {
+    if (!context.eventBus) return;
+    context.eventBus.emit('ralph_task_update', {
+      issueId: context.issueId ?? '',
+      projectId: context.projectId ?? '',
+      executionId: context.executionId ?? '',
+      taskId,
+      taskIndex,
+      totalTasks,
+      status,
+      attempt,
+      error,
+    });
+  };
+
+  const emitLoopProgress = (completedCount: number, failedCount: number, total: number) => {
+    if (!context.eventBus) return;
+    context.eventBus.emit('ralph_loop_progress', {
+      issueId: context.issueId ?? '',
+      projectId: context.projectId ?? '',
+      executionId: context.executionId ?? '',
+      completed: completedCount,
+      failed: failedCount,
+      total,
+    });
+  };
+
   for (let i = 0; i < remainingTasks.length; i++) {
     const task = remainingTasks[i];
 
@@ -364,12 +401,26 @@ export async function runRalphLoop(
 
       updateTaskStatusEntry(change.taskStatusPath, task.id, 'in_progress');
 
-      const result = await runAcpSession({ cwd: context.worktreePath, task: prompt });
+      if (attempt === currentAttempts + 1) {
+        emitTaskUpdate(task.id, i, remainingTasks.length, 'started', 1);
+      }
+
+      const result = await runAcpSession({
+        cwd: context.worktreePath,
+        task: prompt,
+        issueId: context.issueId,
+        projectId: context.projectId,
+        executionId: context.executionId,
+        eventBus: context.eventBus,
+      });
 
       attemptsUsed = attempt;
       if (result.success) {
         taskSuccess = true;
         updateTaskStatusEntry(change.taskStatusPath, task.id, 'completed');
+        emitTaskUpdate(task.id, i, remainingTasks.length, 'completed', attempt);
+        completed++;
+        emitLoopProgress(completed, failed, sortedTasks.length);
         context.onTaskComplete?.(task, true, result.text);
         break;
       } else {
@@ -393,6 +444,7 @@ export async function runRalphLoop(
           break;
         }
 
+        emitTaskUpdate(task.id, i, remainingTasks.length, 'retrying', attempt);
         options.onRetry?.(task, attempt, lastError);
       }
     }
@@ -406,6 +458,7 @@ export async function runRalphLoop(
         error: lastError,
       });
       updateTaskStatusEntry(change.taskStatusPath, task.id, 'failed', lastError);
+      emitTaskUpdate(task.id, i, remainingTasks.length, 'failed', attemptsUsed, lastError);
       context.onTaskComplete?.(task, false, lastError ?? 'Max retries exceeded');
 
       if (shouldPause && context.onAskUser) {
@@ -434,7 +487,6 @@ export async function runRalphLoop(
         }
       }
     } else {
-      completed++;
       taskResults.push({
         taskId: task.id,
         status: 'completed',
