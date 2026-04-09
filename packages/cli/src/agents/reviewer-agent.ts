@@ -454,33 +454,61 @@ issues:
     passed: boolean;
     issues: Array<{ location: string; message: string; suggestion?: string }>;
   }> {
+    const packageJsonPath = path.join(worktreePath, 'package.json');
+
+    if (!fs.existsSync(packageJsonPath)) {
+      return { passed: true, issues: [] };
+    }
+
+    let packageJson: { scripts?: Record<string, string> };
     try {
-      const npmRunBuild = execSync('npm run build 2>&1', {
+      packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+    } catch {
+      return { passed: true, issues: [] };
+    }
+
+    const scripts = packageJson.scripts || {};
+
+    if (scripts.test && !scripts.test.includes('no test specified')) {
+      return await this.runNpmCommand('npm test', 'test', worktreePath);
+    }
+
+    if (scripts.build) {
+      return await this.runNpmCommand('npm run build', 'build', worktreePath);
+    }
+
+    return { passed: true, issues: [] };
+  }
+
+  private async runNpmCommand(command: string, location: string, worktreePath: string): Promise<{
+    passed: boolean;
+    issues: Array<{ location: string; message: string; suggestion?: string }>;
+  }> {
+    try {
+      execSync(command, {
         cwd: worktreePath,
         encoding: 'utf-8',
-        timeout: 120000,
+        timeout: 300000,
       });
-
-      if (npmRunBuild.includes('error') || npmRunBuild.includes('ERROR')) {
-        return {
-          passed: false,
-          issues: [{
-            location: 'build',
-            message: 'TypeScript compilation failed',
-            suggestion: 'Fix TypeScript errors before proceeding',
-          }],
-        };
-      }
 
       return { passed: true, issues: [] };
     } catch (error) {
-      const output = error instanceof Error ? (error as any).stdout || (error as any).message : String(error);
+      const stderr = error instanceof Error ? (error as any).stderr : '';
+      const stdout = error instanceof Error ? (error as any).stdout : '';
+      const combinedOutput = (stderr || stdout || String(error));
+      const last1000 = combinedOutput.slice(-1000);
+
+      const isExecutionError = combinedOutput.includes('command not found') ||
+        combinedOutput.includes('ENOENT') ||
+        combinedOutput.includes('spawn') ||
+        combinedOutput.includes('npm: command not found');
+
       return {
         passed: false,
         issues: [{
-          location: 'build',
-          message: 'Build/test failed',
-          suggestion: typeof output === 'string' ? output.slice(0, 500) : 'Check build output',
+          location,
+          message: isExecutionError ? `${location} command could not be executed` : `${location} failed`,
+          suggestion: last1000,
         }],
       };
     }

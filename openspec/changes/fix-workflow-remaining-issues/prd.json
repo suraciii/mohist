@@ -36,7 +36,7 @@
         "TypeScript compilation passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "dependencies": [],
       "notes": "Improves code quality checking coverage"
     },
