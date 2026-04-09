@@ -1,12 +1,13 @@
 # Ralph Progress Log
-Started: 2026-04-09T05:19:42.783Z
+Started: 2026-04-09T05:22:08.717Z
 
 ---
 
+2026-04-09T13:24:00.000Z | T-002 | Status API 增加 LLM 状态字段
+- 修改 api/status.ts: 增加 llmConfig 可选参数，通过 try/catch 调用 resolveModel() 判断配置状态
+- 修改 server/index.ts: 传递 llmConfig 给 createStatusRoutes
+- TypeScript 类型处理: 使用联合类型 { configured: false; provider?: undefined; model?: undefined } | { configured: true; provider: string; model: string }
+- 注意: resolveModel() 调用时无需使用其返回值，仅需判断是否抛错
+- Pre-existing test failures in services.test.ts and api-routes.test.ts (SQLite UNIQUE constraint issues)
+- Next: T-003 API 错误响应增加 code 字段
 
-## 2026-04-09T05:29:42.783Z - T-001 完成
-- Task: T-001 创建 LlmError 错误类
-- 动作: 在 agent-runtime/llm.ts 中添加 LlmError 类（继承 Error，携带 code 字段），将 resolveModel() 中 apiKey 缺失时的抛错从 Error 改为 LlmError，code='LLM_NOT_CONFIGURED'
-- 验证: npx tsc --noEmit 通过
-- 学习: vitest 未安装但 tsc 类型检查正常，可用于快速验证
-- 下一步: T-002 Status API 增加 LLM 状态字段
