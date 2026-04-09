@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "payload 字段参考 design.md 决策 4 的事件类型设计表。main_tool_call 包含 state: 'started' | 'completed' | 'failed'"
     },
     {
