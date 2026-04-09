@@ -1,5 +1,6 @@
 import type { Issue } from '../types';
-import type { ChangeArtifactsManager, PlanResult } from '../workflow/workflow-controller';
+import type { ChangeArtifactsManager } from '../workflow/workflow-controller';
+import type { PlanResult } from '../types/workflow-results';
 import type { LlmConfig } from '../agent-runtime';
 import { resolveModel } from '../agent-runtime';
 import { ToolRegistry } from '../agent-runtime/tool';

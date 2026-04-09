@@ -9,34 +9,13 @@ import { createGrepTool } from '../tools/grep-tool';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { ReviewResult, DimensionResult, ReviewIssue } from '../types/workflow-results';
 import { loadReviewerDefaultPrompt } from './prompt-loader';
 
 export interface ReviewDimension {
   name: string;
   checks: string[];
   weight?: number;
-}
-
-export interface ReviewIssue {
-  severity: 'error' | 'warning';
-  location: string;
-  message: string;
-  suggestion?: string;
-}
-
-export interface DimensionResult {
-  name: string;
-  passed: boolean;
-  reasoning: string;
-  issues?: ReviewIssue[];
-}
-
-export interface ReviewResult {
-  passed: boolean;
-  dimensions: DimensionResult[];
-  overallReasoning: string;
-  fixSuggestions?: string[];
-  duration: number;
 }
 
 export const REVIEWER_DEFAULT_PROMPT = `role: reviewer

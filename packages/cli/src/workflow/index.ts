@@ -3,12 +3,12 @@ export {
   createWorkflowController,
   type WorkflowControllerOptions,
   type StageResult,
-  type PlanResult,
-  type ReviewResult,
   type PlannerAgent,
   type ReviewerAgent,
   type ChangeArtifactsManager,
 } from './workflow-controller';
+
+export { type PlanResult, type ReviewResult } from '../types/workflow-results';
 
 export {
   loadWorkflow,
