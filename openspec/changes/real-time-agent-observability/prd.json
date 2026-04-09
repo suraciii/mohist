@@ -73,8 +73,8 @@
         "npm test passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "依赖 T-002（事件类型）。ToolRegistry executionId slot 的 fallback：execute 内部读不到时自行 generateId()。main-agent.ts 需要把 eventBus 和 issueId/projectId 传给 runAgentLoop。"
+      "passes": true,
+      "notes": "Replaced step-start event with incrementing stepIndex on tool-call. consumeStream() replaced with fullStream iteration. text-delta emits agent_text_chunk, tool-call emits main_tool_call(state='started'), tool-result emits main_tool_call(state='completed'), tool-error emits main_tool_call(state='failed'). Typecheck passes."
     },
     {
       "id": "T-005",
