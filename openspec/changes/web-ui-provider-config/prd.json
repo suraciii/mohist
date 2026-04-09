@@ -1,0 +1,251 @@
+{
+  "version": "1.0.0",
+  "change": "web-ui-provider-config",
+  "capabilities": [
+    {
+      "name": "provider-management",
+      "path": "specs/provider-management/spec.md",
+      "tasks": [
+        {
+          "id": "backend-list-providers",
+          "title": "Backend: Implement GET /api/providers endpoint",
+          "description": "Create API endpoint to list all available providers (builtin + configured) with their status",
+          "acceptanceCriteria": [
+            "Returns array of providers with id, name, baseURL, configured, source",
+            "Shows correct configuration source (env/config/none)",
+            "Masks API Key in response"
+          ]
+        },
+        {
+          "id": "backend-save-provider",
+          "title": "Backend: Implement POST /api/providers/:id endpoint",
+          "description": "Create API endpoint to save provider configuration to config.jsonc",
+          "acceptanceCriteria": [
+            "Validates apiKey is not empty",
+            "For custom providers: validates id format, baseURL format, models non-empty",
+            "Updates ~/.mohist/config.jsonc atomically",
+            "Returns success/error response"
+          ]
+        },
+        {
+          "id": "backend-delete-provider",
+          "title": "Backend: Implement DELETE /api/providers/:id endpoint",
+          "description": "Create API endpoint to remove provider configuration",
+          "acceptanceCriteria": [
+            "Removes provider from config.jsonc",
+            "Returns success response",
+            "Handles non-existent provider gracefully"
+          ]
+        },
+        {
+          "id": "frontend-settings-page",
+          "title": "Frontend: Create Settings page with Providers tab",
+          "description": "Add new route /settings and Providers tab component",
+          "acceptanceCriteria": [
+            "New Settings page accessible from navigation",
+            "Providers tab is the default or prominent tab",
+            "Responsive layout matching existing UI style"
+          ]
+        },
+        {
+          "id": "frontend-connected-providers",
+          "title": "Frontend: Build Connected Providers section",
+          "description": "Display list of configured providers with disconnect capability",
+          "acceptanceCriteria": [
+            "Shows provider name, masked API Key, source tag",
+            "Disconnect button removes configuration",
+            "Empty state when no providers configured"
+          ]
+        },
+        {
+          "id": "frontend-available-providers",
+          "title": "Frontend: Build Available Providers section",
+          "description": "Display list of builtin providers that can be configured",
+          "acceptanceCriteria": [
+            "Shows all builtin providers not yet configured",
+            "Connect button opens configuration dialog",
+            "Shows provider descriptions/notes"
+          ]
+        },
+        {
+          "id": "frontend-connect-dialog",
+          "title": "Frontend: Create Provider Connect Dialog",
+          "description": "Modal dialog for configuring builtin providers",
+          "acceptanceCriteria": [
+            "Input field for API Key (password type)",
+            "Test Connection button",
+            "Save/Cancel buttons",
+            "Shows provider name and helpful text"
+          ]
+        },
+        {
+          "id": "frontend-custom-provider",
+          "title": "Frontend: Create Custom Provider Dialog",
+          "description": "Form dialog for adding custom OpenAI-compatible providers",
+          "acceptanceCriteria": [
+            "Fields: Provider ID, Name, Base URL, API Key, Models (comma-separated)",
+            "Validation feedback for each field",
+            "Test Connection button",
+            "Save/Cancel buttons"
+          ]
+        },
+        {
+          "id": "frontend-hooks",
+          "title": "Frontend: Implement React Query hooks for providers",
+          "description": "Create useProviders, useSaveProvider, useDeleteProvider hooks",
+          "acceptanceCriteria": [
+            "useProviders fetches and caches provider list",
+            "useSaveProvider handles create/update with optimistic updates",
+            "useDeleteProvider handles removal with confirmation"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "provider-hot-reload",
+      "path": "specs/provider-hot-reload/spec.md",
+      "tasks": [
+        {
+          "id": "hotreload-event-bus",
+          "title": "Backend: Implement Event Bus for config changes",
+          "description": "Create EventEmitter-based event bus for cross-service communication",
+          "acceptanceCriteria": [
+            "EventBus service available for injection",
+            "Supports emit and on methods",
+            "Type-safe event names and payloads"
+          ]
+        },
+        {
+          "id": "hotreload-config-events",
+          "title": "Backend: Emit events on provider config changes",
+          "description": "Modify ConfigService to emit events when provider config changes",
+          "acceptanceCriteria": [
+            "Emits 'config:providers:changed' on save/delete",
+            "Event includes new provider configuration",
+            "Works for both Web UI and CLI changes"
+          ]
+        },
+        {
+          "id": "hotreload-agent-runner",
+          "title": "Backend: Implement AgentRunner hot reload",
+          "description": "Modify AgentRunnerService to listen for config changes and reinitialize LLM provider",
+          "acceptanceCriteria": [
+            "Listens to 'config:providers:changed' events",
+            "Reinitializes LLM provider with new config",
+            "Does not affect running agent instances",
+            "Logs reload events for debugging"
+          ]
+        },
+        {
+          "id": "hotreload-cache-invalidation",
+          "title": "Backend: Implement config cache invalidation",
+          "description": "Ensure ConfigService clears cache on provider config changes",
+          "acceptanceCriteria": [
+            "Cache cleared on save/delete operations",
+            "Next getConfig() reads fresh config from disk",
+            "Thread-safe cache operations"
+          ]
+        },
+        {
+          "id": "hotreload-integration",
+          "title": "Backend: Integrate hot reload across services",
+          "description": "Wire up EventBus between ConfigService and AgentRunnerService",
+          "acceptanceCriteria": [
+            "Services properly inject EventBus",
+            "End-to-end test: save provider via API, agent uses new config",
+            "No memory leaks in event listeners"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "provider-connectivity-test",
+      "path": "specs/provider-connectivity-test/spec.md",
+      "tasks": [
+        {
+          "id": "test-endpoint-builtin",
+          "title": "Backend: Implement POST /api/providers/:id/test endpoint",
+          "description": "Create endpoint to test connection to builtin providers",
+          "acceptanceCriteria": [
+            "Accepts apiKey in request body",
+            "Uses provider's baseURL from builtin config",
+            "Sends cheap LLM request (max_tokens=1)",
+            "Returns { success, error } response"
+          ]
+        },
+        {
+          "id": "test-endpoint-custom",
+          "title": "Backend: Implement POST /api/providers/test endpoint",
+          "description": "Create endpoint to test connection to custom providers",
+          "acceptanceCriteria": [
+            "Accepts apiKey, baseURL, model in request body",
+            "Sends cheap LLM request to specified endpoint",
+            "Returns { success, error } response"
+          ]
+        },
+        {
+          "id": "test-error-handling",
+          "title": "Backend: Implement connection test error handling",
+          "description": "Handle various failure modes (auth, network, timeout)",
+          "acceptanceCriteria": [
+            "401/403 errors return 'Authentication failed'",
+            "Network errors return 'Connection timeout'",
+            "Other errors return descriptive message",
+            "HTTP 400 for failures, 200 for success"
+          ]
+        },
+        {
+          "id": "test-rate-limit",
+          "title": "Backend: Implement rate limiting for test endpoint",
+          "description": "Add rate limiting to prevent abuse of test endpoint",
+          "acceptanceCriteria": [
+            "Limit 10 requests per IP per minute",
+            "Returns 429 Too Many Requests when exceeded",
+            "Rate limit resets after 1 minute"
+          ]
+        },
+        {
+          "id": "frontend-test-button",
+          "title": "Frontend: Add Test Connection button to dialogs",
+          "description": "Implement test button in connect and custom provider dialogs",
+          "acceptanceCriteria": [
+            "Button visible when API Key is entered",
+            "Shows loading state during test",
+            "Displays success (green) or error (red) result",
+            "Result message clear and actionable"
+          ]
+        },
+        {
+          "id": "frontend-test-debounce",
+          "title": "Frontend: Implement test button debouncing",
+          "description": "Prevent rapid repeated test requests",
+          "acceptanceCriteria": [
+            "2-second debounce on test button",
+            "Visual feedback that request is in progress",
+            "No duplicate requests sent"
+          ]
+        },
+        {
+          "id": "frontend-test-hooks",
+          "title": "Frontend: Implement useTestProvider hook",
+          "description": "React Query hook for testing provider connections",
+          "acceptanceCriteria": [
+            "useTestProvider accepts provider config",
+            "Returns mutate function and status (idle/pending/success/error)",
+            "Proper error handling and message extraction"
+          ]
+        },
+        {
+          "id": "test-pre-save",
+          "title": "Frontend: Add pre-save connection validation",
+          "description": "Optional: Warn users when saving untested custom provider",
+          "acceptanceCriteria": [
+            "Detects if test was not run before save",
+            "Shows warning dialog with 'Save Anyway' option",
+            "Allows user to cancel and test first"
+          ]
+        }
+      ]
+    }
+  ]
+}
