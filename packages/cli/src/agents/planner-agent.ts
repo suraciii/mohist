@@ -41,6 +41,7 @@ export class PlannerAgent {
     worktreePath: string;
     prompt?: string;
   }): Promise<PlanResult> {
+    const startTime = Date.now();
     const { issue, worktreePath, prompt } = options;
     const activePrompt = prompt ?? this.defaultPrompt;
 
@@ -48,9 +49,11 @@ export class PlannerAgent {
     if (!changeDir) {
       return {
         success: false,
+        changePath: '',
         artifacts: { proposal: '', design: '', specs: [], prd: null },
         selfReviewNotes: 'Failed to create change directory',
         iterations: 0,
+        duration: Date.now() - startTime,
       };
     }
 
@@ -68,6 +71,7 @@ export class PlannerAgent {
         if (reviewResult.passed) {
           return {
             success: true,
+            changePath: changeDir,
             artifacts: {
               proposal: currentArtifacts.proposal,
               design: currentArtifacts.design,
@@ -75,10 +79,11 @@ export class PlannerAgent {
                 name,
                 content,
               })),
-              prd: currentArtifacts.prd,
+              prd: currentArtifacts.prd as import('../artifacts/change-artifacts-manager').PrdJson | null,
             },
             selfReviewNotes: reviewResult.summary,
             iterations: iterations + 1,
+            duration: Date.now() - startTime,
           };
         }
 
@@ -87,7 +92,8 @@ export class PlannerAgent {
       }
 
       return {
-        success: true,
+        success: false,
+        changePath: changeDir,
         artifacts: {
           proposal: currentArtifacts.proposal,
           design: currentArtifacts.design,
@@ -95,17 +101,20 @@ export class PlannerAgent {
             name,
             content,
           })),
-          prd: currentArtifacts.prd,
+          prd: currentArtifacts.prd as import('../artifacts/change-artifacts-manager').PrdJson | null,
         },
         selfReviewNotes: `Max iterations (${maxIterations}) reached. Some issues may remain.`,
         iterations,
+        duration: Date.now() - startTime,
       };
     } catch (error) {
       return {
         success: false,
+        changePath: changeDir || '',
         artifacts: { proposal: '', design: '', specs: [], prd: null },
         selfReviewNotes: error instanceof Error ? error.message : 'Unknown error during planning',
         iterations: 0,
+        duration: Date.now() - startTime,
       };
     }
   }
