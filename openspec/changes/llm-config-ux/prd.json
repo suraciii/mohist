@@ -32,7 +32,7 @@
         "npm test 通过"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "需要将 llmConfig 传入 createStatusRoutes。参考 api/explore.ts 的传参模式。"
     },
     {
