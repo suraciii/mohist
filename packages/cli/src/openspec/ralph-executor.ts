@@ -1,12 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
-import { Writable, Readable } from 'stream';
-import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-import type { SessionNotification, RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
+import { runAcpSession } from '../agent-runtime/acp-session';
 
 export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout';
 
@@ -132,20 +129,6 @@ interface TaskStatusEntry {
   error?: string;
 }
 
-const DEFAULT_TIMEOUT = 30 * 60 * 1000;
-const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024; // 2MB
-
-export function truncateAgentText(text: string): string {
-  if (text.length <= MAX_AGENT_TEXT_LENGTH) {
-    return text;
-  }
-  const keepLength = Math.floor(MAX_AGENT_TEXT_LENGTH / 2);
-  const head = text.slice(0, keepLength);
-  const tail = text.slice(-keepLength);
-  const truncated = text.length - MAX_AGENT_TEXT_LENGTH;
-  return `${head}\n\n...[truncated ${truncated} characters]...\n\n${tail}`;
-}
-
 export function getOrderValue(order: number | string | undefined): number {
   if (order === undefined) return 999999;
   if (typeof order === 'number') return order;
@@ -190,159 +173,6 @@ export function readPrdTasks(prdPath: string): Task[] | null {
   } catch {
     return null;
   }
-}
-
-interface SpawnResult {
-  success: boolean;
-  output: string;
-  error?: string;
-}
-
-async function executeTaskWithSpawn(
-  _task: Task,
-  fullPrompt: string,
-  worktreePath: string
-): Promise<SpawnResult> {
-  return new Promise((resolve) => {
-    const proc = spawn('opencode', ['acp'], {
-      cwd: worktreePath,
-      stdio: ['pipe', 'pipe', 'inherit'],
-      env: Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([key]) =>
-            key !== 'OPENCODE_SERVER_PASSWORD' &&
-            key !== 'OPENCODE_SERVER_USERNAME'
-        )
-      ),
-    });
-
-    let cleanupDone = false;
-    let agentText = '';
-    let agentTextTruncated = false;
-    let sessionId = '';
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    const doCleanup = () => {
-      if (cleanupDone) return;
-      cleanupDone = true;
-
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-
-      try { proc.kill('SIGTERM'); } catch { /* already exited */ }
-
-      setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch { /* already exited */ }
-      }, 5000);
-    };
-
-    const input = Writable.toWeb(proc.stdin) as WritableStream<Uint8Array>;
-    const output = Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>;
-    const stream = ndJsonStream(input, output);
-
-    const cleanup = async () => {
-      const results = await Promise.allSettled([
-        stream.readable.cancel().catch(() => {}),
-        stream.writable.abort().catch(() => {}),
-      ]);
-      results.forEach((result, index) => {
-        if (result.status === 'rejected') {
-          console.error(`[ralph-executor] Cleanup ${index} failed:`, result.reason);
-        }
-      });
-      doCleanup();
-    };
-
-    const connection = new ClientSideConnection(
-      () => ({
-        sessionUpdate: async (notification: SessionNotification) => {
-          try {
-            const update = notification.update;
-            const eventType = update.sessionUpdate;
-            if (
-              eventType === 'agent_message_chunk' &&
-              update.content &&
-              'text' in update.content
-            ) {
-              if (!agentTextTruncated) {
-                agentText += (update.content as { text: string }).text;
-                if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
-                  agentText = truncateAgentText(agentText);
-                  agentTextTruncated = true;
-                }
-              }
-            }
-          } catch (err) {
-            console.error('[ralph-executor] sessionUpdate error:', err);
-          }
-        },
-        requestPermission: async (
-          params: RequestPermissionRequest
-        ): Promise<RequestPermissionResponse> => {
-          const allow = params.options.find(
-            (o: { kind: string }) => o.kind === 'allow_once' || o.kind === 'allow_always'
-          );
-          if (allow) {
-            return { outcome: { outcome: 'selected', optionId: allow.optionId } };
-          }
-          return { outcome: { outcome: 'cancelled' } };
-        },
-      }),
-      stream
-    );
-
-    const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      timeoutId = setTimeout(() => resolve('timeout'), DEFAULT_TIMEOUT);
-    });
-
-    const runSession = async () => {
-      try {
-        const initResult = await Promise.race([
-          connection.initialize({ protocolVersion: PROTOCOL_VERSION, clientInfo: { name: 'mohist', version: '0.1.0' } }),
-          timeoutPromise,
-        ]);
-
-        if (initResult === 'timeout') {
-          resolve({ success: false, output: agentText, error: 'Timed out during initialize' });
-          return;
-        }
-
-        const sessionResult = await Promise.race([
-          connection.newSession({ cwd: worktreePath, mcpServers: [] }),
-          timeoutPromise,
-        ]);
-
-        if (sessionResult === 'timeout') {
-          resolve({ success: false, output: agentText, error: 'Timed out during newSession' });
-          return;
-        }
-
-        sessionId = sessionResult.sessionId;
-
-        const promptResult = await Promise.race([
-          connection.prompt({ sessionId, prompt: [{ type: 'text', text: fullPrompt }] }),
-          timeoutPromise,
-        ]);
-
-        if (promptResult === 'timeout') {
-          try { await connection.cancel({ sessionId }); } catch { /* cancel may fail */ }
-          resolve({ success: false, output: agentText, error: `Timed out after ${DEFAULT_TIMEOUT / 1000}s` });
-          return;
-        }
-
-        resolve({ success: true, output: agentText });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        resolve({ success: false, output: agentText, error: message });
-      } finally {
-        await cleanup();
-      }
-    };
-
-    runSession();
-  });
 }
 
 function writeTaskStatus(statusPath: string, statusFile: TaskStatusFile): void {
@@ -534,13 +364,13 @@ export async function runRalphLoop(
 
       updateTaskStatusEntry(change.taskStatusPath, task.id, 'in_progress');
 
-      const result = await executeTaskWithSpawn(task, prompt, context.worktreePath);
+      const result = await runAcpSession({ cwd: context.worktreePath, task: prompt });
 
       attemptsUsed = attempt;
       if (result.success) {
         taskSuccess = true;
         updateTaskStatusEntry(change.taskStatusPath, task.id, 'completed');
-        context.onTaskComplete?.(task, true, result.output);
+        context.onTaskComplete?.(task, true, result.text);
         break;
       } else {
         lastError = result.error ?? 'Unknown error';

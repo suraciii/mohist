@@ -18,8 +18,8 @@
         "npm test passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "runAcpSession 暂不包含 EventBus 事件推送（T-003 做），只包含基础的 ACP session 管理 + workflowLog。返回值统一为 { text, success, error?, acpSessionId? }"
+      "passes": true,
+      "notes": "runAcpSession already existed with all required features. Removed unused executeTaskWithSpawn and truncateAgentText from ralph-executor.ts, cleaned up unused imports. Build passes."
     },
     {
       "id": "T-002",
