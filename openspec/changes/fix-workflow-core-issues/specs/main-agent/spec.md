@@ -1,10 +1,18 @@
 ## MODIFIED Requirements
 
-### Requirement: System Prompt Without Deprecated Tool References
+### Requirement: Remove run_ralph_loop Tool and References
 
-The Main Agent system prompt SHALL NOT reference the `run_ralph_loop` tool. All other existing prompt content SHALL be preserved.
+The `run_ralph_loop` tool SHALL be removed entirely: tool file deleted, import removed from Main Agent, tool registration removed from tool registry, and all prompt references deleted.
 
-#### Scenario: no run_ralph_loop references
+#### Scenario: tool file deleted
+- **WHEN** the codebase is inspected
+- **THEN** the file `tools/run-ralph-loop.ts` SHALL NOT exist
+
+#### Scenario: no run_ralph_loop references in Main Agent
+- **WHEN** main-agent.ts is inspected
+- **THEN** it SHALL NOT import or reference `createRunRalphLoopTool` or `run_ralph_loop`
+
+#### Scenario: no run_ralph_loop references in system prompt
 - **WHEN** the Main Agent system prompt is generated
 - **THEN** it SHALL NOT contain the string "run_ralph_loop" or instructions to use the run_ralph_loop tool
 

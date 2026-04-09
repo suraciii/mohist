@@ -6,16 +6,17 @@
       "id": "T-001",
       "title": "Create types/workflow-results.ts with unified interfaces",
       "spec": "specs/workflow-results/spec.md",
-      "description": "Create types/workflow-results.ts exporting shared PlanResult, ReviewResult, PlanArtifacts, and DimensionResult interfaces. Remove duplicate definitions from workflow-controller.ts, planner-agent.ts, and reviewer-agent.ts. Update all imports.",
+      "description": "Create types/workflow-results.ts exporting shared PlanResult, ReviewResult, DimensionResult, ReviewIssue interfaces. Remove duplicate definitions from workflow-controller.ts, planner-agent.ts, and reviewer-agent.ts. Update all imports.",
       "acceptanceCriteria": [
         "types/workflow-results.ts exports PlanResult with fields: success, changePath, artifacts, iterations, duration, optional selfReviewNotes and error",
         "types/workflow-results.ts exports ReviewResult with fields: passed, dimensions, overallReasoning, duration, optional fixSuggestions",
+        "types/workflow-results.ts exports DimensionResult and ReviewIssue",
         "No file other than types/workflow-results.ts exports PlanResult or ReviewResult",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": false,
-      "notes": ""
+      "notes": "DimensionResult and ReviewIssue currently defined in reviewer-agent.ts must also migrate"
     },
     {
       "id": "T-002",
@@ -35,22 +36,22 @@
       "id": "T-003",
       "title": "Update planner-agent.ts to use unified interfaces",
       "spec": "specs/workflow-results/spec.md",
-      "description": "Remove local PlanResult definition from planner-agent.ts. Import from types/workflow-results.ts.",
+      "description": "Change PlanResult import from workflow-controller.ts to types/workflow-results.ts.",
       "acceptanceCriteria": [
-        "planner-agent.ts imports PlanResult from types/workflow-results.ts",
+        "planner-agent.ts imports PlanResult from types/workflow-results.ts (not from workflow-controller)",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": false,
-      "notes": ""
+      "notes": "Currently imports PlanResult from workflow-controller.ts"
     },
     {
       "id": "T-004",
       "title": "Update reviewer-agent.ts to use unified interfaces",
       "spec": "specs/workflow-results/spec.md",
-      "description": "Remove local ReviewResult definition from reviewer-agent.ts. Import from types/workflow-results.ts.",
+      "description": "Remove local ReviewResult, DimensionResult, ReviewIssue definitions from reviewer-agent.ts. Import from types/workflow-results.ts.",
       "acceptanceCriteria": [
-        "reviewer-agent.ts imports ReviewResult from types/workflow-results.ts",
+        "reviewer-agent.ts imports ReviewResult, DimensionResult, ReviewIssue from types/workflow-results.ts",
         "Typecheck passes"
       ],
       "priority": 1,
@@ -61,7 +62,7 @@
       "id": "T-005",
       "title": "Replace M1_ALLOWED_TRANSITIONS with unified STAGE_TRANSITIONS",
       "spec": "specs/workflow-definition/spec.md",
-      "description": "In advance-stage.ts, delete the hardcoded M1_ALLOWED_TRANSITIONS constant. Import isValidTransition and STAGE_TRANSITIONS from types/index.ts. Use isValidTransition for transition validation.",
+      "description": "In advance-stage.ts, delete the hardcoded M1_ALLOWED_TRANSITIONS constant. Import isValidTransition from types/index.ts. Use isValidTransition for transition validation.",
       "acceptanceCriteria": [
         "M1_ALLOWED_TRANSITIONS constant removed from advance-stage.ts",
         "advance-stage.ts imports isValidTransition from types/index.ts",
@@ -104,65 +105,56 @@
     },
     {
       "id": "T-008",
-      "title": "Update DEFAULT_WORKFLOW with all stage entries and approval flags",
+      "title": "Update DEFAULT_WORKFLOW with new flow stages and approval flags",
       "spec": "specs/workflow-definition/spec.md",
-      "description": "Update DEFAULT_WORKFLOW in workflow-loader.ts to include explore, plan, build, review, done entries with correct approval flags. Ensure shouldPauseAtCurrentStage works for both new and legacy flows.",
+      "description": "Replace DEFAULT_WORKFLOW in workflow-loader.ts with new flow stages (explore, plan, build, review, done) and correct approval flags. Legacy stages (draft, check) are NOT added to DEFAULT_WORKFLOW — they work via STAGE_TRANSITIONS alone since shouldPauseAtCurrentStage returns false when stage not found in workflow.",
       "acceptanceCriteria": [
-        "DEFAULT_WORKFLOW contains entries for explore, plan, build, review, done",
-        "Approval flags set correctly so pause triggers before plan and review stages",
-        "shouldPauseAtCurrentStage returns true when next stage has approval: true",
-        "Legacy stages (draft, check) still work via STAGE_TRANSITIONS"
+        "DEFAULT_WORKFLOW contains exactly: explore, plan, build, review, done",
+        "plan stage has approval: true (triggers pause after explore completes, before plan execution)",
+        "review stage has approval: true (triggers pause after build completes)",
+        "explore, build, done have approval: false",
+        "shouldPauseAtCurrentStage returns true when current stage's next entry has approval: true",
+        "Legacy stages (draft, check) not in DEFAULT_WORKFLOW but still transition via STAGE_TRANSITIONS"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "shouldPauseAtCurrentStage checks NEXT stage's approval flag"
+      "notes": "shouldPauseAtCurrentStage checks NEXT stage's approval flag. Only new flow stages in DEFAULT_WORKFLOW — legacy stages get findIndex=-1 which returns false (no pause), correct behavior."
     },
     {
       "id": "T-009",
-      "title": "Integrate RalphExecutor into executeBuildStage",
+      "title": "Integrate RalphExecutor into executeBuildStage without onAskUser",
       "spec": "specs/build-stage-ralph/spec.md",
-      "description": "In workflow-controller.ts executeBuildStage, detect prd.json and OpenSpecChange. If found, create RalphExecutor and call execute(). Map RalphLoopResult to StageResult. Fall back to spawn_coder when no prd.json.",
+      "description": "In workflow-controller.ts executeBuildStage, detect prd.json and OpenSpecChange. If found, create RalphExecutor WITHOUT onAskUser callback and call execute(). Map RalphLoopResult to StageResult. Fall back to spawn_coder when no prd.json.",
       "acceptanceCriteria": [
         "When prd.json exists with tasks, RalphExecutor.execute() is called",
-        "RalphLoopResult mapped to StageResult correctly",
+        "RalphExecutorContext does NOT include onAskUser callback",
+        "RalphLoopResult mapped to StageResult: success from result.success, requiresApproval: true when result.failed > 0",
         "When no prd.json, falls back to current spawn_coder behavior",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
-      "notes": ""
+      "notes": "No onAskUser avoids deadlock inside tool execution. Failed tasks surfaced via stage-level approval."
     },
     {
       "id": "T-010",
-      "title": "Implement onAskUser to pause bridge",
-      "spec": "specs/build-stage-ralph/spec.md",
-      "description": "Implement event-based Promise pattern: when RalphExecutor calls onAskUser, store resolve callback in a Map, emit ask_user event. On resume, resolve the Promise with user message.",
-      "acceptanceCriteria": [
-        "onAskUser creates a Promise that stays pending until resume",
-        "Question and taskId stored for retrieval",
-        "Resume resolves the Promise with user message",
-        "RalphExecutor continues based on response"
-      ],
-      "priority": 2,
-      "passes": false,
-      "notes": "Use Map<issueId, {resolve, question, taskId}> pattern"
-    },
-    {
-      "id": "T-011",
-      "title": "Remove run_ralph_loop references from Main Agent prompt",
+      "title": "Remove run_ralph_loop tool entirely",
       "spec": "specs/main-agent/spec.md",
-      "description": "Remove all references to run_ralph_loop tool from the Main Agent system prompt. Keep all other prompt content unchanged.",
+      "description": "Delete tools/run-ralph-loop.ts. Remove import and tool registration from main-agent.ts. Remove all prompt references to run_ralph_loop.",
       "acceptanceCriteria": [
+        "File tools/run-ralph-loop.ts deleted",
+        "main-agent.ts does not import createRunRalphLoopTool",
+        "main-agent.ts does not register run_ralph_loop in toolRegistry",
         "System prompt does not contain 'run_ralph_loop'",
-        "At least 80% of original prompt content preserved",
+        "At least 80% of original prompt content preserved (excluding removed references)",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
-      "notes": ""
+      "notes": "Combines former T-010 (onAskUser bridge, now deleted) and T-011 (prompt only) into single task"
     },
     {
-      "id": "T-012",
+      "id": "T-011",
       "title": "Implement multi-strategy JSON parsing in PlannerAgent",
       "spec": "specs/ralph-task-execution/spec.md",
       "description": "Add parseArtifactsWithFallback method to PlannerAgent that tries: direct JSON.parse, markdown code block extraction, relaxed parsing (strip comments/trailing commas), regex field extraction. Return null on all-fail.",
@@ -178,7 +170,7 @@
       "notes": ""
     },
     {
-      "id": "T-013",
+      "id": "T-012",
       "title": "Update tests for unified interfaces and transition rules",
       "description": "Update workflow-controller.test.ts and advance-stage.test.ts mocks to use correct PlanResult/ReviewResult shapes from types/workflow-results.ts and new transition validation.",
       "acceptanceCriteria": [
@@ -191,7 +183,7 @@
       "notes": ""
     },
     {
-      "id": "T-014",
+      "id": "T-013",
       "title": "Run full test suite and fix failures",
       "description": "Execute npm test in packages/cli, fix any compilation or runtime failures introduced by changes.",
       "acceptanceCriteria": [

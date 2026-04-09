@@ -39,13 +39,16 @@ The codebase already has a working pause mechanism (`sessionManager.pause()/resu
 
 **Alternative considered:** Adding `shouldPause` to `StageResult` return value — rejected because it duplicates existing mechanism.
 
-### Decision 2: RalphExecutor integration via event-based Promise
+### Decision 2: RalphExecutor without onAskUser — stage-level approval instead
 
-**Why:** RalphExecutor already has `onAskUser` callback that returns a Promise. We can bridge this to AgentRunnerService's pause by storing a resolve function and calling it on resume.
+**Why:** Providing `onAskUser` to RalphExecutor inside `executeBuildStage` causes a deadlock: the tool call blocks waiting for user input, but the Agent Loop can't pause until the tool returns. The existing `run_ralph_loop` tool already demonstrates that omitting `onAskUser` works — failed tasks are simply marked as failed and the loop continues.
 
-**How:** When `onAskUser` is invoked, emit an `ask_user` event and create a Promise. The `AgentRunnerService` detects the pending question, calls `pause()`. On `resume()`, the user's message resolves the Promise.
+**How:** Call `RalphExecutor.execute()` without providing an `onAskUser` callback. When tasks fail after retries, RalphExecutor records them in `RalphLoopResult.failed`. `executeBuildStage` maps this to `StageResult { requiresApproval: true }`, letting the user decide at stage level via `submit_approval`.
 
-**Alternative considered:** Throwing an exception to force-stop — rejected because it would lose RalphExecutor's internal state.
+**Alternatives considered:**
+- Event-based Promise bridge (onAskUser → pause) — rejected: causes deadlock inside tool execution
+- Per-task step execution — rejected: over-engineered, poor performance
+- Keeping `run_ralph_loop` as separate tool — rejected: duplicates Build stage logic
 
 ### Decision 3: Single source for STAGE_TRANSITIONS
 
@@ -67,7 +70,6 @@ The codebase already has a working pause mechanism (`sessionManager.pause()/resu
 
 ## Risks / Trade-offs
 
-- **Risk: RalphExecutor onAskUser ↔ pause bridge complexity** → Mitigation: Use simple Map<issueId, {resolve}> pattern. If Promise never resolves (crash), RalphExecutor timeout handles cleanup.
 - **Risk: Changing transition rules breaks existing issues** → Mitigation: STAGE_TRANSITIONS already includes Draft/Check entries. No data loss.
 - **Risk: Unified interfaces miss edge cases** → Mitigation: Make optional fields explicit (`error?`, `selfReviewNotes?`). Run full test suite.
-- **Risk: workflow.yaml approval flag semantics misunderstood** → Mitigation: `shouldPauseAtCurrentStage` checks NEXT stage's approval flag, not current. Document clearly.
+- **Risk: workflow.yaml approval flag semantics misunderstood** → Mitigation: `shouldPauseAtCurrentStage` checks NEXT stage's approval flag, not current. The flag belongs ON the stage that triggers the pause boundary (plan and review). New and legacy stages must not be mixed in DEFAULT_WORKFLOW — only new flow stages are listed, legacy stages work via STAGE_TRANSITIONS alone.

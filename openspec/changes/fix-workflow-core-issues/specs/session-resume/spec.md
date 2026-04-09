@@ -1,13 +1,13 @@
 ## MODIFIED Requirements
 
-### Requirement: RalphExecutor Pause Integrated with Session Pause
+### Requirement: RalphExecutor Runs Without onAskUser in Build Stage
 
-When RalphExecutor's onAskUser callback is invoked during Build stage execution, the system SHALL pause the agent session and resume it when the user provides a response.
+When RalphExecutor is invoked from WorkflowController.executeBuildStage, the onAskUser callback SHALL NOT be provided. Failed tasks are recorded in the RalphLoopResult and surfaced to the user via the stage-level approval flow instead.
 
-#### Scenario: onAskUser triggers session pause
-- **WHEN** RalphExecutor calls onAskUser with a question during Build stage
-- **THEN** the agent session SHALL be paused via sessionManager.pause() and the question SHALL be stored for user retrieval
+#### Scenario: no onAskUser callback provided
+- **WHEN** executeBuildStage creates a RalphExecutor instance
+- **THEN** the RalphExecutorContext SHALL NOT include an onAskUser callback
 
-#### Scenario: resume provides answer to pending question
-- **WHEN** the user calls resume with a message for an issue that has a pending onAskUser question
-- **THEN** the stored Promise SHALL resolve with the user's message and RalphExecutor SHALL continue based on the response (retry/skip/abort)
+#### Scenario: failed tasks surfaced via stage approval
+- **WHEN** RalphExecutor returns with failed > 0
+- **THEN** executeBuildStage SHALL return a StageResult with requiresApproval: true and the failed task details in the output

@@ -2,11 +2,11 @@
 
 ### Requirement: Build Stage Delegates to RalphExecutor for OpenSpec Tasks
 
-When the Build stage detects an OpenSpec change with prd.json tasks, it SHALL delegate execution to RalphExecutor instead of using spawn_coder directly.
+When the Build stage detects an OpenSpec change with prd.json tasks, it SHALL delegate execution to RalphExecutor instead of using spawn_coder directly. The onAskUser callback SHALL NOT be provided — failed tasks are marked as failed and the loop continues.
 
 #### Scenario: Build stage with prd.json tasks
 - **WHEN** executeBuildStage is called and prd.json exists with one or more tasks
-- **THEN** the system SHALL create a RalphExecutor instance and call execute() with the detected OpenSpecChange
+- **THEN** the system SHALL create a RalphExecutor instance WITHOUT onAskUser callback and call execute() with the detected OpenSpecChange
 
 #### Scenario: Build stage without prd.json
 - **WHEN** executeBuildStage is called and no prd.json exists in the change directory
@@ -14,16 +14,9 @@ When the Build stage detects an OpenSpec change with prd.json tasks, it SHALL de
 
 #### Scenario: RalphExecutor result mapping
 - **WHEN** RalphExecutor.execute() returns a RalphLoopResult
-- **THEN** the system SHALL map it to a StageResult with success based on result.success, and requiresApproval when result.paused is true
+- **THEN** the system SHALL map it to a StageResult with success based on result.success, and requiresApproval: true when result.failed > 0
 
-### Requirement: onAskUser Connected to AgentRunnerService Pause
-
-The RalphExecutor onAskUser callback SHALL trigger an AgentRunnerService pause and wait for user response via a Promise-based mechanism.
-
-#### Scenario: Task failure triggers ask_user
-- **WHEN** a task fails and RalphExecutor invokes onAskUser with a question
-- **THEN** the system SHALL store the question with a resolve callback, emit an ask_user event, and the Promise SHALL remain pending until resume provides an answer
-
-#### Scenario: Resume resolves pending question
-- **WHEN** AgentRunnerService.resume() is called with a user message
-- **THEN** the system SHALL resolve the pending onAskUser Promise with the user message, allowing RalphExecutor to continue
+#### Scenario: Task failure handled without user intervention
+- **WHEN** a task fails after max retries in RalphExecutor
+- **THEN** RalphExecutor SHALL mark the task as failed and continue to the next task (no onAskUser callback provided)
+- **THEN** the final RalphLoopResult SHALL reflect all completed and failed tasks
