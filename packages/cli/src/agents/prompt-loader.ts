@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
+import { REVIEWER_DEFAULT_PROMPT } from './reviewer-agent';
 
 export interface PromptConfig {
   role: string;
@@ -56,5 +57,9 @@ export function loadPlannerSelfReviewPrompt(): string {
 }
 
 export function loadReviewerDefaultPrompt(): string {
-  return loadDefaultPrompt('reviewer-default.yaml');
+  try {
+    return loadDefaultPrompt('reviewer-default.yaml');
+  } catch {
+    return REVIEWER_DEFAULT_PROMPT;
+  }
 }

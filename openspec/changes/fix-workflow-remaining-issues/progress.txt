@@ -76,3 +76,40 @@ Also added `runNpmCommand` helper method with:
 T-006-1 passes=true - Implementation complete and verified
 
 ---
+
+## T-006-2: Extract Reviewer Prompt to YAML file
+Date: 2026-04-09T17:24:00Z
+
+### What was done:
+1. Created `src/agents/prompts/reviewer-default.yaml` with complete prompt structure:
+   - role, name, description
+   - dimensions: correctness, complexity, test_coverage, security
+   - review_process (5 steps)
+   - output_format specification
+
+2. Updated `prompt-loader.ts`:
+   - Added import for REVIEWER_DEFAULT_PROMPT from reviewer-agent.ts
+   - Modified `loadReviewerDefaultPrompt()` to use try/catch fallback pattern
+   - If file missing or corrupted, falls back to embedded REVIEWER_DEFAULT_PROMPT
+
+3. Updated `reviewer-agent.ts`:
+   - Added import for loadReviewerDefaultPrompt from prompt-loader
+   - Changed constructor to use `loadReviewerDefaultPrompt()` instead of embedded REVIEWER_DEFAULT_PROMPT constant
+
+### Acceptance Criteria Verification:
+- ✅ Create src/agents/prompts/reviewer-default.yaml with complete prompt
+- ✅ loadReviewerDefaultPrompt() exists in prompt-loader.ts (already existed, was enhanced with fallback)
+- ✅ ReviewerAgent loads prompt from file at runtime
+- ✅ Fallback to embedded default if file missing/corrupted (via try/catch in prompt-loader)
+- ✅ YAML structure includes all review dimensions (correctness, complexity, test_coverage, security)
+- ✅ TypeScript compilation passes
+
+### Learnings:
+- The function loadReviewerDefaultPrompt() already existed in prompt-loader.ts but threw on file missing
+- Added try/catch to provide fallback to embedded default as specified in design.md
+- Circular import between reviewer-agent.ts and prompt-loader.ts is resolved because fallback is inside function body (lazy evaluation)
+
+### Status:
+T-006-2 passes=true - Implementation complete and verified
+
+---

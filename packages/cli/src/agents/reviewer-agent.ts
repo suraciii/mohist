@@ -9,6 +9,7 @@ import { createGrepTool } from '../tools/grep-tool';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { loadReviewerDefaultPrompt } from './prompt-loader';
 
 export interface ReviewDimension {
   name: string;
@@ -186,7 +187,7 @@ export class ReviewerAgent {
 
   constructor(options: ReviewerAgentOptions) {
     this.llmConfig = options.llmConfig;
-    this.defaultPrompt = options.defaultPrompt ?? REVIEWER_DEFAULT_PROMPT;
+    this.defaultPrompt = options.defaultPrompt ?? loadReviewerDefaultPrompt();
   }
 
   async review(options: {
