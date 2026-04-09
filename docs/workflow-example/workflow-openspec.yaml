@@ -1,0 +1,74 @@
+name: openspec-workflow
+version: "1.0"
+
+stages:
+  - stage: plan
+    description: Generate Change artifacts with self-review
+    entry: mo propose <issue>
+    exit: prd.json exists
+
+  - stage: review
+    description: Human review and approval
+    entry: user action
+    exit: user approved
+
+  - stage: build
+    description: Ralph-style task loop execution
+    entry: auto (after approval)
+    exit: all tasks completed
+
+  - stage: check
+    description: Auto tests + human acceptance + archival
+    entry: auto
+    exit: user approved + archived
+
+auto_proceed:
+  enabled: true
+  stages:
+    - plan    # Auto-proceed if self-review passes
+    - build   # Auto-proceed between tasks
+
+approval_gates:
+  - stage: review
+    message: "Review Change artifacts before build"
+  - stage: check
+    message: "Accept implementation before archival"
+
+ralph:
+  max_retries: 3
+  context_assembly:
+    include:
+      - proposal.md
+      - design.md
+      - specs/{capability}/spec.md
+      - session-memories/*
+    retry_includes:
+      - previous_failure_context
+
+  failure_handling:
+    ac_unsatisfied: retry
+    environment_error: retry
+    code_dependency: ask_user
+    timeout: ask_user
+
+  task_status:
+    path: ".mohist-specs/changes/{change}/task-status.json"
+
+archival:
+  enabled: true
+  path: ".mohist-specs/archive"
+  include:
+    - proposal.md
+    - design.md
+    - specs/
+    - prd.json
+    - task-status.json
+    - session-memories/
+
+self_review:
+  max_iterations: 3
+  criteria:
+    - specs_complete
+    - design_feasible
+    - ac_covered
+    - no_conflicts

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
+import { findChangeDir } from '../openspec/detector';
 
 export interface WorkflowStage {
   stage: string;
@@ -12,6 +13,17 @@ export interface WorkflowStage {
 export interface WorkflowConfig {
   stages: WorkflowStage[];
   source: string;
+}
+
+export interface OpenSpecDetection {
+  detected: boolean;
+  changePath?: string;
+  prdPath?: string;
+  mode: 'openspec' | 'traditional';
+}
+
+export interface WorkflowConfigWithDetection extends WorkflowConfig {
+  openspec: OpenSpecDetection;
 }
 
 const DEFAULT_WORKFLOW: WorkflowConfig = {
@@ -95,4 +107,28 @@ export function loadWorkflow(cwd: string): WorkflowConfig | string {
   }
 
   return DEFAULT_WORKFLOW;
+}
+
+export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSpecDetection {
+  const changePath = findChangeDir(cwd, issueNumber);
+
+  if (!changePath) {
+    return { detected: false, mode: 'traditional' };
+  }
+
+  const prdPath = path.join(changePath, 'prd.json');
+
+  if (!fs.existsSync(prdPath)) {
+    return { detected: true, changePath, mode: 'traditional' };
+  }
+
+  return { detected: true, changePath, prdPath, mode: 'openspec' };
+}
+
+export function loadWorkflowWithDetection(cwd: string, issueNumber: number): WorkflowConfigWithDetection | string {
+  const workflow = loadWorkflow(cwd);
+  if (typeof workflow === 'string') return workflow;
+
+  const openspec = detectOpenSpecForIssue(cwd, issueNumber);
+  return { ...workflow, openspec };
 }

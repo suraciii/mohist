@@ -1,10 +1,10 @@
 # crawlph
 
-AI-powered GitHub workflow automation tool that manages Issues through a 7-stage workflow using AI agents.
+AI-powered GitHub workflow automation tool that manages Issues through a structured workflow using AI agents.
 
 ## Features
 
-- **7-Stage Workflow**: draft → designing → waiting-design-review → implementing → waiting-review → merging → done
+- **Structured Workflow**: draft → plan → build → check → done (with optional review stage)
 - **AI Agents**: Automatic design and implementation using opencode agents
 - **User Checkpoints**: Review and approve designs and implementations before proceeding
 - **Single PR Mode**: Each issue has one PR that accumulates both design and implementation
@@ -141,22 +141,67 @@ crawlph config pollInterval 60000
 
 ## Workflow
 
-The workflow has 7 stages:
+The workflow has 5 stages (with an optional review stage):
 
 1. **draft**: Initial state for new issues
-2. **designing**: AI agent creates a design document
-3. **waiting-design-review**: Waiting for user to review and approve the design
-4. **implementing**: AI agent implements the design
-5. **waiting-review**: Waiting for user to review and approve the implementation
-6. **merging**: PR is being merged
-7. **done**: Issue completed and PR merged
+2. **plan**: AI agent explores the issue and creates design/plan
+3. **review**: (Optional) Human review and approval of plan artifacts
+4. **build**: AI agent implements the plan
+5. **check**: Run tests, verify implementation, and archive
+6. **done**: Issue completed
 
 ### User Checkpoints
 
-At two critical points, the workflow pauses for user review:
+At critical points, the workflow pauses for user review:
 
-- **Design Review**: After designing stage, review the design document and approve with `crawlph pr approve`
-- **Implementation Review**: After implementing stage, review the code and approve with `crawlph pr approve`
+- **Review Stage** (optional): After plan stage, review the Change artifacts and approve with `mo issue approve`
+- **Check Stage**: After build stage, review the code and approve with `mo issue approve`
+
+## OpenSpec Workflow
+
+For complex issues, Mohist supports the **OpenSpec workflow** with structured task decomposition and Ralph-style execution:
+
+```
+plan → review → build → check → done
+```
+
+### Key Features
+
+- **Change Artifacts**: Structured proposal/design/specs stored in `.mohist-specs/changes/`
+- **Ralph Loop**: Task-by-task execution with full context and failure recovery
+- **Self-Review**: Agent validates specs before human review (up to 3 iterations)
+- **Session Memory**: Learnings passed between tasks
+
+### Quick Start
+
+```bash
+# Start server
+mo server start
+
+# Create Change for issue #42 (starts plan stage)
+mo propose 42
+
+# After review, approve to start build
+mo issue approve 42
+
+# Build executes tasks automatically
+# When done, approve to archive
+mo issue approve 42
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `mo propose <issue>` | Create Change and start plan |
+| `mo propose <issue> --force` | Overwrite existing Change |
+| `mo issue resume <id> --skip-to-review` | Resume after manual fixes |
+
+### Documentation
+
+- [OpenSpec Usage Guide](OPENSPEC-USAGE.md) - Detailed usage
+- [Workflow Examples](workflow-example/) - Configuration templates
+- [Troubleshooting](TROUBLESHOOTING.md) - Common issues and solutions
 
 ## Configuration
 

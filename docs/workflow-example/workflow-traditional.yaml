@@ -1,0 +1,36 @@
+name: traditional-workflow
+version: "1.0"
+
+description: Traditional Mohist workflow - backward compatible
+
+stages:
+  - name: draft
+    description: Initial state
+    entry: issue created
+    exit: mo issue start
+
+  - name: plan
+    description: Explore issue and create design
+    entry: mo issue start <issue>
+    exit: design complete
+
+  - name: build
+    description: Implement design
+    entry: auto
+    exit: implementation complete
+
+  - name: check
+    description: Run tests and verify
+    entry: auto
+    exit: tests pass
+
+  - name: done
+    description: Issue completed
+    entry: manual
+    exit: archived
+
+approval_gates:
+  - stage: plan
+    message: "Review design"
+  - stage: check
+    message: "Review implementation"

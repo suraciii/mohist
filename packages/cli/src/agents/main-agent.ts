@@ -11,7 +11,15 @@ import { createAdvanceStageTool } from '../tools/advance-stage';
 import { createAddCommentTool } from '../tools/add-comment';
 import { createGetIssueTool } from '../tools/get-issue';
 import { createAskUserTool } from '../tools/ask-user';
+import { createRunRalphLoopTool } from '../tools/run-ralph-loop';
+import { createArchiveChangeTool } from '../tools/archive-change';
+import { createReadPrdTool } from '../tools/read-prd';
+import { createReadSpecTool } from '../tools/read-spec';
+import { createStoreLearningTool, createLoadLearningsTool } from '../tools/session-memory';
+import { createUpdateTaskStatusTool, createGetTaskStatusTool } from '../tools/task-status';
+import { createSelfReviewTool, createGeneratePrdTool } from '../tools/self-review';
 import type { EventBus } from '../services/event-bus';
+import { detectOpenSpecForIssue, type OpenSpecDetection } from '../workflow/workflow-loader';
 
 export interface MainAgentContext {
   issueRepo: IssueRepo;
@@ -25,8 +33,8 @@ export interface MainAgentContext {
   onWaitingChange?: (issueId: string, questionId: string | null, question?: string) => void;
 }
 
-function buildSystemPrompt(issue: Issue): string {
-  return `You are the Mohist workflow orchestrator. You drive issues through configurable workflow stages by spawning opencode acp coding agents.
+function buildSystemPrompt(issue: Issue, detection: OpenSpecDetection): string {
+  const basePrompt = `You are the Mohist workflow orchestrator. You drive issues through configurable workflow stages by spawning opencode acp coding agents.
 
 ## Current Issue
 - ID: ${issue.id}
@@ -45,10 +53,24 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
 ## Available Tools
 - **read_workflow**: Read the workflow configuration (stages, prompt templates, approval flags). Call this first.
 - **spawn_coder**: Spawn an opencode acp oneshot session to execute a coding task. Provide \`taskTemplate\` (from the workflow stage prompt) and \`variables\` (issue info + previous stage outputs).
+- **run_ralph_loop**: Run Ralph task loop for OpenSpec workflow. Use in build stage when OpenSpec Change is detected. Detects Change directory and executes tasks from prd.json sequentially.
 - **advance_stage**: Move the issue to the next stage. Only pass the target stage name.
 - **add_comment**: Record progress notes, decisions, or summaries on the issue.
 - **get_issue**: Check the current state of the issue at any time.
 - **ask_user**: Ask the user a question and wait for their reply. The tool blocks until the user responds or a 24h timeout expires.
+- **read_prd**: Read the prd.json file for the current OpenSpec Change.
+- **read_spec**: Read a spec file from the current OpenSpec Change.
+- **store_learning** / **load_learnings**: Store and retrieve session learnings for the current Change.
+- **update_task_status** / **get_task_status**: Update and query task status in prd.json.
+- **run_self_review**: Run self-review on the current OpenSpec specs.
+- **generate_prd**: Generate prd.json from the current Change's specs.
+
+## Ralph Loop (OpenSpec Workflow)
+When you call \`read_workflow\`, it will automatically detect whether an OpenSpec Change exists for this issue and report the execution mode.
+- If execution mode is "Ralph-style task loop": use \`run_ralph_loop\` in the build stage instead of \`spawn_coder\`
+- If execution mode is "Traditional": use \`spawn_coder\` for all stages as usual
+- Detection is based on the presence of \`.mohist-specs/changes/{issue-number}-{slug}/prd.json\`
+- A Change directory without prd.json means plan stage is still in progress
 
 ## When to Use ask_user
 - Requirements are ambiguous and you need clarification
@@ -83,6 +105,35 @@ When calling spawn_coder, pass these variables in the \`variables\` object:
 ## Error Handling
 - If spawn_coder fails, analyze the error. You may retry with a more specific task, or advance to done with a comment explaining the failure.
 - If check stage reveals issues, you may advance back to build to fix them.`;
+
+  if (!detection.detected) {
+    return basePrompt;
+  }
+
+  const openspecSection = `
+
+## OpenSpec Plan Stage (Active)
+An OpenSpec Change has been detected for this issue:
+- Change directory: ${detection.changePath}
+- Mode: ${detection.mode}
+
+${detection.mode === 'traditional' ? `A Change directory exists but prd.json has not been generated yet. This means the plan stage is still in progress.
+
+### Plan Stage Instructions
+1. Use \`spawn_coder\` to explore the codebase and create the following files in the Change directory (${detection.changePath}):
+   - \`proposal.md\`: Problem description and solution overview
+   - \`design.md\`: Technical design document with design decisions
+   - \`specs/{capability}/spec.md\`: Capability-based requirement specifications
+2. After creating specs, use \`run_self_review\` to validate spec completeness (up to 3 iterations).
+3. When self-review passes, use \`generate_prd\` to generate prd.json from the specs.
+4. After prd.json is generated, call \`advance_stage("review")\` to enter review stage (do NOT advance directly to "build").` : `prd.json already exists. The plan stage has been completed.
+
+### Next Steps
+- If in plan stage: call \`advance_stage("review")\` to enter review stage.
+- If in build stage: use \`run_ralph_loop\` to execute tasks from prd.json.
+- If in check stage: use \`spawn_coder\` to run tests and lint.`}`;
+
+  return basePrompt + openspecSection;
 }
 
 export interface MainAgentResult {
@@ -95,6 +146,10 @@ export async function runMainAgent(
   sessionManager: SessionManager,
   existingSession?: Session,
 ): Promise<MainAgentResult> {
+  const openSpecDetection = await Promise.resolve(
+    detectOpenSpecForIssue(context.worktreePath, context.issue.number),
+  );
+
   const model = resolveModel(context.llmConfig);
 
   const toolRegistry = new ToolRegistry();
@@ -105,7 +160,7 @@ export async function runMainAgent(
     workflowLogRepo: context.workflowLogRepo,
     eventBus: context.eventBus,
   }));
-  toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath }));
+  toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath, issueNumber: context.issue.number }));
   toolRegistry.register(createAdvanceStageTool({ issue: context.issue, issueRepo: context.issueRepo, worktreePath: context.worktreePath, eventBus: context.eventBus }));
   toolRegistry.register(createAddCommentTool({ issue: context.issue, commentRepo: context.commentRepo, eventBus: context.eventBus }));
   toolRegistry.register(createGetIssueTool({ issue: context.issue, issueRepo: context.issueRepo }));
@@ -119,9 +174,27 @@ export async function runMainAgent(
       onWaitingChange: context.onWaitingChange,
     }));
   }
+  toolRegistry.register(createRunRalphLoopTool({
+    worktreePath: context.worktreePath,
+    issueId: context.issue.id,
+    projectId: context.issue.projectId,
+  }));
+  toolRegistry.register(createArchiveChangeTool({
+    issue: context.issue,
+    worktreePath: context.worktreePath,
+  }));
+  toolRegistry.register(createReadPrdTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createReadSpecTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createStoreLearningTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createLoadLearningsTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createUpdateTaskStatusTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createGetTaskStatusTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createSelfReviewTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createGeneratePrdTool({ projectPath: context.worktreePath }));
 
   const session = existingSession ?? sessionManager.create(Number(context.issue.id));
-  const system = buildSystemPrompt(context.issue);
+  session.metadata['openSpecDetection'] = openSpecDetection;
+  const system = buildSystemPrompt(context.issue, openSpecDetection);
 
   const loopResult = await runAgentLoop(session, sessionManager, toolRegistry, model, {
     system,
