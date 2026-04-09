@@ -1,0 +1,14 @@
+# Ralph Progress Log
+Started: 2026-04-09T04:59:15.115Z
+
+---
+
+2026-04-09T12:54:00.000Z | T-001 | Updated Stage enum in types/index.ts:
+- Added new stages: Explore, Plan, Build, Review, Done
+- Kept old stages (Draft, Check) for backward compatibility
+- Added STAGE_ORDER array for ordered stage iteration
+- Added STAGE_TRANSITIONS record for allowed transitions
+- Added isValidTransition() helper function
+TypeScript compilation passes. Old code using Stage.Draft, Stage.Check continues to work.
+
+Next steps: T-002 (Create WorkflowController) depends on these types

@@ -1,10 +1,34 @@
 export enum Stage {
-  Draft = 'draft',
+  Explore = 'explore',
   Plan = 'plan',
-  Review = 'review',
   Build = 'build',
-  Check = 'check',
-  Done = 'done'
+  Review = 'review',
+  Done = 'done',
+  Draft = 'draft',
+  Check = 'check'
+}
+
+export const STAGE_ORDER: Stage[] = [
+  Stage.Explore,
+  Stage.Plan,
+  Stage.Build,
+  Stage.Review,
+  Stage.Done
+];
+
+export const STAGE_TRANSITIONS: Record<Stage, Stage[]> = {
+  [Stage.Explore]: [Stage.Plan],
+  [Stage.Plan]: [Stage.Build],
+  [Stage.Build]: [Stage.Review],
+  [Stage.Review]: [Stage.Done, Stage.Build],
+  [Stage.Done]: [],
+  [Stage.Draft]: [Stage.Plan],
+  [Stage.Check]: [Stage.Done, Stage.Plan]
+};
+
+export function isValidTransition(from: Stage, to: Stage): boolean {
+  const allowed = STAGE_TRANSITIONS[from];
+  return allowed?.includes(to) ?? false;
 }
 
 export enum IssueStatus {

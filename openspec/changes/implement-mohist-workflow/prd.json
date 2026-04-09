@@ -14,7 +14,7 @@
         "Stage transition validation rules defined"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "dependencies": [],
       "notes": "Foundational task - other tasks depend on the new stage definitions"
     },
