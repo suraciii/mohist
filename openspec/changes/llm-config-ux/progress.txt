@@ -1,0 +1,12 @@
+# Ralph Progress Log
+Started: 2026-04-09T05:19:42.783Z
+
+---
+
+
+## 2026-04-09T05:29:42.783Z - T-001 完成
+- Task: T-001 创建 LlmError 错误类
+- 动作: 在 agent-runtime/llm.ts 中添加 LlmError 类（继承 Error，携带 code 字段），将 resolveModel() 中 apiKey 缺失时的抛错从 Error 改为 LlmError，code='LLM_NOT_CONFIGURED'
+- 验证: npx tsc --noEmit 通过
+- 学习: vitest 未安装但 tsc 类型检查正常，可用于快速验证
+- 下一步: T-002 Status API 增加 LLM 状态字段

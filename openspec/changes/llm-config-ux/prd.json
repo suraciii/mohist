@@ -15,7 +15,7 @@
         "npm test 通过"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "LlmError 放在 agent-runtime/llm.ts 中导出即可，不需要单独文件。"
     },
     {

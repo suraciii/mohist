@@ -6,6 +6,15 @@ import { getProviderConfig, getConfigPath } from '../config/config-loader';
 
 export type LlmConfig = ConfigInfo;
 
+export class LlmError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+    this.name = 'LlmError';
+  }
+}
+
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-20250514';
 
 export function resolveModel(config?: LlmConfig): LanguageModelV3 {
@@ -32,7 +41,8 @@ export function resolveModel(config?: LlmConfig): LanguageModelV3 {
     const envHint = resolved.envVars.length > 0
       ? ` or set ${resolved.envVars.join(', ')} environment variable`
       : '';
-    throw new Error(
+    throw new LlmError(
+      'LLM_NOT_CONFIGURED',
       `API key not found for provider "${providerID}". Set provider.${providerID}.apiKey in ${getConfigPath()}${envHint}.`
     );
   }
