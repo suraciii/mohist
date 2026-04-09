@@ -1,0 +1,10 @@
+# Ralph Progress Log
+Started: 2026-04-09T12:08:56.782Z
+
+---
+2026-04-09T12:15:00Z | T-001 | Created types/workflow-results.ts with unified PlanResult, ReviewResult, DimensionResult, ReviewIssue interfaces. Removed duplicate definitions from workflow-controller.ts (PlanResult, ReviewResult), reviewer-agent.ts (ReviewIssue, DimensionResult, ReviewResult). Updated workflow/index.ts and agents/index.ts to re-export from workflow-results.ts. Fixed planner-agent.ts import to use Issue from types. Typecheck passes.
+
+Learnings: The workflow-controller.ts had local PlanResult/ReviewResult definitions AND used PrdJson/PrdTaskStatus which were also imported from change-artifacts-manager - needed to restore PrdJson/PrdTaskStatus imports after removing local interface defs. Also, when editing reviewer-agent.ts, my first edit accidentally corrupted the REVIEWER_DEFAULT_PROMPT constant - restored from git and re-did the edit.
+
+Next steps: T-002, T-003, T-004 update the remaining files to use the unified interfaces. T-005 handles stage transitions.
+

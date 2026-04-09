@@ -1,36 +1,7 @@
 import { Stage, isValidTransition, type Issue } from '../types';
 import type { PrdTask, PrdJson, PrdTaskStatus } from '../artifacts/change-artifacts-manager';
 import { executeCoderTask } from '../tools/spawn-coder';
-
-export interface PlanResult {
-  success: boolean;
-  changePath: string;
-  artifacts: {
-    proposal: string;
-    design: string;
-    specs: Array<{ name: string; content: string }>;
-    prd: PrdJson | null;
-  };
-  selfReviewNotes?: string;
-  iterations: number;
-  duration: number;
-}
-
-export interface ReviewResult {
-  passed: boolean;
-  dimensions: Array<{
-    name: string;
-    passed: boolean;
-    reasoning: string;
-    issues?: Array<{
-      severity: 'error' | 'warning';
-      location: string;
-      message: string;
-    }>;
-  }>;
-  overallReasoning: string;
-  fixSuggestions?: string[];
-}
+import type { PlanResult, ReviewResult } from '../types/workflow-results';
 
 export interface PlannerAgent {
   plan(options: {
