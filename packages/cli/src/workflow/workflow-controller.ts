@@ -2,6 +2,8 @@ import { Stage, isValidTransition, type Issue } from '../types';
 import type { PrdTask, PrdJson, PrdTaskStatus } from '../artifacts/change-artifacts-manager';
 import { executeCoderTask } from '../tools/spawn-coder';
 import type { PlanResult, ReviewResult } from '../types/workflow-results';
+import { detectOpenSpecChange } from '../openspec/detector';
+import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 
 export interface PlannerAgent {
   plan(options: {
@@ -124,6 +126,38 @@ export class WorkflowController {
   }
 
   private async executeBuildStage(issue: Issue): Promise<StageResult> {
+    const change = detectOpenSpecChange(this.worktreePath, issue);
+
+    if (change) {
+      const executor = new RalphExecutor({
+        worktreePath: this.worktreePath,
+        projectPath: this.worktreePath,
+        issueId: issue.id,
+        projectId: issue.projectId,
+      });
+
+      const result: RalphLoopResult = await executor.execute(change);
+
+      return {
+        success: result.success,
+        requiresApproval: result.failed > 0,
+        output: {
+          stage: Stage.Build,
+          issueNumber: issue.number,
+          completedTasks: result.completed,
+          failedTasks: result.failed,
+          totalTasks: result.total,
+        },
+        message: result.success
+          ? `Build completed - ${result.completed}/${result.total} tasks executed`
+          : `Build completed with ${result.failed} failed task(s)`,
+      };
+    }
+
+    return this.executeBuildStageFallback(issue);
+  }
+
+  private async executeBuildStageFallback(issue: Issue): Promise<StageResult> {
     const MAX_RETRIES = 3;
 
     const prd = this.artifactManager.readPrd(issue.number);

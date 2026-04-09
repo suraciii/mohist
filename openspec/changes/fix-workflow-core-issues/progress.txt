@@ -57,3 +57,10 @@ Next steps: T-008 (Update DEFAULT_WORKFLOW with new flow stages and approval fla
 Learnings: shouldPauseAtCurrentStage checks the NEXT stage's approval flag, not current. When currentStage is "explore", it looks up workflow.stages[exploreIndex + 1] which is "plan" with approval:true, so it pauses correctly before plan execution. Legacy stages get findIndex=-1 which returns false (no pause), which is correct behavior since they don't need approval in the new flow system.
 
 Next steps: T-009 (Integrate RalphExecutor into executeBuildStage without onAskUser).
+
+---
+2026-04-09T13:35:00Z | T-009 | Integrated RalphExecutor into executeBuildStage. When detectOpenSpecChange finds an OpenSpecChange with prd.json, create RalphExecutor WITHOUT onAskUser callback and call execute(). Map RalphLoopResult to StageResult: success from result.success, requiresApproval: true when result.failed > 0. Falls back to original spawn_coder behavior via executeBuildStageFallback when no change is detected. Typecheck passes.
+
+Learnings: The spec required detecting OpenSpecChange (not just prd.json existence). detectOpenSpecChange already exists and checks for prd.json existence, so the condition is simply checking if detectOpenSpecChange returns a non-null change. RalphExecutor.execute() without onAskUser allows failed tasks to be marked as failed and loop continues - no deadlock since there's no user prompt callback. The onAskUser field is simply omitted from the context object.
+
+Next steps: T-010 (Remove run_ralph_loop tool entirely).
