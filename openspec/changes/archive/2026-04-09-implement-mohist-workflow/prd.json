@@ -159,9 +159,9 @@
         "Reports test/build failures as correctness issues"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-006"],
-      "notes": "Better coverage of test scenarios"
+      "notes": "Verified: runTests() prioritizes npm test, falls back to npm run build, checks package.json scripts"
     },
     {
       "id": "T-006-2",
@@ -174,15 +174,15 @@
         "Supports custom prompt override"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-006"],
-      "notes": "Makes review dimensions user-customizable"
+      "notes": "Verified: reviewer-default.yaml exists, loaded via loadReviewerDefaultPrompt() in prompt-loader.ts"
     },
     {
       "id": "T-007",
       "title": "Implement user approval interface",
       "spec": "specs/workflow-engine/spec.md",
-      "description": "Create user approval mechanism for Plan and Review phases. Implement conversation-style interaction.",
+      "description": "Create user approval mechanism for Plan and Review phases. Implement conversation-style interaction. SUPERSEDED by fix-workflow-core-issues T-008 (workflow config) and T-010 (onAskUser bridge).",
       "acceptanceCriteria": [
         "System can pause and wait for user approval at Plan and Review phases",
         "Approval interface shows relevant information",
@@ -192,13 +192,13 @@
       "priority": 7,
       "passes": false,
       "dependencies": ["T-004", "T-006"],
-      "notes": "CRITICAL: Current implementation doesn't actually pause for approval. Need to integrate with ask_user tool."
+      "notes": "SUPERSEDED: AgentRunnerService has pause/resume mechanism but needs config fixes. Covered by fix-workflow-core-issues."
     },
     {
       "id": "T-008",
       "title": "Integrate with existing issue service",
       "spec": "specs/workflow-engine/spec.md",
-      "description": "Update existing issue service and CLI commands to work with new workflow. Refactor Main Agent to use WorkflowController.",
+      "description": "Update existing issue service and CLI commands to work with new workflow. SUPERSEDED by fix-workflow-core-issues T-005 (transition rules), T-009 (RalphExecutor integration), T-011 (prompt cleanup).",
       "acceptanceCriteria": [
         "Issue create/start commands work with new workflow",
         "Existing issues can transition to new stages",
@@ -209,13 +209,13 @@
       "priority": 8,
       "passes": false,
       "dependencies": ["T-005", "T-007"],
-      "notes": "CRITICAL: Main Agent doesn't call WorkflowController yet. Major refactoring needed."
+      "notes": "SUPERSEDED: Covered by fix-workflow-core-issues transition rules unification and RalphExecutor integration."
     },
     {
       "id": "T-008-1",
       "title": "Create write_file tool",
       "spec": "design.md#Implementation Notes",
-      "description": "Create write_file tool that agents can use to write files. This is required for Planner Agent to generate artifacts.",
+      "description": "Create write_file tool that agents can use to write files. Already implemented at tools/write-file.ts.",
       "acceptanceCriteria": [
         "Tool can write files to specified path",
         "Creates parent directories if needed",
@@ -223,15 +223,15 @@
         "Registered in Main Agent's tool registry"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-008"],
-      "notes": "Required for Planner Agent file generation"
+      "notes": "Verified: tools/write-file.ts exists and is registered in Main Agent tool registry"
     },
     {
       "id": "T-008-2",
       "title": "Refactor Main Agent to use WorkflowController",
       "spec": "design.md#Implementation Notes",
-      "description": "Refactor Main Agent initialization and execution flow to use WorkflowController instead of old workflow logic.",
+      "description": "Refactor Main Agent initialization and execution flow to use WorkflowController. SUPERSEDED by fix-workflow-core-issues T-011 (prompt cleanup).",
       "acceptanceCriteria": [
         "Main Agent initializes WorkflowController with all dependencies",
         "Calls executeStage for workflow execution",
@@ -241,13 +241,13 @@
       "priority": 8,
       "passes": false,
       "dependencies": ["T-008"],
-      "notes": "Core integration work"
+      "notes": "SUPERSEDED: Covered by fix-workflow-core-issues prompt simplification and RalphExecutor integration."
     },
     {
       "id": "T-009",
       "title": "Add tests and documentation",
       "spec": null,
-      "description": "Add comprehensive tests for new workflow components. Update documentation with new workflow usage guide.",
+      "description": "Add comprehensive tests for new workflow components. SUPERSEDED by fix-workflow-core-issues T-013, T-014.",
       "acceptanceCriteria": [
         "Unit tests for all major components (>80% coverage)",
         "Integration tests for workflow phases",
@@ -257,7 +257,7 @@
       "priority": 9,
       "passes": false,
       "dependencies": ["T-008"],
-      "notes": "Test error handling and edge cases"
+      "notes": "SUPERSEDED: Covered by fix-workflow-core-issues test update tasks."
     }
   ]
 }
