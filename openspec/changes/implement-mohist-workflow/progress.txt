@@ -1,30 +1,24 @@
 # Ralph Progress Log
-Started: 2026-04-09T04:59:15.115Z
+Started: 2026-04-09T05:28:25.664Z
 
 ---
 
-2026-04-09T12:54:00.000Z | T-001 | Updated Stage enum in types/index.ts:
-- Added new stages: Explore, Plan, Build, Review, Done
-- Kept old stages (Draft, Check) for backward compatibility
-- Added STAGE_ORDER array for ordered stage iteration
-- Added STAGE_TRANSITIONS record for allowed transitions
-- Added isValidTransition() helper function
-TypeScript compilation passes. Old code using Stage.Draft, Stage.Check continues to work.
+## T-003: Create ChangeArtifactsManager (2026-04-09T05:35:00Z)
 
-Next steps: T-002 (Create WorkflowController) depends on these types
+**What was done:**
+- The ChangeArtifactsManager already existed at `packages/cli/src/artifacts/change-artifacts-manager.ts` with full implementation
+- Fixed TypeScript errors: duplicate function implementations, unused variables, wrong variable types
+- Renamed private methods `readArtifact`/`writeArtifact` (issueNumber version) to `readArtifactByIssue`/`writeArtifactByIssue` to avoid naming conflict with public methods
+- Fixed `listChanges()` method - was using `number.length` incorrectly (number is not a string)
+- Removed unused `DEFAULT_CONFIG` constant and `config` property
+- Fixed `restoreChange()` unused `archivePath` variable
+- TypeScript compilation now passes
 
----
+**Learnings:**
+- TypeScript doesn't support function overloading - duplicate function names with different signatures cause errors even if they have different parameter types
+- When renaming variables that shadow built-ins (like `number`), ensure the correct type is used
 
-2026-04-09T13:08:00.000Z | T-002 | Created WorkflowController in packages/cli/src/workflow/workflow-controller.ts:
-- Implemented WorkflowController class with validateTransition() and executeStage() methods
-- validateTransition() uses existing isValidTransition() from types/index.ts
-- executeStage() dispatches to appropriate stage handlers (Explore, Plan, Build, Review, Done)
-- Created workflow/index.ts to export the controller and interfaces
-- Created 17 unit tests covering all stage executions and transition validation
-- All tests pass, TypeScript compilation passes
+**Next steps:**
+- T-003 is complete (passes: true)
+- T-004 (Planner Agent) depends on T-002 and T-003, both now complete
 
-Learnings:
-- artifactManager must be actually used in the class (not just stored) due to strict TypeScript noUnusedLocals
-- Explore stage now checks for existing change directory using artifactManager
-
-Next steps: T-003 (Create ChangeArtifactsManager) can now be implemented

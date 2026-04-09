@@ -46,7 +46,7 @@
         "Git integration works"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "dependencies": [],
       "notes": "Can be developed in parallel with T-002"
     },
