@@ -48,3 +48,31 @@ Started: 2026-04-09T05:28:25.664Z
 - T-005 (Build phase execution) depends on T-002, T-003 - both complete
 - T-006 (Reviewer Agent) depends on T-002 - complete
 
+---
+
+## T-005: Implement Build phase execution (2026-04-09T07:15:00Z)
+
+**What was done:**
+- Added `executeCoderTask` function to `packages/cli/src/tools/spawn-coder.ts` - exports a simplified API for executing single coding tasks
+- Added `CoderTaskResult` interface to `spawn-coder.ts` for structured return values
+- Implemented `executeBuildStage()` method in `WorkflowController` that:
+  - Reads prd.json tasks using `artifactManager.readPrd()`
+  - Sequentially executes each task using `executeCoderTask` (which calls opencode acp)
+  - Retries failed tasks up to 3 times
+  - Escalates to user (`requiresApproval: true`) when all retries fail
+  - Returns structured output with task results on success
+- Added `buildTaskPrompt()` helper to construct detailed task prompts for the Coder Agent
+- Added `readPrd` method to `ChangeArtifactsManager` interface
+- Updated `ChangeArtifactsManager` interface in workflow-controller.ts to include `readPrd`
+
+**Learnings:**
+- The spawn_coder tool internally uses runAcpOneshot which is not exported - created a wrapper function `executeCoderTask` that provides a clean API
+- Task prompts should include issue context, task description, acceptance criteria, and spec references
+- The Build phase should not auto-transition to Review - user should approve after seeing Build results
+
+**Next steps:**
+- T-005 complete (passes: true)
+- T-006 (Reviewer Agent) depends on T-002 - complete
+- T-007 (user approval interface) depends on T-004, T-006
+- T-008 (integrate with issue service) depends on T-005, T-007
+

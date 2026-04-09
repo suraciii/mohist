@@ -79,7 +79,7 @@
         "Escalates to user when all retries fail"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-002", "T-003"],
       "notes": "Coder Agent is called via spawn_coder tool"
     },
