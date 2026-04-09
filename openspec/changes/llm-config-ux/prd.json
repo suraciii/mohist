@@ -79,7 +79,7 @@
         "build 无报错"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "错误提示文案参考引导卡片的设计，保持一致性。"
     }
   ]
