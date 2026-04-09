@@ -26,10 +26,10 @@ async function getCurrentProjectId(): Promise<string | null> {
   }
 }
 
-interface PausedIssue {
-  issueId: string;
-  issueNumber: number;
-}
+type InteractionState =
+  | { type: 'IDLE' }
+  | { type: 'GATE_MODE'; issueId: string; issueNumber: number }
+  | { type: 'QUESTION_MODE'; questionId: string; question: string; issueId: string };
 
 export function setupAttachCommand(program: Command): void {
   program
@@ -63,7 +63,7 @@ export function setupAttachCommand(program: Command): void {
 
       let active = true;
       let currentReq: ClientRequest | null = null;
-      let pausedIssue: PausedIssue | null = null;
+      let interactionState: InteractionState = { type: 'IDLE' };
       let lastMessage: string | null = null;
 
       const rl = readline.createInterface({
@@ -80,43 +80,70 @@ export function setupAttachCommand(program: Command): void {
         }
 
         if (trimmed === 'quit' || trimmed === 'exit') {
+          if (interactionState.type === 'QUESTION_MODE') {
+            console.log(chalk.yellow('Warning: Quitting without answering. The agent will wait 24h for timeout.'));
+            console.log(chalk.yellow("Use 'mo question reply <questionId>' later to answer, or let it timeout."));
+          }
           cleanup();
           return;
         }
 
-        if (!pausedIssue) {
-          console.log(chalk.yellow('No paused agent to send message to. Waiting for agent to pause...'));
-          rl.prompt();
-          return;
-        }
+        if (interactionState.type === 'GATE_MODE') {
+          const issueNumber = interactionState.issueNumber;
+          lastMessage = trimmed;
+          try {
+            const result = await apiClient<any>('POST', `/issues/${issueNumber}/messages`, {
+              message: trimmed,
+            });
 
-        const issueNumber = pausedIssue.issueNumber;
-        lastMessage = trimmed;
-        try {
-          const result = await apiClient<any>('POST', `/issues/${issueNumber}/messages`, {
-            message: trimmed,
-          });
-
-          if (result.success) {
-            const summary = trimmed.length > 50 ? trimmed.substring(0, 50) + '...' : trimmed;
-            console.log(chalk.green(`Message sent to issue #${issueNumber}: "${summary}"`));
-            pausedIssue = null;
-            lastMessage = null;
-          } else {
-            if (result.error?.includes('not paused') || result.error?.includes('409')) {
-              console.log(chalk.yellow(`Agent resumed before message could be sent. Wait for next pause.`));
-              pausedIssue = null;
+            if (result.success) {
+              const summary = trimmed.length > 50 ? trimmed.substring(0, 50) + '...' : trimmed;
+              console.log(chalk.green(`Message sent to issue #${issueNumber}: "${summary}"`));
+              interactionState = { type: 'IDLE' };
               lastMessage = null;
             } else {
-              console.log(chalk.red(`Failed to send message: ${result.error}`));
-              pausedIssue = null;
-              lastMessage = null;
+              if (result.error?.includes('not paused') || result.error?.includes('409')) {
+                console.log(chalk.yellow(`Agent resumed before message could be sent. Wait for next pause.`));
+                interactionState = { type: 'IDLE' };
+                lastMessage = null;
+              } else {
+                console.log(chalk.red(`Failed to send message: ${result.error}`));
+                interactionState = { type: 'IDLE' };
+                lastMessage = null;
+              }
             }
+          } catch (err: any) {
+            console.log(chalk.red(`Network error sending message: ${err.message}`));
+            interactionState = { type: 'IDLE' };
+            lastMessage = null;
           }
-        } catch (err: any) {
-          console.log(chalk.red(`Network error sending message: ${err.message}`));
-          pausedIssue = null;
-          lastMessage = null;
+        } else if (interactionState.type === 'QUESTION_MODE') {
+          const { questionId } = interactionState;
+          try {
+            const result = await apiClient<any>('POST', `/questions/${questionId}/reply`, {
+              answer: trimmed,
+            });
+
+            if (result.success) {
+              const summary = trimmed.length > 50 ? trimmed.substring(0, 50) + '...' : trimmed;
+              console.log(chalk.green(`Answer sent: "${summary}"`));
+              interactionState = { type: 'IDLE' };
+            } else {
+              if (result.error?.includes('409') || result.error?.includes('410')) {
+                console.log(chalk.yellow(`Question expired or already answered.`));
+                interactionState = { type: 'IDLE' };
+              } else {
+                console.log(chalk.red(`Failed to send answer: ${result.error}`));
+                interactionState = { type: 'IDLE' };
+              }
+            }
+          } catch (err: any) {
+            console.log(chalk.red(`Network error sending answer: ${err.message}`));
+            interactionState = { type: 'IDLE' };
+          }
+        } else {
+          console.log(chalk.yellow('No paused agent or pending question'));
+          rl.prompt();
         }
       });
 
@@ -124,16 +151,27 @@ export function setupAttachCommand(program: Command): void {
         cleanup();
       });
 
-      function showPrompt(issueNumber: number) {
+      function showGatePrompt(issueNumber: number) {
         console.log(chalk.yellow(`Agent paused for issue #${issueNumber}. Type a message to send, or 'quit' to detach.`));
         rl.prompt();
       }
 
+      function showQuestionPrompt(question: string, issueId: string) {
+        console.log('');
+        console.log(chalk.cyan('┌─────────────────────────────────────────────────────────────┐'));
+        console.log(chalk.cyan('│  ') + chalk.yellow.bold('[Question]') + chalk.cyan(` Agent is asking for issue #${issueId}:`));
+        console.log(chalk.cyan('│'));
+        console.log(chalk.cyan('│  ') + chalk.white(`"${question}"`));
+        console.log(chalk.cyan('│'));
+        console.log(chalk.cyan('│  ') + chalk.gray('Type your answer below, or \'quit\' to detach:'));
+        console.log(chalk.cyan('└─────────────────────────────────────────────────────────────┘'));
+        rl.prompt();
+      }
+
       function hidePrompt() {
-        if (pausedIssue) {
+        if (interactionState.type !== 'IDLE') {
           readline.cursorTo(process.stdout, 0);
           readline.clearLine(process.stdout, 0);
-          pausedIssue = null;
         }
       }
 
@@ -167,15 +205,32 @@ export function setupAttachCommand(program: Command): void {
             }
 
             if (eventType === 'agent_paused' && parsed.issueNumber) {
-              pausedIssue = {
+              interactionState = {
+                type: 'GATE_MODE',
                 issueId: parsed.issueId,
                 issueNumber: parsed.issueNumber,
               };
-              showPrompt(pausedIssue.issueNumber);
+              showGatePrompt(interactionState.issueNumber);
+            }
+
+            if (eventType === 'question_asked' && parsed.questionId) {
+              interactionState = {
+                type: 'QUESTION_MODE',
+                questionId: parsed.questionId,
+                question: parsed.question || '',
+                issueId: parsed.issueId || '',
+              };
+              showQuestionPrompt(interactionState.question, interactionState.issueId);
+            }
+
+            if (eventType === 'question_answered') {
+              if (interactionState.type === 'QUESTION_MODE' && interactionState.questionId === parsed.questionId) {
+                interactionState = { type: 'IDLE' };
+              }
             }
 
             if (eventType === 'agent_started' || eventType === 'agent_completed') {
-              pausedIssue = null;
+              interactionState = { type: 'IDLE' };
               lastMessage = null;
             }
 
