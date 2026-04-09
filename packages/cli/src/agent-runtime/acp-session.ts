@@ -66,7 +66,10 @@ export async function runAcpSession(
     executionId,
     workflowLogRepo,
     eventBus,
+    throttleMs = 100,
   } = options;
+
+  let lastTextChunkTime = 0;
 
   const proc = spawn('opencode', ['acp'], {
     cwd,
@@ -128,11 +131,25 @@ export async function runAcpSession(
             update.content &&
             'text' in update.content
           ) {
+            const textChunk = (update.content as { text: string }).text;
             if (!agentTextTruncated) {
-              agentText += (update.content as { text: string }).text;
+              agentText += textChunk;
               if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
                 agentText = truncateAgentText(agentText);
                 agentTextTruncated = true;
+              }
+            }
+            if (eventBus && executionId) {
+              const now = Date.now();
+              if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
+                eventBus.emit('coder_text_chunk', {
+                  issueId: issueId ?? '',
+                  projectId: projectId ?? '',
+                  executionId,
+                  acpSessionId: sessionId,
+                  text: textChunk,
+                });
+                lastTextChunkTime = now;
               }
             }
           }
@@ -153,12 +170,15 @@ export async function runAcpSession(
           ) {
             const toolData = update as Record<string, unknown>;
             const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
-            eventBus.emit('tool_call', {
+            const toolStatus = (toolCallData?.status as string) ?? '';
+            const state = toolStatus === 'completed' ? 'completed' : 'started';
+            eventBus.emit('coder_tool_call', {
               issueId: issueId ?? '',
               projectId: projectId ?? '',
+              executionId,
+              acpSessionId: sessionId,
               toolName: (toolCallData?.toolName as string) ?? '',
-              status: (toolCallData?.status as string) ?? '',
-              locations: toolCallData?.locations as string[] | undefined,
+              state,
             });
           }
         } catch (err) {

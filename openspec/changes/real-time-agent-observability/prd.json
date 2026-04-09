@@ -51,8 +51,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "依赖 T-001（runAcpSession）和 T-002（事件类型）。默认 throttleMs=100，设为 0 禁用节流"
+      "passes": true,
+      "notes": "sessionUpdate 回调中 agent_message_chunk 推送 coder_text_chunk（throttleMs=100），tool_call 推送 coder_tool_call。两个事件都检查 eventBus 和 executionId 是否存在。"
     },
     {
       "id": "T-004",
