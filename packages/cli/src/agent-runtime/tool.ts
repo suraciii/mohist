@@ -43,6 +43,7 @@ export namespace Tool {
 
 export class ToolRegistry {
   private tools = new Map<string, ToolInstance>();
+  private currentExecutionId: string | null = null;
 
   register(instance: ToolInstance): void {
     this.tools.set(instance.definition.id, instance);
@@ -58,6 +59,18 @@ export class ToolRegistry {
 
   clear(): void {
     this.tools.clear();
+  }
+
+  setCurrentExecutionId(id: string): void {
+    this.currentExecutionId = id;
+  }
+
+  getCurrentExecutionId(): string | null {
+    return this.currentExecutionId;
+  }
+
+  clearCurrentExecutionId(): void {
+    this.currentExecutionId = null;
   }
 
   toToolSet(): ToolSet {

@@ -4,10 +4,13 @@ import type { LanguageModelV3 } from '@ai-sdk/provider';
 import type { Session } from './session';
 import { SessionManager } from './session';
 import { ToolRegistry } from './tool';
+import type { EventBus } from '../services/event-bus';
 
 export interface AgentLoopOptions {
   maxSteps?: number;
   system?: string;
+  eventBus?: EventBus;
+  eventContext?: { issueId: string; projectId: string };
 }
 
 export interface AgentLoopResult {
@@ -26,6 +29,8 @@ export async function runAgentLoop(
   const maxSteps = options?.maxSteps ?? 20;
   const messages = session.messages;
   const tools = toolRegistry.toToolSet();
+  const eventBus = options?.eventBus;
+  const eventContext = options?.eventContext;
 
   const result = streamText({
     model,
@@ -35,7 +40,60 @@ export async function runAgentLoop(
     stopWhen: stepCountIs(maxSteps),
   });
 
-  await result.consumeStream();
+  let stepIndex = 0;
+
+  for await (const part of result.fullStream) {
+    if (part.type === 'text-delta') {
+      if (eventBus && eventContext) {
+        eventBus.emit('agent_text_chunk', {
+          issueId: eventContext.issueId,
+          projectId: eventContext.projectId,
+          text: part.text,
+          stepIndex,
+        });
+      }
+    } else if (part.type === 'tool-call') {
+      const executionId = crypto.randomUUID();
+      toolRegistry.setCurrentExecutionId(executionId);
+      stepIndex++;
+      if (eventBus && eventContext) {
+        eventBus.emit('main_tool_call', {
+          issueId: eventContext.issueId,
+          projectId: eventContext.projectId,
+          executionId,
+          toolName: part.toolName,
+          state: 'started',
+          args: JSON.stringify(part.input),
+        });
+      }
+    } else if (part.type === 'tool-result') {
+      const executionId = toolRegistry.getCurrentExecutionId() ?? crypto.randomUUID();
+      if (eventBus && eventContext) {
+        eventBus.emit('main_tool_call', {
+          issueId: eventContext.issueId,
+          projectId: eventContext.projectId,
+          executionId,
+          toolName: part.toolName,
+          state: 'completed',
+          result: part.output,
+        });
+      }
+      toolRegistry.clearCurrentExecutionId();
+    } else if (part.type === 'tool-error') {
+      const executionId = toolRegistry.getCurrentExecutionId() ?? crypto.randomUUID();
+      if (eventBus && eventContext) {
+        eventBus.emit('main_tool_call', {
+          issueId: eventContext.issueId,
+          projectId: eventContext.projectId,
+          executionId,
+          toolName: (part as { toolName?: string }).toolName ?? 'unknown',
+          state: 'failed',
+          error: (part as { error?: string }).error ?? 'Unknown error',
+        });
+      }
+      toolRegistry.clearCurrentExecutionId();
+    }
+  }
 
   const allSteps = await result.steps;
   const text = await result.text;

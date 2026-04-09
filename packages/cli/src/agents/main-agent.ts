@@ -198,6 +198,8 @@ export async function runMainAgent(
 
   const loopResult = await runAgentLoop(session, sessionManager, toolRegistry, model, {
     system,
+    eventBus: context.eventBus,
+    eventContext: { issueId: context.issue.id, projectId: context.issue.projectId },
   });
 
   return { loopResult, session };
