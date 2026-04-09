@@ -22,3 +22,16 @@ Started: 2026-04-09T05:22:08.717Z
 - Pre-existing test failures in api-routes.test.ts (NOT NULL constraint, 404 status) - 与本次修改无关
 - Next: T-004 Explore 页面 LLM 状态检查与引导卡片
 
+---
+
+2026-04-09T14:02:00.000Z | T-004 | Explore 页面 LLM 状态检查与引导卡片
+- 修改 web/src/lib/api.ts: 添加 getStatus() 函数请求 /api/status
+- 修改 web/src/hooks/useQueries.ts: 添加 useStatus hook，retry: false 确保失败不阻塞
+- 修改 web/src/components/ExplorePage.tsx:
+  - 添加 LlmGuidanceCard 组件显示引导卡片
+  - 卡片包含配置文件路径 ~/.mohist/config.jsonc、配置示例、支持 provider 列表（anthropic/glm/openai）、刷新按钮
+  - 使用 statusData?.llm?.configured !== false 判断，失败时不阻塞（statusData 可能为 undefined）
+  - llm 未配置时显示引导卡片替代聊天界面
+- TypeScript build 通过
+- Next: T-005 Explore 页面分类错误提示
+

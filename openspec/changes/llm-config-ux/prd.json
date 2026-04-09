@@ -64,7 +64,7 @@
         "build 无报错"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "利用 react-query 的 useQuery 请求 status API。引导卡片的 provider 列表可以硬编码在组件中。"
     },
     {
