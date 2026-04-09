@@ -28,6 +28,12 @@
 - **AND** 请求 `GET /api/status`
 - **THEN** 响应的 `llm` 字段为 `{ configured: false }`
 
+#### Scenario: 配置文件格式错误
+- **WHEN** `~/.mohist/config.jsonc` 存在但 JSONC 语法错误
+- **AND** 请求 `GET /api/status`
+- **THEN** 响应的 `llm` 字段为 `{ configured: false }`
+- **AND** status 端点本身 SHALL 返回 200（不因配置文件格式错误返回 5xx）
+
 #### Scenario: 配置文件格式有效但 provider key 无效
 - **WHEN** config.jsonc 中指定了 model 但对应 provider 无 apiKey
 - **AND** 请求 `GET /api/status`
