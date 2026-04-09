@@ -43,6 +43,8 @@ function createMockArtifactManager(): ChangeArtifactsManager {
     readArtifact: vi.fn().mockReturnValue(null),
     writeArtifact: vi.fn().mockReturnValue(true),
     exists: vi.fn().mockReturnValue(true),
+    readPrd: vi.fn().mockReturnValue({ tasks: [] }),
+    updateTaskStatus: vi.fn().mockReturnValue(true),
   };
 }
 
@@ -237,7 +239,7 @@ describe('WorkflowController', () => {
 
         expect(result.success).toBe(true);
         expect(result.requiresApproval).toBe(false);
-        expect(result.message).toContain('Build stage framework ready');
+        expect(result.message).toContain('Build phase completed');
       });
     });
 
