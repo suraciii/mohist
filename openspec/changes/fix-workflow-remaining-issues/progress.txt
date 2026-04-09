@@ -44,3 +44,35 @@ T-007 was already fully implemented in a previous iteration. The approval infras
 T-007 passes=true - Implementation complete and verified
 
 ---
+
+## T-006-1: Improve Reviewer Agent test execution
+Date: 2026-04-09T17:20:00Z
+
+### What was done:
+Updated `runTests` method in reviewer-agent.ts (lines 453-515) to:
+
+1. Check if package.json exists
+2. Parse scripts section from package.json
+3. If `test` script exists and not default ("no test specified"), run `npm test`
+4. Else if `build` script exists, run `npm run build`
+5. Else return passed with no issues (skipped)
+
+Also added `runNpmCommand` helper method with:
+- 5-minute (300000ms) timeout
+- Error detection distinguishing execution errors vs test failures
+- Last 1000 chars of output included in suggestion
+- Returns proper issues array for correctness reporting
+
+### Acceptance Criteria Verification:
+- ✅ Reads and parses package.json to detect available scripts
+- ✅ Runs 'npm test' if test script exists and is not default
+- ✅ Falls back to 'npm run build' if no test script
+- ✅ Returns skipped status if neither script exists (returns passed with no issues)
+- ✅ Test failures reported as correctness issues with output
+- ✅ 5-minute timeout for test execution (300000ms)
+- ✅ TypeScript compilation passes
+
+### Status:
+T-006-1 passes=true - Implementation complete and verified
+
+---
