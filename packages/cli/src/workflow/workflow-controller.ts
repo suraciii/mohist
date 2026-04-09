@@ -48,6 +48,7 @@ export interface ReviewerAgent {
 
 export interface ChangeArtifactsManager {
   getChangeDir(issueNumber: number): string | null;
+  createChangeDir(issueNumber: number, title: string): string | null;
   readArtifact(changeDir: string, artifactPath: string): string | null;
   writeArtifact(changeDir: string, artifactPath: string, content: string): boolean;
   exists(changeDir: string): boolean;

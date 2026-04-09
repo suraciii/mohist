@@ -7,7 +7,6 @@ import { streamText } from 'ai';
 import { createReadFileTool } from '../tools/read-file';
 import { createGlobTool } from '../tools/glob-tool';
 import { createGrepTool } from '../tools/grep-tool';
-import { createWriteFileTool } from '../tools/write-file';
 
 const DEFAULT_MAX_ITERATIONS = 3;
 
@@ -144,7 +143,7 @@ export class PlannerAgent {
     const { issue, worktreePath, prompt } = options;
     const activePrompt = prompt ?? this.defaultPrompt;
 
-    const changeDir = this.artifactManager.getChangeDir(issue.number);
+    const changeDir = this.artifactManager.getChangeDir(issue.number) || this.artifactManager.createChangeDir(issue.number, issue.title);
     if (!changeDir) {
       return {
         success: false,
@@ -246,15 +245,6 @@ Be concise - provide a summary of your findings.`;
     return registry;
   }
 
-  private buildArtifactToolRegistry(cwd: string): ToolRegistry {
-    const registry = new ToolRegistry();
-    registry.register(createReadFileTool({ projectPath: cwd }));
-    registry.register(createGlobTool({ projectPath: cwd }));
-    registry.register(createGrepTool({ projectPath: cwd }));
-    registry.register(createWriteFileTool({ projectPath: cwd }));
-    return registry;
-  }
-
   private parseCodebaseFindings(findings: string): CodebaseInfo {
     const keyFiles: string[] = [];
     const patterns: string[] = [];
@@ -284,7 +274,6 @@ Be concise - provide a summary of your findings.`;
     changeDir: string
   ): Promise<{ proposal: string; design: string; specs: Map<string, string>; prd: unknown }> {
     const model = resolveModel(this.llmConfig);
-    const toolRegistry = this.buildArtifactToolRegistry(process.cwd());
 
     const prompt_text = `You are a Planner Agent creating design artifacts for this issue:
 
@@ -296,68 +285,94 @@ Codebase Findings:
 - Patterns: ${codebaseInfo.patterns.join(', ') || 'None identified'}
 - Architecture: ${codebaseInfo.architecture}
 
-You MUST use the write_file tool to create the following artifacts in the change directory:
+Create the following artifacts and return them as a single JSON object:
 
-1. **proposal.md** - Problem statement and solution overview
-2. **design.md** - Technical design decisions  
-3. **specs/*.md** - One spec file per capability
-4. **prd.json** - Task breakdown with tasks array
+{
+  "proposal": "## Why\\n\\n[Content...]\\n\\n## What Changes\\n\\n[Content...]",
+  "design": "## Context\\n\\n[Content...]\\n\\n## Decisions\\n\\n[Content...]",
+  "specs": [
+    {"name": "capability-name", "content": "## ADDED Requirements\\n\\n### Requirement: [name]\\n\\n..."}
+  ],
+  "prd": {
+    "project": "project-name",
+    "description": "...",
+    "tasks": [
+      {"id": "T-001", "title": "...", "description": "...", "acceptanceCriteria": [...]}
+    ]
+  }
+}
 
-Generate high-quality artifacts that cover all requirements. After creating all files, report which files were created.`;
+Return ONLY a valid JSON object with no additional text. The JSON must include:
+- proposal: Markdown string with ## Why and ## What Changes sections
+- design: Markdown string with ## Context, ## Goals/Non-Goals, ## Decisions, ## Risks sections
+- specs: Array of {name, content} objects, each content is markdown
+- prd: Object with project, description, and tasks array
 
-    // Execute the stream and wait for completion
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const streamResult: any = await streamText({
+Generate high-quality artifacts that cover all requirements. Be comprehensive and detailed.`;
+
+    const result = await streamText({
       model,
-      system: 'You are a Planner Agent. Create high-quality design artifacts using the write_file tool. You have access to read_file, glob, grep, and write_file tools.',
+      system: 'You are a Planner Agent. Return design artifacts as structured JSON. No tools needed.',
       messages: [{ role: 'user', content: prompt_text }],
-      tools: toolRegistry.toToolSet(),
     });
 
-    // Wait for the result to complete (agent may make multiple tool calls)
-    await streamResult.text;
+    const text = await result.text;
+    const artifacts = this.parseArtifactsJson(text);
 
-    return this.readGeneratedArtifacts(changeDir);
+    await this.writeArtifactsToFiles(changeDir, artifacts);
+
+    return {
+      proposal: artifacts.proposal,
+      design: artifacts.design,
+      specs: new Map(artifacts.specs.map(s => [s.name, s.content])),
+      prd: artifacts.prd,
+    };
   }
 
-  private readGeneratedArtifacts(
-    changeDir: string
-  ): { proposal: string; design: string; specs: Map<string, string>; prd: unknown } {
-    const fs = require('fs');
-    const path = require('path');
+  private parseArtifactsJson(
+    text: string
+  ): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } {
+    let jsonStr = text.trim();
 
-    const proposalPath = path.join(changeDir, 'proposal.md');
-    const designPath = path.join(changeDir, 'design.md');
-    const specsDir = path.join(changeDir, 'specs');
-    const prdPath = path.join(changeDir, 'prd.json');
-
-    let proposal = '';
-    let design = '';
-    const specs = new Map<string, string>();
-    let prd: unknown = null;
-
-    if (fs.existsSync(proposalPath)) {
-      proposal = fs.readFileSync(proposalPath, 'utf-8');
-    }
-    if (fs.existsSync(designPath)) {
-      design = fs.readFileSync(designPath, 'utf-8');
-    }
-    if (fs.existsSync(specsDir)) {
-      const specFiles = fs.readdirSync(specsDir).filter((f: string) => f.endsWith('.md'));
-      for (const file of specFiles) {
-        const content = fs.readFileSync(path.join(specsDir, file), 'utf-8');
-        specs.set(file.replace('.md', ''), content);
-      }
-    }
-    if (fs.existsSync(prdPath)) {
-      try {
-        prd = JSON.parse(fs.readFileSync(prdPath, 'utf-8'));
-      } catch {
-        // Invalid JSON, ignore
-      }
+    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1].trim();
     }
 
-    return { proposal, design, specs, prd };
+    try {
+      const parsed = JSON.parse(jsonStr);
+      return {
+        proposal: parsed.proposal || '',
+        design: parsed.design || '',
+        specs: Array.isArray(parsed.specs) ? parsed.specs : [],
+        prd: parsed.prd || null,
+      };
+    } catch (error) {
+      console.error('Failed to parse artifacts JSON:', error);
+      console.error('Raw text:', text.slice(0, 500));
+      return {
+        proposal: '',
+        design: '',
+        specs: [],
+        prd: null,
+      };
+    }
+  }
+
+  private async writeArtifactsToFiles(
+    changeDir: string,
+    artifacts: { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown }
+  ): Promise<void> {
+    this.artifactManager.writeArtifact(changeDir, 'proposal.md', artifacts.proposal);
+    this.artifactManager.writeArtifact(changeDir, 'design.md', artifacts.design);
+
+    for (const spec of artifacts.specs) {
+      this.artifactManager.writeArtifact(changeDir, `specs/${spec.name}.md`, spec.content);
+    }
+
+    if (artifacts.prd) {
+      this.artifactManager.writeArtifact(changeDir, 'prd.json', JSON.stringify(artifacts.prd, null, 2));
+    }
   }
 
   private async selfReview(
@@ -423,33 +438,47 @@ Be critical but fair.`;
     changeDir: string
   ): Promise<{ proposal: string; design: string; specs: Map<string, string>; prd: unknown }> {
     const model = resolveModel(this.llmConfig);
-    const toolRegistry = this.buildArtifactToolRegistry(process.cwd());
 
     const issuesList = issues.map((issue, i) => `${i + 1}. ${issue}`).join('\n');
-    const prompt_text = `Fix the following issues in the design artifacts located in ${changeDir}:
+    const prompt_text = `Fix the following issues in the design artifacts:
 
 ${issuesList}
 
 Current artifacts:
-- Proposal: ${artifacts.proposal.slice(0, 500)}...
-- Design: ${artifacts.design.slice(0, 500)}...
+- Proposal: ${artifacts.proposal.slice(0, 1000)}...
+- Design: ${artifacts.design.slice(0, 1000)}...
 - Specs: ${Array.from(artifacts.specs.keys()).join(', ')}
 
-Use the write_file tool to rewrite the affected files and address these issues. Focus on the specific problems identified. After fixing, report which files were updated.`;
+Return ONLY a valid JSON object with no additional text:
 
-    // Execute the stream and wait for completion
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const streamResult: any = await streamText({
+{
+  "proposal": "[Updated proposal markdown]",
+  "design": "[Updated design markdown]",
+  "specs": [
+    {"name": "capability-name", "content": "[Updated spec content]"}
+  ],
+  "prd": {...}
+}
+
+Fix the specific issues identified. Be thorough and address each point.`;
+
+    const result = await streamText({
       model,
-      system: 'You are a Planner Agent. Fix the identified issues in the design artifacts using write_file tool.',
+      system: 'You are a Planner Agent. Fix design artifacts and return as structured JSON. No tools needed.',
       messages: [{ role: 'user', content: prompt_text }],
-      tools: toolRegistry.toToolSet(),
     });
 
-    // Wait for the result to complete
-    await streamResult.text;
+    const text = await result.text;
+    const fixedArtifacts = this.parseArtifactsJson(text);
 
-    return this.readGeneratedArtifacts(changeDir);
+    await this.writeArtifactsToFiles(changeDir, fixedArtifacts);
+
+    return {
+      proposal: fixedArtifacts.proposal,
+      design: fixedArtifacts.design,
+      specs: new Map(fixedArtifacts.specs.map(s => [s.name, s.content])),
+      prd: fixedArtifacts.prd,
+    };
   }
 
   private extractMaxIterations(prompt: string): number {
