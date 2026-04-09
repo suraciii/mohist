@@ -85,7 +85,7 @@
         "Unit test covers both found and not-found cases"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

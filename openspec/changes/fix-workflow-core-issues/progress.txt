@@ -36,3 +36,10 @@ Next steps: T-005 (Replace M1_ALLOWED_TRANSITIONS with unified STAGE_TRANSITIONS
 Learnings: The old M1_ALLOWED_TRANSITIONS had different transitions than STAGE_TRANSITIONS spec (e.g., Plan→Review, Build→Check were allowed in old but not in spec). Some existing tests fail because they test old M1 behavior - these will be updated in T-012 (Update tests for unified interfaces and transition rules).
 
 Next steps: T-006 (Add findPendingApprovalByIssueId to IssueRepo).
+
+---
+2026-04-09T12:60:00Z | T-006 | Added findPendingApprovalByIssueId(issueId) method to IssueRepo in src/db/issue-repo.ts. Method queries issues by id where approval_state IS NOT NULL and returns the issue only if approval_state.status === 'awaiting', otherwise returns null. Added 4 unit tests covering: found case (awaiting), no approval state, non-awaiting status, and not-found case. All tests pass, typecheck passes.
+
+Learnings: The existing findPendingApproval(projectId) method provided a good template. The new method follows the same pattern but queries by issue ID instead of project ID. Tests follow the same pattern as other IssueRepo tests in database.test.ts.
+
+Next steps: T-007 (Add duplicate execution prevention to AgentRunnerService).

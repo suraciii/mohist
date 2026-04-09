@@ -282,6 +282,19 @@ export class IssueRepo {
     return null;
   }
 
+  findPendingApprovalByIssueId(issueId: string): Issue | null {
+    const row = this.db.get<IssueRow>(
+      `SELECT * FROM issues WHERE id = ? AND approval_state IS NOT NULL`,
+      [issueId]
+    );
+    if (!row) return null;
+    const issue = rowToIssue(row);
+    if (issue.approvalState && issue.approvalState.status === 'awaiting') {
+      return issue;
+    }
+    return null;
+  }
+
   count(projectId?: string): number {
     if (projectId) {
       const row = this.db.get<{ count: number }>(
