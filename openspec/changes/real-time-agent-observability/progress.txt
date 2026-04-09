@@ -1,13 +1,20 @@
 # Ralph Progress Log
-Started: 2026-04-09T06:44:19.726Z
+Started: 2026-04-09T08:07:32.947Z
 
 ---
-2026-04-09T15:10:00Z T-004 runAgentLoop fullStream iteration
-- Fixed TS error: 'step-start' event doesn't exist in AI SDK fullStream types
-- Moved stepIndex++ to increment on tool-call instead of step-start event
-- All event emissions (text-delta, tool-call, tool-result, tool-error) working correctly
-- Typecheck passes
-- Tests failures are pre-existing (database isolation issues, not related to this change)
+## 2026-04-09T16:15:00Z - T-005 - Ralph executor 接入 EventBus 推送 task 进度
 
----
+**What was done:**
+- Added `toolRegistry?: ToolRegistry` to `run-ralph-loop.ts` ToolContext
+- Tool reads `executionId` from `toolRegistry.getCurrentExecutionId()` and passes to `RalphExecutorContext`
+- Passed `executionId`, `eventBus`, `issueId`, `projectId` to `runAcpSession` in `ralph-executor.ts` (was previously only passing `cwd` and `task`)
+- Passed `toolRegistry` from `main-agent.ts` to `createRunRalphLoopTool`
+
+**Learnings:**
+- The `emitTaskUpdate` and `emitLoopProgress` helpers were already implemented in ralph-executor.ts from prior tasks
+- The missing pieces were: (1) `executionId` not being wired from ToolRegistry to the tool context, and (2) `runAcpSession` not receiving eventBus/executionId so coder events weren't emitted from ralph tasks
+- `spawn-coder.ts` has the same gap — it passes `eventBus` to `runAcpSession` but not `executionId`, so `coder_text_chunk`/`coder_tool_call` events won't fire from spawn_coder either. This should be addressed separately.
+
+**Next steps:**
+- T-006: Integration tests for end-to-end event flow verification
 
