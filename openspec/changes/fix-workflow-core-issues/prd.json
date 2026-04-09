@@ -150,7 +150,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Combines former T-010 (onAskUser bridge, now deleted) and T-011 (prompt only) into single task"
     },
     {

@@ -11,7 +11,6 @@ import { createAdvanceStageTool } from '../tools/advance-stage';
 import { createAddCommentTool } from '../tools/add-comment';
 import { createGetIssueTool } from '../tools/get-issue';
 import { createAskUserTool } from '../tools/ask-user';
-import { createRunRalphLoopTool } from '../tools/run-ralph-loop';
 import { createArchiveChangeTool } from '../tools/archive-change';
 import { createReadPrdTool } from '../tools/read-prd';
 import { createReadSpecTool } from '../tools/read-spec';
@@ -66,7 +65,6 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
 ## Available Tools
 - **read_workflow**: Read the workflow configuration (stages, prompt templates, approval flags). Call this first.
 - **spawn_coder**: Spawn an opencode acp oneshot session to execute a coding task. Provide \`taskTemplate\` (from the workflow stage prompt) and \`variables\` (issue info + previous stage outputs).
-- **run_ralph_loop**: Run Ralph task loop for OpenSpec workflow. Use in build stage when OpenSpec Change is detected. Detects Change directory and executes tasks from prd.json sequentially.
 - **advance_stage**: Move the issue to the next stage. Only pass the target stage name.
 - **add_comment**: Record progress notes, decisions, or summaries on the issue.
 - **get_issue**: Check the current state of the issue at any time.
@@ -78,13 +76,6 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
 - **update_task_status** / **get_task_status**: Update and query task status in prd.json.
 - **run_self_review**: Run self-review on the current OpenSpec specs.
 - **generate_prd**: Generate prd.json from the current Change's specs.
-
-## Ralph Loop (OpenSpec Workflow)
-When you call \`read_workflow\`, it will automatically detect whether an OpenSpec Change exists for this issue and report the execution mode.
-- If execution mode is "Ralph-style task loop": use \`run_ralph_loop\` in the build stage instead of \`spawn_coder\`
-- If execution mode is "Traditional": use \`spawn_coder\` for all stages as usual
-- Detection is based on the presence of \`.mohist-specs/changes/{issue-number}-{slug}/prd.json\`
-- A Change directory without prd.json means plan stage is still in progress
 
 ## When to Use ask_user
 - Requirements are ambiguous and you need clarification
@@ -158,7 +149,6 @@ ${detection.mode === 'traditional' ? `A Change directory exists but prd.json has
 
 ### Next Steps
 - If in plan stage: call \`advance_stage("review")\` to enter review stage.
-- If in build stage: use \`run_ralph_loop\` to execute tasks from prd.json.
 - If in check stage: use \`spawn_coder\` to run tests and lint.`}`;
 
   return basePrompt + openspecSection;
@@ -215,11 +205,6 @@ export async function runMainAgent(
       onWaitingChange: context.onWaitingChange,
     }));
   }
-  toolRegistry.register(createRunRalphLoopTool({
-    worktreePath: context.worktreePath,
-    issueId: context.issue.id,
-    projectId: context.issue.projectId,
-  }));
   toolRegistry.register(createArchiveChangeTool({
     issue: context.issue,
     worktreePath: context.worktreePath,

@@ -64,3 +64,10 @@ Next steps: T-009 (Integrate RalphExecutor into executeBuildStage without onAskU
 Learnings: The spec required detecting OpenSpecChange (not just prd.json existence). detectOpenSpecChange already exists and checks for prd.json existence, so the condition is simply checking if detectOpenSpecChange returns a non-null change. RalphExecutor.execute() without onAskUser allows failed tasks to be marked as failed and loop continues - no deadlock since there's no user prompt callback. The onAskUser field is simply omitted from the context object.
 
 Next steps: T-010 (Remove run_ralph_loop tool entirely).
+
+---
+2026-04-09T14:05:00Z | T-010 | Deleted tools/run-ralph-loop.ts. Removed createRunRalphLoopTool import from main-agent.ts. Removed tool registration from toolRegistry. Removed three prompt references: (1) run_ralph_loop tool description in Available Tools, (2) entire "Ralph Loop (OpenSpec Workflow)" section, (3) build stage instruction referencing run_ralph_loop. Typecheck passes. Verified no run_ralph_loop references remain in main-agent.ts.
+
+Learnings: The spec required preserving 80%+ of prompt content - only removed the specific run_ralph_loop references, not the entire OpenSpec Workflow section. The OpenSpec detection info remains in the prompt via read_workflow tool which still reports execution mode. The build stage now delegates to RalphExecutor via executeBuildStage (T-009), so no explicit run_ralph_loop instruction needed.
+
+Next steps: T-011 (Implement multi-strategy JSON parsing in PlannerAgent).
