@@ -1,202 +1,153 @@
 {
   "project": "mohist",
-  "description": "Implement new Mohist workflow with inner loops, multi-agent review, and automated iteration",
+  "description": "Implement simplified Mohist workflow with 3 core Agents (Planner, Coder, Reviewer). Plan/Review details customized via Prompt.",
   "tasks": [
     {
       "id": "T-001",
       "title": "Update Stage enum and types",
       "spec": "specs/workflow-engine/spec.md#Requirement: Workflow stages definition",
-      "description": "Update the Stage enum in types/index.ts to support new workflow stages: Explore, Plan, Build, Review, Done. Update issue type definitions if needed.",
+      "description": "Update the Stage enum in types/index.ts to support new workflow stages: Explore, Plan, Build, Review, Done. Update issue type definitions if needed. Map old stages to new stages for backward compatibility.",
       "acceptanceCriteria": [
         "Stage enum includes Explore, Plan, Build, Review, Done",
         "TypeScript compilation passes",
-        "Existing code that references old stages is updated or deprecated"
+        "Existing code that references old stages continues to work",
+        "Stage transition validation rules defined"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This is foundational - other tasks depend on the new stage definitions"
+      "dependencies": [],
+      "notes": "Foundational task - other tasks depend on the new stage definitions"
     },
     {
       "id": "T-002",
-      "title": "Create WorkflowController base class",
+      "title": "Create WorkflowController",
       "spec": "specs/workflow-engine/spec.md#Requirement: Workflow execution coordination",
-      "description": "Create the WorkflowController class that manages workflow execution, stage transitions, and agent invocation. Implement basic stage execution framework.",
+      "description": "Create the WorkflowController class that manages workflow execution and stage transitions. Implement basic stage execution framework with transition validation.",
       "acceptanceCriteria": [
         "WorkflowController can execute different stages based on issue state",
         "Stage transition validation works correctly",
         "Controller can invoke appropriate agents for each stage",
-        "Unit tests pass"
+        "Unit tests pass with >80% coverage"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "Focus on framework, not specific phase logic yet"
+      "dependencies": ["T-001"],
+      "notes": "Simplified design - no LoopController, agents handle iteration themselves"
     },
     {
       "id": "T-003",
-      "title": "Implement LoopController for inner loops",
-      "spec": "specs/loop-controller/spec.md",
-      "description": "Create LoopController that manages inner loop execution for Plan and Review phases. Implement iteration counting, max limit enforcement, and escalation logic.",
-      "acceptanceCriteria": [
-        "LoopController tracks iteration count and history",
-        "Max iteration limits (5 for Plan, 3 for Review) are enforced",
-        "Escalation to user works when max iterations reached",
-        "Loop state is persisted between iterations"
-      ],
-      "priority": 3,
-      "passes": false,
-      "notes": "This is the core mechanism for iterative optimization"
-    },
-    {
-      "id": "T-004",
-      "title": "Implement MultiAgentReview orchestrator",
-      "spec": "specs/multi-agent-review/spec.md",
-      "description": "Create MultiAgentReview class that can execute multiple review agents in parallel and aggregate their results. Implement result aggregation logic.",
-      "acceptanceCriteria": [
-        "Can execute multiple review agents concurrently",
-        "Aggregates results into unified pass/fail decision",
-        "Collects all review outputs and issues",
-        "Handles partial failures gracefully"
-      ],
-      "priority": 4,
-      "passes": false,
-      "notes": "Start with sequential execution, parallel can be added later"
-    },
-    {
-      "id": "T-005",
       "title": "Create ChangeArtifactsManager",
       "spec": "specs/change-artifacts-manager/spec.md",
-      "description": "Implement ChangeArtifactsManager that handles creation, reading, and writing of change artifacts in .mohist/changes/ directory. Implement directory structure creation.",
+      "description": "Implement ChangeArtifactsManager that handles creation, reading, and writing of change artifacts in .mohist/changes/ directory.",
       "acceptanceCriteria": [
         "Can create change directory with correct structure",
         "Can read and write artifact files",
         "Artifacts are stored in correct locations",
-        "Git integration works (files are tracked)"
+        "Git integration works"
+      ],
+      "priority": 3,
+      "passes": false,
+      "dependencies": [],
+      "notes": "Can be developed in parallel with T-002"
+    },
+    {
+      "id": "T-004",
+      "title": "Implement Planner Agent",
+      "spec": "specs/planner-agent/spec.md",
+      "description": "Create Planner Agent that generates design artifacts (proposal, design, specs, prd.json) and self-reviews them. Review dimensions defined via Prompt.",
+      "acceptanceCriteria": [
+        "Planner Agent can explore codebase and generate design",
+        "Generates all required artifacts in .mohist/changes/{number}-{slug}/",
+        "Self-reviews design according to Prompt-defined criteria",
+        "Can self-correct if issues found",
+        "Provides default Prompt template"
+      ],
+      "priority": 4,
+      "passes": false,
+      "dependencies": ["T-002", "T-003"],
+      "notes": "Agent handles iteration internally, no external LoopController needed"
+    },
+    {
+      "id": "T-005",
+      "title": "Implement Build phase execution",
+      "spec": "specs/workflow-engine/spec.md#Requirement: Execute Build phase",
+      "description": "Create Build phase execution logic that reads prd.json and sequentially executes tasks using Coder Agent (spawn_coder). Implement task failure handling with retry.",
+      "acceptanceCriteria": [
+        "Can read and parse prd.json tasks",
+        "Executes tasks sequentially using spawn_coder",
+        "Handles task failures with retry (up to 3 times)",
+        "Escalates to user when all retries fail"
       ],
       "priority": 5,
       "passes": false,
-      "notes": "Git commit functionality can be basic initially"
+      "dependencies": ["T-002", "T-003"],
+      "notes": "Coder Agent is called via spawn_coder tool"
     },
     {
       "id": "T-006",
-      "title": "Implement Plan phase agents",
-      "spec": "specs/workflow-engine/spec.md#Requirement: Execute Plan phase",
-      "description": "Create PlanAgent that generates design artifacts (proposal, design, specs, prd.json). Create PlanReviewAgents for completeness, consistency, feasibility, and risk reviews.",
+      "title": "Implement Reviewer Agent",
+      "spec": "specs/reviewer-agent/spec.md",
+      "description": "Create Reviewer Agent that reviews code quality. Review dimensions (correctness, complexity, test coverage, security) defined via Prompt.",
       "acceptanceCriteria": [
-        "PlanAgent generates all required artifacts",
-        "Review agents can evaluate design artifacts",
-        "Review agents return structured output with passed/reasoning/issues",
-        "Integration with LoopController works"
+        "Reviewer Agent can analyze code in the worktree",
+        "Reviews code according to Prompt-defined dimensions",
+        "Provides structured output with pass/fail and issues",
+        "Can suggest specific fixes",
+        "Provides default Prompt template"
       ],
       "priority": 6,
       "passes": false,
-      "notes": "Review agents can be simple initially, iterate on quality"
+      "dependencies": ["T-002"],
+      "notes": "Review dimensions fully customizable via Prompt"
     },
     {
       "id": "T-007",
-      "title": "Implement Plan phase Fix agent",
-      "spec": "specs/loop-controller/spec.md#Requirement: Inner loop execution for Plan phase",
-      "description": "Create PlanFixAgent that can modify design artifacts based on review feedback. Implement integration with LoopController for iterative fixing.",
-      "acceptanceCriteria": [
-        "FixAgent can read review feedback",
-        "FixAgent can modify design documents",
-        "FixAgent works within the inner loop",
-        "Changes are tracked in artifact history"
-      ],
-      "priority": 7,
-      "passes": false,
-      "notes": "This closes the inner loop for Plan phase"
-    },
-    {
-      "id": "T-008",
-      "title": "Implement Build phase execution",
-      "spec": "specs/workflow-engine/spec.md#Requirement: Execute Build phase",
-      "description": "Create Build phase execution logic that reads prd.json and sequentially executes tasks using external Coder agents (opencode). Implement task failure handling with retry and fix.",
-      "acceptanceCriteria": [
-        "Can read and parse prd.json tasks",
-        "Executes tasks sequentially",
-        "Calls external Coder agents correctly",
-        "Handles task failures with retry (up to 3 times)",
-        "Escalates to user when retry fails"
-      ],
-      "priority": 8,
-      "passes": false,
-      "notes": "External agent integration is critical - test thoroughly"
-    },
-    {
-      "id": "T-009",
-      "title": "Implement Review phase agents",
-      "spec": "specs/multi-agent-review/spec.md#Requirement: Review phase multi-agent review",
-      "description": "Create code review agents for correctness, complexity, test coverage, and security. Implement test execution validation.",
-      "acceptanceCriteria": [
-        "Review agents can analyze code",
-        "Correctness agent verifies logic",
-        "Complexity agent checks code quality",
-        "Test coverage agent validates tests",
-        "Security agent checks for vulnerabilities"
-      ],
-      "priority": 9,
-      "passes": false,
-      "notes": "Test execution can be basic initially"
-    },
-    {
-      "id": "T-010",
-      "title": "Implement Review phase Fix agent",
-      "spec": "specs/loop-controller/spec.md#Requirement: Inner loop execution for Review phase",
-      "description": "Create CodeFixAgent that can modify code based on review feedback. Implement integration with LoopController for iterative code fixing.",
-      "acceptanceCriteria": [
-        "FixAgent can read code review feedback",
-        "FixAgent can modify source code",
-        "FixAgent works within the inner loop",
-        "Changes are tracked"
-      ],
-      "priority": 10,
-      "passes": false,
-      "notes": "This closes the inner loop for Review phase"
-    },
-    {
-      "id": "T-011",
       "title": "Implement user approval interface",
       "spec": "specs/workflow-engine/spec.md",
-      "description": "Create user approval mechanism for Plan and Review phases. Implement conversation-style interaction where system presents results and waits for user decision.",
+      "description": "Create user approval mechanism for Plan and Review phases. Implement conversation-style interaction.",
       "acceptanceCriteria": [
-        "System can pause and wait for user approval",
+        "System can pause and wait for user approval at Plan and Review phases",
         "Approval interface shows relevant information",
         "User can approve, request changes, or abort",
         "State transitions work correctly based on user input"
       ],
-      "priority": 11,
+      "priority": 7,
       "passes": false,
-      "notes": "UI can be CLI-based initially, web UI can be added later"
+      "dependencies": ["T-004", "T-006"],
+      "notes": "Use existing ask_user tool for CLI interface"
     },
     {
-      "id": "T-012",
+      "id": "T-008",
       "title": "Integrate with existing issue service",
       "spec": "specs/workflow-engine/spec.md",
-      "description": "Update existing issue service and CLI commands to work with new workflow. Ensure backward compatibility or provide migration path.",
+      "description": "Update existing issue service and CLI commands to work with new workflow. Refactor Main Agent to use WorkflowController.",
       "acceptanceCriteria": [
         "Issue create/start commands work with new workflow",
         "Existing issues can transition to new stages",
         "Status queries return correct workflow state",
-        "Tests pass"
+        "Main Agent refactored to call WorkflowController",
+        "All existing tests pass"
       ],
-      "priority": 12,
+      "priority": 8,
       "passes": false,
-      "notes": "This is integration work - ensure nothing breaks"
+      "dependencies": ["T-005", "T-007"],
+      "notes": "Keep Main Agent's public interface stable"
     },
     {
-      "id": "T-013",
+      "id": "T-009",
       "title": "Add tests and documentation",
       "spec": null,
       "description": "Add comprehensive tests for new workflow components. Update documentation with new workflow usage guide.",
       "acceptanceCriteria": [
-        "Unit tests for all major components",
+        "Unit tests for all major components (>80% coverage)",
         "Integration tests for workflow phases",
         "Documentation updated",
         "All tests pass"
       ],
-      "priority": 13,
+      "priority": 9,
       "passes": false,
-      "notes": "Don't forget error handling and edge cases"
+      "dependencies": ["T-008"],
+      "notes": "Test error handling and edge cases"
     }
   ]
 }
