@@ -1,0 +1,21 @@
+# Ralph Progress Log
+Started: 2026-04-08T06:52:05.599Z
+
+---
+
+## 2026-04-08T15:00:00Z - T-001: 实现 read_prd 工具
+
+**Status**: COMPLETED
+
+**What was done**:
+- Fixed syntax error in `packages/cli/src/tools/read-prd.ts` line 67 (stray `)` from `.forEach()` to `for...of` refactoring)
+- Tool was already fully implemented with: path safety checks, JSON parsing, error handling, structured formatting
+- 8 unit tests already existed covering: valid prd, missing file, outside-project path, invalid JSON, missing tasks, minimal prd, strict params, absolute paths
+
+**Learnings**:
+- The read_prd tool was pre-implemented as a stub that became complete. Only needed a syntax fix.
+- Tool follows the project pattern: `createXxxTool(context)` returning `ToolInstance`, using zod for params
+- Tests use temp directories with `beforeEach`/`afterEach` cleanup
+
+**Next**: T-002 (read_spec tool) - similar pattern expected
+

@@ -334,6 +334,35 @@ export function setupIssueCommands(program: Command): void {
     });
 
   issue
+    .command('resume <number>')
+    .description('Resume a paused issue with optional skip to review')
+    .option('--skip-to-review', 'Skip plan stage and go directly to review (for OpenSpec workflow)')
+    .action(async (number, options) => {
+      try {
+        const endpoint = options.skipToReview 
+          ? `/issues/${number}/skip-to-review` 
+          : `/issues/${number}/reopen`;
+        
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          endpoint
+        );
+        
+        if (response.success) {
+          if (options.skipToReview) {
+            console.log(chalk.green(`✓ Issue #${number} resumed, skipped to review stage`));
+          } else {
+            console.log(chalk.green(`✓ Issue #${number} reopened`));
+          }
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to resume issue: ${error}`));
+      }
+    });
+
+  issue
     .command('diff <number>')
     .description('Show diff between issue branch and main')
     .action(async (number) => {

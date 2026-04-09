@@ -1,0 +1,282 @@
+{
+  "version": "1.0",
+  "change_id": "ralph-executor-stability-fix",
+  "issue_reference": "Fix OpenSpec workflow stability and integration completeness",
+  "generated_at": "2026-04-08T20:00:00Z",
+  "tasks": [
+    {
+      "id": "T-001",
+      "order": 1,
+      "capability": "resource-cleanup",
+      "requirement_ref": "D1",
+      "title": "实现 connection 和 stream 显式关闭",
+      "description": "修复 ralph-executor.ts 中 stream 和 connection 对象未关闭导致的资源泄漏问题",
+      "acceptance_criteria": [
+        "在 executeTaskWithSpawn 中添加 try-finally 块",
+        "finally 块中调用 connection.close()",
+        "finally 块中调用 stream.cancel()",
+        "确保无论成功或失败都执行清理",
+        "更新单元测试验证清理被调用"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-002",
+      "order": 2,
+      "capability": "concurrency-fix",
+      "requirement_ref": "D2",
+      "title": "修复 ensureKill 竞态条件",
+      "description": "使用原子标志防止 ensureKill 函数在多路径调用时的竞态条件",
+      "acceptance_criteria": [
+        "添加 cleanupDone 原子标志",
+        "创建统一的 doCleanup 函数",
+        "所有出口点（success/timeout/error）调用同一个 cleanup 函数",
+        "验证多次调用不会重复执行 kill",
+        "更新单元测试验证竞态安全性"
+      ],
+      "dependencies": ["T-001"],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-003",
+      "order": 3,
+      "capability": "memory-safety",
+      "requirement_ref": "D3",
+      "title": "限制 agentText 最大长度为 2MB",
+      "description": "添加 agentText 长度限制（2MB，从10MB下调），防止无界增长导致 OOM，保留开头和结尾截断以保留诊断价值",
+      "acceptance_criteria": [
+        "添加 MAX_AGENT_TEXT_LENGTH 常量（2MB）",
+        "在 sessionUpdate 中检查长度",
+        "超限时保留开头和结尾，中间添加 '[truncated N characters]' 标记",
+        "添加单元测试验证截断行为",
+        "测试边界情况（刚好 2MB、超过 2MB）"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-004",
+      "order": 4,
+      "capability": "detector-enhancement",
+      "requirement_ref": "D4",
+      "title": "增强 detector 处理多个 changes",
+      "description": "修改 detector.ts 正确处理多个 matching changes，返回最新版本",
+      "acceptance_criteria": [
+        "过滤所有以 issue-number 开头的 change 目录",
+        "解析版本号（-v2, -v3 等）",
+        "按版本号降序排序",
+        "返回最新的 change（版本号最大的）",
+        "更新单元测试覆盖多版本场景",
+        "向后兼容：无版本号视为 v1"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-005",
+      "order": 5,
+      "capability": "failure-classification",
+      "requirement_ref": "D5",
+      "title": "验证失败分类逻辑覆盖率",
+      "description": "验证 ralph-executor.ts 中已实现的 categorizeFailure 函数覆盖所有预期错误类型，添加缺失的分类规则",
+      "acceptance_criteria": [
+        "审查现有 categorizeFailure 实现",
+        "补充缺失的错误模式（如测试框架错误、编译错误等）",
+        "验证 FAILURE_CATEGORY_CONFIGS 配置合理",
+        "添加单元测试覆盖所有分类场景",
+        "确保分类逻辑与 T-001/T-002 修复兼容"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-006",
+      "order": 6,
+      "capability": "tool-registration",
+      "requirement_ref": "D6",
+      "title": "注册 8 个缺失工具到 main-agent",
+      "description": "将 read_prd, read_spec, store_learning, load_learnings, update_task_status, get_task_status, run_self_review, generate_prd 注册到 main-agent 的 ToolRegistry",
+      "acceptance_criteria": [
+        "main-agent.ts 中注册全部 8 个工具",
+        "每个工具传入正确的 cwd (worktreePath)",
+        "更新 agent-workflow-e2e.test.ts 中的工具数量断言",
+        "验证工具注册后 Agent 能发现并调用这些工具",
+        "构建通过，测试通过"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-007",
+      "order": 7,
+      "capability": "plan-stage-integration",
+      "requirement_ref": "D7",
+      "title": "实现 Plan Stage OpenSpec 感知（异步预检测）",
+      "description": "修改 runMainAgent 为异步，在启动时预检测 OpenSpec 状态并缓存到 session，buildSystemPrompt 从参数读取检测结果而非同步IO",
+      "acceptance_criteria": [
+        "将 runMainAgent 改为 async 函数",
+        "在 runMainAgent 中调用异步检测函数（复用 T-009 的 findChangeDirAsync）",
+        "将检测结果存入 session 缓存",
+        "修改 buildSystemPrompt 接收 detection 参数而非同步检测",
+        "当 Change 目录存在时注入 OpenSpec plan 指令",
+        "指令包含：创建 specs、运行 self-review、生成 prd.json、advance 到 review",
+        "测试覆盖 OpenSpec 和 traditional 两种模式",
+        "验证无同步 IO 阻塞 agent loop"
+      ],
+      "dependencies": ["T-006", "T-011"],
+      "estimated_effort": "medium",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-008",
+      "order": 8,
+      "capability": "bug-fix",
+      "requirement_ref": "D8",
+      "title": "修复 change-creator 的 isNew 和 findNextVersion bug",
+      "description": "修复 change-creator.ts 中 --force 时 isNew 标记错误和 findNextVersion 版本冲突问题",
+      "acceptance_criteria": [
+        "--force 时 isNew 设为 true",
+        "findNextVersion 收集所有版本号（含 baseName）找最大值 +1",
+        "不会产生与已有目录冲突的名称",
+        "添加 change-creator 单元测试覆盖两个 bug 场景",
+        "添加 api/propose.ts 路由测试"
+      ],
+      "dependencies": [],
+      "estimated_effort": "medium",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-009",
+      "order": 9,
+      "capability": "detection-unification",
+      "requirement_ref": "D9",
+      "title": "统一检测逻辑消除重复",
+      "description": "提取 findChangeDir() 共享函数，workflow-loader 和 detector 都调用它",
+      "acceptance_criteria": [
+        "在 detector.ts 中导出 findChangeDir() 函数",
+        "detectOpenSpecChange 内部调用 findChangeDir",
+        "workflow-loader.ts 的 detectOpenSpecForIssue 调用 findChangeDir",
+        "两个入口对相同输入返回一致的 change 目录",
+        "多 Change 场景下两个入口都返回最新版本",
+        "更新 detector.test.ts 和 workflow-loader-detection.test.ts"
+      ],
+      "dependencies": ["T-004"],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-010",
+      "order": 10,
+      "capability": "workflow-stage",
+      "requirement_ref": "D10",
+      "title": "实现动态 Review Stage（向后兼容）",
+      "description": "不在默认 workflow 中添加 review stage，而是在 advance-stage.ts 中允许 plan→review 和 review→build 转换，让 agent 动态决定路径",
+      "acceptance_criteria": [
+        "M1_ALLOWED_TRANSITIONS 添加 Plan→Review 和 Review→Build",
+        "默认 workflow 保持 [plan, build, check] 不变（向后兼容）",
+        "如果目标 stage 不在 workflow 配置中，使用默认配置 {approval: true, timeout: 600}",
+        "添加 advance-stage 测试覆盖新转换路径",
+        "验证现有项目 workflow 不受影响",
+        "验证 OpenSpec 项目 agent 能通过 advance_stage(\"review\") 进入 review"
+      ],
+      "dependencies": [],
+      "estimated_effort": "medium",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-011",
+      "order": 11,
+      "capability": "bug-fix",
+      "requirement_ref": "D11",
+      "title": "修复 archive_change 报告生成时序",
+      "description": "修复 archive-change.ts 中 renameSync 后用旧路径读取文件导致报告数据为空的问题",
+      "acceptance_criteria": [
+        "generateReport 在 renameSync 之前调用",
+        "报告包含正确的 tasksCompleted/tasksFailed 数量",
+        "报告包含正确的 sessionMemoriesCount",
+        "添加 archive-change 单元测试验证报告内容",
+        "测试归档冲突场景（同日归档两次）"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-012",
+      "order": 12,
+      "capability": "documentation",
+      "requirement_ref": "D12",
+      "title": "修复文档拼写和 schema 不匹配",
+      "description": "修复 OPENSEPCE 拼写错误、示例 YAML schema、README 旧 workflow 描述",
+      "acceptance_criteria": [
+        "重命名 OPENSEPCE-USAGE.md → OPENSPEC-USAGE.md",
+        "更新 docs/README.md 中引用该文件的链接",
+        "workflow-openspec.yaml 使用 stages[].stage 而非 stages[].name",
+        "docs/README.md 描述当前 4-stage workflow (plan/review/build/check)",
+        "验证示例 YAML 能被 workflow-loader.ts 正确解析"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "design.md",
+      "passes": true
+    },
+    {
+      "id": "T-013",
+      "order": 13,
+      "capability": "testing",
+      "requirement_ref": "TEST",
+      "title": "端到端验证和测试更新",
+      "description": "运行全量测试，更新受影响的测试断言，确保所有修复正确集成",
+      "acceptance_criteria": [
+        "更新 ralph-executor.test.ts 测试清理逻辑",
+        "添加竞态条件测试用例",
+        "添加 agentText 截断测试",
+        "更新 agent-workflow-e2e.test.ts 工具数量断言（≥15）",
+        "添加 skip-to-review 端点测试",
+        "确保全部测试通过",
+        "npm run build 通过"
+      ],
+      "dependencies": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007", "T-008", "T-009", "T-010", "T-011", "T-012"],
+      "estimated_effort": "medium",
+      "spec_file": "design.md",
+      "passes": true
+    }
+  ],
+  "metadata": {
+    "total_tasks": 13,
+    "capabilities_covered": [
+      "resource-cleanup",
+      "concurrency-fix",
+      "memory-safety",
+      "detector-enhancement",
+      "failure-classification",
+      "tool-registration",
+      "plan-stage-integration",
+      "bug-fix",
+      "detection-unification",
+      "workflow-stage",
+      "documentation",
+      "testing"
+    ],
+    "session_memory_path": "./session-memories/",
+    "task_status_path": "./task-status.json"
+  }
+}

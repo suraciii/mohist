@@ -9,6 +9,7 @@ export interface Session {
   createdAt: Date;
   closedAt: Date | null;
   status: SessionStatus;
+  metadata: Record<string, unknown>;
 }
 
 function generateSessionId(): string {
@@ -26,6 +27,7 @@ export class SessionManager {
       createdAt: new Date(),
       closedAt: null,
       status: 'active',
+      metadata: {},
     };
     this.sessions.set(session.id, session);
     return session;

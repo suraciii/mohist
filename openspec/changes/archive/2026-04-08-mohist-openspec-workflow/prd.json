@@ -1,0 +1,341 @@
+{
+  "version": "1.0",
+  "change_id": "mohist-openspec-workflow",
+  "issue_reference": "OpenSpec Workflow Integration",
+  "generated_at": "2026-04-08T14:30:00Z",
+  "tasks": [
+    {
+      "id": "T-001",
+      "order": 1,
+      "capability": "core-tools",
+      "requirement_ref": "REQ-001",
+      "title": "实现 read_prd 工具",
+      "description": "创建工具用于读取 prd.json 文件并解析任务列表",
+      "acceptance_criteria": [
+        "工具能读取指定路径的 prd.json",
+        "返回结构化的任务列表",
+        "处理文件不存在等错误情况",
+        "包含单元测试"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "specs/core-tools.md",
+      "passes": true
+    },
+    {
+      "id": "T-002",
+      "order": 2,
+      "capability": "core-tools",
+      "requirement_ref": "REQ-002",
+      "title": "实现 read_spec 工具",
+      "description": "创建工具用于读取特定 capability 的 spec.md 文件",
+      "acceptance_criteria": [
+        "工具能根据 capability 名称读取对应 spec 文件",
+        "返回 spec 内容和元数据",
+        "支持读取特定 requirement",
+        "包含单元测试"
+      ],
+      "dependencies": [
+        "T-001"
+      ],
+      "estimated_effort": "small",
+      "spec_file": "specs/core-tools.md",
+      "passes": true
+    },
+    {
+      "id": "T-003",
+      "order": 3,
+      "capability": "core-tools",
+      "requirement_ref": "REQ-003",
+      "title": "实现 session-memory 工具集",
+      "description": "创建 store_learning 和 load_learnings 工具，用于管理任务学习记录",
+      "acceptance_criteria": [
+        "store_learning: 保存 task 执行洞察到 session-memories/",
+        "load_learnings: 读取所有之前任务的 learnings",
+        "JSON 格式包含 insights, adjustments, success",
+        "文件命名规范: {task-id}.json",
+        "包含单元测试"
+      ],
+      "dependencies": [
+        "T-001"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/session-memory/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-004",
+      "order": 4,
+      "capability": "core-tools",
+      "requirement_ref": "REQ-004",
+      "title": "实现 task-status 工具集",
+      "description": "创建 update_task_status 和 get_task_status 工具，用于追踪任务执行状态",
+      "acceptance_criteria": [
+        "update_task_status: 更新特定 task 的状态和重试次数",
+        "get_task_status: 读取当前任务索引和所有任务状态",
+        "task-status.json 格式符合 PRD-FORMAT.md 规范",
+        "支持状态: pending, in_progress, completed, failed, skipped",
+        "包含单元测试"
+      ],
+      "dependencies": [
+        "T-001"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-005-A",
+      "order": "5-A",
+      "capability": "main-agent",
+      "requirement_ref": "REQ-005-A",
+      "title": "实现 OpenSpec Change 检测器",
+      "description": "创建detector模块检测Change目录和prd.json存在性",
+      "acceptance_criteria": [
+        "detector.ts 实现detectOpenSpecChange函数",
+        "检测.mohist-specs/changes/{issue-number}-{slug}/",
+        "检测prd.json存在性",
+        "返回Change路径信息（prd, task-status, session-memories等）",
+        "包含单元测试"
+      ],
+      "dependencies": [],
+      "estimated_effort": "small",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-005-B",
+      "order": "5-B",
+      "capability": "main-agent",
+      "requirement_ref": "REQ-005-B",
+      "title": "实现任务上下文组装器",
+      "description": "创建context-assembler.ts组装完整任务上下文（proposal+design+spec+learnings）",
+      "acceptance_criteria": [
+        "读取proposal.md和design.md",
+        "根据task.spec_file读取对应spec文件",
+        "从session-memories/加载历史learnings",
+        "组装成完整的prompt字符串",
+        "包含单元测试"
+      ],
+      "dependencies": [
+        "T-005-A"
+      ],
+      "estimated_effort": "small",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-005-C",
+      "order": "5-C",
+      "capability": "main-agent",
+      "requirement_ref": "REQ-005-C",
+      "title": "实现 Ralph 循环控制器",
+      "description": "创建ralph-executor.ts实现任务循环执行逻辑",
+      "acceptance_criteria": [
+        "读取prd.json获取task列表",
+        "按order排序选择pending task",
+        "循环调用spawn_coder执行每个task",
+        "每次执行使用完整上下文",
+        "支持从指定task恢复执行",
+        "包含单元测试"
+      ],
+      "dependencies": [
+        "T-005-A",
+        "T-005-B"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-005-D",
+      "order": "5-D",
+      "capability": "main-agent",
+      "requirement_ref": "REQ-005-D",
+      "title": "集成 Ralph 循环到 main-agent",
+      "description": "修改main-agent在build stage使用Ralph循环",
+      "acceptance_criteria": [
+        "main-agent.ts在build stage检测Change",
+        "如果检测到Change，使用Ralph循环",
+        "如果没有Change，使用传统spawn_coder",
+        "正确传递上下文给spawn_coder",
+        "向后兼容现有workflow",
+        "包含集成测试"
+      ],
+      "dependencies": [
+        "T-005-C"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-006",
+      "order": 6,
+      "capability": "main-agent",
+      "requirement_ref": "REQ-006",
+      "title": "实现失败处理和重试逻辑",
+      "description": "处理 task 失败的各种情况：AC 不满足、环境错误、代码依赖、超时",
+      "acceptance_criteria": [
+        "分类失败类型并应用不同策略",
+        "AC/环境错误: 重试最多 3 次",
+        "代码依赖/超时: 直接暂停并 ask_user",
+        "重试时附加失败原因到 prompt",
+        "记录每次失败的 learning",
+        "超过最大重试次数时暂停",
+        "用户介入后能从失败 task 恢复"
+      ],
+      "dependencies": [
+        "T-005-D"
+      ],
+      "estimated_effort": "large",
+      "spec_file": "specs/ralph-task-execution/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-007",
+      "order": 7,
+      "capability": "main-agent",
+      "requirement_ref": "REQ-007",
+      "title": "实现自我审查循环",
+      "description": "在 plan stage 内实现自我审查：验证 specs 完整性，最多 3 次迭代",
+      "acceptance_criteria": [
+        "生成 artifacts 后自动启动自我审查",
+        "验证 specs 完整性、设计可行性、AC 覆盖",
+        "发现问题时自动修复并再次审查",
+        "Agent 自主判断是否通过",
+        "达到 3 次上限仍未通过则标记 stage 失败",
+        "通过后生成 prd.json"
+      ],
+      "dependencies": [
+        "T-005-D"
+      ],
+      "estimated_effort": "large",
+      "spec_file": "specs/agent-spec-generation/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-008",
+      "order": 8,
+      "capability": "workflow-loader",
+      "requirement_ref": "REQ-008",
+      "title": "实现 Change 自动检测",
+      "description": "扩展 workflow-loader 通过文件存在性自动检测是否使用 OpenSpec workflow",
+      "acceptance_criteria": [
+        "进入 build stage 时检测 prd.json 存在性",
+        "存在 prd.json → 使用 Ralph-style 执行",
+        "不存在 → 使用传统 build（单次 spawn_coder）",
+        "plan stage 检测 Change 目录存在性",
+        "向后兼容：没有 Change 的 issue 走传统流程"
+      ],
+      "dependencies": [
+        "T-005-D"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/workflow-definition/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-009",
+      "order": 9,
+      "capability": "cli",
+      "requirement_ref": "REQ-009",
+      "title": "实现 mo propose 命令",
+      "description": "创建 CLI 命令用于启动 Plan 阶段，创建或更新 Change",
+      "acceptance_criteria": [
+        "mo propose <issue-number>: 为 issue 创建 Change",
+        "如果 Change 已存在，自动创建新版本（-v2, -v3）",
+        "mo propose <issue-number> --force: 强制覆盖现有 Change",
+        "触发 plan stage 执行",
+        "正确生成 {issue-number}-{slug} 命名",
+        "包含帮助文档和错误处理"
+      ],
+      "dependencies": [
+        "T-007",
+        "T-008"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/change-artifacts/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-010",
+      "order": 10,
+      "capability": "cli",
+      "requirement_ref": "REQ-010",
+      "title": "实现 resume --skip-to-review 选项",
+      "description": "扩展 mo issue resume 命令支持从 plan 失败恢复",
+      "acceptance_criteria": [
+        "mo issue resume <id> --skip-to-review: 跳过 plan，直接进入 review",
+        "用于用户手动修复 plan 失败后的场景",
+        "检测是否有可恢复的 Change",
+        "正确设置 stage 为 review",
+        "包含帮助文档"
+      ],
+      "dependencies": [
+        "T-009"
+      ],
+      "estimated_effort": "small",
+      "spec_file": "specs/workflow-definition/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-011",
+      "order": 11,
+      "capability": "workflow",
+      "requirement_ref": "REQ-011",
+      "title": "实现 check stage 扩展",
+      "description": "扩展 check stage 包含自动测试、人工验收和 Change 归档",
+      "acceptance_criteria": [
+        "自动运行 npm test 和 npm run lint",
+        "报告测试结果到 issue comment",
+        "人工验收 approval gate",
+        "用户 approve 后归档 Change 到 .mohist-specs/archive/",
+        "归档包含所有产物和 session-memories",
+        "生成执行报告"
+      ],
+      "dependencies": [
+        "T-005-D"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/workflow-definition/spec.md",
+      "passes": true
+    },
+    {
+      "id": "T-012",
+      "order": 12,
+      "capability": "documentation",
+      "requirement_ref": "REQ-012",
+      "title": "编写用户文档和示例",
+      "description": "创建完整的文档：使用指南、workflow 示例、故障排除",
+      "acceptance_criteria": [
+        "README.md: OpenSpec workflow 概述和使用场景",
+        "USAGE.md: 详细使用指南（mo propose, 各 stage 说明）",
+        "examples/: 示例 workflow.yaml 配置",
+        "TROUBLESHOOTING.md: 常见问题和解决方案",
+        "更新主 README 添加 OpenSpec workflow 章节"
+      ],
+      "dependencies": [
+        "T-009",
+        "T-010",
+        "T-011"
+      ],
+      "estimated_effort": "medium",
+      "spec_file": "specs/specs-project-storage/spec.md",
+      "passes": true
+    }
+  ],
+  "metadata": {
+    "total_tasks": 15,
+    "capabilities_covered": [
+      "core-tools",
+      "main-agent",
+      "workflow-loader",
+      "cli",
+      "workflow",
+      "documentation"
+    ],
+    "session_memory_path": "./session-memories/",
+    "task_status_path": "./task-status.json"
+  }
+}
