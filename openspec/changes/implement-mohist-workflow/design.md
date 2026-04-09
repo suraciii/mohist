@@ -6,128 +6,365 @@
 2. 阶段间没有迭代优化，发现问题只能人工介入
 3. 用户需要在每个阶段手动检查产出物质量
 
-新的 workflow 需要支持"内循环"模式：在 Plan 和 Review 阶段自动进行多维度审查，发现问题自动修复迭代，直到质量达标才推进到下一阶段。
+新的 workflow 简化为 3 个核心 Agent，通过 Prompt 自定义行为，Agent 自主决定是否需要迭代优化。
 
 ## Goals / Non-Goals
 
 **Goals:**
-- 实现 Plan 阶段的自动化审查和迭代优化（完整性、一致性、可行性、风险）
-- 实现 Review 阶段的代码多维度审查（正确性、复杂性、测试覆盖、安全性）
-- 支持灵活的配置：审查维度、通过标准、最大迭代次数
-- 建立统一的变更产出物管理体系（存储在 `.mohist/changes/`）
+- 实现 Plan 阶段的设计和审查（Planner Agent，Prompt 自定义审查标准）
+- 实现 Build 阶段的顺序任务执行（Coder Agent）
+- 实现 Review 阶段的代码审查（Reviewer Agent，Prompt 自定义审查维度）
+- 建立统一的变更产出物管理体系
 - 设计对话式用户审查交互界面
 
 **Non-Goals:**
-- 不实现通用的 workflow 引擎（非目标）
-- 不支持用户自定义 workflow 阶段（现阶段只支持固定 workflow）
-- 不实现复杂的并行审查调度（初期串行即可）
+- 不实现复杂的内循环编排（LoopController、MultiAgentReview）
+- 不硬编码具体的审查维度和规则
+- 不支持用户自定义 workflow 阶段
+- 不实现通用的 workflow 引擎
 
 ## Decisions
 
-**Decision 1: Workflow 阶段模型**
+### Decision 1: 简化的 Agent 模型
 
-采用 Explore → Plan (内循环) → Build → Review (内循环) → Done 模型。
+采用 3 个核心 Agent：Planner、Coder、Reviewer。具体的审查维度和行为通过 Prompt 自定义。
 
-- **选择理由**: 与用户需求完全匹配，探索→设计→实现的流程符合人类认知习惯
-- **替代方案**: 保持现有的线性模型，添加审查回调 → 拒绝，因为无法很好地支持迭代优化
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    简化后的 Mohist Workflow                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│    用户         Planner                      Coder           Reviewer      │
+│   介入│         Agent                        Agent           Agent         │
+│      ▼          │                            │               │            │
+│  ┌──────────┐  ┌──────────┐   ┌──────────┐  ┌──────────┐   ┌──────────┐   │
+│  │ Explore  │──│   Plan   │──▶│  Build   │──│  Review  │──▶│   Done   │   │
+│  │  (探索)  │  │  (设计)  │   │  (构建)  │  │  (审查)  │   │ (完成)   │   │
+│  └──────────┘  └────┬─────┘   └──────────┘  └────┬─────┘   └──────────┘   │
+│                     │                            │                         │
+│                用户审批点                    用户审批点                     │
+│                                                                             │
+│  Prompt 定义：                                                               │
+│  - Planner: 设计规范、审查标准                                               │
+│  - Reviewer: 审查维度（正确性、复杂度、安全等）                              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-**Decision 2: 审查通过标准**
+- **Planner Agent**: 生成设计方案，自我审查，Prompt 定义审查标准
+- **Coder Agent**: 执行具体任务，Prompt 定义编码规范
+- **Reviewer Agent**: 审查代码质量，Prompt 定义审查维度
 
-由 Agent 灵活判断，而非硬编码规则。
+### Decision 2: Agent 自主迭代
 
-- **选择理由**: 避免过早的规则设计，让 Agent 根据上下文判断
-- **实现方式**: 每个 Review Agent 返回 structured output，包含 `passed` (boolean) 和 `reasoning` (string)
-- **聚合逻辑**: Workflow Controller 综合所有 Review Agent 的结果，决定是继续、修复还是暂停
+**原方案**: LoopController 强制管理迭代（最多 5 轮）
+**新方案**: Agent 自主决定是否需要迭代
 
-**Decision 3: 内循环控制器的职责边界**
+**理由**:
+- 简化架构，移除 LoopController 编排层
+- Agent 可以根据上下文智能判断是否需要重新设计/修复
+- 用户始终有最终审批权
 
-Loop Controller 只负责协调，不负责具体审查逻辑。
+**实现**:
+```
+Plan 阶段:
+1. Planner Agent 生成设计方案
+2. Planner Agent 自我审查（根据 Prompt 中的审查标准）
+3. IF 发现问题 → 自我修正并重新生成
+4. IF 通过 → 提交给用户审批
+5. 用户审批通过 → 进入 Build 阶段
 
-- **选择理由**: 单一职责，便于测试和扩展
-- **职责划分**:
-  - Loop Controller: 管理迭代次数、决定下一步动作（继续/修复/暂停）
-  - Review Agents: 执行具体审查，返回结构化结果
-  - Fix Agents: 根据审查意见执行修复
+Review 阶段:
+1. Reviewer Agent 审查代码
+2. IF 发现问题 → 可以建议修复或交给用户决定
+3. IF 通过 → 提交给用户审批
+4. 用户审批通过 → 进入 Done 阶段
+```
 
-**Decision 4: 变更产出物存储**
+### Decision 3: 移除 MultiAgentReview 编排层
+
+**原方案**: 4 个专门的 Review Agents + MultiAgentReview 编排器
+**新方案**: 1 个 Reviewer Agent，具体的审查维度在 Prompt 中定义
+
+**Prompt 示例**:
+```
+You are a Reviewer Agent. Review the code according to these dimensions:
+1. Correctness - check for logic errors, type safety, lint issues
+2. Complexity - check cyclomatic complexity, function length
+3. Test Coverage - verify tests exist and pass
+4. Security - check for common vulnerabilities
+
+For each dimension, provide:
+- passed (boolean)
+- reasoning (string)
+- issues (array) if any
+
+Overall: return passed only if all dimensions pass.
+```
+
+### Decision 4: Planner Agent 职责
+
+Planner Agent 负责：
+1. 探索 codebase，理解现有架构
+2. 生成设计方案（proposal.md, design.md, specs/）
+3. 生成 prd.json（任务规划）
+4. 自我审查设计质量
+5. 根据审查反馈自我修正
+
+**Prompt 示例**:
+```
+You are a Planner Agent. Create a design for this issue:
+- Issue: {title}
+- Description: {body}
+
+Steps:
+1. Explore the codebase to understand existing patterns
+2. Create design documents in .mohist/changes/{number}-{slug}/
+3. Self-review your design for:
+   - Completeness: all requirements covered?
+   - Consistency: aligns with existing patterns?
+   - Feasibility: can be implemented?
+   - Risks: potential issues identified?
+4. If issues found, fix them
+5. Generate prd.json with tasks
+```
+
+### Decision 5: Coder Agent 职责
+
+Coder Agent 通过 `spawn_coder` 调用，负责：
+1. 读取 prd.json 中的 task
+2. 理解 task 要求
+3. 实现代码
+4. 运行测试/验证
+
+Build 阶段顺序执行：
+```
+FOR each task in prd.json.tasks:
+  1. Call spawn_coder with task details
+  2. IF success → mark task as done
+  3. IF failure:
+     - Retry up to 3 times
+     - IF still failing → pause and ask user
+```
+
+### Decision 6: Check 阶段并入 Review
+
+Check 阶段的功能（测试执行、lint、typecheck）作为 Reviewer Agent 的审查维度之一，通过 Prompt 定义。
+
+### Decision 7: 变更产出物存储
 
 存储在 `.mohist/changes/{issue-number}-{slug}/` 目录下，由 Git 管理。
 
-- **选择理由**: 
-  - 与代码仓库一起版本控制，便于追溯
-  - 不污染项目根目录
-  - 符合 OpenSpec 规范
-- **目录结构**:
-  ```
-  .mohist/changes/42-user-auth/
-  ├── proposal.md
-  ├── design.md
-  ├── specs/
-  │   ├── auth-flow.md
-  │   └── session-mgmt.md
-  └── prd.json
-  ```
-
-**Decision 5: Build 阶段的失败处理**
-
-Task 失败时自动重试 + Fix，仍失败则升级。
-
-- **选择理由**: 平衡自动化和可靠性
-- **策略**: 
-  - 最多 3 次自动重试
-  - 失败后尝试自动修复
-  - 修复失败则暂停并通知用户
-
-**Decision 6: 用户审查交互方式**
-
-采用对话式（Chat-style），而非代码审查界面。
-
-- **选择理由**: 
-  - 实现简单，现阶段足够
-  - 与 Explore 阶段的交互方式一致
-  - 可以通过迭代增强（后续可添加 diff 查看）
+目录结构：
+```
+.mohist/changes/42-user-auth/
+├── proposal.md
+├── design.md
+├── specs/
+│   ├── auth-flow.md
+│   └── session-mgmt.md
+└── prd.json
+```
 
 ## Risks / Trade-offs
 
-**Risk 1: Agent 审查质量不稳定**
+### Risk 1: Agent 自我审查质量不稳定
 
 → **Mitigation**: 
-- 多维度审查，不依赖单一 Agent 判断
+- 详细的 Prompt 模板，包含审查清单
 - 保留人工审批作为最终关卡
-- 收集审查质量数据，后续迭代优化
+- Prompt 迭代优化
 
-**Risk 2: 内循环无限迭代**
+### Risk 2: Agent 可能无限迭代
 
 → **Mitigation**: 
-- 设置最大迭代次数（Plan 阶段最多 5 轮，Review 阶段最多 3 轮）
-- 达到上限后强制暂停，交给用户处理
+- 在 Prompt 中设置最大迭代次数建议
+- 用户可以随时介入
+- 长时间运行检测和超时
 
-**Risk 3: 产出物管理增加 Git 负担**
+### Risk 3: Prompt 复杂度
 
-→ **Mitigation**:
-- 产出物主要是 markdown/json，不会太大
-- 可以在 `.gitattributes` 中标记为 linguist-generated，减少 review 噪音
-- 提供清理命令归档旧变更
+→ **Mitigation**: 
+- 提供默认的 Prompt 模板
+- Prompt 可配置但非必须
+- 良好的默认值覆盖 80% 场景
 
-**Risk 4: 与现有代码的兼容性问题**
+### Risk 4: 与现有代码的兼容性
 
-→ **Mitigation**:
+→ **Mitigation**: 
 - 保留现有的 Stage 枚举作为兼容层
 - 新增 Workflow Controller 层，逐步替换旧逻辑
-- 使用特性开关控制新旧 workflow 切换（如果需要）
+- 使用特性开关控制新旧 workflow 切换
 
 ## Migration Plan
 
-1. **Phase 1**: 实现新的 Stage 枚举和 Workflow Controller 框架
-2. **Phase 2**: 实现 Plan 阶段的内循环和审查机制
-3. **Phase 3**: 实现 Build 阶段的顺序执行
-4. **Phase 4**: 实现 Review 阶段的内循环和代码审查
-5. **Phase 5**: 集成测试和文档更新
+### Phase 1: 基础框架
+- 更新 Stage 枚举
+- 创建 WorkflowController
+- 实现 ChangeArtifactsManager
+
+### Phase 2: Planner Agent
+- 实现 Planner Agent 基础框架
+- 提供默认 Prompt 模板
+- 集成到 Plan 阶段
+
+### Phase 3: Build 阶段
+- 实现顺序 task 执行
+- 集成 spawn_coder
+- 实现失败重试
+
+### Phase 4: Reviewer Agent
+- 实现 Reviewer Agent 基础框架
+- 提供默认 Prompt 模板
+- 集成到 Review 阶段
+
+### Phase 5: 集成和测试
+- 集成到 Main Agent
+- 端到端测试
+- 文档更新
 
 **Rollback**: 保留旧代码路径，通过配置切换回旧 workflow。
 
-## Open Questions
+## Architecture Diagram
 
-1. Review Agent 的具体数量和维度是否需要可配置？（建议初期固定，后续根据使用数据调整）
-2. 是否需要支持 Review 阶段的并行执行？（建议初期串行，简化实现）
-3. Fix Agent 是一次性修复所有问题，还是逐个修复？（建议一次性，减少迭代次数）
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Mohist Workflow 架构                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                        Main Agent                                   │   │
+│  │  ┌───────────────────────────────────────────────────────────────┐  │   │
+│  │  │ Tool Registry                                                   │  │   │
+│  │  │  • spawn_coder    • advance_stage    • add_comment             │  │   │
+│  │  │  • ask_user       • read_workflow    • get_issue               │  │   │
+│  │  │  • read_prd       • update_task_status • store_learning        │  │   │
+│  │  └───────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                     │   │
+│  │  ┌───────────────────────────────────────────────────────────────┐  │   │
+│  │  │ Session Manager                                                 │  │   │
+│  │  │  • 管理 Agent 会话状态                                          │  │   │
+│  │  │  • 支持断点恢复                                                 │  │   │
+│  │  └───────────────────────────────────────────────────────────────┘  │   │
+│  │                              │                                      │   │
+│  └──────────────────────────────┼──────────────────────────────────────┘   │
+│                                 │                                           │
+│                                 ▼                                           │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                     WorkflowController                              │   │
+│  │                                                                     │   │
+│  │  executeStage(issue, stage):                                        │   │
+│  │    ├─ Plan ──────▶ Planner Agent (Prompt 定义审查标准)              │   │
+│  │    ├─ Build ─────▶ Sequential Task Executor + Coder Agent           │   │
+│  │    └─ Review ────▶ Reviewer Agent (Prompt 定义审查维度)             │   │
+│  │                                                                     │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    Storage Layer                                    │   │
+│  │  ┌─────────────┐  ┌──────────────────┐  ┌──────────────────────┐   │   │
+│  │  │ SQLite      │  │ .mohist/changes/ │  │ Git Repository       │   │   │
+│  │  │ (issues)    │  │ (artifacts)      │  │ (version control)    │   │   │
+│  │  └─────────────┘  └──────────────────┘  └──────────────────────┘   │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Agent Prompt Templates
+
+### Planner Agent Default Prompt
+
+```yaml
+role: planner
+name: Planner Agent
+description: Creates design artifacts and self-reviews them
+
+steps:
+  - Explore codebase to understand existing patterns
+  - Read issue details and requirements
+  - Create design documents:
+      - proposal.md: Problem and solution overview
+      - design.md: Technical design with decisions
+      - specs/: Capability-based specifications
+      - prd.json: Task breakdown
+  - Self-review design:
+      completeness: Are all requirements covered?
+      consistency: Does it align with existing patterns?
+      feasibility: Can it be implemented?
+      risks: What could go wrong?
+  - If issues found, fix and re-review
+  - Submit for user approval
+
+output_format:
+  artifacts:
+    - proposal.md
+    - design.md
+    - specs/*.md
+    - prd.json
+  review_result:
+    passed: boolean
+    issues: array
+```
+
+### Reviewer Agent Default Prompt
+
+```yaml
+role: reviewer
+name: Reviewer Agent
+description: Reviews code quality and provides feedback
+
+dimensions:
+  correctness:
+    - Logic errors
+    - Type safety
+    - Lint violations
+  complexity:
+    - Function length
+    - Cyclomatic complexity
+    - Code duplication
+  test_coverage:
+    - Tests exist
+    - Tests pass
+    - Coverage adequate
+  security:
+    - Common vulnerabilities
+    - Input validation
+    - Injection risks
+
+steps:
+  - Review all changed files
+  - For each dimension, provide:
+      passed: boolean
+      reasoning: string
+      issues: array
+  - Overall: pass only if all dimensions pass
+  - If failed, suggest specific fixes
+
+output_format:
+  passed: boolean
+  dimensions: array
+  overall_reasoning: string
+  fix_suggestions: array
+```
+
+## File Structure
+
+```
+packages/cli/src/
+├── types/index.ts              # Stage enum 更新
+├── workflow/
+│   ├── index.ts                # WorkflowController 导出
+│   └── workflow-controller.ts  # 阶段管理
+├── agents/
+│   ├── main-agent.ts           # 更新：调用 WorkflowController
+│   ├── planner-agent.ts        # Planner Agent 实现
+│   └── reviewer-agent.ts       # Reviewer Agent 实现
+│   └── prompts/                # Prompt 模板
+│       ├── planner-default.yaml
+│       └── reviewer-default.yaml
+├── artifacts/
+│   └── change-artifacts-manager.ts
+└── tools/
+    └── spawn-coder.ts          # Coder Agent 调用
+```
