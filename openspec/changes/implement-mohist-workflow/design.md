@@ -348,6 +348,142 @@ output_format:
   fix_suggestions: array
 ```
 
+## Implementation Notes
+
+基于代码审查发现的关键问题，以下是必须解决的实现细节：
+
+### 问题 1: Planner Agent 文件写入能力
+
+**问题描述**: Planner Agent 调用 `streamText` 但没有提供文件写入工具，导致无法实际生成 artifact 文件。
+
+**解决方案**:
+- 给 Planner Agent 添加 `write_file` tool
+- 或者修改实现：让 Agent 返回结构化内容，代码再写入文件
+
+**推荐方案**: 方案 B（返回内容）更可控
+
+```typescript
+// 修改后的 generateArtifacts 流程
+1. Agent 生成内容并返回 JSON:
+   {
+     "proposal": "...",
+     "design": "...",
+     "specs": [{"name": "...", "content": "..."}],
+     "prd": {...}
+   }
+
+2. 代码验证内容完整性
+3. 代码写入文件系统
+4. 返回 PlanResult
+```
+
+### 问题 2: Build 阶段 Task 状态追踪
+
+**问题描述**: 当前执行 task 后没有更新 prd.json 中的 task 状态。
+
+**解决方案**:
+- 添加 `updateTaskStatus` 方法到 ChangeArtifactsManager
+- Build 阶段执行后更新 task status:
+  - `pending` → `in_progress` → `completed`/`failed`
+- 在 prd.json 中记录每个 task 的执行历史
+
+### 问题 3: Reviewer Agent 测试命令选择
+
+**问题描述**: 当前只运行 `npm run build`，应该优先尝试测试。
+
+**解决方案**:
+```typescript
+// 改进后的测试执行逻辑
+async runTests(worktreePath: string): Promise<TestResult> {
+  // 1. 检查 package.json 中的 scripts
+  const hasTest = await checkScriptExists('test');
+  const hasBuild = await checkScriptExists('build');
+  
+  // 2. 优先执行测试
+  if (hasTest) {
+    return await execNpmScript('test');
+  }
+  
+  // 3. 没有测试则执行 build 作为备选
+  if (hasBuild) {
+    return await execNpmScript('build');
+  }
+  
+  // 4. 都没有则跳过
+  return { passed: true, skipped: true };
+}
+```
+
+### 问题 4: Prompt 文件化
+
+**问题描述**: 当前 Prompt 模板嵌入在 TypeScript 代码中，不利于用户自定义。
+
+**解决方案**:
+1. 创建 `src/agents/prompts/` 目录
+2. 将默认 Prompt 放入 YAML 文件
+3. 启动时加载 Prompt 文件
+4. 支持用户自定义配置覆盖
+
+```
+src/agents/prompts/
+├── planner-default.yaml
+├── planner-self-review.yaml
+└── reviewer-default.yaml
+```
+
+### 问题 5: 用户审批流程
+
+**问题描述**: 当前 Plan/Review 阶段执行后直接返回，没有真正的用户审批暂停。
+
+**解决方案**:
+- 在 `executePlanStage` 和 `executeReviewStage` 返回时设置 `requiresApproval: true`
+- Main Agent 检测到 `requiresApproval` 后调用 `ask_user` tool
+- 根据用户输入决定是推进阶段还是要求修改
+
+```typescript
+// WorkflowController 中的处理
+if (result.requiresApproval) {
+  // 返回给 Main Agent，由 Main Agent 处理用户交互
+  return {
+    success: true,
+    requiresApproval: true,
+    output: result,
+    message: 'Waiting for user approval...'
+  };
+}
+```
+
+### 问题 6: Main Agent 集成
+
+**问题描述**: Main Agent 尚未调用 WorkflowController。
+
+**解决方案**:
+1. 重构 Main Agent，移除旧的工作流逻辑
+2. 初始化 WorkflowController 并注入 Agent 实例
+3. 在合适的时机调用 `executeStage`
+4. 处理 `requiresApproval` 状态
+
+```typescript
+// Main Agent 初始化
+const workflowController = new WorkflowController({
+  plannerAgent: createPlannerAgent({...}),
+  reviewerAgent: createReviewerAgent({...}),
+  artifactManager: new ChangeArtifactsManager(...),
+  worktreePath: context.worktreePath
+});
+
+// 执行阶段
+const result = await workflowController.executeStage(issue, issue.stage);
+
+// 处理审批
+if (result.requiresApproval) {
+  const decision = await askUserApproval(result.output);
+  if (decision === 'approve') {
+    await advanceStage(issue.id, nextStage);
+  }
+}
+```
+
 ## File Structure
 
 ```
@@ -359,12 +495,48 @@ packages/cli/src/
 ├── agents/
 │   ├── main-agent.ts           # 更新：调用 WorkflowController
 │   ├── planner-agent.ts        # Planner Agent 实现
-│   └── reviewer-agent.ts       # Reviewer Agent 实现
-│   └── prompts/                # Prompt 模板
+│   ├── reviewer-agent.ts       # Reviewer Agent 实现
+│   └── prompts/                # Prompt 模板（新增）
 │       ├── planner-default.yaml
+│       ├── planner-self-review.yaml
 │       └── reviewer-default.yaml
 ├── artifacts/
 │   └── change-artifacts-manager.ts
 └── tools/
-    └── spawn-coder.ts          # Coder Agent 调用
+    ├── spawn-coder.ts          # Coder Agent 调用
+    └── write-file.ts           # 文件写入工具（新增）
 ```
+
+## Implementation Checklist
+
+基于审查结果，以下是必须完成的修复项：
+
+- [ ] **T-004-1**: 修复 Planner Agent 文件生成（添加 write_file 工具或修改实现）
+- [ ] **T-004-2**: 将 Planner Prompt 移到 YAML 文件
+- [ ] **T-005-1**: Build 阶段添加 task 状态更新
+- [ ] **T-006-1**: Reviewer Agent 优先尝试 `npm test`，备选 `npm run build`
+- [ ] **T-006-2**: 将 Reviewer Prompt 移到 YAML 文件
+- [ ] **T-007**: 实现真正的用户审批流程（ask_user 集成）
+- [ ] **T-008**: Main Agent 集成 WorkflowController
+- [ ] **T-008-1**: 创建 write_file tool
+- [ ] **T-008-2**: 重构 Main Agent 初始化逻辑
+
+## Testing Strategy
+
+### 单元测试
+- WorkflowController 阶段转换验证
+- Planner Agent 迭代逻辑
+- Reviewer Agent 维度解析
+- ChangeArtifactsManager 文件操作
+
+### 集成测试
+- 完整 workflow 端到端测试
+- Agent 与 Tool 的集成
+- 用户审批流程测试
+
+### 手动测试场景
+1. 创建一个简单 issue，运行 Plan 阶段，验证 artifacts 生成
+2. 运行 Build 阶段，验证 task 顺序执行和状态更新
+3. 运行 Review 阶段，验证多维度审查
+4. 测试用户审批流程（approve/request changes/abort）
+5. 测试失败重试和错误处理

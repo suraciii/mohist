@@ -63,9 +63,40 @@
         "Provides default Prompt template"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "dependencies": ["T-002", "T-003"],
-      "notes": "Agent handles iteration internally, no external LoopController needed"
+      "notes": "CRITICAL: Current implementation doesn't actually write files. Need to fix file generation logic."
+    },
+    {
+      "id": "T-004-1",
+      "title": "Fix Planner Agent file generation",
+      "spec": "design.md#Implementation Notes",
+      "description": "Fix Planner Agent to actually generate and write artifact files. Either add write_file tool or change implementation to return structured content that code writes to files.",
+      "acceptanceCriteria": [
+        "Planner Agent successfully creates proposal.md, design.md, specs/, prd.json",
+        "Files are written to correct location",
+        "Content is valid and complete"
+      ],
+      "priority": 4,
+      "passes": false,
+      "dependencies": ["T-004"],
+      "notes": "Critical fix - current code calls streamText but doesn't provide file write capability"
+    },
+    {
+      "id": "T-004-2",
+      "title": "Extract Planner Prompt to YAML files",
+      "spec": "design.md#Implementation Notes",
+      "description": "Move Planner Agent default prompt from embedded TypeScript string to YAML files in src/agents/prompts/ directory.",
+      "acceptanceCriteria": [
+        "Create src/agents/prompts/planner-default.yaml",
+        "Create src/agents/prompts/planner-self-review.yaml",
+        "Agent loads prompt from file at runtime",
+        "Supports custom prompt override"
+      ],
+      "priority": 4,
+      "passes": false,
+      "dependencies": ["T-004"],
+      "notes": "Makes prompts user-customizable"
     },
     {
       "id": "T-005",
@@ -84,6 +115,22 @@
       "notes": "Coder Agent is called via spawn_coder tool"
     },
     {
+      "id": "T-005-1",
+      "title": "Add task status tracking in Build phase",
+      "spec": "design.md#Implementation Notes",
+      "description": "Implement task status updates during Build phase execution. Track pending → in_progress → completed/failed status for each task.",
+      "acceptanceCriteria": [
+        "Task status updated in prd.json after each task execution",
+        "Status transitions: pending → in_progress → completed/failed",
+        "Execution history recorded",
+        "Can resume from failed task"
+      ],
+      "priority": 5,
+      "passes": false,
+      "dependencies": ["T-005"],
+      "notes": "Add updateTaskStatus method to ChangeArtifactsManager"
+    },
+    {
       "id": "T-006",
       "title": "Implement Reviewer Agent",
       "spec": "specs/reviewer-agent/spec.md",
@@ -96,9 +143,40 @@
         "Provides default Prompt template"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "dependencies": ["T-002"],
-      "notes": "Review dimensions fully customizable via Prompt"
+      "notes": "CRITICAL: Currently only runs 'npm run build'. Should try 'npm test' first."
+    },
+    {
+      "id": "T-006-1",
+      "title": "Improve Reviewer Agent test execution",
+      "spec": "design.md#Implementation Notes",
+      "description": "Update Reviewer Agent to try 'npm test' first, then 'npm run build' as fallback. Check package.json scripts to determine available commands.",
+      "acceptanceCriteria": [
+        "Checks package.json for available scripts",
+        "Prioritizes 'npm test' over 'npm run build'",
+        "Handles missing scripts gracefully",
+        "Reports test/build failures as correctness issues"
+      ],
+      "priority": 6,
+      "passes": false,
+      "dependencies": ["T-006"],
+      "notes": "Better coverage of test scenarios"
+    },
+    {
+      "id": "T-006-2",
+      "title": "Extract Reviewer Prompt to YAML files",
+      "spec": "design.md#Implementation Notes",
+      "description": "Move Reviewer Agent default prompt from embedded TypeScript string to YAML files in src/agents/prompts/ directory.",
+      "acceptanceCriteria": [
+        "Create src/agents/prompts/reviewer-default.yaml",
+        "Agent loads prompt from file at runtime",
+        "Supports custom prompt override"
+      ],
+      "priority": 6,
+      "passes": false,
+      "dependencies": ["T-006"],
+      "notes": "Makes review dimensions user-customizable"
     },
     {
       "id": "T-007",
@@ -114,7 +192,7 @@
       "priority": 7,
       "passes": false,
       "dependencies": ["T-004", "T-006"],
-      "notes": "Use existing ask_user tool for CLI interface"
+      "notes": "CRITICAL: Current implementation doesn't actually pause for approval. Need to integrate with ask_user tool."
     },
     {
       "id": "T-008",
@@ -131,7 +209,39 @@
       "priority": 8,
       "passes": false,
       "dependencies": ["T-005", "T-007"],
-      "notes": "Keep Main Agent's public interface stable"
+      "notes": "CRITICAL: Main Agent doesn't call WorkflowController yet. Major refactoring needed."
+    },
+    {
+      "id": "T-008-1",
+      "title": "Create write_file tool",
+      "spec": "design.md#Implementation Notes",
+      "description": "Create write_file tool that agents can use to write files. This is required for Planner Agent to generate artifacts.",
+      "acceptanceCriteria": [
+        "Tool can write files to specified path",
+        "Creates parent directories if needed",
+        "Handles errors gracefully",
+        "Registered in Main Agent's tool registry"
+      ],
+      "priority": 8,
+      "passes": false,
+      "dependencies": ["T-008"],
+      "notes": "Required for Planner Agent file generation"
+    },
+    {
+      "id": "T-008-2",
+      "title": "Refactor Main Agent to use WorkflowController",
+      "spec": "design.md#Implementation Notes",
+      "description": "Refactor Main Agent initialization and execution flow to use WorkflowController instead of old workflow logic.",
+      "acceptanceCriteria": [
+        "Main Agent initializes WorkflowController with all dependencies",
+        "Calls executeStage for workflow execution",
+        "Handles requiresApproval responses",
+        "Maintains backward compatibility"
+      ],
+      "priority": 8,
+      "passes": false,
+      "dependencies": ["T-008"],
+      "notes": "Core integration work"
     },
     {
       "id": "T-009",
