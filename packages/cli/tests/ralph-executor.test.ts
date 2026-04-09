@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { runRalphLoop, sortTasksByOrder, getOrderValue, readTaskStatus, readPrdTasks, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS, truncateAgentText } from '../src/openspec/ralph-executor';
+import { runRalphLoop, sortTasksByOrder, getOrderValue, readTaskStatus, readPrdTasks, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS } from '../src/openspec/ralph-executor';
+import { truncateAgentText } from '../src/agent-runtime/acp-session';
 import type { OpenSpecChange } from '../src/openspec/detector';
 
 describe('ralph-executor utilities', () => {

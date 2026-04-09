@@ -113,8 +113,8 @@
         "npm test passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "可以 mock streamText 和 ACP session，不需要真正调用 LLM 或 opencode acp。增加时序容错测试：模拟 AI SDK 事件顺序变化时的行为。"
+      "passes": true,
+      "notes": "21 integration tests covering: EventBus basics (emit/on/off), runAgentLoop event emission (agent_text_chunk with stepIndex, main_tool_call started/completed/failed, no-eventBus resilience), ToolRegistry executionId slot (store/retrieve, fallback on empty slot, concurrent tool calls independent IDs), runAcpSession event emission (coder_text_chunk, coder_tool_call started/completed, no-executionId suppression, no-eventBus resilience), ralph executor event emission (ralph_task_update started/completed/failed, ralph_loop_progress, no-eventBus resilience), executionId L0<->L1 correlation, SSE event type coverage. Also fixed pre-existing bug: exported truncateAgentText from acp-session.ts and fixed import in ralph-executor.test.ts."
     }
   ]
 }
