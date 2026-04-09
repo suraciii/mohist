@@ -42,8 +42,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Currently imports PlanResult from workflow-controller.ts"
+      "passes": true,
+      "notes": "Already imports PlanResult from types/workflow-results.ts - no change needed"
     },
     {
       "id": "T-004",

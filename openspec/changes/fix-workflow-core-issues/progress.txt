@@ -15,3 +15,10 @@ Learnings: T-001 created the unified types and updated all files to use them. No
 
 Next steps: Continue with T-003 (planner-agent.ts) and T-004 (reviewer-agent.ts) to verify unified interface usage.
 
+
+---
+2026-04-09T12:30:00Z | T-003 | Verified planner-agent.ts already imports PlanResult from types/workflow-results.ts (line 3: `import type { PlanResult } from '../types/workflow-results';`). No workflow-controller import for PlanResult exists. Typecheck passes. Task was already complete when reviewed.
+
+Learnings: T-001 set up the unified types and T-002/T-003 were already updated by that change. Only T-004 (reviewer-agent.ts) may need verification.
+
+Next steps: Verify T-004 (reviewer-agent.ts), then proceed to T-005 (STAGE_TRANSITIONS).
