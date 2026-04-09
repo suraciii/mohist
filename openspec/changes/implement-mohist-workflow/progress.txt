@@ -76,3 +76,30 @@ Started: 2026-04-09T05:28:25.664Z
 - T-007 (user approval interface) depends on T-004, T-006
 - T-008 (integrate with issue service) depends on T-005, T-007
 
+---
+
+## T-006: Implement Reviewer Agent (2026-04-09T08:30:00Z)
+
+**What was done:**
+- Created ReviewerAgent class at `packages/cli/src/agents/reviewer-agent.ts`
+- Implemented `review()` method that:
+  - Identifies changed files using git diff
+  - Reviews each file according to Prompt-defined dimensions (correctness, complexity, test_coverage, security)
+  - Runs tests/build as part of review
+  - Provides structured ReviewResult with pass/fail and issues
+- Added `REVIEWER_DEFAULT_PROMPT` constant with default prompt template covering all 4 dimensions
+- Created types: `ReviewDimension`, `ReviewIssue`, `DimensionResult`, `ReviewResult`
+- Exported all types and the agent from `agents/index.ts`
+- Fixed TypeScript errors: removed unused `issue` variable and unused `checksMatches` variable
+
+**Learnings:**
+- The ReviewerAgent interface was already defined in workflow-controller.ts, so the implementation just needed to match that interface
+- Dimensions are extracted from the prompt using regex patterns, allowing full customization via custom prompts
+- The review process runs each dimension separately and aggregates results at the end
+- TypeScript unused variable errors must be fixed - prefixing with underscore or removing the variable
+
+**Next steps:**
+- T-006 complete (passes: true)
+- T-007 (user approval interface) depends on T-004, T-006 - both now complete
+- T-008 (integrate with issue service) depends on T-005, T-007
+
