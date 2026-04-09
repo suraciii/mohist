@@ -7,6 +7,7 @@ import { runExploreAgent } from '../agents/explore-agent';
 import { ExploreSessionRepo } from '../db/explore-session-repo';
 import { ProjectService } from '../services/project-service';
 import type { LlmConfig } from '../agent-runtime';
+import { LlmError } from '../agent-runtime/llm';
 import type { EventBus } from '../services/event-bus';
 
 export function createExploreRoutes(
@@ -256,10 +257,13 @@ export function createExploreRoutes(
         }
       });
     } catch (error) {
-      const response: ApiResponse = {
+      const response: ApiResponse & { code?: string } = {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to send message',
       };
+      if (error instanceof LlmError) {
+        response.code = error.code;
+      }
       return c.json(response, 500);
     }
   });

@@ -11,3 +11,14 @@ Started: 2026-04-09T05:22:08.717Z
 - Pre-existing test failures in services.test.ts and api-routes.test.ts (SQLite UNIQUE constraint issues)
 - Next: T-003 API 错误响应增加 code 字段
 
+---
+
+2026-04-09T13:32:00.000Z | T-003 | API 错误响应增加 code 字段
+- 修改 api/explore.ts: 在 POST /:id/messages 的 catch 块中检测 LlmError 并附加 code 字段
+- 添加 import { LlmError } from '../agent-runtime/llm'
+- 修改响应类型为 ApiResponse & { code?: string }
+- instanceof LlmError 检查只在 error 为 LlmError 时添加 code 字段
+- TypeScript 类型检查通过
+- Pre-existing test failures in api-routes.test.ts (NOT NULL constraint, 404 status) - 与本次修改无关
+- Next: T-004 Explore 页面 LLM 状态检查与引导卡片
+

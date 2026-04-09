@@ -47,7 +47,7 @@
         "npm test 通过"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "只改 api/explore.ts 的 messages 端点。Issues start 端点后续再做。"
     },
     {
