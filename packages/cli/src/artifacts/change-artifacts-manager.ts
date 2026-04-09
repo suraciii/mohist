@@ -6,6 +6,16 @@ import { slugify } from '../utils/slugify';
 
 const execFileAsync = promisify(execFile);
 
+export type TaskStatusValue = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+
+export interface PrdTaskStatus {
+  status: TaskStatusValue;
+  startedAt?: string;
+  completedAt?: string;
+  attempts?: number;
+  error?: string;
+}
+
 export interface PrdTask {
   id: string;
   order?: number;
@@ -17,6 +27,11 @@ export interface PrdTask {
   dependencies?: string[];
   estimated_effort?: string;
   spec_file?: string;
+  status?: TaskStatusValue;
+  startedAt?: string;
+  completedAt?: string;
+  attempts?: number;
+  error?: string;
 }
 
 export interface PrdJson {
@@ -351,6 +366,35 @@ export class ChangeArtifactsManager {
     try {
       this.ensureDir(path.dirname(filePath));
       fs.writeFileSync(filePath, content, 'utf-8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  updateTaskStatus(
+    issueNumber: number,
+    taskId: string,
+    status: PrdTaskStatus
+  ): boolean {
+    const prd = this.readPrd(issueNumber);
+    if (!prd) {
+      return false;
+    }
+
+    const task = prd.tasks.find(t => t.id === taskId);
+    if (!task) {
+      return false;
+    }
+
+    task.status = status.status;
+    if (status.startedAt) task.startedAt = status.startedAt;
+    if (status.completedAt) task.completedAt = status.completedAt;
+    if (status.attempts !== undefined) task.attempts = status.attempts;
+    if (status.error !== undefined) task.error = status.error;
+
+    try {
+      this.writePrd(issueNumber, prd);
       return true;
     } catch {
       return false;

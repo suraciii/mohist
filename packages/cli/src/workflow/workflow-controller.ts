@@ -1,5 +1,5 @@
 import { Stage, isValidTransition, type Issue } from '../types';
-import type { PrdTask, PrdJson } from '../artifacts/change-artifacts-manager';
+import type { PrdTask, PrdJson, PrdTaskStatus } from '../artifacts/change-artifacts-manager';
 import { executeCoderTask } from '../tools/spawn-coder';
 
 export interface PlanResult {
@@ -53,6 +53,7 @@ export interface ChangeArtifactsManager {
   writeArtifact(changeDir: string, artifactPath: string, content: string): boolean;
   exists(changeDir: string): boolean;
   readPrd(issueNumber: number): PrdJson | null;
+  updateTaskStatus(issueNumber: number, taskId: string, status: PrdTaskStatus): boolean;
 }
 
 export interface StageResult {
@@ -176,13 +177,27 @@ export class WorkflowController {
 
     for (const task of tasks) {
       const taskId = task.id || `task-${taskResults.length}`;
-      let attempt = 0;
+
+      if (task.status === 'completed') {
+        console.log(`[Build phase] Skipping task "${task.title}" (${taskId}) - already completed`);
+        taskResults.push({ taskId, success: true, attempts: task.attempts || 1 });
+        continue;
+      }
+
+      const currentAttempts = task.attempts || 0;
+      let attempt = currentAttempts;
       let taskSuccess = false;
       let lastError: string | undefined;
 
-      while (attempt < MAX_RETRIES && !taskSuccess) {
+      this.artifactManager.updateTaskStatus(issue.number, taskId, {
+        status: 'in_progress',
+        startedAt: new Date().toISOString(),
+        attempts: attempt + 1,
+      });
+
+      while (attempt < MAX_RETRIES + currentAttempts && !taskSuccess) {
         attempt++;
-        console.log(`[Build phase] Executing task "${task.title}" (${taskId}), attempt ${attempt}/${MAX_RETRIES}`);
+        console.log(`[Build phase] Executing task "${task.title}" (${taskId}), attempt ${attempt}/${MAX_RETRIES + currentAttempts}`);
 
         const taskPrompt = this.buildTaskPrompt(issue, task);
 
@@ -203,9 +218,19 @@ export class WorkflowController {
       taskResults.push({
         taskId,
         success: taskSuccess,
-        attempts: attempt,
+        attempts: attempt - currentAttempts,
         error: taskSuccess ? undefined : lastError,
       });
+
+      const statusUpdate: PrdTaskStatus = {
+        status: taskSuccess ? 'completed' : 'failed',
+        completedAt: new Date().toISOString(),
+        attempts: attempt,
+      };
+      if (!taskSuccess && lastError) {
+        statusUpdate.error = lastError;
+      }
+      this.artifactManager.updateTaskStatus(issue.number, taskId, statusUpdate);
 
       if (!taskSuccess) {
         return {

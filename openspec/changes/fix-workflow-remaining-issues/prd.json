@@ -1,0 +1,106 @@
+{
+  "project": "mohist",
+  "description": "Complete the Mohist workflow implementation by fixing remaining issues: task status tracking, reviewer test improvements, prompt extraction, and user approval integration.",
+  "tasks": [
+    {
+      "id": "T-005-1",
+      "title": "Add task status tracking in Build phase",
+      "spec": "design.md#Decision 1: Task Status Storage Location",
+      "description": "Implement task status updates during Build phase execution. Track pending → in_progress → completed/failed status for each task in prd.json. Enable resuming from failed tasks.",
+      "acceptanceCriteria": [
+        "Task status field added to prd.json schema",
+        "Status transitions correctly: pending → in_progress → completed/failed",
+        "Timestamps recorded (startedAt, completedAt)",
+        "Attempt counts tracked for each task",
+        "Build phase can resume from failed tasks (skip completed)",
+        "TypeScript compilation passes",
+        "Unit tests for status updates"
+      ],
+      "priority": 1,
+      "passes": true,
+      "dependencies": [],
+      "notes": "Foundation for reliable Build phase execution"
+    },
+    {
+      "id": "T-006-1",
+      "title": "Improve Reviewer Agent test execution",
+      "spec": "design.md#Decision 2: Reviewer Test Execution Priority",
+      "description": "Update Reviewer Agent to check package.json scripts and prioritize npm test over npm run build. Handle missing scripts gracefully.",
+      "acceptanceCriteria": [
+        "Reads and parses package.json to detect available scripts",
+        "Runs 'npm test' if test script exists and is not default",
+        "Falls back to 'npm run build' if no test script",
+        "Returns skipped status if neither script exists",
+        "Test failures reported as correctness issues with output",
+        "5-minute timeout for test execution",
+        "TypeScript compilation passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "dependencies": [],
+      "notes": "Improves code quality checking coverage"
+    },
+    {
+      "id": "T-006-2",
+      "title": "Extract Reviewer Prompt to YAML file",
+      "spec": "design.md#Decision 3: Prompt File Structure",
+      "description": "Move Reviewer Agent default prompt from embedded TypeScript string to YAML file in src/agents/prompts/ directory. Follow Planner Agent pattern.",
+      "acceptanceCriteria": [
+        "Create src/agents/prompts/reviewer-default.yaml with complete prompt",
+        "Add loadReviewerDefaultPrompt() to prompt-loader.ts",
+        "ReviewerAgent loads prompt from file at runtime",
+        "Fallback to embedded default if file missing/corrupted",
+        "YAML structure includes all review dimensions",
+        "TypeScript compilation passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "dependencies": [],
+      "notes": "Follows pattern established by T-004-2"
+    },
+    {
+      "id": "T-007",
+      "title": "Implement reliable user approval interface",
+      "spec": "design.md#Decision 4: User Approval Architecture",
+      "description": "Design and implement a reliable user approval mechanism for Plan and Review stages. Ensure approval flow cannot fail silently.",
+      "acceptanceCriteria": [
+        "Approval state added to Issue type (pending, awaiting, approved, rejected)",
+        "execute_stage tool sets approval state when requiresApproval is true",
+        "submit_approval tool created for user to respond",
+        "Main Agent system prompt updated with approval flow instructions",
+        "State persisted in SQLite for recovery after crashes",
+        "Can resume from approval state on restart",
+        "Options: approve, request changes, abort",
+        "Clear presentation of approval request with context",
+        "End-to-end test passes for all three options",
+        "TypeScript compilation passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "dependencies": [],
+      "notes": "Critical for workflow reliability - prevents silent failures"
+    },
+    {
+      "id": "T-009",
+      "title": "Add comprehensive tests and documentation",
+      "spec": null,
+      "description": "Add unit tests for all modified components and update documentation with new workflow behavior.",
+      "acceptanceCriteria": [
+        "Unit tests for ChangeArtifactsManager.updateTaskStatus",
+        "Unit tests for ReviewerAgent.runTests with various scenarios",
+        "Unit tests for PromptLoader with missing/corrupted files",
+        "Unit tests for approval state transitions",
+        "Integration test for Build phase with task status updates",
+        "Integration test for Review phase with test execution",
+        "Integration test for complete approval flow",
+        "Documentation updated with new workflow features",
+        "All tests pass",
+        "Test coverage >80% for modified files"
+      ],
+      "priority": 4,
+      "passes": false,
+      "dependencies": ["T-005-1", "T-006-1", "T-006-2", "T-007"],
+      "notes": "Final quality gate before completion"
+    }
+  ]
+}
