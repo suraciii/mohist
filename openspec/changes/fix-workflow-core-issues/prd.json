@@ -55,8 +55,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already completed - import present on line 12"
     },
     {
       "id": "T-005",

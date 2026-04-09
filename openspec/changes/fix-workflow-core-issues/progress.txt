@@ -22,3 +22,10 @@ Next steps: Continue with T-003 (planner-agent.ts) and T-004 (reviewer-agent.ts)
 Learnings: T-001 set up the unified types and T-002/T-003 were already updated by that change. Only T-004 (reviewer-agent.ts) may need verification.
 
 Next steps: Verify T-004 (reviewer-agent.ts), then proceed to T-005 (STAGE_TRANSITIONS).
+
+---
+2026-04-09T12:45:00Z | T-004 | Verified reviewer-agent.ts already imports ReviewResult, DimensionResult, ReviewIssue from types/workflow-results.ts on line 12. No local interface definitions exist. Typecheck passes. Task was already complete when reviewed.
+
+Learnings: T-001 created the unified types and updated reviewer-agent.ts. All tasks T-001 through T-004 for interface unification are complete.
+
+Next steps: T-005 (Replace M1_ALLOWED_TRANSITIONS with unified STAGE_TRANSITIONS).
