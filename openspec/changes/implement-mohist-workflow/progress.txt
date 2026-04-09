@@ -1,26 +1,12 @@
 # Ralph Progress Log
-Started: 2026-04-09T06:42:54.195Z
+Started: 2026-04-09T07:11:45.053Z
 
 ---
-Timestamp: 2026-04-09T14:50:25Z
-Task ID: T-004
-What was done:
-- Reviewed Planner Agent implementation at packages/cli/src/agents/planner-agent.ts
-- Verified core functionality: exploreCodebase, generateArtifacts, selfReview, fixIssues
-- Confirmed write_file tool is properly registered via buildArtifactToolRegistry
-- Verified default prompt template exists (PLANNER_DEFAULT_PROMPT constant)
-- Verified planner-default.yaml exists at packages/cli/src/agents/prompts/
-- TypeScript compilation passes
-- Tests: some failures unrelated to T-004 (Build stage mock issue, SQL constraint)
-
-Learnings:
-- Planner Agent implementation is complete and functional
-- Uses AI SDK's streamText with tool registry pattern
-- Agent self-corrects via fixIssues method with max 3 iterations
-- ChangeArtifactsManager handles directory and file operations
-
-Next Steps:
-- T-004 marked as passes=true (complete)
-- T-004-1 (fix file generation), T-004-2 (YAML prompts) are related follow-up tasks
-- Could add dedicated planner-agent tests if needed
+T-004-1 | 2026-04-09T12:15:00Z | Fix Planner Agent file generation
+- Changed plan() to use createChangeDir if getChangeDir returns null (ensures directory exists before writing)
+- Made writeArtifactsToFiles async and changed to use artifactManager.writeArtifact instead of direct fs.writeFileSync
+- Added createChangeDir to ChangeArtifactsManager interface in workflow-controller.ts
+- Typecheck passes
+Learnings: The issue was that getChangeDir only finds existing directories but doesn't create them. The directory needs to be created before generateArtifacts writes files.
+Next steps: T-004-2 (Extract Planner Prompt to YAML files)
 
