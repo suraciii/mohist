@@ -63,9 +63,9 @@
         "Provides default Prompt template"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-002", "T-003"],
-      "notes": "CRITICAL: Current implementation doesn't actually write files. Need to fix file generation logic."
+      "notes": "Planner Agent fully implemented with exploreCodebase, generateArtifacts, selfReview, fixIssues. Uses write_file tool via tool registry. Default prompt template provided in TypeScript constant and YAML file."
     },
     {
       "id": "T-004-1",
