@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Tool, type ToolInstance } from '../agent-runtime/tool';
+import { Tool, type ToolInstance, type ToolRegistry } from '../agent-runtime/tool';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { EventBus } from '../services/event-bus';
 import { runAcpSession } from '../agent-runtime/acp-session';
@@ -48,6 +48,7 @@ export interface SpawnCoderContext {
   projectId?: string;
   workflowLogRepo?: WorkflowLogRepo;
   eventBus?: EventBus;
+  toolRegistry?: ToolRegistry;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,12 +102,15 @@ export function createSpawnCoderTool(
       );
       console.log(`[spawn_coder] Task: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}`);
 
+      const executionId = context?.toolRegistry?.getCurrentExecutionId() ?? undefined;
+
       const result = await runAcpSession({
         cwd,
         task,
         timeout,
         issueId: context?.issueId,
         projectId: context?.projectId,
+        executionId,
         workflowLogRepo: context?.workflowLogRepo,
         eventBus: context?.eventBus,
       });
