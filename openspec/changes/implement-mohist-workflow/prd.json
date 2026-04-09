@@ -96,7 +96,7 @@
         "Provides default Prompt template"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-002"],
       "notes": "Review dimensions fully customizable via Prompt"
     },
