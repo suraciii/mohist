@@ -18,8 +18,13 @@ import { createReadSpecTool } from '../tools/read-spec';
 import { createStoreLearningTool, createLoadLearningsTool } from '../tools/session-memory';
 import { createUpdateTaskStatusTool, createGetTaskStatusTool } from '../tools/task-status';
 import { createSelfReviewTool, createGeneratePrdTool } from '../tools/self-review';
+import { createExecuteStageTool } from '../tools/execute-stage';
 import type { EventBus } from '../services/event-bus';
 import { detectOpenSpecForIssue, type OpenSpecDetection } from '../workflow/workflow-loader';
+import { WorkflowController, createWorkflowController } from '../workflow/workflow-controller';
+import { createPlannerAgent } from './planner-agent';
+import { createReviewerAgent } from './reviewer-agent';
+import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 
 export interface MainAgentContext {
   issueRepo: IssueRepo;
@@ -31,6 +36,7 @@ export interface MainAgentContext {
   eventBus?: EventBus;
   workflowLogRepo?: WorkflowLogRepo;
   onWaitingChange?: (issueId: string, questionId: string | null, question?: string) => void;
+  workflowController?: WorkflowController;
 }
 
 function buildSystemPrompt(issue: Issue, detection: OpenSpecDetection): string {
@@ -43,11 +49,19 @@ function buildSystemPrompt(issue: Issue, detection: OpenSpecDetection): string {
 - Stage: ${issue.stage}
 ${issue.body ? `- Description: ${issue.body}` : ''}
 
-## How It Works
-1. First, call \`read_workflow\` to read the workflow configuration. It returns the available stages, their prompt templates, and settings.
-2. For each stage, call \`spawn_coder\` with the stage's prompt template and variables from the issue and previous stage results.
-3. After spawn_coder completes, call \`advance_stage\` to move to the next stage.
-4. If a stage has \`approval: true\`, do NOT advance to the next stage. Instead, add a comment summarizing the result and stop. The user will manually continue later.
+## How It Works (New Workflow)
+1. Check the current issue stage.
+2. Call execute_stage with the current stage to execute the appropriate agent:
+   - Plan stage: Planner Agent generates design artifacts
+   - Build stage: Sequential task execution using Coder Agent
+   - Review stage: Reviewer Agent reviews code quality
+3. If execute_stage returns requiresApproval: true:
+   - Present the results to the user
+   - Use ask_user to get approval decision (approve/request changes/abort)
+   - If approved, call advance_stage to move to next stage
+   - If changes requested, the current stage will be re-executed
+   - If aborted, stop the workflow
+4. If requiresApproval: false and execution was successful, automatically advance to next stage
 5. Continue until the issue reaches "done".
 
 ## Available Tools
@@ -94,17 +108,29 @@ When calling spawn_coder, pass these variables in the \`variables\` object:
 - \`build.output\`: the text result from the build stage (after build completes)
 - \`check.output\`: the text result from the check stage (after check completes)
 
-## Instructions
-1. Call \`read_workflow\` to understand the workflow stages.
-2. Find the current stage in the workflow and use its prompt template.
-3. Call \`spawn_coder\` with the prompt template and variables.
-4. After spawn_coder returns, call \`advance_stage\` with the next stage.
-5. If the stage has \`approval: true\`, add a comment and stop instead of advancing.
-6. Repeat until done.
+## Instructions (New Workflow)
+1. Check the current issue stage using get_issue.
+2. Call execute_stage with the current stage name.
+3. Parse the result:
+   - If success: true and requiresApproval: false: Execution completed, call advance_stage to next stage
+   - If success: true and requiresApproval: true: Present results to user and call ask_user for approval
+   - If success: false: Analyze error, add comment, and decide whether to retry or abort
+4. For Plan and Review stages, always expect requiresApproval: true and get user confirmation
+5. For Build stage, if successful, automatically advance to Review
+
+## User Approval Flow
+When requiresApproval: true:
+1. Present a clear summary of the results
+2. Call ask_user with specific options:
+   - "Approve and continue" → call advance_stage to next stage
+   - "Request changes" → the stage will be re-executed (for Plan/Review)
+   - "Abort workflow" → stop execution and add comment
 
 ## Error Handling
-- If spawn_coder fails, analyze the error. You may retry with a more specific task, or advance to done with a comment explaining the failure.
-- If check stage reveals issues, you may advance back to build to fix them.`;
+- If execute_stage fails, analyze the error message
+- You may retry the same stage with modifications
+- For persistent failures, ask the user for guidance using \`ask_user\`
+- Always add comments to document decisions and issues`;
 
   if (!detection.detected) {
     return basePrompt;
@@ -150,6 +176,19 @@ export async function runMainAgent(
     detectOpenSpecForIssue(context.worktreePath, context.issue.number),
   );
 
+  // Initialize WorkflowController if not provided
+  const workflowController = context.workflowController ?? createWorkflowController({
+    plannerAgent: createPlannerAgent({
+      llmConfig: context.llmConfig,
+      artifactManager: new ChangeArtifactsManager(context.worktreePath),
+    }),
+    reviewerAgent: createReviewerAgent({
+      llmConfig: context.llmConfig,
+    }),
+    artifactManager: new ChangeArtifactsManager(context.worktreePath),
+    worktreePath: context.worktreePath,
+  });
+
   const model = resolveModel(context.llmConfig);
 
   const toolRegistry = new ToolRegistry();
@@ -191,6 +230,10 @@ export async function runMainAgent(
   toolRegistry.register(createGetTaskStatusTool({ projectPath: context.worktreePath }));
   toolRegistry.register(createSelfReviewTool({ projectPath: context.worktreePath }));
   toolRegistry.register(createGeneratePrdTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createExecuteStageTool({
+    workflowController,
+    issue: context.issue,
+  }));
 
   const session = existingSession ?? sessionManager.create(Number(context.issue.id));
   session.metadata['openSpecDetection'] = openSpecDetection;
