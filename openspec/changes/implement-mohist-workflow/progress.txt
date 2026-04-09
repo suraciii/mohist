@@ -12,3 +12,19 @@ Started: 2026-04-09T04:59:15.115Z
 TypeScript compilation passes. Old code using Stage.Draft, Stage.Check continues to work.
 
 Next steps: T-002 (Create WorkflowController) depends on these types
+
+---
+
+2026-04-09T13:08:00.000Z | T-002 | Created WorkflowController in packages/cli/src/workflow/workflow-controller.ts:
+- Implemented WorkflowController class with validateTransition() and executeStage() methods
+- validateTransition() uses existing isValidTransition() from types/index.ts
+- executeStage() dispatches to appropriate stage handlers (Explore, Plan, Build, Review, Done)
+- Created workflow/index.ts to export the controller and interfaces
+- Created 17 unit tests covering all stage executions and transition validation
+- All tests pass, TypeScript compilation passes
+
+Learnings:
+- artifactManager must be actually used in the class (not just stored) due to strict TypeScript noUnusedLocals
+- Explore stage now checks for existing change directory using artifactManager
+
+Next steps: T-003 (Create ChangeArtifactsManager) can now be implemented
