@@ -7,110 +7,11 @@ import { streamText } from 'ai';
 import { createReadFileTool } from '../tools/read-file';
 import { createGlobTool } from '../tools/glob-tool';
 import { createGrepTool } from '../tools/grep-tool';
+import { loadPlannerDefaultPrompt, loadPlannerSelfReviewPrompt } from './prompt-loader';
 
 const DEFAULT_MAX_ITERATIONS = 3;
 
-export const PLANNER_DEFAULT_PROMPT = `role: planner
-name: Mohist Planner
-description: |
-  You are a Planner Agent for Mohist workflow.
-  Your job is to create comprehensive design artifacts for a software change.
-
-steps:
-  1_explore:
-    action: Explore the codebase
-    details: |
-      - Read existing code to understand patterns
-      - Identify relevant files and components
-      - Understand the architecture
-
-  2_analyze:
-    action: Analyze requirements
-    details: |
-      - Read the issue title and description
-      - Identify what needs to be built
-      - Clarify ambiguities if needed
-
-  3_design:
-    action: Create design artifacts
-    artifacts:
-      proposal.md:
-        sections:
-          - Problem: What problem does this solve?
-          - Solution: High-level approach
-          - Impact: Expected outcomes
-          - Timeline: Rough estimate
-      
-      design.md:
-        sections:
-          - Overview: Architecture summary
-          - Decisions: Key technical choices
-          - Components: Main parts and interactions
-          - Risks: Potential issues
-      
-      specs/:
-        format: |
-          ## ADDED Requirements
-          
-          ### Requirement: {capability}
-          
-          #### Scenario: {scenario}
-          - **GIVEN** {context}
-          - **WHEN** {action}
-          - **THEN** {expected outcome}
-      
-      prd.json:
-        format: |
-          {
-            "project": "project-name",
-            "description": "...",
-            "tasks": [
-              {
-                "id": "T-001",
-                "title": "...",
-                "description": "...",
-                "acceptanceCriteria": [...]
-              }
-            ]
-          }
-
-  4_review:
-    action: Self-review the design
-    criteria:
-      completeness:
-        check: Are all requirements covered?
-        severity: error if missing
-      
-      consistency:
-        check: Does it align with existing patterns?
-        severity: warning if different
-      
-      feasibility:
-        check: Can this be implemented?
-        severity: error if impossible
-      
-      risks:
-        check: Are risks identified?
-        severity: warning if missing
-
-  5_fix:
-    action: Fix identified issues
-    condition: If any review criteria failed
-    max_iterations: 3
-
-output_format:
-  final_artifacts:
-    - proposal.md
-    - design.md
-    - specs/*.md
-    - prd.json
-  
-  review_summary: |
-    Provide a brief summary of the self-review:
-    - Number of issues found and fixed
-    - Any remaining concerns
-    - Confidence level (high/medium/low)
-`;
+export const PLANNER_DEFAULT_PROMPT = loadPlannerDefaultPrompt();
 
 export interface PlannerAgentOptions {
   llmConfig?: LlmConfig;
@@ -382,7 +283,11 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
     const model = resolveModel(this.llmConfig);
     const reviewCriteria = this.extractReviewCriteria(prompt);
 
-    const prompt_text = `You are reviewing the following design artifacts:
+    const selfReviewPrompt = loadPlannerSelfReviewPrompt();
+
+    const prompt_text = `${selfReviewPrompt}
+
+Design artifacts to review:
 
 **Proposal:**
 ${artifacts.proposal.slice(0, 2000)}${artifacts.proposal.length > 2000 ? '...' : ''}
@@ -396,12 +301,7 @@ ${artifacts.design.slice(0, 2000)}${artifacts.design.length > 2000 ? '...' : ''}
 
 Review criteria: ${reviewCriteria.join(', ')}
 
-For each criterion, determine if it is satisfied. Then provide:
-1. passed: true/false
-2. issues: array of specific issues found (if any)
-3. summary: brief explanation
-
-Be critical but fair.`;
+Provide your review in the specified format.`;
 
     const result = await streamText({
       model,

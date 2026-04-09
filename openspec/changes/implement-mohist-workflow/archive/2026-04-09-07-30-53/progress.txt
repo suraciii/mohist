@@ -1,0 +1,12 @@
+# Ralph Progress Log
+Started: 2026-04-09T07:11:45.053Z
+
+---
+T-004-1 | 2026-04-09T12:15:00Z | Fix Planner Agent file generation
+- Changed plan() to use createChangeDir if getChangeDir returns null (ensures directory exists before writing)
+- Made writeArtifactsToFiles async and changed to use artifactManager.writeArtifact instead of direct fs.writeFileSync
+- Added createChangeDir to ChangeArtifactsManager interface in workflow-controller.ts
+- Typecheck passes
+Learnings: The issue was that getChangeDir only finds existing directories but doesn't create them. The directory needs to be created before generateArtifacts writes files.
+Next steps: T-004-2 (Extract Planner Prompt to YAML files)
+
