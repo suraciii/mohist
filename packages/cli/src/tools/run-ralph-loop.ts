@@ -1,13 +1,16 @@
 import { z } from 'zod';
-import { Tool, type ToolInstance } from '../agent-runtime/tool';
+import { Tool, type ToolInstance, type ToolRegistry } from '../agent-runtime/tool';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor } from '../openspec/ralph-executor';
 import { IssueStatus, type Stage } from '../types';
+import type { EventBus } from '../services/event-bus';
 
 export interface ToolContext {
   worktreePath: string;
   issueId: string;
   projectId?: string;
+  eventBus?: EventBus;
+  toolRegistry?: ToolRegistry;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,11 +42,15 @@ export function createRunRalphLoopTool(context: ToolContext): ToolInstance<any> 
         return 'No OpenSpec Change found for this issue. Use spawn_coder instead.';
       }
 
+      const executionId = context.toolRegistry?.getCurrentExecutionId() ?? undefined;
+
       const executor = new RalphExecutor({
         worktreePath: context.worktreePath,
         projectPath: context.worktreePath,
         issueId: context.issueId,
         projectId: context.projectId,
+        eventBus: context.eventBus,
+        executionId,
       });
 
       const loopResult = await executor.execute(change);

@@ -6,3 +6,5 @@ export { SessionManager } from './session';
 export type { Session } from './session';
 export { runAgentLoop } from './agent-loop';
 export type { AgentLoopOptions, AgentLoopResult } from './agent-loop';
+export { runAcpSession } from './acp-session';
+export type { AcpSessionOptions, AcpSessionResult } from './acp-session';
