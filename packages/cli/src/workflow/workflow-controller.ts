@@ -1,4 +1,6 @@
 import { Stage, isValidTransition, type Issue } from '../types';
+import type { PrdTask, PrdJson } from '../artifacts/change-artifacts-manager';
+import { executeCoderTask } from '../tools/spawn-coder';
 
 export interface PlanResult {
   success: boolean;
@@ -49,6 +51,7 @@ export interface ChangeArtifactsManager {
   readArtifact(changeDir: string, artifactPath: string): string | null;
   writeArtifact(changeDir: string, artifactPath: string, content: string): boolean;
   exists(changeDir: string): boolean;
+  readPrd(issueNumber: number): PrdJson | null;
 }
 
 export interface StageResult {
@@ -146,12 +149,136 @@ export class WorkflowController {
   }
 
   private async executeBuildStage(issue: Issue): Promise<StageResult> {
+    const MAX_RETRIES = 3;
+
+    const prd = this.artifactManager.readPrd(issue.number);
+    if (!prd) {
+      return {
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `No prd.json found for issue #${issue.number}. Cannot execute Build phase.`,
+      };
+    }
+
+    const tasks = prd.tasks || [];
+    if (tasks.length === 0) {
+      return {
+        success: true,
+        requiresApproval: false,
+        output: { stage: Stage.Build, issueNumber: issue.number, completedTasks: 0 },
+        message: 'Build phase completed - no tasks to execute',
+      };
+    }
+
+    const taskResults: Array<{ taskId: string; success: boolean; attempts: number; error?: string }> = [];
+
+    for (const task of tasks) {
+      const taskId = task.id || `task-${taskResults.length}`;
+      let attempt = 0;
+      let taskSuccess = false;
+      let lastError: string | undefined;
+
+      while (attempt < MAX_RETRIES && !taskSuccess) {
+        attempt++;
+        console.log(`[Build phase] Executing task "${task.title}" (${taskId}), attempt ${attempt}/${MAX_RETRIES}`);
+
+        const taskPrompt = this.buildTaskPrompt(issue, task);
+
+        const result = await executeCoderTask(this.worktreePath, taskPrompt, {
+          issueId: issue.id,
+          projectId: issue.projectId,
+        });
+
+        if (result.success) {
+          taskSuccess = true;
+          console.log(`[Build phase] Task "${task.title}" (${taskId}) succeeded on attempt ${attempt}`);
+        } else {
+          lastError = result.error || 'Unknown error';
+          console.warn(`[Build phase] Task "${task.title}" (${taskId}) failed on attempt ${attempt}: ${lastError}`);
+        }
+      }
+
+      taskResults.push({
+        taskId,
+        success: taskSuccess,
+        attempts: attempt,
+        error: taskSuccess ? undefined : lastError,
+      });
+
+      if (!taskSuccess) {
+        return {
+          success: false,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Build,
+            issueNumber: issue.number,
+            failedTask: { id: taskId, title: task.title, error: lastError },
+            completedTasks: taskResults.length - 1,
+            totalTasks: tasks.length,
+          },
+          message: `Task "${task.title}" (${taskId}) failed after ${MAX_RETRIES} attempts. User intervention required.`,
+        };
+      }
+    }
+
     return {
       success: true,
       requiresApproval: false,
-      output: { stage: Stage.Build, issueNumber: issue.number },
-      message: 'Build stage framework ready - Coder Agent will be invoked via spawn_coder',
+      output: {
+        stage: Stage.Build,
+        issueNumber: issue.number,
+        completedTasks: taskResults.length,
+        totalTasks: tasks.length,
+        taskResults,
+      },
+      message: `Build phase completed successfully - ${taskResults.length}/${tasks.length} tasks executed`,
     };
+  }
+
+  private buildTaskPrompt(issue: Issue, task: PrdTask): string {
+    const lines = [
+      `# Task: ${task.title}`,
+      '',
+      `## Issue`,
+      `#${issue.number}: ${issue.title}`,
+      '',
+    ];
+
+    if (issue.body) {
+      lines.push('## Description');
+      lines.push(issue.body);
+      lines.push('');
+    }
+
+    if (task.description) {
+      lines.push('## Task Description');
+      lines.push(task.description);
+      lines.push('');
+    }
+
+    if (task.acceptance_criteria && task.acceptance_criteria.length > 0) {
+      lines.push('## Acceptance Criteria');
+      for (const criterion of task.acceptance_criteria) {
+        lines.push(`- ${criterion}`);
+      }
+      lines.push('');
+    }
+
+    if (task.spec_file) {
+      lines.push(`## Spec Reference`);
+      lines.push(`See: ${task.spec_file}`);
+      lines.push('');
+    }
+
+    lines.push('## Instructions');
+    lines.push('1. Analyze the task requirements carefully');
+    lines.push('2. Implement the solution following existing code patterns');
+    lines.push('3. Run tests and verify the implementation');
+    lines.push('4. Ensure TypeScript compilation passes');
+    lines.push('5. Do not commit changes unless explicitly instructed');
+
+    return lines.join('\n');
   }
 
   private async executeReviewStage(issue: Issue): Promise<StageResult> {
