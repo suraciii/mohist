@@ -8,3 +8,10 @@ Learnings: The workflow-controller.ts had local PlanResult/ReviewResult definiti
 
 Next steps: T-002, T-003, T-004 update the remaining files to use the unified interfaces. T-005 handles stage transitions.
 
+---
+2026-04-09T12:22:00Z | T-002 | Verified workflow-controller.ts already imports PlanResult and ReviewResult from types/workflow-results.ts. No local interface definitions exist. Typecheck passes. Task was already complete when reviewed.
+
+Learnings: T-001 created the unified types and updated all files to use them. No additional changes needed for T-002.
+
+Next steps: Continue with T-003 (planner-agent.ts) and T-004 (reviewer-agent.ts) to verify unified interface usage.
+
