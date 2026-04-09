@@ -1,15 +1,6 @@
 # Ralph Progress Log
-Started: 2026-04-09T06:19:14.844Z
+Started: 2026-04-09T06:35:54.569Z
 
 ---
-2026-04-09T13:45:00Z - T-001 - 统一 ACP session 管理模块
-- runAcpSession already existed in agent-runtime/acp-session.ts
-- Removed executeTaskWithSpawn wrapper function from ralph-executor.ts (it just called runAcpSession anyway)
-- Removed truncateAgentText and MAX_AGENT_TEXT_LENGTH from ralph-executor.ts (duplicate of acp-session.ts)
-- Removed unused ACP-related imports from ralph-executor.ts
-- Updated ralph-executor.ts to call runAcpSession directly
-- Build passes successfully
-- Tests timed out (likely integration tests requiring opencode acp binary)
-- Learnings: The acp-session.ts already had all the required functionality. executeTaskWithSpawn was just a thin wrapper that is now unnecessary. The ralph executor code that was duplicating truncateAgentText can now use the one in acp-session.ts if needed.
-- Next steps: T-002 (EventBus new event types)
+2026-04-09T08:15:32.734Z | T-002 | EventBus 新增 6 种事件类型 (agent_text_chunk, main_tool_call, coder_text_chunk, coder_tool_call, ralph_task_update, ralph_loop_progress)。EventMap payload 定义参考 design.md Decision 4。Typecheck passes.
 
