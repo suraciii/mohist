@@ -77,13 +77,38 @@ L2: ralph task (ACP session, 循环执行)
 | 事件 | 层级 | 触发时机 | 核心字段 |
 |------|------|----------|----------|
 | `agent_text_chunk` | L0 | streamText text-delta | text, stepIndex |
-| `main_tool_call` | L0 | streamText tool-call / tool-result | executionId, toolName, state, args, result, duration |
+| `main_tool_call` | L0 | streamText tool-call / tool-result / tool-error | executionId, toolName, state, args, result, error, duration |
 | `coder_text_chunk` | L1/L2 | ACP agent_message_chunk | executionId, acpSessionId, text |
 | `coder_tool_call` | L1/L2 | ACP tool_call | executionId, acpSessionId, toolName, state |
-| `ralph_task_update` | L1 | ralph task 开始/完成/失败 | executionId, taskId, taskIndex, totalTasks, status, attempt |
+| `ralph_task_update` | L1 | ralph task 开始/完成/失败/重试 | executionId, taskId, taskIndex, totalTasks, status, attempt, error |
 | `ralph_loop_progress` | L1 | ralph loop 进度变化 | executionId, completed, failed, total |
 
+**状态设计：**
+- `main_tool_call`: `started` | `completed` | `failed`
+- `coder_tool_call`: `started` | `completed`
+- `ralph_task_update`: `started` | `completed` | `failed` | `retrying`
+
 **设计原则：** L1/L2 事件都带 `executionId`，UI 通过它关联到 L0 的 `main_tool_call` 事件。
+
+### Decision 5: 高频事件节流（可选优化）
+
+**选择：** 在 T-003 中实现可选的节流机制，默认 100ms
+
+**理由：**
+- agent_message_chunk 可能每秒产生数十个事件
+- 100ms 节流可将事件量减少 10 倍，用户体验无明显损失
+- 可在运行时通过 options 控制，默认开启
+
+**实现方式：**
+```typescript
+let lastEmitTime = 0;
+const THROTTLE_MS = options.throttleMs ?? 100;
+
+if (now - lastEmitTime > THROTTLE_MS) {
+  eventBus.emit('coder_text_chunk', { ... });
+  lastEmitTime = now;
+}
+```
 
 ## Risks / Trade-offs
 
@@ -91,6 +116,6 @@ L2: ralph task (ACP session, 循环执行)
 
 **[Risk] executionId 时序依赖 AI SDK 行为** → 如果 AI SDK 改变了 tool-call 事件和 execute 的触发顺序，fallback 机制（读不到就 generateId）保证不崩溃，只是关联失效，UI 回退到时间窗口匹配。
 
-**[Risk] 高频 agent_text_chunk 事件增加 SSE 负载** → 现阶段展示全部信息是需求。未来可在 SSE 端加 client-side 过滤或节流，不影响后端。
+**[Risk] 高频 agent_text_chunk 事件增加 SSE 负载** → Decision 5 的节流机制缓解此问题。现阶段展示全部信息是需求，未来可在 SSE 端加 client-side 过滤或节流，不影响后端。
 
 **[Trade-off] 不改 DB schema** → 历史回放仍依赖 workflow_log（只有 spawn_coder 写入，ralph task 不写）。未来如需完整回放，需要扩展 workflow_log 或新增表，但本次聚焦实时推送。

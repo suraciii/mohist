@@ -6,7 +6,7 @@
 
 函数签名：`runAcpSession(options: AcpSessionOptions): Promise<AcpSessionResult>`
 
-AcpSessionOptions SHALL 包含：cwd、task、timeout（默认 30min）、issueId、projectId、executionId、workflowLogRepo、eventBus。
+AcpSessionOptions SHALL 包含：cwd、task、timeout（默认 30min）、issueId、projectId、executionId、workflowLogRepo、eventBus、throttleMs（可选，默认 100）。
 
 AcpSessionResult SHALL 包含：text（agent 输出文本）、success（boolean）、error（可选）、acpSessionId（可选）。
 
@@ -81,3 +81,20 @@ AcpSessionResult SHALL 包含：text（agent 输出文本）、success（boolean
 - **WHEN** ralph executor 执行一个 task
 - **THEN** 内部调用 `runAcpSession({ cwd: worktreePath, task: fullPrompt, issueId, projectId, executionId, eventBus })`
 - **AND** 返回值的 success 字段用于判断 task 是否成功
+
+### Requirement: ACP session 事件节流
+
+`runAcpSession` SHALL 支持可选的事件节流机制，通过 `throttleMs` 参数控制 `coder_text_chunk` 事件的推送频率。
+
+#### Scenario: 默认节流 100ms
+- **WHEN** 调用 `runAcpSession` 时不指定 throttleMs
+- **THEN** `coder_text_chunk` 事件默认每 100ms 最多推送一次
+- **AND** 中间累积的文本合并到一个事件中
+
+#### Scenario: 禁用节流
+- **WHEN** 调用 `runAcpSession({ throttleMs: 0 })`
+- **THEN** `coder_text_chunk` 事件实时推送，无延迟
+
+#### Scenario: 自定义节流间隔
+- **WHEN** 调用 `runAcpSession({ throttleMs: 200 })`
+- **THEN** `coder_text_chunk` 事件每 200ms 最多推送一次
