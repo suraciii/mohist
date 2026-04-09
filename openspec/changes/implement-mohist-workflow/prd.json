@@ -63,7 +63,7 @@
         "Provides default Prompt template"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "dependencies": ["T-002", "T-003"],
       "notes": "Agent handles iteration internally, no external LoopController needed"
     },

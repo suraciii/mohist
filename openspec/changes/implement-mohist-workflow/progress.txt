@@ -22,3 +22,29 @@ Started: 2026-04-09T05:28:25.664Z
 - T-003 is complete (passes: true)
 - T-004 (Planner Agent) depends on T-002 and T-003, both now complete
 
+---
+
+## T-004: Implement Planner Agent (2026-04-09T06:20:00Z)
+
+**What was done:**
+- Created PlannerAgent class at `packages/cli/src/agents/planner-agent.ts`
+- Implemented `plan()` method that:
+  - Explores codebase using LLM with read_file/glob/grep tools
+  - Generates design artifacts (proposal.md, design.md, specs/, prd.json)
+  - Self-reviews artifacts against Prompt-defined criteria
+  - Self-corrects issues up to max_iterations (default 3)
+- Added `PLANNER_DEFAULT_PROMPT` constant with default prompt template
+- Created `packages/cli/src/agents/prompts/planner-default.yaml` for YAML prompt template storage
+- Exported `PlannerAgent`, `createPlannerAgent`, `PLANNER_DEFAULT_PROMPT`, `PlannerAgentOptions`, `CodebaseInfo` from `agents/index.ts`
+- Fixed TypeScript errors: removed unused imports, fixed implicit `any` type on filter callback
+
+**Learnings:**
+- AI SDK v6 `streamText` returns result with `.text` property directly (not via async iteration)
+- `fs.readdirSync().filter()` needs explicit type annotation when using module-level require
+- The PlannerAgent is designed to work with WorkflowController which already has the interfaces defined
+
+**Next steps:**
+- T-004 complete (passes: true)
+- T-005 (Build phase execution) depends on T-002, T-003 - both complete
+- T-006 (Reviewer Agent) depends on T-002 - complete
+
