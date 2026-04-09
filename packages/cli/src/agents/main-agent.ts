@@ -159,6 +159,7 @@ export async function runMainAgent(
     projectId: context.issue.projectId,
     workflowLogRepo: context.workflowLogRepo,
     eventBus: context.eventBus,
+    toolRegistry,
   }));
   toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath, issueNumber: context.issue.number }));
   toolRegistry.register(createAdvanceStageTool({ issue: context.issue, issueRepo: context.issueRepo, worktreePath: context.worktreePath, eventBus: context.eventBus }));
@@ -178,6 +179,8 @@ export async function runMainAgent(
     worktreePath: context.worktreePath,
     issueId: context.issue.id,
     projectId: context.issue.projectId,
+    eventBus: context.eventBus,
+    toolRegistry,
   }));
   toolRegistry.register(createArchiveChangeTool({
     issue: context.issue,
@@ -198,6 +201,8 @@ export async function runMainAgent(
 
   const loopResult = await runAgentLoop(session, sessionManager, toolRegistry, model, {
     system,
+    eventBus: context.eventBus,
+    eventContext: { issueId: context.issue.id, projectId: context.issue.projectId },
   });
 
   return { loopResult, session };

@@ -8,8 +8,14 @@
 
 #### Scenario: Main Agent 思考时 SSE 客户端收到文本
 - **WHEN** Main Agent 的 LLM 输出文本 "Let me read the workflow..."
-- **THEN** EventBus emit `agent_text_chunk`，payload 包含 `{ text: "Let me read the workflow..." }`
+- **THEN** EventBus emit `agent_text_chunk`，payload 包含 `{ text: "Let me read the workflow...", stepIndex: 0 }`
 - **AND** SSE 客户端实时收到该事件
+
+#### Scenario: 多 Step 时 stepIndex 递增
+- **WHEN** Main Agent 执行多个 steps（maxSteps > 1）
+- **AND** 第一轮 LLM 调用输出 text
+- **THEN** EventBus emit `agent_text_chunk`，stepIndex 为 0
+- **AND** 第二轮 LLM 调用输出 text 时，stepIndex 为 1
 
 #### Scenario: 无 EventBus 时不推送
 - **WHEN** runAgentLoop 未传入 eventBus 参数
@@ -17,11 +23,12 @@
 
 ### Requirement: Main Agent 推送 tool call 生命周期
 
-`runAgentLoop` SHALL 对 fullStream 的 `tool-call` 和 `tool-result` 事件推送 `main_tool_call` 事件。
+`runAgentLoop` SHALL 对 fullStream 的 `tool-call`、`tool-result` 和 tool 执行异常事件推送 `main_tool_call` 事件。
 
 事件 payload：
 - started：`{ issueId, projectId, executionId, toolName, state: 'started', args, stepIndex }`
 - completed：`{ issueId, projectId, executionId, toolName, state: 'completed', result, duration, stepIndex }`
+- failed：`{ issueId, projectId, executionId, toolName, state: 'failed', args, error, stepIndex }`
 
 #### Scenario: tool call 开始
 - **WHEN** Main Agent 的 LLM 决定调用 `spawn_coder` tool
@@ -31,6 +38,12 @@
 - **WHEN** `spawn_coder` tool execute 返回结果
 - **THEN** EventBus emit `main_tool_call`，state 为 `completed`，result 为 tool 返回值
 - **AND** duration 为从 started 到 completed 的毫秒数
+
+#### Scenario: tool call 执行失败
+- **WHEN** `spawn_coder` tool execute 抛出异常
+- **THEN** EventBus emit `main_tool_call`，state 为 `failed`
+- **AND** error 包含异常信息
+- **AND** duration 为从 started 到 failed 的毫秒数
 
 ### Requirement: ACP session 推送 agent 文本
 
@@ -70,28 +83,29 @@
 
 ### Requirement: Ralph loop 推送 task 级别进度
 
-ralph loop SHALL 在每个 task 开始、完成、失败时推送 `ralph_task_update` 事件，并在每次 task 状态变化时推送 `ralph_loop_progress` 事件。
+ralph loop SHALL 在每个 task 开始、完成、失败、重试时推送 `ralph_task_update` 事件，并在每次 task 状态变化时推送 `ralph_loop_progress` 事件。
 
 ralph_task_update payload：`{ issueId, projectId, executionId, taskId, taskIndex, totalTasks, status, attempt, output?, error? }`
 
 ralph_loop_progress payload：`{ issueId, projectId, executionId, completed, failed, total }`
 
 #### Scenario: task 开始执行
-- **WHEN** ralph loop 开始执行 task T-003（共 5 个 task）
+- **WHEN** ralph loop 开始执行 task T-003（共 5 个 task，索引从 0 开始）
 - **THEN** EventBus emit `ralph_task_update`，status 为 `started`，taskIndex 为 2，totalTasks 为 5
 
 #### Scenario: task 完成
 - **WHEN** task T-003 成功完成
 - **THEN** EventBus emit `ralph_task_update`，status 为 `completed`
-- **AND** EventBus emit `ralph_loop_progress`，completed 为 3（前两个 + 当前）
+- **AND** EventBus emit `ralph_loop_progress`，completed 为 3（前两个 + 当前），failed 为 0，total 为 5
 
 #### Scenario: task 失败重试
 - **WHEN** task T-003 第 1 次失败，准备重试
-- **THEN** EventBus emit `ralph_task_update`，status 为 `retrying`，attempt 为 1
+- **THEN** EventBus emit `ralph_task_update`，status 为 `retrying`，attempt 为 2（第 2 次尝试）
 
 #### Scenario: task 最终失败
 - **WHEN** task T-003 达到最大重试次数后仍失败
 - **THEN** EventBus emit `ralph_task_update`，status 为 `failed`，error 包含失败原因
+- **AND** EventBus emit `ralph_loop_progress`，completed 为 2，failed 为 1，total 为 5
 
 ### Requirement: executionId 层级关联
 
@@ -106,3 +120,8 @@ ralph_loop_progress payload：`{ issueId, projectId, executionId, completed, fai
 - **WHEN** ToolRegistry 的 executionId slot 在 tool execute 时为空
 - **THEN** tool execute 自行生成 UUID 作为 executionId
 - **AND** 后续所有事件使用该 ID
+
+#### Scenario: 并发 tool call 的 executionId 独立
+- **WHEN** Main Agent 同时发起多个 tool calls（如 spawn_coder 和 read_workflow）
+- **THEN** 每个 tool call 有独立的 executionId
+- **AND** 各自的 L1/L2 事件使用对应的 executionId，不混淆
