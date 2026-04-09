@@ -273,9 +273,17 @@ export class AgentRunnerService {
     sessionManager: SessionManager,
     llmConfig?: LlmConfig,
     updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
-  ): { started: boolean; queuePosition?: number } {
+  ): { started: boolean; queuePosition?: number; error?: string } {
     if (this.activeAgents.has(issue.id)) {
       return { started: false, queuePosition: 0 };
+    }
+
+    const pendingApproval = issueRepo.findPendingApprovalByIssueId(issue.id);
+    if (pendingApproval) {
+      return {
+        started: false,
+        error: `Issue #${issue.number} has pending approval. Use resume or submit_approval first.`,
+      };
     }
 
     if (this.activeAgents.size >= this.maxConcurrentAgents) {

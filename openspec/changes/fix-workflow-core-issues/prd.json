@@ -100,8 +100,8 @@
         "Unit test covers both cases"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added duplicate execution prevention in AgentRunnerService.start() using findPendingApprovalByIssueId()"
     },
     {
       "id": "T-008",
