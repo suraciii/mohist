@@ -71,8 +71,8 @@
         "Invalid transitions rejected: Done→any, Build→Explore"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "M1_ALLOWED_TRANSITIONS removed, isValidTransition imported and used. Some existing tests fail because they test old M1 transitions (Plan→Review, Build→Check) not in new STAGE_TRANSITIONS. These tests will be updated in T-012."
     },
     {
       "id": "T-006",

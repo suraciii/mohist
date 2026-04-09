@@ -29,3 +29,10 @@ Next steps: Verify T-004 (reviewer-agent.ts), then proceed to T-005 (STAGE_TRANS
 Learnings: T-001 created the unified types and updated reviewer-agent.ts. All tasks T-001 through T-004 for interface unification are complete.
 
 Next steps: T-005 (Replace M1_ALLOWED_TRANSITIONS with unified STAGE_TRANSITIONS).
+
+---
+2026-04-09T12:55:00Z | T-005 | Removed M1_ALLOWED_TRANSITIONS constant from advance-stage.ts, imported isValidTransition from types/index.ts, replaced transition validation logic. Typecheck passes.
+
+Learnings: The old M1_ALLOWED_TRANSITIONS had different transitions than STAGE_TRANSITIONS spec (e.g., Plan→Review, Build→Check were allowed in old but not in spec). Some existing tests fail because they test old M1 behavior - these will be updated in T-012 (Update tests for unified interfaces and transition rules).
+
+Next steps: T-006 (Add findPendingApprovalByIssueId to IssueRepo).
