@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { resolveModel } from '../src/agent-runtime/llm';
+import { resolveModel, LlmError } from '../src/agent-runtime/llm';
 import type { ConfigInfo } from '../src/config/config-schema';
 
 describe('resolveModel', () => {
@@ -132,5 +132,39 @@ describe('resolveModel', () => {
     const model = resolveModel(config);
     expect(model).toBeDefined();
     expect(model.modelId).toBe('deepseek-chat');
+  });
+
+  describe('LlmError', () => {
+    it('should throw LlmError with code LLM_NOT_CONFIGURED when apiKey is missing', () => {
+      delete process.env['ANTHROPIC_API_KEY'];
+      const config: ConfigInfo = {
+        model: 'anthropic/claude-sonnet-4-20250514',
+      };
+      try {
+        resolveModel(config);
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(LlmError);
+        expect(error).toBeInstanceOf(Error);
+        expect((error as LlmError).code).toBe('LLM_NOT_CONFIGURED');
+        expect((error as LlmError).name).toBe('LlmError');
+        expect((error as LlmError).message).toContain('anthropic');
+      }
+    });
+
+    it('should throw plain Error for invalid model format', () => {
+      const config: ConfigInfo = {
+        provider: { anthropic: { apiKey: 'sk-test' } },
+        model: 'no-slash-here',
+      };
+      try {
+        resolveModel(config);
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        expect(error).not.toBeInstanceOf(LlmError);
+        expect((error as Error).message).toContain('Invalid model format');
+      }
+    });
   });
 });
