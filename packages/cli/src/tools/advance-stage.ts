@@ -2,19 +2,11 @@ import { z } from 'zod';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
 import { IssueRepo } from '../db/issue-repo';
 import type { Issue } from '../types';
-import { Stage } from '../types';
+import { Stage, isValidTransition } from '../types';
 import { loadWorkflow } from '../workflow/workflow-loader';
 import type { EventBus } from '../services/event-bus';
 
 const VALID_STAGES = new Set(Object.values(Stage));
-
-const M1_ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  [Stage.Draft]: [Stage.Plan],
-  [Stage.Plan]: [Stage.Build, Stage.Review],
-  [Stage.Review]: [Stage.Build],
-  [Stage.Build]: [Stage.Check],
-  [Stage.Check]: [Stage.Done, Stage.Plan],
-};
 
 export interface AdvanceStageContext {
   issue: Issue;
@@ -46,13 +38,8 @@ export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstan
         return `Error: invalid stage "${stage}". Valid stages: ${Array.from(VALID_STAGES).join(', ')}`;
       }
 
-      const allowed = M1_ALLOWED_TRANSITIONS[issue.stage];
-      if (!allowed) {
-        return `Error: issue is in stage "${issue.stage}" which is not supported in M1. No transitions are allowed from this stage.`;
-      }
-
-      if (!allowed.includes(stage)) {
-        return `Error: cannot advance from "${issue.stage}" to "${stage}". Allowed transitions from "${issue.stage}": ${allowed.join(', ')}`;
+      if (!isValidTransition(issue.stage, stage)) {
+        return `Error: cannot advance from "${issue.stage}" to "${stage}". Invalid stage transition.`;
       }
 
       const fromStage = issue.stage;
