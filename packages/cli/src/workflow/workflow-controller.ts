@@ -4,14 +4,16 @@ import { executeCoderTask } from '../tools/spawn-coder';
 
 export interface PlanResult {
   success: boolean;
+  changePath: string;
   artifacts: {
     proposal: string;
     design: string;
     specs: Array<{ name: string; content: string }>;
-    prd: unknown;
+    prd: PrdJson | null;
   };
   selfReviewNotes?: string;
   iterations: number;
+  duration: number;
 }
 
 export interface ReviewResult {
