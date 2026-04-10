@@ -31,7 +31,7 @@
         "GET /api/status 保持不变，不受影响"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "需要集成 builtin-models.ts；GET /api/models 与 GET /api/status 并存，职责分离"
     },
     {

@@ -9,3 +9,14 @@ Started: 2026-04-10T09:41:56.666Z
 - TypeScript compilation passes, existing tests pass (1 unrelated pre-existing failure)
 - Learnings: *-for-coding providers share models via .map() transformation rather than direct reference to allow independent badge/contextWindow overrides
 - Next steps: T-002 - Extend Provider API to return models from builtin-models registry
+
+---
+[2026-04-10T17:53:00Z] T-002 Extended Provider API to return model lists
+- Modified GET /api/providers: builtin providers now return model IDs from getModelsByProvider()
+- Added GET /api/models endpoint: returns all available models grouped by provider
+- GET /api/models only includes configured providers (source !== 'none') for builtin providers
+- Custom providers' models are included if configured
+- TypeScript compilation passes
+- Test status: 16/17 tests pass; 1 pre-existing failure in providers.test.ts (regex issue in maskApiKey test, unrelated to T-002 changes)
+- Learnings: The maskApiKey function's regex test was already broken - it expects masked keys to start with '*' but maskApiKey preserves first 4 chars
+- Next steps: T-003 - Database migration + type definitions update
