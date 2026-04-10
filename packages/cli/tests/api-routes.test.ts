@@ -236,8 +236,8 @@ describe('API Routes', () => {
 
     describe('GET /api/issues', () => {
       it('should list issues', async () => {
-        issueService.create({ projectId, title: 'Issue 1' });
-        issueService.create({ projectId, title: 'Issue 2' });
+        await issueService.create({ projectId, title: 'Issue 1' });
+        await issueService.create({ projectId, title: 'Issue 2' });
 
         const response = await request(server).get('/api/issues');
 
@@ -246,7 +246,7 @@ describe('API Routes', () => {
       });
 
       it('should filter by stage', async () => {
-        issueService.create({ projectId, title: 'Test' });
+        await issueService.create({ projectId, title: 'Test' });
         issueService.transitionToStageByNumber(projectId, 1, 'designing' as any);
 
         const response = await request(server).get('/api/issues?stage=designing');
@@ -258,7 +258,7 @@ describe('API Routes', () => {
 
     describe('GET /api/issues/:number', () => {
       it('should return issue details', async () => {
-        issueService.create({ projectId, title: 'Test Issue' });
+        await issueService.create({ projectId, title: 'Test Issue' });
 
         const response = await request(server).get('/api/issues/1');
 
@@ -276,7 +276,7 @@ describe('API Routes', () => {
 
     describe('POST /api/issues/:number/start', () => {
       it('should start processing an issue', async () => {
-        issueService.create({ projectId, title: 'Test Issue' });
+        await issueService.create({ projectId, title: 'Test Issue' });
 
         const response = await request(server).post('/api/issues/1/start');
 
@@ -313,6 +313,44 @@ describe('API Routes', () => {
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(response.body.data.name).toBe('Test Project');
+      });
+
+      it('should return llm.configured false when no llmConfig provided', async () => {
+        const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
+        projectService.setCurrent(project);
+
+        const response = await request(server).get('/api/status');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.llm).toBeDefined();
+        expect(response.body.data.llm.configured).toBe(false);
+        expect(response.body.data.llm.provider).toBeUndefined();
+        expect(response.body.data.llm.model).toBeUndefined();
+      });
+
+      it('should not expose apiKey in llm status', async () => {
+        const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
+        projectService.setCurrent(project);
+
+        const response = await request(server).get('/api/status');
+
+        expect(response.status).toBe(200);
+        const llmJson = JSON.stringify(response.body.data.llm);
+        expect(llmJson).not.toContain('apiKey');
+      });
+
+      it('should return llm.configured false when llmConfig has no apiKey', async () => {
+        const noKeyApp = new Hono();
+        noKeyApp.route('/api', createStatusRoutes(projectService, issueService, { model: 'anthropic/claude-sonnet-4-20250514' }));
+        const noKeyServer = createTestServer(noKeyApp);
+
+        const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
+        projectService.setCurrent(project);
+
+        const response = await request(noKeyServer).get('/api/status');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.llm.configured).toBe(false);
       });
     });
 

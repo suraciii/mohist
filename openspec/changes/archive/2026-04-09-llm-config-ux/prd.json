@@ -1,0 +1,86 @@
+{
+  "project": "mohist",
+  "description": "改善 LLM 配置缺失时的用户体验：status API 暴露 LLM 状态、错误分类为结构化错误码、前端展示引导卡片和分类错误提示",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "创建 LlmError 错误类",
+      "spec": "specs/llm-error-classification/spec.md",
+      "description": "在 agent-runtime/llm.ts 中创建 LlmError 类（继承 Error），携带 code 字段。将 resolveModel() 中 apiKey 缺失时的抛错改为 LlmError，code 为 LLM_NOT_CONFIGURED。",
+      "acceptanceCriteria": [
+        "resolveModel 在 apiKey 缺失时抛出 LlmError，error.code === 'LLM_NOT_CONFIGURED'",
+        "resolveModel 在 apiKey 存在时正常返回 LanguageModelV3",
+        "LlmError 继承 Error， instanceof Error 为 true",
+        "现有 resolveModel 的其他错误（model 格式无效）仍抛普通 Error",
+        "npm test 通过"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "LlmError 放在 agent-runtime/llm.ts 中导出即可，不需要单独文件。"
+    },
+    {
+      "id": "T-002",
+      "title": "Status API 增加 LLM 状态字段",
+      "spec": "specs/llm-status/spec.md",
+      "description": "在 api/status.ts 的 GET /api/status 端点中增加 llm 字段。通过 try/catch 调用 resolveModel() 判断配置是否有效，返回 { configured, provider?, model? }。不暴露敏感信息。",
+      "acceptanceCriteria": [
+        "GET /api/status 响应包含 llm 字段",
+        "LLM 已配置时 llm.configured === true，包含 provider 和 model",
+        "LLM 未配置时 llm.configured === false，无 provider/model 字段",
+        "配置无效时 status 端点本身返回 200，不返回 5xx",
+        "响应不包含 apiKey 等敏感信息",
+        "npm test 通过"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "需要将 llmConfig 传入 createStatusRoutes。参考 api/explore.ts 的传参模式。"
+    },
+    {
+      "id": "T-003",
+      "title": "API 错误响应增加 code 字段",
+      "spec": "specs/http-api/spec.md",
+      "description": "在 api/explore.ts 的 POST /:id/messages 的 catch 块中，检测 error 是否为 LlmError，如果是则在错误响应中附加 code 字段。",
+      "acceptanceCriteria": [
+        "LlmError 时错误响应包含 code 字段（如 'LLM_NOT_CONFIGURED'）",
+        "普通 Error 时错误响应无 code 字段",
+        "HTTP 状态码逻辑不变",
+        "npm test 通过"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "只改 api/explore.ts 的 messages 端点。Issues start 端点后续再做。"
+    },
+    {
+      "id": "T-004",
+      "title": "Explore 页面 LLM 状态检查与引导卡片",
+      "spec": "specs/web-ui/spec.md",
+      "description": "在 ExplorePage 中查询 /api/status 的 llm 字段。当 llm.configured === false 时渲染引导卡片替代聊天界面。引导卡片包含配置文件路径、配置示例、支持的 provider 列表、刷新按钮。Status 请求失败时不阻塞页面。",
+      "acceptanceCriteria": [
+        "LLM 未配置时 Explore 页面显示引导卡片，不显示聊天输入框",
+        "引导卡片包含 ~/.mohist/config.jsonc 路径和配置示例",
+        "引导卡片包含刷新按钮，点击后重新查询 status",
+        "LLM 已配置时页面正常显示聊天界面",
+        "Status 请求失败时不阻塞页面",
+        "build 无报错"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "利用 react-query 的 useQuery 请求 status API。引导卡片的 provider 列表可以硬编码在组件中。"
+    },
+    {
+      "id": "T-005",
+      "title": "Explore 页面分类错误提示",
+      "spec": "specs/web-ui/spec.md",
+      "description": "更新 useExploreStream 解析 API 返回的 code 字段，根据 code 展示分类错误提示。当 code 为 LLM_NOT_CONFIGURED 时显示配置引导而非原始错误信息。",
+      "acceptanceCriteria": [
+        "useExploreStream 正确解析 API 响应中的 code 字段",
+        "stream error 为 LLM_NOT_CONFIGURED 时显示配置引导",
+        "无 code 字段的错误保持原有展示逻辑",
+        "build 无报错"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "错误提示文案参考引导卡片的设计，保持一致性。"
+    }
+  ]
+}

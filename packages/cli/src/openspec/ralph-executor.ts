@@ -1,12 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
-import { Writable, Readable } from 'stream';
-import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-import type { SessionNotification, RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
+import { runAcpSession } from '../agent-runtime/acp-session';
+import type { EventBus } from '../services/event-bus';
 
 export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout';
 
@@ -89,6 +87,8 @@ export interface RalphExecutorContext {
   projectPath: string;
   issueId?: string;
   projectId?: string;
+  eventBus?: EventBus;
+  executionId?: string;
   onTaskStart?: (task: Task) => void;
   onTaskComplete?: (task: Task, success: boolean, output: string) => void;
   onLoopComplete?: (results: RalphLoopResult) => void;
@@ -130,20 +130,6 @@ interface TaskStatusEntry {
   status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
   attempts: number;
   error?: string;
-}
-
-const DEFAULT_TIMEOUT = 30 * 60 * 1000;
-const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024; // 2MB
-
-export function truncateAgentText(text: string): string {
-  if (text.length <= MAX_AGENT_TEXT_LENGTH) {
-    return text;
-  }
-  const keepLength = Math.floor(MAX_AGENT_TEXT_LENGTH / 2);
-  const head = text.slice(0, keepLength);
-  const tail = text.slice(-keepLength);
-  const truncated = text.length - MAX_AGENT_TEXT_LENGTH;
-  return `${head}\n\n...[truncated ${truncated} characters]...\n\n${tail}`;
 }
 
 export function getOrderValue(order: number | string | undefined): number {
@@ -190,159 +176,6 @@ export function readPrdTasks(prdPath: string): Task[] | null {
   } catch {
     return null;
   }
-}
-
-interface SpawnResult {
-  success: boolean;
-  output: string;
-  error?: string;
-}
-
-async function executeTaskWithSpawn(
-  _task: Task,
-  fullPrompt: string,
-  worktreePath: string
-): Promise<SpawnResult> {
-  return new Promise((resolve) => {
-    const proc = spawn('opencode', ['acp'], {
-      cwd: worktreePath,
-      stdio: ['pipe', 'pipe', 'inherit'],
-      env: Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([key]) =>
-            key !== 'OPENCODE_SERVER_PASSWORD' &&
-            key !== 'OPENCODE_SERVER_USERNAME'
-        )
-      ),
-    });
-
-    let cleanupDone = false;
-    let agentText = '';
-    let agentTextTruncated = false;
-    let sessionId = '';
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    const doCleanup = () => {
-      if (cleanupDone) return;
-      cleanupDone = true;
-
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-
-      try { proc.kill('SIGTERM'); } catch { /* already exited */ }
-
-      setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch { /* already exited */ }
-      }, 5000);
-    };
-
-    const input = Writable.toWeb(proc.stdin) as WritableStream<Uint8Array>;
-    const output = Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>;
-    const stream = ndJsonStream(input, output);
-
-    const cleanup = async () => {
-      const results = await Promise.allSettled([
-        stream.readable.cancel().catch(() => {}),
-        stream.writable.abort().catch(() => {}),
-      ]);
-      results.forEach((result, index) => {
-        if (result.status === 'rejected') {
-          console.error(`[ralph-executor] Cleanup ${index} failed:`, result.reason);
-        }
-      });
-      doCleanup();
-    };
-
-    const connection = new ClientSideConnection(
-      () => ({
-        sessionUpdate: async (notification: SessionNotification) => {
-          try {
-            const update = notification.update;
-            const eventType = update.sessionUpdate;
-            if (
-              eventType === 'agent_message_chunk' &&
-              update.content &&
-              'text' in update.content
-            ) {
-              if (!agentTextTruncated) {
-                agentText += (update.content as { text: string }).text;
-                if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
-                  agentText = truncateAgentText(agentText);
-                  agentTextTruncated = true;
-                }
-              }
-            }
-          } catch (err) {
-            console.error('[ralph-executor] sessionUpdate error:', err);
-          }
-        },
-        requestPermission: async (
-          params: RequestPermissionRequest
-        ): Promise<RequestPermissionResponse> => {
-          const allow = params.options.find(
-            (o: { kind: string }) => o.kind === 'allow_once' || o.kind === 'allow_always'
-          );
-          if (allow) {
-            return { outcome: { outcome: 'selected', optionId: allow.optionId } };
-          }
-          return { outcome: { outcome: 'cancelled' } };
-        },
-      }),
-      stream
-    );
-
-    const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      timeoutId = setTimeout(() => resolve('timeout'), DEFAULT_TIMEOUT);
-    });
-
-    const runSession = async () => {
-      try {
-        const initResult = await Promise.race([
-          connection.initialize({ protocolVersion: PROTOCOL_VERSION, clientInfo: { name: 'mohist', version: '0.1.0' } }),
-          timeoutPromise,
-        ]);
-
-        if (initResult === 'timeout') {
-          resolve({ success: false, output: agentText, error: 'Timed out during initialize' });
-          return;
-        }
-
-        const sessionResult = await Promise.race([
-          connection.newSession({ cwd: worktreePath, mcpServers: [] }),
-          timeoutPromise,
-        ]);
-
-        if (sessionResult === 'timeout') {
-          resolve({ success: false, output: agentText, error: 'Timed out during newSession' });
-          return;
-        }
-
-        sessionId = sessionResult.sessionId;
-
-        const promptResult = await Promise.race([
-          connection.prompt({ sessionId, prompt: [{ type: 'text', text: fullPrompt }] }),
-          timeoutPromise,
-        ]);
-
-        if (promptResult === 'timeout') {
-          try { await connection.cancel({ sessionId }); } catch { /* cancel may fail */ }
-          resolve({ success: false, output: agentText, error: `Timed out after ${DEFAULT_TIMEOUT / 1000}s` });
-          return;
-        }
-
-        resolve({ success: true, output: agentText });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        resolve({ success: false, output: agentText, error: message });
-      } finally {
-        await cleanup();
-      }
-    };
-
-    runSession();
-  });
 }
 
 function writeTaskStatus(statusPath: string, statusFile: TaskStatusFile): void {
@@ -497,6 +330,40 @@ export async function runRalphLoop(
 
   let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
 
+  const emitTaskUpdate = (
+    taskId: string,
+    taskIndex: number,
+    totalTasks: number,
+    status: 'started' | 'completed' | 'failed' | 'retrying',
+    attempt?: number,
+    error?: string
+  ) => {
+    if (!context.eventBus) return;
+    context.eventBus.emit('ralph_task_update', {
+      issueId: context.issueId ?? '',
+      projectId: context.projectId ?? '',
+      executionId: context.executionId ?? '',
+      taskId,
+      taskIndex,
+      totalTasks,
+      status,
+      attempt,
+      error,
+    });
+  };
+
+  const emitLoopProgress = (completedCount: number, failedCount: number, total: number) => {
+    if (!context.eventBus) return;
+    context.eventBus.emit('ralph_loop_progress', {
+      issueId: context.issueId ?? '',
+      projectId: context.projectId ?? '',
+      executionId: context.executionId ?? '',
+      completed: completedCount,
+      failed: failedCount,
+      total,
+    });
+  };
+
   for (let i = 0; i < remainingTasks.length; i++) {
     const task = remainingTasks[i];
 
@@ -534,13 +401,27 @@ export async function runRalphLoop(
 
       updateTaskStatusEntry(change.taskStatusPath, task.id, 'in_progress');
 
-      const result = await executeTaskWithSpawn(task, prompt, context.worktreePath);
+      if (attempt === currentAttempts + 1) {
+        emitTaskUpdate(task.id, i, remainingTasks.length, 'started', attempt);
+      }
+
+      const result = await runAcpSession({
+        cwd: context.worktreePath,
+        task: prompt,
+        issueId: context.issueId,
+        projectId: context.projectId,
+        executionId: context.executionId,
+        eventBus: context.eventBus,
+      });
 
       attemptsUsed = attempt;
       if (result.success) {
         taskSuccess = true;
         updateTaskStatusEntry(change.taskStatusPath, task.id, 'completed');
-        context.onTaskComplete?.(task, true, result.output);
+        emitTaskUpdate(task.id, i, remainingTasks.length, 'completed', attempt);
+        completed++;
+        emitLoopProgress(completed, failed, sortedTasks.length);
+        context.onTaskComplete?.(task, true, result.text);
         break;
       } else {
         lastError = result.error ?? 'Unknown error';
@@ -563,6 +444,7 @@ export async function runRalphLoop(
           break;
         }
 
+        emitTaskUpdate(task.id, i, remainingTasks.length, 'retrying', attempt);
         options.onRetry?.(task, attempt, lastError);
       }
     }
@@ -576,6 +458,7 @@ export async function runRalphLoop(
         error: lastError,
       });
       updateTaskStatusEntry(change.taskStatusPath, task.id, 'failed', lastError);
+      emitTaskUpdate(task.id, i, remainingTasks.length, 'failed', attemptsUsed, lastError);
       context.onTaskComplete?.(task, false, lastError ?? 'Max retries exceeded');
 
       if (shouldPause && context.onAskUser) {
@@ -604,7 +487,6 @@ export async function runRalphLoop(
         }
       }
     } else {
-      completed++;
       taskResults.push({
         taskId: task.id,
         status: 'completed',
