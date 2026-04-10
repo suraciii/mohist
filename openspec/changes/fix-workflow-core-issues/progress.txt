@@ -14,3 +14,18 @@ Started: 2026-04-10T01:27:17.117Z
 
 Next steps: Run tests to verify implementation
 
+
+[2026-04-10 09:37:45] T-012: Updated advance-stage.test.ts to reflect correct STAGE_TRANSITIONS:
+- Removed tests for invalid transitions that are now valid (Plan→Review)
+- Added tests for invalid transitions that are now rejected (Build→Check)
+- Fixed approval emission tests to reflect actual DEFAULT_WORKFLOW: approval=true for plan and review stages, approval=false for build/done/explore
+- Legacy transitions (Draft→Plan, Check→Done, Check→Plan) still work via STAGE_TRANSITIONS
+Learnings: DEFAULT_WORKFLOW only contains new flow stages (explore, plan, build, review, done). Legacy stages (draft, check) are not in DEFAULT_WORKFLOW but still transition via STAGE_TRANSITIONS. shouldPauseAtCurrentStage checks NEXT stage's approval flag.
+Next: Continue with T-013 - Run full test suite and fix any remaining failures.
+
+[2026-04-10 09:37:45] T-012: Updated advance-stage.test.ts to reflect correct STAGE_TRANSITIONS:
+- Removed tests for invalid transitions that are now valid (Plan→Review)
+- Added tests for invalid transitions that are now rejected (Build→Check)
+- Fixed approval emission tests to reflect actual DEFAULT_WORKFLOW: approval=true for plan and review stages, approval=false for build/done/explore
+Learnings: DEFAULT_WORKFLOW only contains new flow stages (explore, plan, build, review, done). Legacy stages (draft, check) are not in DEFAULT_WORKFLOW but still transition via STAGE_TRANSITIONS.
+Next: Continue with T-013 - Run full test suite.

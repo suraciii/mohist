@@ -179,8 +179,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated advance-stage.test.ts to use correct STAGE_TRANSITIONS (Build→Review, Plan→Review no longer allowed, Build→Check no longer allowed). Updated approval emission tests to reflect DEFAULT_WORKFLOW approval flags (build has no approval, plan/review do)."
     },
     {
       "id": "T-013",
