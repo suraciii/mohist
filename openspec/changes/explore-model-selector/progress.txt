@@ -20,3 +20,5 @@ Started: 2026-04-10T09:41:56.666Z
 - Test status: 16/17 tests pass; 1 pre-existing failure in providers.test.ts (regex issue in maskApiKey test, unrelated to T-002 changes)
 - Learnings: The maskApiKey function's regex test was already broken - it expects masked keys to start with '*' but maskApiKey preserves first 4 chars
 - Next steps: T-003 - Database migration + type definitions update
+
+2026-04-10T17:57:30Z | T-003 | 数据库迁移 + 类型定义更新 | 实现 migrateToVersion10() 添加 model/variant 列；更新 ExploreSession/ExploreSessionRow 接口；build 通过，tests 通过（1 pre-existing failure） | - | Next: T-004 更新 Explore Session Repository

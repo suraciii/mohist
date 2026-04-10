@@ -122,6 +122,8 @@ export interface ExploreSession {
   issueId: string | null;
   title: string;
   status: ExploreStatus;
+  model?: string;
+  variant?: string;
   createdAt: string;
   updatedAt: string;
 }

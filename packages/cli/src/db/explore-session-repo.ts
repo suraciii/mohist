@@ -8,6 +8,8 @@ interface ExploreSessionRow {
   issue_id: string | null;
   title: string;
   status: string;
+  model: string | null;
+  variant: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -19,6 +21,8 @@ function rowToExploreSession(row: ExploreSessionRow): ExploreSession {
     issueId: row.issue_id,
     title: row.title,
     status: row.status as ExploreStatus,
+    model: row.model ?? undefined,
+    variant: row.variant ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

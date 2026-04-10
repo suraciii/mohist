@@ -48,7 +48,7 @@
         "ExploreSessionRow 接口同步更新"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "所有迁移在单文件 migrations.ts 中，无 migrations/ 目录"
     },
     {
