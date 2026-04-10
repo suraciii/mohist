@@ -1,0 +1,11 @@
+# Ralph Progress Log
+Started: 2026-04-10T09:41:56.666Z
+
+---
+[2026-04-10T17:47:00Z] T-001 Created builtin-models.ts with complete model metadata for all providers
+- Implemented ModelMetadata interface with id, name, provider, description, badges, contextWindow, variants fields
+- Added models for: anthropic (3), openai (4), glm (3), kimi (3), minimax (1), deepseek (2), qwen (3), zhipuai-coding-plan (shared with glm), kimi-for-coding (1), minimax-for-coding (1)
+- Added helper functions: getModelsByProvider(), getModelById(), PROVIDER_MODEL_COUNT
+- TypeScript compilation passes, existing tests pass (1 unrelated pre-existing failure)
+- Learnings: *-for-coding providers share models via .map() transformation rather than direct reference to allow independent badge/contextWindow overrides
+- Next steps: T-002 - Extend Provider API to return models from builtin-models registry

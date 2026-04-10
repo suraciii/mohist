@@ -15,7 +15,7 @@
         "单元测试通过"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "参考 design.md 中的首期支持模型清单，注意 *-for-coding provider 使用不同 SDK (anthropic) 但共享模型 ID"
     },
     {

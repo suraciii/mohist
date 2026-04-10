@@ -81,11 +81,11 @@ export class HttpServer {
   public start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = serve(
-        { fetch: this.app.fetch, port: this.config.serverPort },
+        { fetch: this.app.fetch, port: this.config.serverPort, hostname: this.config.serverHost },
         (info) => {
           this.state.isRunning = true;
           this.state.startedAt = new Date().toISOString();
-          console.log(`Server listening on port ${info.port}`);
+          console.log(`Server listening on ${this.config.serverHost}:${info.port}`);
           resolve();
         }
       );

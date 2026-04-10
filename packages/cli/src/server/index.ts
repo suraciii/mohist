@@ -16,8 +16,8 @@ import { createExploreRoutes } from '../api/explore';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
-import type { LlmConfig } from '../agent-runtime';
-import { load as loadConfig } from '../config/config-loader';
+
+import { load as loadConfig, getServerConfig } from '../config/config-loader';
 import { RateLimiter } from '../utils/rate-limiter';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,10 +38,28 @@ function ensureDataDir(): void {
 async function main(): Promise<void> {
   ensureDataDir();
   
+  // Load config from JSONC first to get server config
+  let fileConfig: ReturnType<typeof loadConfig>;
+  try {
+    fileConfig = loadConfig();
+  } catch (err) {
+    console.error('Failed to load config:', err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+  
+  const serverConfig = getServerConfig(fileConfig);
+  
   const db = new DatabaseManager();
   const stateManager = new StateManager(db);
   const configService = new ConfigService(stateManager.getConfigRepo());
-  const config = configService.getConfig();
+  const dbConfig = configService.getConfig();
+  
+  // Merge: JSONC server config overrides DB config
+  const config = {
+    ...dbConfig,
+    serverPort: serverConfig.port,
+    serverHost: serverConfig.host,
+  };
 
   const issueService = new IssueService(stateManager.getIssueRepo(), stateManager.getCommentRepo());
   const projectService = new ProjectService(stateManager.getProjectRepo(), stateManager.getConfigRepo(), stateManager.getIssueRepo(), stateManager.getLabelRepo());
@@ -53,15 +71,7 @@ async function main(): Promise<void> {
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
   const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents());
 
-  let llmConfig: LlmConfig | undefined;
-  try {
-    llmConfig = loadConfig();
-  } catch (err) {
-    console.error('Failed to load config:', err instanceof Error ? err.message : err);
-    process.exit(1);
-  }
-
-  agentRunner.setLlmConfig(llmConfig);
+  agentRunner.setLlmConfig(fileConfig);
 
   const expiredCount = stateManager.getQuestionRepo().expireAllPending();
   if (expiredCount > 0) {
@@ -72,17 +82,17 @@ async function main(): Promise<void> {
   const server = new HttpServer(config, rateLimiter);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner, workflowLogRepo));
-  server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo));
+  server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
   server.addRouter('/api/providers', createProviderRoutes(eventBus, rateLimiter));
-  server.addRouter('/api', createStatusRoutes(projectService, issueService, llmConfig));
+  server.addRouter('/api', createStatusRoutes(projectService, issueService, fileConfig));
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
   server.addRouter('/api/fs', createFsRoutes());
-  server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), eventBus, llmConfig));
+  server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), eventBus, fileConfig));
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
   server.serveStaticFiles(webDistDir);
@@ -113,7 +123,7 @@ async function main(): Promise<void> {
 
   await server.start();
   
-  console.log(`mohist server started on port ${config.serverPort}`);
+  console.log(`mohist server started on ${config.serverHost}:${config.serverPort}`);
   console.log(`Max concurrent agents: ${config.maxConcurrentAgents}`);
 }
 

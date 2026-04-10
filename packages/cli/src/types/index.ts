@@ -72,6 +72,7 @@ export interface Project {
 
 export interface Config {
   serverPort: number;
+  serverHost: string;
   pollInterval: number;
   maxConcurrentAgents: number;
   agentTimeout: number;

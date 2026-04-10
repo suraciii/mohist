@@ -3,7 +3,6 @@ import { ConfigRepo, initializeDefaultConfig } from '../db';
 
 export class ConfigService {
   private static KEYS = {
-    SERVER_PORT: 'server.port',
     AGENT_TIMEOUT: 'agent.timeout',
     AGENT_MAX_CONCURRENT: 'agent.maxConcurrent',
     POLL_INTERVAL: 'poll.interval',
@@ -29,21 +28,12 @@ export class ConfigService {
     return this.configRepo.getAll();
   }
 
-  getConfig(): Config {
+  getConfig(): Omit<Config, 'serverPort' | 'serverHost'> {
     return {
-      serverPort: this.configRepo.getNumber(ConfigService.KEYS.SERVER_PORT, 3456),
       agentTimeout: this.configRepo.getNumber(ConfigService.KEYS.AGENT_TIMEOUT, 1800000),
       maxConcurrentAgents: this.configRepo.getNumber(ConfigService.KEYS.AGENT_MAX_CONCURRENT, 8),
       pollInterval: this.configRepo.getNumber(ConfigService.KEYS.POLL_INTERVAL, 30000),
     };
-  }
-
-  getServerPort(): number {
-    return this.configRepo.getNumber(ConfigService.KEYS.SERVER_PORT, 3456);
-  }
-
-  setServerPort(port: number): void {
-    this.configRepo.set(ConfigService.KEYS.SERVER_PORT, port);
   }
 
   getAgentTimeout(): number {
@@ -77,13 +67,6 @@ export class ConfigService {
 
   validate(key: string, value: string): { valid: boolean; error?: string } {
     switch (key) {
-      case ConfigService.KEYS.SERVER_PORT:
-        const port = parseInt(value, 10);
-        if (isNaN(port) || port < 1 || port > 65535) {
-          return { valid: false, error: 'Port must be between 1 and 65535' };
-        }
-        break;
-      
       case ConfigService.KEYS.AGENT_TIMEOUT:
         const timeout = parseInt(value, 10);
         if (isNaN(timeout) || timeout < 60000) {
