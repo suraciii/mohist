@@ -29,8 +29,8 @@
         "Tests pass (npm test in packages/cli)"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Follow existing test patterns in packages/cli/tests/"
+      "passes": true,
+      "notes": "Tests added to config-loader.test.ts and resolve-model.test.ts. All 45 tests pass."
     }
   ]
 }
