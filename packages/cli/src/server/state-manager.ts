@@ -1,5 +1,5 @@
 import { 
-  getDatabase, 
+  DatabaseManager,
   initializeDatabase,
   ProjectRepo, 
   IssueRepo, 
@@ -25,8 +25,7 @@ export class StateManager {
   private exploreMessageRepo: ExploreMessageRepo;
   private initialized: boolean = false;
 
-  constructor() {
-    const db = getDatabase();
+  constructor(db: DatabaseManager) {
     initializeDatabase(db);
     
     this.projectRepo = new ProjectRepo(db);
@@ -82,18 +81,4 @@ export class StateManager {
   getExploreMessageRepo(): ExploreMessageRepo {
     return this.exploreMessageRepo;
   }
-}
-
-let stateManagerInstance: StateManager | null = null;
-
-export function getStateManager(): StateManager {
-  if (!stateManagerInstance) {
-    stateManagerInstance = new StateManager();
-  }
-  return stateManagerInstance;
-}
-
-export function resetStateManager(): StateManager {
-  stateManagerInstance = new StateManager();
-  return stateManagerInstance;
 }

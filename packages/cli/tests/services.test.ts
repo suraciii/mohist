@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { resetDatabase, closeDatabase } from '../src/db/database';
-import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
+import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ConfigRepo } from '../src/db/config-repo';
+import { LabelRepo } from '../src/db/label-repo';
+import { CommentRepo } from '../src/db/comment-repo';
 import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
 import { ConfigService } from '../src/services/config-service';
@@ -15,26 +16,28 @@ describe('ProjectService', () => {
   let projectRepo: ProjectRepo;
   let issueRepo: IssueRepo;
   let configRepo: ConfigRepo;
+  let labelRepo: LabelRepo;
   let service: ProjectService;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
-    
+
     projectRepo = new ProjectRepo(db);
     issueRepo = new IssueRepo(db);
     configRepo = new ConfigRepo(db);
-    service = new ProjectService(projectRepo, configRepo, issueRepo);
+    labelRepo = new LabelRepo(db);
+    service = new ProjectService(projectRepo, configRepo, issueRepo, labelRepo);
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('create', () => {
     it('should create a project', async () => {
       const project = await service.create({ name: 'Test Project', path: '/test/path' });
-      
+
       expect(project.id).toBeDefined();
       expect(project.name).toBe('Test Project');
       expect(project.path).toBe('/test/path');
@@ -42,14 +45,14 @@ describe('ProjectService', () => {
 
     it('should throw on duplicate name', async () => {
       await service.create({ name: 'Test', path: '/path1' });
-      
+
       await expect(service.create({ name: 'Test', path: '/path2' }))
         .rejects.toThrow('already exists');
     });
 
     it('should throw on duplicate path', async () => {
       await service.create({ name: 'Project1', path: '/test/path' });
-      
+
       await expect(service.create({ name: 'Project2', path: '/test/path' }))
         .rejects.toThrow('already used');
     });
@@ -59,21 +62,21 @@ describe('ProjectService', () => {
     it('should find project by id', async () => {
       const created = await service.create({ name: 'Test', path: '/test' });
       const found = service.getById(created.id);
-      
+
       expect(found?.name).toBe('Test');
     });
 
     it('should find project by name', async () => {
       await service.create({ name: 'Unique Name', path: '/test' });
       const found = service.getByName('Unique Name');
-      
+
       expect(found?.path).toBe('/test');
     });
 
     it('should find project by path', async () => {
       await service.create({ name: 'Test', path: '/unique/path' });
       const found = service.getByPath('/unique/path');
-      
+
       expect(found?.name).toBe('Test');
     });
   });
@@ -86,14 +89,14 @@ describe('ProjectService', () => {
     it('should set current project', async () => {
       const project = await service.create({ name: 'Test', path: '/test' });
       service.setCurrent(project);
-      
+
       expect(service.getCurrent()?.id).toBe(project.id);
     });
 
     it('should set current project by name', async () => {
       await service.create({ name: 'Test', path: '/test' });
       const set = service.setCurrentByName('Test');
-      
+
       expect(set?.name).toBe('Test');
       expect(service.getCurrent()?.name).toBe('Test');
     });
@@ -102,7 +105,7 @@ describe('ProjectService', () => {
       const project = await service.create({ name: 'Test', path: '/test' });
       service.setCurrent(project);
       service.clearCurrent();
-      
+
       expect(service.getCurrent()).toBeNull();
     });
 
@@ -110,7 +113,7 @@ describe('ProjectService', () => {
       const project = await service.create({ name: 'Test', path: '/test' });
       service.setCurrent(project);
       service.delete(project.id);
-      
+
       expect(service.getCurrent()).toBeNull();
     });
   });
@@ -137,7 +140,7 @@ describe('ProjectService', () => {
     it('should return all projects sorted by name', async () => {
       await service.create({ name: 'Zebra', path: '/z' });
       await service.create({ name: 'Alpha', path: '/a' });
-      
+
       const all = service.getAll();
       expect(all).toHaveLength(2);
       expect(all[0].name).toBe('Alpha');
@@ -160,37 +163,39 @@ describe('ProjectService', () => {
 describe('IssueService', () => {
   let db: DatabaseManager;
   let issueRepo: IssueRepo;
+  let commentRepo: CommentRepo;
   let service: IssueService;
   let projectId: string;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
-    
+
     const projectRepo = new ProjectRepo(db);
     const project = projectRepo.create({ name: 'Test Project', path: '/test' });
     projectId = project.id;
-    
+
     issueRepo = new IssueRepo(db);
-    service = new IssueService(issueRepo);
+    commentRepo = new CommentRepo(db);
+    service = new IssueService(issueRepo, commentRepo);
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('create', () => {
     it('should create an issue with auto-incrementing number', () => {
       const issue1 = service.create({ projectId, title: 'First' });
       const issue2 = service.create({ projectId, title: 'Second' });
-      
+
       expect(issue1.number).toBe(1);
       expect(issue2.number).toBe(2);
     });
 
     it('should create issue in draft stage', () => {
       const issue = service.create({ projectId, title: 'Test' });
-      
+
       expect(issue.stage).toBe(Stage.Draft);
       expect(issue.status).toBe(IssueStatus.Active);
     });
@@ -200,7 +205,7 @@ describe('IssueService', () => {
     it('should find issue by number', () => {
       service.create({ projectId, title: 'Test' });
       const found = service.getByNumber(projectId, 1);
-      
+
       expect(found?.number).toBe(1);
     });
   });
@@ -209,7 +214,7 @@ describe('IssueService', () => {
     it('should transition issue stage', () => {
       service.create({ projectId, title: 'Test' });
       const updated = service.transitionToStageByNumber(projectId, 1, Stage.Plan);
-      
+
       expect(updated?.stage).toBe(Stage.Plan);
     });
 
@@ -223,7 +228,7 @@ describe('IssueService', () => {
     it('should pause issue', () => {
       service.create({ projectId, title: 'Test' });
       const paused = service.pause(projectId, 1);
-      
+
       expect(paused?.status).toBe(IssueStatus.Paused);
     });
 
@@ -231,7 +236,7 @@ describe('IssueService', () => {
       service.create({ projectId, title: 'Test' });
       service.pause(projectId, 1);
       const resumed = service.resume(projectId, 1);
-      
+
       expect(resumed?.status).toBe(IssueStatus.Active);
     });
   });
@@ -240,7 +245,7 @@ describe('IssueService', () => {
     it('should block issue', () => {
       service.create({ projectId, title: 'Test' });
       const blocked = service.block(projectId, 1);
-      
+
       expect(blocked?.status).toBe(IssueStatus.Blocked);
     });
   });
@@ -250,10 +255,10 @@ describe('IssueService', () => {
       service.create({ projectId, title: 'Draft 1' });
       service.create({ projectId, title: 'Draft 2' });
       service.transitionToStageByNumber(projectId, 1, Stage.Plan);
-      
+
       const plan = service.getByStage(projectId, Stage.Plan);
       const drafts = service.getByStage(projectId, Stage.Draft);
-      
+
       expect(plan).toHaveLength(1);
       expect(drafts).toHaveLength(1);
     });
@@ -266,21 +271,21 @@ describe('ConfigService', () => {
   let service: ConfigService;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
-    
+
     configRepo = new ConfigRepo(db);
     service = new ConfigService(configRepo);
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('getConfig', () => {
     it('should return default config', () => {
       const config = service.getConfig();
-      
+
       expect(config.serverPort).toBe(3456);
       expect(config.agentTimeout).toBe(1800000);
       expect(config.maxConcurrentAgents).toBe(8);
@@ -344,7 +349,7 @@ describe('ConfigService', () => {
     it('should reset config to defaults', () => {
       service.setServerPort(9999);
       service.resetToDefaults();
-      
+
       expect(service.getServerPort()).toBe(3456);
     });
   });

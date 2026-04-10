@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { DatabaseManager, resetDatabase, closeDatabase } from '../src/db/database';
+import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
@@ -16,7 +16,7 @@ describe('advance-stage transitions', () => {
   let projectId: string;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     issueRepo = new IssueRepo(db);
     projectRepo = new ProjectRepo(db);
@@ -25,7 +25,7 @@ describe('advance-stage transitions', () => {
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   function createIssue(stage: Stage) {

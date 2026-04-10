@@ -2,9 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
 import { Hono } from 'hono';
 import request from 'supertest';
-import { resetDatabase, closeDatabase } from '../src/db/database';
-import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
+import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ConfigRepo } from '../src/db/config-repo';
@@ -55,7 +54,7 @@ describe('E2E: Single Issue Complete Flow', () => {
   let projectId: string;
 
   beforeEach(async () => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
@@ -68,7 +67,7 @@ describe('E2E: Single Issue Complete Flow', () => {
     const issueService = new IssueService(issueRepo, commentRepo);
     const configService = new ConfigService(configRepo);
     
-    const stateManager = new StateManager();
+    const stateManager = new StateManager(db);
     
     app = new Hono();
     app.route('/api/projects', createProjectRoutes(projectService));
@@ -89,7 +88,7 @@ describe('E2E: Single Issue Complete Flow', () => {
 
   afterEach(() => {
     server.close();
-    closeDatabase();
+    db.close();
   });
 
   function getAppUrl(): string {

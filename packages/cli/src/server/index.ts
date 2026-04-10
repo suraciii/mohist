@@ -1,5 +1,6 @@
 import { HttpServer } from './http-server';
-import { getStateManager } from './state-manager';
+import { StateManager } from './state-manager';
+import { DatabaseManager } from '../db';
 import { createProjectRoutes } from '../api/projects';
 import { createIssueRoutes } from '../api/issues';
 import { createProposeRoutes } from '../api/propose';
@@ -35,7 +36,8 @@ function ensureDataDir(): void {
 async function main(): Promise<void> {
   ensureDataDir();
   
-  const stateManager = getStateManager();
+  const db = new DatabaseManager();
+  const stateManager = new StateManager(db);
   const configService = new ConfigService(stateManager.getConfigRepo());
   const config = configService.getConfig();
 
