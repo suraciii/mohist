@@ -54,7 +54,7 @@ describe('E2E: Single Issue Complete Flow', () => {
   let server: http.Server;
   let projectId: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     db = resetDatabase({ inMemory: true });
     initializeDatabase(db);
     
@@ -82,7 +82,7 @@ describe('E2E: Single Issue Complete Flow', () => {
     const addr = server.address() as import('net').AddressInfo;
     (app as any).__port = addr.port;
     
-    const project = projectService.create({ name: 'E2E Test Project', path: '/test/e2e' });
+    const project = await projectService.create({ name: 'E2E Test Project', path: '/test/e2e' });
     projectId = project.id;
     projectService.setCurrent(project);
   });

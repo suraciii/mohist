@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseManager, SqlValue } from './database';
-import { Issue, Stage, IssueStatus } from '../types';
+import { Issue, Stage, IssueStatus, ApprovalState } from '../types';
 
 interface IssueRow {
   id: string;
@@ -13,6 +13,7 @@ interface IssueRow {
   labels: string;
   created_at: string;
   updated_at: string;
+  approval_state: string | null;
 }
 
 function rowToIssue(row: IssueRow): Issue {
@@ -22,7 +23,16 @@ function rowToIssue(row: IssueRow): Issue {
   } catch {
     labels = [];
   }
-  
+
+  let approvalState: ApprovalState | undefined;
+  if (row.approval_state) {
+    try {
+      approvalState = JSON.parse(row.approval_state);
+    } catch {
+      approvalState = undefined;
+    }
+  }
+
   return {
     id: row.id,
     number: row.number,
@@ -34,6 +44,7 @@ function rowToIssue(row: IssueRow): Issue {
     labels,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    approvalState,
   };
 }
 
@@ -234,6 +245,54 @@ export class IssueRepo {
       [projectId]
     );
     return (row?.max || 0) + 1;
+  }
+
+  setApprovalState(issueId: string, approvalState: ApprovalState): Issue | null {
+    const now = new Date().toISOString();
+
+    this.db.run(
+      'UPDATE issues SET approval_state = ?, updated_at = ? WHERE id = ?',
+      [JSON.stringify(approvalState), now, issueId]
+    );
+
+    return this.findById(issueId);
+  }
+
+  clearApprovalState(issueId: string): Issue | null {
+    const now = new Date().toISOString();
+
+    this.db.run(
+      'UPDATE issues SET approval_state = NULL, updated_at = ? WHERE id = ?',
+      [now, issueId]
+    );
+
+    return this.findById(issueId);
+  }
+
+  findPendingApproval(projectId: string): Issue | null {
+    const row = this.db.get<IssueRow>(
+      `SELECT * FROM issues WHERE project_id = ? AND approval_state IS NOT NULL`,
+      [projectId]
+    );
+    if (!row) return null;
+    const issue = rowToIssue(row);
+    if (issue.approvalState && issue.approvalState.status === 'awaiting') {
+      return issue;
+    }
+    return null;
+  }
+
+  findPendingApprovalByIssueId(issueId: string): Issue | null {
+    const row = this.db.get<IssueRow>(
+      `SELECT * FROM issues WHERE id = ? AND approval_state IS NOT NULL`,
+      [issueId]
+    );
+    if (!row) return null;
+    const issue = rowToIssue(row);
+    if (issue.approvalState && issue.approvalState.status === 'awaiting') {
+      return issue;
+    }
+    return null;
   }
 
   count(projectId?: string): number {

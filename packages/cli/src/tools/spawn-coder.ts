@@ -51,6 +51,60 @@ export interface SpawnCoderContext {
   toolRegistry?: ToolRegistry;
 }
 
+export interface CoderTaskResult {
+  success: boolean;
+  output: string;
+  error?: string;
+}
+
+export async function executeCoderTask(
+  cwd: string,
+  task: string,
+  options?: {
+    timeout?: number;
+    issueId?: string;
+    projectId?: string;
+    workflowLogRepo?: WorkflowLogRepo;
+    eventBus?: EventBus;
+  }
+): Promise<CoderTaskResult> {
+  const timeout = options?.timeout ?? DEFAULT_TIMEOUT;
+
+  console.log(
+    `[executeCoderTask] Spawning: opencode acp (cwd=${cwd}, timeout=${timeout}ms)`
+  );
+  console.log(`[executeCoderTask] Task: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}`);
+
+  const result = await runAcpOneshot(
+    cwd,
+    task,
+    timeout,
+    options?.issueId ?? '',
+    options?.workflowLogRepo,
+    options?.eventBus,
+    options?.projectId ?? '',
+  );
+
+  if (result.error && !result.text) {
+    return { success: false, output: '', error: result.error };
+  }
+
+  const text = result.text.trim();
+  if (result.error) {
+    return {
+      success: false,
+      output: text,
+      error: result.error,
+    };
+  }
+
+  if (!text) {
+    return { success: true, output: 'Coding agent completed with no output.' };
+  }
+
+  return { success: true, output: maybeTruncate(text) };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createSpawnCoderTool(
   context?: SpawnCoderContext

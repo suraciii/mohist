@@ -29,25 +29,36 @@ export interface WorkflowConfigWithDetection extends WorkflowConfig {
 const DEFAULT_WORKFLOW: WorkflowConfig = {
   stages: [
     {
-      stage: 'plan',
+      stage: 'explore',
       prompt:
-        '分析 issue #{issue.number}: {issue.title}，探索 codebase，产出实现计划',
+        '探索 issue #{issue.number}: {issue.title}，分析问题背景和 codebase',
       approval: false,
       timeout: 600,
     },
     {
-      stage: 'build',
+      stage: 'plan',
       prompt:
-        '按 plan 阶段的计划实现 {issue.title}。计划摘要：{plan.output}',
+        '基于探索结果，为 issue #{issue.number}: {issue.title} 制定实现计划',
       approval: true,
+      timeout: 600,
+    },
+    {
+      stage: 'build',
+      prompt: '实现 {issue.title}，按 plan 阶段的计划进行',
+      approval: false,
       timeout: 1800,
     },
     {
-      stage: 'check',
-      prompt:
-        '检查 {issue.title} 的实现：运行测试、lint、typecheck，报告问题',
+      stage: 'review',
+      prompt: '审查实现成果，检查功能正确性和代码质量',
       approval: true,
       timeout: 600,
+    },
+    {
+      stage: 'done',
+      prompt: '标记 issue #{issue.number} 为已完成',
+      approval: false,
+      timeout: 300,
     },
   ],
   source: 'builtin',

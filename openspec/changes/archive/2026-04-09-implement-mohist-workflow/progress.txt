@@ -1,0 +1,26 @@
+# Ralph Progress Log
+Started: 2026-04-09T07:30:53.514Z
+
+---
+[2026-04-09T15:35:45Z] T-004-2 Extract Planner Prompt to YAML files
+- Created: src/agents/prompts/planner-default.yaml (moved from embedded string)
+- Created: src/agents/prompts/planner-self-review.yaml (for self-review step)
+- Created: src/agents/prompt-loader.ts (loads prompts from YAML files at runtime)
+- Modified: src/agents/planner-agent.ts (now uses loadPlannerDefaultPrompt and loadPlannerSelfReviewPrompt)
+- Updated: src/agents/index.ts (exports prompt-loader functions)
+- TypeScript compilation passes
+- Test failures are pre-existing (unrelated to this change - issues with database/project service tests and workflow-controller.readPrd)
+- Learnings: Pre-existing test issues should not block task completion. The workflow-controller test failure shows readPrd is not implemented yet (T-005-1).
+- Next steps: T-005-1 needs to implement readPrd in ChangeArtifactsManager
+
+---
+[2026-04-09T16:18:00Z] T-004 Implement Planner Agent - Fixed PlanResult interface
+- Fixed: Added missing 'changePath' field to PlanResult interface (workflow-controller.ts)
+- Fixed: Added missing 'duration' field to track execution time (workflow-controller.ts)
+- Fixed: Changed 'prd' type from 'unknown' to 'PrdJson | null' for better type safety
+- Fixed: planner-agent.ts now tracks startTime and calculates duration
+- Fixed: Max iterations now returns success: false (not success: true) when issues remain
+- Fixed: All return statements now include changePath and duration fields
+- TypeScript compilation passes
+- Learnings: Interface completeness is important for downstream consumers. Duration tracking helps with performance monitoring.
+- Next steps: T-005 Implement Build phase execution

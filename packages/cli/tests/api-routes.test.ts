@@ -356,8 +356,8 @@ describe('API Routes', () => {
 
     describe('GET /api/status?all=true', () => {
       it('should return all projects status', async () => {
-        projectService.create({ name: 'Project 1', path: '/path/1' });
-        projectService.create({ name: 'Project 2', path: '/path/2' });
+        await projectService.create({ name: 'Project 1', path: '/path/1' });
+        await projectService.create({ name: 'Project 2', path: '/path/2' });
 
         const response = await request(server).get('/api/status?all=true');
 
