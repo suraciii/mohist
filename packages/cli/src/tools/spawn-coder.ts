@@ -75,15 +75,15 @@ export async function executeCoderTask(
   );
   console.log(`[executeCoderTask] Task: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}`);
 
-  const result = await runAcpOneshot(
+  const result = await runAcpSession({
     cwd,
     task,
     timeout,
-    options?.issueId ?? '',
-    options?.workflowLogRepo,
-    options?.eventBus,
-    options?.projectId ?? '',
-  );
+    issueId: options?.issueId,
+    projectId: options?.projectId,
+    workflowLogRepo: options?.workflowLogRepo,
+    eventBus: options?.eventBus,
+  });
 
   if (result.error && !result.text) {
     return { success: false, output: '', error: result.error };
