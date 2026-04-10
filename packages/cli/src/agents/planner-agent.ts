@@ -243,6 +243,61 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
   private parseArtifactsJson(
     text: string
   ): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } {
+    const parsed = this.parseArtifactsWithFallback(text);
+    if (parsed) {
+      return parsed;
+    }
+    return {
+      proposal: '',
+      design: '',
+      specs: [],
+      prd: null,
+    };
+  }
+
+  private parseArtifactsWithFallback(
+    text: string
+  ): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+    const strategies = [
+      () => this.tryDirectParse(text),
+      () => this.tryCodeBlockExtraction(text),
+      () => this.tryRelaxedParsing(text),
+      () => this.tryRegexFieldExtraction(text),
+    ];
+
+    for (const strategy of strategies) {
+      try {
+        const result = strategy();
+        if (result) {
+          return result;
+        }
+      } catch {
+        // continue to next strategy
+      }
+    }
+
+    console.error('All JSON parsing strategies failed');
+    console.error('Raw text:', text.slice(0, 500));
+    return null;
+  }
+
+  private tryDirectParse(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+    const jsonStr = text.trim();
+    const parsed = JSON.parse(jsonStr);
+    return this.normalizeParsedArtifacts(parsed);
+  }
+
+  private tryCodeBlockExtraction(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (!jsonMatch) {
+      return null;
+    }
+    const jsonStr = jsonMatch[1].trim();
+    const parsed = JSON.parse(jsonStr);
+    return this.normalizeParsedArtifacts(parsed);
+  }
+
+  private tryRelaxedParsing(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
     let jsonStr = text.trim();
 
     const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -250,24 +305,68 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
       jsonStr = jsonMatch[1].trim();
     }
 
-    try {
-      const parsed = JSON.parse(jsonStr);
-      return {
-        proposal: parsed.proposal || '',
-        design: parsed.design || '',
-        specs: Array.isArray(parsed.specs) ? parsed.specs : [],
-        prd: parsed.prd || null,
-      };
-    } catch (error) {
-      console.error('Failed to parse artifacts JSON:', error);
-      console.error('Raw text:', text.slice(0, 500));
-      return {
-        proposal: '',
-        design: '',
-        specs: [],
-        prd: null,
-      };
+    jsonStr = jsonStr.replace(/\/\/.*$/gm, '');
+    jsonStr = jsonStr.replace(/\/\*[\s\S]*?\*\//g, '');
+    jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+
+    const parsed = JSON.parse(jsonStr);
+    return this.normalizeParsedArtifacts(parsed);
+  }
+
+  private tryRegexFieldExtraction(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+    const extractString = (fieldMatch: RegExpMatchArray | null): string => {
+      if (!fieldMatch) return '';
+      const content = fieldMatch[1] || fieldMatch[2] || '';
+      return content.trim().replace(/^["']|["']$/g, '');
+    };
+
+    const proposalMatch = text.match(/"proposal"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)')/s);
+    const designMatch = text.match(/"design"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)')/s);
+
+    const specsMatch = text.match(/"specs"\s*:\s*\[([\s\S]*?)\]/);
+    const prdMatch = text.match(/"prd"\s*:\s*(\{[\s\S]*\}|\[[\s\S]*\])/);
+
+    const specs: { name: string; content: string }[] = [];
+    if (specsMatch) {
+      const specMatches = specsMatch[1].matchAll(/"name"\s*:\s*"([^"]+)"/g);
+      const contentMatches = specsMatch[1].matchAll(/"content"\s*:\s*"([^"]+)"/g);
+      const names = Array.from(specMatches, m => m[1]);
+      const contents = Array.from(contentMatches, m => m[1]);
+      for (let i = 0; i < Math.min(names.length, contents.length); i++) {
+        specs.push({ name: names[i], content: contents[i] });
+      }
     }
+
+    let prd: unknown = null;
+    if (prdMatch) {
+      try {
+        prd = JSON.parse(prdMatch[1]);
+      } catch {
+        // ignore parse errors in regex extraction
+      }
+    }
+
+    const proposal = extractString(proposalMatch as RegExpMatchArray);
+    const design = extractString(designMatch as RegExpMatchArray);
+
+    if (!proposal && !design && specs.length === 0 && !prd) {
+      return null;
+    }
+
+    return { proposal, design, specs, prd };
+  }
+
+  private normalizeParsedArtifacts(parsed: unknown): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+    if (typeof parsed !== 'object' || parsed === null) {
+      return null;
+    }
+    const obj = parsed as Record<string, unknown>;
+    return {
+      proposal: typeof obj.proposal === 'string' ? obj.proposal : '',
+      design: typeof obj.design === 'string' ? obj.design : '',
+      specs: Array.isArray(obj.specs) ? obj.specs : [],
+      prd: obj.prd ?? null,
+    };
   }
 
   private async writeArtifactsToFiles(
