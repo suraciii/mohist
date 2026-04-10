@@ -111,7 +111,7 @@
         "前端项目 build 通过"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "当前前端无任何 headless UI 库，这是引入的第一个；已有 fuzzysort 依赖可用于搜索"
     },
     {

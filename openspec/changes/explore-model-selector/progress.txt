@@ -54,3 +54,16 @@ Started: 2026-04-10T09:41:56.666Z
 - TypeScript compilation passes
 - Learnings: Simple spread + override pattern works well - resolveModel() accepts ConfigInfo which has optional model and variant fields
 - Next steps: T-007 - Frontend: Install @headlessui/react + API types and client updates
+
+---
+[2026-04-10T18:50:00Z] T-007 前端：安装 @headlessui/react + API 类型和客户端更新
+- Installed @headlessui/react (added 20 packages)
+- Added ModelBadge type: 'free' | 'latest'
+- Added Model interface: id, name, badges, contextWindow
+- Added ModelProvider interface: id, name, configured, models[]
+- Updated ExploreSession interface to include optional model?: string and variant?: string
+- Added getAvailableModels() API function: calls GET /api/providers/models
+- Added updateSessionModel(sessionId, model, variant?) API function: calls POST /api/explore/:id/model
+- Build: typecheck passes on changed files; 2 pre-existing unused variable errors in CustomProviderDialog.tsx and ProviderConnectDialog.tsx (not related to T-007)
+- Learnings: Backend endpoint is at /providers/models (not /api/models) - API structure follows /api prefix + route path pattern
+- Next steps: T-008 - Create ModelSelector component
