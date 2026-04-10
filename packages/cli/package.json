@@ -9,7 +9,7 @@
     "mo-server": "./bin/mo-server"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/agents/prompts/*.yaml dist/agents/prompts/",
     "dev": "tsc --watch",
     "start:server": "node bin/mo-server",
     "start:cli": "node bin/mo",
