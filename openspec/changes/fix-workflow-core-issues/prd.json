@@ -166,8 +166,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added parseArtifactsWithFallback with 4 strategies: tryDirectParse, tryCodeBlockExtraction, tryRelaxedParsing, tryRegexFieldExtraction"
     },
     {
       "id": "T-012",
