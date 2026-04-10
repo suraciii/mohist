@@ -45,3 +45,12 @@ Started: 2026-04-10T09:41:56.666Z
 - No specific tests for explore API endpoints; general test suite passed (test timeout but typecheck/lint passed)
 - Learnings: The llmConfig closure issue was that the config was captured at server startup. Solution: load config fresh on each request and merge with session.model
 - Next steps: T-006 - Enhance Explore Agent to support session model
+
+---
+[2026-04-10T18:35:00Z] T-006 增强 Explore Agent 支持 session model
+- Added sessionModel?: string and sessionVariant?: string fields to ExploreAgentContext interface
+- Modified runExploreAgent(): when sessionModel is set, creates merged config { ...llmConfig, model: sessionModel, variant: sessionVariant } to override global config
+- Falls back to global llmConfig when no sessionModel is set
+- TypeScript compilation passes
+- Learnings: Simple spread + override pattern works well - resolveModel() accepts ConfigInfo which has optional model and variant fields
+- Next steps: T-007 - Frontend: Install @headlessui/react + API types and client updates

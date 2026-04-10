@@ -95,7 +95,7 @@
         "variant 也被正确传递到 resolveModel"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "resolveModel(config) 接受 ConfigInfo，可直接构造 { ...config, model: sessionModel } 覆盖"
     },
     {
