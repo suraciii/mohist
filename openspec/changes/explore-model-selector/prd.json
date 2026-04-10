@@ -148,7 +148,7 @@
         "UI 响应流畅"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "需要修改 ExplorePage.tsx；可利用已有 eventBus 的 config:providers:changed 事件"
     },
     {

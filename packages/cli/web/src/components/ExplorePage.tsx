@@ -5,8 +5,11 @@ import { useExploreStream } from '../hooks/useExploreStream'
 import { useQueryClient } from '@tanstack/react-query'
 import { ExploreChat } from './ExploreChat'
 import { ExploreInput } from './ExploreInput'
+import { ModelSelector } from './ModelSelector'
 
-function LlmGuidanceCard({ onRefresh }: { onRefresh: () => void }) {
+function LlmGuidanceCard() {
+  const navigate = useNavigate()
+
   return (
     <div className="flex-1 flex items-center justify-center p-8">
       <div className="max-w-lg w-full bg-amber-50 border border-amber-200 rounded-lg p-6">
@@ -24,13 +27,6 @@ function LlmGuidanceCard({ onRefresh }: { onRefresh: () => void }) {
 
         <div className="space-y-4">
           <div>
-            <p className="text-amber-800 text-sm font-medium mb-2">Configuration file:</p>
-            <code className="block bg-amber-100 text-amber-900 text-xs rounded px-2 py-1.5">
-              ~/.mohist/config.jsonc
-            </code>
-          </div>
-
-          <div>
             <p className="text-amber-800 text-sm font-medium mb-2">Supported providers:</p>
             <div className="flex gap-2">
               {['anthropic', 'glm', 'openai'].map(p => (
@@ -42,30 +38,22 @@ function LlmGuidanceCard({ onRefresh }: { onRefresh: () => void }) {
           </div>
 
           <div>
-            <p className="text-amber-800 text-sm font-medium mb-2">Configuration example:</p>
-            <pre className="bg-amber-100 text-amber-900 text-xs rounded p-2 overflow-x-auto">{`{
-  // Anthropic (recommended)
-  "ANTHROPIC_API_KEY": "sk-...",
-  
-  // or GLM
-  "ZHIPUAI_API_KEY": "...",
-  
-  // or OpenAI
-  "OPENAI_API_KEY": "...",
-  
-  // Select provider & model
-  "model": "anthropic/claude-sonnet-4-20250514"
-}`}</pre>
+            <p className="text-amber-800 text-sm font-medium mb-2">To get started:</p>
+            <ol className="list-decimal list-inside text-amber-700 text-sm space-y-1">
+              <li>Go to Settings page</li>
+              <li>Connect a provider (e.g., Anthropic, OpenAI, or GLM)</li>
+              <li>Return here to start exploring</li>
+            </ol>
           </div>
 
           <button
-            onClick={onRefresh}
+            onClick={() => navigate('/settings')}
             className="w-full flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium py-2 px-4 rounded transition-colors"
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+              <path fillRule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z" clipRule="evenodd" />
             </svg>
-            Refresh
+            Go to Settings
           </button>
         </div>
       </div>
@@ -140,7 +128,7 @@ export function ExplorePage() {
             />
           </svg>
         </button>
-        <div>
+        <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold text-gray-900">{session.title}</h2>
           <div className="text-xs text-gray-400">
             {session.status === 'active' ? 'Active' : 'Crystallized'}
@@ -148,10 +136,17 @@ export function ExplorePage() {
             {new Date(session.createdAt).toLocaleString()}
           </div>
         </div>
+        {llmConfigured && (
+          <ModelSelector
+            sessionId={session.id}
+            currentModel={session.model}
+            currentVariant={session.variant}
+          />
+        )}
       </div>
 
       {!llmConfigured && (
-        <LlmGuidanceCard onRefresh={() => refetchStatus()} />
+        <LlmGuidanceCard />
       )}
 
       {llmConfigured && streamError && (

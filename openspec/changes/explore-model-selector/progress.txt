@@ -85,3 +85,15 @@ Started: 2026-04-10T09:41:56.666Z
 - Tests: 46 tests passed
 - Learnings: @headlessui/react v2 Popover API uses render prop pattern with ({ open }) => ... for controlling transition and content
 - Next steps: T-009 - Integrate ModelSelector into ExplorePage + upgrade LLM unconfigured prompt
+
+---
+[2026-04-10T19:30:00Z] T-009 集成模型选择器到 ExplorePage + 升级 LLM 未配置提示
+- Integrated ModelSelector into ExplorePage header (right side, next to session info)
+- ModelSelector receives sessionId, currentModel, and currentVariant props from session data
+- Updated LlmGuidanceCard: removed onRefresh prop, added navigate('/settings') button to guide users to Settings page
+- Updated ProviderConnectDialog: added queryClient.invalidateQueries({ queryKey: ['models'] }) on successful provider save
+- Auto-refresh mechanism: when user connects a provider in Settings, ProviderConnectDialog invalidates both 'providers' and 'models' queries, so ModelSelector's useModels hook will refetch
+- TypeScript compilation passes (pre-existing unused variable errors in CustomProviderDialog.tsx and ProviderConnectDialog.tsx are unrelated)
+- Build errors are pre-existing issues, not introduced by this change
+- Learnings: Since eventBus is server-side and SSE doesn't broadcast config:providers:changed, using query invalidation in ProviderConnectDialog is the cleanest way to trigger auto-refresh
+- Next steps: T-010 - End-to-end testing

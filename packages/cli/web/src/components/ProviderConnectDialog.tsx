@@ -80,6 +80,7 @@ export function ProviderConnectDialog({ open, onClose, provider }: Props) {
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: ['providers'] })
+          queryClient.invalidateQueries({ queryKey: ['models'] })
           handleClose()
         },
       },
