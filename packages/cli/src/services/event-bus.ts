@@ -16,6 +16,7 @@ export type EventMap = {
   coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed' };
   ralph_task_update: { issueId: string; projectId: string; executionId: string; taskId: string; taskIndex: number; totalTasks: number; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt?: number; error?: string };
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number };
+  'config:providers:changed': { providers: Array<{ id: string; name?: string; apiKey?: string; baseURL?: string; sdk?: string; models?: string[] }> };
 };
 
 export type EventName = keyof EventMap;

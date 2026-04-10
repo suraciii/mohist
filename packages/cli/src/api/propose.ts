@@ -14,7 +14,7 @@ export function createProposeRoutes(
   stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
   sessionManager: SessionManager = new SessionManager(),
-  llmConfig?: LlmConfig,
+  _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
 ): Hono {
   const app = new Hono();
@@ -99,7 +99,7 @@ export function createProposeRoutes(
         stateManager.getQuestionRepo(),
         worktreePath,
         sessionManager,
-        llmConfig,
+        undefined,
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 

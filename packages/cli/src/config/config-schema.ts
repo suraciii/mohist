@@ -7,12 +7,14 @@ export const ProviderConfigSchema = z.object({
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
   sdk: z.enum(['anthropic', 'openai', 'openai-compatible']).optional(),
+  models: z.array(z.string()).optional(),
 }).strip();
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
 export const ConfigInfoSchema = z.object({
   $schema: z.string().optional(),
+  _version: z.number().optional(),
   model: z.string().optional(),
   provider: z.record(z.string(), ProviderConfigSchema).optional(),
   server: z.object({

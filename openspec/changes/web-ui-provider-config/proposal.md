@@ -9,6 +9,7 @@
 - **配置热重载**: Provider 配置变更后无需重启 Server，实时生效
 - **连接测试功能**: 配置 Provider 时可发送测试请求验证连接和认证是否成功
 - **API 扩展**: 新增 `/api/providers` 相关端点支持 Web UI 操作
+- **配置 Schema 更新**: ProviderConfig 新增 `models` 字段（字符串数组），用于存储自定义 Provider 的模型列表
 
 ## Capabilities
 
@@ -24,6 +25,6 @@
 
 - **Frontend**: 新增 SettingsProviders 组件、Provider 连接对话框、自定义 Provider 表单
 - **Backend API**: 新增 GET/POST/DELETE `/api/providers` 端点
-- **Config Layer**: ConfigService 需要支持热重载和变更通知机制
+- **Config Layer**: ConfigService 需要支持热重载和变更通知机制；ProviderConfig Schema 新增 models 字段
 - **Agent Runner**: AgentRunnerService 需要监听配置变更，动态重新初始化 LLM Client
 - **Storage**: 继续使用 `~/.mohist/config.jsonc`，与 CLI 配置保持兼容

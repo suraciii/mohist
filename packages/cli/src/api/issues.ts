@@ -19,7 +19,7 @@ export function createIssueRoutes(
   stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
   sessionManager: SessionManager = new SessionManager(),
-  llmConfig?: LlmConfig,
+  _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
   workflowLogRepo?: WorkflowLogRepo,
 ): Hono {
@@ -338,7 +338,7 @@ export function createIssueRoutes(
         stateManager.getQuestionRepo(),
         worktreePath,
         sessionManager,
-        llmConfig,
+        undefined,
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 
@@ -633,7 +633,7 @@ export function createIssueRoutes(
         worktreePath,
         sessionManager,
         '[System] User approved. Continue to next stage.',
-        llmConfig,
+        undefined,
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 
@@ -717,7 +717,7 @@ export function createIssueRoutes(
         worktreePath,
         sessionManager,
         message,
-        llmConfig,
+        undefined,
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 

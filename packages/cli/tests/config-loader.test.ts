@@ -69,7 +69,10 @@ describe('ConfigLoader', () => {
     it('should parse empty JSON object', () => {
       fs.writeFileSync(configPath, `{}`);
       const config = load(configPath);
-      expect(config).toEqual({});
+      expect(config._version).toBeDefined();
+      expect(config._version).toBeTypeOf('number');
+      const { _version, ...rest } = config;
+      expect(rest).toEqual({});
     });
 
     it('should parse full config with all fields', () => {
@@ -217,6 +220,43 @@ describe('ConfigLoader', () => {
       const files = fs.readdirSync(tmpDir);
       const tmpFiles = files.filter((f) => f.includes('.tmp.'));
       expect(tmpFiles).toHaveLength(0);
+    });
+
+    it('should write with expectedVersion successfully when versions match', () => {
+      writeConfig({ model: 'old/model' }, configPath);
+      const firstLoad = load(configPath);
+      const version = firstLoad._version;
+      expect(version).toBeDefined();
+
+      writeConfig({ model: 'new/model' }, configPath, { expectedVersion: version });
+      const secondLoad = load(configPath);
+      expect(secondLoad.model).toBe('new/model');
+      expect(secondLoad._version).toBeGreaterThan(version!);
+    });
+
+    it('should throw ConfigConflictError when expectedVersion does not match', () => {
+      writeConfig({ model: 'old/model' }, configPath);
+      const firstLoad = load(configPath);
+      const version = firstLoad._version;
+      expect(version).toBeDefined();
+
+      // Simulate an external update that advances the version
+      writeConfig({ model: 'intermediate/model' }, configPath);
+
+      expect(() => {
+        writeConfig({ model: 'stale/model' }, configPath, { expectedVersion: version });
+      }).toThrow(/Config version conflict/);
+    });
+
+    it('should write without expectedVersion when option is omitted', () => {
+      writeConfig({ model: 'first/model' }, configPath);
+      const firstLoad = load(configPath);
+      const version = firstLoad._version;
+
+      writeConfig({ model: 'second/model' }, configPath);
+      const secondLoad = load(configPath);
+      expect(secondLoad.model).toBe('second/model');
+      expect(secondLoad._version).toBeGreaterThan(version!);
     });
   });
 });

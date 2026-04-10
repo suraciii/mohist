@@ -1,17 +1,18 @@
 ## ADDED Requirements
 
 ### Requirement: 连接测试端点
-系统 SHALL 提供 API 端点用于测试 Provider 连接，发送探测请求并返回连接状态。
+系统 SHALL 提供统一 API 端点用于测试 Provider 连接，支持内置和自定义 Provider。
 
-#### Scenario: 测试内置 Provider 连接
-- **WHEN** 客户端发送 POST 请求到 `/api/providers/:id/test`，body 包含 apiKey
-- **THEN** 系统使用提供的 apiKey 和内置 Provider 的 baseURL 发送测试请求
+#### Scenario: 测试 Provider 连接
+- **WHEN** 客户端发送 POST 请求到 `/api/providers/test`
+- **AND** body 包含完整的 Provider 配置（id?, name, apiKey, baseURL, sdk, models?）
+- **THEN** 系统使用提供的配置发送测试请求
 - **AND** 返回测试结果，包含 success 状态和错误信息（如有）
 
-#### Scenario: 测试自定义 Provider 连接
-- **WHEN** 客户端发送 POST 请求到 `/api/providers/test`，body 包含 apiKey、baseURL、model
-- **THEN** 系统使用提供的参数发送测试请求
-- **AND** 返回测试结果
+#### Scenario: 测试内置 Provider（已保存配置）
+- **GIVEN** Provider 配置已保存到 config.jsonc
+- **WHEN** 客户端发送 POST 请求到 `/api/providers/test` 仅包含 id
+- **THEN** 系统从 config.jsonc 加载完整配置并发送测试请求
 
 #### Scenario: 连接测试成功
 - **GIVEN** Provider 配置正确且网络可达
@@ -33,7 +34,7 @@
 
 #### Scenario: 频繁测试被限流
 - **GIVEN** 客户端在短时间内发送多次测试请求
-- **WHEN** 超过限流阈值（每 IP 每分钟 10 次）
+- **WHEN** 超过限流阈值（每分钟 30 次）
 - **THEN** 系统返回 429 Too Many Requests 错误
 
 ### Requirement: Web UI 连接测试

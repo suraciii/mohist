@@ -8,6 +8,7 @@ import { Header } from './components/Header'
 import { IssueDetailPage } from './components/IssueDetailPage'
 import { ExplorePage } from './components/ExplorePage'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
+import { SettingsPage } from './components/SettingsPage'
 
 function KanbanView() {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -126,6 +127,7 @@ function AppContent() {
         <Route path="/issue/:number" element={<IssueDetailPage />} />
         <Route path="/explore" element={<ExploreRedirect />} />
         <Route path="/explore/:id" element={<ExplorePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </div>
   )

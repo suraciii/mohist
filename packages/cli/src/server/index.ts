@@ -5,6 +5,7 @@ import { createProjectRoutes } from '../api/projects';
 import { createIssueRoutes } from '../api/issues';
 import { createProposeRoutes } from '../api/propose';
 import { createConfigRoutes } from '../api/config';
+import { createProviderRoutes } from '../api/providers';
 import { createStatusRoutes } from '../api/status';
 import { createLabelRoutes } from '../api/labels';
 import { createEventRoutes } from '../api/events';
@@ -17,6 +18,7 @@ import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
 import type { LlmConfig } from '../agent-runtime';
 import { load as loadConfig } from '../config/config-loader';
+import { RateLimiter } from '../utils/rate-limiter';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -59,12 +61,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  agentRunner.setLlmConfig(llmConfig);
+
   const expiredCount = stateManager.getQuestionRepo().expireAllPending();
   if (expiredCount > 0) {
     console.log(`Expired ${expiredCount} orphaned pending question(s) from previous session`);
   }
 
-  const server = new HttpServer(config);
+  const rateLimiter = new RateLimiter(60 * 1000, 30);
+  const server = new HttpServer(config, rateLimiter);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
   server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, llmConfig, agentRunner, workflowLogRepo));
@@ -72,6 +77,7 @@ async function main(): Promise<void> {
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
+  server.addRouter('/api/providers', createProviderRoutes(eventBus, rateLimiter));
   server.addRouter('/api', createStatusRoutes(projectService, issueService, llmConfig));
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
@@ -83,11 +89,13 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', async () => {
     console.log('Received SIGTERM, shutting down gracefully...');
+    agentRunner.shutdown();
     await server.stop();
   });
 
   process.on('SIGINT', async () => {
     console.log('Received SIGINT, shutting down gracefully...');
+    agentRunner.shutdown();
     await server.stop();
   });
 

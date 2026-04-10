@@ -5,7 +5,16 @@
 
 #### Scenario: 获取 Provider 列表
 - **WHEN** 客户端发送 GET 请求到 `/api/providers`
-- **THEN** 系统返回包含所有 Provider 的列表，每个 Provider 包含 id、name、baseURL、configured 状态、source（env/config/none）
+- **THEN** 系统返回包含所有 Provider 的列表，每个 Provider 包含：
+  - `id`: Provider 唯一标识
+  - `name`: 显示名称
+  - `baseURL`: API 端点 URL
+  - `models`: 支持的模型列表（字符串数组）
+  - `configured`: 是否已配置（有 apiKey）
+  - `source`: 配置来源（config/env/none）
+  - `isBuiltin`: 是否为内置 Provider
+  - `isDefault`: 是否为当前默认 Provider
+  - `apiKeyMasked`: mask 后的 API Key（如 `sk-ab*********789`）
 
 ### Requirement: Provider 配置保存
 系统 SHALL 允许通过 API 保存或更新 Provider 配置，配置 SHALL 写入 `~/.mohist/config.jsonc`。
@@ -15,8 +24,9 @@
 - **THEN** 系统验证 apiKey 非空，更新 config.jsonc，返回 success
 
 #### Scenario: 配置自定义 Provider
-- **WHEN** 客户端发送 POST 请求到 `/api/providers/:id`，body 包含 apiKey、baseURL、models、name
+- **WHEN** 客户端发送 POST 请求到 `/api/providers/:id`，body 包含 apiKey、baseURL、models（字符串数组）、name
 - **THEN** 系统验证 id 格式（a-z, 0-9, -）、baseURL 格式、models 非空，更新 config.jsonc
+- **AND** 保存 models 列表到配置文件
 
 #### Scenario: 配置验证失败
 - **WHEN** 客户端发送 POST 请求包含无效数据（如空 apiKey、无效 baseURL）

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
   return useQuery({
@@ -129,4 +130,99 @@ export function useStatus() {
     queryFn: () => api.getStatus(),
     retry: false,
   })
+}
+
+export function useProviders() {
+  return useQuery<Provider[], Error>({
+    queryKey: ['providers'],
+    queryFn: () => providerApi.getProviders(),
+  })
+}
+
+export interface SaveProviderVariables {
+  id: string
+  data: ProviderFormData
+}
+
+interface SaveProviderContext {
+  previousProviders?: Provider[]
+}
+
+export function useSaveProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation<{ id: string; configured: boolean }, Error, SaveProviderVariables, SaveProviderContext>({
+    mutationFn: ({ id, data }) => providerApi.saveProvider(id, data),
+    onMutate: async ({ id, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['providers'] })
+      const previousProviders = queryClient.getQueryData<Provider[]>(['providers'])
+
+      queryClient.setQueryData<Provider[]>(['providers'], (old) => {
+        if (!old) return old
+        return old.map((p) =>
+          p.id === id
+            ? { ...p, configured: true, apiKeyMasked: maskApiKey(data.apiKey), ...data }
+            : p
+        )
+      })
+
+      return { previousProviders }
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previousProviders) {
+        queryClient.setQueryData(['providers'], context.previousProviders)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['providers'] })
+    },
+  })
+}
+
+interface DeleteProviderContext {
+  previousProviders?: Provider[]
+}
+
+export function useDeleteProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation<{ id: string }, Error, string, DeleteProviderContext>({
+    mutationFn: (id) => providerApi.deleteProvider(id),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['providers'] })
+      const previousProviders = queryClient.getQueryData<Provider[]>(['providers'])
+
+      queryClient.setQueryData<Provider[]>(['providers'], (old) => {
+        if (!old) return old
+        return old.map((p) =>
+          p.id === id ? { ...p, configured: false, apiKeyMasked: null } : p
+        )
+      })
+
+      return { previousProviders }
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previousProviders) {
+        queryClient.setQueryData(['providers'], context.previousProviders)
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['providers'] })
+    },
+  })
+}
+
+export interface TestProviderVariables {
+  data: ProviderFormData & { id?: string }
+}
+
+export function useTestProvider() {
+  return useMutation<{ success: boolean }, Error, TestProviderVariables>({
+    mutationFn: ({ data }) => providerApi.testProvider(data),
+  })
+}
+
+function maskApiKey(apiKey: string): string {
+  if (apiKey.length <= 8) return '********'
+  return apiKey.slice(0, 4) + '*'.repeat(apiKey.length - 8) + apiKey.slice(-4)
 }
