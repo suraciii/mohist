@@ -122,3 +122,11 @@ export function useCreateExploreSession() {
     },
   })
 }
+
+export function useStatus() {
+  return useQuery({
+    queryKey: ['status'],
+    queryFn: () => api.getStatus(),
+    retry: false,
+  })
+}

@@ -1,0 +1,13 @@
+# Ralph Progress Log
+Started: 2026-04-09T06:44:19.726Z
+
+---
+2026-04-09T15:10:00Z T-004 runAgentLoop fullStream iteration
+- Fixed TS error: 'step-start' event doesn't exist in AI SDK fullStream types
+- Moved stepIndex++ to increment on tool-call instead of step-start event
+- All event emissions (text-delta, tool-call, tool-result, tool-error) working correctly
+- Typecheck passes
+- Tests failures are pre-existing (database isolation issues, not related to this change)
+
+---
+

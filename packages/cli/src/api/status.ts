@@ -2,10 +2,12 @@ import { Hono } from 'hono';
 import { ProjectService } from '../services/project-service';
 import { IssueService } from '../services/issue-service';
 import { ApiResponse } from '../types';
+import { resolveModel, type LlmConfig } from '../agent-runtime';
 
 export function createStatusRoutes(
   projectService: ProjectService,
-  issueService: IssueService
+  issueService: IssueService,
+  llmConfig?: LlmConfig
 ): Hono {
   const app = new Hono();
 
@@ -57,6 +59,22 @@ export function createStatusRoutes(
       const issues = issueService.getByProject(currentId);
       const activeIssues = issues.filter(i => i.status === 'active');
 
+      let llm: { configured: false; provider?: undefined; model?: undefined } | { configured: true; provider: string; model: string } = { configured: false };
+      try {
+        resolveModel(llmConfig);
+        const modelStr = llmConfig?.model ?? 'anthropic/claude-sonnet-4-20250514';
+        const slashIndex = modelStr.indexOf('/');
+        if (slashIndex !== -1) {
+          llm = {
+            configured: true,
+            provider: modelStr.slice(0, slashIndex),
+            model: modelStr.slice(slashIndex + 1),
+          };
+        }
+      } catch {
+        // LLM not configured or invalid - llm stays { configured: false }
+      }
+
       const status = {
         name: current.name,
         path: current.path,
@@ -68,7 +86,8 @@ export function createStatusRoutes(
           build: issues.filter(i => i.stage === 'build').length,
           check: issues.filter(i => i.stage === 'check').length,
           done: issues.filter(i => i.stage === 'done').length,
-        }
+        },
+        llm,
       };
 
       const response: ApiResponse = {
