@@ -10,6 +10,9 @@ describe('resolveModel', () => {
     savedEnv['OPENAI_API_KEY'] = process.env['OPENAI_API_KEY'];
     savedEnv['GLM_API_KEY'] = process.env['GLM_API_KEY'];
     savedEnv['DEEPSEEK_API_KEY'] = process.env['DEEPSEEK_API_KEY'];
+    savedEnv['ZHIPU_API_KEY'] = process.env['ZHIPU_API_KEY'];
+    savedEnv['KIMI_API_KEY'] = process.env['KIMI_API_KEY'];
+    savedEnv['MINIMAX_API_KEY'] = process.env['MINIMAX_API_KEY'];
   });
 
   afterEach(() => {
@@ -132,6 +135,36 @@ describe('resolveModel', () => {
     const model = resolveModel(config);
     expect(model).toBeDefined();
     expect(model.modelId).toBe('deepseek-chat');
+  });
+
+  it('should create zhipuai-coding-plan model via createOpenAI', () => {
+    const config: ConfigInfo = {
+      provider: { 'zhipuai-coding-plan': { apiKey: 'sk-zhipu-test' } },
+      model: 'zhipuai-coding-plan/glm-5.1',
+    };
+    const model = resolveModel(config);
+    expect(model).toBeDefined();
+    expect(model.modelId).toBe('glm-5.1');
+  });
+
+  it('should create kimi-for-coding model via createAnthropic', () => {
+    const config: ConfigInfo = {
+      provider: { 'kimi-for-coding': { apiKey: 'sk-kimi-test' } },
+      model: 'kimi-for-coding/k2p5',
+    };
+    const model = resolveModel(config);
+    expect(model).toBeDefined();
+    expect(model.modelId).toBe('k2p5');
+  });
+
+  it('should create minimax-for-coding model via createAnthropic', () => {
+    const config: ConfigInfo = {
+      provider: { 'minimax-for-coding': { apiKey: 'sk-minimax-test' } },
+      model: 'minimax-for-coding/MiniMax-M2.5',
+    };
+    const model = resolveModel(config);
+    expect(model).toBeDefined();
+    expect(model.modelId).toBe('MiniMax-M2.5');
   });
 
   describe('LlmError', () => {

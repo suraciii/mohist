@@ -50,4 +50,22 @@ export const BUILTIN_PROVIDERS: Record<string, BuiltinProvider> = {
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     envVars: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY'],
   },
+  'zhipuai-coding-plan': {
+    sdk: 'openai-compatible',
+    name: '智谱 Coding Plan',
+    baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    envVars: ['ZHIPU_API_KEY'],
+  },
+  'kimi-for-coding': {
+    sdk: 'anthropic',
+    name: 'Kimi For Coding',
+    baseURL: 'https://api.kimi.com/coding/v1',
+    envVars: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
+  },
+  'minimax-for-coding': {
+    sdk: 'anthropic',
+    name: 'MiniMax Coding',
+    baseURL: 'https://api.minimax.io/anthropic/v1',
+    envVars: ['MINIMAX_API_KEY'],
+  },
 };

@@ -177,6 +177,30 @@ describe('ConfigLoader', () => {
       expect(resolved.apiKey).toBe('sk-kimi-key');
       expect(resolved.source).toBe('env');
     });
+
+    it('should return zhipuai-coding-plan with openai-compatible SDK and correct baseURL', () => {
+      const resolved = getProviderConfig({}, 'zhipuai-coding-plan');
+      expect(resolved.sdk).toBe('openai-compatible');
+      expect(resolved.name).toBe('智谱 Coding Plan');
+      expect(resolved.baseURL).toBe('https://open.bigmodel.cn/api/coding/paas/v4');
+      expect(resolved.envVars).toEqual(['ZHIPU_API_KEY']);
+    });
+
+    it('should return kimi-for-coding with anthropic SDK and correct baseURL', () => {
+      const resolved = getProviderConfig({}, 'kimi-for-coding');
+      expect(resolved.sdk).toBe('anthropic');
+      expect(resolved.name).toBe('Kimi For Coding');
+      expect(resolved.baseURL).toBe('https://api.kimi.com/coding/v1');
+      expect(resolved.envVars).toEqual(['KIMI_API_KEY', 'MOONSHOT_API_KEY']);
+    });
+
+    it('should return minimax-for-coding with anthropic SDK and correct baseURL', () => {
+      const resolved = getProviderConfig({}, 'minimax-for-coding');
+      expect(resolved.sdk).toBe('anthropic');
+      expect(resolved.name).toBe('MiniMax Coding');
+      expect(resolved.baseURL).toBe('https://api.minimax.io/anthropic/v1');
+      expect(resolved.envVars).toEqual(['MINIMAX_API_KEY']);
+    });
   });
 
   describe('writeConfig', () => {
