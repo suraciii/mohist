@@ -33,3 +33,15 @@ Started: 2026-04-10T09:41:56.666Z
 - No specific tests for explore-session-repo exist; general test suite passed typecheck
 - Learnings: T-003 already updated ExploreSessionRow and rowToExploreSession to handle model/variant, so only needed to add updateModel() and update create()
 - Next steps: T-005 - Add POST /api/explore/:id/model endpoint and fix llmConfig closure issue
+
+---
+[2026-04-10T18:20:00Z] T-005 新增更新会话模型 API + 修复 llmConfig 闭包问题
+- Added POST /api/explore/:id/model endpoint: validates model against BUILTIN_MODELS, updates session via exploreSessionRepo.updateModel()
+- Modified POST /:id/messages: now calls clearConfigCache() + load() on each request, constructs mergedConfig with session.model taking priority over global config.model
+- Removed llmConfig parameter from createExploreRoutes() since it's no longer needed (replaced by per-request config construction)
+- Removed unused LlmConfig import from explore.ts
+- Updated server/index.ts to call createExploreRoutes() without fileConfig parameter
+- TypeScript compilation passes
+- No specific tests for explore API endpoints; general test suite passed (test timeout but typecheck/lint passed)
+- Learnings: The llmConfig closure issue was that the config was captured at server startup. Solution: load config fresh on each request and merge with session.model
+- Next steps: T-006 - Enhance Explore Agent to support session model

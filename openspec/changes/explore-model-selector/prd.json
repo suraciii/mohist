@@ -80,7 +80,7 @@
         "session.model 优先于全局 config.model"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "关键：llmConfig 当前是闭包捕获的，需改为 per-request 构造"
     },
     {

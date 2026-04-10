@@ -9,6 +9,8 @@ import { ProjectService } from '../services/project-service';
 import type { LlmConfig } from '../agent-runtime';
 import { LlmError } from '../agent-runtime/llm';
 import type { EventBus } from '../services/event-bus';
+import { clearConfigCache, load } from '../config/config-loader';
+import { BUILTIN_MODELS } from '../config/builtin-models';
 
 export function createExploreRoutes(
   exploreService: ExploreService,
@@ -16,7 +18,6 @@ export function createExploreRoutes(
   projectService: ProjectService,
   exploreSessionRepo: ExploreSessionRepo,
   eventBus: EventBus,
-  llmConfig?: LlmConfig,
 ): Hono {
   const app = new Hono();
 
@@ -130,6 +131,53 @@ export function createExploreRoutes(
     }
   });
 
+  app.post('/:id/model', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const body = await c.req.json();
+      const { model, variant } = body;
+
+      if (!model || typeof model !== 'string') {
+        const response: ApiResponse = {
+          success: false,
+          error: 'model is required',
+        };
+        return c.json(response, 400);
+      }
+
+      const validModels = BUILTIN_MODELS.map((m) => m.id);
+      if (!validModels.includes(model)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Invalid model: ${model}. Available models: ${validModels.join(', ')}`,
+        };
+        return c.json(response, 400);
+      }
+
+      const session = exploreSessionRepo.findById(id);
+      if (!session) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Session not found',
+        };
+        return c.json(response, 404);
+      }
+
+      const updatedSession = exploreSessionRepo.updateModel(id, model, variant ?? null);
+      const response: ApiResponse<ExploreSession> = {
+        success: true,
+        data: updatedSession!,
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update session model',
+      };
+      return c.json(response, 500);
+    }
+  });
+
   app.post('/:id/messages', async (c) => {
     try {
       const sessionId = c.req.param('id');
@@ -171,11 +219,18 @@ export function createExploreRoutes(
         { role: 'user' as const, content: userContent },
       ];
 
+      clearConfigCache();
+      const globalConfig = load();
+      const mergedConfig: LlmConfig = {
+        ...globalConfig,
+        model: session.model ?? globalConfig.model,
+      };
+
       const agentContext = {
         projectPath: project.path,
         sessionId,
         projectId: session.projectId,
-        llmConfig,
+        llmConfig: mergedConfig,
         issueService,
         exploreSessionRepo,
         eventBus,
