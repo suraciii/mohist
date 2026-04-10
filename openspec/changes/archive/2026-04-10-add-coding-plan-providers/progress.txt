@@ -1,0 +1,29 @@
+# Ralph Progress Log
+Started: 2026-04-10T06:21:29.452Z
+
+---
+
+## T-001: Add coding plan providers to builtin-providers.ts
+- Timestamp: 2026-04-10T06:35:00Z
+- Status: COMPLETED
+- What was done: Added 3 new entries to BUILTIN_PROVIDERS:
+  - `zhipuai-coding-plan` (openai-compatible, https://open.bigmodel.cn/api/coding/paas/v4, envVars: ZHIPU_API_KEY)
+  - `kimi-for-coding` (anthropic, https://api.kimi.com/coding/v1, envVars: KIMI_API_KEY, MOONSHOT_API_KEY)
+  - `minimax-for-coding` (anthropic, https://api.minimax.io/anthropic/v1, envVars: MINIMAX_API_KEY)
+- TypeScript typecheck passed (npx tsc --noEmit)
+- Build encountered cp command failure for prompts directory but tsc compiled successfully
+- Learnings: Existing config-schema.ts already supports 'anthropic' SDK type, no changes needed there
+- Next steps: T-002 (add unit tests for coding plan provider resolution)
+
+---
+
+## T-002: Add unit tests for coding plan provider resolution
+- Timestamp: 2026-04-10T06:38:00Z
+- Status: COMPLETED
+- What was done: Added 6 new tests across 2 test files:
+  - config-loader.test.ts: 3 tests verifying getProviderConfig() for each coding plan provider (sdk, name, baseURL, envVars)
+  - resolve-model.test.ts: 3 tests verifying resolveModel() creates correct SDK instances with correct model IDs
+- Tests pass: 45 passed (17 resolve-model + 28 config-loader)
+- Learnings: Existing test patterns (beforeEach savedEnv, setEnv helper) work well. No mocking needed since we test provider resolution logic directly.
+- Next steps: All tasks complete. Ready for review.
+
