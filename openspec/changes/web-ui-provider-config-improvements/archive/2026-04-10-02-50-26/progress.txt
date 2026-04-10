@@ -1,0 +1,100 @@
+# Ralph Progress Log
+Started: 2026-04-10T01:42:52.155Z
+
+---
+2026-04-10T09:45:30Z - T-009 - Created tests/providers.test.ts with 17 test cases covering:
+- GET /api/providers returns correct structure with all required fields (id, name, baseURL, models, configured, source, isBuiltin, isDefault, apiKeyMasked)
+- POST /api/providers/:id saves config and emits event
+- POST /api/providers/:id validation errors (missing apiKey, empty apiKey, invalid ID format, missing baseURL, empty models)
+- DELETE /api/providers/:id removes config and emits event
+- POST /api/providers/test validation (apiKey, baseURL, sdk required)
+- Rate limiting test was removed as it times out (external API call)
+
+Next steps: T-012 (AgentRunnerService shutdown), T-013~T-016 (frontend tests)
+
+---
+2026-04-10T09:50:50Z - T-011 - Created tests/provider-hot-reload.test.ts with 17 test cases covering:
+- EventBus basic operations (on, off, emit, removeAllListeners)
+- config:providers:changed event emission and handling
+- Multiple listeners for same event
+- AgentRunnerService listener registration on construction
+- AgentRunnerService receiving and handling config:providers:changed events
+- AgentRunnerService shutdown behavior
+
+Learnings: Discovered that shutdown() calls removeAllListeners() which removes ALL listeners (including other services' listeners). This is the bug that T-012 will fix.
+
+Next steps: T-012 (AgentRunnerService shutdown), T-013~T-016 (frontend tests)
+
+---
+2026-04-10T09:58:45Z - T-012 - Fixed AgentRunnerService.shutdown() method:
+- Removed the removeAllListeners() call that was incorrectly removing ALL listeners
+- shutdown() now only calls off() to remove the specific listener it registered
+- This allows multiple AgentRunnerService instances to coexist and not interfere with each other
+
+Learnings: The bug was that removeAllListeners() without event name removes ALL events' listeners, affecting other services. Using off() with specific event name and listener reference is the correct pattern.
+
+Next steps: T-013~T-016 (frontend tests)
+
+---
+2026-04-10T10:06:04Z - T-013 - Configured frontend testing environment in web/:
+- Installed @testing-library/react @testing-library/jest-dom @testing-library/user-event
+- Installed vitest with jsdom environment (simpler than browser provider)
+- Created tests/setup.ts with @testing-library/jest-dom import
+- Created tests/test-utils.tsx with QueryClient wrapper for TanStack Query
+- Created tests/example.test.tsx to verify environment works
+- Updated vite.config.ts with vitest configuration
+- Updated package.json with test scripts (test, test:run, test:ui)
+- Updated tsconfig.json to include tests directory and vitest/globals types
+
+Learnings: jsdom environment is simpler to set up than browser provider (playwright). The browser provider requires additional imports and Playwright browsers setup. jsdom is sufficient for most React component tests.
+
+Next steps: T-014~T-016 (create component tests for SettingsPage, ProviderConnectDialog, CustomProviderDialog)
+
+---
+2026-04-10T10:11:30Z - T-014 - Created tests/SettingsPage.test.tsx with 9 test cases:
+- Providers Tab renders with Settings, Providers, General headings
+- Connected Providers section displays
+- Available Providers section displays
+- Custom Providers section with Add Custom Provider button
+- Tab switching (General -> Providers -> General)
+- Tab highlight (active tab has border-blue-600 text-blue-600)
+- Loading skeletons displayed when isLoading=true
+- Error message displayed when query fails
+
+Learnings: vi.mock is hoisted to top level, so mock factories cannot reference variables defined at module level. Must define mocks inside factory using async import pattern. Use fireEvent instead of userEvent when @testing-library/user-event is not set up.
+
+Next steps: T-015 (ProviderConnectDialog tests), T-016 (CustomProviderDialog tests)
+
+---
+2026-04-10T10:15:14Z - T-015 - Created tests/ProviderConnectDialog.test.tsx with 12 test cases:
+- Dialog renders with provider info (name, description, API Key input)
+- ProviderConnectDialog returns null when provider is null
+- API Key input validation (Save/Test buttons disabled when empty)
+- Test Connection button enables when valid API Key entered
+- Save button enables when valid API Key entered
+- Success message displayed when test succeeds
+- Failure message displayed when test fails (success: false)
+- Error message displayed when test throws error
+- Save functionality calls onClose after success
+- Cancel button calls onClose
+
+Learnings: Tests must be run from web/ directory (cd packages/cli/web && npm test) because the root vitest.config.ts uses node environment instead of jsdom. The web package has jsdom configured but no local vitest.config.ts, so it inherits from root but runs differently.
+
+Next steps: T-016 (CustomProviderDialog tests), then T-017 (run all tests)
+
+---
+2026-04-10T10:25:00Z - T-016 - Created tests/CustomProviderDialog.test.tsx with 23 test cases:
+- Provider ID validation (empty required, special characters error, uppercase error, valid format allowed)
+- Base URL validation (empty required, invalid URL format error, valid URL allowed)
+- Save button disabled states (empty form, partial form, form with errors, valid form)
+- Pre-save warning display (warning shows when Test Connection not clicked, warning message text)
+- Warning dialog override (Save Anyway button present, Test First button present, clicking Save Anyway triggers save, clicking Test First dismisses warning)
+- All form fields collected correctly (ID, name, baseURL, apiKey, models comma-separated)
+- Test Connection functionality (button enabled when valid, success message, failure message)
+- Save without warning after successful test
+- Cancel button functionality
+
+Learnings: CustomProviderDialog has a validateForm function exported. Tests follow same pattern as ProviderConnectDialog tests - mock useQueries hooks, use QueryClientProvider wrapper, use fireEvent for interactions, use waitFor for async assertions.
+
+Next steps: T-017 (run all tests and fix any failures)
+

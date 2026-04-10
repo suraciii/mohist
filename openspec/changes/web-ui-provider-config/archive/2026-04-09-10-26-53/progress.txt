@@ -1,0 +1,140 @@
+# Ralph Progress Log
+Started: 2026-04-09T08:28:43.243Z
+
+---
+2026-04-09T08:36:00Z - T-001 - Implemented GET /api/providers endpoint
+- Created src/api/providers.ts with ProviderListItem interface
+- Added models field to ProviderConfigSchema in config-schema.ts
+- Registered route in src/server/index.ts
+- Returns all builtin providers + custom providers from config.jsonc
+- source field maps 'builtin' to 'none' per spec (only config/env/none allowed)
+- apiKeyMasked uses same algorithm as CLI: 4 prefix + **** + 4 suffix
+Learnings:
+- ResolvedProvider.source type includes 'builtin' which doesn't map to API spec
+- Fixed by converting 'builtin' to 'none' for source field
+Next steps: T-002 (POST /api/providers/:id endpoint)
+---
+2026-04-09T08:46:00Z - T-002 - Implemented POST /api/providers/:id endpoint
+- Added POST /:id route to src/api/providers.ts
+- Validates apiKey is not empty (400 error if empty)
+- For custom providers: validates id format /^[a-z0-9-]+$/ (400 error if invalid)
+- For custom providers: validates baseURL via URL constructor (400 error if invalid)
+- For custom providers: validates models is non-empty array (400 error if empty)
+- Uses existing ProviderConfigSchema for additional validation
+- Updates config.jsonc atomically via writeConfig() (uses temp file + rename)
+- Returns { success: true, data: { id, configured: true } } on success
+Learnings:
+- writeConfig() already handles atomic writes via temp file + rename
+- Builtin providers don't need baseURL/models validation (only apiKey)
+Next steps: T-003 (DELETE /api/providers/:id endpoint)
+---
+2026-04-09T08:52:00Z - T-003 - Implemented DELETE /api/providers/:id endpoint
+- Added DELETE /:id route to src/api/providers.ts
+- Loads config, checks if provider exists in config.provider
+- Returns 204 (no content) if provider not found in config
+- Deletes provider entry from config.provider and writes atomically via writeConfig()
+- Returns { success: true, data: { id } } on success
+Learnings:
+- Hono c.json() doesn't accept 204 directly; used c.status(204) + c.body(null) instead
+- writeConfig() handles atomic updates already - no extra work needed
+Next steps: T-004 (Event Bus implementation for hot reload)
+---
+2026-04-09T09:02:00Z - T-004 - Implemented Event Bus for config changes
+- Added 'config:providers:changed' event to EventMap in event-bus.ts
+- EventBus already had on/off/emit methods with proper typing - met all acceptance criteria
+- EventBus is exported via services/index.ts and available for DI
+- Existing implementation supports emit(eventName, payload) and on(eventName, handler)
+- removeAllListeners() provides proper cleanup to prevent memory leaks
+Learnings:
+- EventBus was already fully implemented with strong typing
+- Only needed to add the new event type to EventMap
+- Type-safe event names are already using string constants via EventName type
+Next steps: T-005 (Emit events on provider config changes)
+
+
+2026-04-09T10:00:00Z T-005 Backend: Emit events on provider config changes
+- Modified src/api/providers.ts: added EventBus parameter, emit 'config:providers:changed' on POST and DELETE
+- Modified src/server/index.ts: pass eventBus to createProviderRoutes()
+- EventMap already defined in event-bus.ts with 'config:providers:changed' event
+- TypeScript typecheck passed
+Learnings: EventBus already had the event type defined. No schema changes needed.
+Next steps: Implement T-006 (config cache invalidation) and T-007 (AgentRunner hot reload)
+---
+2026-04-09T11:00:00Z - T-006 - Backend: Implement config cache invalidation
+- Modified src/config/config-loader.ts: added configCache Map (path -> ConfigInfo)
+- Added clearConfigCache() function to clear all cached configs
+- Modified load(): checks cache before reading file, stores parsed result in cache
+- Modified writeConfig(): calls clearConfigCache() before writing to invalidate cache
+- Cache is per-file-path, so tests using different temp paths don't interfere
+- ConfigLoader tests all pass (22 tests)
+- TypeScript typecheck passed
+Learnings:
+- load() is stateless per file path - using Map keyed by path allows proper cache isolation
+- clearConfigCache() clears all entries, ensuring fresh reads after any config change
+- writeConfig() already atomic via temp file + rename - adding cache clear before write is sufficient
+Next steps: T-007 (AgentRunner hot reload)
+---
+2026-04-09T11:30:00Z - T-007 - Backend: Implement AgentRunner hot reload
+- Modified src/services/agent-runner-service.ts:
+  - Added private llmConfig field to store current LLM config
+  - Added setLlmConfig() and getLlmConfig() methods for config management
+  - Added event listener for 'config:providers:changed' via EventBus
+  - handleProvidersChanged() reloads config via load() and updates stored llmConfig
+  - Modified executeAgent() and resume() to use stored llmConfig when passed config is undefined
+- Modified src/api/issues.ts and src/api/propose.ts:
+  - Changed route handlers to pass undefined instead of captured llmConfig to agentRunner.start()/resume()
+  - This ensures stored config (set via setLlmConfig) is used instead
+- Modified src/server/index.ts:
+  - Added call to agentRunner.setLlmConfig(llmConfig) after loading config at startup
+- TypeScript typecheck passed
+Learnings:
+- llmConfig was captured at route creation time, so changes wouldn't take effect
+- Solution: routes pass undefined, executeAgent/resume use stored this.llmConfig
+- Server must call setLlmConfig after loadConfig() to set initial config
+- Running agents continue using their captured config (passed as parameter), new agents use updated config
+Next steps: T-008 (POST /api/providers/test endpoint)
+---
+2026-04-09T12:15:00Z - T-008 - Backend: Implement POST /api/providers/test endpoint
+- Modified src/api/providers.ts:
+  - Added imports: generateText from 'ai', createAnthropic from '@ai-sdk/anthropic', createOpenAI from '@ai-sdk/openai'
+  - Added POST /test endpoint before POST /:id route (to avoid matching 'test' as an id)
+  - Test endpoint accepts full provider config (id?, name, apiKey, baseURL, sdk, models?)
+  - If id provided, loads saved config from config.jsonc via getProviderConfig() and merges with provided fields
+  - Creates LLM model using SDK factory functions based on sdk type (anthropic/openai/openai-compatible)
+  - Sends test request with maxOutputTokens=1 (AI SDK v6 uses maxOutputTokens, not maxTokens)
+  - Maps common errors to user-friendly messages (Authentication failed, Connection failed, Connection timeout)
+  - Returns { success: true } with HTTP 200 for successful test
+  - Returns { success: false, error: message } with HTTP 400 for failed test
+TypeScript build passed (npm run build)
+Learnings:
+- AI SDK v6 uses maxOutputTokens parameter, not maxTokens
+- Hono route order matters: static routes (/test) must come before param routes (/:id)
+- Need to use SDK factory functions (createAnthropic, createOpenAI) directly for custom configs
+Next steps: T-009 (connection test error handling - already partially done in T-008)
+---
+2026-04-09T12:45:00Z - T-009 - Backend: Implement connection test error handling
+- Modified src/api/providers.ts: improved error handling in POST /test endpoint
+- Changed from fragile string matching to proper error property checking:
+  - error.status === 401 || error.status === 403 -> 'Authentication failed'
+  - error.code === 'ECONNREFUSED' | 'ENOTFOUND' | 'ENETUNREACH' | 'EAI_AGAIN' -> 'Connection failed'
+  - error.name === 'TimeoutError' | error.code === 'ETIMEDOUT' | error.name === 'AI_TimeoutError' -> 'Connection timeout'
+  - Other errors return original error.message
+- HTTP 400 returned for all failures (not 500), HTTP 200 for success
+TypeScript typecheck passed
+Learnings:
+- AI SDK errors have structured properties (status, code, name) not just string messages
+- String matching like errorMessage.includes('401') is fragile and can miss cases
+- Better to use type-safe property access on Error objects
+Next steps: T-010 (rate limiting for test endpoint)
+---
+2026-04-09T13:15:00Z - T-010 - Backend: Implement rate limiting for test endpoint
+- Modified src/api/providers.ts: added rate limiting middleware for POST /test endpoint
+- Implementation uses in-memory Map with IP-based tracking (x-forwarded-for or x-real-ip header)
+- Limits 30 requests per minute per IP, returns 429 + Retry-After header when exceeded
+- Cleanup interval runs every 60 seconds to remove expired entries
+- TypeScript typecheck passed, existing tests have pre-existing failures unrelated to this change
+Learnings:
+- Hono middleware signature: async function(c: Context, next: Next): Promise<Response | void>
+- Return type must be Promise<Response | void> not Promise<Response> (missing return)
+- Fixed by changing return type and using 'return next()' instead of 'await next()'
+Next steps: Continue with frontend tasks (T-011 onwards)

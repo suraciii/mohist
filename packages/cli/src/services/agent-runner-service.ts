@@ -8,6 +8,8 @@ import { IssueStatus, type Issue } from '../types';
 import { EventBus } from './event-bus';
 import { Stage } from '../types';
 import { loadWorkflow } from '../workflow/workflow-loader';
+import { load } from '../config/config-loader';
+import { maskSensitiveData } from '../utils/sensitive-data';
 
 export interface RunningAgent {
   issueId: string;
@@ -57,6 +59,8 @@ export class AgentRunnerService {
   private waitingQuestions = new Map<string, WaitingQuestion>();
   private readonly maxConcurrentAgents: number;
   private readonly recoverableIssues: RecoverableIssue[];
+  private llmConfig?: LlmConfig;
+  private readonly providersChangedListener: (data: { providers: Array<{ id: string; name?: string; apiKey?: string; baseURL?: string; sdk?: string; models?: string[] }> }) => void;
 
   constructor(
     private readonly eventBus: EventBus,
@@ -70,6 +74,35 @@ export class AgentRunnerService {
     if (this.recoverableIssues.length > 0) {
       console.log(`Detected ${this.recoverableIssues.length} recoverable issue(s): ${this.recoverableIssues.map(i => `#${i.issueNumber} (${i.stage})`).join(', ')}`);
     }
+
+    this.providersChangedListener = (_data) => {
+      this.handleProvidersChanged();
+    };
+    this.eventBus.on('config:providers:changed', this.providersChangedListener);
+  }
+
+  shutdown(): void {
+    this.eventBus.off('config:providers:changed', this.providersChangedListener);
+  }
+
+  private handleProvidersChanged(): void {
+    try {
+      console.log('[AgentRunnerService] Provider config changed, reloading LLM config...');
+      const freshConfig = load();
+      this.llmConfig = freshConfig;
+      const maskedConfig = maskSensitiveData(freshConfig as unknown as Record<string, unknown>);
+      console.log('[AgentRunnerService] LLM config reloaded successfully', JSON.stringify(maskedConfig));
+    } catch (err) {
+      console.error('[AgentRunnerService] Failed to reload LLM config:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  setLlmConfig(config: LlmConfig): void {
+    this.llmConfig = config;
+  }
+
+  getLlmConfig(): LlmConfig | undefined {
+    return this.llmConfig;
   }
 
   private detectRecoverableIssues(): RecoverableIssue[] {
@@ -192,6 +225,7 @@ export class AgentRunnerService {
     llmConfig?: LlmConfig,
     updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
   ): void {
+    const resolvedLlmConfig = llmConfig ?? this.llmConfig;
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
 
     const promise = (async () => {
@@ -203,7 +237,7 @@ export class AgentRunnerService {
             commentRepo,
             questionRepo,
             worktreePath,
-            llmConfig,
+            llmConfig: resolvedLlmConfig,
             issue,
             eventBus: this.eventBus,
             workflowLogRepo: this.workflowLogRepo,
@@ -330,6 +364,7 @@ export class AgentRunnerService {
 
     this.pausedSessions.delete(issue.number);
 
+    const resolvedLlmConfig = llmConfig ?? this.llmConfig;
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
 
     sessionManager.appendMessage(session.id, {
@@ -346,7 +381,7 @@ export class AgentRunnerService {
             commentRepo,
             questionRepo,
             worktreePath,
-            llmConfig,
+            llmConfig: resolvedLlmConfig,
             issue,
             eventBus: this.eventBus,
             workflowLogRepo: this.workflowLogRepo,

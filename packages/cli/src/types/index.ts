@@ -131,6 +131,18 @@ export interface ToolCallRecord {
   result: unknown;
 }
 
+export class ConfigConflictError extends Error {
+  currentVersion: number;
+  expectedVersion: number;
+
+  constructor(currentVersion: number, expectedVersion: number) {
+    super(`Config version conflict: expected ${expectedVersion} but current is ${currentVersion}`);
+    this.name = 'ConfigConflictError';
+    this.currentVersion = currentVersion;
+    this.expectedVersion = expectedVersion;
+  }
+}
+
 export interface ExploreMessage {
   id: string;
   sessionId: string;

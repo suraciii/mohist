@@ -1,0 +1,127 @@
+# Ralph Progress Log
+Started: 2026-04-09T10:26:53.674Z
+
+---
+2026-04-09T18:45:00Z - T-011: Frontend: Create Settings page with Providers tab
+- Created SettingsPage component with Providers and General tabs
+- Added Settings link to Header navigation
+- Added /settings route in App.tsx
+- Created provider-api.ts with API methods for providers
+- Updated prd.json: passes=true
+
+---
+2026-04-09T19:30:00Z - T-012: Frontend: Implement React Query hooks for providers
+- Fixed provider-api.ts: added missing `request` function, renamed export to `providerApi`
+- Added React Query hooks in useQueries.ts:
+  - useProviders: fetches and caches provider list with queryKey ['providers']
+  - useSaveProvider: handles create/update with optimistic updates, rollback on error
+  - useDeleteProvider: handles removal with optimistic update, rollback on error
+  - useTestProvider: handles connection testing
+- Added proper TypeScript types for mutation context
+- Implemented cache invalidation on mutations (onSettled)
+- Updated prd.json: passes=true
+- Typecheck passed for main CLI package
+- Note: web package has pre-existing issues (missing lucide-react types) unrelated to this task
+
+---
+2026-04-09T19:45:00Z - T-013: Frontend: Build Connected Providers section
+- Implemented ConnectedProvidersList component with full functionality
+- Shows provider name, masked API Key (font-mono), source tag (config/env)
+- ProviderIcon component displays colored avatar with 2-letter abbreviation
+- SourceTag shows Cloud/CloudOff icons with 'config' (blue) or 'env' (green) badge
+- isDefault badge shows checkmark icon and 'default' label
+- Remove button opens confirmation dialog before disconnect
+- Empty state with dashed border and CloudOffIcon when no providers configured
+- Loading state with skeleton cards (animate-pulse)
+- Error state with red alert banner
+- Since lucide-react is not installed, created inline SVG icon components
+- Build passed successfully
+- Updated prd.json: passes=true
+
+---
+2026-04-09T19:50:00Z - T-014: Frontend: Build Available Providers section
+- Implemented AvailableProvidersList component with full functionality
+- Filters providers to show only builtin providers not yet configured (isBuiltin && !configured)
+- Provider descriptions for each builtin: anthropic, openai, glm, kimi, minimax, deepseek, qwen
+- Connect button for each provider (placeholder handler for future dialog)
+- Loading state with skeleton cards (animate-pulse)
+- Error state with red alert banner
+- Empty state when all providers configured
+- Build passed successfully
+- Updated prd.json: passes=true
+- Next steps: T-015 Create Provider Connect Dialog
+
+
+2026-04-09T15:30:00Z T-015 Frontend: Create Provider Connect Dialog
+- Created ProviderConnectDialog.tsx component with:
+  - Password input field with show/hide toggle (EyeIcon/EyeSlashIcon)
+  - Test Connection button (visible when API Key entered)
+  - Save and Cancel buttons
+  - Provider-specific help text descriptions
+  - Form validation requiring non-empty API Key
+- Updated SettingsPage.tsx to integrate the dialog:
+  - Imported ProviderConnectDialog component
+  - AvailableProvidersList now tracks selected provider state
+  - handleConnect passes full Provider object instead of just ID
+  - Dialog opens when Connect button clicked, closes on Save/Cancel
+- Verified typecheck passes
+Next: T-016 Create Custom Provider Dialog
+
+---
+2026-04-09T20:00:00Z - T-016: Frontend: Create Custom Provider Dialog
+- Created CustomProviderDialog.tsx with full form for custom OpenAI-compatible providers
+- Fields: Provider ID (lowercase alphanumeric + hyphens), Name, Base URL, API Key, Models (comma-separated)
+- Validation: id format regex /^[a-z0-9-]+$/, URL format via URL constructor, all fields required
+- Test Connection button with loading state and result feedback (success/error)
+- Save and Cancel buttons with proper disabled states
+- Help text for each field explaining the purpose
+- API Key input has show/hide toggle
+- Error messages shown inline below each field
+- Created CustomProvidersSection in SettingsPage with "Add Custom Provider" button
+- Integrated CustomProviderDialog with open/close state management
+- Typecheck passed
+- Updated prd.json: passes=true
+Next: T-017 Implement useTestProvider hook (may already exist - checking)
+
+---
+2026-04-09T20:15:00Z - T-017: Frontend: Implement useTestProvider hook
+- Verified useTestProvider hook already exists in useQueries.ts:219-223
+- Uses useMutation with TestProviderVariables interface
+- Returns mutate function and status properties (isIdle/isPending/isSuccess/isError)
+- Already integrated in both ProviderConnectDialog.tsx:49 and CustomProviderDialog.tsx:89
+- Typecheck passed (npm run typecheck)
+- No code changes needed - hook was implemented as part of T-012
+- Updated prd.json: passes=true
+Learnings: T-012 implemented all required React Query hooks including useTestProvider. When reusing existing code, verify before implementing.
+Next: T-018 Add Test Connection button to dialogs (verify integration)
+
+---
+2026-04-09T20:30:00Z - T-018: Frontend: Add Test Connection button to dialogs
+- Added CheckCircleIcon and XCircleIcon SVG components to ProviderConnectDialog.tsx
+- Added CheckCircleIcon and XCircleIcon SVG components to CustomProviderDialog.tsx
+- ProviderConnectDialog:
+  - Added testResult state to track { success: boolean, message: string }
+  - Updated handleTest to set testResult instead of using alert()
+  - Success message: "Connection successful! Your API key is valid."
+  - Error message: "Connection failed. Please check your API key and try again."
+  - Error from API: "Connection failed: {error.message}"
+  - Display testResult with green checkmark (success) or red X (error) + message
+- CustomProviderDialog:
+  - Added icons to existing testResult display
+  - Both dialogs now show clear, actionable result messages with visual indicators
+- Typecheck passed (npm run typecheck)
+- Updated prd.json: passes=true
+Learnings: ProviderConnectDialog was using alert() for test results which provides poor UX. Better to use inline state-based feedback with icons.
+Next: T-019 Implement test button debouncing
+
+[2026-04-09 10:30:00] T-019 - Implement test button debouncing (2s) in ProviderConnectDialog and CustomProviderDialog. Reset lastTestTime when inputs change. No external deps needed - using simple Date.now() comparison. Typecheck passed. Task complete.
+
+---
+2026-04-09T21:00:00Z - T-020: Backend: Integrate hot reload across services
+- Fixed memory leak in AgentRunnerService: stored event listener as class property `providersChangedListener`
+- Added shutdown() method to AgentRunnerService for proper event listener cleanup
+- Modified server/index.ts to call agentRunner.shutdown() on SIGTERM/SIGINT
+- Typecheck passed (npm run typecheck)
+- Updated prd.json: passes=true
+Learnings: EventBus listener was registered with anonymous function, making it impossible to unregister. Store listener reference as class property to enable cleanup.
+Next: T-021 (optional pre-save validation)

@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as jsonc from 'jsonc-parser';
 import { ConfigInfoSchema, type ConfigInfo } from './config-schema';
 import { BUILTIN_PROVIDERS, type BuiltinProvider } from './builtin-providers';
+import { ConfigConflictError } from '../types';
 
 export interface ResolvedProvider {
   sdk: string;
@@ -17,6 +18,12 @@ export interface ResolvedProvider {
 const CONFIG_DIR = (): string => path.join(os.homedir(), '.mohist');
 const CONFIG_PATH = (): string => path.join(CONFIG_DIR(), 'config.jsonc');
 
+const configCache = new Map<string, ConfigInfo>();
+
+export function clearConfigCache(): void {
+  configCache.clear();
+}
+
 function ensureConfigDir(): void {
   const dir = CONFIG_DIR();
   if (!fs.existsSync(dir)) {
@@ -27,8 +34,14 @@ function ensureConfigDir(): void {
 export function load(configPath?: string): ConfigInfo {
   const filePath = configPath ?? CONFIG_PATH();
 
+  if (configCache.has(filePath)) {
+    return configCache.get(filePath)!;
+  }
+
   if (!fs.existsSync(filePath)) {
-    return {};
+    const emptyConfig: ConfigInfo = {};
+    configCache.set(filePath, emptyConfig);
+    return emptyConfig;
   }
 
   const raw = fs.readFileSync(filePath, 'utf-8');
@@ -51,6 +64,11 @@ export function load(configPath?: string): ConfigInfo {
     throw new Error(`Invalid config in ${filePath}:\n${issues}`);
   }
 
+  if (result.data._version === undefined) {
+    result.data._version = Date.now();
+  }
+
+  configCache.set(filePath, result.data);
   return result.data;
 }
 
@@ -92,12 +110,29 @@ export function getProviderConfig(
   return { sdk, name, apiKey, baseURL, envVars, source: apiKeySource };
 }
 
+export interface WriteConfigOptions {
+  expectedVersion?: number;
+}
+
 export function writeConfig(
   config: ConfigInfo,
-  configPath?: string
+  configPath?: string,
+  options?: WriteConfigOptions
 ): void {
   const filePath = configPath ?? CONFIG_PATH();
+
+  const currentConfig = load(filePath);
+  if (options?.expectedVersion !== undefined) {
+    if (currentConfig._version !== undefined && currentConfig._version !== options.expectedVersion) {
+      throw new ConfigConflictError(currentConfig._version, options.expectedVersion);
+    }
+  }
+
   ensureConfigDir();
+
+  clearConfigCache();
+
+  config._version = Math.max(Date.now(), (currentConfig._version ?? 0) + 1);
 
   const content = JSON.stringify(config, null, 2) + '\n';
   const tmpPath = filePath + '.tmp.' + process.pid;

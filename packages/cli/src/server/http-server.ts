@@ -4,14 +4,16 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Config, ServerState } from '../types';
+import type { RateLimiter } from '../utils/rate-limiter';
 
 export class HttpServer {
   private app: Hono;
   private server: ReturnType<typeof serve> | null;
   private config: Config;
   private state: ServerState;
+  private rateLimiter: RateLimiter | null;
 
-  constructor(config: Config) {
+  constructor(config: Config, rateLimiter?: RateLimiter) {
     this.config = config;
     this.app = new Hono();
     this.server = null;
@@ -19,6 +21,7 @@ export class HttpServer {
       isRunning: false,
       port: config.serverPort
     };
+    this.rateLimiter = rateLimiter || null;
     this.setupMiddleware();
     this.setupRoutes();
   }
@@ -94,6 +97,10 @@ export class HttpServer {
       if (!this.server) {
         resolve();
         return;
+      }
+
+      if (this.rateLimiter) {
+        this.rateLimiter.dispose();
       }
 
       this.server.close((err?: Error) => {

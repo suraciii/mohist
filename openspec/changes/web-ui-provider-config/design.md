@@ -85,6 +85,17 @@ await llm.generate({
 - OpenCode 的完整表单包含 headers、payload 等高级选项
 - Mohist 场景更简单，基础字段足够
 
+**配置 Schema 更新**：
+```typescript
+export const ProviderConfigSchema = z.object({
+  name: z.string().optional(),
+  apiKey: z.string().optional(),
+  baseURL: z.string().optional(),
+  sdk: z.enum(['anthropic', 'openai', 'openai-compatible']).optional(),
+  models: z.array(z.string()).optional(), // 新增：模型列表
+}).strip();
+```
+
 ### 4. 错误处理策略
 
 **决策**：使用 Toast 通知 + 表单内联错误显示。
@@ -93,13 +104,42 @@ await llm.generate({
 - Web UI 已集成 Toast 系统
 - 连接测试失败需要具体错误信息（如 401、timeout）
 
+### 5. API Key Mask 规则
+
+**决策**：使用固定格式的 mask 策略，保留前缀和后缀，中间替换为星号。
+
+**规则**：
+```typescript
+function maskApiKey(key: string): string {
+  if (key.length <= 8) return '********';
+  return key.slice(0, 4) + '*'.repeat(key.length - 8) + key.slice(-4);
+}
+// 示例: "sk-abc123xyz789" → "sk-a*********789"
+```
+
+### 6. Provider 列表 API 响应格式
+
+```typescript
+interface ProviderListItem {
+  id: string;                    // 唯一标识
+  name: string;                  // 显示名称
+  baseURL: string | null;        // API 端点
+  models: string[];              // 支持的模型列表
+  configured: boolean;           // 是否已配置 apiKey
+  source: 'config' | 'env' | 'none';  // 配置来源
+  isBuiltin: boolean;            // 是否为内置 Provider
+  isDefault: boolean;            // 是否为当前默认 Provider
+  apiKeyMasked: string | null;   // Mask 后的 API Key
+}
+```
+
 ## Risks / Trade-offs
 
 | Risk | Mitigation |
 |------|------------|
 | 配置热重载时正在运行的 Agent 可能使用旧配置 | Agent 下次运行时自动使用新配置；紧急场景提示用户重启 Server |
 | API Key 在内存中可能泄露 | API Key 仅存在于服务端内存，不传输到前端；日志中 mask 处理 |
-| 连接测试可能被滥用（频繁测试） | 前端防抖（2秒），服务端限流（每 IP 每分钟 10 次） |
+| 连接测试可能被滥用（频繁测试） | 前端防抖（2秒），服务端限流（每分钟 30 次，单人使用场景足够） |
 | 自定义 Provider 配置错误导致系统不稳定 | 表单验证 provider ID 格式、baseURL 格式；保存前强制测试连接 |
 
 ## Migration Plan
