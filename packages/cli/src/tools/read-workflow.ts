@@ -23,7 +23,7 @@ function formatWorkflow(config: WorkflowConfigWithDetection): string {
     lines.push(`- **Change detected**: YES`);
     lines.push(`- **Change path**: ${config.openspec.changePath}`);
     lines.push(`- **PRD**: ${config.openspec.prdPath}`);
-    lines.push(`- **Execution mode**: Ralph-style task loop (use \`run_ralph_loop\` in build stage)`);
+    lines.push(`- **Execution mode**: Ralph-style task loop (Build stage automatically detects prd.json and runs tasks sequentially)`);
   } else if (config.openspec.detected) {
     lines.push(`- **Change directory detected**: YES (but no prd.json yet)`);
     lines.push(`- **Change path**: ${config.openspec.changePath}`);
@@ -42,7 +42,7 @@ export function createReadWorkflowTool(context: ReadWorkflowContext): ToolInstan
     description:
       'Read the workflow configuration. Returns the workflow stages, prompt templates, settings, ' +
       'and OpenSpec Change detection result. Call this first to understand the available stages, ' +
-      'whether to use run_ralph_loop or spawn_coder, and the current execution mode.',
+      'execution mode, and whether the Build stage will use Ralph-style task execution or spawn_coder.',
     parameters: z.object({}).strict(),
     execute: async () => {
       const result = loadWorkflowWithDetection(context.cwd, context.issueNumber);

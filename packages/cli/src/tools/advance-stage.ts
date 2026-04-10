@@ -19,7 +19,7 @@ export interface AdvanceStageContext {
 export function createAdvanceStageTool(context: AdvanceStageContext): ToolInstance<any> {
   return Tool.define('advance_stage', {
     description:
-      'Advance the current issue to the next workflow stage. Allowed transitions: draft → plan, plan → build/review, review → build, build → check, check → done/plan.',
+      'Advance the current issue to the next workflow stage. Allowed transitions: explore → plan, draft → plan, plan → build, build → review, review → done/build, check → done/plan.',
     parameters: z.object({
       stage: z
         .string()
