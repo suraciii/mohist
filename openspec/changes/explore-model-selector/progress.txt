@@ -22,3 +22,14 @@ Started: 2026-04-10T09:41:56.666Z
 - Next steps: T-003 - Database migration + type definitions update
 
 2026-04-10T17:57:30Z | T-003 | 数据库迁移 + 类型定义更新 | 实现 migrateToVersion10() 添加 model/variant 列；更新 ExploreSession/ExploreSessionRow 接口；build 通过，tests 通过（1 pre-existing failure） | - | Next: T-004 更新 Explore Session Repository
+
+---
+[2026-04-10T18:05:00Z] T-004 Updated Explore Session Repository
+- Added import for `load` from config-loader
+- Updated `create()` to use `load().model` as default model for new sessions
+- Added `updateModel(id, model, variant)` method to update session's model and variant
+- `rowToExploreSession` already correctly maps model/variant fields
+- TypeScript compilation passes
+- No specific tests for explore-session-repo exist; general test suite passed typecheck
+- Learnings: T-003 already updated ExploreSessionRow and rowToExploreSession to handle model/variant, so only needed to add updateModel() and update create()
+- Next steps: T-005 - Add POST /api/explore/:id/model endpoint and fix llmConfig closure issue

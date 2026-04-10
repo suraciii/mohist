@@ -63,7 +63,7 @@
         "findById 返回的对象包含 model 和 variant"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "依赖 T-003 完成后的类型定义"
     },
     {

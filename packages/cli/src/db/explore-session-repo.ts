@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseManager } from './database';
 import { ExploreSession, ExploreStatus } from '../types';
+import { load } from '../config/config-loader';
 
 interface ExploreSessionRow {
   id: string;
@@ -39,11 +40,13 @@ export class ExploreSessionRepo {
   create(data: CreateExploreSessionData): ExploreSession {
     const now = new Date().toISOString();
     const id = uuidv4();
+    const config = load();
+    const model = config.model ?? null;
 
     this.db.run(
-      `INSERT INTO explore_sessions (id, project_id, title, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, data.projectId, data.title, ExploreStatus.Active, now, now]
+      `INSERT INTO explore_sessions (id, project_id, title, status, model, variant, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, data.projectId, data.title, ExploreStatus.Active, model, null, now, now]
     );
 
     return {
@@ -52,6 +55,8 @@ export class ExploreSessionRepo {
       issueId: null,
       title: data.title,
       status: ExploreStatus.Active,
+      model: model ?? undefined,
+      variant: undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -92,6 +97,15 @@ export class ExploreSessionRepo {
     this.db.run(
       'UPDATE explore_sessions SET issue_id = ?, updated_at = ? WHERE id = ?',
       [issueId, now, id]
+    );
+    return this.findById(id);
+  }
+
+  updateModel(id: string, model: string, variant: string | null): ExploreSession | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE explore_sessions SET model = ?, variant = ?, updated_at = ? WHERE id = ?',
+      [model, variant, now, id]
     );
     return this.findById(id);
   }
