@@ -1,0 +1,28 @@
+# Ralph Progress Log
+Started: 2026-04-10T01:27:02.707Z
+
+---
+
+
+## 2026-04-10 T-006: Update services.test.ts
+- Replaced 3x `resetDatabase({ inMemory: true })` with `new DatabaseManager({ inMemory: true })`
+- Replaced 3x `closeDatabase()` with `db.close()`
+- Fixed pre-existing API mismatches discovered during update:
+  - ProjectService now requires LabelRepo (4th constructor param)
+  - ProjectService.create() is now async (added await/async to test cases)
+  - IssueService now requires CommentRepo (2nd constructor param)
+- All 36 tests pass, typecheck clean
+- Next: T-007 (api-routes.test.ts and e2e.test.ts)
+
+## 2026-04-10 T-007 Update api-routes.test.ts and e2e.test.ts
+
+### What was done
+- **api-routes.test.ts**: Removed imports of `resetDatabase`, `closeDatabase`, `initializeDatabase`. Replaced `resetDatabase({ inMemory: true })` with `new DatabaseManager({ inMemory: true })`, removed redundant `initializeDatabase(db)` call (StateManager constructor handles it), replaced `new StateManager()` with `new StateManager(db)`, replaced `closeDatabase()` with `db.close()`.
+- **e2e.test.ts**: Same DI pattern replacements. Kept `initializeDatabase(db)` because this test creates repos directly before StateManager. Fixed pre-existing async bug: `projectService.create()` is async but was called without `await` — made `beforeEach` async and added `await`.
+
+### Learnings
+- e2e.test.ts needed `initializeDatabase(db)` retained because it creates repos directly (not via StateManager). The design spec (Decision 5) confirms this: "Tests using repos directly must call initializeDatabase(db) themselves."
+- Discovered pre-existing bug: `ProjectService.create()` is async (calls `detectBaseBranch`), but e2e.test.ts called it without await. This caused `projectId` to be undefined, leading to foreign key constraint failures.
+
+### Next steps
+- T-008: Update `agent-workflow-e2e.test.ts` and `advance-stage.test.ts` (currently failing with "resetDatabase is not a function")

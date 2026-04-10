@@ -79,26 +79,4 @@ export class DatabaseManager {
   }
 }
 
-let instance: DatabaseManager | null = null;
 
-export function getDatabase(config?: DatabaseConfig): DatabaseManager {
-  if (!instance) {
-    instance = new DatabaseManager(config);
-  }
-  return instance;
-}
-
-export function resetDatabase(config?: DatabaseConfig): DatabaseManager {
-  if (instance) {
-    instance.close();
-  }
-  instance = new DatabaseManager(config);
-  return instance;
-}
-
-export function closeDatabase(): void {
-  if (instance) {
-    instance.close();
-    instance = null;
-  }
-}

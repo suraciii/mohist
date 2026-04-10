@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
 import { Hono } from 'hono';
 import request from 'supertest';
-import { resetDatabase, closeDatabase } from '../src/db/database';
-import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
@@ -59,10 +57,9 @@ describe('API Routes', () => {
   let stateManager: StateManager;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
-    initializeDatabase(db);
+    db = new DatabaseManager({ inMemory: true });
     
-    stateManager = new StateManager();
+    stateManager = new StateManager(db);
     
     projectRepo = stateManager.getProjectRepo();
     issueRepo = stateManager.getIssueRepo();
@@ -76,7 +73,7 @@ describe('API Routes', () => {
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('Project Routes', () => {

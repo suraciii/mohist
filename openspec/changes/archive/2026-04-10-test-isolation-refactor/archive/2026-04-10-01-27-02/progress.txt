@@ -1,0 +1,39 @@
+# Ralph Progress Log
+Started: 2026-04-09T11:04:17.562Z
+
+---
+
+
+## 2026-04-09 T-001: Remove DatabaseManager singleton
+- Removed `instance` global variable, `getDatabase()`, `resetDatabase()`, and `closeDatabase()` from `packages/cli/src/db/database.ts`
+- DatabaseManager class itself is unchanged
+- Build shows expected errors in `db/index.ts` (T-002) and `state-manager.ts` (T-003) which still reference removed exports
+- Next: T-002 to update db/index.ts exports, T-003 to refactor StateManager
+
+## 2026-04-09 T-002: Update database exports
+- Removed getDatabase, resetDatabase, closeDatabase from the re-export line in db/index.ts
+- TypeScript confirms only remaining error is state-manager.ts importing getDatabase (T-003 scope)
+- Learnings: T-001 already removed the functions from database.ts; T-002 was purely an index.ts re-export cleanup
+- Next: T-003 refactors StateManager for dependency injection, which will resolve the remaining typecheck error
+
+## 2026-04-09 T-003: Refactor StateManager for DI
+- Changed StateManager constructor to accept `db: DatabaseManager` parameter instead of calling `getDatabase()` internally
+- Kept `initializeDatabase(db)` call inside constructor (per Decision 5 in design.md)
+- Removed `stateManagerInstance` global variable
+- Removed `getStateManager()` and `resetStateManager()` functions
+- Added `DatabaseManager` to imports from `'../db'`
+- TypeScript shows expected error in `server/index.ts` still calling `getStateManager()` — that's T-004's scope
+- Next: T-004 updates server/index.ts to use explicit `new DatabaseManager()` + `new StateManager(db)`
+
+## 2026-04-09 T-004: Update server entry point
+- Replaced `import { getStateManager }` with `import { StateManager }` and `import { DatabaseManager } from '../db'`
+- Changed `const stateManager = getStateManager()` to `const db = new DatabaseManager(); const stateManager = new StateManager(db);`
+- TypeScript compilation passes cleanly
+- Next: T-005 (update database.test.ts) and remaining test file updates
+
+[2026-04-09T19:23:20Z] T-005 Update database.test.ts
+- Replaced 6x resetDatabase({ inMemory: true }) with new DatabaseManager({ inMemory: true })
+- Replaced 6x closeDatabase() with db.close()
+- Updated import to remove resetDatabase and closeDatabase
+- All 47 tests pass, TypeScript compiles cleanly
+- Next: T-006 (services.test.ts), T-007 (api-routes + e2e), T-008 (agent-workflow + advance-stage)

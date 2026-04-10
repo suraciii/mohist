@@ -1,0 +1,24 @@
+# Ralph Progress Log
+Started: 2026-04-10T02:46:31.046Z
+
+---
+
+## T-008: 2026-04-10T10:48:52Z
+**Task:** Update agent-workflow-e2e.test.ts and advance-stage.test.ts
+**What was done:**
+- Replaced `resetDatabase({ inMemory: true })` with `new DatabaseManager({ inMemory: true })` in both files
+- Replaced `closeDatabase()` with `db.close()` in both files
+**Learnings:** Simple mechanical replacement, no issues encountered
+**Next steps:** Commit changes
+
+---
+
+## T-009: 2026-04-10T10:51:51Z
+**Task:** Verify full test suite passes
+**What was done:**
+- Ran `vitest --run` 3 times consecutively
+- All 24 test files passed consistently (403 tests, 2 skipped)
+- Ran `npm run typecheck` - passed with no errors
+**Learnings:** Test isolation refactor is complete and stable. No flakiness observed across multiple runs. The 6 affected test files (database.test.ts, services.test.ts, api-routes.test.ts, e2e.test.ts, agent-workflow-e2e.test.ts, advance-stage.test.ts) work correctly alongside the 18 unaffected test files.
+**Next steps:** Finalize and archive change
+

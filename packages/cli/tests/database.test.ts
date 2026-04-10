@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DatabaseManager, resetDatabase, closeDatabase } from '../src/db/database';
+import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
@@ -12,12 +12,12 @@ describe('DatabaseManager', () => {
   let db: DatabaseManager;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('constructor', () => {
@@ -106,13 +106,13 @@ describe('ProjectRepo', () => {
   let repo: ProjectRepo;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     repo = new ProjectRepo(db);
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('create', () => {
@@ -191,7 +191,7 @@ describe('IssueRepo', () => {
   let projectId: string;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
@@ -202,7 +202,7 @@ describe('IssueRepo', () => {
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('create', () => {
@@ -315,13 +315,13 @@ describe('ConfigRepo', () => {
   let repo: ConfigRepo;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     repo = new ConfigRepo(db);
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('set/get', () => {
@@ -378,7 +378,7 @@ describe('IssueRepo Labels', () => {
   let projectId: string;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
@@ -389,7 +389,7 @@ describe('IssueRepo Labels', () => {
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('create with labels', () => {
@@ -463,7 +463,7 @@ describe('CommentRepo', () => {
   let issueId: string;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
@@ -477,7 +477,7 @@ describe('CommentRepo', () => {
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('create', () => {
@@ -534,7 +534,7 @@ describe('LabelRepo', () => {
   let projectId: string;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     
     const projectRepo = new ProjectRepo(db);
@@ -545,7 +545,7 @@ describe('LabelRepo', () => {
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('findAllUsed', () => {

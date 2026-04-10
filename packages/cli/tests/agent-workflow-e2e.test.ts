@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { resetDatabase, closeDatabase } from '../src/db/database';
-import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
+import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
 import { CommentRepo } from '../src/db/comment-repo';
@@ -142,7 +141,7 @@ describe('Agent Workflow E2E', () => {
     mockState.acpPromptCount = 0;
     mockState.nextPid = 50000;
 
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
 
     projectRepo = new ProjectRepo(db);
@@ -164,7 +163,7 @@ describe('Agent Workflow E2E', () => {
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('Tool Integration', () => {

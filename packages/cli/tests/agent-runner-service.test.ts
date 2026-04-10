@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { resetDatabase, closeDatabase } from '../src/db/database';
-import { initializeDatabase } from '../src/db/migrations';
 import { DatabaseManager } from '../src/db/database';
+import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
 import { AgentRunnerService } from '../src/services/agent-runner-service';
@@ -17,7 +16,7 @@ describe('AgentRunnerService', () => {
   let eventBus: EventBus;
 
   beforeEach(() => {
-    db = resetDatabase({ inMemory: true });
+    db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     projectRepo = new ProjectRepo(db);
     issueRepo = new IssueRepo(db);
@@ -26,7 +25,7 @@ describe('AgentRunnerService', () => {
   });
 
   afterEach(() => {
-    closeDatabase();
+    db.close();
   });
 
   describe('start', () => {
