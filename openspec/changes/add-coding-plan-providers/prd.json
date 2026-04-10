@@ -1,0 +1,36 @@
+{
+  "project": "mohist",
+  "description": "Add coding plan providers (zhipuai-coding-plan, kimi-for-coding, minimax-for-coding) to the builtin provider registry",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add coding plan providers to builtin-providers.ts",
+      "spec": "specs/provider-config/spec.md",
+      "description": "Add 3 new entries to BUILTIN_PROVIDERS in packages/cli/src/config/builtin-providers.ts: zhipuai-coding-plan (openai-compatible, https://open.bigmodel.cn/api/coding/paas/v4), kimi-for-coding (anthropic, https://api.kimi.com/coding/v1), minimax-for-coding (anthropic, https://api.minimax.io/anthropic/v1).",
+      "acceptanceCriteria": [
+        "BUILTIN_PROVIDERS contains 'zhipuai-coding-plan' with sdk 'openai-compatible' and baseURL 'https://open.bigmodel.cn/api/coding/paas/v4'",
+        "BUILTIN_PROVIDERS contains 'kimi-for-coding' with sdk 'anthropic' and baseURL 'https://api.kimi.com/coding/v1'",
+        "BUILTIN_PROVIDERS contains 'minimax-for-coding' with sdk 'anthropic' and baseURL 'https://api.minimax.io/anthropic/v1'",
+        "Build passes (npm run build in packages/cli)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "No changes needed to config-schema.ts or llm.ts - they already support anthropic SDK type."
+    },
+    {
+      "id": "T-002",
+      "title": "Add unit tests for coding plan provider resolution",
+      "description": "Add tests verifying that getProviderConfig() correctly resolves each coding plan provider, including SDK type, baseURL, envVars, and that resolveModel() creates the correct SDK instance.",
+      "acceptanceCriteria": [
+        "Test: zhipuai-coding-plan resolves to openai-compatible SDK with correct baseURL",
+        "Test: kimi-for-coding resolves to anthropic SDK with correct baseURL",
+        "Test: minimax-for-coding resolves to anthropic SDK with correct baseURL",
+        "Tests pass (npm test in packages/cli)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Tests added to config-loader.test.ts and resolve-model.test.ts. All 45 tests pass."
+    }
+  ]
+}
