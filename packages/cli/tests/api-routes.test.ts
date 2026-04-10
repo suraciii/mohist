@@ -197,7 +197,7 @@ describe('API Routes', () => {
       app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner));
       server = createTestServer(app);
       
-      const project = projectService.create({ name: 'Test Project', path: '/test/path' });
+      const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
       projectId = project.id;
       projectService.setCurrent(project);
     });
@@ -305,7 +305,7 @@ describe('API Routes', () => {
       });
 
       it('should return current project status', async () => {
-        const project = projectService.create({ name: 'Test Project', path: '/test/path' });
+        const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
         projectService.setCurrent(project);
 
         const response = await request(server).get('/api/status');
@@ -318,8 +318,8 @@ describe('API Routes', () => {
 
     describe('GET /api/status?all=true', () => {
       it('should return all projects status', async () => {
-        projectService.create({ name: 'Project 1', path: '/path/1' });
-        projectService.create({ name: 'Project 2', path: '/path/2' });
+        await projectService.create({ name: 'Project 1', path: '/path/1' });
+        await projectService.create({ name: 'Project 2', path: '/path/2' });
 
         const response = await request(server).get('/api/status?all=true');
 
