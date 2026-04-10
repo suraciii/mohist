@@ -165,7 +165,7 @@
         "前端测试：模型选择触发 API 调用"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "后端测试使用 vitest，前端测试使用 vitest + @testing-library/react（项目已有配置）"
     },
     {

@@ -97,3 +97,22 @@ Started: 2026-04-10T09:41:56.666Z
 - Build errors are pre-existing issues, not introduced by this change
 - Learnings: Since eventBus is server-side and SSE doesn't broadcast config:providers:changed, using query invalidation in ProviderConnectDialog is the cleanest way to trigger auto-refresh
 - Next steps: T-010 - End-to-end testing
+
+---
+[2026-04-10T18:45:00Z] T-010 端到端测试
+- Created packages/cli/tests/model-selection.test.ts with backend API tests:
+  - GET /api/providers/models: returns models grouped by provider, includes model metadata
+  - POST /api/explore/:id/model: updates session model, validates model, returns 400 for invalid model, persists model after update
+- Created packages/cli/web/tests/ModelSelector.test.tsx with frontend component tests:
+  - Rendering: displays current model name or "Select model", shows chevron icon
+  - Opening/closing: popover opens on click, closes on second click
+  - Search: filters models by search query, shows "No models found" for non-matching, clears when input cleared
+  - Model selection: calls updateSessionModel API with correct parameters
+  - Badges: displays free (green) and latest (blue) badges
+  - Keyboard navigation: Arrow keys for navigation, Escape to close
+  - Recent models: shows recent section when localStorage has data
+- Backend tests: 11 passed
+- Frontend tests: 63 passed (5 test files passed)
+- TypeScript compilation passes
+- Learnings: GET /api/providers/models only returns configured providers (source !== 'none'), so tests need to set ANTHROPIC_API_KEY/OPENAI_API_KEY env vars for providers to appear. ExploreService requires ExploreMessageRepo as second constructor argument for getSession() to work properly.
+- Next steps: T-011 - Documentation update
