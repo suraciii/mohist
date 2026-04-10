@@ -64,16 +64,16 @@ vi.mock('@agentclientprotocol/sdk', () => ({
         const taskText = params.prompt?.[0]?.text || '';
         const lower = taskText.toLowerCase();
         let output = 'Task completed successfully.';
-        if (taskText.includes('\u68c0\u67e5') || (lower.includes('check') && !lower.includes('\u5b9e\u73b0'))) {
+        if (taskText.includes('\u5ba1\u67e5') || taskText.includes('\u68c0\u67e5') || (lower.includes('review') && !lower.includes('\u5b9e\u73b0'))) {
           output = [
-            'Check results:',
+            'Review results:',
             '- TypeScript: no errors',
             '- ESLint: no warnings',
             '- Tests: 12/12 passing',
             '- Coverage: 87%',
             'No issues found.',
           ].join('\n');
-        } else if (taskText.includes('\u5206\u6790') && !taskText.includes('\u68c0\u67e5')) {
+        } else if (taskText.includes('\u5206\u6790') && !taskText.includes('\u5ba1\u67e5') && !taskText.includes('\u68c0\u67e5')) {
           output = [
             'Plan for the issue:',
             '1. Create data models and database schema',
@@ -89,9 +89,9 @@ vi.mock('@agentclientprotocol/sdk', () => ({
             '- Added Zod schema validation',
             '- All 12 tests passing',
           ].join('\n');
-        } else if (lower.includes('check')) {
+        } else if (lower.includes('review') || lower.includes('check')) {
           output = [
-            'Check results:',
+            'Review results:',
             '- TypeScript: no errors',
             '- Tests: 12/12 passing',
             'No issues found.',
@@ -175,7 +175,7 @@ describe('Agent Workflow E2E', () => {
       expect(result).toContain('# Workflow');
       expect(result).toContain('## plan');
       expect(result).toContain('## build');
-      expect(result).toContain('## check');
+      expect(result).toContain('## review');
       expect(result).toContain('approval: true');
     });
 
@@ -271,7 +271,7 @@ describe('Agent Workflow E2E', () => {
   });
 
   describe('Stage Transitions', () => {
-    it('plan -> build -> check -> done full progression', async () => {
+    it('plan -> build -> review -> done full progression', async () => {
       issueRepo.updateStage(issue.id, Stage.Plan);
       let currentIssue = issueRepo.findById(issue.id)!;
 
@@ -280,9 +280,9 @@ describe('Agent Workflow E2E', () => {
       expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Build);
 
       currentIssue = issueRepo.findById(issue.id)!;
-      const advanceToCheck = createAdvanceStageTool({ issue: currentIssue, issueRepo });
-      await advanceToCheck.definition.execute({ stage: 'check' });
-      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Check);
+      const advanceToReview = createAdvanceStageTool({ issue: currentIssue, issueRepo });
+      await advanceToReview.definition.execute({ stage: 'review' });
+      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Review);
 
       currentIssue = issueRepo.findById(issue.id)!;
       const advanceToDone = createAdvanceStageTool({ issue: currentIssue, issueRepo });
@@ -290,15 +290,15 @@ describe('Agent Workflow E2E', () => {
       expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Done);
     });
 
-    it('check can loop back to plan', async () => {
-      issueRepo.updateStage(issue.id, Stage.Check);
+    it('review can go back to build for rework', async () => {
+      issueRepo.updateStage(issue.id, Stage.Review);
       const currentIssue = issueRepo.findById(issue.id)!;
 
       const tool = createAdvanceStageTool({ issue: currentIssue, issueRepo });
-      const result = await tool.definition.execute({ stage: 'plan' });
+      const result = await tool.definition.execute({ stage: 'build' });
 
       expect(result).toContain('advanced');
-      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Plan);
+      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Build);
     });
 
     it('rejects all transitions from done', async () => {
@@ -313,7 +313,7 @@ describe('Agent Workflow E2E', () => {
   });
 
   describe('Simulated Agent Flow', () => {
-    it('completes plan -> build -> check -> done without crashes', async () => {
+    it('completes plan -> build -> review -> done without crashes', async () => {
       issueRepo.updateStage(issue.id, Stage.Plan);
 
       const spawnCoder = createSpawnCoderTool({ worktreePath: '/tmp/e2e-test' });
@@ -344,17 +344,17 @@ describe('Agent Workflow E2E', () => {
       expect(buildOutput).toContain('Build completed:');
 
       currentIssue = issueRepo.findById(issue.id)!;
-      const advanceCheck = createAdvanceStageTool({ issue: currentIssue, issueRepo });
-      const checkResult = await advanceCheck.definition.execute({ stage: 'check' });
-      expect(checkResult).toContain('advanced');
-      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Check);
+      const advanceReview = createAdvanceStageTool({ issue: currentIssue, issueRepo });
+      const reviewResult = await advanceReview.definition.execute({ stage: 'review' });
+      expect(reviewResult).toContain('advanced');
+      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Review);
 
-      const checkOutput = await spawnCoder.definition.execute({
-        taskTemplate: '\u68c0\u67e5 {issue.title} \u7684\u5b9e\u73b0\uff1a\u8fd0\u884c\u6d4b\u8bd5\u3001lint\u3001typecheck\uff0c\u62a5\u544a\u95ee\u9898',
+      const reviewOutput = await spawnCoder.definition.execute({
+        taskTemplate: '\u5ba1\u67e5 {issue.title} \u7684\u5b9e\u73b0\uff1a\u8fd0\u884c\u6d4b\u8bd5\u3001lint\u3001typecheck\uff0c\u62a5\u544a\u95ee\u9898',
         variables: { issue: { title: issue.title } },
       });
-      expect(checkOutput).toContain('Check results:');
-      expect(checkOutput).toContain('12/12 passing');
+      expect(reviewOutput).toContain('Review results:');
+      expect(reviewOutput).toContain('12/12 passing');
 
       currentIssue = issueRepo.findById(issue.id)!;
       const advanceDone = createAdvanceStageTool({ issue: currentIssue, issueRepo });
@@ -377,7 +377,7 @@ describe('Agent Workflow E2E', () => {
         variables: {},
       });
       await spawnCoder.definition.execute({
-        taskTemplate: 'Check task',
+        taskTemplate: 'Review task',
         variables: {},
       });
 
@@ -440,7 +440,7 @@ describe('Agent Workflow E2E', () => {
       currentIssue = issueRepo.findById(issue.id)!;
       const commentTool = createAddCommentTool({ issue: currentIssue, commentRepo });
       await commentTool.definition.execute({
-        body: 'Build completed. Waiting for approval before proceeding to check.',
+        body: 'Build completed. Waiting for approval before proceeding to review.',
       });
 
       expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Build);
@@ -460,8 +460,8 @@ describe('Agent Workflow E2E', () => {
       await advanceTo('build').definition.execute({ stage: 'build' });
       expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Build);
 
-      await advanceTo('check').definition.execute({ stage: 'check' });
-      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Check);
+      await advanceTo('review').definition.execute({ stage: 'review' });
+      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Review);
 
       await advanceTo('done').definition.execute({ stage: 'done' });
       expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Done);
