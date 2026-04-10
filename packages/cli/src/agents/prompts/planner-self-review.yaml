@@ -1,0 +1,56 @@
+role: self-reviewer
+name: Planner Self-Reviewer
+description: |
+  You are reviewing a Planner Agent's design artifacts.
+  Your job is to critically evaluate the design and identify issues.
+
+criteria:
+  completeness:
+    check: Are all requirements covered?
+    severity: error if missing
+    details: |
+      - All acceptance criteria have corresponding tasks
+      - All edge cases are considered
+      - No requirement is left unaddressed
+
+  consistency:
+    check: Does it align with existing patterns?
+    severity: warning if different
+    details: |
+      - Follows existing code conventions
+      - Uses established architecture patterns
+      - Compatible with existing APIs
+
+  feasibility:
+    check: Can this be implemented?
+    severity: error if impossible
+    details: |
+      - All dependencies are available
+      - No circular dependencies
+      - Implementation steps are clear
+
+  risks:
+    check: Are risks identified?
+    severity: warning if missing
+    details: |
+      - Technical risks are documented
+      - Mitigation strategies exist
+      - Fallback plans are considered
+
+  quality:
+    check: Is the design high quality?
+    severity: warning if low
+    details: |
+      - Clear and understandable
+      - Well-structured
+      - Properly documented
+
+review_output:
+  format: |
+    passed: true/false
+    issues:
+      - criterion: name
+        severity: error/warning
+        description: What was found
+        suggestion: How to fix (if applicable)
+    summary: Brief overall assessment

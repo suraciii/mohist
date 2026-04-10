@@ -48,11 +48,11 @@ describe('advance-stage transitions', () => {
     expect(issueRepo.findById(issue.id)!.stage).toBe(Stage.Build);
   });
 
-  it('should allow plan → review transition', async () => {
-    const issue = createIssue(Stage.Plan);
+  it('should allow build → review transition', async () => {
+    const issue = createIssue(Stage.Build);
     const tool = createAdvanceStageTool({ issue, issueRepo });
     const result = await tool.definition.execute({ stage: 'review' });
-    expect(result).toContain('advanced from "plan" to "review"');
+    expect(result).toContain('advanced from "build" to "review"');
     expect(issueRepo.findById(issue.id)!.stage).toBe(Stage.Review);
   });
 
@@ -72,8 +72,8 @@ describe('advance-stage transitions', () => {
     expect(result).toContain('cannot advance');
   });
 
-  it('should reject build → review transition', async () => {
-    const issue = createIssue(Stage.Build);
+  it('should reject plan → review transition', async () => {
+    const issue = createIssue(Stage.Plan);
     const tool = createAdvanceStageTool({ issue, issueRepo });
     const result = await tool.definition.execute({ stage: 'review' });
     expect(result).toContain('Error');
@@ -87,15 +87,16 @@ describe('advance-stage transitions', () => {
     expect(result).toContain('advanced from "draft" to "plan"');
   });
 
-  it('should allow build → check transition', async () => {
+  it('should reject build → check transition', async () => {
     const issue = createIssue(Stage.Build);
     const tool = createAdvanceStageTool({ issue, issueRepo });
     const result = await tool.definition.execute({ stage: 'check' });
-    expect(result).toContain('advanced from "build" to "check"');
+    expect(result).toContain('Error');
+    expect(result).toContain('cannot advance');
   });
 
-  it('should emit approval_requested for review stage (dynamic default)', async () => {
-    const issue = createIssue(Stage.Plan);
+  it('should emit approval_requested for build stage when advancing to review', async () => {
+    const issue = createIssue(Stage.Build);
     const approvals: any[] = [];
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-adv-'));
     const tool = createAdvanceStageTool({
@@ -116,29 +117,7 @@ describe('advance-stage transitions', () => {
     expect(approvals[0].stage).toBe(Stage.Review);
   });
 
-  it('should emit approval_requested for build from review', async () => {
-    const issue = createIssue(Stage.Review);
-    const approvals: any[] = [];
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-adv-'));
-    const tool = createAdvanceStageTool({
-      issue,
-      issueRepo,
-      worktreePath: tmpDir,
-      eventBus: {
-        emit: (event: string, data: any) => {
-          if (event === 'approval_requested') approvals.push(data);
-        },
-        on: () => {},
-        off: () => {},
-      } as any,
-    });
-    await tool.definition.execute({ stage: 'build' });
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    expect(approvals.length).toBe(1);
-    expect(approvals[0].stage).toBe(Stage.Build);
-  });
-
-  it('should not emit approval for plan stage', async () => {
+  it('should emit approval_requested for plan stage when advancing from draft', async () => {
     const issue = createIssue(Stage.Draft);
     const approvals: any[] = [];
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-adv-'));
@@ -155,6 +134,28 @@ describe('advance-stage transitions', () => {
       } as any,
     });
     await tool.definition.execute({ stage: 'plan' });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    expect(approvals.length).toBe(1);
+    expect(approvals[0].stage).toBe(Stage.Plan);
+  });
+
+  it('should not emit approval for build stage', async () => {
+    const issue = createIssue(Stage.Plan);
+    const approvals: any[] = [];
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-adv-'));
+    const tool = createAdvanceStageTool({
+      issue,
+      issueRepo,
+      worktreePath: tmpDir,
+      eventBus: {
+        emit: (event: string, data: any) => {
+          if (event === 'approval_requested') approvals.push(data);
+        },
+        on: () => {},
+        off: () => {},
+      } as any,
+    });
+    await tool.definition.execute({ stage: 'build' });
     fs.rmSync(tmpDir, { recursive: true, force: true });
     expect(approvals.length).toBe(0);
   });

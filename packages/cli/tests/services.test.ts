@@ -32,46 +32,46 @@ describe('ProjectService', () => {
   });
 
   describe('create', () => {
-    it('should create a project', () => {
-      const project = service.create({ name: 'Test Project', path: '/test/path' });
+    it('should create a project', async () => {
+      const project = await service.create({ name: 'Test Project', path: '/test/path' });
       
       expect(project.id).toBeDefined();
       expect(project.name).toBe('Test Project');
       expect(project.path).toBe('/test/path');
     });
 
-    it('should throw on duplicate name', () => {
-      service.create({ name: 'Test', path: '/path1' });
+    it('should throw on duplicate name', async () => {
+      await service.create({ name: 'Test', path: '/path1' });
       
-      expect(() => service.create({ name: 'Test', path: '/path2' }))
-        .toThrow('already exists');
+      await expect(service.create({ name: 'Test', path: '/path2' }))
+        .rejects.toThrow('already exists');
     });
 
-    it('should throw on duplicate path', () => {
-      service.create({ name: 'Project1', path: '/test/path' });
+    it('should throw on duplicate path', async () => {
+      await service.create({ name: 'Project1', path: '/test/path' });
       
-      expect(() => service.create({ name: 'Project2', path: '/test/path' }))
-        .toThrow('already used');
+      await expect(service.create({ name: 'Project2', path: '/test/path' }))
+        .rejects.toThrow('already used');
     });
   });
 
   describe('getById/getByName/getByPath', () => {
-    it('should find project by id', () => {
-      const created = service.create({ name: 'Test', path: '/test' });
+    it('should find project by id', async () => {
+      const created = await service.create({ name: 'Test', path: '/test' });
       const found = service.getById(created.id);
       
       expect(found?.name).toBe('Test');
     });
 
-    it('should find project by name', () => {
-      service.create({ name: 'Unique Name', path: '/test' });
+    it('should find project by name', async () => {
+      await service.create({ name: 'Unique Name', path: '/test' });
       const found = service.getByName('Unique Name');
       
       expect(found?.path).toBe('/test');
     });
 
-    it('should find project by path', () => {
-      service.create({ name: 'Test', path: '/unique/path' });
+    it('should find project by path', async () => {
+      await service.create({ name: 'Test', path: '/unique/path' });
       const found = service.getByPath('/unique/path');
       
       expect(found?.name).toBe('Test');
@@ -83,31 +83,31 @@ describe('ProjectService', () => {
       expect(service.getCurrent()).toBeNull();
     });
 
-    it('should set current project', () => {
-      const project = service.create({ name: 'Test', path: '/test' });
+    it('should set current project', async () => {
+      const project = await service.create({ name: 'Test', path: '/test' });
       service.setCurrent(project);
       
       expect(service.getCurrent()?.id).toBe(project.id);
     });
 
-    it('should set current project by name', () => {
-      service.create({ name: 'Test', path: '/test' });
+    it('should set current project by name', async () => {
+      await service.create({ name: 'Test', path: '/test' });
       const set = service.setCurrentByName('Test');
       
       expect(set?.name).toBe('Test');
       expect(service.getCurrent()?.name).toBe('Test');
     });
 
-    it('should clear current project', () => {
-      const project = service.create({ name: 'Test', path: '/test' });
+    it('should clear current project', async () => {
+      const project = await service.create({ name: 'Test', path: '/test' });
       service.setCurrent(project);
       service.clearCurrent();
       
       expect(service.getCurrent()).toBeNull();
     });
 
-    it('should clear current project on delete', () => {
-      const project = service.create({ name: 'Test', path: '/test' });
+    it('should clear current project on delete', async () => {
+      const project = await service.create({ name: 'Test', path: '/test' });
       service.setCurrent(project);
       service.delete(project.id);
       
@@ -116,8 +116,8 @@ describe('ProjectService', () => {
   });
 
   describe('delete', () => {
-    it('should delete project', () => {
-      const project = service.create({ name: 'Test', path: '/test' });
+    it('should delete project', async () => {
+      const project = await service.create({ name: 'Test', path: '/test' });
       expect(service.delete(project.id)).toBe(true);
       expect(service.getById(project.id)).toBeNull();
     });
@@ -126,17 +126,17 @@ describe('ProjectService', () => {
       expect(service.delete('nonexistent')).toBe(false);
     });
 
-    it('should delete by name', () => {
-      service.create({ name: 'Test', path: '/test' });
+    it('should delete by name', async () => {
+      await service.create({ name: 'Test', path: '/test' });
       expect(service.deleteByName('Test')).toBe(true);
       expect(service.getByName('Test')).toBeNull();
     });
   });
 
   describe('getAll', () => {
-    it('should return all projects sorted by name', () => {
-      service.create({ name: 'Zebra', path: '/z' });
-      service.create({ name: 'Alpha', path: '/a' });
+    it('should return all projects sorted by name', async () => {
+      await service.create({ name: 'Zebra', path: '/z' });
+      await service.create({ name: 'Alpha', path: '/a' });
       
       const all = service.getAll();
       expect(all).toHaveLength(2);
@@ -146,8 +146,8 @@ describe('ProjectService', () => {
   });
 
   describe('exists', () => {
-    it('should return true for existing project', () => {
-      service.create({ name: 'Test', path: '/test' });
+    it('should return true for existing project', async () => {
+      await service.create({ name: 'Test', path: '/test' });
       expect(service.exists('Test')).toBe(true);
     });
 

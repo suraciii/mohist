@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -120,6 +120,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 8) {
     migrateToVersion8(db);
+  }
+
+  if (currentVersion < 9) {
+    migrateToVersion9(db);
   }
 }
 
@@ -303,5 +307,20 @@ function migrateToVersion8(db: DatabaseManager): void {
     }
 
     setSchemaVersion(db, 8);
+  });
+}
+
+function migrateToVersion9(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(issues)"
+    );
+    const hasApprovalState = tableInfo.some(col => col.name === 'approval_state');
+
+    if (!hasApprovalState) {
+      db.exec("ALTER TABLE issues ADD COLUMN approval_state TEXT");
+    }
+
+    setSchemaVersion(db, 9);
   });
 }
