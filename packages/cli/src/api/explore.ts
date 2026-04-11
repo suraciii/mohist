@@ -145,11 +145,23 @@ export function createExploreRoutes(
         return c.json(response, 400);
       }
 
-      const validModels = BUILTIN_MODELS.map((m) => m.id);
-      if (!validModels.includes(model)) {
+      const builtinModelIds = new Set(BUILTIN_MODELS.map((m) => m.id));
+      let isValid = builtinModelIds.has(model);
+      if (!isValid) {
+        const config = load();
+        const customProviders = config.provider ?? {};
+        for (const providerId of Object.keys(customProviders)) {
+          const providerModels = customProviders[providerId]?.models;
+          if (Array.isArray(providerModels) && providerModels.includes(model)) {
+            isValid = true;
+            break;
+          }
+        }
+      }
+      if (!isValid) {
         const response: ApiResponse = {
           success: false,
-          error: `Invalid model: ${model}. Available models: ${validModels.join(', ')}`,
+          error: `Invalid model: ${model}`,
         };
         return c.json(response, 400);
       }

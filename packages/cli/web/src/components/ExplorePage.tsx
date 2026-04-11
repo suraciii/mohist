@@ -66,7 +66,7 @@ export function ExplorePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { data, isLoading } = useExploreSession(id || '')
-  const { data: statusData, refetch: refetchStatus } = useStatus()
+  const { data: statusData } = useStatus()
   const {
     streaming,
     streamContent,
