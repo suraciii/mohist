@@ -114,8 +114,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Modified POST /explore/:id/model to validate model format: checks for '/' presence first (returns 400 'Invalid model format: expected provider/model-id'), then uses getModelById() to verify model exists (returns 400 'Invalid model: {model}'). Replaced getModelsByProvider iteration with getModelById() for cleaner validation."
     },
     {
       "id": "T-008",

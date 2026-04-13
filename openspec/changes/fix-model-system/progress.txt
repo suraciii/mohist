@@ -98,3 +98,22 @@ Learnings:
 
 Next steps:
 - T-007: 修复 explore session model ID 存储和验证
+
+---
+T-007: 2026-04-13T19:30:00Z
+Task: 修复 explore session model ID 存储和验证
+What was done:
+- Modified POST /explore/:id/model validation logic in explore.ts
+- First check: if model doesn't contain '/', return 400 "Invalid model format: expected provider/model-id"
+- Second check: use getModelById(model) to verify model exists, return 400 "Invalid model: {model}" if not found
+- Replaced getModelsByProvider iteration with getModelById() for cleaner validation
+- Changed import from getModelsByProvider to getModelById in explore.ts
+- Typecheck passes
+
+Learnings:
+- getModelById() returns undefined for both bare IDs (no '/') and non-existent full IDs
+- Need to check for '/' first before calling getModelById() to give appropriate error message
+- T-008 migration will set existing bare IDs to NULL, so POST /explore/:id/messages merge logic falls back to globalConfig.model
+
+Next steps:
+- T-008: 数据库迁移：裸 model ID 置空

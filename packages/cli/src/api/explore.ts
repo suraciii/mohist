@@ -10,7 +10,7 @@ import type { LlmConfig } from '../agent-runtime';
 import { LlmError } from '../agent-runtime/llm';
 import type { EventBus } from '../services/event-bus';
 import { clearConfigCache, load } from '../config/config-loader';
-import { getModelsByProvider } from '../config/builtin-models';
+import { getModelById } from '../config/builtin-models';
 
 export function createExploreRoutes(
   exploreService: ExploreService,
@@ -145,17 +145,16 @@ export function createExploreRoutes(
         return c.json(response, 400);
       }
 
-      const config = load();
-      const validModelIds = new Set<string>();
-      const builtinProviders = config.provider ?? {};
-      for (const providerId of Object.keys(builtinProviders)) {
-        const models = await getModelsByProvider(providerId, config);
-        for (const m of models) {
-          validModelIds.add(m.id);
-        }
+      if (!model.includes('/')) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Invalid model format: expected provider/model-id`,
+        };
+        return c.json(response, 400);
       }
-      const isValid = validModelIds.has(model);
-      if (!isValid) {
+
+      const modelMetadata = await getModelById(model);
+      if (!modelMetadata) {
         const response: ApiResponse = {
           success: false,
           error: `Invalid model: ${model}`,
