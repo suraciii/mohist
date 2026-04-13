@@ -12,20 +12,11 @@ import { SettingsPage } from './components/SettingsPage'
 import { ProjectGuard } from './components/ProjectGuard'
 
 function KanbanView() {
-  const { projectId, setProjectId, setProjects } = useProject()
+  const { projectId } = useProject()
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { data: issues, isLoading } = useIssues(projectId ? { projectId } : undefined)
   const { data: agentStatus } = useAgentStatus()
   const [showCreateProject, setShowCreateProject] = useState(false)
-
-  useEffect(() => {
-    if (projects && projects.length > 0) {
-      setProjects(projects)
-      if (!projectId) {
-        setProjectId(projects[0].id)
-      }
-    }
-  }, [projects, projectId, setProjectId, setProjects])
 
   if (projectsLoading) {
     return null

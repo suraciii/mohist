@@ -51,7 +51,7 @@
         "Build passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "KanbanView 仍可保留 projects.length === 0 的空状态展示，但会被 ProjectGuard 提前拦截。"
     },
     {

@@ -19,3 +19,11 @@ T-002 | 2026-04-13T05:25:00Z | 添加 ProjectGuard 全局守卫组件
 - Typecheck 和 Build 均通过
 Next: T-003 从 KanbanView 移除 projectId 初始化副作用
 
+---
+T-003 | 2026-04-13T13:23:58Z | 从 KanbanView 移除 projectId 初始化副作用
+- 移除了 KanbanView 中的 useEffect，该 useEffect 调用 setProjectId 和 setProjects 进行 projectId 初始化
+- 这些初始化工作现在由 AppContent 的 React Query hooks (useProjects, useCurrentProject) 和 ProjectGuard 负责
+- 保留了 KanbanView 中无项目时的空状态展示（防御性编程）
+- Typecheck 和 Build 均通过
+Next: T-004 验证 Explore 页面不再永久 Loading
+
