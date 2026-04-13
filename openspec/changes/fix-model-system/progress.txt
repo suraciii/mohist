@@ -58,3 +58,26 @@ Learnings:
 
 Next steps:
 - T-005: 实现智能默认模型选择
+
+---
+T-005: 2026-04-13T18:25:00Z
+Task: 实现智能默认模型选择
+What was done:
+- Removed hardcoded DEFAULT_MODEL constant from llm.ts
+- Created async resolveDefaultModel() function that:
+  - Returns explicit config.model if set
+  - Otherwise iterates all providers from getBuiltinProviders()
+  - For each provider with apiKey (source !== 'none'), queries models.dev for models
+  - Sorts by release_date descending and returns provider/latest-model-id
+  - Throws 'No LLM provider configured' if no providers have apiKey
+- Made resolveModel() async to support resolveDefaultModel()
+- Updated all callers to await resolveModel(): explore-agent.ts, main-agent.ts, planner-agent.ts, reviewer-agent.ts, status.ts, explore.ts
+
+Learnings:
+- Smart default model selection inherently requires async operations (getBuiltinProviders, ModelsDev.get are async)
+- resolveModel API changed from sync to async, requiring updates to all callers
+- Tests in resolve-model.test.ts fail because they call resolveModel synchronously without await
+- Tests need to be updated to async (属于 T-009 task)
+
+Next steps:
+- T-006: 修复 /providers/models API 返回全限定 model ID

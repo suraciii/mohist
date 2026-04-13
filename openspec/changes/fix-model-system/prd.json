@@ -82,8 +82,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "实现正确：resolveDefaultModel() 遍历所有 provider，按 release_date 选择最新模型；resolveModel 改为 async 以支持智能选择；测试需要更新为 async（属于 T-009）"
     },
     {
       "id": "T-006",

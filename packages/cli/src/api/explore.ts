@@ -245,7 +245,7 @@ export function createExploreRoutes(
         eventBus,
       };
 
-      const result = runExploreAgent(agentContext, historyMessages);
+      const result = await runExploreAgent(agentContext, historyMessages);
 
       return streamSSE(c, async (stream: SSEStreamingApi) => {
         try {

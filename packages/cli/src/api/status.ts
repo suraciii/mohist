@@ -61,7 +61,7 @@ export function createStatusRoutes(
 
       let llm: { configured: false; provider?: undefined; model?: undefined } | { configured: true; provider: string; model: string } = { configured: false };
       try {
-        resolveModel(llmConfig);
+        await resolveModel(llmConfig);
         const modelStr = llmConfig?.model ?? 'anthropic/claude-sonnet-4-20250514';
         const slashIndex = modelStr.indexOf('/');
         if (slashIndex !== -1) {
