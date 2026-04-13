@@ -1,6 +1,17 @@
 import http from 'http';
+import { load, getServerConfig } from '../config/config-loader';
 
-export const API_BASE = 'http://localhost:3456/api';
+function getApiBase(): string {
+  try {
+    const config = load();
+    const serverConfig = getServerConfig(config);
+    return `http://${serverConfig.host}:${serverConfig.port}/api`;
+  } catch {
+    return 'http://127.0.0.1:3456/api';
+  }
+}
+
+export const API_BASE = getApiBase();
 
 export function apiClient<T = any>(
   method: string,
@@ -11,7 +22,7 @@ export function apiClient<T = any>(
     const data = body ? JSON.stringify(body) : undefined;
 
     const req = http.request(
-      `${API_BASE}${path}`,
+      `${getApiBase()}${path}`,
       {
         method,
         headers: {

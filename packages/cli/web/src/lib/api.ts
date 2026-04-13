@@ -132,4 +132,12 @@ export const api = {
     issuesByStage: Record<string, number>
     llm: { configured: false; provider?: undefined; model?: undefined } | { configured: true; provider: string; model: string }
   }>('/status'),
+
+  getAvailableModels: () => request<import('./types').ModelProvider[]>('/providers/models'),
+
+  updateSessionModel: (sessionId: string, model: string, variant?: string) =>
+    request<import('./types').ExploreSession>(`/explore/${encodeURIComponent(sessionId)}/model`, {
+      method: 'POST',
+      body: JSON.stringify({ model, variant }),
+    }),
 }

@@ -72,6 +72,7 @@ export interface Project {
 
 export interface Config {
   serverPort: number;
+  serverHost: string;
   pollInterval: number;
   maxConcurrentAgents: number;
   agentTimeout: number;
@@ -121,6 +122,8 @@ export interface ExploreSession {
   issueId: string | null;
   title: string;
   status: ExploreStatus;
+  model?: string;
+  variant?: string;
   createdAt: string;
   updatedAt: string;
 }

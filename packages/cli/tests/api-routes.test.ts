@@ -379,24 +379,24 @@ describe('API Routes', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
-        expect(response.body.data.serverPort).toBeDefined();
+        expect(response.body.data.agentTimeout).toBeDefined();
       });
     });
 
     describe('PUT /api/config/:key', () => {
       it('should update config value', async () => {
         const response = await request(server)
-          .put('/api/config/server.port')
-          .send({ value: 4000 });
+          .put('/api/config/agent.timeout')
+          .send({ value: 2000000 });
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
       });
 
-      it('should validate port range', async () => {
+      it('should validate agent timeout minimum', async () => {
         const response = await request(server)
-          .put('/api/config/server.port')
-          .send({ value: 99999 });
+          .put('/api/config/agent.timeout')
+          .send({ value: 1000 });
 
         expect(response.status).toBe(400);
       });

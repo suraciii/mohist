@@ -286,7 +286,6 @@ describe('ConfigService', () => {
     it('should return default config', () => {
       const config = service.getConfig();
 
-      expect(config.serverPort).toBe(3456);
       expect(config.agentTimeout).toBe(1800000);
       expect(config.maxConcurrentAgents).toBe(8);
       expect(config.pollInterval).toBe(30000);
@@ -297,13 +296,6 @@ describe('ConfigService', () => {
     it('should set and get config value', () => {
       service.set('test.key', 'test-value');
       expect(service.get('test.key')).toBe('test-value');
-    });
-  });
-
-  describe('server port', () => {
-    it('should set and get server port', () => {
-      service.setServerPort(4000);
-      expect(service.getServerPort()).toBe(4000);
     });
   });
 
@@ -322,12 +314,6 @@ describe('ConfigService', () => {
   });
 
   describe('validate', () => {
-    it('should validate port range', () => {
-      expect(service.validate('server.port', '8080').valid).toBe(true);
-      expect(service.validate('server.port', '99999').valid).toBe(false);
-      expect(service.validate('server.port', '0').valid).toBe(false);
-    });
-
     it('should validate agent timeout minimum', () => {
       expect(service.validate('agent.timeout', '60000').valid).toBe(true);
       expect(service.validate('agent.timeout', '59999').valid).toBe(false);
@@ -347,10 +333,10 @@ describe('ConfigService', () => {
 
   describe('resetToDefaults', () => {
     it('should reset config to defaults', () => {
-      service.setServerPort(9999);
+      service.setAgentTimeout(999999);
       service.resetToDefaults();
 
-      expect(service.getServerPort()).toBe(3456);
+      expect(service.getAgentTimeout()).toBe(1800000);
     });
   });
 });

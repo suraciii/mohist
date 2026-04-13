@@ -148,3 +148,15 @@ export function getConfigPath(): string {
 export function getConfigDir(): string {
   return CONFIG_DIR();
 }
+
+export interface ServerConfig {
+  port: number;
+  host: string;
+}
+
+export function getServerConfig(config: ConfigInfo): ServerConfig {
+  return {
+    port: config.server?.port ?? 3456,
+    host: config.server?.host ?? '127.0.0.1',
+  };
+}
