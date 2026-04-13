@@ -19,3 +19,21 @@ Learnings:
 
 Next steps:
 - T-003: 从 models.dev 数据生成 provider 注册表
+
+---
+T-003: 2026-04-13T18:30:00Z
+Task: 从 models.dev 数据生成 provider 注册表
+What was done:
+- Rewrote builtin-providers.ts with getBuiltinProviders() async function
+- npmToSdk() maps @ai-sdk/anthropic→anthropic, @ai-sdk/openai→openai, others→openai-compatible
+- getBuiltinProviders() iterates ModelsDev.get() and extracts id, name, api(baseURL), env
+- deepseek kept as static FALLBACK_PROVIDERS since it's not in models.dev
+- Static BUILTIN_PROVIDERS fallback kept for backward compat (anthropic, openai, deepseek)
+- Typecheck passes
+
+Learnings:
+- Existing code uses BUILTIN_PROVIDERS synchronously, so static fallback remains useful
+- getBuiltinProviders() async function is available for future dynamic usage
+
+Next steps:
+- T-004: 替换硬编码模型列表为 models.dev 数据

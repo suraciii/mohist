@@ -47,8 +47,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "npmToSdk() maps @ai-sdk/anthropic→anthropic, @ai-sdk/openai→openai, others→openai-compatible; getBuiltinProviders() async function from ModelsDev.get(); deepseek kept as static fallback"
     },
     {
       "id": "T-004",
