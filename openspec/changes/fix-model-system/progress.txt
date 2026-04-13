@@ -117,3 +117,10 @@ Learnings:
 
 Next steps:
 - T-008: 数据库迁移：裸 model ID 置空
+
+---
+Timestamp: 2026-04-13
+Task: T-008 数据库迁移：裸 model ID 置空
+Done: Added migrateToVersion11() in migrations.ts. Bumped SCHEMA_VERSION to 11. Migration iterates explore_sessions WHERE model IS NOT NULL, sets model=NULL for records where model does not contain '/'. Fully-qualified IDs unchanged. Migration is idempotent.
+Learnings: Existing migration pattern uses db.all() + db.run() in a transaction with setSchemaVersion() at the end. The idempotency comes from only querying non-null models and using WHERE id = ? for targeted updates.
+Next: T-009 - Update existing tests and add new tests.

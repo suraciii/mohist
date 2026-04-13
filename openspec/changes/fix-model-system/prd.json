@@ -129,8 +129,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added migrateToVersion11(): iterates explore_sessions with non-null model, sets bare IDs (no '/') to NULL, leaves fully-qualified IDs unchanged. SCHEMA_VERSION bumped to 11. Migration is idempotent."
     },
     {
       "id": "T-009",
