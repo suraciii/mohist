@@ -81,3 +81,20 @@ Learnings:
 
 Next steps:
 - T-006: 修复 /providers/models API 返回全限定 model ID
+
+---
+T-006: 2026-04-13T19:15:00Z
+Task: 修复 /providers/models API 返回全限定 model ID
+What was done:
+- Modified GET /providers/ API (providers.ts line 90): custom provider models now use full format `${id}/${m}`
+- Modified GET /providers/models API (providers.ts line 155): custom provider model IDs now use full format `${id}/${m}`
+- Builtin providers already returned full format via getModelsByProvider() which transforms to provider/model-id
+- Typecheck passes
+
+Learnings:
+- getModelsByProvider() already returns full format IDs for builtin providers
+- Only custom providers needed fixing since they directly used raw config arrays
+- Test failures are pre-existing from broader model system changes (T-009 handles test updates)
+
+Next steps:
+- T-007: 修复 explore session model ID 存储和验证

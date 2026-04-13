@@ -97,8 +97,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Modified GET /providers/ and GET /providers/models APIs to return full format IDs (provider/model-id) for custom providers; builtin providers already returned full format via getModelsByProvider()"
     },
     {
       "id": "T-007",

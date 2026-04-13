@@ -87,7 +87,7 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
           id,
           name: resolved.name,
           baseURL: resolved.baseURL,
-          models: customProviders[id]?.models ?? [],
+          models: (customProviders[id]?.models ?? []).map(m => `${id}/${m}`),
           configured: resolved.source !== 'none',
           source: resolved.source === 'builtin' ? 'none' : resolved.source,
           isBuiltin: false,
@@ -153,7 +153,7 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
           name: resolved.name,
           configured: resolved.source !== 'none',
           models: models.map(m => ({
-            id: m,
+            id: `${id}/${m}`,
             name: m,
             badges: [],
             contextWindow: 0,
