@@ -65,7 +65,7 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
 
       for (const id of Object.keys(BUILTIN_PROVIDERS)) {
         const resolved = getProviderConfig(config, id);
-        const builtinModels = getModelsByProvider(id);
+        const builtinModels = await getModelsByProvider(id);
         providerList.push({
           id,
           name: resolved.name,
@@ -130,7 +130,7 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
       for (const id of Object.keys(BUILTIN_PROVIDERS)) {
         const resolved = getProviderConfig(config, id);
         if (resolved.source === 'none') continue;
-        const builtinModels = getModelsByProvider(id);
+        const builtinModels = await getModelsByProvider(id);
         providerGroups.push({
           id,
           name: resolved.name,

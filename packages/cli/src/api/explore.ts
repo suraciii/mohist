@@ -10,7 +10,7 @@ import type { LlmConfig } from '../agent-runtime';
 import { LlmError } from '../agent-runtime/llm';
 import type { EventBus } from '../services/event-bus';
 import { clearConfigCache, load } from '../config/config-loader';
-import { BUILTIN_MODELS } from '../config/builtin-models';
+import { getModelsByProvider } from '../config/builtin-models';
 
 export function createExploreRoutes(
   exploreService: ExploreService,
@@ -145,19 +145,16 @@ export function createExploreRoutes(
         return c.json(response, 400);
       }
 
-      const builtinModelIds = new Set(BUILTIN_MODELS.map((m) => m.id));
-      let isValid = builtinModelIds.has(model);
-      if (!isValid) {
-        const config = load();
-        const customProviders = config.provider ?? {};
-        for (const providerId of Object.keys(customProviders)) {
-          const providerModels = customProviders[providerId]?.models;
-          if (Array.isArray(providerModels) && providerModels.includes(model)) {
-            isValid = true;
-            break;
-          }
+      const config = load();
+      const validModelIds = new Set<string>();
+      const builtinProviders = config.provider ?? {};
+      for (const providerId of Object.keys(builtinProviders)) {
+        const models = await getModelsByProvider(providerId, config);
+        for (const m of models) {
+          validModelIds.add(m.id);
         }
       }
+      const isValid = validModelIds.has(model);
       if (!isValid) {
         const response: ApiResponse = {
           success: false,

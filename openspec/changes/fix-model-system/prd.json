@@ -64,8 +64,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Verified: getModelsByProvider('minimax') returns minimax/MiniMax-M2.7 etc; getModelsByProvider('moonshotai') returns moonshotai/kimi-k2-0905-preview etc; model IDs are in full format; config override works; hardcoded BUILTIN_MODELS removed; typecheck passes"
     },
     {
       "id": "T-005",

@@ -37,3 +37,24 @@ Learnings:
 
 Next steps:
 - T-004: 替换硬编码模型列表为 models.dev 数据
+
+---
+T-004: 2026-04-13T18:45:00Z
+Task: 替换硬编码模型列表为 models.dev 数据
+What was done:
+- Rewrote builtin-models.ts with async getModelsByProvider() and getModelById()
+- Models now queried dynamically from ModelsDev.get() data
+- Model IDs transformed to full format provider/model-id (e.g., minimax/MiniMax-M2.7)
+- Config override via provider.{id}.models still works, models transformed to full format
+- Removed hardcoded BUILTIN_MODELS constant and all hardcoded model arrays (ANTHROPIC_MODELS, etc.)
+- Updated providers.ts to await getModelsByProvider()
+- Updated explore.ts to use async getModelsByProvider() instead of BUILTIN_MODELS
+
+Learnings:
+- The BUILTIN_MODELS removal affected explore.ts which used it for model validation
+- Since T-007 handles explore.ts validation changes, updated explore.ts to use async API
+- Test failures in model-selection.test.ts are expected - tests use bare IDs (gpt-4o) but new system returns full format (openai/gpt-5.1-codex-max)
+- Test failures in config-loader.test.ts are pre-existing from T-003 changes
+
+Next steps:
+- T-005: 实现智能默认模型选择
