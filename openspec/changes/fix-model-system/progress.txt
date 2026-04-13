@@ -1,10 +1,21 @@
 # Ralph Progress Log
-Started: 2026-04-13T08:29:06.746Z
+Started: 2026-04-13T09:51:38.020Z
 
 ---
-- Timestamp: 2026-04-13T08:45:00.000Z
-- Task ID: T-001
-- What was done: Created src/config/models-dev.ts with ModelsDev namespace implementing cache-first data fetching from models.dev/api.json. Includes ModelsDevProvider and ModelsDevModel Zod schemas, get() method (cache-first with TTL 1hr), refresh() method (background refresh every 60min), and fallback to snapshot when fetch fails.
-- Learnings: The project uses CommonJS module system, so __dirname works directly. import.meta.url only works with ESM modules.
-- Next steps: T-002 - Generate models-snapshot.ts at build time
+T-002: 2026-04-13T18:00:39Z
+Task: 构建脚本生成 models.dev snapshot
+What was done:
+- Created script/build-models-snapshot.js to fetch from models.dev/api.json and generate snapshot files
+- Generated src/config/models-snapshot.js (1.7MB) and models-snapshot.d.ts
+- Updated package.json build script to run snapshot generation before tsc
+- Added allowJs: true to tsconfig.json for JavaScript file processing
+- Handled MODELS_DEV_API_JSON env var for local JSON fallback
+- Network failure gracefully falls back to existing snapshot
 
+Learnings:
+- TypeScript has serialization limits for large inferred types (TS7056)
+- Solution: generate .js with // @ts-nocheck and separate .d.ts with Record<string, unknown>
+- opencode uses Bun which handles this differently; Node.js requires allowJs: true
+
+Next steps:
+- T-003: 从 models.dev 数据生成 provider 注册表

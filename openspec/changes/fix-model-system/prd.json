@@ -30,7 +30,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "参考 opensrc/opencode/packages/opencode/script/build.ts 中的 snapshot 生成逻辑"
     },
     {
