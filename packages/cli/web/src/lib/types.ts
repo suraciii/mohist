@@ -97,6 +97,8 @@ export interface ExploreSession {
   issueId: string | null
   title: string
   status: 'active' | 'crystallized' | 'archived'
+  model?: string
+  variant?: string
   createdAt: string
   updatedAt: string
 }
@@ -119,4 +121,20 @@ export interface ToolCallRecord {
 export interface ExploreSessionWithMessages {
   session: ExploreSession
   messages: ExploreMessage[]
+}
+
+export type ModelBadge = 'free' | 'latest'
+
+export interface Model {
+  id: string
+  name: string
+  badges: ModelBadge[]
+  contextWindow: number
+}
+
+export interface ModelProvider {
+  id: string
+  name: string
+  configured: boolean
+  models: Model[]
 }

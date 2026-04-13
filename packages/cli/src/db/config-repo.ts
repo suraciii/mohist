@@ -90,6 +90,7 @@ export class ConfigRepo {
 
 export const DEFAULT_CONFIG = {
   'server.port': '3456',
+  'server.host': '127.0.0.1',
   'agent.timeout': '1800000',  // 30 minutes in ms
   'agent.maxConcurrent': '8',
   'poll.interval': '30000',  // 30 seconds

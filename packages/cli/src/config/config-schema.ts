@@ -19,6 +19,7 @@ export const ConfigInfoSchema = z.object({
   provider: z.record(z.string(), ProviderConfigSchema).optional(),
   server: z.object({
     port: z.number().optional(),
+    host: z.string().optional(),
   }).strip().optional(),
   agent: z.object({
     timeout: z.number().optional(),

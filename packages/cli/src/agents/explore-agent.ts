@@ -15,6 +15,8 @@ export interface ExploreAgentContext {
   sessionId: string;
   projectId: string;
   llmConfig?: LlmConfig;
+  sessionModel?: string;
+  sessionVariant?: string;
   issueService: IssueService;
   exploreSessionRepo: ExploreSessionRepo;
   eventBus: EventBus;
@@ -89,7 +91,10 @@ export function runExploreAgent(
   context: ExploreAgentContext,
   messages: ModelMessage[],
 ): ReturnType<typeof streamText> {
-  const model = resolveModel(context.llmConfig);
+  const config = context.sessionModel
+    ? { ...context.llmConfig, model: context.sessionModel, variant: context.sessionVariant }
+    : context.llmConfig;
+  const model = resolveModel(config);
   const toolRegistry = buildExploreToolRegistry(context);
 
   return streamText({

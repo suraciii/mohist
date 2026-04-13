@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import { DatabaseManager } from './database';
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -124,6 +124,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 9) {
     migrateToVersion9(db);
+  }
+
+  if (currentVersion < 10) {
+    migrateToVersion10(db);
   }
 }
 
@@ -322,5 +326,25 @@ function migrateToVersion9(db: DatabaseManager): void {
     }
 
     setSchemaVersion(db, 9);
+  });
+}
+
+function migrateToVersion10(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(explore_sessions)"
+    );
+    const hasModel = tableInfo.some(col => col.name === 'model');
+    const hasVariant = tableInfo.some(col => col.name === 'variant');
+
+    if (!hasModel) {
+      db.exec("ALTER TABLE explore_sessions ADD COLUMN model TEXT");
+    }
+
+    if (!hasVariant) {
+      db.exec("ALTER TABLE explore_sessions ADD COLUMN variant TEXT");
+    }
+
+    setSchemaVersion(db, 10);
   });
 }

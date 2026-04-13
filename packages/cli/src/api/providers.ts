@@ -5,6 +5,7 @@ import { ApiResponse, ConfigConflictError } from '../types';
 import { load, getProviderConfig, writeConfig } from '../config/config-loader';
 import { BUILTIN_PROVIDERS } from '../config/builtin-providers';
 import { ProviderConfigSchema } from '../config/config-schema';
+import { getModelsByProvider } from '../config/builtin-models';
 import type { EventBus } from '../services/event-bus';
 import { RateLimiter } from '../utils/rate-limiter';
 import { maskSensitiveData } from '../utils/sensitive-data';
@@ -64,11 +65,12 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
 
       for (const id of Object.keys(BUILTIN_PROVIDERS)) {
         const resolved = getProviderConfig(config, id);
+        const builtinModels = getModelsByProvider(id);
         providerList.push({
           id,
           name: resolved.name,
           baseURL: resolved.baseURL,
-          models: [],
+          models: builtinModels.map(m => m.id),
           configured: resolved.source !== 'none',
           source: resolved.source === 'builtin' ? 'none' : resolved.source,
           isBuiltin: true,
@@ -97,6 +99,71 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
       const response: ApiResponse<ProviderListItem[]> = {
         success: true,
         data: providerList,
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? maskSensitiveData({ message: error.message }).message : 'Unknown error',
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/models', async (c) => {
+    try {
+      const config = load();
+      const customProviders = config.provider ?? {};
+
+      const providerGroups: Array<{
+        id: string;
+        name: string;
+        configured: boolean;
+        models: Array<{
+          id: string;
+          name: string;
+          badges: string[];
+          contextWindow: number;
+        }>;
+      }> = [];
+
+      for (const id of Object.keys(BUILTIN_PROVIDERS)) {
+        const resolved = getProviderConfig(config, id);
+        if (resolved.source === 'none') continue;
+        const builtinModels = getModelsByProvider(id);
+        providerGroups.push({
+          id,
+          name: resolved.name,
+          configured: true,
+          models: builtinModels.map(m => ({
+            id: m.id,
+            name: m.name,
+            badges: m.badges,
+            contextWindow: m.contextWindow,
+          })),
+        });
+      }
+
+      for (const id of Object.keys(customProviders)) {
+        if (BUILTIN_PROVIDERS[id]) continue;
+        const resolved = getProviderConfig(config, id);
+        const models = customProviders[id]?.models ?? [];
+        providerGroups.push({
+          id,
+          name: resolved.name,
+          configured: resolved.source !== 'none',
+          models: models.map(m => ({
+            id: m,
+            name: m,
+            badges: [],
+            contextWindow: 0,
+          })),
+        });
+      }
+
+      const response: ApiResponse<typeof providerGroups> = {
+        success: true,
+        data: providerGroups,
       };
       return c.json(response);
     } catch (error) {
