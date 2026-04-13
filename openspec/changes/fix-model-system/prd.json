@@ -14,7 +14,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "参考 opensrc/opencode/packages/opencode/src/provider/models.ts 的实现模式，但使用 Node.js fs 而非 Bun API"
     },
     {

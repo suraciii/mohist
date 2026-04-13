@@ -1,0 +1,10 @@
+# Ralph Progress Log
+Started: 2026-04-13T08:29:06.746Z
+
+---
+- Timestamp: 2026-04-13T08:45:00.000Z
+- Task ID: T-001
+- What was done: Created src/config/models-dev.ts with ModelsDev namespace implementing cache-first data fetching from models.dev/api.json. Includes ModelsDevProvider and ModelsDevModel Zod schemas, get() method (cache-first with TTL 1hr), refresh() method (background refresh every 60min), and fallback to snapshot when fetch fails.
+- Learnings: The project uses CommonJS module system, so __dirname works directly. import.meta.url only works with ESM modules.
+- Next steps: T-002 - Generate models-snapshot.ts at build time
+
