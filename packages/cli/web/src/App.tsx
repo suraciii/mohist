@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
-import { useIssues, useProjects, useAgentStatus, useExploreSessions, useCreateExploreSession } from './hooks/useQueries'
+import { useIssues, useProjects, useCurrentProject, useAgentStatus, useExploreSessions, useCreateExploreSession } from './hooks/useQueries'
 import useSSE from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -116,8 +116,25 @@ function ExploreRedirect() {
 }
 
 function AppContent() {
-  const { projectId } = useProject()
+  const { projectId, setProjectId, setProjects } = useProject()
   useSSE(projectId)
+
+  const { data: projects } = useProjects()
+  const { data: currentProject } = useCurrentProject()
+
+  useEffect(() => {
+    if (projects) {
+      setProjects(projects)
+    }
+  }, [projects, setProjects])
+
+  useEffect(() => {
+    if (currentProject) {
+      setProjectId(currentProject.id)
+    } else if (projects && projects.length > 0 && !projectId) {
+      setProjectId(projects[0].id)
+    }
+  }, [currentProject, projects, projectId, setProjectId])
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">

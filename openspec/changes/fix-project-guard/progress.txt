@@ -1,0 +1,12 @@
+# Ralph Progress Log
+Started: 2026-04-13T05:16:04.078Z
+
+---
+T-001 | 2026-04-13T05:20:00Z | 新增 useCurrentProject hook 和 AppContent 初始化
+- 在 api.ts 中添加了 getCurrentProject() 方法，封装 GET /api/projects/current
+- 在 useQueries.ts 中新增 useCurrentProject hook，使用 retry: false 避免404时重试
+- 在 AppContent 中添加 useProjects 和 useCurrentProject 调用，通过 useEffect 同步到 ProjectContext
+- 处理了三种情况：后端有 currentProject 时设置 projectId；404 但有项目列表时自动选第一个；API 失败时 gracefully 降级
+- Typecheck 和 Build 均通过
+Next: T-002 添加 ProjectGuard 全局守卫组件
+

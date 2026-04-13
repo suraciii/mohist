@@ -140,4 +140,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ model, variant }),
     }),
+
+  getCurrentProject: () => request<import('./types').Project | null>('/projects/current'),
 }
