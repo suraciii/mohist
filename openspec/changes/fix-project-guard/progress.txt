@@ -10,3 +10,12 @@ T-001 | 2026-04-13T05:20:00Z | 新增 useCurrentProject hook 和 AppContent 初�
 - Typecheck 和 Build 均通过
 Next: T-002 添加 ProjectGuard 全局守卫组件
 
+---
+T-002 | 2026-04-13T05:25:00Z | 添加 ProjectGuard 全局守卫组件
+- 创建了 ProjectGuard 组件 (components/ProjectGuard.tsx)，使用 React Router layout route 模式
+- 使用 useLocation 判断 /settings 路由进行豁免
+- 处理四种状态：loading 显示 spinner；无项目显示引导页（含 CreateProjectDialog）；有项目但 projectId 为 null 时自动选择第一个；正常渲染 Outlet
+- 更新 App.tsx 将 Routes 包裹在 ProjectGuard 的 layout route 中
+- Typecheck 和 Build 均通过
+Next: T-003 从 KanbanView 移除 projectId 初始化副作用
+

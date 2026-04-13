@@ -35,7 +35,7 @@
         "Build passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "使用 useLocation 判断 /settings 豁免。引导页面可复用 KanbanView 中的无项目空状态 UI 或新建组件。"
     },
     {

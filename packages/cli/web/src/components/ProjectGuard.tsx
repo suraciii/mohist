@@ -1,0 +1,52 @@
+import { Outlet, useLocation } from 'react-router-dom'
+import { useProjects } from '../hooks/useQueries'
+import { useProject } from '../context/ProjectContext'
+import { CreateProjectDialog } from './CreateProjectDialog'
+import { useState } from 'react'
+
+export function ProjectGuard() {
+  const location = useLocation()
+  const { projectId, setProjectId } = useProject()
+  const { data: projects, isLoading } = useProjects()
+  const [showCreateProject, setShowCreateProject] = useState(false)
+
+  if (location.pathname === '/settings') {
+    return <Outlet />
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center flex-1">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      </div>
+    )
+  }
+
+  if (!projects || projects.length === 0) {
+    return (
+      <>
+        <div className="flex items-center justify-center flex-1">
+          <div className="text-center">
+            <div className="text-gray-400 text-lg mb-4">No projects yet</div>
+            <button
+              onClick={() => setShowCreateProject(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+            >
+              Create Project
+            </button>
+          </div>
+        </div>
+        <CreateProjectDialog
+          open={showCreateProject}
+          onClose={() => setShowCreateProject(false)}
+        />
+      </>
+    )
+  }
+
+  if (!projectId) {
+    setProjectId(projects[0].id)
+  }
+
+  return <Outlet />
+}
