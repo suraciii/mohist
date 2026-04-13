@@ -26,4 +26,15 @@ T-003 | 2026-04-13T13:23:58Z | 从 KanbanView 移除 projectId 初始化副作�
 - 保留了 KanbanView 中无项目时的空状态展示（防御性编程）
 - Typecheck 和 Build 均通过
 Next: T-004 验证 Explore 页面不再永久 Loading
+---
+
+T-004 | 2026-04-13T13:31:00Z | 验证 Explore 页面不再永久 Loading
+- 验证了 T-001、T-002、T-003 的实现：AppContent 初始化 currentProjectId、ProjectGuard 全局守卫、KanbanView 初始化逻辑移除
+- 检查了关键文件：useCurrentProject hook (useQueries.ts)、ProjectGuard 组件 (components/ProjectGuard.tsx)、AppContent 初始化逻辑 (App.tsx)
+- 直接访问 /explore 有项目时：ProjectGuard -> auto select first project -> ExploreRedirect -> navigate to /explore/:id
+- 直接访问 /explore 无项目时：ProjectGuard -> 显示引导页
+- 刷新 /explore/:id 后：session 数据通过 useExploreSession(id) 正常加载
+- Typecheck 通过 (tsc --noEmit)
+- Build 通过 (tsc && cp prompts)
+Next: 完成所有任务
 

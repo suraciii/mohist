@@ -68,7 +68,7 @@
         "Build passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "这是集成验证任务。主要验证前面三个任务的组合效果。如果发现问题在此修复。"
     }
   ]
