@@ -1,3 +1,9 @@
+## Purpose
+
+定义 mohist WebUI 的核心页面和交互能力，包括看板视图、Issue 详情页、Explore 页面、以及项目状态管理。
+
+## Requirements
+
 ## MODIFIED Requirements
 
 ### Requirement: 无项目时显示空状态引导

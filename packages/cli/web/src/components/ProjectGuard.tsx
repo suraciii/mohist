@@ -2,13 +2,19 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { useProjects } from '../hooks/useQueries'
 import { useProject } from '../context/ProjectContext'
 import { CreateProjectDialog } from './CreateProjectDialog'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export function ProjectGuard() {
   const location = useLocation()
   const { projectId, setProjectId } = useProject()
   const { data: projects, isLoading } = useProjects()
   const [showCreateProject, setShowCreateProject] = useState(false)
+
+  useEffect(() => {
+    if (!projectId && projects && projects.length > 0) {
+      setProjectId(projects[0].id)
+    }
+  }, [projectId, projects, setProjectId])
 
   if (location.pathname === '/settings') {
     return <Outlet />
@@ -42,10 +48,6 @@ export function ProjectGuard() {
         />
       </>
     )
-  }
-
-  if (!projectId) {
-    setProjectId(projects[0].id)
   }
 
   return <Outlet />

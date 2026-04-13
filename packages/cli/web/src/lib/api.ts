@@ -141,5 +141,14 @@ export const api = {
       body: JSON.stringify({ model, variant }),
     }),
 
-  getCurrentProject: () => request<import('./types').Project | null>('/projects/current'),
+  getCurrentProject: async () => {
+    const res = await fetch(`${BASE}/projects/current`, {
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const json: ApiResponse<import('./types').Project> = await res.json()
+    if (!json.success) {
+      return null
+    }
+    return json.data
+  },
 }
