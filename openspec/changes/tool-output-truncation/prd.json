@@ -68,7 +68,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "三个限制独立生效，自行截断后设置 metadata.truncated = true 跳过全局兜底"
     }
   ]
