@@ -51,7 +51,7 @@ async function sleep(ms: number): Promise<void> {
 const FETCH_MAX_ATTEMPTS = 3;
 const FETCH_BACKOFF_MS = [1000, 2000];
 
-async function smartFetch(projectPath: string): Promise<void> {
+export async function smartFetch(projectPath: string): Promise<void> {
   const lastFetch = getLastFetchTime(projectPath);
   if (Date.now() - lastFetch <= FETCH_CACHE_MAX_AGE_MS) {
     return;
