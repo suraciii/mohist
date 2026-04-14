@@ -109,3 +109,11 @@ Started: 2026-04-14T10:47:40.570Z
 - Updated worktree-manager.test.ts: changed spy from `console.warn` to `process.stderr.write` to match Log module output
 - Typecheck passes, all tests pass (2 pre-existing failures unrelated to this change)
 - Next: T-008 新增 log.level 配置支持
+
+[2026-04-14T20:05Z] T-008 completed
+- Added `log` block (with `level` field) to ConfigInfoSchema in config-schema.ts
+- Added `getLogConfig()` function and `LogConfig` interface to config-loader.ts
+- Refactored server/index.ts main() to load config first, then use getLogConfig() for Log.init()
+- Priority: LOG_LEVEL env var > config.jsonc log.level > default INFO
+- Typecheck passes, 2 pre-existing test failures unrelated to this change
+- All 8 tasks now complete
