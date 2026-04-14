@@ -20,7 +20,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "参考 opensrc/opencode/packages/opencode/src/util/log.ts 的实现，移除 zod（Level 用普通 TypeScript enum）和 Glob（用 fs.readdir 替代）"
     },
     {
