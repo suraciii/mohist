@@ -9,6 +9,9 @@ import { createReadFileTool } from '../tools/read-file';
 import { createGlobTool } from '../tools/glob-tool';
 import { createGrepTool } from '../tools/grep-tool';
 import { loadPlannerDefaultPrompt, loadPlannerSelfReviewPrompt } from './prompt-loader';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'spawn-coder' });
 
 const DEFAULT_MAX_ITERATIONS = 3;
 
@@ -276,8 +279,7 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
       }
     }
 
-    console.error('All JSON parsing strategies failed');
-    console.error('Raw text:', text.slice(0, 500));
+    log.error('All JSON parsing strategies failed', { rawText: text.slice(0, 500) });
     return null;
   }
 

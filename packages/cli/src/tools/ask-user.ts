@@ -3,6 +3,9 @@ import { Tool, type ToolInstance } from '../agent-runtime/tool';
 import type { QuestionRepo } from '../db/question-repo';
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'spawn-coder' });
 
 const DEFAULT_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
@@ -81,9 +84,7 @@ export function createAskUserTool(
 
       context.onWaitingChange?.(issueId, q.id, params.question);
 
-      console.log(
-        `[ask_user] Question ${q.id} created for issue ${issueId}: ${params.question.slice(0, 100)}`
-      );
+      log.info('ask_user question created', { issueId, questionId: q.id, question: params.question.slice(0, 100) });
 
       const answer = await new Promise<string>((resolve) => {
         const cleanup = (resolvedQuestionId?: string) => {
@@ -92,9 +93,7 @@ export function createAskUserTool(
         const timer = setTimeout(() => {
           pendingResolvers.delete(q.id);
           context.questionRepo.expire(q.id);
-          console.log(
-            `[ask_user] Question ${q.id} expired after ${timeoutMs}ms`
-          );
+          log.warn('ask_user question expired', { questionId: q.id, timeoutMs });
           cleanup(q.id);
           resolve('No answer received within timeout. Proceed with your best judgment.');
         }, timeoutMs);

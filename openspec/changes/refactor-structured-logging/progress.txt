@@ -75,3 +75,13 @@ Started: 2026-04-14T10:47:40.570Z
 
 ### Next Steps
 - T-005: spawn-coder 和工具日志迁移
+
+## 2026-04-14 T-005 spawn-coder 和工具日志迁移
+
+- Replaced console.log/error in spawn-coder.ts with Log.create({ service: 'spawn-coder' })
+- Added log.time() in executeCoderTask and spawn_coder tool execute for duration tracking
+- Replaced console.log in ask-user.ts with log.info/log.warn
+- Replaced console.error in planner-agent.ts with log.error
+- Note: used timer.stop() instead of `using` due to noUnusedLocals:true in tsconfig
+- Typecheck passes, tests pass (2 pre-existing failures unrelated to this change)
+- Next: T-006 Project / Worktree / DB 日志迁移
