@@ -55,7 +55,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "这是 Issue #2 blocked 诊断的关键改进 — catch 块中的 log.error 必须包含 issueNumber 和 stage"
     },
     {
