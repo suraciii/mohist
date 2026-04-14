@@ -74,9 +74,6 @@ export async function smartFetch(projectPath: string): Promise<void> {
     }
   }
 
-  console.warn(
-    `smartFetch: git fetch origin failed after ${FETCH_MAX_ATTEMPTS} attempts: ${lastError?.message || lastError}. Continuing with local refs.`
-  );
   log.warn('git fetch origin failed, continuing with local refs', {
     attempts: FETCH_MAX_ATTEMPTS,
     error: lastError?.message || String(lastError),

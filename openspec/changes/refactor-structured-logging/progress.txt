@@ -99,3 +99,13 @@ Started: 2026-04-14T10:47:40.570Z
 - Note: kept existing console.warn in smartFetch alongside log.warn for backward compatibility (CLI output)
 - Typecheck passes, tests pass (2 pre-existing failures unrelated to this change)
 - Next: T-007 CLI 内部操作日志清理
+
+---
+
+## T-007 - 2026-04-14T11:58:00Z
+
+- Removed redundant `console.warn` in `git/worktree-manager.ts` smartFetch (already had `log.warn` from T-006)
+- Verified all remaining console.log/error/warn calls are in CLI commands (user interaction with chalk) or server/index.ts (intentional pre-init fallback per design Decision 8)
+- Updated worktree-manager.test.ts: changed spy from `console.warn` to `process.stderr.write` to match Log module output
+- Typecheck passes, all tests pass (2 pre-existing failures unrelated to this change)
+- Next: T-008 新增 log.level 配置支持
