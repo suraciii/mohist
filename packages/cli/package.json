@@ -9,7 +9,7 @@
     "mo-server": "./bin/mo-server"
   },
   "scripts": {
-    "build": "node script/build-models-snapshot.js && tsc && cp src/agents/prompts/*.yaml dist/agents/prompts/",
+    "build": "node script/build-models-snapshot.js && tsc && mkdir -p dist/agents/prompts && cp src/agents/prompts/*.yaml dist/agents/prompts/",
     "dev": "tsc --watch",
     "start:server": "node bin/mo-server",
     "start:cli": "node bin/mo",
@@ -18,7 +18,7 @@
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "build:web": "cd web && npm install && npm run build",
-    "dev:web": "cd web && npm run dev"
+    "dev:web": "cd web && npm install && npm run dev"
   },
   "keywords": [
     "automation",

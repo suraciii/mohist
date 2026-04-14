@@ -16,7 +16,7 @@
         "npm test passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "使用 async function withRetry helper 或内联重试逻辑，不引入外部依赖。退避间隔：1000ms, 2000ms。"
     },
     {
