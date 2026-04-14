@@ -21,6 +21,7 @@ const FALLBACK_PROVIDERS: Record<string, BuiltinProvider> = {
     baseURL: 'https://api.deepseek.com',
     envVars: ['DEEPSEEK_API_KEY'],
   },
+
 };
 
 function buildProvidersFromSnapshot(): Record<string, BuiltinProvider> {

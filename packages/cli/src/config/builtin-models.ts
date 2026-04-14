@@ -2,6 +2,7 @@ import { ModelsDev, type ModelsDevModel } from './models-dev';
 import { load } from './config-loader';
 import type { ConfigInfo } from './config-schema';
 
+
 export interface ModelVariant {
   id: string;
   name: string;
@@ -17,6 +18,7 @@ export interface ModelMetadata {
   contextWindow: number;
   variants?: ModelVariant[];
 }
+
 
 function modelFromModelsDev(providerId: string, model: ModelsDevModel): ModelMetadata {
   const badges: string[] = [];
