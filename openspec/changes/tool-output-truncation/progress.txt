@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Started: 2026-04-14T04:16:03.158Z
+
+---
+
+
+[2026-04-14T12:19:30Z] T-001 completed
+- Created src/services/truncate-service.ts with truncate() function
+- Supports maxLines (default 2000), maxBytes (default 50KB), direction ('head'|'tail')
+- Writes full content to ~/.mohist/tool-output/tool_<ts>_<random>.txt on truncation
+- Returns preview + hint with truncation amount, file path, and read suggestions
+- Auto-creates output directory if missing
+- Created tests/truncate-service.test.ts with 14 passing tests
+- Typecheck passes
+- Learnings: followed opencode's truncate.ts pattern but simplified (no Effect, pure Node.js fs)
+- Next: T-002 (Tool.define integration with TruncateService)

@@ -18,7 +18,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "参考 opensrc/opencode/packages/opencode/src/tool/truncate.ts，但简化实现不使用 Effect"
     },
     {
