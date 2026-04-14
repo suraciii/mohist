@@ -23,7 +23,40 @@ const FALLBACK_PROVIDERS: Record<string, BuiltinProvider> = {
   },
 };
 
+let builtinProvidersCache: Record<string, BuiltinProvider> | null = null;
+let cachePromise: Promise<Record<string, BuiltinProvider>> | null = null;
+
+export function clearBuiltinProvidersCache(): void {
+  builtinProvidersCache = null;
+  cachePromise = null;
+}
+
+export function getBuiltinProvidersSync(): Record<string, BuiltinProvider> {
+  if (builtinProvidersCache) {
+    return builtinProvidersCache;
+  }
+  if (!cachePromise) {
+    cachePromise = doGetBuiltinProviders();
+    cachePromise.then((cache) => {
+      builtinProvidersCache = cache;
+    });
+  }
+  return BUILTIN_PROVIDERS;
+}
+
 export async function getBuiltinProviders(): Promise<Record<string, BuiltinProvider>> {
+  if (builtinProvidersCache) {
+    return builtinProvidersCache;
+  }
+  if (!cachePromise) {
+    cachePromise = doGetBuiltinProviders();
+  }
+  const result = await cachePromise;
+  builtinProvidersCache = result;
+  return result;
+}
+
+async function doGetBuiltinProviders(): Promise<Record<string, BuiltinProvider>> {
   const providers: Record<string, BuiltinProvider> = {};
   const modelsDevData = await ModelsDev.get();
 
@@ -42,6 +75,7 @@ export async function getBuiltinProviders(): Promise<Record<string, BuiltinProvi
     }
   }
 
+  builtinProvidersCache = providers;
   return providers;
 }
 

@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as jsonc from 'jsonc-parser';
 import { ConfigInfoSchema, type ConfigInfo } from './config-schema';
-import { BUILTIN_PROVIDERS, type BuiltinProvider } from './builtin-providers';
+import { BUILTIN_PROVIDERS, getBuiltinProvidersSync, type BuiltinProvider } from './builtin-providers';
 import { ConfigConflictError } from '../types';
 
 export interface ResolvedProvider {
@@ -76,7 +76,7 @@ export function getProviderConfig(
   config: ConfigInfo,
   providerID: string
 ): ResolvedProvider {
-  const builtin = BUILTIN_PROVIDERS[providerID] as BuiltinProvider | undefined;
+  const builtin = getBuiltinProvidersSync()[providerID] as BuiltinProvider | undefined;
   const fileProvider = config.provider?.[providerID];
 
   let apiKey: string | null = null;

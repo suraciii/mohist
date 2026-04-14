@@ -1,18 +1,25 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { load, getProviderConfig, writeConfig } from '../src/config/config-loader';
+import { load, getProviderConfig, writeConfig, clearConfigCache } from '../src/config/config-loader';
 import type { ConfigInfo } from '../src/config/config-schema';
+import { clearBuiltinProvidersCache } from '../src/config/builtin-providers';
 
 describe('ConfigLoader', () => {
   let tmpDir: string;
   let configPath: string;
   const savedEnv: Record<string, string | undefined> = {};
 
+  beforeAll(async () => {
+    await import('../src/config/builtin-providers');
+  });
+
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-test-'));
     configPath = path.join(tmpDir, 'config.jsonc');
+    clearConfigCache();
+    clearBuiltinProvidersCache();
   });
 
   afterEach(() => {
@@ -107,12 +114,12 @@ describe('ConfigLoader', () => {
   });
 
   describe('getProviderConfig', () => {
-    it('should return builtin provider info for glm', () => {
-      const resolved = getProviderConfig({}, 'glm');
+    it('should return builtin provider info for zhipuai', () => {
+      const resolved = getProviderConfig({}, 'zhipuai');
       expect(resolved.sdk).toBe('openai-compatible');
-      expect(resolved.name).toBe('智谱 GLM');
+      expect(resolved.name).toBe('Zhipu AI');
       expect(resolved.baseURL).toBe('https://open.bigmodel.cn/api/paas/v4');
-      expect(resolved.envVars).toEqual(['GLM_API_KEY']);
+      expect(resolved.envVars).toEqual(['ZHIPU_API_KEY']);
     });
 
     it('should return undefined for unknown provider', () => {
@@ -155,9 +162,9 @@ describe('ConfigLoader', () => {
 
     it('should use builtin baseURL when config has no baseURL', () => {
       const config: ConfigInfo = {
-        provider: { glm: { apiKey: 'sk-test' } },
+        provider: { zhipuai: { apiKey: 'sk-test' } },
       };
-      const resolved = getProviderConfig(config, 'glm');
+      const resolved = getProviderConfig(config, 'zhipuai');
       expect(resolved.baseURL).toBe('https://open.bigmodel.cn/api/paas/v4');
     });
 
@@ -173,7 +180,7 @@ describe('ConfigLoader', () => {
     it('should check multiple env vars for a provider', () => {
       delete process.env['MOONSHOT_API_KEY'];
       setEnv('KIMI_API_KEY', 'sk-kimi-key');
-      const resolved = getProviderConfig({}, 'kimi');
+      const resolved = getProviderConfig({}, 'moonshotai');
       expect(resolved.apiKey).toBe('sk-kimi-key');
       expect(resolved.source).toBe('env');
     });
@@ -181,7 +188,7 @@ describe('ConfigLoader', () => {
     it('should return zhipuai-coding-plan with openai-compatible SDK and correct baseURL', () => {
       const resolved = getProviderConfig({}, 'zhipuai-coding-plan');
       expect(resolved.sdk).toBe('openai-compatible');
-      expect(resolved.name).toBe('智谱 Coding Plan');
+      expect(resolved.name).toBe('Zhipu AI Coding Plan');
       expect(resolved.baseURL).toBe('https://open.bigmodel.cn/api/coding/paas/v4');
       expect(resolved.envVars).toEqual(['ZHIPU_API_KEY']);
     });
@@ -191,13 +198,13 @@ describe('ConfigLoader', () => {
       expect(resolved.sdk).toBe('anthropic');
       expect(resolved.name).toBe('Kimi For Coding');
       expect(resolved.baseURL).toBe('https://api.kimi.com/coding/v1');
-      expect(resolved.envVars).toEqual(['KIMI_API_KEY', 'MOONSHOT_API_KEY']);
+      expect(resolved.envVars).toEqual(['KIMI_API_KEY']);
     });
 
-    it('should return minimax-for-coding with anthropic SDK and correct baseURL', () => {
-      const resolved = getProviderConfig({}, 'minimax-for-coding');
+    it('should return minimax-coding-plan with anthropic SDK and correct baseURL', () => {
+      const resolved = getProviderConfig({}, 'minimax-coding-plan');
       expect(resolved.sdk).toBe('anthropic');
-      expect(resolved.name).toBe('MiniMax Coding');
+      expect(resolved.name).toBe('MiniMax Coding Plan (minimax.io)');
       expect(resolved.baseURL).toBe('https://api.minimax.io/anthropic/v1');
       expect(resolved.envVars).toEqual(['MINIMAX_API_KEY']);
     });
