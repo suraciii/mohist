@@ -2,6 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { findChangeDir } from '../openspec/detector';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'workflow' });
 
 export interface WorkflowStage {
   stage: string;
@@ -109,9 +112,7 @@ export function loadWorkflow(cwd: string): WorkflowConfig | string {
     const result = parseWorkflowFile(candidate);
     if (result === 'ENOENT') continue;
     if (typeof result === 'string') {
-      console.error(
-        `[workflow-loader] ${result}. Falling back to default workflow.`
-      );
+      log.warn('Workflow file error, falling back to default', { error: result });
       return DEFAULT_WORKFLOW;
     }
     return result;

@@ -4,6 +4,9 @@ import { executeCoderTask } from '../tools/spawn-coder';
 import type { PlanResult, ReviewResult } from '../types/workflow-results';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'workflow' });
 
 export interface PlannerAgent {
   plan(options: {
@@ -186,7 +189,7 @@ export class WorkflowController {
       const taskId = task.id || `task-${taskResults.length}`;
 
       if (task.status === 'completed') {
-        console.log(`[Build phase] Skipping task "${task.title}" (${taskId}) - already completed`);
+        log.info('Skipping completed task', { issueNumber: issue.number, taskId, taskTitle: task.title });
         taskResults.push({ taskId, success: true, attempts: task.attempts || 1 });
         continue;
       }
@@ -204,7 +207,7 @@ export class WorkflowController {
 
       while (attempt < MAX_RETRIES + currentAttempts && !taskSuccess) {
         attempt++;
-        console.log(`[Build phase] Executing task "${task.title}" (${taskId}), attempt ${attempt}/${MAX_RETRIES + currentAttempts}`);
+        log.info('Executing task', { issueNumber: issue.number, taskId, taskTitle: task.title, attempt, maxAttempts: MAX_RETRIES + currentAttempts });
 
         const taskPrompt = this.buildTaskPrompt(issue, task);
 
@@ -215,10 +218,10 @@ export class WorkflowController {
 
         if (result.success) {
           taskSuccess = true;
-          console.log(`[Build phase] Task "${task.title}" (${taskId}) succeeded on attempt ${attempt}`);
+          log.info('Task succeeded', { issueNumber: issue.number, taskId, taskTitle: task.title, attempt });
         } else {
           lastError = result.error || 'Unknown error';
-          console.warn(`[Build phase] Task "${task.title}" (${taskId}) failed on attempt ${attempt}: ${lastError}`);
+          log.warn('Task failed', { issueNumber: issue.number, taskId, taskTitle: task.title, attempt, error: lastError });
         }
       }
 
