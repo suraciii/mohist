@@ -1,0 +1,43 @@
+{
+  "project": "mohist",
+  "description": "修复 mo issue start 在网络故障时的脆弱性：smartFetch 增加重试和降级，start handler 调整操作顺序保证状态一致性",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "smartFetch 增加重试和优雅降级",
+      "spec": "specs/worktree-manager/spec.md",
+      "description": "重写 worktree-manager.ts 中的 smartFetch 函数：增加 3 次重试（指数退避 1s/2s），全部失败后 console.warn 并静默继续，不写 fetch cache。",
+      "acceptanceCriteria": [
+        "smartFetch 在 git fetch 失败时重试最多 2 次（共 3 次尝试）",
+        "3 次全部失败后不抛异常，打印 console.warn 包含错误信息",
+        "3 次全部失败后不写入 fetch cache 时间戳",
+        "重试成功时正常写入 fetch cache",
+        "Typecheck passes",
+        "npm test passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "使用 async function withRetry helper 或内联重试逻辑，不引入外部依赖。退避间隔：1000ms, 2000ms。"
+    },
+    {
+      "id": "T-002",
+      "title": "start handler 调整操作顺序 + rollback",
+      "spec": "specs/http-api/spec.md",
+      "description": "重构 issues.ts POST /:number/start handler：先 worktreeManager.create() 再 transitionToStage()，catch 块中如果 stage 已改为 Plan 则 rollback 回 Draft。rollback 失败时 log error 但不吞掉原始错误。",
+      "acceptanceCriteria": [
+        "worktree 创建在 stage 转换之前执行",
+        "所有前置校验（包括 !agentRunner）在 stage 转换之前完成",
+        "worktree 创建失败时 issue stage 保持 Draft",
+        "stage 转换后后续步骤失败时，catch 块 rollback stage 回 Draft",
+        "rollback 失败时 log error 但返回原始错误信息",
+        "已创建的 worktree 在 rollback 时不被删除",
+        "为 worktree 失败和 rollback 场景补充单元测试",
+        "Typecheck passes",
+        "npm test passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "参考 propose.ts 的正确模式。rollback 用 try-catch 包裹，失败时 console.error 但不 throw。"
+    }
+  ]
+}
