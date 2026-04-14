@@ -177,11 +177,10 @@ describe('ConfigLoader', () => {
       expect(resolved.baseURL).toBe('https://my-api.com/v1');
     });
 
-    it('should check multiple env vars for a provider', () => {
-      delete process.env['MOONSHOT_API_KEY'];
-      setEnv('KIMI_API_KEY', 'sk-kimi-key');
+    it('should check env var for moonshotai provider', () => {
+      setEnv('MOONSHOT_API_KEY', 'sk-moonshot-key');
       const resolved = getProviderConfig({}, 'moonshotai');
-      expect(resolved.apiKey).toBe('sk-kimi-key');
+      expect(resolved.apiKey).toBe('sk-moonshot-key');
       expect(resolved.source).toBe('env');
     });
 

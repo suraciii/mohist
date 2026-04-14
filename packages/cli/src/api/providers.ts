@@ -3,7 +3,7 @@ import type { Context, Next } from 'hono';
 import { generateText } from 'ai';
 import { ApiResponse, ConfigConflictError } from '../types';
 import { load, getProviderConfig, writeConfig } from '../config/config-loader';
-import { BUILTIN_PROVIDERS } from '../config/builtin-providers';
+import { BUILTIN_PROVIDERS, getBuiltinProviders } from '../config/builtin-providers';
 import { ProviderConfigSchema } from '../config/config-schema';
 import { getModelsByProvider } from '../config/builtin-models';
 import type { EventBus } from '../services/event-bus';
@@ -60,12 +60,13 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
   app.get('/', async (c) => {
     try {
       const config = load();
+      const allProviders = await getBuiltinProviders();
       const defaultProviderId = getDefaultProviderId(config);
       const providerList: ProviderListItem[] = [];
 
-      for (const id of Object.keys(BUILTIN_PROVIDERS)) {
+      for (const id of Object.keys(allProviders)) {
         const resolved = getProviderConfig(config, id);
-        const builtinModels = await getModelsByProvider(id);
+        const builtinModels = await getModelsByProvider(id, config);
         providerList.push({
           id,
           name: resolved.name,
@@ -81,7 +82,7 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
 
       const customProviders = config.provider ?? {};
       for (const id of Object.keys(customProviders)) {
-        if (BUILTIN_PROVIDERS[id]) continue;
+        if (allProviders[id]) continue;
         const resolved = getProviderConfig(config, id);
         providerList.push({
           id,
@@ -113,6 +114,7 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
   app.get('/models', async (c) => {
     try {
       const config = load();
+      const allProviders = await getBuiltinProviders();
       const customProviders = config.provider ?? {};
 
       const providerGroups: Array<{
@@ -127,10 +129,10 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
         }>;
       }> = [];
 
-      for (const id of Object.keys(BUILTIN_PROVIDERS)) {
+      for (const id of Object.keys(allProviders)) {
         const resolved = getProviderConfig(config, id);
         if (resolved.source === 'none') continue;
-        const builtinModels = await getModelsByProvider(id);
+        const builtinModels = await getModelsByProvider(id, config);
         providerGroups.push({
           id,
           name: resolved.name,
@@ -145,7 +147,7 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
       }
 
       for (const id of Object.keys(customProviders)) {
-        if (BUILTIN_PROVIDERS[id]) continue;
+        if (allProviders[id]) continue;
         const resolved = getProviderConfig(config, id);
         const models = customProviders[id]?.models ?? [];
         providerGroups.push({

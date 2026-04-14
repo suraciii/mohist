@@ -23,36 +23,48 @@ const FALLBACK_PROVIDERS: Record<string, BuiltinProvider> = {
   },
 };
 
-let builtinProvidersCache: Record<string, BuiltinProvider> | null = null;
-let cachePromise: Promise<Record<string, BuiltinProvider>> | null = null;
-
-export function clearBuiltinProvidersCache(): void {
-  builtinProvidersCache = null;
-  cachePromise = null;
+function buildProvidersFromSnapshot(): Record<string, BuiltinProvider> {
+  const providers: Record<string, BuiltinProvider> = {};
+  try {
+    const mod = require('./models-snapshot.js') as { snapshot: Record<string, { npm?: string; name: string; api?: string; env: string[] }> };
+    for (const [id, provider] of Object.entries(mod.snapshot)) {
+      providers[id] = {
+        sdk: npmToSdk(provider.npm),
+        name: provider.name,
+        baseURL: provider.api ?? null,
+        envVars: provider.env,
+      };
+    }
+  } catch {
+    // snapshot not available
+  }
+  for (const [id, fallback] of Object.entries(FALLBACK_PROVIDERS)) {
+    if (!providers[id]) {
+      providers[id] = fallback;
+    }
+  }
+  return providers;
 }
 
-export function getBuiltinProvidersSync(): Record<string, BuiltinProvider> {
-  if (builtinProvidersCache) {
-    return builtinProvidersCache;
-  }
-  if (!cachePromise) {
-    cachePromise = doGetBuiltinProviders();
-    cachePromise.then((cache) => {
-      builtinProvidersCache = cache;
-    });
-  }
-  return BUILTIN_PROVIDERS;
+export const BUILTIN_PROVIDERS: Record<string, BuiltinProvider> = buildProvidersFromSnapshot();
+
+let asyncProvidersCache: Record<string, BuiltinProvider> | null = null;
+let asyncCachePromise: Promise<Record<string, BuiltinProvider>> | null = null;
+
+export function clearBuiltinProvidersCache(): void {
+  asyncProvidersCache = null;
+  asyncCachePromise = null;
 }
 
 export async function getBuiltinProviders(): Promise<Record<string, BuiltinProvider>> {
-  if (builtinProvidersCache) {
-    return builtinProvidersCache;
+  if (asyncProvidersCache) {
+    return asyncProvidersCache;
   }
-  if (!cachePromise) {
-    cachePromise = doGetBuiltinProviders();
+  if (!asyncCachePromise) {
+    asyncCachePromise = doGetBuiltinProviders();
   }
-  const result = await cachePromise;
-  builtinProvidersCache = result;
+  const result = await asyncCachePromise;
+  asyncProvidersCache = result;
   return result;
 }
 
@@ -75,27 +87,6 @@ async function doGetBuiltinProviders(): Promise<Record<string, BuiltinProvider>>
     }
   }
 
-  builtinProvidersCache = providers;
+  asyncProvidersCache = providers;
   return providers;
 }
-
-export const BUILTIN_PROVIDERS: Record<string, BuiltinProvider> = {
-  anthropic: {
-    sdk: 'anthropic',
-    name: 'Anthropic',
-    baseURL: null,
-    envVars: ['ANTHROPIC_API_KEY'],
-  },
-  openai: {
-    sdk: 'openai',
-    name: 'OpenAI',
-    baseURL: null,
-    envVars: ['OPENAI_API_KEY'],
-  },
-  deepseek: {
-    sdk: 'openai-compatible',
-    name: 'DeepSeek',
-    baseURL: 'https://api.deepseek.com',
-    envVars: ['DEEPSEEK_API_KEY'],
-  },
-};
