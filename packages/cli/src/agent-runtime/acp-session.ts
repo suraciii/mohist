@@ -12,6 +12,9 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { EventBus } from '../services/event-bus';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'session' });
 
 export interface AcpSessionOptions {
   cwd: string;
@@ -113,7 +116,7 @@ export async function runAcpSession(
     ]);
     results.forEach((result, index) => {
       if (result.status === 'rejected') {
-        console.error(`[acp-session] Cleanup ${index} failed:`, result.reason);
+        log.error('Cleanup failed', { index, reason: String(result.reason) });
       }
     });
     ensureKill();
@@ -182,7 +185,7 @@ export async function runAcpSession(
             });
           }
         } catch (err) {
-          console.error('[acp-session] sessionUpdate error:', err);
+          log.error('sessionUpdate error', { error: err instanceof Error ? err.message : String(err) });
         }
       },
       requestPermission: async (

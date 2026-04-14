@@ -1,5 +1,8 @@
 import { Issue, Stage, IssueStatus, Comment } from '../types';
 import { IssueRepo, CommentRepo } from '../db';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'workflow' });
 
 export interface CreateIssueInput {
   projectId: string;
@@ -51,21 +54,34 @@ export class IssueService {
   }
 
   transitionToStage(issueId: string, stage: Stage): Issue | null {
-    return this.issueRepo.updateStage(issueId, stage);
+    const current = this.issueRepo.findById(issueId);
+    const result = this.issueRepo.updateStage(issueId, stage);
+    if (result && current) {
+      log.info('Stage transition', { issueNumber: result.number, fromStage: current.stage, toStage: stage });
+    }
+    return result;
   }
 
   transitionToStageByNumber(projectId: string, number: number, stage: Stage): Issue | null {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
     
+    const fromStage = issue.stage;
     const updated = this.issueRepo.updateStage(issue.id, stage);
     if (!updated) return null;
-    
+
+    log.info('Stage transition', { issueNumber: number, fromStage, toStage: stage });
+
     return this.issueRepo.findByNumber(projectId, number);
   }
 
   setStatus(issueId: string, status: IssueStatus): Issue | null {
-    return this.issueRepo.updateStatus(issueId, status);
+    const current = this.issueRepo.findById(issueId);
+    const result = this.issueRepo.updateStatus(issueId, status);
+    if (result && current) {
+      log.info('Status transition', { issueNumber: result.number, fromStatus: current.status, toStatus: status });
+    }
+    return result;
   }
 
   pause(projectId: string, number: number): Issue | null {

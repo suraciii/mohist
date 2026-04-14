@@ -59,3 +59,19 @@ Started: 2026-04-14T10:47:40.570Z
 
 ### Next Steps
 - T-004: Workflow 和 ACP Session 日志迁移
+
+## 2026-04-14 T-004 Workflow 和 ACP Session 日志迁移
+
+### Done
+- workflow-controller.ts: Imported Log module, created `log = Log.create({ service: 'workflow' })`; replaced 4 console.log/warn calls with log.info/log.warn including structured fields (issueNumber, taskId, taskTitle, attempt, error)
+- workflow-loader.ts: Imported Log module, replaced console.error with log.warn for workflow file parse errors
+- acp-session.ts: Imported Log module, created `log = Log.create({ service: 'session' })`; replaced 2 console.error calls with log.error for cleanup failures and sessionUpdate errors
+- issue-service.ts: Imported Log module, created `log = Log.create({ service: 'workflow' })`; added log.info in transitionToStage, transitionToStageByNumber, and setStatus with fromStage/toStage/fromStatus/toStatus fields and issueNumber
+- Typecheck passes, all relevant tests pass (workflow-controller, workflow-loader, issue-service)
+
+### Learnings
+- Stage/status transitions live in issue-service.ts (via issueRepo), not in workflow-controller.ts; both transitionToStage and setStatus needed logging to cover all state changes
+- advance-stage.ts calls issueRepo.updateStage directly (bypassing IssueService), so its transitions won't be logged through this path — covered by T-005 (spawn-coder tools)
+
+### Next Steps
+- T-005: spawn-coder 和工具日志迁移
