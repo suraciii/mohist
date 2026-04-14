@@ -44,12 +44,36 @@ function writeLastFetchTime(projectPath: string, time: number): void {
   fs.writeFileSync(cacheFile, time.toString(), 'utf-8');
 }
 
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const FETCH_MAX_ATTEMPTS = 3;
+const FETCH_BACKOFF_MS = [1000, 2000];
+
 async function smartFetch(projectPath: string): Promise<void> {
   const lastFetch = getLastFetchTime(projectPath);
-  if (Date.now() - lastFetch > FETCH_CACHE_MAX_AGE_MS) {
-    await execFileAsync('git', ['fetch', 'origin'], { cwd: projectPath });
-    writeLastFetchTime(projectPath, Date.now());
+  if (Date.now() - lastFetch <= FETCH_CACHE_MAX_AGE_MS) {
+    return;
   }
+
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < FETCH_MAX_ATTEMPTS; attempt++) {
+    try {
+      await execFileAsync('git', ['fetch', 'origin'], { cwd: projectPath });
+      writeLastFetchTime(projectPath, Date.now());
+      return;
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < FETCH_MAX_ATTEMPTS - 1) {
+        await sleep(FETCH_BACKOFF_MS[attempt]);
+      }
+    }
+  }
+
+  console.warn(
+    `smartFetch: git fetch origin failed after ${FETCH_MAX_ATTEMPTS} attempts: ${lastError?.message || lastError}. Continuing with local refs.`
+  );
 }
 
 async function branchExists(projectPath: string, branch: string): Promise<boolean> {

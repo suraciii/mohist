@@ -1,0 +1,20 @@
+# Ralph Progress Log
+Started: 2026-04-14T08:38:39.369Z
+
+---
+
+## 2026-04-14 - T-001: smartFetch 增加重试和优雅降级
+
+**Done**: Rewrote `smartFetch` in `packages/cli/src/git/worktree-manager.ts`:
+- Added `sleep()` helper and constants `FETCH_MAX_ATTEMPTS=3`, `FETCH_BACKOFF_MS=[1000, 2000]`
+- Replaced single `execFileAsync` call with retry loop (up to 3 attempts, exponential backoff 1s/2s)
+- On all 3 failures: `console.warn` with error details, no throw, no fetch cache write
+- On any attempt success: writes fetch cache and returns normally
+- Added early return when within cache window (separated the condition check from the retry logic)
+
+**Verification**: typecheck passes, tests pass (2 pre-existing failures unrelated to worktree-manager).
+
+**Next steps**: T-002 - start handler operation order + rollback.
+
+---
+
