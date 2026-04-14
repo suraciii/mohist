@@ -39,3 +39,23 @@ Started: 2026-04-14T10:47:40.570Z
 
 ### Next Steps
 - T-003: Agent Runner 日志迁移
+
+## 2026-04-14 T-003 Agent Runner 日志迁移
+
+### Done
+- agent-runner-service.ts: Imported Log module, created `log = Log.create({ service: 'agent-runner' })` at module level
+- Replaced all 7 console.log/error calls with structured log.info/log.error
+- Constructor: log.info for init and recoverable issues detection
+- handleProvidersChanged: log.info for reload events, log.error for failures
+- executeAgent: Added log.info at start (with issueNumber, projectId) and completion (with issueNumber, duration via startTime tracking)
+- executeAgent catch: log.error with issueNumber, stage (fetched from currentIssue), and error message
+- executeAgent status update failure: log.error with issueNumber and error
+- resume: Added log.info at resume start, duration tracking, and same error/completion logging as executeAgent
+- All tests pass, typecheck passes
+
+### Learnings
+- Both executeAgent and resume have nearly identical agent execution loops — error logging pattern is duplicated
+- Stage info for error logging is fetched from issueRepo at error time to get the current stage, not the initial stage
+
+### Next Steps
+- T-004: Workflow 和 ACP Session 日志迁移

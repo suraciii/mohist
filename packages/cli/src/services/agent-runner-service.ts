@@ -10,6 +10,7 @@ import { Stage } from '../types';
 import { loadWorkflow } from '../workflow/workflow-loader';
 import { load } from '../config/config-loader';
 import { maskSensitiveData } from '../utils/sensitive-data';
+import { Log } from '../util/log';
 
 export interface RunningAgent {
   issueId: string;
@@ -52,6 +53,8 @@ export interface WaitingQuestion {
   question: string;
 }
 
+const log = Log.create({ service: 'agent-runner' });
+
 export class AgentRunnerService {
   private activeAgents = new Map<string, RunningAgent>();
   private agentQueue: QueuedAgent[] = [];
@@ -70,9 +73,9 @@ export class AgentRunnerService {
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
-    console.log(`AgentRunnerService initialized with maxConcurrentAgents: ${this.maxConcurrentAgents}`);
+    log.info('AgentRunnerService initialized', { maxConcurrentAgents: this.maxConcurrentAgents });
     if (this.recoverableIssues.length > 0) {
-      console.log(`Detected ${this.recoverableIssues.length} recoverable issue(s): ${this.recoverableIssues.map(i => `#${i.issueNumber} (${i.stage})`).join(', ')}`);
+      log.info('Detected recoverable issues', { count: this.recoverableIssues.length, issues: this.recoverableIssues.map(i => `#${i.issueNumber} (${i.stage})`).join(', ') });
     }
 
     this.providersChangedListener = (_data) => {
@@ -87,13 +90,13 @@ export class AgentRunnerService {
 
   private handleProvidersChanged(): void {
     try {
-      console.log('[AgentRunnerService] Provider config changed, reloading LLM config...');
+      log.info('Provider config changed, reloading LLM config');
       const freshConfig = load();
       this.llmConfig = freshConfig;
       const maskedConfig = maskSensitiveData(freshConfig as unknown as Record<string, unknown>);
-      console.log('[AgentRunnerService] LLM config reloaded successfully', JSON.stringify(maskedConfig));
+      log.info('LLM config reloaded successfully', { config: JSON.stringify(maskedConfig) });
     } catch (err) {
-      console.error('[AgentRunnerService] Failed to reload LLM config:', err instanceof Error ? err.message : err);
+      log.error('Failed to reload LLM config', { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -227,7 +230,9 @@ export class AgentRunnerService {
   ): void {
     const resolvedLlmConfig = llmConfig ?? this.llmConfig;
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
+    log.info('Agent started', { issueNumber: issue.number, projectId });
 
+    const startTime = Date.now();
     const promise = (async () => {
       let session: Session | undefined;
       try {
@@ -265,17 +270,27 @@ export class AgentRunnerService {
           sessionManager.close(session.id);
         }
 
+        const duration = Date.now() - startTime;
+        log.info('Agent completed', { issueNumber: issue.number, duration });
         this.eventBus.emit('agent_completed', { issueId: issue.id, projectId });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        console.error(`Agent loop failed for issue #${issue.number}:`, err);
+        const currentIssue = issueRepo.findById(issue.id);
+        log.error('Agent execution failed', {
+          issueNumber: issue.number,
+          stage: currentIssue?.stage ?? 'unknown',
+          error: errorMsg,
+        });
         if (session) {
           try { sessionManager.close(session.id); } catch (_) { /* already closed */ }
         }
         try {
           updateIssueStatus?.(issue.id, IssueStatus.Blocked);
         } catch (updateErr) {
-          console.error(`Failed to update issue #${issue.number} status to blocked:`, updateErr);
+          log.error('Failed to update issue status to blocked', {
+            issueNumber: issue.number,
+            error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+          });
         }
         this.eventBus.emit('agent_error', {
           issueId: issue.id,
@@ -366,7 +381,9 @@ export class AgentRunnerService {
 
     const resolvedLlmConfig = llmConfig ?? this.llmConfig;
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
+    log.info('Agent resumed', { issueNumber: issue.number, projectId });
 
+    const startTime = Date.now();
     sessionManager.appendMessage(session.id, {
       role: 'user',
       content: message,
@@ -409,15 +426,25 @@ export class AgentRunnerService {
           sessionManager.close(updatedSession.id);
         }
 
+        const duration = Date.now() - startTime;
+        log.info('Agent completed', { issueNumber: issue.number, duration });
         this.eventBus.emit('agent_completed', { issueId: issue.id, projectId });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        console.error(`Agent loop failed for issue #${issue.number}:`, err);
+        const currentIssue = issueRepo.findById(issue.id);
+        log.error('Agent execution failed', {
+          issueNumber: issue.number,
+          stage: currentIssue?.stage ?? 'unknown',
+          error: errorMsg,
+        });
         try { sessionManager.close(session.id); } catch (_) { /* already closed */ }
         try {
           updateIssueStatus?.(issue.id, IssueStatus.Blocked);
         } catch (updateErr) {
-          console.error(`Failed to update issue #${issue.number} status to blocked:`, updateErr);
+          log.error('Failed to update issue status to blocked', {
+            issueNumber: issue.number,
+            error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+          });
         }
         this.eventBus.emit('agent_error', {
           issueId: issue.id,
