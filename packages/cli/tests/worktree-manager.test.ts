@@ -18,7 +18,7 @@ describe('smartFetch', () => {
   let gitDir: string;
   let cacheFile: string;
   const execFileMock = vi.mocked(execFile);
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smartfetch-test-'));
@@ -26,13 +26,13 @@ describe('smartFetch', () => {
     fs.mkdirSync(gitDir);
     cacheFile = path.join(gitDir, 'mohist-last-fetch');
     execFileMock.mockReset();
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    warnSpy.mockRestore();
+    stderrSpy.mockRestore();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -80,7 +80,7 @@ describe('smartFetch', () => {
     expect(execFileMock).toHaveBeenCalledTimes(3);
     const cached = parseInt(fs.readFileSync(cacheFile, 'utf-8').trim(), 10);
     expect(cached).toBeGreaterThan(oldTime);
-    expect(warnSpy).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalled();
   });
 
   it('should warn and not throw when all 3 attempts fail', async () => {
@@ -95,12 +95,9 @@ describe('smartFetch', () => {
     await expect(promise).resolves.not.toThrow();
 
     expect(execFileMock).toHaveBeenCalledTimes(3);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('git fetch origin failed after 3 attempts')
-    );
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('gnutls_handshake() failed')
-    );
+    const warnOutput = stderrSpy.mock.calls.map(c => String(c[0])).join(' ');
+    expect(warnOutput).toContain('git fetch origin failed');
+    expect(warnOutput).toContain('gnutls_handshake() failed');
     const cached = parseInt(fs.readFileSync(cacheFile, 'utf-8').trim(), 10);
     expect(cached).toBe(oldTime);
   });
