@@ -260,6 +260,7 @@ export function createIssueRoutes(
   });
 
   app.post('/:number/start', async (c) => {
+    let stageTransitioned = false;
     try {
       const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
@@ -305,15 +306,6 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      issueService.transitionToStage(issue.id, Stage.Plan);
-      const updatedIssue = issueService.getByNumber(projectId, number)!;
-
-      const project = projectService.getById(projectId);
-      let worktreePath = process.cwd();
-      if (worktreeManager && project) {
-        worktreePath = await worktreeManager.create(project.path, project.name, issue.number, project.baseBranch);
-      }
-
       if (!agentRunner) {
         const response: ApiResponse = {
           success: false,
@@ -321,6 +313,16 @@ export function createIssueRoutes(
         };
         return c.json(response, 500);
       }
+
+      const project = projectService.getById(projectId);
+      let worktreePath = process.cwd();
+      if (worktreeManager && project) {
+        worktreePath = await worktreeManager.create(project.path, project.name, issue.number, project.baseBranch);
+      }
+
+      issueService.transitionToStage(issue.id, Stage.Plan);
+      stageTransitioned = true;
+      const updatedIssue = issueService.getByNumber(projectId, number)!;
 
       if (agentRunner.isRunning(updatedIssue.id)) {
         const response: ApiResponse = {
@@ -367,6 +369,18 @@ export function createIssueRoutes(
       };
       return c.json(response, 202);
     } catch (error) {
+      if (stageTransitioned) {
+        try {
+          const number = parseInt(c.req.param('number'));
+          const projectId = getCurrentProjectId();
+          const issue = projectId ? issueService.getByNumber(projectId, number) : null;
+          if (issue && issue.stage === Stage.Plan) {
+            issueService.transitionToStage(issue.id, Stage.Draft);
+          }
+        } catch (rollbackError) {
+          console.error('Failed to rollback stage to Draft:', rollbackError);
+        }
+      }
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

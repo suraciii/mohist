@@ -18,3 +18,20 @@ Started: 2026-04-14T08:38:39.369Z
 
 ---
 
+## 2026-04-14 - T-002: start handler 调整操作顺序 + rollback
+
+**Done**: Refactored `POST /:number/start` in `packages/cli/src/api/issues.ts`:
+- Moved `!agentRunner` check before stage transition (was after)
+- Moved `worktreeManager.create()` before `transitionToStage()` (was after)
+- Added `stageTransitioned` flag to track whether stage was changed
+- Added rollback logic in catch block: if `stageTransitioned`, re-fetch issue and rollback `Plan→Draft`
+- Rollback failure logged via `console.error` but does not suppress original error
+- Worktree is NOT deleted on rollback (idempotent, reused on retry)
+- Added 6 unit tests in `tests/start-handler-resilience.test.ts` covering all spec scenarios
+
+**Verification**: typecheck passes, all 6 new tests pass, 2 pre-existing failures unchanged.
+
+**All tasks complete**.
+
+---
+
