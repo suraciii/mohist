@@ -25,6 +25,9 @@ export const ConfigInfoSchema = z.object({
     timeout: z.number().optional(),
     maxConcurrent: z.number().optional(),
   }).strip().optional(),
+  log: z.object({
+    level: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR']).optional(),
+  }).strip().optional(),
 }).strip();
 
 export type ConfigInfo = z.infer<typeof ConfigInfoSchema>;

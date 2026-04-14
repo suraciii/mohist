@@ -18,7 +18,7 @@ import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
 import { Log } from '../util/log';
 
-import { load as loadConfig, getServerConfig } from '../config/config-loader';
+import { load as loadConfig, getServerConfig, getLogConfig } from '../config/config-loader';
 import { RateLimiter } from '../utils/rate-limiter';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -45,24 +45,26 @@ async function main(): Promise<void> {
     console.error('[FATAL] Unhandled Promise Rejection (pre-init):', reason);
   });
 
+  let fileConfig: ReturnType<typeof loadConfig>;
+  try {
+    fileConfig = loadConfig();
+  } catch (err) {
+    console.error('Failed to load config:', err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+
+  const logConfig = getLogConfig(fileConfig);
+
   await Log.init({
     print: process.argv.includes('--print-logs'),
     dev: process.env.NODE_ENV === 'development',
-    level: (process.env.LOG_LEVEL as Log.Level) || 'INFO',
+    level: (process.env.LOG_LEVEL as Log.Level) || logConfig.level,
   });
 
   process.removeAllListeners('unhandledRejection');
   process.on('unhandledRejection', (reason) => {
     Log.Default.error('Unhandled Promise Rejection', { reason });
   });
-
-  let fileConfig: ReturnType<typeof loadConfig>;
-  try {
-    fileConfig = loadConfig();
-  } catch (err) {
-    log.error('Failed to load config', { error: err instanceof Error ? err.message : err });
-    process.exit(1);
-  }
   
   const serverConfig = getServerConfig(fileConfig);
   

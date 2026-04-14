@@ -160,3 +160,13 @@ export function getServerConfig(config: ConfigInfo): ServerConfig {
     host: config.server?.host ?? '127.0.0.1',
   };
 }
+
+export interface LogConfig {
+  level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+}
+
+export function getLogConfig(config: ConfigInfo): LogConfig {
+  return {
+    level: config.log?.level ?? 'INFO',
+  };
+}
