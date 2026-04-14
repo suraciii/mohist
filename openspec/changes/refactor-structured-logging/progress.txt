@@ -85,3 +85,17 @@ Started: 2026-04-14T10:47:40.570Z
 - Note: used timer.stop() instead of `using` due to noUnusedLocals:true in tsconfig
 - Typecheck passes, tests pass (2 pre-existing failures unrelated to this change)
 - Next: T-006 Project / Worktree / DB 日志迁移
+
+---
+
+## T-006 - 2026-04-14T11:51:00Z
+
+- Replaced console.log in project/manager.ts with log.info (service='project'): create, delete, use operations
+- Replaced console.error in project/detector.ts with log.error (service='project'): config read failure
+- Replaced console.warn in git/worktree-manager.ts with log.warn (service='worktree'): smartFetch failure
+- Added log.info in WorktreeManager: create, remove, prune events
+- Added log.info in db/database.ts (service='db'): database opened event
+- Added log.info in db/migrations.ts (service='db'): migration start/complete, initialization start/complete
+- Note: kept existing console.warn in smartFetch alongside log.warn for backward compatibility (CLI output)
+- Typecheck passes, tests pass (2 pre-existing failures unrelated to this change)
+- Next: T-007 CLI 内部操作日志清理

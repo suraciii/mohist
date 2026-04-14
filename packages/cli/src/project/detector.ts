@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Project } from '../types';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'project' });
 
 export class DirectoryDetector {
   static detectProject(projects: Project[]): Project | undefined {
@@ -33,7 +36,7 @@ export class DirectoryDetector {
           updatedAt: config.updatedAt || new Date().toISOString()
         };
       } catch (error) {
-        console.error('Failed to read project config:', error);
+        log.error('Failed to read project config', { configPath, error });
       }
     }
     

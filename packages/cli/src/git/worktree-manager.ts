@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
 import { slugify } from '../utils/slugify';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'worktree' });
 
 const execFileAsync = promisify(execFile);
 
@@ -74,6 +77,10 @@ export async function smartFetch(projectPath: string): Promise<void> {
   console.warn(
     `smartFetch: git fetch origin failed after ${FETCH_MAX_ATTEMPTS} attempts: ${lastError?.message || lastError}. Continuing with local refs.`
   );
+  log.warn('git fetch origin failed, continuing with local refs', {
+    attempts: FETCH_MAX_ATTEMPTS,
+    error: lastError?.message || String(lastError),
+  });
 }
 
 async function branchExists(projectPath: string, branch: string): Promise<boolean> {
@@ -137,6 +144,7 @@ export class WorktreeManager {
       );
     }
 
+    log.info('Worktree created', { projectName, issueNumber, branch, worktreePath });
     return worktreePath;
   }
 
@@ -173,6 +181,8 @@ export class WorktreeManager {
         throw new Error(`Failed to delete branch: ${msg}`);
       }
     }
+
+    log.info('Worktree removed', { projectName, issueNumber, branch });
   }
 
   async list(projectPath: string): Promise<WorktreeInfo[]> {
@@ -233,6 +243,7 @@ export class WorktreeManager {
       await execFileAsync('git', ['worktree', 'prune'], {
         cwd: projectPath,
       });
+      log.info('Worktrees pruned', { projectPath });
     } catch (error: any) {
       throw new Error(`Failed to prune worktrees: ${error.message || error}`);
     }

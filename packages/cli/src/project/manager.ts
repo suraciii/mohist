@@ -1,5 +1,8 @@
 import { Project } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'project' });
 
 export class ProjectManager {
   private projects: Map<string, Project> = new Map();
@@ -21,7 +24,7 @@ export class ProjectManager {
     };
 
     this.projects.set(id, project);
-    console.log(`Project created: ${name} (${projectPath})`);
+    log.info('Project created', { name, path: projectPath });
     
     return project;
   }
@@ -46,7 +49,7 @@ export class ProjectManager {
       this.currentProject = null;
     }
 
-    console.log(`Project deleted: ${name}`);
+    log.info('Project deleted', { name });
     return true;
   }
 
@@ -54,7 +57,7 @@ export class ProjectManager {
     const project = this.get(name);
     if (project) {
       this.currentProject = project.id;
-      console.log(`Switched to project: ${name}`);
+      log.info('Switched to project', { name });
     }
     return project;
   }
