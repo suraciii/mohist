@@ -87,14 +87,14 @@ export function buildExploreToolRegistry(context: ExploreAgentContext): ToolRegi
   return registry;
 }
 
-export function runExploreAgent(
+export async function runExploreAgent(
   context: ExploreAgentContext,
   messages: ModelMessage[],
-): ReturnType<typeof streamText> {
+): Promise<ReturnType<typeof streamText>> {
   const config = context.sessionModel
     ? { ...context.llmConfig, model: context.sessionModel, variant: context.sessionVariant }
     : context.llmConfig;
-  const model = resolveModel(config);
+  const model = await resolveModel(config);
   const toolRegistry = buildExploreToolRegistry(context);
 
   return streamText({

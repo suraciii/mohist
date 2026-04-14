@@ -1,4 +1,5 @@
 import type { SdkType } from './config-schema';
+import { ModelsDev } from './models-dev';
 
 export interface BuiltinProvider {
   sdk: SdkType;
@@ -7,65 +8,86 @@ export interface BuiltinProvider {
   envVars: string[];
 }
 
-export const BUILTIN_PROVIDERS: Record<string, BuiltinProvider> = {
-  anthropic: {
-    sdk: 'anthropic',
-    name: 'Anthropic',
-    baseURL: null,
-    envVars: ['ANTHROPIC_API_KEY'],
-  },
-  openai: {
-    sdk: 'openai',
-    name: 'OpenAI',
-    baseURL: null,
-    envVars: ['OPENAI_API_KEY'],
-  },
-  glm: {
-    sdk: 'openai-compatible',
-    name: '智谱 GLM',
-    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
-    envVars: ['GLM_API_KEY'],
-  },
-  kimi: {
-    sdk: 'openai-compatible',
-    name: 'Moonshot Kimi',
-    baseURL: 'https://api.moonshot.cn/v1',
-    envVars: ['MOONSHOT_API_KEY', 'KIMI_API_KEY'],
-  },
-  minimax: {
-    sdk: 'openai-compatible',
-    name: 'MiniMax',
-    baseURL: 'https://api.minimax.chat/v1',
-    envVars: ['MINIMAX_API_KEY'],
-  },
+function npmToSdk(npm: string | undefined): SdkType {
+  if (npm === '@ai-sdk/anthropic') return 'anthropic';
+  if (npm === '@ai-sdk/openai') return 'openai';
+  return 'openai-compatible';
+}
+
+const FALLBACK_PROVIDERS: Record<string, BuiltinProvider> = {
   deepseek: {
     sdk: 'openai-compatible',
     name: 'DeepSeek',
     baseURL: 'https://api.deepseek.com',
     envVars: ['DEEPSEEK_API_KEY'],
   },
-  qwen: {
-    sdk: 'openai-compatible',
-    name: '通义千问',
-    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    envVars: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY'],
-  },
-  'zhipuai-coding-plan': {
-    sdk: 'openai-compatible',
-    name: '智谱 Coding Plan',
-    baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
-    envVars: ['ZHIPU_API_KEY'],
-  },
-  'kimi-for-coding': {
-    sdk: 'anthropic',
-    name: 'Kimi For Coding',
-    baseURL: 'https://api.kimi.com/coding/v1',
-    envVars: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
-  },
-  'minimax-for-coding': {
-    sdk: 'anthropic',
-    name: 'MiniMax Coding',
-    baseURL: 'https://api.minimax.io/anthropic/v1',
-    envVars: ['MINIMAX_API_KEY'],
-  },
+
 };
+
+function buildProvidersFromSnapshot(): Record<string, BuiltinProvider> {
+  const providers: Record<string, BuiltinProvider> = {};
+  try {
+    const mod = require('./models-snapshot.js') as { snapshot: Record<string, { npm?: string; name: string; api?: string; env: string[] }> };
+    for (const [id, provider] of Object.entries(mod.snapshot)) {
+      providers[id] = {
+        sdk: npmToSdk(provider.npm),
+        name: provider.name,
+        baseURL: provider.api ?? null,
+        envVars: provider.env,
+      };
+    }
+  } catch {
+    // snapshot not available
+  }
+  for (const [id, fallback] of Object.entries(FALLBACK_PROVIDERS)) {
+    if (!providers[id]) {
+      providers[id] = fallback;
+    }
+  }
+  return providers;
+}
+
+export const BUILTIN_PROVIDERS: Record<string, BuiltinProvider> = buildProvidersFromSnapshot();
+
+let asyncProvidersCache: Record<string, BuiltinProvider> | null = null;
+let asyncCachePromise: Promise<Record<string, BuiltinProvider>> | null = null;
+
+export function clearBuiltinProvidersCache(): void {
+  asyncProvidersCache = null;
+  asyncCachePromise = null;
+}
+
+export async function getBuiltinProviders(): Promise<Record<string, BuiltinProvider>> {
+  if (asyncProvidersCache) {
+    return asyncProvidersCache;
+  }
+  if (!asyncCachePromise) {
+    asyncCachePromise = doGetBuiltinProviders();
+  }
+  const result = await asyncCachePromise;
+  asyncProvidersCache = result;
+  return result;
+}
+
+async function doGetBuiltinProviders(): Promise<Record<string, BuiltinProvider>> {
+  const providers: Record<string, BuiltinProvider> = {};
+  const modelsDevData = await ModelsDev.get();
+
+  for (const [id, provider] of Object.entries(modelsDevData)) {
+    providers[id] = {
+      sdk: npmToSdk(provider.npm),
+      name: provider.name,
+      baseURL: provider.api ?? null,
+      envVars: provider.env,
+    };
+  }
+
+  for (const [id, fallback] of Object.entries(FALLBACK_PROVIDERS)) {
+    if (!providers[id]) {
+      providers[id] = fallback;
+    }
+  }
+
+  asyncProvidersCache = providers;
+  return providers;
+}

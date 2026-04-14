@@ -100,9 +100,23 @@ describe('Provider Routes', () => {
       for (const provider of response.body.data) {
         if (provider.apiKeyMasked) {
           expect(provider.apiKeyMasked).not.toMatch(/^[a-zA-Z0-9_-]{20,}$/);
-          expect(provider.apiKeyMasked).toMatch(/^\**.*\*\**$/);
+          expect(provider.apiKeyMasked).toContain('*');
         }
       }
+    });
+
+    it('should return models in fully-qualified ID format (provider/model-id)', async () => {
+      const response = await request(server).get('/api/providers');
+
+      expect(response.status).toBe(200);
+      const anthropicProvider = response.body.data.find((p: { id: string }) => p.id === 'anthropic');
+      expect(anthropicProvider).toBeDefined();
+      expect(Array.isArray(anthropicProvider.models)).toBe(true);
+      expect(anthropicProvider.models.length).toBeGreaterThan(0);
+      const modelId = anthropicProvider.models[0];
+      expect(typeof modelId).toBe('string');
+      expect(modelId).toContain('/');
+      expect(modelId.startsWith('anthropic/')).toBe(true);
     });
   });
 

@@ -1,0 +1,48 @@
+# Ralph Progress Log
+Started: 2026-04-14T04:16:03.158Z
+
+---
+
+
+[2026-04-14T12:19:30Z] T-001 completed
+- Created src/services/truncate-service.ts with truncate() function
+- Supports maxLines (default 2000), maxBytes (default 50KB), direction ('head'|'tail')
+- Writes full content to ~/.mohist/tool-output/tool_<ts>_<random>.txt on truncation
+- Returns preview + hint with truncation amount, file path, and read suggestions
+- Auto-creates output directory if missing
+- Created tests/truncate-service.test.ts with 14 passing tests
+- Typecheck passes
+- Learnings: followed opencode's truncate.ts pattern but simplified (no Effect, pure Node.js fs)
+- Next: T-002 (Tool.define integration with TruncateService)
+
+## 2026-04-14 T-002: Tool.define 集成 TruncateService
+- Added ToolResult interface with output and metadata fields
+- Extended ToolDefinition.execute return type to Promise<string | ToolResult>
+- Added normalizeResult helper to wrap plain string returns into ToolResult
+- Modified Tool.define wrapper: checks metadata.truncated, skips global truncate if true, falls back to TruncateService.truncate() otherwise
+- All 574 tests pass, typecheck clean
+- Learnings: The normalizeResult pattern keeps backward compatibility — existing tools returning string work unchanged
+- Next: T-003 (glob 100条上限), T-004 (read_file 三重限制)
+
+## 2026-04-14 T-003: glob 工具添加 100 条结果上限
+
+- Modified `src/tools/glob-tool.ts`: added MAX_RESULTS = 100 constant
+- When matches > 100: slice to first 100, append truncation hint with total count, return ToolResult with metadata.truncated = true and metadata.count
+- When matches <= 100: return plain string (backward compatible)
+- Import ToolResult type from agent-runtime/tool
+- Build/typecheck passes
+- Learnings: Tool.define already handles string | ToolResult return types, so glob just needs to return the appropriate type
+- Next: T-004 read_file tool triple output limits
+
+## 2026-04-14 T-004: read_file 工具添加三重输出限制
+
+- Modified `src/tools/read-file.ts`: added three independent truncation limits
+- MAX_LINES = 2000: truncates output to first 2000 lines with hint showing line range and next offset
+- MAX_BYTES = 50KB: truncates numbered output when byte count exceeds limit, with hint
+- MAX_LINE_LENGTH = 2000: per-line truncation with `... (line truncated to 2000 chars)` suffix
+- Per-line truncation always applies (safety concern); line count and byte limits skipped when user specifies both offset AND limit
+- Returns ToolResult with metadata.truncated = true and metadata.lineTruncations array when applicable
+- Import ToolResult type from agent-runtime/tool
+- Build/typecheck passes, all 574 tests pass
+- Learnings: Three limits are independent — per-line truncation is always active (prevents context bloat from any single huge line), while line/byte limits respect explicit user ranges. Byte limit check uses numbered output (includes line number prefix in byte count).
+- Next: All 4 tasks complete — change is done

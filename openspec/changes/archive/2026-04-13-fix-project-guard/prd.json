@@ -1,0 +1,75 @@
+{
+  "project": "mohist",
+  "description": "修复前端项目守卫机制：AppContent 启动时通过 React Query 恢复 currentProjectId，添加全局 ProjectGuard 统一处理无项目状态，解决 Explore 页面永久 Loading 问题。",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "新增 useCurrentProject hook 和 AppContent 初始化",
+      "spec": "specs/web-ui/spec.md",
+      "description": "在 useQueries.ts 中新增 useCurrentProject query hook，封装 GET /api/projects/current。在 AppContent.tsx 中使用 useProjects 和 useCurrentProject，通过 useEffect 将结果同步到 ProjectContext。处理 404 和网络错误。",
+      "acceptanceCriteria": [
+        "useQueries.ts 中存在 useCurrentProject hook",
+        "AppContent 挂载时调用 useProjects 和 useCurrentProject",
+        "后端有 currentProject 时 projectId 被正确设置",
+        "后端返回 404 但有项目列表时自动选第一个（不写后端）",
+        "API 失败时不抛出未捕获异常，projectId 保持 null",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "api.ts 需添加 getCurrentProject 方法。useCurrentProject hook 应在 404 时优雅降级为 null，不抛异常（可用 retry: false）。"
+    },
+    {
+      "id": "T-002",
+      "title": "添加 ProjectGuard 全局守卫组件",
+      "spec": "specs/project-guard/spec.md",
+      "description": "创建 ProjectGuard 组件，在 AppContent 中包裹 Routes。根据项目加载状态决定渲染内容：loading 时显示 spinner，无项目时显示引导页面（含 CreateProjectDialog），有项目时渲染 Outlet。对 /settings 路由做豁免。",
+      "acceptanceCriteria": [
+        "项目加载中时显示 spinner",
+        "无项目时显示引导页面含 Create Project 按钮",
+        "有项目但 projectId 为 null 时自动选择第一个项目",
+        "有项目且 projectId 存在时正常渲染 Outlet",
+        "访问 /settings 不受 ProjectGuard 阻塞",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "使用 useLocation 判断 /settings 豁免。引导页面可复用 KanbanView 中的无项目空状态 UI 或新建组件。"
+    },
+    {
+      "id": "T-003",
+      "title": "从 KanbanView 移除 projectId 初始化副作用",
+      "spec": "specs/web-ui/spec.md",
+      "description": "移除 KanbanView 中 useEffect 里调用 setProjectId 和 setProjects 的逻辑。这些初始化工作现在由 AppContent 的 React Query hooks 和 ProjectGuard 负责。保留无项目空状态展示作为防御性编程。",
+      "acceptanceCriteria": [
+        "KanbanView 不再包含 setProjectId 调用",
+        "KanbanView 不再包含 setProjects 调用",
+        "首页看板在有项目时正常显示 issues",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "KanbanView 仍可保留 projects.length === 0 的空状态展示，但会被 ProjectGuard 提前拦截。"
+    },
+    {
+      "id": "T-004",
+      "title": "验证 Explore 页面不再永久 Loading",
+      "spec": "specs/project-guard/spec.md",
+      "description": "端到端验证修复效果：直接访问 /explore 路由不再卡在 Loading。验证场景包括：有项目时正常跳转、无项目时显示引导、刷新 /explore/:id 后 session 正常加载。",
+      "acceptanceCriteria": [
+        "直接访问 /explore 路由不卡在 Loading（有项目时正常工作）",
+        "无项目时访问 /explore 显示引导页面",
+        "刷新 /explore/:id 后 session 数据正常加载",
+        "从 Explore 页面返回首页正常",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "这是集成验证任务。主要验证前面三个任务的组合效果。如果发现问题在此修复。"
+    }
+  ]
+}
