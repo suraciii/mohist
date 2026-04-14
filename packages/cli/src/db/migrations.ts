@@ -1,6 +1,9 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import { DatabaseManager } from './database';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'db' });
 
 const SCHEMA_VERSION = 11;
 
@@ -55,6 +58,7 @@ const CREATE_COMMENTS_INDEXES = [
 ];
 
 export function runMigrations(db: DatabaseManager): void {
+  log.info('Running initial migrations', { targetVersion: SCHEMA_VERSION });
   db.transaction(() => {
     db.exec(CREATE_PROJECTS_TABLE);
     db.exec(CREATE_ISSUES_TABLE);
@@ -66,6 +70,7 @@ export function runMigrations(db: DatabaseManager): void {
     
     setSchemaVersion(db, SCHEMA_VERSION);
   });
+  log.info('Initial migrations completed', { version: SCHEMA_VERSION });
 }
 
 function setSchemaVersion(db: DatabaseManager, version: number): void {
@@ -89,6 +94,7 @@ export function getSchemaVersion(db: DatabaseManager): number {
 
 export function initializeDatabase(db: DatabaseManager): void {
   const currentVersion = getSchemaVersion(db);
+  log.info('Initializing database', { currentVersion, targetVersion: SCHEMA_VERSION });
   
   if (currentVersion === 0) {
     runMigrations(db);
@@ -133,6 +139,9 @@ export function initializeDatabase(db: DatabaseManager): void {
   if (currentVersion < 11) {
     migrateToVersion11(db);
   }
+
+  const finalVersion = getSchemaVersion(db);
+  log.info('Database initialization completed', { version: finalVersion });
 }
 
 function migrateToVersion2(db: DatabaseManager): void {

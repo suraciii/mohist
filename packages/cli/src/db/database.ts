@@ -2,6 +2,9 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'db' });
 
 export type SqlValue = string | number | boolean | null | Buffer;
 
@@ -30,6 +33,7 @@ export class DatabaseManager {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
+    log.info('Database opened', { path: this.dbPath });
   }
 
   private ensureDirectoryExists(): void {
