@@ -3,6 +3,9 @@ import { Tool, type ToolInstance, type ToolRegistry } from '../agent-runtime/too
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { EventBus } from '../services/event-bus';
 import { runAcpSession } from '../agent-runtime/acp-session';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'spawn-coder' });
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
 
@@ -69,11 +72,10 @@ export async function executeCoderTask(
   }
 ): Promise<CoderTaskResult> {
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT;
+  const issueNumber = options?.issueId;
 
-  console.log(
-    `[executeCoderTask] Spawning: opencode acp (cwd=${cwd}, timeout=${timeout}ms)`
-  );
-  console.log(`[executeCoderTask] Task: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}`);
+  const timer = log.time('executeCoderTask', { cwd, timeout, issueNumber });
+  log.info('Spawning opencode acp', { cwd, timeout, issueNumber, task: task.slice(0, 200) });
 
   const result = await runAcpSession({
     cwd,
@@ -84,6 +86,8 @@ export async function executeCoderTask(
     workflowLogRepo: options?.workflowLogRepo,
     eventBus: options?.eventBus,
   });
+
+  timer.stop();
 
   if (result.error && !result.text) {
     return { success: false, output: '', error: result.error };
@@ -151,12 +155,12 @@ export function createSpawnCoderTool(
         params.variables
       );
 
-      console.log(
-        `[spawn_coder] Spawning: opencode acp (cwd=${cwd}, timeout=${timeout}ms)`
-      );
-      console.log(`[spawn_coder] Task: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}`);
+      const issueNumber = context?.issueId;
+      log.info('spawn_coder executing', { cwd, timeout, issueNumber, task: task.slice(0, 200) });
 
       const executionId = context?.toolRegistry?.getCurrentExecutionId() ?? undefined;
+
+      const timer = log.time('spawn_coder', { cwd, issueNumber });
 
       const result = await runAcpSession({
         cwd,
@@ -168,6 +172,8 @@ export function createSpawnCoderTool(
         workflowLogRepo: context?.workflowLogRepo,
         eventBus: context?.eventBus,
       });
+
+      timer.stop();
 
       if (!result.success && !result.text) {
         return `Error: ${result.error}`;
