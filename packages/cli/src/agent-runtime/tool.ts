@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { tool } from 'ai';
 import type { ToolSet } from 'ai';
-import { truncate } from '../services/truncate-service.js';
+import { truncate } from '../services/truncate-service';
 
 export interface ToolResult {
   output: string;

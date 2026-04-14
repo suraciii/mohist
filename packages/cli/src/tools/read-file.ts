@@ -85,7 +85,8 @@ export function createReadFileTool(context: ReadFileContext): ToolInstance<any> 
           let byteCount = 0;
           let fitCount = 0;
           for (let i = 0; i < numbered.length; i++) {
-            const lineBytes = Buffer.byteLength(numbered[i], 'utf-8') + 1;
+            const sep = i > 0 ? 1 : 0;
+            const lineBytes = Buffer.byteLength(numbered[i], 'utf-8') + sep;
             if (byteCount + lineBytes > MAX_BYTES && fitCount > 0) break;
             byteCount += lineBytes;
             fitCount++;
