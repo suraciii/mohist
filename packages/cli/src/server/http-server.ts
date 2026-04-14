@@ -5,6 +5,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Config, ServerState } from '../types';
 import type { RateLimiter } from '../utils/rate-limiter';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'server' });
 
 export class HttpServer {
   private app: Hono;
@@ -28,8 +31,15 @@ export class HttpServer {
 
   private setupMiddleware(): void {
     this.app.use('*', async (c, next) => {
-      console.log(`${new Date().toISOString()} ${c.req.method} ${c.req.path}`);
+      const start = Date.now();
       await next();
+      const duration = Date.now() - start;
+      log.info('HTTP request', {
+        method: c.req.method,
+        path: c.req.path,
+        status: c.res.status,
+        duration,
+      });
     });
   }
 
@@ -54,7 +64,7 @@ export class HttpServer {
     const resolvedDir = path.resolve(webDistDir);
 
     if (!fs.existsSync(resolvedDir)) {
-      console.log(`Web dist directory not found: ${resolvedDir}, skipping static file serving`);
+      log.info(`Web dist directory not found, skipping static file serving`, { path: resolvedDir });
       return;
     }
 
@@ -85,7 +95,7 @@ export class HttpServer {
         (info) => {
           this.state.isRunning = true;
           this.state.startedAt = new Date().toISOString();
-          console.log(`Server listening on ${this.config.serverHost}:${info.port}`);
+          log.info('Server listening', { host: this.config.serverHost, port: info.port });
           resolve();
         }
       );
@@ -108,7 +118,7 @@ export class HttpServer {
           reject(err);
         } else {
           this.state.isRunning = false;
-          console.log('Server stopped');
+          log.info('Server stopped');
           resolve();
         }
       });

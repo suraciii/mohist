@@ -139,7 +139,7 @@ describe('POST /issues/:number/start resilience', () => {
     const issue = await setupProjectAndIssue();
     const worktreeManager = createMockWorktreeManager();
 
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     const app = new Hono();
     app.route('/api/issues', createIssueRoutes(
@@ -163,14 +163,14 @@ describe('POST /issues/:number/start resilience', () => {
     const updatedIssue = issueService.getByNumber(projectId, issue.number);
     expect(updatedIssue?.stage).toBe(Stage.Draft);
 
-    errorSpy.mockRestore();
+    stderrSpy.mockRestore();
   });
 
   it('should log error but return original error when rollback fails', async () => {
     const issue = await setupProjectAndIssue();
     const worktreeManager = createMockWorktreeManager();
 
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
     vi.spyOn(agentRunner, 'start').mockImplementation((() => {
@@ -199,12 +199,11 @@ describe('POST /issues/:number/start resilience', () => {
     expect(response.status).toBe(500);
     expect(response.body.error).toContain('agent start failed');
 
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to rollback stage to Draft'),
-      expect.any(Error)
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to rollback stage to Draft')
     );
 
-    errorSpy.mockRestore();
+    stderrSpy.mockRestore();
   });
 
   it('should not delete worktree on rollback', async () => {

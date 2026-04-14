@@ -10,6 +10,9 @@ import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'issue' });
 
 const execFileAsync = promisify(execFile);
 
@@ -378,7 +381,7 @@ export function createIssueRoutes(
             issueService.transitionToStage(issue.id, Stage.Draft);
           }
         } catch (rollbackError) {
-          console.error('Failed to rollback stage to Draft:', rollbackError);
+          log.error('Failed to rollback stage to Draft', { error: rollbackError instanceof Error ? rollbackError.message : rollbackError });
         }
       }
       const response: ApiResponse = {

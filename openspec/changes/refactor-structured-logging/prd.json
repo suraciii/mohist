@@ -39,7 +39,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "server.ts 中 spawn 的 stdio 改为 ['ignore', 'ignore', logStream]，只保留 stderr 兜底"
     },
     {

@@ -11,6 +11,9 @@ import { LlmError } from '../agent-runtime/llm';
 import type { EventBus } from '../services/event-bus';
 import { clearConfigCache, load } from '../config/config-loader';
 import { getModelById } from '../config/builtin-models';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'explore' });
 
 export function createExploreRoutes(
   exploreService: ExploreService,
@@ -309,7 +312,7 @@ export function createExploreRoutes(
             data: JSON.stringify({ type: 'done', issueId: createdIssueId }),
           });
         } catch (error) {
-          console.error('[explore] Stream error:', error);
+          log.error('Stream error', { error: error instanceof Error ? error.message : error });
           await stream.writeSSE({
             data: JSON.stringify({
               type: 'done',
