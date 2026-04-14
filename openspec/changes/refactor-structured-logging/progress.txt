@@ -21,3 +21,21 @@ Started: 2026-04-14T10:47:40.570Z
 
 ### Next steps
 - T-002: Server daemon logging migration and init() integration
+
+## 2026-04-14 T-002 Server 端日志迁移与 daemon 改造
+
+### Done
+- server/index.ts: Added Log.init() after ensureDataDir(), pre/post unhandledRejection handlers, replaced all console.* with Log.create({ service: 'server' })
+- http-server.ts: Replaced console.log with log.info, added request duration logging in middleware with method/path/status/duration fields
+- cli/commands/server.ts: Changed daemon stdio from ['ignore', logStream, logStream] to ['ignore', 'ignore', stderrStream]; added getLatestLogFile() helper; serverLogs() and serverStatus() now show latest timestamp log file path
+- api/issues.ts: Replaced console.error in rollback catch with log.error
+- api/explore.ts: Replaced console.error stream error with log.error
+- api/questions.ts: Replaced console.warn/log with log.warn/log.info
+- tests/start-handler-resilience.test.ts: Updated spies from console.error to process.stderr.write to match new Log output
+
+### Learnings
+- Log module defaults to process.stderr.write when not initialized (tests don't call Log.init), so test spies need to target process.stderr.write
+- Pre-existing test failures in resolve-model.test.ts and api-routes.test.ts are unrelated to this change (LLM config issues)
+
+### Next Steps
+- T-003: Agent Runner 日志迁移

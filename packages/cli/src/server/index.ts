@@ -16,11 +16,14 @@ import { createExploreRoutes } from '../api/explore';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager } from '../agent-runtime';
+import { Log } from '../util/log';
 
 import { load as loadConfig, getServerConfig } from '../config/config-loader';
 import { RateLimiter } from '../utils/rate-limiter';
 import * as fs from 'fs';
 import * as path from 'path';
+
+const log = Log.create({ service: 'server' });
 
 function ensureDataDir(): void {
   const dataDir = path.join(process.env.HOME || '', '.mohist');
@@ -37,13 +40,27 @@ function ensureDataDir(): void {
 
 async function main(): Promise<void> {
   ensureDataDir();
-  
-  // Load config from JSONC first to get server config
+
+  process.on('unhandledRejection', (reason) => {
+    console.error('[FATAL] Unhandled Promise Rejection (pre-init):', reason);
+  });
+
+  await Log.init({
+    print: process.argv.includes('--print-logs'),
+    dev: process.env.NODE_ENV === 'development',
+    level: (process.env.LOG_LEVEL as Log.Level) || 'INFO',
+  });
+
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', (reason) => {
+    Log.Default.error('Unhandled Promise Rejection', { reason });
+  });
+
   let fileConfig: ReturnType<typeof loadConfig>;
   try {
     fileConfig = loadConfig();
   } catch (err) {
-    console.error('Failed to load config:', err instanceof Error ? err.message : err);
+    log.error('Failed to load config', { error: err instanceof Error ? err.message : err });
     process.exit(1);
   }
   
@@ -75,7 +92,7 @@ async function main(): Promise<void> {
 
   const expiredCount = stateManager.getQuestionRepo().expireAllPending();
   if (expiredCount > 0) {
-    console.log(`Expired ${expiredCount} orphaned pending question(s) from previous session`);
+    log.info(`Expired ${expiredCount} orphaned pending question(s) from previous session`);
   }
 
   const rateLimiter = new RateLimiter(60 * 1000, 30);
@@ -98,36 +115,31 @@ async function main(): Promise<void> {
   server.serveStaticFiles(webDistDir);
 
   process.on('SIGTERM', async () => {
-    console.log('Received SIGTERM, shutting down gracefully...');
+    log.info('Received SIGTERM, shutting down gracefully...');
     agentRunner.shutdown();
     await server.stop();
   });
 
   process.on('SIGINT', async () => {
-    console.log('Received SIGINT, shutting down gracefully...');
+    log.info('Received SIGINT, shutting down gracefully...');
     agentRunner.shutdown();
     await server.stop();
   });
 
-  process.on('unhandledRejection', (reason, _promise) => {
-    console.error('[FATAL] Unhandled Promise Rejection:', reason);
-    if (reason instanceof Error) {
-      console.error('Stack trace:', reason.stack);
-    }
-  });
-
   process.on('uncaughtException', (error) => {
-    console.error('[FATAL] Uncaught Exception:', error.message);
-    console.error('Stack trace:', error.stack);
+    log.error('Uncaught Exception', { error });
   });
 
   await server.start();
   
-  console.log(`mohist server started on ${config.serverHost}:${config.serverPort}`);
-  console.log(`Max concurrent agents: ${config.maxConcurrentAgents}`);
+  log.info(`mohist server started`, {
+    host: config.serverHost,
+    port: config.serverPort,
+    maxConcurrentAgents: config.maxConcurrentAgents,
+  });
 }
 
 main().catch((error) => {
-  console.error('Failed to start server:', error);
+  log.error('Failed to start server', { error });
   process.exit(1);
 });

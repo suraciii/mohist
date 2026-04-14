@@ -5,7 +5,17 @@ import chalk from 'chalk';
 import http from 'http';
 
 const PID_FILE = path.join(process.env.HOME || '', '.mohist', 'server.pid');
-const LOG_FILE = path.join(process.env.HOME || '', '.mohist', 'logs', 'server.log');
+const LOGS_DIR = path.join(process.env.HOME || '', '.mohist', 'logs');
+const STDERR_LOG_FILE = path.join(LOGS_DIR, 'server.log');
+const LOG_FILE_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}\.log$/;
+
+function getLatestLogFile(): string | null {
+  if (!fs.existsSync(LOGS_DIR)) return null;
+  const files = fs.readdirSync(LOGS_DIR)
+    .filter(f => LOG_FILE_PATTERN.test(f))
+    .sort();
+  return files.length > 0 ? path.join(LOGS_DIR, files[files.length - 1]) : null;
+}
 
 interface ServerStatus {
   running: boolean;
@@ -61,18 +71,15 @@ export async function startServer(): Promise<void> {
   
   const serverPath = path.join(__dirname, '..', '..', '..', 'bin', 'mo-server');
   
-  if (!fs.existsSync(LOG_FILE)) {
-    const logsDir = path.dirname(LOG_FILE);
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true });
-    }
+  if (!fs.existsSync(LOGS_DIR)) {
+    fs.mkdirSync(LOGS_DIR, { recursive: true });
   }
   
-  const logStream = fs.openSync(LOG_FILE, 'a');
+  const stderrStream = fs.openSync(STDERR_LOG_FILE, 'a');
   
   const child = spawn(process.execPath, [serverPath], {
     detached: true,
-    stdio: ['ignore', logStream, logStream],
+    stdio: ['ignore', 'ignore', stderrStream],
     cwd: process.cwd()
   });
   
@@ -101,7 +108,8 @@ export async function startServer(): Promise<void> {
       console.log(chalk.green('Server started'));
       console.log(chalk.gray(`PID: ${pid}`));
       console.log(chalk.gray(`Port: 3456`));
-      console.log(chalk.gray(`Logs: ${LOG_FILE}`));
+      const latestLog = getLatestLogFile();
+      console.log(chalk.gray(`Logs: ${latestLog || LOGS_DIR}`));
       return;
     }
     
@@ -109,7 +117,7 @@ export async function startServer(): Promise<void> {
   }
   
   console.error(chalk.red('Server failed to start within timeout'));
-  console.log(chalk.yellow('Check logs at: ' + LOG_FILE));
+  console.log(chalk.yellow('Check logs at: ' + (getLatestLogFile() || STDERR_LOG_FILE)));
   process.exit(1);
 }
 
@@ -181,7 +189,7 @@ export async function serverStatus(): Promise<void> {
       }
     }
 
-    console.log(chalk.gray(`Logs: ${LOG_FILE}`));
+    console.log(chalk.gray(`Logs: ${getLatestLogFile() || LOGS_DIR}`));
   } else {
     console.log(chalk.red('Server is not running'));
     console.log(chalk.yellow('Start with: mo server start'));
@@ -189,13 +197,14 @@ export async function serverStatus(): Promise<void> {
 }
 
 export async function serverLogs(lines: number = 50): Promise<void> {
-  if (!fs.existsSync(LOG_FILE)) {
+  const logFile = getLatestLogFile();
+  if (!logFile || !fs.existsSync(logFile)) {
     console.log(chalk.yellow('No logs found'));
     console.log(chalk.gray('Server may not have been started yet'));
     return;
   }
   
-  const content = fs.readFileSync(LOG_FILE, 'utf-8');
+  const content = fs.readFileSync(logFile, 'utf-8');
   const logLines = content.split('\n').filter(line => line.trim());
   const lastLines = logLines.slice(-lines);
   
@@ -207,5 +216,5 @@ export async function serverLogs(lines: number = 50): Promise<void> {
   });
   
   console.log(chalk.gray('─'.repeat(60)));
-  console.log(chalk.gray(`Full log: ${LOG_FILE}`));
+  console.log(chalk.gray(`Full log: ${logFile}`));
 }

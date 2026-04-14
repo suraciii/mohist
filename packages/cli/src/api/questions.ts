@@ -4,6 +4,9 @@ import { IssueRepo } from '../db/issue-repo';
 import { EventBus } from '../services/event-bus';
 import { ApiResponse, Question } from '../types';
 import { resolveQuestion, hasPendingResolver } from '../tools/ask-user';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'issue' });
 
 export function createQuestionRoutes(
   questionRepo: QuestionRepo,
@@ -125,7 +128,7 @@ export function createQuestionRoutes(
       // Now resolve the ask_user tool's Promise to unblock the agent
       const resolved = resolveQuestion(id, answer);
       if (!resolved) {
-        console.warn(`[questions API] Question ${id} DB updated but resolver lost. Agent may have timed out between checks.`);
+        log.warn(`Question DB updated but resolver lost`, { questionId: id });
       }
 
       // Resolve projectId from issue
@@ -140,7 +143,7 @@ export function createQuestionRoutes(
         answer: answer,
       });
 
-      console.log(`[questions API] Question ${id} answered: ${answer.slice(0, 100)}`);
+      log.info('Question answered', { questionId: id, answer: answer.slice(0, 100) });
 
       const response: ApiResponse<Question> = {
         success: true,
@@ -190,7 +193,7 @@ export function createQuestionRoutes(
       // If agent is still waiting, resolve with timeout message
       const resolved = resolveQuestion(id, 'Question was manually expired by user. Proceed with your best judgment.');
       if (resolved) {
-        console.log(`[questions API] Question ${id} manually expired, agent resolver cleared`);
+        log.info('Question manually expired, agent resolver cleared', { questionId: id });
       }
 
       const response: ApiResponse<Question> = {
