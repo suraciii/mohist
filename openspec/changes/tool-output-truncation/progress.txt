@@ -23,3 +23,13 @@ Started: 2026-04-14T04:16:03.158Z
 - All 574 tests pass, typecheck clean
 - Learnings: The normalizeResult pattern keeps backward compatibility — existing tools returning string work unchanged
 - Next: T-003 (glob 100条上限), T-004 (read_file 三重限制)
+
+## 2026-04-14 T-003: glob 工具添加 100 条结果上限
+
+- Modified `src/tools/glob-tool.ts`: added MAX_RESULTS = 100 constant
+- When matches > 100: slice to first 100, append truncation hint with total count, return ToolResult with metadata.truncated = true and metadata.count
+- When matches <= 100: return plain string (backward compatible)
+- Import ToolResult type from agent-runtime/tool
+- Build/typecheck passes
+- Learnings: Tool.define already handles string | ToolResult return types, so glob just needs to return the appropriate type
+- Next: T-004 read_file tool triple output limits

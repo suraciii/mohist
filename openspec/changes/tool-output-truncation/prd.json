@@ -50,7 +50,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "设置 metadata.truncated = true 跳过全局二次截断"
     },
     {
