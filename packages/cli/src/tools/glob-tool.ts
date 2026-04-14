@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Tool, type ToolInstance } from '../agent-runtime/tool';
+import { Tool, type ToolInstance, type ToolResult } from '../agent-runtime/tool';
 
 export interface GlobContext {
   projectPath: string;
@@ -86,14 +86,29 @@ export function createGlobTool(context: GlobContext): ToolInstance<any> {
           ),
       })
       .strict(),
-    execute: async (params) => {
+    execute: async (params): Promise<string | ToolResult> => {
+      const MAX_RESULTS = 100;
       const matches = globWalk(context.projectPath, context.projectPath, params.pattern);
 
       if (matches.length === 0) {
         return 'No files matched the pattern.';
       }
 
-      return matches.join('\n');
+      if (matches.length <= MAX_RESULTS) {
+        return matches.join('\n');
+      }
+
+      const truncated = matches.slice(0, MAX_RESULTS);
+      const output = truncated.join('\n') +
+        `\n\n(Results truncated: showing first ${MAX_RESULTS} of ${matches.length} results. Use a more specific path or pattern.)`;
+
+      return {
+        output,
+        metadata: {
+          truncated: true,
+          count: matches.length,
+        },
+      };
     },
   });
 }

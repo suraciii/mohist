@@ -319,7 +319,7 @@ export class ReviewerAgent {
       };
     }
 
-    const model = resolveModel(this.llmConfig);
+    const model = await resolveModel(this.llmConfig);
     const toolRegistry = this.buildReviewToolRegistry(worktreePath);
 
     const codeSnippets = await this.getCodeSnippets(changedFiles, worktreePath);

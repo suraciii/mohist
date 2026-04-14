@@ -181,7 +181,7 @@ export async function runMainAgent(
     worktreePath: context.worktreePath,
   });
 
-  const model = resolveModel(context.llmConfig);
+  const model = await resolveModel(context.llmConfig);
 
   const toolRegistry = new ToolRegistry();
   toolRegistry.register(createSpawnCoderTool({

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
-import { useIssues, useProjects, useAgentStatus, useExploreSessions, useCreateExploreSession } from './hooks/useQueries'
+import { useIssues, useProjects, useCurrentProject, useAgentStatus, useExploreSessions, useCreateExploreSession } from './hooks/useQueries'
 import useSSE from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -9,22 +9,14 @@ import { IssueDetailPage } from './components/IssueDetailPage'
 import { ExplorePage } from './components/ExplorePage'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
 import { SettingsPage } from './components/SettingsPage'
+import { ProjectGuard } from './components/ProjectGuard'
 
 function KanbanView() {
-  const { projectId, setProjectId, setProjects } = useProject()
+  const { projectId } = useProject()
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { data: issues, isLoading } = useIssues(projectId ? { projectId } : undefined)
   const { data: agentStatus } = useAgentStatus()
   const [showCreateProject, setShowCreateProject] = useState(false)
-
-  useEffect(() => {
-    if (projects && projects.length > 0) {
-      setProjects(projects)
-      if (!projectId) {
-        setProjectId(projects[0].id)
-      }
-    }
-  }, [projects, projectId, setProjectId, setProjects])
 
   if (projectsLoading) {
     return null
@@ -116,18 +108,37 @@ function ExploreRedirect() {
 }
 
 function AppContent() {
-  const { projectId } = useProject()
+  const { projectId, setProjectId, setProjects } = useProject()
   useSSE(projectId)
+
+  const { data: projects } = useProjects()
+  const { data: currentProject } = useCurrentProject()
+
+  useEffect(() => {
+    if (projects) {
+      setProjects(projects)
+    }
+  }, [projects, setProjects])
+
+  useEffect(() => {
+    if (currentProject) {
+      setProjectId(currentProject.id)
+    } else if (projects && projects.length > 0 && !projectId) {
+      setProjectId(projects[0].id)
+    }
+  }, [currentProject, projects, projectId, setProjectId])
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
       <Routes>
-        <Route path="/" element={<KanbanView />} />
-        <Route path="/issue/:number" element={<IssueDetailPage />} />
-        <Route path="/explore" element={<ExploreRedirect />} />
-        <Route path="/explore/:id" element={<ExplorePage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route element={<ProjectGuard />}>
+          <Route path="/" element={<KanbanView />} />
+          <Route path="/issue/:number" element={<IssueDetailPage />} />
+          <Route path="/explore" element={<ExploreRedirect />} />
+          <Route path="/explore/:id" element={<ExplorePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
       </Routes>
     </div>
   )

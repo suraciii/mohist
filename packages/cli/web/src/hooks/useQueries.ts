@@ -9,6 +9,14 @@ export function useProjects() {
   })
 }
 
+export function useCurrentProject() {
+  return useQuery({
+    queryKey: ['current-project'],
+    queryFn: () => api.getCurrentProject(),
+    retry: false,
+  })
+}
+
 export function useIssues(params?: { stage?: string; label?: string; projectId?: string }) {
   return useQuery({
     queryKey: ['issues', params],

@@ -121,7 +121,7 @@ export class PlannerAgent {
   }
 
   private async exploreCodebase(worktreePath: string, issue: Issue): Promise<CodebaseInfo> {
-    const model = resolveModel(this.llmConfig);
+    const model = await resolveModel(this.llmConfig);
     const toolRegistry = this.buildExploreToolRegistry(worktreePath);
 
     const explorationPrompt = `Explore the codebase to understand the existing patterns relevant to this issue:
@@ -184,7 +184,7 @@ Be concise - provide a summary of your findings.`;
     codebaseInfo: CodebaseInfo,
     changeDir: string
   ): Promise<{ proposal: string; design: string; specs: Map<string, string>; prd: unknown }> {
-    const model = resolveModel(this.llmConfig);
+    const model = await resolveModel(this.llmConfig);
 
     const prompt_text = `You are a Planner Agent creating design artifacts for this issue:
 
@@ -389,7 +389,7 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
     artifacts: { proposal: string; design: string; specs: Map<string, string>; prd: unknown },
     prompt: string
   ): Promise<{ passed: boolean; issues: string[]; summary: string }> {
-    const model = resolveModel(this.llmConfig);
+    const model = await resolveModel(this.llmConfig);
     const reviewCriteria = this.extractReviewCriteria(prompt);
 
     const selfReviewPrompt = loadPlannerSelfReviewPrompt();
@@ -446,7 +446,7 @@ Provide your review in the specified format.`;
     issues: string[],
     changeDir: string
   ): Promise<{ proposal: string; design: string; specs: Map<string, string>; prd: unknown }> {
-    const model = resolveModel(this.llmConfig);
+    const model = await resolveModel(this.llmConfig);
 
     const issuesList = issues.map((issue, i) => `${i + 1}. ${issue}`).join('\n');
     const prompt_text = `Fix the following issues in the design artifacts:

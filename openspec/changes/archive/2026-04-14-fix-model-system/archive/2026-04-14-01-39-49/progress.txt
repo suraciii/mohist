@@ -1,0 +1,126 @@
+# Ralph Progress Log
+Started: 2026-04-13T09:51:38.020Z
+
+---
+T-002: 2026-04-13T18:00:39Z
+Task: 构建脚本生成 models.dev snapshot
+What was done:
+- Created script/build-models-snapshot.js to fetch from models.dev/api.json and generate snapshot files
+- Generated src/config/models-snapshot.js (1.7MB) and models-snapshot.d.ts
+- Updated package.json build script to run snapshot generation before tsc
+- Added allowJs: true to tsconfig.json for JavaScript file processing
+- Handled MODELS_DEV_API_JSON env var for local JSON fallback
+- Network failure gracefully falls back to existing snapshot
+
+Learnings:
+- TypeScript has serialization limits for large inferred types (TS7056)
+- Solution: generate .js with // @ts-nocheck and separate .d.ts with Record<string, unknown>
+- opencode uses Bun which handles this differently; Node.js requires allowJs: true
+
+Next steps:
+- T-003: 从 models.dev 数据生成 provider 注册表
+
+---
+T-003: 2026-04-13T18:30:00Z
+Task: 从 models.dev 数据生成 provider 注册表
+What was done:
+- Rewrote builtin-providers.ts with getBuiltinProviders() async function
+- npmToSdk() maps @ai-sdk/anthropic→anthropic, @ai-sdk/openai→openai, others→openai-compatible
+- getBuiltinProviders() iterates ModelsDev.get() and extracts id, name, api(baseURL), env
+- deepseek kept as static FALLBACK_PROVIDERS since it's not in models.dev
+- Static BUILTIN_PROVIDERS fallback kept for backward compat (anthropic, openai, deepseek)
+- Typecheck passes
+
+Learnings:
+- Existing code uses BUILTIN_PROVIDERS synchronously, so static fallback remains useful
+- getBuiltinProviders() async function is available for future dynamic usage
+
+Next steps:
+- T-004: 替换硬编码模型列表为 models.dev 数据
+
+---
+T-004: 2026-04-13T18:45:00Z
+Task: 替换硬编码模型列表为 models.dev 数据
+What was done:
+- Rewrote builtin-models.ts with async getModelsByProvider() and getModelById()
+- Models now queried dynamically from ModelsDev.get() data
+- Model IDs transformed to full format provider/model-id (e.g., minimax/MiniMax-M2.7)
+- Config override via provider.{id}.models still works, models transformed to full format
+- Removed hardcoded BUILTIN_MODELS constant and all hardcoded model arrays (ANTHROPIC_MODELS, etc.)
+- Updated providers.ts to await getModelsByProvider()
+- Updated explore.ts to use async getModelsByProvider() instead of BUILTIN_MODELS
+
+Learnings:
+- The BUILTIN_MODELS removal affected explore.ts which used it for model validation
+- Since T-007 handles explore.ts validation changes, updated explore.ts to use async API
+- Test failures in model-selection.test.ts are expected - tests use bare IDs (gpt-4o) but new system returns full format (openai/gpt-5.1-codex-max)
+- Test failures in config-loader.test.ts are pre-existing from T-003 changes
+
+Next steps:
+- T-005: 实现智能默认模型选择
+
+---
+T-005: 2026-04-13T18:25:00Z
+Task: 实现智能默认模型选择
+What was done:
+- Removed hardcoded DEFAULT_MODEL constant from llm.ts
+- Created async resolveDefaultModel() function that:
+  - Returns explicit config.model if set
+  - Otherwise iterates all providers from getBuiltinProviders()
+  - For each provider with apiKey (source !== 'none'), queries models.dev for models
+  - Sorts by release_date descending and returns provider/latest-model-id
+  - Throws 'No LLM provider configured' if no providers have apiKey
+- Made resolveModel() async to support resolveDefaultModel()
+- Updated all callers to await resolveModel(): explore-agent.ts, main-agent.ts, planner-agent.ts, reviewer-agent.ts, status.ts, explore.ts
+
+Learnings:
+- Smart default model selection inherently requires async operations (getBuiltinProviders, ModelsDev.get are async)
+- resolveModel API changed from sync to async, requiring updates to all callers
+- Tests in resolve-model.test.ts fail because they call resolveModel synchronously without await
+- Tests need to be updated to async (属于 T-009 task)
+
+Next steps:
+- T-006: 修复 /providers/models API 返回全限定 model ID
+
+---
+T-006: 2026-04-13T19:15:00Z
+Task: 修复 /providers/models API 返回全限定 model ID
+What was done:
+- Modified GET /providers/ API (providers.ts line 90): custom provider models now use full format `${id}/${m}`
+- Modified GET /providers/models API (providers.ts line 155): custom provider model IDs now use full format `${id}/${m}`
+- Builtin providers already returned full format via getModelsByProvider() which transforms to provider/model-id
+- Typecheck passes
+
+Learnings:
+- getModelsByProvider() already returns full format IDs for builtin providers
+- Only custom providers needed fixing since they directly used raw config arrays
+- Test failures are pre-existing from broader model system changes (T-009 handles test updates)
+
+Next steps:
+- T-007: 修复 explore session model ID 存储和验证
+
+---
+T-007: 2026-04-13T19:30:00Z
+Task: 修复 explore session model ID 存储和验证
+What was done:
+- Modified POST /explore/:id/model validation logic in explore.ts
+- First check: if model doesn't contain '/', return 400 "Invalid model format: expected provider/model-id"
+- Second check: use getModelById(model) to verify model exists, return 400 "Invalid model: {model}" if not found
+- Replaced getModelsByProvider iteration with getModelById() for cleaner validation
+- Changed import from getModelsByProvider to getModelById in explore.ts
+- Typecheck passes
+
+Learnings:
+- getModelById() returns undefined for both bare IDs (no '/') and non-existent full IDs
+- Need to check for '/' first before calling getModelById() to give appropriate error message
+- T-008 migration will set existing bare IDs to NULL, so POST /explore/:id/messages merge logic falls back to globalConfig.model
+
+Next steps:
+- T-008: 数据库迁移：裸 model ID 置空
+
+---
+Timestamp: 2026-04-13
+Task: T-008 数据库迁移：裸 model ID 置空
+Done: Added migrateToVersion11() in migrations.ts. Bumped SCHEMA_VERSION to 11. Migration iterates explore_sessions WHERE model IS NOT NULL, sets model=NULL for records where model does not contain '/'. Fully-qualified IDs unchanged. Migration is idempotent.
+Learnings: Existing migration pattern uses db.all() + db.run() in a transaction with setSchemaVersion() at the end. The idempotency comes from only querying non-null models and using WHERE id = ? for targeted updates.
+Next: T-009 - Update existing tests and add new tests.

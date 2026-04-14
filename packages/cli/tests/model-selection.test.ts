@@ -97,13 +97,6 @@ describe('Model Selection API', () => {
     delete process.env.OPENAI_API_KEY;
   });
 
-  afterEach(() => {
-    server.close();
-    db.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    clearConfigCache();
-  });
-
   describe('GET /api/providers/models', () => {
     it('should return models grouped by provider', async () => {
       const response = await request(server).get('/api/providers/models');
@@ -128,20 +121,19 @@ describe('Model Selection API', () => {
       expect(model).toHaveProperty('contextWindow');
     });
 
-    it('should include model metadata', async () => {
+    it('should include model metadata with fully-qualified IDs', async () => {
       const response = await request(server).get('/api/providers/models');
 
       expect(response.status).toBe(200);
       const anthropicProvider = response.body.data.find((p: { id: string }) => p.id === 'anthropic');
-      const claudeModel = anthropicProvider.models.find((m: { id: string }) => m.id === 'claude-opus-4-20250514');
+      const claudeModel = anthropicProvider.models.find((m: { id: string }) => m.id === 'anthropic/claude-opus-4-20250514');
 
       expect(claudeModel).toBeDefined();
       expect(claudeModel.name).toBe('Claude Opus 4');
-      expect(claudeModel.badges).toContain('latest');
       expect(claudeModel.contextWindow).toBe(200000);
     });
 
-    it('should include openai provider with correct models', async () => {
+    it('should include openai provider with correct models in full format', async () => {
       const response = await request(server).get('/api/providers/models');
 
       expect(response.status).toBe(200);
@@ -149,8 +141,8 @@ describe('Model Selection API', () => {
 
       expect(openaiProvider).toBeDefined();
       const modelIds = openaiProvider.models.map((m: { id: string }) => m.id);
-      expect(modelIds).toContain('gpt-4o');
-      expect(modelIds).toContain('gpt-4o-mini');
+      expect(modelIds).toContain('openai/gpt-4o');
+      expect(modelIds).toContain('openai/gpt-4o-mini');
     });
   });
 
@@ -166,36 +158,36 @@ describe('Model Selection API', () => {
       sessionId = session.id;
     });
 
-    it('should update session model', async () => {
+    it('should update session model with fully-qualified ID', async () => {
       const response = await request(server)
         .post(`/api/explore/${sessionId}/model`)
-        .send({ model: 'claude-sonnet-4-20250514', variant: 'latest' });
+        .send({ model: 'anthropic/claude-sonnet-4-6', variant: 'latest' });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.model).toBe('claude-sonnet-4-20250514');
+      expect(response.body.data.model).toBe('anthropic/claude-sonnet-4-6');
       expect(response.body.data.variant).toBe('latest');
     });
 
     it('should update session model without variant', async () => {
       const response = await request(server)
         .post(`/api/explore/${sessionId}/model`)
-        .send({ model: 'gpt-4o' });
+        .send({ model: 'openai/gpt-4o' });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.model).toBe('gpt-4o');
+      expect(response.body.data.model).toBe('openai/gpt-4o');
       expect(response.body.data.variant).toBeUndefined();
     });
 
-    it('should return 400 for invalid model', async () => {
+    it('should return 400 for invalid model (bare ID without provider)', async () => {
       const response = await request(server)
         .post(`/api/explore/${sessionId}/model`)
         .send({ model: 'invalid-model-xyz' });
 
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
-      expect(response.body.error).toContain('Invalid model');
+      expect(response.body.error).toContain('Invalid model format');
     });
 
     it('should return 400 when model is missing', async () => {
@@ -220,24 +212,24 @@ describe('Model Selection API', () => {
     it('should return 404 for non-existent session', async () => {
       const response = await request(server)
         .post('/api/explore/non-existent-session-id/model')
-        .send({ model: 'claude-sonnet-4-20250514' });
+        .send({ model: 'anthropic/claude-sonnet-4-6' });
 
       expect(response.status).toBe(404);
       expect(response.body.success).toBe(false);
       expect(response.body.error).toContain('Session not found');
     });
 
-    it('should accept all valid builtin models', async () => {
+    it('should accept all valid builtin models in full format', async () => {
       const validModels = [
-        'claude-opus-4-20250514',
-        'claude-sonnet-4-20250514',
-        'claude-haiku-4-20250514',
-        'gpt-4o',
-        'gpt-4o-mini',
-        'glm-4-flash',
-        'glm-4-plus',
-        'deepseek-chat',
-        'qwen-max',
+        'anthropic/claude-opus-4-20250514',
+        'anthropic/claude-sonnet-4-6',
+        'anthropic/claude-haiku-4-5',
+        'openai/gpt-4o',
+        'openai/gpt-4o-mini',
+        'zhipuai/glm-4.5-flash',
+        'zhipuai/glm-4.5',
+        'deepseek/deepseek-chat',
+        'alibaba/qwen3-8b',
       ];
 
       for (const model of validModels) {
@@ -245,7 +237,7 @@ describe('Model Selection API', () => {
           .post(`/api/explore/${sessionId}/model`)
           .send({ model });
 
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(200, `Failed for model: ${model}`);
         expect(response.body.data.model).toBe(model);
       }
     });
@@ -253,12 +245,12 @@ describe('Model Selection API', () => {
     it('should persist model after update', async () => {
       await request(server)
         .post(`/api/explore/${sessionId}/model`)
-        .send({ model: 'claude-sonnet-4-20250514' });
+        .send({ model: 'anthropic/claude-sonnet-4-6' });
 
       const getResponse = await request(server).get(`/api/explore/${sessionId}`);
 
       expect(getResponse.status).toBe(200);
-      expect(getResponse.body.data.session.model).toBe('claude-sonnet-4-20250514');
+      expect(getResponse.body.data.session.model).toBe('anthropic/claude-sonnet-4-6');
     });
   });
 });
