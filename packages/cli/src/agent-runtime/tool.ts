@@ -1,17 +1,31 @@
 import { z } from 'zod';
 import { tool } from 'ai';
 import type { ToolSet } from 'ai';
+import { truncate } from '../services/truncate-service.js';
+
+export interface ToolResult {
+  output: string;
+  metadata?: {
+    truncated?: boolean;
+    outputPath?: string;
+    [key: string]: unknown;
+  };
+}
 
 export interface ToolDefinition<P = unknown> {
   id: string;
   description: string;
   parameters: z.ZodType<P>;
-  execute: (params: P) => Promise<string>;
+  execute: (params: P) => Promise<string | ToolResult>;
 }
 
 export interface ToolInstance<P = unknown> {
   definition: ToolDefinition<P>;
   aiTool: ToolSet[string];
+}
+
+function normalizeResult(raw: string | ToolResult): ToolResult {
+  return typeof raw === 'string' ? { output: raw } : raw;
 }
 
 export namespace Tool {
@@ -20,7 +34,7 @@ export namespace Tool {
     def: {
       description: string;
       parameters: z.ZodType<P>;
-      execute: (params: P) => Promise<string>;
+      execute: (params: P) => Promise<string | ToolResult>;
     }
   ): ToolInstance<P> {
     const definition: ToolDefinition<P> = { id, ...def };
@@ -29,11 +43,24 @@ export namespace Tool {
       description: def.description,
       inputSchema: def.parameters as z.ZodType,
       execute: async (params) => {
-        const result = def.parameters.safeParse(params);
-        if (!result.success) {
-          return `Validation error: ${result.error.issues.map((i) => i.message).join(', ')}`;
+        const parsed = def.parameters.safeParse(params);
+        if (!parsed.success) {
+          return `Validation error: ${parsed.error.issues.map((i) => i.message).join(', ')}`;
         }
-        return def.execute(result.data as P);
+
+        const raw = await def.execute(parsed.data as P);
+        const result = normalizeResult(raw);
+
+        if (result.metadata?.truncated) {
+          return result.output;
+        }
+
+        const truncated = await truncate(result.output);
+        if (truncated.truncated) {
+          return truncated.content;
+        }
+
+        return result.output;
       },
     });
 

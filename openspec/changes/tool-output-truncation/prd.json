@@ -35,7 +35,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "关键机制：通过 metadata.truncated 判断工具是否已自行处理截断"
     },
     {

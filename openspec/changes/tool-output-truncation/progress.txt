@@ -14,3 +14,12 @@ Started: 2026-04-14T04:16:03.158Z
 - Typecheck passes
 - Learnings: followed opencode's truncate.ts pattern but simplified (no Effect, pure Node.js fs)
 - Next: T-002 (Tool.define integration with TruncateService)
+
+## 2026-04-14 T-002: Tool.define 集成 TruncateService
+- Added ToolResult interface with output and metadata fields
+- Extended ToolDefinition.execute return type to Promise<string | ToolResult>
+- Added normalizeResult helper to wrap plain string returns into ToolResult
+- Modified Tool.define wrapper: checks metadata.truncated, skips global truncate if true, falls back to TruncateService.truncate() otherwise
+- All 574 tests pass, typecheck clean
+- Learnings: The normalizeResult pattern keeps backward compatibility — existing tools returning string work unchanged
+- Next: T-003 (glob 100条上限), T-004 (read_file 三重限制)
