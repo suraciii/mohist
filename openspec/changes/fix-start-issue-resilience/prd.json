@@ -36,7 +36,7 @@
         "npm test passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "参考 propose.ts 的正确模式。rollback 用 try-catch 包裹，失败时 console.error 但不 throw。"
     }
   ]
