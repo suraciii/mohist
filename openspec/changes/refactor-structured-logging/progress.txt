@@ -1,0 +1,23 @@
+# Ralph Progress Log
+Started: 2026-04-14T10:47:40.570Z
+
+---
+
+
+## 2026-04-14T10:56 - T-001 创建 Log 模块核心实现
+
+### What was done
+- Created `packages/cli/src/util/log.ts` (~210 lines) ported from opencode's `util/log.ts`
+- Removed zod dependency (Level is plain TypeScript union type)
+- Removed Glob dependency (cleanup uses fs.readdirSync + regex pattern matching)
+- Log directory changed to `~/.mohist/logs/` via `os.homedir()`
+- Refactored `clone()` to bypass service cache by extracting `createLogger()` internal function
+- Fixed `init({ print: true })` to reset write function (original opencode code didn't need this since init is called once)
+- Wrote comprehensive tests (10 test cases) covering all acceptance criteria
+
+### Learnings
+- `clone()` on a named logger must bypass the service cache, otherwise `Log.create({ ...tags })` returns the cached instance instead of creating a new independent copy
+- `init({ print: true })` must explicitly reset the `write` function to stderr default, otherwise a prior `init({ print: false })` call leaves a file stream writer in place
+
+### Next steps
+- T-002: Server daemon logging migration and init() integration
