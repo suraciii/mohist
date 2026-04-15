@@ -2,26 +2,36 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resolveModel, LlmError } from '../src/agent-runtime/llm';
 import type { ConfigInfo } from '../src/config/config-schema';
 
+function snapshotApiKeyEnv(): Record<string, string | undefined> {
+  const saved: Record<string, string | undefined> = {};
+  for (const key of Object.keys(process.env)) {
+    if (key.endsWith('_API_KEY')) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  }
+  return saved;
+}
+
+function restoreApiKeyEnv(saved: Record<string, string | undefined>) {
+  for (const [key, val] of Object.entries(saved)) {
+    if (val === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = val;
+    }
+  }
+}
+
 describe('resolveModel', () => {
-  const savedEnv: Record<string, string | undefined> = {};
+  let savedEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    savedEnv['ANTHROPIC_API_KEY'] = process.env['ANTHROPIC_API_KEY'];
-    savedEnv['OPENAI_API_KEY'] = process.env['OPENAI_API_KEY'];
-    savedEnv['ZHIPU_API_KEY'] = process.env['ZHIPU_API_KEY'];
-    savedEnv['DEEPSEEK_API_KEY'] = process.env['DEEPSEEK_API_KEY'];
-    savedEnv['MINIMAX_API_KEY'] = process.env['MINIMAX_API_KEY'];
-    savedEnv['KIMI_API_KEY'] = process.env['KIMI_API_KEY'];
+    savedEnv = snapshotApiKeyEnv();
   });
 
   afterEach(() => {
-    for (const [key, val] of Object.entries(savedEnv)) {
-      if (val === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = val;
-      }
-    }
+    restoreApiKeyEnv(savedEnv);
   });
 
   it('should create anthropic model via createAnthropic', async () => {

@@ -55,8 +55,17 @@ describe('API Routes', () => {
   let issueService: IssueService;
   let configService: ConfigService;
   let stateManager: StateManager;
+  let savedApiKeys: Record<string, string | undefined> = {};
 
   beforeEach(() => {
+    savedApiKeys = {};
+    for (const key of Object.keys(process.env)) {
+      if (key.endsWith('_API_KEY')) {
+        savedApiKeys[key] = process.env[key];
+        delete process.env[key];
+      }
+    }
+
     db = new DatabaseManager({ inMemory: true });
     
     stateManager = new StateManager(db);
@@ -74,6 +83,13 @@ describe('API Routes', () => {
 
   afterEach(() => {
     db.close();
+    for (const [key, val] of Object.entries(savedApiKeys)) {
+      if (val === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = val;
+      }
+    }
   });
 
   describe('Project Routes', () => {
