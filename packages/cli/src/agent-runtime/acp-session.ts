@@ -74,6 +74,8 @@ export async function runAcpSession(
 
   let lastTextChunkTime = 0;
 
+  log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100) });
+
   const proc = spawn('opencode', ['acp'], {
     cwd,
     stdio: ['pipe', 'pipe', 'inherit'],
@@ -84,6 +86,10 @@ export async function runAcpSession(
           key !== 'OPENCODE_SERVER_USERNAME'
       )
     ),
+  });
+
+  proc.on('error', (err) => {
+    log.error('opencode acp subprocess error', { error: err.message });
   });
 
   let procExited = false;
@@ -217,9 +223,12 @@ export async function runAcpSession(
     ]);
 
     if (initResult === 'timeout') {
+      log.error('ACP initialize timed out', { timeout });
       await cleanup();
       return { text: agentText, success: false, error: `Timed out during initialize` };
     }
+
+    log.info('ACP initialized, creating session');
 
     const sessionResult = await Promise.race([
       connection.newSession({
@@ -230,11 +239,13 @@ export async function runAcpSession(
     ]);
 
     if (sessionResult === 'timeout') {
+      log.error('ACP newSession timed out', { timeout });
       await cleanup();
       return { text: agentText, success: false, error: `Timed out during newSession` };
     }
 
     sessionId = sessionResult.sessionId;
+    log.info('ACP session created', { sessionId });
 
     const promptResult = await Promise.race([
       connection.prompt({
@@ -245,6 +256,7 @@ export async function runAcpSession(
     ]);
 
     if (promptResult === 'timeout') {
+      log.error('ACP prompt timed out', { sessionId, timeout });
       try {
         await connection.cancel({ sessionId });
       } catch {
@@ -256,6 +268,7 @@ export async function runAcpSession(
 
     return { text: agentText, success: true, acpSessionId: sessionId };
   } catch (err) {
+    log.error('ACP session failed', { sessionId, error: err instanceof Error ? err.message : String(err) });
     await cleanup();
     const message = err instanceof Error ? err.message : String(err);
     return { text: agentText, success: false, error: message };

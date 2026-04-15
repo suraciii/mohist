@@ -11,7 +11,7 @@ import { createGrepTool } from '../tools/grep-tool';
 import { loadPlannerDefaultPrompt, loadPlannerSelfReviewPrompt } from './prompt-loader';
 import { Log } from '../util/log';
 
-const log = Log.create({ service: 'spawn-coder' });
+const log = Log.create({ service: 'planner' });
 
 const DEFAULT_MAX_ITERATIONS = 3;
 
