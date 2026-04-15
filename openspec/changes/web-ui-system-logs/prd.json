@@ -79,7 +79,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "参照 openclaw 的 ui/src/ui/controllers/logs.ts 的 parseLogLine 和 loadLogs 逻辑。使用 setInterval 实现 3 秒轮询。Page Visibility API 防止后台无意义轮询和缓冲区溢出。parseLogLine 用 try/catch 做容错。"
     },
     {
