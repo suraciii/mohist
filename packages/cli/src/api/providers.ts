@@ -249,7 +249,7 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
             break;
           case 'openai-compatible':
           default:
-            model = createOpenAI(sdkOpts)(modelToTest);
+            model = createOpenAI(sdkOpts).chat(modelToTest);
             break;
         }
       } catch (err) {

@@ -1,0 +1,28 @@
+# Ralph Progress Log
+Started: 2026-04-15T08:14:30.879Z
+
+---
+
+
+[2026-04-15] T-001 Inject initial message when session messages is empty
+- Added empty messages check in runAgentLoop before streamText call
+- When session.messages is empty, injects a user message via sessionManager.appendMessage
+- Message content: "Start working on the current issue. Begin by reading the workflow configuration using read_workflow."
+- Build passes successfully
+- Next: T-002 (Roll back stage to Draft on agent failure)
+
+[2026-04-15] T-002 Roll back stage to Draft on agent failure
+- Added issueRepo.updateStage(issue.id, Stage.Draft) and issueRepo.clearApprovalState(issue.id) in executeAgent catch block after updateIssueStatus
+- Both calls wrapped in try/catch to prevent rollback failure from masking original error
+- Stage import was already present; no new imports needed
+- Build passes
+- Next: T-003 Fix reopen endpoint to resume agent or reset stage
+
+[2026-04-15] T-003: Fixed reopen endpoint to resume agent or reset stage.
+- When agentRunner has pausedSession and agent is not running: auto-resume agent with appropriate message
+- When agentRunner exists but no pausedSession: reset stage to Draft and clear approval_state
+- When agentRunner is unavailable: only restore status (existing behavior)
+- Each branch returns a distinct message reflecting the actual operation performed
+- npm run build passes
+- Learnings: approve endpoint pattern was directly reusable for worktreePath resolution and resume call
+- Next steps: All 3 tasks complete, ready for archive

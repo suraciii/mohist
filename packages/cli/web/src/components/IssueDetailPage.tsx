@@ -5,8 +5,10 @@ import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile } from '../lib/types'
 import { api } from '../lib/api'
 import { useIssue, useIssueDiff, useAgentStatus, useSendMessage } from '../hooks/useQueries'
+import { useAgentSession } from '../hooks/useAgentSession'
 import { EditIssueDialog } from './EditIssueDialog'
 import { QuestionPanel } from './QuestionPanel'
+import { AgentSessionPanel } from './AgentSessionPanel'
 
 const STAGES = [Stage.Draft, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
@@ -51,6 +53,14 @@ export function IssueDetailPage() {
   const { data: issue, isLoading } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
+  const {
+    agentText,
+    toolCalls,
+    coderSessions,
+    coderTexts,
+    isStreaming,
+    isLoading: sessionLoading,
+  } = useAgentSession(issueNumber)
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveIssue(issueNumber),
@@ -448,11 +458,15 @@ export function IssueDetailPage() {
                 <QuestionPanel issueId={issue.id} />
               )}
 
-              {isAgentRunningOnThis && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 flex items-center gap-2">
-                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
-                  <span className="text-sm text-blue-700 font-medium">Agent is running...</span>
-                </div>
+              {(isAgentRunningOnThis || (!isDraft && (agentText || toolCalls.length > 0 || coderSessions.length > 0))) && !sessionLoading && (
+                <AgentSessionPanel
+                  agentText={agentText}
+                  toolCalls={toolCalls}
+                  coderSessions={coderSessions}
+                  coderTexts={coderTexts}
+                  isStreaming={isStreaming}
+                  isLive={isAgentRunningOnThis}
+                />
               )}
             </div>
           </div>

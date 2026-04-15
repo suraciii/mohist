@@ -1,0 +1,53 @@
+{
+  "project": "mohist",
+  "description": "Fix agent empty messages error and reopen resume flow",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Inject initial message when session messages is empty",
+      "spec": "specs/agent-initial-message/spec.md",
+      "description": "在 `packages/cli/src/agent-runtime/agent-loop.ts` 的 `runAgentLoop` 函数中，在调用 `streamText` 之前，检查 `session.messages` 是否为空数组。如果为空，通过 `sessionManager.appendMessage(session.id, { role: 'user', content: 'Start working on the current issue. Begin by reading the workflow configuration using read_workflow.' })` 注入消息。",
+      "acceptanceCriteria": [
+        "新 session（messages 为空数组）调用 runAgentLoop 不再抛出 InvalidPromptError",
+        "非空 messages 的 session 行为不变",
+        "注入的消息通过 sessionManager.appendMessage 写入，session.messages 中可见",
+        "npm run build 通过"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "修改 agent-loop.ts 第 30 行附近，在 const messages = session.messages 之后添加空数组检查并调用 sessionManager.appendMessage。"
+    },
+    {
+      "id": "T-002",
+      "title": "Roll back stage to Draft on agent failure",
+      "spec": "specs/reopen-resume/spec.md",
+      "description": "修改 `packages/cli/src/services/agent-runner-service.ts` 的 `executeAgent` 方法 catch 块。在现有的 `updateIssueStatus(issueId, Blocked)` 之后，增加：1) 通过 `issueRepo.updateStage(issue.id, Stage.Draft)` 将 stage 回滚到 Draft；2) 通过 `issueRepo.clearApprovalState(issue.id)` 清除残留的 approval state。注意：catch 块中的 `issueRepo` 可通过闭包捕获的参数获取。",
+      "acceptanceCriteria": [
+        "agent 执行失败时 status 改为 Blocked，stage 回滚到 Draft",
+        "回滚时同步清除 approval_state",
+        "agent 正常完成（含 pause）时 stage 不受影响",
+        "npm run build 通过"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "executeAgent 的 catch 块在 agent-runner-service.ts:276。issueRepo 已在闭包中可用（executeAgent 参数）。Stage 和 clearApprovalState 需要新增 import。"
+    },
+    {
+      "id": "T-003",
+      "title": "Fix reopen endpoint to resume agent or reset stage",
+      "spec": "specs/reopen-resume/spec.md",
+      "description": "修改 `packages/cli/src/api/issues.ts` 的 reopen 端点（POST /:number/reopen）。在现有 `issueService.resume()` 之后：1) 如果 agentRunner 存在、有 pausedSession、且 agent 未运行（`!agentRunner.isRunning(issue.id)`），自动调用 `agentRunner.resume()`（参考 approve 端点）；2) 如果 agentRunner 存在但无 pausedSession，调用 `issueService.transitionToStage(issue.id, Stage.Draft)` 重置 stage 为 Draft，并调用 `stateManager.getIssueRepo().clearApprovalState(issue.id)` 清除残留 approval，返回提示信息。",
+      "acceptanceCriteria": [
+        "reopen 有 pausedSession 且 agent 未运行时自动 resume agent",
+        "reopen 无 pausedSession 的 issue 时 stage 重置为 Draft",
+        "reopen 重置 Draft 时同步清除 approval_state",
+        "reopen 时 agentRunner 不可用时仅恢复 status",
+        "API 返回的 message 准确反映实际执行的操作",
+        "npm run build 通过"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "参考 approve 端点获取 worktreePath 和调用 resume 的方式。issueRepo.clearApprovalState 在 db/issue-repo.ts 已存在。transitionToStage 无需额外合法性检查。"
+    }
+  ]
+}

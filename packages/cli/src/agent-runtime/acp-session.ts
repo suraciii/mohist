@@ -11,6 +11,7 @@ import type {
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
 
@@ -26,6 +27,7 @@ export interface AcpSessionOptions {
   workflowLogRepo?: WorkflowLogRepo;
   eventBus?: EventBus;
   throttleMs?: number;
+  coderSessionRepo?: CoderSessionRepo;
 }
 
 export interface AcpSessionResult {
@@ -70,6 +72,7 @@ export async function runAcpSession(
     workflowLogRepo,
     eventBus,
     throttleMs = 100,
+    coderSessionRepo,
   } = options;
 
   let lastTextChunkTime = 0;
@@ -96,6 +99,8 @@ export async function runAcpSession(
   let agentText = '';
   let agentTextTruncated = false;
   let sessionId = '';
+  let coderToolCallCounter = 0;
+  const coderToolCallIds = new Map<string, string[]>();
 
   const ensureKill = () => {
     if (!procExited) {
@@ -181,13 +186,32 @@ export async function runAcpSession(
             const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
             const toolStatus = (toolCallData?.status as string) ?? '';
             const state = toolStatus === 'completed' ? 'completed' : 'started';
+            const toolName = (toolCallData?.toolName as string) ?? '';
+            let toolCallId: string;
+            if (state === 'started') {
+              toolCallId = `${sessionId}-${toolName}-${coderToolCallCounter++}`;
+              const key = `${sessionId}-${toolName}`;
+              const list = coderToolCallIds.get(key) ?? [];
+              list.push(toolCallId);
+              coderToolCallIds.set(key, list);
+            } else {
+              const key = `${sessionId}-${toolName}`;
+              const list = coderToolCallIds.get(key) ?? [];
+              toolCallId = list.shift() ?? `${sessionId}-${toolName}-${coderToolCallCounter++}`;
+              if (list.length > 0) {
+                coderToolCallIds.set(key, list);
+              } else {
+                coderToolCallIds.delete(key);
+              }
+            }
             eventBus.emit('coder_tool_call', {
               issueId: issueId ?? '',
               projectId: projectId ?? '',
               executionId,
               acpSessionId: sessionId,
-              toolName: (toolCallData?.toolName as string) ?? '',
+              toolName,
               state,
+              toolCallId,
             });
           }
         } catch (err) {
@@ -212,6 +236,8 @@ export async function runAcpSession(
   const timeoutPromise = new Promise<'timeout'>((resolve) =>
     setTimeout(() => resolve('timeout'), timeout)
   );
+
+  let coderSessionId: string | undefined;
 
   try {
     const initResult = await Promise.race([
@@ -247,6 +273,21 @@ export async function runAcpSession(
     sessionId = sessionResult.sessionId;
     log.info('ACP session created', { sessionId });
 
+    if (coderSessionRepo && issueId) {
+      try {
+        const coderSession = coderSessionRepo.insert({
+          issueId,
+          acpSessionId: sessionId,
+          executionId,
+          taskDescription: task.slice(0, 200),
+        });
+        coderSessionId = coderSession.id;
+        log.info('coder_session row created', { coderSessionId, acpSessionId: sessionId });
+      } catch (err) {
+        log.error('Failed to create coder_session row', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     const promptResult = await Promise.race([
       connection.prompt({
         sessionId,
@@ -257,6 +298,13 @@ export async function runAcpSession(
 
     if (promptResult === 'timeout') {
       log.error('ACP prompt timed out', { sessionId, timeout });
+      if (coderSessionRepo && coderSessionId) {
+        try {
+          coderSessionRepo.updateStatus(coderSessionId, 'failed');
+        } catch (err) {
+          log.error('Failed to update coder_session status', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
       try {
         await connection.cancel({ sessionId });
       } catch {
@@ -266,9 +314,24 @@ export async function runAcpSession(
       return { text: agentText, success: false, error: `Timed out after ${timeout / 1000}s` };
     }
 
+    if (coderSessionRepo && coderSessionId) {
+      try {
+        coderSessionRepo.updateStatus(coderSessionId, 'completed');
+      } catch (err) {
+        log.error('Failed to update coder_session status to completed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     return { text: agentText, success: true, acpSessionId: sessionId };
   } catch (err) {
     log.error('ACP session failed', { sessionId, error: err instanceof Error ? err.message : String(err) });
+    if (coderSessionRepo && coderSessionId) {
+      try {
+        coderSessionRepo.updateStatus(coderSessionId, 'failed');
+      } catch (updateErr) {
+        log.error('Failed to update coder_session status', { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
+      }
+    }
     await cleanup();
     const message = err instanceof Error ? err.message : String(err);
     return { text: agentText, success: false, error: message };
