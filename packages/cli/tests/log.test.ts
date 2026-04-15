@@ -53,26 +53,80 @@ describe("Log", () => {
   })
 
   describe("init with print:true", () => {
-    it("should write to stderr", async () => {
+    it("should write to stderr as plain text", async () => {
       const writeSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
       await Log.init({ print: true })
       const log = Log.create({ service: "print-test" })
       log.info("hello stderr")
       const output = writeSpy.mock.calls.map((c: any) => String(c[0])).join("")
       expect(output).toContain("hello stderr")
+      expect(output).not.toMatch(/^\{.*\}$/s)
     })
   })
 
   describe("init with print:false (file output)", () => {
-    it("should write to ~/.mohist/logs/<timestamp>.log", async () => {
+    it("should write to ~/.mohist/logs/mohist-YYYY-MM-DD.log", async () => {
       await Log.init({ print: false })
       const logfile = Log.file()
-      expect(logfile).toMatch(/\.mohist\/logs\/\d{4}-\d{2}-\d{2}T\d{6}\.log$/)
+      expect(logfile).toMatch(
+        /\.mohist\/logs\/mohist-\d{4}-\d{2}-\d{2}\.log$/,
+      )
       const log = Log.create({ service: "file-test" })
       log.info("hello file")
       await new Promise((r) => setTimeout(r, 100))
       const content = await fs.readFile(logfile, "utf-8")
       expect(content).toContain("hello file")
+      await fs.unlink(logfile).catch(() => {})
+    })
+
+    it("should write JSONL format where each line is valid JSON", async () => {
+      await Log.init({ print: false })
+      const logfile = Log.file()
+      const log = Log.create({ service: "jsonl-test" })
+      log.info("first message")
+      log.warn("second message", { key: "value" })
+      await new Promise((r) => setTimeout(r, 100))
+      const content = await fs.readFile(logfile, "utf-8")
+      const lines = content.trim().split("\n")
+      for (const line of lines) {
+        const parsed = JSON.parse(line)
+        expect(parsed).toHaveProperty("level")
+        expect(parsed).toHaveProperty("time")
+        expect(parsed).toHaveProperty("diffMs")
+        expect(parsed).toHaveProperty("service")
+        expect(parsed).toHaveProperty("message")
+      }
+      await fs.unlink(logfile).catch(() => {})
+    })
+
+    it("should include extra fields as top-level JSON properties", async () => {
+      await Log.init({ print: false })
+      const logfile = Log.file()
+      const log = Log.create({ service: "extra-test" })
+      log.info("with extra", { method: "GET", path: "/api/health" })
+      await new Promise((r) => setTimeout(r, 100))
+      const content = await fs.readFile(logfile, "utf-8")
+      const parsed = JSON.parse(content.trim())
+      expect(parsed.method).toBe("GET")
+      expect(parsed.path).toBe("/api/health")
+      expect(parsed.service).toBe("extra-test")
+      expect(parsed.message).toBe("with extra")
+      await fs.unlink(logfile).catch(() => {})
+    })
+
+    it("should set level field correctly for each log level", async () => {
+      await Log.init({ print: false, level: "DEBUG" })
+      const logfile = Log.file()
+      const log = Log.create({ service: "level-jsonl" })
+      log.debug("dbg")
+      log.info("inf")
+      log.warn("wrn")
+      log.error("err")
+      await new Promise((r) => setTimeout(r, 100))
+      const content = await fs.readFile(logfile, "utf-8")
+      const lines = content.trim().split("\n")
+      const levels = lines.map((l: string) => JSON.parse(l).level)
+      expect(levels).toEqual(["DEBUG", "INFO", "WARN", "ERROR"])
       await fs.unlink(logfile).catch(() => {})
     })
   })
