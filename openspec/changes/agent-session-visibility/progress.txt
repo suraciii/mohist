@@ -79,3 +79,26 @@ Started: 2026-04-15T10:23:07.116Z
 
 ### Next steps
 - T-008: Build AgentSessionPanel component using this hook
+
+## 2026-04-15 T-008 Build AgentSessionPanel component
+
+### What was done
+- Created `AgentSessionPanel.tsx` component with:
+  - Streaming text display with blinking cursor animation (uses ref-based buffer from useAgentSession, no per-chunk re-render)
+  - `ToolCallTimelineEntry` sub-component: renders each tool call as a timeline entry with status icon (spinning/loading for started, green check for completed, red X for failed), tool name in mono font, duration, and collapsible args/result sections
+  - `CoderSubTimeline` sub-component: nested indented sub-timeline for coder sessions with purple accent color, shows coder text output and coder tool calls
+  - Main panel header with live/history indicator
+  - `max-h-[600px] overflow-y-auto` for scrollable content
+- Wired into `IssueDetailPage.tsx`:
+  - Imported `useAgentSession` hook and `AgentSessionPanel` component
+  - Replaced the static "Agent is running..." blue box
+  - Panel shows in live mode when agent is running on this issue
+  - Panel shows in historical mode when issue is past draft and has session data
+- Vite build succeeds (pre-existing tsc errors in CustomProviderDialog.tsx and ProviderConnectDialog.tsx are unrelated)
+
+### Learnings
+- Component reuses the batched rendering from useAgentSession (useRef + rAF), so the panel itself doesn't need any memoization for text streaming
+- The `isLive` prop distinguishes between active streaming and historical replay for UI indicators
+
+### Next steps
+- All 8 tasks complete - change is finished
