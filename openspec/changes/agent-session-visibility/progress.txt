@@ -49,3 +49,13 @@ Started: 2026-04-15T10:23:07.116Z
 - Wired repos through server/index.ts
 - Build passes successfully
 - Next: T-006 (frontend types and SSE subscription)
+
+[2026-04-15] T-006 completed
+- Added AgentDetailEventMap type with all 6 event payloads (agent_text_chunk, main_tool_call, coder_text_chunk, coder_tool_call, ralph_task_update, ralph_loop_progress) to types.ts
+- Merged AgentDetailEventMap into existing EventMap via intersection type
+- Created lib/agent-events.ts: global EventTarget-based event emitter with dispatchAgentEvent, onAgentEvent, and AGENT_DETAIL_EVENTS list
+- Updated useSSE.ts to subscribe to all 6 new events and dispatch them through the global emitter
+- Components can now subscribe via onAgentEvent() without creating duplicate SSE connections
+- Text buffer and tool call timeline accumulation will be handled in T-007 (useAgentSession hook)
+- Learnings: Pre-existing TS errors in CustomProviderDialog.tsx and ProviderConnectDialog.tsx (unused imports) - not related to this change
+- Next: T-007 (useAgentSession hook)

@@ -91,7 +91,7 @@
         "npm run build succeeds in packages/cli/web"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

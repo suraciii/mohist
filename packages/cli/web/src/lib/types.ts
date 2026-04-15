@@ -71,6 +71,15 @@ export interface DiffFile {
   deletions: number
 }
 
+export type AgentDetailEventMap = {
+  agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number }
+  main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number }
+  coder_text_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string }
+  coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed' }
+  ralph_task_update: { issueId: string; projectId: string; executionId: string; taskId: string; taskIndex: number; totalTasks: number; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt?: number; error?: string }
+  ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number }
+}
+
 export type EventMap = {
   stage_changed: { issueId: string; projectId: string; from: string; to: string }
   comment_added: { issueId: string; projectId: string; commentId: string; body: string; createdAt: string }
@@ -82,7 +91,7 @@ export type EventMap = {
   question_asked: { issueId: string; projectId: string; questionId: string; question: string }
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
   explore_crystallized: { sessionId: string; issueId: string; projectId: string }
-}
+} & AgentDetailEventMap
 
 export type EventName = keyof EventMap
 
