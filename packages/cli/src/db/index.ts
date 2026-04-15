@@ -10,3 +10,4 @@ export { QuestionRepo } from './question-repo';
 export { ExploreSessionRepo, type CreateExploreSessionData } from './explore-session-repo';
 export { ExploreMessageRepo, type CreateExploreMessageData } from './explore-message-repo';
 export { AgentSessionMessageRepo, type AgentSessionMessage, type CreateAgentSessionMessageData } from './agent-session-message-repo';
+export { CoderSessionRepo, type CoderSession, type CreateCoderSessionData } from './coder-session-repo';
