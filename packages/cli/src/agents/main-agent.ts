@@ -5,6 +5,7 @@ import { CommentRepo } from '../db/comment-repo';
 import { QuestionRepo } from '../db/question-repo';
 import type { Issue } from '../types';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { createSpawnCoderTool } from '../tools/spawn-coder';
 import { createReadWorkflowTool } from '../tools/read-workflow';
 import { createAdvanceStageTool } from '../tools/advance-stage';
@@ -35,6 +36,7 @@ export interface MainAgentContext {
   issue: Issue;
   eventBus?: EventBus;
   workflowLogRepo?: WorkflowLogRepo;
+  agentSessionMessageRepo?: AgentSessionMessageRepo;
   onWaitingChange?: (issueId: string, questionId: string | null, question?: string) => void;
   workflowController?: WorkflowController;
 }
@@ -237,6 +239,7 @@ export async function runMainAgent(
     system,
     eventBus: context.eventBus,
     eventContext: { issueId: context.issue.id, projectId: context.issue.projectId },
+    agentSessionMessageRepo: context.agentSessionMessageRepo,
   });
 
   return { loopResult, session };

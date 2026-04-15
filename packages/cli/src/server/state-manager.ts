@@ -9,7 +9,8 @@ import {
   WorkflowLogRepo,
   QuestionRepo,
   ExploreSessionRepo,
-  ExploreMessageRepo
+  ExploreMessageRepo,
+  AgentSessionMessageRepo
 } from '../db';
 import { initializeDefaultConfig } from '../db/config-repo';
 
@@ -23,6 +24,7 @@ export class StateManager {
   private questionRepo: QuestionRepo;
   private exploreSessionRepo: ExploreSessionRepo;
   private exploreMessageRepo: ExploreMessageRepo;
+  private agentSessionMessageRepo: AgentSessionMessageRepo;
   private initialized: boolean = false;
 
   constructor(db: DatabaseManager) {
@@ -37,6 +39,7 @@ export class StateManager {
     this.questionRepo = new QuestionRepo(db);
     this.exploreSessionRepo = new ExploreSessionRepo(db);
     this.exploreMessageRepo = new ExploreMessageRepo(db);
+    this.agentSessionMessageRepo = new AgentSessionMessageRepo(db);
     
     initializeDefaultConfig(this.configRepo);
     this.initialized = true;
@@ -80,5 +83,9 @@ export class StateManager {
 
   getExploreMessageRepo(): ExploreMessageRepo {
     return this.exploreMessageRepo;
+  }
+
+  getAgentSessionMessageRepo(): AgentSessionMessageRepo {
+    return this.agentSessionMessageRepo;
   }
 }

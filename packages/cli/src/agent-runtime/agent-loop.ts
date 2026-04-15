@@ -5,12 +5,14 @@ import type { Session } from './session';
 import { SessionManager } from './session';
 import { ToolRegistry } from './tool';
 import type { EventBus } from '../services/event-bus';
+import type { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 
 export interface AgentLoopOptions {
   maxSteps?: number;
   system?: string;
   eventBus?: EventBus;
   eventContext?: { issueId: string; projectId: string };
+  agentSessionMessageRepo?: AgentSessionMessageRepo;
 }
 
 export interface AgentLoopResult {
@@ -125,9 +127,95 @@ export async function runAgentLoop(
     }
   }
 
+  const repo = options?.agentSessionMessageRepo;
+  if (repo && eventContext) {
+    const issueId = eventContext.issueId;
+    const sessionId = session.id;
+    for (let stepIdx = 0; stepIdx < allSteps.length; stepIdx++) {
+      const stepMessages = allSteps[stepIdx].response.messages;
+      for (let msgIdx = 0; msgIdx < stepMessages.length; msgIdx++) {
+        const msg = stepMessages[msgIdx] as ModelMessage;
+        persistMessage(repo, issueId, sessionId, msg, stepIdx, msgIdx);
+      }
+    }
+  }
+
   return {
     text,
     steps: allSteps.length,
     finishReason,
   };
+}
+
+function persistMessage(
+  repo: AgentSessionMessageRepo,
+  issueId: string,
+  sessionId: string,
+  msg: ModelMessage,
+  stepIndex: number,
+  messageIndex: number,
+): void {
+  const role = msg.role;
+
+  if (role === 'assistant') {
+    const content = msg.content;
+    let textContent: string | null = null;
+    let toolCallsJson: string | null = null;
+
+    if (typeof content === 'string') {
+      textContent = content;
+    } else if (Array.isArray(content)) {
+      const textParts: string[] = [];
+      const calls: Array<{ toolCallId: string; toolName: string; args: unknown }> = [];
+      for (const part of content) {
+        if (part.type === 'text') {
+          textParts.push(part.text);
+        } else if (part.type === 'tool-call') {
+          calls.push({ toolCallId: part.toolCallId, toolName: part.toolName, args: part.input });
+        }
+      }
+      textContent = textParts.length > 0 ? textParts.join('') : null;
+      if (calls.length > 0) {
+        toolCallsJson = JSON.stringify(calls);
+      }
+    }
+
+    repo.insert({
+      issueId,
+      sessionId,
+      role,
+      content: textContent,
+      toolCalls: toolCallsJson,
+      stepIndex,
+      messageIndex,
+    });
+  } else if (role === 'tool') {
+    const content = msg.content;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part.type === 'tool-result') {
+          repo.insert({
+            issueId,
+            sessionId,
+            role,
+            content: null,
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            toolResult: typeof part.output === 'string' ? part.output : JSON.stringify(part.output),
+            stepIndex,
+            messageIndex,
+          });
+        }
+      }
+    }
+  } else {
+    repo.insert({
+      issueId,
+      sessionId,
+      role,
+      content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+      stepIndex,
+      messageIndex,
+    });
+  }
 }
