@@ -10,7 +10,7 @@
     "test": "npm run test -w packages/cli",
     "lint": "npm run lint -w packages/cli",
     "typecheck": "npm run typecheck -w packages/cli",
-    "dev": "concurrently -n server,web -c blue,green \"npm run start:server -w packages/cli\" \"npm run dev:web -w packages/cli\""
+    "dev": "npm run build && concurrently -n server,web -c blue,green \"npm run start:server -w packages/cli\" \"npm run dev:web -w packages/cli\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
