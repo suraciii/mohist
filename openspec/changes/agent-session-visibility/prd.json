@@ -125,7 +125,7 @@
         "npm run build succeeds in packages/cli/web"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Use Tailwind CSS consistent with existing components"
     }
   ]
