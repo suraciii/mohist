@@ -1,0 +1,132 @@
+{
+  "project": "mohist",
+  "description": "Make agent sessions visible in WebUI - real-time streaming and historical replay",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create agent_session_message DB table and repo",
+      "spec": "specs/main-agent-session-persistence/spec.md",
+      "description": "Create the agent_session_message table in SQLite with columns: id, issue_id, session_id, role, content, tool_calls, tool_call_id, tool_name, tool_result, step_index, message_index, created_at. Create an AgentSessionMessageRepo class with insert and findByIssueId methods. Register the table in the DB initialization flow.",
+      "acceptanceCriteria": [
+        "agent_session_message table is created on server startup with correct schema",
+        "AgentSessionMessageRepo.findByIssueId returns messages ordered by step_index and message_index",
+        "Index on (issue_id, step_index, message_index) exists",
+        "npm run build succeeds"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Follow existing repo patterns in packages/cli/src/db/"
+    },
+    {
+      "id": "T-002",
+      "title": "Create coder_session DB table and repo",
+      "spec": "specs/coder-session-tracking/spec.md",
+      "description": "Create the coder_session table in SQLite with columns: id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at. Create a CoderSessionRepo class with insert, updateStatus, and findByIssueId methods. Register the table in the DB initialization flow.",
+      "acceptanceCriteria": [
+        "coder_session table is created on server startup with correct schema",
+        "CoderSessionRepo.findByIssueId returns sessions ordered by created_at",
+        "Index on issue_id exists",
+        "npm run build succeeds"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Persist Main Agent messages after runAgentLoop completes",
+      "spec": "specs/main-agent-session-persistence/spec.md",
+      "description": "Modify agent-loop.ts to write messages to agent_session_message table after the fullStream completes. Extract role, content, tool_calls, tool_result from each ModelMessage. Pass a repo instance through the runAgentLoop options. Wire the repo in main-agent.ts.",
+      "acceptanceCriteria": [
+        "After runAgentLoop completes, all step messages are in agent_session_message table",
+        "Assistant messages with tool_calls have the tool_calls field populated as JSON",
+        "Tool result messages have tool_call_id, tool_name, and tool_result populated",
+        "step_index aligns with result.steps array index and message_index aligns with message position within step",
+        "npm run build succeeds"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Also fix the parallel tool call executionId bug by replacing single currentExecutionId with a toolCallId -> executionId Map"
+    },
+    {
+      "id": "T-004",
+      "title": "Record coder session mapping on ACP spawn and completion",
+      "spec": "specs/coder-session-tracking/spec.md",
+      "description": "Modify spawn-coder.ts / acp-session.ts to create a coder_session row immediately after the ACP sessionId is obtained, and update status to completed/failed when the session finishes. Pass CoderSessionRepo through the options chain from agent-runner-service.",
+      "acceptanceCriteria": [
+        "When runAcpSession obtains a sessionId, a coder_session row with status='running' is created",
+        "When runAcpSession succeeds, coder_session status is updated to 'completed'",
+        "When runAcpSession fails or times out after session creation, coder_session status is updated to 'failed'",
+        "npm run build succeeds"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-005",
+      "title": "Add REST API endpoints for session data",
+      "spec": "specs/main-agent-session-persistence/spec.md",
+      "description": "Add two new API endpoints: GET /issues/:number/agent-session returns agent_session_message rows for the issue. GET /issues/:number/coder-sessions returns coder_session rows with their associated workflow_log entries (filtered by acp_session_id). Wire into the HTTP server router.",
+      "acceptanceCriteria": [
+        "GET /issues/:number/agent-session returns array of messages with correct fields",
+        "GET /issues/:number/coder-sessions returns array with workflow_log entries nested",
+        "Both endpoints return empty arrays when no data exists",
+        "npm run build succeeds"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Add routes in packages/cli/src/api/ following existing patterns"
+    },
+    {
+      "id": "T-006",
+      "title": "Update frontend types and SSE subscription for agent detail events",
+      "spec": "specs/agent-session-ui/spec.md",
+      "description": "Add TypeScript types for agent_text_chunk, main_tool_call, coder_text_chunk, coder_tool_call, ralph_task_update, ralph_loop_progress to lib/types.ts EventMap. Update useSSE.ts to subscribe to these events and dispatch them via a lightweight global event emitter (e.g. EventTarget) so components can subscribe without creating duplicate SSE connections.",
+      "acceptanceCriteria": [
+        "EventMap in types.ts includes all 6 new event types with correct payload shapes",
+        "useSSE subscribes to all new event types",
+        "Agent text chunks are accumulated into a buffer accessible to components",
+        "Tool call events are collected into a timeline array",
+        "npm run build succeeds in packages/cli/web"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-007",
+      "title": "Create useAgentSession hook for historical + live data",
+      "spec": "specs/agent-session-ui/spec.md",
+      "description": "Create a new React hook useAgentSession(issueNumber) that: (1) fetches historical data from GET /agent-session and GET /coder-sessions on mount, (2) subscribes to global SSE event emitter for live updates, (3) merges historical and live events using (stepIndex, executionId) deduplication, (4) returns a unified activity list with text buffers and tool call timeline.",
+      "acceptanceCriteria": [
+        "Hook returns { messages, toolCalls, coderSessions, isStreaming }",
+        "Historical data is loaded on mount via React Query",
+        "Live SSE events are appended to the historical data via global event emitter",
+        "Tool call events are deduplicated by executionId to avoid duplicate timeline entries",
+        "npm run build succeeds in packages/cli/web"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Use useRef for text buffer, requestAnimationFrame for batched renders"
+    },
+    {
+      "id": "T-008",
+      "title": "Build AgentSessionPanel component",
+      "spec": "specs/agent-session-ui/spec.md",
+      "description": "Create the AgentSessionPanel React component that renders: streaming agent text with typing cursor, tool call timeline with collapsible entries (name, status, duration, expandable args/result), coder session sub-timelines with their own tool calls, and ralph task progress indicators. Replace the static blue box in IssueDetailPage.",
+      "acceptanceCriteria": [
+        "Component renders streaming text with smooth updates (no per-chunk re-render)",
+        "Tool calls shown as timeline entries with status icons and duration",
+        "Completed tool calls are collapsible with args/result on expansion",
+        "Coder sessions display as nested sub-timelines",
+        "Component works in both live and historical modes",
+        "Replaces the 'Agent is running...' blue box in IssueDetailPage",
+        "npm run build succeeds in packages/cli/web"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Use Tailwind CSS consistent with existing components"
+    }
+  ]
+}
