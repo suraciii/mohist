@@ -46,7 +46,7 @@
         "npm run build 通过"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "参考 approve 端点获取 worktreePath 和调用 resume 的方式。issueRepo.clearApprovalState 在 db/issue-repo.ts 已存在。transitionToStage 无需额外合法性检查。"
     }
   ]
