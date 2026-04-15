@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "node script/build-models-snapshot.js && tsc && mkdir -p dist/agents/prompts && cp src/agents/prompts/*.yaml dist/agents/prompts/",
-    "dev": "tsc --watch",
+    "dev": "concurrently -n server,web -c blue,green \"npm run start:server\" \"npm run dev:web\"",
     "start:server": "node bin/mo-server",
     "start:cli": "node bin/mo",
     "test": "vitest",
