@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 13;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -138,6 +138,14 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 11) {
     migrateToVersion11(db);
+  }
+
+  if (currentVersion < 12) {
+    migrateToVersion12(db);
+  }
+
+  if (currentVersion < 13) {
+    migrateToVersion13(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -376,5 +384,63 @@ function migrateToVersion11(db: DatabaseManager): void {
       }
     }
     setSchemaVersion(db, 11);
+  });
+}
+
+const CREATE_AGENT_SESSION_MESSAGE_TABLE = `
+CREATE TABLE IF NOT EXISTS agent_session_message (
+  id            TEXT PRIMARY KEY,
+  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  session_id    TEXT NOT NULL,
+  role          TEXT NOT NULL,
+  content       TEXT,
+  tool_calls    TEXT,
+  tool_call_id  TEXT,
+  tool_name     TEXT,
+  tool_result   TEXT,
+  step_index    INTEGER NOT NULL,
+  message_index INTEGER NOT NULL,
+  created_at    TEXT NOT NULL
+);
+`;
+
+const CREATE_AGENT_SESSION_MESSAGE_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_agent_session_message_issue_step ON agent_session_message(issue_id, step_index, message_index);',
+];
+
+function migrateToVersion12(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_AGENT_SESSION_MESSAGE_TABLE);
+    for (const indexSql of CREATE_AGENT_SESSION_MESSAGE_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 12);
+  });
+}
+
+const CREATE_CODER_SESSION_TABLE = `
+CREATE TABLE IF NOT EXISTS coder_session (
+  id                TEXT PRIMARY KEY,
+  issue_id          TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  acp_session_id    TEXT NOT NULL,
+  execution_id      TEXT,
+  task_description  TEXT,
+  status            TEXT NOT NULL DEFAULT 'running',
+  created_at        TEXT NOT NULL,
+  completed_at      TEXT
+);
+`;
+
+const CREATE_CODER_SESSION_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_coder_session_issue_id ON coder_session(issue_id);',
+];
+
+function migrateToVersion13(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_CODER_SESSION_TABLE);
+    for (const indexSql of CREATE_CODER_SESSION_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 13);
   });
 }

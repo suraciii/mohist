@@ -1,8 +1,16 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { EventName, EventMap } from '../lib/types'
+import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../lib/agent-events'
+import type { AgentDetailEventMap } from '../lib/types'
 
 const SSE_URL = '/api/events'
+
+type AgentDetailEventName = keyof AgentDetailEventMap
+
+function isAgentDetailEvent(name: string): name is AgentDetailEventName {
+  return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
+}
 
 function useSSE(projectId: string | null) {
   const queryClient = useQueryClient()
@@ -12,6 +20,10 @@ function useSSE(projectId: string | null) {
     (eventName: string, data: string) => {
       try {
         const parsed = JSON.parse(data)
+
+        if (isAgentDetailEvent(eventName)) {
+          dispatchAgentEvent(eventName, parsed as AgentDetailEventMap[typeof eventName])
+        }
 
         switch (eventName as EventName) {
           case 'stage_changed': {
@@ -77,6 +89,12 @@ function useSSE(projectId: string | null) {
       'approval_requested',
       'question_asked',
       'question_answered',
+      'agent_text_chunk',
+      'main_tool_call',
+      'coder_text_chunk',
+      'coder_tool_call',
+      'ralph_task_update',
+      'ralph_loop_progress',
     ]
 
     for (const type of eventTypes) {

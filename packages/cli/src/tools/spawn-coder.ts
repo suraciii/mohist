@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Tool, type ToolInstance, type ToolRegistry } from '../agent-runtime/tool';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { runAcpSession } from '../agent-runtime/acp-session';
 import { Log } from '../util/log';
@@ -52,6 +53,7 @@ export interface SpawnCoderContext {
   workflowLogRepo?: WorkflowLogRepo;
   eventBus?: EventBus;
   toolRegistry?: ToolRegistry;
+  coderSessionRepo?: CoderSessionRepo;
 }
 
 export interface CoderTaskResult {
@@ -69,6 +71,7 @@ export async function executeCoderTask(
     projectId?: string;
     workflowLogRepo?: WorkflowLogRepo;
     eventBus?: EventBus;
+    coderSessionRepo?: CoderSessionRepo;
   }
 ): Promise<CoderTaskResult> {
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT;
@@ -85,6 +88,7 @@ export async function executeCoderTask(
     projectId: options?.projectId,
     workflowLogRepo: options?.workflowLogRepo,
     eventBus: options?.eventBus,
+    coderSessionRepo: options?.coderSessionRepo,
   });
 
   timer.stop();
@@ -171,6 +175,7 @@ export function createSpawnCoderTool(
         executionId,
         workflowLogRepo: context?.workflowLogRepo,
         eventBus: context?.eventBus,
+        coderSessionRepo: context?.coderSessionRepo,
       });
 
       timer.stop();

@@ -141,6 +141,12 @@ export const api = {
       body: JSON.stringify({ model, variant }),
     }),
 
+  getAgentSession: (number: number) =>
+    request<import('./types').AgentSessionMessageItem[]>(`/issues/${number}/agent-session`),
+
+  getCoderSessions: (number: number) =>
+    request<import('./types').CoderSessionItem[]>(`/issues/${number}/coder-sessions`),
+
   getCurrentProject: async () => {
     const res = await fetch(`${BASE}/projects/current`, {
       headers: { 'Content-Type': 'application/json' },
