@@ -99,6 +99,8 @@ export async function runAcpSession(
   let agentText = '';
   let agentTextTruncated = false;
   let sessionId = '';
+  let coderToolCallCounter = 0;
+  const coderToolCallIds = new Map<string, string[]>();
 
   const ensureKill = () => {
     if (!procExited) {
@@ -184,13 +186,32 @@ export async function runAcpSession(
             const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
             const toolStatus = (toolCallData?.status as string) ?? '';
             const state = toolStatus === 'completed' ? 'completed' : 'started';
+            const toolName = (toolCallData?.toolName as string) ?? '';
+            let toolCallId: string;
+            if (state === 'started') {
+              toolCallId = `${sessionId}-${toolName}-${coderToolCallCounter++}`;
+              const key = `${sessionId}-${toolName}`;
+              const list = coderToolCallIds.get(key) ?? [];
+              list.push(toolCallId);
+              coderToolCallIds.set(key, list);
+            } else {
+              const key = `${sessionId}-${toolName}`;
+              const list = coderToolCallIds.get(key) ?? [];
+              toolCallId = list.shift() ?? `${sessionId}-${toolName}-${coderToolCallCounter++}`;
+              if (list.length > 0) {
+                coderToolCallIds.set(key, list);
+              } else {
+                coderToolCallIds.delete(key);
+              }
+            }
             eventBus.emit('coder_tool_call', {
               issueId: issueId ?? '',
               projectId: projectId ?? '',
               executionId,
               acpSessionId: sessionId,
-              toolName: (toolCallData?.toolName as string) ?? '',
+              toolName,
               state,
+              toolCallId,
             });
           }
         } catch (err) {

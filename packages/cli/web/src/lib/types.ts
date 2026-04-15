@@ -75,7 +75,7 @@ export type AgentDetailEventMap = {
   agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number }
   main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number }
   coder_text_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string }
-  coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed' }
+  coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed'; toolCallId: string }
   ralph_task_update: { issueId: string; projectId: string; executionId: string; taskId: string; taskIndex: number; totalTasks: number; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt?: number; error?: string }
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number }
 }
@@ -188,6 +188,8 @@ export interface ToolCallEntry {
   duration?: number
   stepIndex?: number
   timestamp: number
+  acpSessionId?: string
+  toolCallId?: string
 }
 
 export interface CoderTextBuffer {

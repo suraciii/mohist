@@ -41,7 +41,7 @@ function StatusIcon({ state }: { state: ToolCallEntry['state'] }) {
 
 function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
   const [expanded, setExpanded] = useState(false)
-  const isCoder = entry.executionId.startsWith('coder-')
+  const isCoder = !!entry.acpSessionId
 
   return (
     <div className={`flex gap-2 ${isCoder ? 'ml-4' : ''}`}>
@@ -114,7 +114,7 @@ function CoderSubTimeline({
   const [expanded, setExpanded] = useState(true)
   const text = coderTexts.find((t) => t.acpSessionId === session.acpSessionId)?.text ?? ''
   const sessionToolCalls = toolCalls.filter(
-    (tc) => tc.executionId.startsWith('coder-') && tc.executionId.includes(session.acpSessionId),
+    (tc) => tc.acpSessionId === session.acpSessionId,
   )
   const statusColor = session.status === 'completed'
     ? 'text-green-500'

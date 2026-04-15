@@ -47,12 +47,16 @@ export function useAgentSession(issueNumber: number) {
 
   const textBufferRef = useRef('')
   const rafRef = useRef<number | null>(null)
+  const timeoutRef = useRef<number | null>(null)
   const lastFlushRef = useRef(0)
   const liveToolCallsRef = useRef<Map<string, ToolCallEntry>>(new Map())
   const seenExecutionIdRef = useRef<Set<string>>(new Set())
   const historyLoadedRef = useRef(false)
+  const mountedRef = useRef(true)
+  const lastAgentRunningRef = useRef(false)
 
   const flushTextBuffer = useCallback(() => {
+    if (!mountedRef.current) return
     const text = textBufferRef.current
     setAgentText(text)
     lastFlushRef.current = Date.now()
@@ -60,32 +64,35 @@ export function useAgentSession(issueNumber: number) {
   }, [])
 
   const scheduleFlush = useCallback(() => {
-    if (rafRef.current !== null) return
+    if (!mountedRef.current) return
+    if (rafRef.current !== null || timeoutRef.current !== null) return
     const now = Date.now()
     const elapsed = now - lastFlushRef.current
     if (elapsed >= FLUSH_INTERVAL) {
       rafRef.current = requestAnimationFrame(flushTextBuffer)
     } else {
-      rafRef.current = window.setTimeout(
-        () => {
+      timeoutRef.current = window.setTimeout(() => {
+        timeoutRef.current = null
+        if (mountedRef.current) {
           rafRef.current = requestAnimationFrame(flushTextBuffer)
-        },
-        FLUSH_INTERVAL - elapsed,
-      )
+        }
+      }, FLUSH_INTERVAL - elapsed)
     }
   }, [flushTextBuffer])
 
+  // Load historical data
   useEffect(() => {
     if (loadingMessages || loadingCoderSessions) return
-    if (historicalMessages.length === 0 && historicalCoderSessions.length === 0) {
-      historyLoadedRef.current = true
-      return
-    }
     if (historyLoadedRef.current) return
     historyLoadedRef.current = true
 
     const callsFromHistory: ToolCallEntry[] = []
+    let historicalText = ''
+
     for (const msg of historicalMessages) {
+      if (msg.role === 'assistant' && msg.content) {
+        historicalText += msg.content
+      }
       if (msg.toolCalls) {
         try {
           const parsed = JSON.parse(msg.toolCalls) as Array<{
@@ -114,21 +121,44 @@ export function useAgentSession(issueNumber: number) {
         seenExecutionIdRef.current.add(msg.toolCallId)
       }
     }
+
+    textBufferRef.current = historicalText
+    setAgentText(historicalText)
     setToolCalls(callsFromHistory)
     setCoderSessions(historicalCoderSessions)
   }, [historicalMessages, historicalCoderSessions, loadingMessages, loadingCoderSessions])
 
+  // Reset buffers when a new agent run starts on this issue
   useEffect(() => {
-    if (agentStatus && !agentStatus.running) {
+    const isRunningOnThis = !!(agentStatus?.running && agentStatus?.issueId === String(issueNumber))
+    const wasRunningOnThis = lastAgentRunningRef.current
+    if (isRunningOnThis && !wasRunningOnThis) {
+      // New run started - reset live state
+      textBufferRef.current = ''
+      setAgentText('')
+      setIsStreaming(true)
+      liveToolCallsRef.current = new Map()
+      seenExecutionIdRef.current = new Set()
+      setCoderTexts([])
+      // Keep historical tool calls since they represent previous runs;
+      // new live events will append.
+    }
+    if (!agentStatus?.running) {
       setIsStreaming(false)
     }
-  }, [agentStatus])
+    lastAgentRunningRef.current = isRunningOnThis
+  }, [agentStatus, issueNumber])
 
+  // Subscribe to live SSE events
   useEffect(() => {
+    mountedRef.current = true
+    const issueId = String(issueNumber)
+
     const unsubs: Array<() => void> = []
 
     unsubs.push(
       onAgentEvent('agent_text_chunk', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
         textBufferRef.current += detail.text
         setIsStreaming(true)
         scheduleFlush()
@@ -137,6 +167,7 @@ export function useAgentSession(issueNumber: number) {
 
     unsubs.push(
       onAgentEvent('main_tool_call', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
         const existing = liveToolCallsRef.current.get(detail.executionId)
         if (detail.state === 'started') {
           if (seenExecutionIdRef.current.has(detail.executionId)) return
@@ -171,6 +202,7 @@ export function useAgentSession(issueNumber: number) {
 
     unsubs.push(
       onAgentEvent('coder_text_chunk', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
         setCoderTexts((prev) => {
           const idx = prev.findIndex(
             (c) => c.executionId === detail.executionId,
@@ -194,25 +226,49 @@ export function useAgentSession(issueNumber: number) {
 
     unsubs.push(
       onAgentEvent('coder_tool_call', (detail) => {
-        const execId = `coder-${detail.acpSessionId}-${detail.toolName}-${Date.now()}`
-        const entry: ToolCallEntry = {
-          executionId: execId,
-          toolName: detail.toolName,
-          state: detail.state,
-          timestamp: Date.now(),
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        const existing = liveToolCallsRef.current.get(detail.toolCallId)
+        if (detail.state === 'started') {
+          if (seenExecutionIdRef.current.has(detail.toolCallId)) return
+          const entry: ToolCallEntry = {
+            executionId: detail.executionId,
+            toolName: detail.toolName,
+            state: 'started',
+            timestamp: Date.now(),
+            acpSessionId: detail.acpSessionId,
+            toolCallId: detail.toolCallId,
+          }
+          liveToolCallsRef.current.set(detail.toolCallId, entry)
+          seenExecutionIdRef.current.add(detail.toolCallId)
+          setToolCalls((prev) => [...prev, entry])
+        } else if (existing) {
+          const updated: ToolCallEntry = {
+            ...existing,
+            state: detail.state,
+          }
+          liveToolCallsRef.current.set(detail.toolCallId, updated)
+          setToolCalls((prev) =>
+            prev.map((tc) =>
+              tc.toolCallId === detail.toolCallId ? updated : tc,
+            ),
+          )
         }
-        setToolCalls((prev) => [...prev, entry])
       }),
     )
 
     return () => {
+      mountedRef.current = false
       for (const unsub of unsubs) unsub()
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
       }
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
     }
-  }, [scheduleFlush, flushTextBuffer])
+  }, [scheduleFlush, flushTextBuffer, issueNumber])
 
   return {
     messages: historicalMessages,
