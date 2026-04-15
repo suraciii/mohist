@@ -10,3 +10,10 @@ Started: 2026-04-15T08:14:30.879Z
 - Message content: "Start working on the current issue. Begin by reading the workflow configuration using read_workflow."
 - Build passes successfully
 - Next: T-002 (Roll back stage to Draft on agent failure)
+
+[2026-04-15] T-002 Roll back stage to Draft on agent failure
+- Added issueRepo.updateStage(issue.id, Stage.Draft) and issueRepo.clearApprovalState(issue.id) in executeAgent catch block after updateIssueStatus
+- Both calls wrapped in try/catch to prevent rollback failure from masking original error
+- Stage import was already present; no new imports needed
+- Build passes
+- Next: T-003 Fix reopen endpoint to resume agent or reset stage

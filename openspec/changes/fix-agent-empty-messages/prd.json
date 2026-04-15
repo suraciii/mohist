@@ -29,7 +29,7 @@
         "npm run build 通过"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "executeAgent 的 catch 块在 agent-runner-service.ts:276。issueRepo 已在闭包中可用（executeAgent 参数）。Stage 和 clearApprovalState 需要新增 import。"
     },
     {
