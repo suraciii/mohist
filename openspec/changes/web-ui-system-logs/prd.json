@@ -104,7 +104,7 @@
         "npm run build 通过"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "使用 Tailwind CSS 样式，与现有组件风格一致。参照 openclaw 的 ui/src/ui/views/logs.ts 的 UI 布局。ERROR 级别用红色，WARN 用黄色，INFO 用默认色，DEBUG 用灰色。auto-follow 的滚动到底部判断使用 10px tolerance。"
     }
   ]
