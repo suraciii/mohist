@@ -25,9 +25,9 @@ mohist:   想法 ──▶ 方案 ──▶ 代码 ──▶ 验证 ──▶ �
 │   │   Explore Mode    │    Pipeline (PLAN → BUILD → CHECK)      │   │
 │   │   (Pipeline 外)    │                                        │   │
 │   │                   │    ┌──────┐   ┌──────┐   ┌──────┐       │   │
-│   │   和你对话        │    │ Plan │──▶│ Build│──▶│ Check│──▶ done│   │
+│   │   AI 面试你       │    │ Plan │──▶│ Build│──▶│ Check│──▶ done│   │
 │   │   梳理需求        │    │      │   │      │   │      │       │   │
-│   │                   │    └──────┘   └──────┘   └──────┘       │   │
+│   │   产出 proposal   │    └──────┘   └──────┘   └──────┘       │   │
 │   │                   │       ▲                     │           │   │
 │   │                   │       │     ⏸你确认          │⏸你确认    │   │
 │   │                   │       └─── 有问题 ───────────┘           │   │
@@ -46,17 +46,22 @@ mohist:   想法 ──▶ 方案 ──▶ 代码 ──▶ 验证 ──▶ �
 │                                                                     │
 │  Explore Mode (Pipeline 外)                                          │
 │  ─────────────────────────                                           │
+│  AI: 结构化面试，按分支逐个追问                                        │
+│      · 每个参与者及其需求                                             │
+│      · 每个失败模式                                                   │
+│      · 每个边界情况                                                   │
+│      · 每个集成点                                                     │
+│      · 每个难逆转的决策                                               │
 │  你: 回答问题，澄清需求，做取舍                                        │
-│  AI: 主动提问，帮你理清思路                                           │
-│  产出: 清晰的 Issue（含明确需求描述）                                  │
+│  产出: proposal.md (Intent/Scope/Approach/User Stories/Out of Scope) │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  PLAN (规划)                                                         │
 │  ──────────                                                          │
-│  你: 审查方案，确认没问题                                              │
-│  AI: 分析代码库，给出技术方案和任务分解                                 │
-│  产出: 技术方案 + 任务清单                                             │
+│  AI: 探索代码库，基于 proposal 做技术设计和任务拆分                     │
+│  你: 审查方案和任务拆分                                                │
+│  产出: specs/ (行为规格) + design.md (技术设计) + tasks.json (任务)   │
 │  Gate: human（你确认后才进入 BUILD）                                   │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -64,7 +69,10 @@ mohist:   想法 ──▶ 方案 ──▶ 代码 ──▶ 验证 ──▶ �
 │  BUILD (构建)                                                        │
 │  ───────────                                                         │
 │  你: (可以去做别的事，也可以随时查看进度/追加指令)                       │
-│  AI: 逐个完成任务，写代码，内循环 write→test→fix                       │
+│  AI: 逐个执行 tasks.json 中的任务                                     │
+│      AFK task: 自动执行                                              │
+│      HITL task: 到决策点暂停，等你决策                                │
+│      内循环 write→test→fix                                           │
 │  产出: 代码变更                                                       │
 │  Gate: none（自动进入 CHECK）                                         │
 │                                                                     │
@@ -72,29 +80,38 @@ mohist:   想法 ──▶ 方案 ──▶ 代码 ──▶ 验证 ──▶ �
 │                                                                     │
 │  CHECK (检查)                                                        │
 │  ───────────                                                         │
+│  AI: 6-pass 代码审查 + 跨切面审计                                     │
 │  你: 审查结果，决定是否完成                                            │
-│  AI: 运行测试，代码审查，对比需求                                      │
 │  产出: 审查报告                                                       │
 │  Gate: human（你确认后 Issue 完成，或回到 PLAN 修复）                   │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## 产物流转
+
+```
+openspec/changes/{slug}/
+  ├── proposal.md     ← Explore 产出，Plan 消费
+  ├── specs/          ← Plan 产出，Build/Check 消费
+  ├── design.md       ← Plan 产出，Build/Check 消费
+  └── tasks.json      ← Plan 产出，Build 消费
+
+归档时:
+  openspec/changes/{slug}/ → openspec/changes/archive/{date}-{slug}/
+  delta specs 合入 openspec/specs/
+```
+
 ## 你的决策点
 
 ```
-                     gate_after:human          gate_after:human
-                         │                          │
-                         ▼                          ▼
-draft ──▶ PLAN ─────────▶ BUILD ──▶ CHECK ─────────▶ done
-              │                         │
-         "方案OK，开始写"          "审查OK，完成"
-              │                         │
-         方案确认，进入 BUILD      审查通过，Issue 完成
-
-              ▲                         │
-              └───── 有问题 ────────────┘
-               CHECK 发现问题，回到 PLAN 重新规划
+                   ⏸ gate_after:human          ⏸ gate_after:human
+                       │                            │
+                       ▼                            ▼
+Explore ──▶ Plan ──────▶ Build ──▶ Check ──────────▶ done
+              │                       │
+         "方案+任务OK，           "审查OK，完成"
+          开始写"
 ```
 
 ## 如果发现问题
@@ -102,6 +119,7 @@ draft ──▶ PLAN ─────────▶ BUILD ──▶ CHECK ──
 ```
 在 Pipeline 内：
   CHECK → PLAN: 自动循环，CHECK 发现问题回到 PLAN 重新规划
+  HITL task: Agent 在决策点暂停等你
   小问题: Agent 用 ask_user 问具体问题，继续推进
   大问题: Agent 标记 blocked，退出 Pipeline 回到 Explore Mode
 

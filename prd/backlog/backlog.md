@@ -75,10 +75,13 @@
 
 | ID | 事项 | 说明 | 来源 |
 |----|------|------|------|
-| B-060 | 实现 Plan Agent | 方案设计，read + write，生成 design.md 和任务清单 | design |
-| B-061 | 实现 Build Agent | 代码实现，read + write + bash，内循环 write→test→fix | design |
-| B-062 | 实现 Check Agent | 测试 + 审查，read + bash，运行测试、代码审查 | design |
-| B-063 | Sub-Agent 类型定义 | agent 的 name、system prompt、tool set、model override 定义 | prd.json T-013 |
+| B-060 | 重构 ExploreAgent | system prompt 重写为结构化面试模式，新增 write_file 工具，产出 proposal.md 到 openspec/changes/。面试流程：收集想法→探索代码库→逐分支追问→确认模块→写 proposal | talks/2026-04-15 决策1,5,9,10 |
+| B-061 | 重构 PlannerAgent | 从一步全出 JSON 改为：读 proposal.md → 探索代码库 → 产出 specs/ + design.md + tasks.json。自审查改为方案完整性+拆分质量（人类审查预演） | talks/2026-04-15 决策3,4,8,11 |
+| B-062 | 重构 ReviewerAgent | 从 4 维度改为 6-pass 代码审查 + 跨切面审计。核心定位：对抗性审查，审查者是"对手" | talks/2026-04-15 决策7,14 |
+| B-063 | 产物目录迁移 | 产物路径从 .mohist/changes/ 改为代码库内 openspec/changes/{issueNumber}-{slug}/，纳入版本控制。ChangeArtifactsManager 适配新路径 | talks/2026-04-15 决策3 |
+| B-064 | tasks.json 替代 prd.json | 新增 type(WRITE/TEST/MIGRATE/CONFIG/REVIEW)、mode(AFK/HITL)、output、dependsOn、files、patterns 字段。context-assembler 适配新结构。types: PrdTask → Task | talks/2026-04-15 决策4,13 |
+| B-065 | Task 获取 tool | mohist agent 通过 tool 从 tasks.json 获取当前应执行的任务（按 order、依赖关系、状态过滤），传给 coder session | talks/2026-04-15 决策13 |
+| B-066 | Sub-Agent 类型定义 | agent 的 name、system prompt、tool set、model override 定义 | prd.json T-013 |
 
 ### 基础工具（给非 Code sub-agent 用）
 
@@ -136,22 +139,30 @@
 
 ---
 
-## 6. Stage 架构 (已决策)
+## 6. Stage 架构 + 工作流对齐 (已决策)
 
-> **决策结果**: PLAN → BUILD → CHECK 三阶段循环模型
+> **决策结果**: Explore(独立能力) + PLAN → BUILD → CHECK 三阶段循环模型
 >
-> 详见 `design/plan.md`、`design/build.md`、`design/check.md` 和 `openspec/changes/doc-cleanup-and-stage-model/`
+> 产物体系对齐 OpenSpec: proposal → specs + design → tasks
+>
+> 详见 `design/explore.md`、`design/plan.md`、`design/build.md`、`design/check.md`
+> 和 `talks/2026-04-15-workflow-alignment.md`
 
 **已决策**:
 
 | 决策 | 结论 | 理由 |
 |------|------|------|
-| Stage 数量 | 3 stages: PLAN / BUILD / CHECK | 基于软件开发四种不确定性和 DevOps 反馈周期理论，3 stages 是最小完整反馈循环 |
-| Stage vs Status 分离 | Stage = pipeline 阶段（plan/build/check），Status = 运行时状态（active/paused/blocked） | 消除 `waiting-*` 阶段 |
-| Gate 模型 | gate 是 stage 属性（`gate_after: none \| human`） | 不是独立 Stage，消除 `waiting-design-review` 等伪阶段 |
-| Explore | Pipeline 外的交互模式，不是 Stage | 需求梳理是人类主导的对话活动，不应被 pipeline stage 约束 |
-| Draft | 不是 Stage，是 issue 创建状态 | 创建 issue 是一个动作，不是需要 agent 执行的阶段 |
-| 循环机制 | CHECK 失败 → 回到 PLAN | PDCA 循环，CHECK 发现问题带新信息重新规划 |
+| 产物体系 | proposal → specs + design → tasks (OpenSpec 模型) | 对齐 Mario Barbero 工作流 + OpenSpec 概念体系 |
+| 产物位置 | openspec/changes/{N}-{slug}/ (代码库内) | 纳入版本控制，可 review |
+| Issue 角色 | 追踪载体，不承载内容 | 产物在 openspec/changes/，Issue 只管状态流转 |
+| Explore 定位 | 独立能力，不参与 stage 状态机 | 可从 Explore 创建 Issue，也可在已有 Issue 下 Explore |
+| Explore 交互 | 同步阻塞式结构化面试 | 用 ask_user，行为从偶尔问小问题变为系统化面试 |
+| Plan 产出 | specs/ + design.md + tasks.json | 不再一步全出 JSON，基于 proposal 分步产出 |
+| tasks.json | prd.json 改名 + 增加字段 (type/mode/output/dependsOn/files/patterns) | 命名与职责对齐，增加 AFK/HITL 分类 |
+| Plan gate | 单 gate，展示自审查报告等用户批准或反馈 | 不拆子 gate |
+| 自审查 | 人类审查的预演，AI 先按同样标准审一遍 | 降低人类审查成本 |
+| Check 定位 | 对抗性审查，6-pass + 跨切面审计 | 审查者是"对手"，不是"同事" |
+| Task 执行 | 每个 task 独立 ACP session，通过 tool 获取 next task | "一次会话一个 task"是机制不是约束 |
 
 **Stage 枚举**: `draft | plan | build | check | done`
 
@@ -165,6 +176,7 @@
 | 远期 | Pipeline as Code（条件分支、并行、插件） | workflow.yaml 扩展 |
 
 **来源**: 2026-04-01 explore 讨论 → `talks/2026-04-01-stage-model.md`
+**更新**: 2026-04-15 工作流对齐 → `talks/2026-04-15-workflow-alignment.md`
 
 ---
 

@@ -17,33 +17,40 @@ AI: (改需求...)
 (循环往复，效率低)
 
 mohist:
-你: 创建 Issue "加搜索"
-AI: (在 Explore Mode 中和你对话，梳理需求)
-你: 确认需求清晰
-AI: PLAN → BUILD → CHECK 自动循环
-你: 在 gate 点确认方案、审查结果
+你: "我想加个搜索"
+AI: (面试你：谁用？什么场景？失败怎么办？边界在哪？)
+你: 回答问题，理清需求
+AI: 产出 proposal → 设计方案 → 拆任务 → 实现 → 审查
+你: 在关键决策点确认
 (需求清晰，一次到位)
 ```
 
 ## 核心价值
 
-- **需求先行** - 先聊清楚（Explore Mode），再动手（Pipeline）
-- **循环反馈** - PLAN → BUILD → CHECK 循环，CHECK 发现问题自动回到 PLAN
-- **随时介入** - gate 点让你确认，你也可以随时追加指令
-- **清晰边界** - Pipeline 自动推进，你在关键决策点介入
+- **需求先行** — AI 面试你，把模糊想法变成清晰 proposal
+- **产物可审** — 每步都有文件产出，可 diff、可 review、可追溯
+- **循环反馈** — PLAN → BUILD → CHECK 循环，CHECK 发现问题自动回到 PLAN
+- **随时介入** — gate 点让你确认，你也可以随时追加指令
 
 ## Pipeline 模型
 
 ```
-Explore Mode (Pipeline 外)          Pipeline Mode (PLAN → BUILD → CHECK)
-┌──────────────────────┐            ┌─────────────────────────────────────┐
-│ 用户与 mohist 自由对话  │            │                                     │
-│ 梳理需求、澄清模糊点    │──draft──▶ │ PLAN ──▶ BUILD ──▶ CHECK ──▶ done  │
-│ 产出清晰的 Issue       │            │   ▲                    │           │
-└──────────────────────┘            │   └────── 有问题 ────────┘           │
-                                    │                                     │
-                                    │   ⏸ plan gate     ⏸ check gate     │
-                                    └─────────────────────────────────────┘
+Explore Mode (Pipeline 外)              Pipeline Mode
+┌────────────────────────────┐          ┌─────────────────────────────────────┐
+│ AI 面试人类，梳理需求       │          │                                     │
+│ 产出 proposal.md           │──▶ Plan ──▶│ PLAN ──▶ BUILD ──▶ CHECK ──▶ done│
+│ (产品/用户视角)             │          │   ▲                    │           │
+└────────────────────────────┘          │   └────── 有问题 ────────┘           │
+                                        │                                     │
+                                        │   ⏸ plan gate     ⏸ check gate     │
+                                        └─────────────────────────────────────┘
+
+产物:
+openspec/changes/{slug}/
+  ├── proposal.md    ← Explore
+  ├── specs/         ← Plan
+  ├── design.md      ← Plan
+  └── tasks.json     ← Plan
 ```
 
 ## 边界
@@ -51,8 +58,10 @@ Explore Mode (Pipeline 外)          Pipeline Mode (PLAN → BUILD → CHECK)
 ### 现在做的
 
 ```
-Issue 创建 ──────────────────────────────────────▶ PR 合并
-(想法)                                              (代码)
+想法 ──▶ Explore ──▶ Plan ──▶ Build ──▶ Check ──▶ Done
+                 └── proposal  └─ specs    └─ 代码    └─ 审查报告
+                                └─ design
+                                └─ tasks
 ```
 
 ### 暂不做的
