@@ -3,6 +3,7 @@ import type { CommentRepo } from '../db/comment-repo';
 import type { QuestionRepo } from '../db/question-repo';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
+import type { CoderSessionRepo } from '../db/coder-session-repo';
 import { SessionManager, type Session, type LlmConfig } from '../agent-runtime';
 import { runMainAgent } from '../agents/main-agent';
 import { IssueStatus, type Issue } from '../types';
@@ -72,6 +73,7 @@ export class AgentRunnerService {
     private readonly issueRepo?: IssueRepo,
     maxConcurrentAgents: number = 8,
     private readonly agentSessionMessageRepo?: AgentSessionMessageRepo,
+    private readonly coderSessionRepo?: CoderSessionRepo,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -249,6 +251,7 @@ export class AgentRunnerService {
             eventBus: this.eventBus,
             workflowLogRepo: this.workflowLogRepo,
             agentSessionMessageRepo: this.agentSessionMessageRepo,
+            coderSessionRepo: this.coderSessionRepo,
             onWaitingChange: (issueId, questionId, question) => {
               if (questionId && question) {
                 this.setWaiting(issueId, questionId, question);
@@ -415,6 +418,7 @@ export class AgentRunnerService {
             eventBus: this.eventBus,
             workflowLogRepo: this.workflowLogRepo,
             agentSessionMessageRepo: this.agentSessionMessageRepo,
+            coderSessionRepo: this.coderSessionRepo,
             onWaitingChange: (issueId, questionId, question) => {
               if (questionId && question) {
                 this.setWaiting(issueId, questionId, question);

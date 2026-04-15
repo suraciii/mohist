@@ -6,6 +6,7 @@ import { QuestionRepo } from '../db/question-repo';
 import type { Issue } from '../types';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
+import type { CoderSessionRepo } from '../db/coder-session-repo';
 import { createSpawnCoderTool } from '../tools/spawn-coder';
 import { createReadWorkflowTool } from '../tools/read-workflow';
 import { createAdvanceStageTool } from '../tools/advance-stage';
@@ -37,6 +38,7 @@ export interface MainAgentContext {
   eventBus?: EventBus;
   workflowLogRepo?: WorkflowLogRepo;
   agentSessionMessageRepo?: AgentSessionMessageRepo;
+  coderSessionRepo?: CoderSessionRepo;
   onWaitingChange?: (issueId: string, questionId: string | null, question?: string) => void;
   workflowController?: WorkflowController;
 }
@@ -193,6 +195,7 @@ export async function runMainAgent(
     workflowLogRepo: context.workflowLogRepo,
     eventBus: context.eventBus,
     toolRegistry,
+    coderSessionRepo: context.coderSessionRepo,
   }));
   toolRegistry.register(createReadWorkflowTool({ cwd: context.worktreePath, issueNumber: context.issue.number }));
   toolRegistry.register(createAdvanceStageTool({ issue: context.issue, issueRepo: context.issueRepo, worktreePath: context.worktreePath, eventBus: context.eventBus }));
