@@ -1,0 +1,14 @@
+# Ralph Progress Log
+Started: 2026-04-15T10:23:07.116Z
+
+---
+
+
+[2026-04-15T10:27:30Z] T-001 COMPLETED
+- Created agent-session-message-repo.ts with AgentSessionMessageRepo class (insert, findByIssueId methods)
+- Added migration v12 creating agent_session_message table with all required columns
+- Added index idx_agent_session_message_issue_step on (issue_id, step_index, message_index)
+- Exported from db/index.ts
+- npm run build succeeds, all tests pass
+- Learning: followed existing repo patterns (WorkflowLogRepo, ExploreMessageRepo) for consistency
+- Next: T-002 (coder_session table) or T-003 (persist messages from agent-loop)
