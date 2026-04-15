@@ -45,26 +45,34 @@ async function main(): Promise<void> {
     console.error('[FATAL] Unhandled Promise Rejection (pre-init):', reason);
   });
 
-  let fileConfig: ReturnType<typeof loadConfig>;
-  try {
-    fileConfig = loadConfig();
-  } catch (err) {
-    console.error('Failed to load config:', err instanceof Error ? err.message : err);
-    process.exit(1);
+  let logLevel: Log.Level = 'INFO';
+  if (process.env.LOG_LEVEL) {
+    logLevel = process.env.LOG_LEVEL as Log.Level;
   }
-
-  const logConfig = getLogConfig(fileConfig);
 
   await Log.init({
     print: process.argv.includes('--print-logs'),
     dev: process.env.NODE_ENV === 'development',
-    level: (process.env.LOG_LEVEL as Log.Level) || logConfig.level,
+    level: logLevel,
   });
 
   process.removeAllListeners('unhandledRejection');
   process.on('unhandledRejection', (reason) => {
     Log.Default.error('Unhandled Promise Rejection', { reason });
   });
+
+  let fileConfig: ReturnType<typeof loadConfig>;
+  try {
+    fileConfig = loadConfig();
+  } catch (err) {
+    log.error('Failed to load config', { error: err instanceof Error ? err.message : err });
+    process.exit(1);
+  }
+
+  const logConfig = getLogConfig(fileConfig);
+  if (logConfig.level !== logLevel) {
+    log.info('Overriding log level from config', { from: logLevel, to: logConfig.level });
+  }
   
   const serverConfig = getServerConfig(fileConfig);
   

@@ -2,7 +2,7 @@ import { Issue, Stage, IssueStatus, Comment } from '../types';
 import { IssueRepo, CommentRepo } from '../db';
 import { Log } from '../util/log';
 
-const log = Log.create({ service: 'workflow' });
+const log = Log.create({ service: 'issue' });
 
 export interface CreateIssueInput {
   projectId: string;
