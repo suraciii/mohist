@@ -10,7 +10,8 @@ import {
   QuestionRepo,
   ExploreSessionRepo,
   ExploreMessageRepo,
-  AgentSessionMessageRepo
+  AgentSessionMessageRepo,
+  CoderSessionRepo
 } from '../db';
 import { initializeDefaultConfig } from '../db/config-repo';
 
@@ -25,6 +26,7 @@ export class StateManager {
   private exploreSessionRepo: ExploreSessionRepo;
   private exploreMessageRepo: ExploreMessageRepo;
   private agentSessionMessageRepo: AgentSessionMessageRepo;
+  private coderSessionRepo: CoderSessionRepo;
   private initialized: boolean = false;
 
   constructor(db: DatabaseManager) {
@@ -40,6 +42,7 @@ export class StateManager {
     this.exploreSessionRepo = new ExploreSessionRepo(db);
     this.exploreMessageRepo = new ExploreMessageRepo(db);
     this.agentSessionMessageRepo = new AgentSessionMessageRepo(db);
+    this.coderSessionRepo = new CoderSessionRepo(db);
     
     initializeDefaultConfig(this.configRepo);
     this.initialized = true;
@@ -87,5 +90,9 @@ export class StateManager {
 
   getAgentSessionMessageRepo(): AgentSessionMessageRepo {
     return this.agentSessionMessageRepo;
+  }
+
+  getCoderSessionRepo(): CoderSessionRepo {
+    return this.coderSessionRepo;
   }
 }

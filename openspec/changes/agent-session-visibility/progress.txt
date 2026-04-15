@@ -30,3 +30,13 @@ Started: 2026-04-15T10:23:07.116Z
 - step_index aligns with result.steps array index, message_index aligns within step.response.messages
 - npm run build succeeds
 - Next: T-004 (record coder session mapping) or T-005 (REST API endpoints)
+
+[2026-04-15] T-004 Record coder session mapping on ACP spawn and completion
+- Added CoderSessionRepo to StateManager with getter
+- Wired CoderSessionRepo through AgentRunnerService constructor -> MainAgentContext -> SpawnCoderContext -> AcpSessionOptions
+- In runAcpSession: insert coder_session row with status='running' after sessionId is obtained
+- On success: update to 'completed'; on prompt timeout: update to 'failed'; on catch after session creation: update to 'failed'
+- No row is created if ACP fails before session creation (initialize/newSession timeout) - per spec
+- Build succeeds, all tests pass (e2e failures are pre-existing)
+- Learning: coderSessionId must be declared before try block since catch block needs access to it
+- Next: T-005 Add REST API endpoints for session data
