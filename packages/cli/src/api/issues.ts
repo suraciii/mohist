@@ -468,35 +468,43 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      if (agentRunner && agentRunner.hasPausedSession(number) && !agentRunner.isRunning(issue.id)) {
-        const project = projectService.getById(projectId);
-        let worktreePath = process.cwd();
-        if (worktreeManager && project) {
-          const existingPath = worktreeManager.getPath(project.name, issue.number);
-          worktreePath = existingPath || process.cwd();
+      if (agentRunner) {
+        if (agentRunner.isRunning(issue.id)) {
+          const response: ApiResponse = {
+            success: false,
+            error: `Issue #${number} already has an agent running. Wait for it to complete first.`
+          };
+          return c.json(response, 409);
         }
 
-        agentRunner.resume(
-          issue,
-          projectId,
-          stateManager.getIssueRepo(),
-          stateManager.getCommentRepo(),
-          stateManager.getQuestionRepo(),
-          worktreePath,
-          sessionManager,
-          '[System] Issue reopened. Continue working.',
-          undefined,
-          (issueId, status) => issueService.setStatus(issueId, status),
-        );
+        if (agentRunner.hasPausedSession(number)) {
+          const project = projectService.getById(projectId);
+          let worktreePath = process.cwd();
+          if (worktreeManager && project) {
+            const existingPath = worktreeManager.getPath(project.name, issue.number);
+            worktreePath = existingPath || process.cwd();
+          }
 
-        const response: ApiResponse = {
-          success: true,
-          data: { issue, message: `Issue #${number} reopened and resumed` }
-        };
-        return c.json(response);
-      }
+          agentRunner.resume(
+            issue,
+            projectId,
+            stateManager.getIssueRepo(),
+            stateManager.getCommentRepo(),
+            stateManager.getQuestionRepo(),
+            worktreePath,
+            sessionManager,
+            '[System] Issue reopened. Continue working.',
+            undefined,
+            (issueId, status) => issueService.setStatus(issueId, status),
+          );
 
-      if (agentRunner && !agentRunner.hasPausedSession(number)) {
+          const response: ApiResponse = {
+            success: true,
+            data: { issue, message: `Issue #${number} reopened and resumed` }
+          };
+          return c.json(response);
+        }
+
         issueService.transitionToStage(issue.id, Stage.Draft);
         stateManager.getIssueRepo().clearApprovalState(issue.id);
         const updatedIssue = issueService.getByNumber(projectId, number) || issue;

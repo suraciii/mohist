@@ -455,6 +455,15 @@ export class AgentRunnerService {
             error: updateErr instanceof Error ? updateErr.message : String(updateErr),
           });
         }
+        try {
+          issueRepo.updateStage(issue.id, Stage.Draft);
+          issueRepo.clearApprovalState(issue.id);
+        } catch (rollbackErr) {
+          log.error('Failed to rollback stage to draft', {
+            issueNumber: issue.number,
+            error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+          });
+        }
         this.eventBus.emit('agent_error', {
           issueId: issue.id,
           projectId,
