@@ -65,6 +65,7 @@ export async function runAgentLoop(
     } else if (part.type === 'tool-call') {
       const executionId = crypto.randomUUID();
       toolRegistry.setCurrentExecutionId(executionId);
+      toolRegistry.setExecutionIdForToolCall(part.toolCallId, executionId);
       toolStartTimes.set(executionId, Date.now());
       stepIndex++;
       if (eventBus && eventContext) {
@@ -79,7 +80,7 @@ export async function runAgentLoop(
         });
       }
     } else if (part.type === 'tool-result') {
-      const executionId = toolRegistry.getCurrentExecutionId() ?? crypto.randomUUID();
+      const executionId = toolRegistry.getExecutionIdForToolCall(part.toolCallId) ?? toolRegistry.getCurrentExecutionId() ?? crypto.randomUUID();
       const startTime = toolStartTimes.get(executionId);
       const duration = startTime ? Date.now() - startTime : undefined;
       if (eventBus && eventContext) {
@@ -95,9 +96,11 @@ export async function runAgentLoop(
         });
       }
       toolStartTimes.delete(executionId);
+      toolRegistry.removeExecutionIdForToolCall(part.toolCallId);
       toolRegistry.clearCurrentExecutionId();
     } else if (part.type === 'tool-error') {
-      const executionId = toolRegistry.getCurrentExecutionId() ?? crypto.randomUUID();
+      const tcPart = part as unknown as { toolCallId?: string; toolName?: string; error?: string };
+      const executionId = (tcPart.toolCallId ? toolRegistry.getExecutionIdForToolCall(tcPart.toolCallId) : undefined) ?? toolRegistry.getCurrentExecutionId() ?? crypto.randomUUID();
       const startTime = toolStartTimes.get(executionId);
       const duration = startTime ? Date.now() - startTime : undefined;
       if (eventBus && eventContext) {
@@ -105,12 +108,15 @@ export async function runAgentLoop(
           issueId: eventContext.issueId,
           projectId: eventContext.projectId,
           executionId,
-          toolName: (part as { toolName?: string }).toolName ?? 'unknown',
+          toolName: tcPart.toolName ?? 'unknown',
           state: 'failed',
-          error: (part as { error?: string }).error ?? 'Unknown error',
+          error: tcPart.error ?? 'Unknown error',
           duration,
           stepIndex,
         });
+      }
+      if (tcPart.toolCallId) {
+        toolRegistry.removeExecutionIdForToolCall(tcPart.toolCallId);
       }
       toolStartTimes.delete(executionId);
       toolRegistry.clearCurrentExecutionId();
