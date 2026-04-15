@@ -1,0 +1,111 @@
+{
+  "project": "mohist",
+  "description": "Web UI 系统日志查看：JSONL 格式改造 + cursor-based 日志 API + 前端日志页面",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "改造 Log 系统为 JSONL 格式输出",
+      "spec": "specs/log-tail-api/spec.md",
+      "description": "修改 `packages/cli/src/util/log.ts`，文件写入模式改为 JSONL 格式。每条日志输出一行 JSON，包含 level、time、diffMs、service、message 以及 extra 字段。日志文件名从进程时间戳格式改为按日期 rolling 的 `mohist-YYYY-MM-DD.log`（仍在 `~/.mohist/logs/`），清理策略从保留 10 个文件改为删除 24 小时前的旧日志。`--print-logs` 模式保持纯文本 stderr 输出不变。更新 `log.test.ts` 验证 JSONL 格式和 rolling 文件名。",
+      "acceptanceCriteria": [
+        "正常模式下日志文件每行可被 JSON.parse() 成功解析",
+        "JSONL 行包含 level、time、diffMs、service、message 字段",
+        "日志文件路径格式为 `~/.mohist/logs/mohist-YYYY-MM-DD.log`",
+        "dev 模式下日志文件路径为 `~/.mohist/logs/dev.log`",
+        "--print-logs 模式 stderr 输出为纯文本，非 JSON",
+        "现有日志调用（log.info/debug/warn/error）无需修改调用方式即可工作",
+        "log.test.ts 包含 JSONL 格式验证测试",
+        "Typecheck passes",
+        "npm test passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "参照 design.md D1 + D5 决策。只改 write 函数的行为，不改 Logger 接口。--print-logs 走默认 write（stderr 纯文本），正常模式走文件 JSONL write。diffMs 保留现有纯文本中的时间差信息。rolling 文件名使用 LOG_PREFIX='mohist' + formatLocalDate() + LOG_SUFFIX='.log'。"
+    },
+    {
+      "id": "T-002",
+      "title": "实现 log-tail 读取函数",
+      "spec": "specs/log-tail-api/spec.md",
+      "description": "在 `packages/cli/src/util/log-tail.ts` 中实现 `readLogTail` 函数，从日志文件读取 JSONL 行。支持 cursor-based 分页、limit 限制、maxBytes 限制。当首选日志文件不存在且文件名符合 rolling 模式（`mohist-YYYY-MM-DD.log`）时，自动回退到 `~/.mohist/logs/` 目录下 mtime 最新的 matching 文件。参照 openclaw 的 `logging/log-tail.ts` 实现。",
+      "acceptanceCriteria": [
+        "readLogTail({ cursor: undefined }) 返回文件末尾 maxBytes 字节的日志行",
+        "readLogTail({ cursor: N }) 返回从偏移 N 到文件末尾的增量行",
+        "cursor 超出文件大小时执行重置逻辑（从文件末尾读取）",
+        "文件不存在时返回空 lines 和 cursor=0",
+        "当首选文件不存在且符合 rolling 模式时，自动回退到目录下最新的 `mohist-YYYY-MM-DD.log`",
+        "返回的 lines 是原始字符串数组（未解析）",
+        "truncated 在文件大于 maxBytes 时为 true",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "核心函数，参照 opensrc/openclaw/src/logging/log-tail.ts 的 readLogSlice + resolveLogFile 实现。使用 fs.open + handle.read 的文件读取方式。rolling 回退通过正则 `/^mohist-\\d{4}-\\d{2}-\\d{2}\\.log$/` 匹配目录并选择 mtimeMs 最新的文件。"
+    },
+    {
+      "id": "T-003",
+      "title": "实现 GET /api/logs/tail API 路由",
+      "spec": "specs/log-tail-api/spec.md",
+      "description": "创建 `packages/cli/src/api/logs.ts`，实现 Hono 路由处理 GET /api/logs/tail 请求。解析 query params（cursor/limit/maxBytes），调用 readLogTail，返回 `{ success: true, data: {...} }` 统一响应格式。在 server/index.ts 中注册路由。在 `lib/api.ts` 添加 `getLogTail` 方法。在 http-server.ts 中确保 `/api/logs/*` 不受 rate limiter 限制。",
+      "acceptanceCriteria": [
+        "GET /api/logs/tail 无参数返回最新日志",
+        "GET /api/logs/tail?cursor=N 返回增量日志",
+        "limit 参数限制返回行数，默认 500，上限 5000",
+        "maxBytes 参数限制读取字节数，默认 250KB，上限 1MB",
+        "响应使用 { success: true, data: { file, cursor, lines, truncated } } 格式",
+        "lib/api.ts 新增 getLogTail(cursor?, limit?, maxBytes?) 方法",
+        "日志 API 请求不计入 rate limit 配额",
+        "无效参数返回适当错误响应",
+        "路由在 server/index.ts 中注册为 /api/logs",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "参照现有 api/status.ts 或 api/config.ts 的 Hono 路由模式。server.addRouter('/api/logs', createLogRoutes())。API 响应必须包裹在 success/data 中以兼容前端 request() 函数。rate limit 排除通过 http-server middleware 路径判断实现。"
+    },
+    {
+      "id": "T-004",
+      "title": "实现 useLogs hook",
+      "spec": "specs/web-ui-logs-page/spec.md",
+      "description": "创建 `packages/cli/web/src/hooks/useLogs.ts`，封装日志轮询逻辑：每 3 秒调用 GET /api/logs/tail，维护 cursor 增量读取，本地缓冲区上限 2000 条。提供 parseLogLine 函数将 JSONL 字符串解析为结构化对象 { level, time, service, message, raw }，非法 JSON 时回退为原始文本。使用 Page Visibility API，tab 隐藏时暂停轮询，回到前台时立即拉取。",
+      "acceptanceCriteria": [
+        "首次请求无 cursor 获取初始日志",
+        "后续请求带上次 cursor 增量读取",
+        "缓冲区超过 2000 条时丢弃最旧条目",
+        "parseLogLine 正确解析 JSONL 为 { level, time, service, message, raw }",
+        "parseLogLine 遇到非法 JSON 时不抛出异常，回退为原始文本且 level 为 null",
+        "hook 返回 entries、loading、error、refresh、cursor 状态",
+        "使用 document.visibilitychange 在 tab 隐藏时暂停轮询、显示时恢复",
+        "组件卸载时清理轮询定时器和事件监听",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "参照 openclaw 的 ui/src/ui/controllers/logs.ts 的 parseLogLine 和 loadLogs 逻辑。使用 setInterval 实现 3 秒轮询。Page Visibility API 防止后台无意义轮询和缓冲区溢出。parseLogLine 用 try/catch 做容错。"
+    },
+    {
+      "id": "T-005",
+      "title": "实现 LogsPage 组件和路由集成",
+      "spec": "specs/web-ui-logs-page/spec.md",
+      "description": "创建 `packages/cli/web/src/components/LogsPage.tsx`，实现日志查看页面：结构化显示（time | level | service | message）、级别筛选 chips、文本搜索、Auto-follow 开关、截断提示、文件路径显示、导出按钮。在 App.tsx 添加 /logs 路由，在 Header.tsx Explore 与 Settings 之间添加 Logs 导航链接（文字+图标，窄屏可仅显示图标）。",
+      "acceptanceCriteria": [
+        "/logs 路由显示日志页面",
+        "Header 显示 Logs 导航链接",
+        "级别筛选 chips 可切换 DEBUG/INFO/WARN/ERROR",
+        "搜索框过滤匹配 message、service、raw 的条目",
+        "Auto-follow 开关控制自动滚动到底部",
+        "用户向上滚动超过底部 10px 时暂停 auto-follow",
+        "用户滚动回底部 10px 以内时恢复 auto-follow",
+        "每条日志显示时间、级别（带颜色）、服务名、消息",
+        "truncated 时显示截断提示",
+        "显示当前日志文件路径",
+        "Export 按钮下载筛选后的日志文本",
+        "无日志时导出按钮禁用",
+        "Typecheck passes",
+        "npm run build 通过"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "使用 Tailwind CSS 样式，与现有组件风格一致。参照 openclaw 的 ui/src/ui/views/logs.ts 的 UI 布局。ERROR 级别用红色，WARN 用黄色，INFO 用默认色，DEBUG 用灰色。auto-follow 的滚动到底部判断使用 10px tolerance。"
+    }
+  ]
+}
