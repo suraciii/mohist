@@ -27,3 +27,15 @@ Started: 2026-04-15T05:05:53.732Z
 **Learnings:** TS target ES2022 doesn't have `Array.prototype.toSorted()` — must use mutable `.sort()`. `os` import not needed since `Log.file()` provides the path.
 **Next:** T-003 (GET /api/logs/tail API route)
 
+
+[2026-04-15] T-003 完成
+- 创建 packages/cli/src/api/logs.ts，实现 GET /tail Hono 路由
+- 解析 cursor/limit/maxBytes query params，验证参数有效性
+- 调用 readLogTail，返回 { success: true, data: { file, cursor, lines, truncated } }
+- 在 server/index.ts 注册 /api/logs 路由
+- 在 http-server.ts middleware 中排除 /api/logs/* 路径（跳过日志记录）
+- 在 web/src/lib/api.ts 添加 getLogTail(cursor?, limit?, maxBytes?) 方法
+- 在 web/src/lib/types.ts 添加 LogTailResult 接口
+- CLI typecheck 通过
+- Learnings: rate limiter 当前仅在 providers.ts 中按路由使用，非全局 middleware；logs 路由自然不受限制
+- Next: T-004 实现 useLogs hook

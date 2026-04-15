@@ -123,6 +123,13 @@ export interface ExploreSessionWithMessages {
   messages: ExploreMessage[]
 }
 
+export interface LogTailResult {
+  file: string
+  cursor: number
+  lines: string[]
+  truncated: boolean
+}
+
 export type ModelBadge = 'free' | 'latest'
 
 export interface Model {

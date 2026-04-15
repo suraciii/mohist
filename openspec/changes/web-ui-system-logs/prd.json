@@ -59,7 +59,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "参照现有 api/status.ts 或 api/config.ts 的 Hono 路由模式。server.addRouter('/api/logs', createLogRoutes())。API 响应必须包裹在 success/data 中以兼容前端 request() 函数。rate limit 排除通过 http-server middleware 路径判断实现。"
     },
     {
