@@ -128,8 +128,8 @@ export async function resolveModel(config?: LlmConfig): Promise<LanguageModelV3>
     case 'openai':
       return createOpenAI(sdkOpts)(modelID);
     case 'openai-compatible':
-      return createOpenAI(sdkOpts)(modelID);
+      return createOpenAI(sdkOpts).chat(modelID);
     default:
-      return createOpenAI(sdkOpts)(modelID);
+      return createOpenAI(sdkOpts).chat(modelID);
   }
 }
