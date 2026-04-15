@@ -75,7 +75,7 @@
         "npm run build succeeds"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Add routes in packages/cli/src/api/ following existing patterns"
     },
     {

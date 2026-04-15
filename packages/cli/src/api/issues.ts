@@ -7,6 +7,8 @@ import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { SessionManager, type LlmConfig } from '../agent-runtime';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
+import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
+import { CoderSessionRepo } from '../db/coder-session-repo';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -25,6 +27,8 @@ export function createIssueRoutes(
   _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
   workflowLogRepo?: WorkflowLogRepo,
+  agentSessionMessageRepo?: AgentSessionMessageRepo,
+  coderSessionRepo?: CoderSessionRepo,
 ): Hono {
   const app = new Hono();
 
@@ -921,6 +925,127 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: entries
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/agent-session', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (!agentSessionMessageRepo) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'AgentSessionMessageRepo not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const messages = agentSessionMessageRepo.findByIssueId(issue.id);
+      const data = messages.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        toolCalls: m.toolCalls,
+        toolCallId: m.toolCallId,
+        toolName: m.toolName,
+        toolResult: m.toolResult,
+        stepIndex: m.stepIndex,
+        createdAt: m.createdAt,
+      }));
+
+      const response: ApiResponse = {
+        success: true,
+        data
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/coder-sessions', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (!coderSessionRepo || !workflowLogRepo) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'CoderSessionRepo or WorkflowLogRepo not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const sessions = coderSessionRepo.findByIssueId(issue.id);
+      const data = sessions.map(session => {
+        const logs = workflowLogRepo.findBySessionId(session.acpSessionId);
+        return {
+          id: session.id,
+          acpSessionId: session.acpSessionId,
+          executionId: session.executionId,
+          taskDescription: session.taskDescription,
+          status: session.status,
+          createdAt: session.createdAt,
+          completedAt: session.completedAt,
+          workflowLogs: logs.map(l => ({
+            id: l.id,
+            eventType: l.eventType,
+            data: (() => { try { return JSON.parse(l.data); } catch { return l.data; } })(),
+            createdAt: l.createdAt,
+          })),
+        };
+      });
+
+      const response: ApiResponse = {
+        success: true,
+        data
       };
       return c.json(response);
     } catch (error) {
