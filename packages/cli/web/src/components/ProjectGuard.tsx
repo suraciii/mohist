@@ -16,7 +16,7 @@ export function ProjectGuard() {
     }
   }, [projectId, projects, setProjectId])
 
-  if (location.pathname === '/settings') {
+  if (location.pathname === '/settings' || location.pathname === '/logs') {
     return <Outlet />
   }
 

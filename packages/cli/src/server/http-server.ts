@@ -31,11 +31,6 @@ export class HttpServer {
 
   private setupMiddleware(): void {
     this.app.use('*', async (c, next) => {
-      if (c.req.path.startsWith('/api/logs')) {
-        await next();
-        return;
-      }
-
       const start = Date.now();
       await next();
       const duration = Date.now() - start;

@@ -68,10 +68,14 @@ export function useLogs(): UseLogsReturn {
 
       const parsed: ParsedLogEntry[] = result.lines.map(parseLogLine)
 
-      setEntries((prev: ParsedLogEntry[]) => {
-        const next = [...prev, ...parsed]
-        return next.length > MAX_ENTRIES ? next.slice(next.length - MAX_ENTRIES) : next
-      })
+      if (result.reset) {
+        setEntries(parsed)
+      } else {
+        setEntries((prev: ParsedLogEntry[]) => {
+          const next = [...prev, ...parsed]
+          return next.length > MAX_ENTRIES ? next.slice(next.length - MAX_ENTRIES) : next
+        })
+      }
 
       cursorRef.current = result.cursor
       setCursor(result.cursor)
