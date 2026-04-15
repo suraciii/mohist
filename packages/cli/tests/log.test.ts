@@ -15,6 +15,7 @@ describe("Log", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks()
+    await Log.init({ print: true, level: "INFO" })
   })
 
   describe("create", () => {

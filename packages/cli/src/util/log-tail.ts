@@ -17,6 +17,7 @@ export type LogTailResult = {
   cursor: number
   lines: string[]
   truncated: boolean
+  reset: boolean
 }
 
 function isRollingLogFile(file: string): boolean {
@@ -55,8 +56,72 @@ async function readLogSlice(params: {
 }): Promise<Omit<LogTailResult, "file">> {
   const stat = await fs.stat(params.file).catch(() => null)
   if (!stat) {
-    return { cursor: 0, lines: [], truncated: false }
+    return { cursor: 0, lines: [], truncated: false, reset: false }
   }
+
+  const size = stat.size
+  const maxBytes = clamp(params.maxBytes, 1, MAX_BYTES)
+  const limit = clamp(params.limit, 1, MAX_LIMIT)
+  const cursor =
+    typeof params.cursor === "number" && Number.isFinite(params.cursor)
+      ? Math.max(0, Math.floor(params.cursor))
+      : undefined
+
+  let truncated = false
+  let reset = false
+  let start: number
+
+  if (cursor != null) {
+    if (cursor > size) {
+      start = Math.max(0, size - maxBytes)
+      truncated = start > 0
+      reset = true
+    } else {
+      start = cursor
+      if (size - start > maxBytes) {
+        start = Math.max(0, size - maxBytes)
+        truncated = true
+        reset = true
+      }
+    }
+  } else {
+    start = Math.max(0, size - maxBytes)
+    truncated = start > 0
+  }
+
+  if (size === 0 || size <= start) {
+    return { cursor: size, lines: [], truncated, reset }
+  }
+
+  const handle = await fs.open(params.file, "r")
+  try {
+    let prefix = ""
+    if (start > 0) {
+      const prefixBuf = Buffer.alloc(1)
+      const prefixRead = await handle.read(prefixBuf, 0, 1, start - 1)
+      prefix = prefixBuf.toString("utf8", 0, prefixRead.bytesRead)
+    }
+
+    const length = Math.max(0, size - start)
+    const buffer = Buffer.alloc(length)
+    const readResult = await handle.read(buffer, 0, length, start)
+    const text = buffer.toString("utf8", 0, readResult.bytesRead)
+    let lines = text.split("\n")
+    if (start > 0 && prefix !== "\n") {
+      lines = lines.slice(1)
+    }
+    if (lines.length > 0 && lines[lines.length - 1] === "") {
+      lines = lines.slice(0, -1)
+    }
+    if (lines.length > limit) {
+      lines = lines.slice(lines.length - limit)
+    }
+
+    return { cursor: size, lines, truncated, reset }
+  } finally {
+    await handle.close()
+  }
+}
 
   const size = stat.size
   const maxBytes = clamp(params.maxBytes, 1, MAX_BYTES)

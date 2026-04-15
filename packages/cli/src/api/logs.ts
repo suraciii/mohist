@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { ApiResponse } from '../types';
-import { readLogTail } from '../util/log-tail';
+import { readLogTail, LogTailResult } from '../util/log-tail';
 
 export function createLogRoutes(): Hono {
   const app = new Hono();
@@ -15,7 +15,7 @@ export function createLogRoutes(): Hono {
       if (cursorParam != null && cursorParam !== '') {
         cursor = Number(cursorParam);
         if (!Number.isFinite(cursor) || cursor < 0) {
-          const response: ApiResponse = {
+          const response: ApiResponse<never> = {
             success: false,
             error: 'Invalid cursor: must be a non-negative number',
           };
@@ -27,7 +27,7 @@ export function createLogRoutes(): Hono {
       if (limitParam != null && limitParam !== '') {
         limit = Number(limitParam);
         if (!Number.isFinite(limit) || limit <= 0) {
-          const response: ApiResponse = {
+          const response: ApiResponse<never> = {
             success: false,
             error: 'Invalid limit: must be a positive number',
           };
@@ -39,7 +39,7 @@ export function createLogRoutes(): Hono {
       if (maxBytesParam != null && maxBytesParam !== '') {
         maxBytes = Number(maxBytesParam);
         if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
-          const response: ApiResponse = {
+          const response: ApiResponse<never> = {
             success: false,
             error: 'Invalid maxBytes: must be a positive number',
           };
@@ -48,13 +48,13 @@ export function createLogRoutes(): Hono {
       }
 
       const result = await readLogTail({ cursor, limit, maxBytes });
-      const response: ApiResponse = {
+      const response: ApiResponse<LogTailResult> = {
         success: true,
         data: result,
       };
       return c.json(response);
     } catch (error) {
-      const response: ApiResponse = {
+      const response: ApiResponse<never> = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       };

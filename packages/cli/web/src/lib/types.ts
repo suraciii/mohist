@@ -128,6 +128,7 @@ export interface LogTailResult {
   cursor: number
   lines: string[]
   truncated: boolean
+  reset: boolean
 }
 
 export type ModelBadge = 'free' | 'latest'

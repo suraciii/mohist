@@ -84,7 +84,7 @@ export function LogsPage() {
   useEffect(() => {
     if (!autoFollow || userPausedAutoFollow) return
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [filtered.length, autoFollow, userPausedAutoFollow])
+  }, [entries.length, autoFollow, userPausedAutoFollow])
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current
