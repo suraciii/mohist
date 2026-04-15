@@ -19,7 +19,7 @@
         "npm test passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "参照 design.md D1 + D5 决策。只改 write 函数的行为，不改 Logger 接口。--print-logs 走默认 write（stderr 纯文本），正常模式走文件 JSONL write。diffMs 保留现有纯文本中的时间差信息。rolling 文件名使用 LOG_PREFIX='mohist' + formatLocalDate() + LOG_SUFFIX='.log'。"
     },
     {

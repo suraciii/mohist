@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Started: 2026-04-15T05:05:53.732Z
+
+---
+
+## 2026-04-15T05:12:30Z — T-001 改造 Log 系统为 JSONL 格式输出
+**Done:** Modified `packages/cli/src/util/log.ts`:
+- File output changed from plain text to JSONL format (each line = JSON with level, time, diffMs, service, message + extra fields)
+- Log filename changed from `YYYY-MM-DDTHHMMSS.log` to rolling `mohist-YYYY-MM-DD.log`
+- Cleanup strategy changed from "keep 10 files" to "delete files older than 24h"
+- `--print-logs` mode preserved as plain text stderr output
+- Added `printMode` flag to route between text (`print:true`) and JSONL (`print:false`) builds
+- Updated `log.test.ts` with 4 new JSONL-specific tests (format validation, extra fields, level values, rolling filename)
+**Learnings:** Namespace `export {}` syntax not allowed in TS namespaces — need to use individual function/const exports instead.
+**Next:** T-002 (log-tail read function)
+
