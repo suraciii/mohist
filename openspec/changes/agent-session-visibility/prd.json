@@ -45,7 +45,7 @@
         "npm run build succeeds"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Also fix the parallel tool call executionId bug by replacing single currentExecutionId with a toolCallId -> executionId Map"
     },
     {

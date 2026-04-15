@@ -19,3 +19,14 @@ Started: 2026-04-15T10:23:07.116Z
 - Exported from db/index.ts
 - npm run build succeeds
 - Next: T-003 (persist Main Agent messages) and T-004 (record coder session mapping)
+
+[2026-04-15] T-003 completed
+- Added persistMessage helper to agent-loop.ts that extracts role/content/tool_calls/tool_result from ModelMessage
+- Assistant messages: extracts text content and tool_call parts (with toolCallId, toolName, args as JSON)
+- Tool messages: extracts each tool-result part (toolCallId, toolName, output as toolResult)
+- System/user messages: stored as-is with content stringified if needed
+- Added AgentSessionMessageRepo to AgentLoopOptions, MainAgentContext
+- Wired repo through StateManager -> AgentRunnerService -> MainAgentContext -> runAgentLoop
+- step_index aligns with result.steps array index, message_index aligns within step.response.messages
+- npm run build succeeds
+- Next: T-004 (record coder session mapping) or T-005 (REST API endpoints)
