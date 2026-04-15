@@ -39,3 +39,14 @@ Started: 2026-04-15T05:05:53.732Z
 - CLI typecheck 通过
 - Learnings: rate limiter 当前仅在 providers.ts 中按路由使用，非全局 middleware；logs 路由自然不受限制
 - Next: T-004 实现 useLogs hook
+
+[2026-04-15] T-004: Implemented useLogs hook
+- Created packages/cli/web/src/hooks/useLogs.ts with:
+  - parseLogLine: JSONL parser with fallback for invalid JSON
+  - useLogs hook: 3s polling, cursor-based incremental reads, 2000 entry buffer cap
+  - Page Visibility API integration: pauses polling when tab hidden, immediate fetch on return
+  - Proper cleanup of intervals and event listeners on unmount
+- Returns: entries, loading, error, refresh, cursor, truncated, file
+- Fixed naming bug (parseLogEntry -> parseLogLine) and typed setEntries callback
+- Typecheck passes
+- Next: T-005 (LogsPage component and routing)
