@@ -38,7 +38,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "核心函数，参照 opensrc/openclaw/src/logging/log-tail.ts 的 readLogSlice + resolveLogFile 实现。使用 fs.open + handle.read 的文件读取方式。rolling 回退通过正则 `/^mohist-\\d{4}-\\d{2}-\\d{2}\\.log$/` 匹配目录并选择 mtimeMs 最新的文件。"
     },
     {

@@ -14,3 +14,16 @@ Started: 2026-04-15T05:05:53.732Z
 **Learnings:** Namespace `export {}` syntax not allowed in TS namespaces — need to use individual function/const exports instead.
 **Next:** T-002 (log-tail read function)
 
+---
+
+## 2026-04-15T05:20:00Z — T-002 实现 log-tail 读取函数
+**Done:** Created `packages/cli/src/util/log-tail.ts`:
+- `readLogTail()` main function — reads JSONL log lines from current log file
+- `resolveLogFile()` — when primary file doesn't exist and matches rolling pattern, finds newest `mohist-YYYY-MM-DD.log` in logs dir by mtime
+- `readLogSlice()` — core file reading with cursor-based pagination, limit, maxBytes
+- Handles: no cursor (tail from end), cursor (incremental), cursor > size (reset), file not found (empty), truncation
+- Lines returned as raw strings (unparsed)
+- Added inline `clamp()` helper (project has no shared clamp util)
+**Learnings:** TS target ES2022 doesn't have `Array.prototype.toSorted()` — must use mutable `.sort()`. `os` import not needed since `Log.file()` provides the path.
+**Next:** T-003 (GET /api/logs/tail API route)
+
