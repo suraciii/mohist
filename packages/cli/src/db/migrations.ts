@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -142,6 +142,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 12) {
     migrateToVersion12(db);
+  }
+
+  if (currentVersion < 13) {
+    migrateToVersion13(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -411,5 +415,32 @@ function migrateToVersion12(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 12);
+  });
+}
+
+const CREATE_CODER_SESSION_TABLE = `
+CREATE TABLE IF NOT EXISTS coder_session (
+  id                TEXT PRIMARY KEY,
+  issue_id          TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  acp_session_id    TEXT NOT NULL,
+  execution_id      TEXT,
+  task_description  TEXT,
+  status            TEXT NOT NULL DEFAULT 'running',
+  created_at        TEXT NOT NULL,
+  completed_at      TEXT
+);
+`;
+
+const CREATE_CODER_SESSION_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_coder_session_issue_id ON coder_session(issue_id);',
+];
+
+function migrateToVersion13(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_CODER_SESSION_TABLE);
+    for (const indexSql of CREATE_CODER_SESSION_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 13);
   });
 }
