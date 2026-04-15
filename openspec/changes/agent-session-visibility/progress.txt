@@ -40,3 +40,12 @@ Started: 2026-04-15T10:23:07.116Z
 - Build succeeds, all tests pass (e2e failures are pre-existing)
 - Learning: coderSessionId must be declared before try block since catch block needs access to it
 - Next: T-005 Add REST API endpoints for session data
+
+[2026-04-15] T-005 completed.
+- Added GET /issues/:number/agent-session endpoint returning agent_session_message rows with fields: id, role, content, toolCalls, toolCallId, toolName, toolResult, stepIndex, createdAt
+- Added GET /issues/:number/coder-sessions endpoint returning coder_session rows with nested workflowLogs (filtered by acpSessionId)
+- Both endpoints return empty arrays when no data exists (repos return empty arrays from findByIssueId/findBySessionId)
+- Extended createIssueRoutes signature with agentSessionMessageRepo and coderSessionRepo params
+- Wired repos through server/index.ts
+- Build passes successfully
+- Next: T-006 (frontend types and SSE subscription)
