@@ -147,3 +147,51 @@ export interface ModelProvider {
   configured: boolean
   models: Model[]
 }
+
+export interface AgentSessionMessageItem {
+  id: string
+  role: string
+  content: string | null
+  toolCalls: string | null
+  toolCallId: string | null
+  toolName: string | null
+  toolResult: string | null
+  stepIndex: number
+  createdAt: string
+}
+
+export interface WorkflowLogItem {
+  id: string
+  eventType: string
+  data: unknown
+  createdAt: string
+}
+
+export interface CoderSessionItem {
+  id: string
+  acpSessionId: string
+  executionId: string | null
+  taskDescription: string | null
+  status: string
+  createdAt: string
+  completedAt: string | null
+  workflowLogs: WorkflowLogItem[]
+}
+
+export interface ToolCallEntry {
+  executionId: string
+  toolName: string
+  state: 'started' | 'completed' | 'failed'
+  args?: string
+  result?: string
+  error?: string
+  duration?: number
+  stepIndex?: number
+  timestamp: number
+}
+
+export interface CoderTextBuffer {
+  executionId: string
+  acpSessionId: string
+  text: string
+}

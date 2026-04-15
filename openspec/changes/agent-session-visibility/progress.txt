@@ -59,3 +59,23 @@ Started: 2026-04-15T10:23:07.116Z
 - Text buffer and tool call timeline accumulation will be handled in T-007 (useAgentSession hook)
 - Learnings: Pre-existing TS errors in CustomProviderDialog.tsx and ProviderConnectDialog.tsx (unused imports) - not related to this change
 - Next: T-007 (useAgentSession hook)
+
+## 2026-04-15 T-007 Create useAgentSession hook for historical + live data
+
+### What was done
+- Added frontend types to `types.ts`: `AgentSessionMessageItem`, `CoderSessionItem`, `WorkflowLogItem`, `ToolCallEntry`, `CoderTextBuffer`
+- Added API methods `getAgentSession()` and `getCoderSessions()` to `api.ts`
+- Created `useAgentSession.ts` hook with:
+  - React Query for historical data fetching (GET /agent-session + GET /coder-sessions)
+  - Live SSE event subscription via `onAgentEvent` global emitter for `agent_text_chunk`, `main_tool_call`, `coder_text_chunk`, `coder_tool_call`
+  - `useRef` text buffer with `requestAnimationFrame` + 100ms interval batched rendering
+  - `executionId`-based dedup via `seenExecutionIdRef` Set to prevent duplicate tool call entries when historical and live data overlap
+  - `isStreaming` state driven by `agent_text_chunk` events and `agentStatus.running` check
+  - `historyLoadedRef` guard to prevent re-processing historical data on re-renders
+
+### Learnings
+- `onAgentEvent` only accepts `AgentDetailEventMap` keys, not the broader `EventMap` keys like `agent_completed`/`agent_error`. Used `agentStatus` query polling instead for streaming state.
+- Pre-existing TS errors in `CustomProviderDialog.tsx` and `ProviderConnectDialog.tsx` (unused imports) are unrelated to this change.
+
+### Next steps
+- T-008: Build AgentSessionPanel component using this hook

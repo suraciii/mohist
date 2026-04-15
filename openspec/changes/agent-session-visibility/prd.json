@@ -107,7 +107,7 @@
         "npm run build succeeds in packages/cli/web"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Use useRef for text buffer, requestAnimationFrame for batched renders"
     },
     {
