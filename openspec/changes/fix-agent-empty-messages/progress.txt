@@ -17,3 +17,12 @@ Started: 2026-04-15T08:14:30.879Z
 - Stage import was already present; no new imports needed
 - Build passes
 - Next: T-003 Fix reopen endpoint to resume agent or reset stage
+
+[2026-04-15] T-003: Fixed reopen endpoint to resume agent or reset stage.
+- When agentRunner has pausedSession and agent is not running: auto-resume agent with appropriate message
+- When agentRunner exists but no pausedSession: reset stage to Draft and clear approval_state
+- When agentRunner is unavailable: only restore status (existing behavior)
+- Each branch returns a distinct message reflecting the actual operation performed
+- npm run build passes
+- Learnings: approve endpoint pattern was directly reusable for worktreePath resolution and resume call
+- Next steps: All 3 tasks complete, ready for archive
