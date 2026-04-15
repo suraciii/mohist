@@ -27,6 +27,13 @@ export async function runAgentLoop(
   options?: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
   const maxSteps = options?.maxSteps ?? 20;
+  if (session.messages.length === 0) {
+    sessionManager.appendMessage(session.id, {
+      role: 'user',
+      content:
+        'Start working on the current issue. Begin by reading the workflow configuration using read_workflow.',
+    });
+  }
   const messages = session.messages;
   const tools = toolRegistry.toToolSet();
   const eventBus = options?.eventBus;

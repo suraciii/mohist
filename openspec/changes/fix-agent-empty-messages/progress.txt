@@ -1,5 +1,12 @@
 # Ralph Progress Log
-Started: 2026-04-15T07:50:15.621Z
+Started: 2026-04-15T08:14:30.879Z
 
 ---
 
+
+[2026-04-15] T-001 Inject initial message when session messages is empty
+- Added empty messages check in runAgentLoop before streamText call
+- When session.messages is empty, injects a user message via sessionManager.appendMessage
+- Message content: "Start working on the current issue. Begin by reading the workflow configuration using read_workflow."
+- Build passes successfully
+- Next: T-002 (Roll back stage to Draft on agent failure)

@@ -14,7 +14,7 @@
         "npm run build 通过"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "修改 agent-loop.ts 第 30 行附近，在 const messages = session.messages 之后添加空数组检查并调用 sessionManager.appendMessage。"
     },
     {
