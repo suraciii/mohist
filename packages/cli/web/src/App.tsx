@@ -9,6 +9,7 @@ import { IssueDetailPage } from './components/IssueDetailPage'
 import { ExplorePage } from './components/ExplorePage'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
 import { SettingsPage } from './components/SettingsPage'
+import { LogsPage } from './components/LogsPage'
 import { ProjectGuard } from './components/ProjectGuard'
 
 function KanbanView() {
@@ -138,6 +139,7 @@ function AppContent() {
           <Route path="/explore" element={<ExploreRedirect />} />
           <Route path="/explore/:id" element={<ExplorePage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/logs" element={<LogsPage />} />
         </Route>
       </Routes>
     </div>

@@ -50,3 +50,24 @@ Started: 2026-04-15T05:05:53.732Z
 - Fixed naming bug (parseLogEntry -> parseLogLine) and typed setEntries callback
 - Typecheck passes
 - Next: T-005 (LogsPage component and routing)
+
+## 2026-04-15 — T-005: 实现 LogsPage 组件和路由集成
+
+**Done:**
+- Created `packages/cli/web/src/components/LogsPage.tsx` with:
+  - Structured log display (time | level with color | service tag | message)
+  - Level filter chips (DEBUG/INFO/WARN/ERROR) — toggleable
+  - Text search filtering across message, service, raw fields
+  - Auto-follow toggle with scroll-based pause/resume (10px threshold)
+  - Truncation warning banner when API returns truncated=true
+  - File path display
+  - Export button (downloads filtered logs as .txt, disabled when empty)
+- Added `/logs` route in `App.tsx`
+- Added Logs nav link in `Header.tsx` between Explore and Settings (text hidden on narrow screens via `hidden sm:inline`)
+
+**Learnings:**
+- The pre-existing TS6133 errors in CustomProviderDialog.tsx and ProviderConnectDialog.tsx are not related to this change
+- `parseLogLine` is already exported from useLogs.ts but only needed inside the hook; the page component uses the pre-parsed entries directly
+
+**Next steps:**
+- All 5/5 tasks complete for web-ui-system-logs change
