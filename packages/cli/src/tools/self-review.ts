@@ -2,7 +2,7 @@ import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
-import { runSelfReview, canGeneratePrd } from '../openspec/self-review';
+import { runSelfReview, canGenerateTasks } from '../openspec/self-review';
 import type { Task, TasksFile } from '../artifacts/change-artifacts-manager';
 
 export interface SelfReviewToolContext {
@@ -210,7 +210,7 @@ export function createGenerateTasksTool(context: SelfReviewToolContext): ToolIns
 
       const tasksPath = path.join(resolved, 'tasks.json');
 
-      if (!canGeneratePrd(resolved)) {
+      if (!canGenerateTasks(resolved)) {
         return 'Error: Cannot generate tasks.json. Self-review has not passed or specs are incomplete.';
       }
 
