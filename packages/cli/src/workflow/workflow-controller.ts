@@ -7,7 +7,9 @@ import type { PlanResult, ReviewResult } from '../types/workflow-results';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
-import { buildArtifactPrompt, buildSelfReviewPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import type { IssueRepo } from '../db/issue-repo';
+import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'workflow' });
@@ -46,23 +48,39 @@ export interface StageResult {
 }
 
 export interface WorkflowControllerOptions {
-  plannerAgent: PlannerAgent;
-  reviewerAgent: ReviewerAgent;
+  plannerAgent?: PlannerAgent;
+  reviewerAgent?: ReviewerAgent;
   artifactManager: ChangeArtifactsManager;
   worktreePath: string;
+  issueRepo?: IssueRepo;
+  eventBus?: EventBus;
+  projectId?: string;
+}
+
+export interface PipelineResult {
+  completed: boolean;
+  stage: Stage;
+  gateRequired: boolean;
+  message?: string;
 }
 
 export class WorkflowController {
-  private plannerAgent: PlannerAgent;
-  private reviewerAgent: ReviewerAgent;
+  private plannerAgent?: PlannerAgent;
+  private reviewerAgent?: ReviewerAgent;
   private artifactManager: ChangeArtifactsManager;
   private worktreePath: string;
+  private issueRepo?: IssueRepo;
+  private eventBus?: EventBus;
+  private projectId?: string;
 
   constructor(options: WorkflowControllerOptions) {
     this.plannerAgent = options.plannerAgent;
     this.reviewerAgent = options.reviewerAgent;
     this.artifactManager = options.artifactManager;
     this.worktreePath = options.worktreePath;
+    this.issueRepo = options.issueRepo;
+    this.eventBus = options.eventBus;
+    this.projectId = options.projectId;
   }
 
   validateTransition(from: Stage, to: Stage): boolean {
@@ -109,6 +127,14 @@ export class WorkflowController {
 
   private async executePlanStage(issue: Issue): Promise<StageResult> {
     try {
+      if (!this.plannerAgent) {
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: 'PlannerAgent not configured',
+        };
+      }
       const result = await this.plannerAgent.plan({
         issue,
         worktreePath: this.worktreePath,
@@ -311,6 +337,14 @@ export class WorkflowController {
 
   private async executeReviewStage(issue: Issue): Promise<StageResult> {
     try {
+      if (!this.reviewerAgent) {
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: 'ReviewerAgent not configured',
+        };
+      }
       const result = await this.reviewerAgent.review({
         issue,
         worktreePath: this.worktreePath,
@@ -437,6 +471,200 @@ export class WorkflowController {
         requiresApproval: false,
         output: null,
         message: `Plan stage error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  async run(issue: Issue, acpOptions: AcpConnectionOptions): Promise<PipelineResult> {
+    if (!this.issueRepo || !this.eventBus) {
+      return {
+        completed: false,
+        stage: issue.stage,
+        gateRequired: false,
+        message: 'Pipeline requires issueRepo and eventBus',
+      };
+    }
+
+    let currentIssue = issue;
+
+    while (currentIssue.stage !== Stage.Done) {
+      switch (currentIssue.stage) {
+        case Stage.Draft:
+        case Stage.Plan: {
+          const planResult = await this.runPlanStage(currentIssue, acpOptions);
+          if (!planResult.success) {
+            return {
+              completed: false,
+              stage: Stage.Plan,
+              gateRequired: false,
+              message: planResult.message,
+            };
+          }
+
+          this.issueRepo.updateStage(currentIssue.id, Stage.Plan);
+          this.issueRepo.setApprovalState(currentIssue.id, {
+            stage: Stage.Plan,
+            status: 'awaiting',
+            output: planResult.output,
+            requestedAt: new Date().toISOString(),
+          });
+          this.eventBus.emit('approval_requested', {
+            issueId: currentIssue.id,
+            projectId: this.projectId ?? currentIssue.projectId,
+            stage: Stage.Plan,
+          });
+
+          return {
+            completed: false,
+            stage: Stage.Plan,
+            gateRequired: true,
+            message: 'Plan completed, awaiting approval',
+          };
+        }
+
+        case Stage.Build: {
+          const buildResult = await this.runPipelineBuildStage(currentIssue);
+          if (!buildResult.success) {
+            return {
+              completed: false,
+              stage: Stage.Build,
+              gateRequired: false,
+              message: buildResult.message,
+            };
+          }
+
+          currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Review)!;
+          break;
+        }
+
+        case Stage.Review: {
+          const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
+          if (!reviewResult.success) {
+            return {
+              completed: false,
+              stage: Stage.Review,
+              gateRequired: false,
+              message: reviewResult.message,
+            };
+          }
+
+          this.issueRepo.setApprovalState(currentIssue.id, {
+            stage: Stage.Review,
+            status: 'awaiting',
+            output: reviewResult.output,
+            requestedAt: new Date().toISOString(),
+          });
+          this.eventBus.emit('approval_requested', {
+            issueId: currentIssue.id,
+            projectId: this.projectId ?? currentIssue.projectId,
+            stage: Stage.Review,
+          });
+
+          return {
+            completed: false,
+            stage: Stage.Review,
+            gateRequired: true,
+            message: 'Review completed, awaiting approval',
+          };
+        }
+
+        default:
+          return {
+            completed: false,
+            stage: currentIssue.stage,
+            gateRequired: false,
+            message: `Pipeline cannot handle stage: ${currentIssue.stage}`,
+          };
+      }
+    }
+
+    this.issueRepo.updateStage(currentIssue.id, Stage.Done);
+    this.issueRepo.clearApprovalState(currentIssue.id);
+    return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
+  }
+
+  private async runPipelineBuildStage(issue: Issue): Promise<StageResult> {
+    const change = detectOpenSpecChange(this.worktreePath, issue);
+
+    if (change) {
+      const executor = new RalphExecutor({
+        worktreePath: this.worktreePath,
+        projectPath: this.worktreePath,
+        issueId: issue.id,
+        projectId: issue.projectId,
+      });
+
+      const result: RalphLoopResult = await executor.execute(change);
+
+      return {
+        success: result.success,
+        requiresApproval: false,
+        output: {
+          stage: Stage.Build,
+          issueNumber: issue.number,
+          completedTasks: result.completed,
+          failedTasks: result.failed,
+          totalTasks: result.total,
+        },
+        message: result.success
+          ? `Build completed - ${result.completed}/${result.total} tasks executed`
+          : `Build completed with ${result.failed} failed task(s)`,
+      };
+    }
+
+    return {
+      success: false,
+      requiresApproval: false,
+      output: null,
+      message: `No OpenSpec change found for issue #${issue.number}`,
+    };
+  }
+
+  private async runPipelineReviewStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+    const changeDir = this.artifactManager.getChangeDir(issue.number);
+    if (!changeDir) {
+      return {
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `Change directory not found for issue #${issue.number}`,
+      };
+    }
+
+    let conn: AcpConnection | undefined;
+    try {
+      conn = await createAcpConnection(acpOptions);
+
+      const reviewerPrompt = buildReviewerPrompt(issue, changeDir);
+      const result = await conn.prompt(reviewerPrompt);
+
+      await conn.close();
+
+      return {
+        success: result.success,
+        requiresApproval: true,
+        output: {
+          stage: Stage.Review,
+          issueNumber: issue.number,
+          reviewReport: result.text,
+        },
+        message: result.success
+          ? 'Review completed, awaiting user approval'
+          : `Review failed: ${result.error ?? 'unknown error'}`,
+      };
+    } catch (err) {
+      if (conn) {
+        try {
+          await conn.close();
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      return {
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `Review stage error: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }

@@ -58,3 +58,37 @@ Started: 2026-04-16T12:10:01.067Z
 
 ### Next steps
 - T-004: Implement pipeline core loop, gate controller, and review stage
+
+---
+
+## 2026-04-16T00:00:00Z - T-004 Implement pipeline core loop, gate controller, and review stage
+
+### What was done
+- Added `PipelineResult` interface to `workflow-controller.ts` with `completed`, `stage`, `gateRequired`, `message` fields
+- Added `run(issue, acpOptions)` method to `WorkflowController` — the main pipeline loop:
+  - Fixed order: plan → gate → build → review → gate → done (no LLM decisions)
+  - Plan gate: sets `approvalState` to `awaiting`, emits `approval_requested`, returns
+  - Build → Review: auto-advance without gate (per spec: "No gate after build")
+  - Review gate: same pattern as plan gate
+  - Completion: updates stage to Done, clears approvalState
+- Added `runPipelineBuildStage(issue)` — uses `RalphExecutor` via `detectOpenSpecChange()` (unchanged logic from existing `executeBuildStage`)
+- Added `runPipelineReviewStage(issue, acpOptions)` — uses `AcpConnection` with `buildReviewerPrompt()`, single prompt round
+- Extended `WorkflowControllerOptions` with optional `issueRepo`, `eventBus`, `projectId` (pipeline-only dependencies)
+- Made `plannerAgent`/`reviewerAgent` optional in options (backward compatible)
+- Added to `AgentRunnerService`:
+  - `pendingGates` Map for tracking issues at gates (replaces `pausedSessions` for pipeline path)
+  - `hasPendingGate(issueNumber)` — check if issue is waiting at a pipeline gate
+  - `startPipeline(...)` — creates WorkflowController and calls `run()`
+  - `resumePipeline(...)` — re-invokes `run()` after gate approval
+  - `executePipeline()` — shared private method that runs pipeline and handles gate tracking, error handling, event emission
+- Exported `PipelineResult` from `workflow/index.ts`
+- Typecheck and build pass
+
+### Learnings
+- Pipeline `run()` reads current `issue.stage` from parameter, so re-invocation naturally picks up from the right stage after gate approval
+- `pendingGates` tracks gate state by issue number, mirroring the `pausedSessions` pattern for backward compatibility
+- Old `start()`/`resume()` methods preserved untouched — they'll be removed in T-006/T-007 when MainAgent is deleted
+- `AcpConnectionOptions` passed to `run()` as parameter since it contains execution-specific context (issueId, projectId, etc.)
+
+### Next steps
+- T-005: Implement ExploreService

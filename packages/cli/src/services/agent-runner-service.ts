@@ -5,7 +5,10 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import { SessionManager, type Session, type LlmConfig } from '../agent-runtime';
+import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { runMainAgent } from '../agents/main-agent';
+import { WorkflowController, type PipelineResult } from '../workflow/workflow-controller';
+import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue } from '../types';
 import { EventBus } from './event-bus';
 import { Stage } from '../types';
@@ -57,10 +60,18 @@ export interface WaitingQuestion {
 
 const log = Log.create({ service: 'agent-runner' });
 
+export interface PipelineGateInfo {
+  issueId: string;
+  issueNumber: number;
+  projectId: string;
+  stage: Stage;
+}
+
 export class AgentRunnerService {
   private activeAgents = new Map<string, RunningAgent>();
   private agentQueue: QueuedAgent[] = [];
   private pausedSessions = new Map<number, Session>();
+  private pendingGates = new Map<number, PipelineGateInfo>();
   private waitingQuestions = new Map<string, WaitingQuestion>();
   private readonly maxConcurrentAgents: number;
   private readonly recoverableIssues: RecoverableIssue[];
@@ -182,6 +193,143 @@ export class AgentRunnerService {
 
   hasPausedSession(issueNumber: number): boolean {
     return this.pausedSessions.has(issueNumber);
+  }
+
+  hasPendingGate(issueNumber: number): boolean {
+    return this.pendingGates.has(issueNumber);
+  }
+
+  startPipeline(
+    issue: Issue,
+    projectId: string,
+    issueRepo: IssueRepo,
+    worktreePath: string,
+    acpOptions: AcpConnectionOptions,
+    updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
+  ): { started: boolean; error?: string } {
+    if (this.activeAgents.has(issue.id)) {
+      return { started: false, error: `Issue #${issue.number} already has an agent running` };
+    }
+
+    const pendingApproval = issueRepo.findPendingApprovalByIssueId(issue.id);
+    if (pendingApproval) {
+      return {
+        started: false,
+        error: `Issue #${issue.number} has pending approval.`,
+      };
+    }
+
+    this.executePipeline(issue, projectId, issueRepo, worktreePath, acpOptions, updateIssueStatus);
+    return { started: true };
+  }
+
+  resumePipeline(
+    issue: Issue,
+    projectId: string,
+    issueRepo: IssueRepo,
+    worktreePath: string,
+    acpOptions: AcpConnectionOptions,
+    updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
+  ): void {
+    if (this.activeAgents.has(issue.id)) {
+      throw new Error(`Issue #${issue.number} is already running`);
+    }
+
+    this.pendingGates.delete(issue.number);
+    this.executePipeline(issue, projectId, issueRepo, worktreePath, acpOptions, updateIssueStatus);
+  }
+
+  private executePipeline(
+    issue: Issue,
+    projectId: string,
+    issueRepo: IssueRepo,
+    worktreePath: string,
+    acpOptions: AcpConnectionOptions,
+    updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
+  ): void {
+    this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
+    log.info('Pipeline started', { issueNumber: issue.number, projectId });
+
+    const startTime = Date.now();
+    const promise = (async () => {
+      try {
+        const artifactManager = new ChangeArtifactsManager(worktreePath);
+        const pipeline = new WorkflowController({
+          artifactManager,
+          worktreePath,
+          issueRepo,
+          eventBus: this.eventBus,
+          projectId,
+        });
+
+        const result: PipelineResult = await pipeline.run(issue, acpOptions);
+
+        if (result.gateRequired) {
+          this.pendingGates.set(issue.number, {
+            issueId: issue.id,
+            issueNumber: issue.number,
+            projectId,
+            stage: result.stage,
+          });
+          this.eventBus.emit('agent_paused', {
+            issueId: issue.id,
+            projectId,
+            issueNumber: issue.number,
+          });
+          log.info('Pipeline paused at gate', {
+            issueNumber: issue.number,
+            stage: result.stage,
+          });
+        }
+
+        const duration = Date.now() - startTime;
+        log.info('Pipeline run completed', { issueNumber: issue.number, duration, completed: result.completed });
+        if (result.completed) {
+          this.eventBus.emit('agent_completed', { issueId: issue.id, projectId });
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const currentIssue = issueRepo.findById(issue.id);
+        log.error('Pipeline execution failed', {
+          issueNumber: issue.number,
+          stage: currentIssue?.stage ?? 'unknown',
+          error: errorMsg,
+        });
+        try {
+          updateIssueStatus?.(issue.id, IssueStatus.Blocked);
+        } catch (updateErr) {
+          log.error('Failed to update issue status to blocked', {
+            issueNumber: issue.number,
+            error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+          });
+        }
+        try {
+          issueRepo.updateStage(issue.id, Stage.Draft);
+          issueRepo.clearApprovalState(issue.id);
+        } catch (rollbackErr) {
+          log.error('Failed to rollback stage to draft', {
+            issueNumber: issue.number,
+            error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+          });
+        }
+        this.eventBus.emit('agent_error', {
+          issueId: issue.id,
+          projectId,
+          error: errorMsg,
+        });
+      } finally {
+        this.activeAgents.delete(issue.id);
+        this.clearWaiting(issue.id);
+        this.processQueue();
+      }
+    })();
+
+    this.activeAgents.set(issue.id, {
+      issueId: issue.id,
+      issueNumber: issue.number,
+      promise,
+      projectId,
+    });
   }
 
   private shouldPauseAtCurrentStage(

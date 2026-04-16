@@ -60,8 +60,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added PipelineResult type, run() method with plan→gate→build→review→gate→done loop. runPipelineBuildStage uses RalphExecutor. runPipelineReviewStage uses AcpConnection+buildReviewerPrompt. AgentRunnerService has startPipeline/resumePipeline/hasPendingGate for pipeline gate management. Old methods preserved for backward compat."
     },
     {
       "id": "T-005",
