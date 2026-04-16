@@ -132,14 +132,9 @@ interface TaskStatusEntry {
   error?: string;
 }
 
-export function getOrderValue(order: number | string | undefined): number {
+export function getOrderValue(order: number | undefined): number {
   if (order === undefined) return 999999;
-  if (typeof order === 'number') return order;
-  if (typeof order === 'string') {
-    const num = parseInt(order.replace(/[^0-9]/g, ''), 10);
-    return isNaN(num) ? 999999 : num;
-  }
-  return 999999;
+  return order;
 }
 
 export function sortTasksByOrder(tasks: Task[]): Task[] {
@@ -162,15 +157,15 @@ export function readTaskStatus(statusPath: string): TaskStatusFile | null {
   }
 }
 
-export function readPrdTasks(prdPath: string): Task[] | null {
-  if (!fs.existsSync(prdPath)) {
+export function readTasks(tasksPath: string): Task[] | null {
+  if (!fs.existsSync(tasksPath)) {
     return null;
   }
   try {
-    const content = fs.readFileSync(prdPath, 'utf-8');
-    const prd = JSON.parse(content);
-    if (prd.tasks && Array.isArray(prd.tasks)) {
-      return prd.tasks as Task[];
+    const content = fs.readFileSync(tasksPath, 'utf-8');
+    const tasksFile = JSON.parse(content);
+    if (tasksFile.tasks && Array.isArray(tasksFile.tasks)) {
+      return tasksFile.tasks as Task[];
     }
     return null;
   } catch {
@@ -303,7 +298,9 @@ export async function runRalphLoop(
 ): Promise<RalphLoopResult> {
   const resumeFromTaskIndex = options.resumeFromTaskIndex;
 
-  const tasks = readPrdTasks(change.prdPath);
+  const taskStatusPath = path.join(change.changePath, 'task-status.json');
+
+  const tasks = readTasks(change.tasksPath);
   if (!tasks || tasks.length === 0) {
     return {
       completed: 0,
@@ -315,10 +312,10 @@ export async function runRalphLoop(
   }
 
   const sortedTasks = sortTasksByOrder(tasks);
-  let statusFile = readTaskStatus(change.taskStatusPath);
+  let statusFile = readTaskStatus(taskStatusPath);
 
   if (!statusFile) {
-    statusFile = initializeTaskStatus(change.taskStatusPath, sortedTasks);
+    statusFile = initializeTaskStatus(taskStatusPath, sortedTasks);
   }
 
   const startIndex = resumeFromTaskIndex ?? statusFile.current_task_index;
@@ -399,7 +396,7 @@ export async function runRalphLoop(
           }).fullPrompt
         : assembledContext.fullPrompt;
 
-      updateTaskStatusEntry(change.taskStatusPath, task.id, 'in_progress');
+      updateTaskStatusEntry(taskStatusPath, task.id, 'in_progress');
 
       if (attempt === currentAttempts + 1) {
         emitTaskUpdate(task.id, i, remainingTasks.length, 'started', attempt);
@@ -417,7 +414,7 @@ export async function runRalphLoop(
       attemptsUsed = attempt;
       if (result.success) {
         taskSuccess = true;
-        updateTaskStatusEntry(change.taskStatusPath, task.id, 'completed');
+        updateTaskStatusEntry(taskStatusPath, task.id, 'completed');
         emitTaskUpdate(task.id, i, remainingTasks.length, 'completed', attempt);
         completed++;
         emitLoopProgress(completed, failed, sortedTasks.length);
@@ -457,7 +454,7 @@ export async function runRalphLoop(
         attempts: attemptsUsed,
         error: lastError,
       });
-      updateTaskStatusEntry(change.taskStatusPath, task.id, 'failed', lastError);
+      updateTaskStatusEntry(taskStatusPath, task.id, 'failed', lastError);
       emitTaskUpdate(task.id, i, remainingTasks.length, 'failed', attemptsUsed, lastError);
       context.onTaskComplete?.(task, false, lastError ?? 'Max retries exceeded');
 
@@ -466,7 +463,7 @@ export async function runRalphLoop(
         const answer = await context.onAskUser(question, task.id);
 
         if (answer.toLowerCase().includes('skip')) {
-          updateTaskStatusEntry(change.taskStatusPath, task.id, 'skipped');
+          updateTaskStatusEntry(taskStatusPath, task.id, 'skipped');
           taskResults[taskResults.length - 1].status = 'skipped';
         } else if (answer.toLowerCase().includes('retry')) {
           i--;
@@ -494,7 +491,7 @@ export async function runRalphLoop(
       });
     }
 
-    const updatedStatus = readTaskStatus(change.taskStatusPath);
+    const updatedStatus = readTaskStatus(taskStatusPath);
     if (updatedStatus) {
       statusFile = updatedStatus;
     }

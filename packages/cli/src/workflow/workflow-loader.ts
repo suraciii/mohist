@@ -21,7 +21,7 @@ export interface WorkflowConfig {
 export interface OpenSpecDetection {
   detected: boolean;
   changePath?: string;
-  prdPath?: string;
+  tasksPath?: string;
   mode: 'openspec' | 'traditional';
 }
 
@@ -128,13 +128,13 @@ export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSp
     return { detected: false, mode: 'traditional' };
   }
 
-  const prdPath = path.join(changePath, 'prd.json');
+  const tasksPath = path.join(changePath, 'tasks.json');
 
-  if (!fs.existsSync(prdPath)) {
+  if (!fs.existsSync(tasksPath)) {
     return { detected: true, changePath, mode: 'traditional' };
   }
 
-  return { detected: true, changePath, prdPath, mode: 'openspec' };
+  return { detected: true, changePath, tasksPath, mode: 'openspec' };
 }
 
 export function loadWorkflowWithDetection(cwd: string, issueNumber: number): WorkflowConfigWithDetection | string {

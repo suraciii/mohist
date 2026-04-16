@@ -13,7 +13,7 @@
         "workflow-results.ts 的 prd 字段已重命名为 tasks"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先改类型定义和 detector，后续 task 依赖这些类型"
     },
     {
