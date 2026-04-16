@@ -89,8 +89,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Deleted main-agent.ts, planner-agent.ts, reviewer-agent.ts, agent-loop.ts, planner-default.yaml. Removed old session-based methods from AgentRunnerService. Updated API routes to use startPipeline/resumePipeline. Deleted 4 test files for deleted agents."
     },
     {
       "id": "T-007",
