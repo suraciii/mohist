@@ -14,7 +14,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Instruction content sourced from opensrc/OpenSpec/schemas/ralph-driven/schema.yaml"
     },
     {
