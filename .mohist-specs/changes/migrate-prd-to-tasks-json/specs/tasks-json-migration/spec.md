@@ -13,7 +13,7 @@ Each `Task` object SHALL have:
 - `acceptanceCriteria`: string[] (optional) — verification criteria
 - `spec`: string (optional) — spec file reference with optional anchor (e.g., "specs/search/spec.md#REQ-001")
 - `dependsOn`: string[] (optional) — documentational dependency declarations
-- `passes`: boolean (required, default false) — completion flag
+- `passes`: boolean (required, default false) — completion flag (skipped tasks are also marked passes: true)
 - `attempts`: number (required, default 0) — execution attempt count
 - `error`: string | null (optional) — last failure reason
 
@@ -39,18 +39,18 @@ The system SHALL NOT use `task-status.json` for tracking task execution state. A
 ## MODIFIED Requirements
 
 ### Requirement: Change directory detection reads tasks.json
-The `detectOpenSpecChange` function SHALL look for `tasks.json` instead of `prd.json` as the required artifact. For backward compatibility, if `tasks.json` does not exist but `prd.json` does, the function SHALL fall back to reading `prd.json` and return its path.
+The `detectOpenSpecChange` function SHALL look for `tasks.json` instead of `prd.json` as the required artifact. It SHALL NOT fall back to `prd.json`.
 
 #### Scenario: tasks.json exists in change directory
 - **WHEN** a change directory contains `tasks.json`
 - **THEN** `detectOpenSpecChange` returns `tasksPath` pointing to `tasks.json`
 
-#### Scenario: Legacy prd.json without tasks.json
-- **WHEN** a change directory contains `prd.json` but no `tasks.json`
-- **THEN** `detectOpenSpecChange` falls back to `prdPath` pointing to `prd.json`
+#### Scenario: No tasks.json in change directory
+- **WHEN** a change directory does not contain `tasks.json`
+- **THEN** `detectOpenSpecChange` returns `null`
 
 ### Requirement: RalphExecutor reads and writes tasks.json directly
-The `RalphExecutor` SHALL read task definitions from `tasks.json` (falling back to `prd.json` for legacy changes). It SHALL update `passes`/`attempts`/`error` directly on tasks in the same file. The `readPrdTasks` function SHALL be renamed to `readTasks`. All task-status.json read/write code SHALL be removed.
+The `RalphExecutor` SHALL read task definitions from `tasks.json`. It SHALL update `passes`/`attempts`/`error` directly on tasks in the same file. The `readPrdTasks` function SHALL be renamed to `readTasks`. All task-status.json read/write code SHALL be removed.
 
 #### Scenario: Reading tasks from tasks.json
 - **WHEN** RalphExecutor reads tasks from a change with `tasks.json`
@@ -68,7 +68,7 @@ The `ContextAssembler` SHALL use the new `Task` interface with camelCase field n
 - **THEN** the assembler reads the spec file and includes it in the prompt
 
 ### Requirement: read_prd tool renamed to read_tasks
-The `read_prd` tool SHALL be renamed to `read_tasks`. It SHALL read `tasks.json` (falling back to `prd.json`) and format the output using new field names including passes/attempts/error status.
+The `read_prd` tool SHALL be renamed to `read_tasks`. It SHALL read `tasks.json` and format the output using new field names including passes/attempts/error status.
 
 #### Scenario: Agent uses read_tasks tool
 - **WHEN** an agent calls `read_tasks` with a change path
