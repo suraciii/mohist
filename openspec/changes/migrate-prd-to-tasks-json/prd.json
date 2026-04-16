@@ -55,7 +55,7 @@
         "task 失败后 attempts 递增、error 填充并写回 tasks.json"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "这是改动最大的部分，需要仔细处理状态更新逻辑"
     },
     {

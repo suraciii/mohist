@@ -40,3 +40,29 @@ Started: 2026-04-16T04:49:17.598Z
 
 ### Next Steps
 - T-004: Refactor RalphExecutor to use tasks.json directly (remove task-status.json read/write logic)
+
+## 2026-04-16 — T-004: Refactor RalphExecutor to use tasks.json directly
+
+### Done
+- Removed `TaskStatusFile`, `TaskStatusEntry` interfaces from ralph-executor.ts
+- Removed `readTaskStatus`, `writeTaskStatus`, `updateTaskStatusEntry`, `initializeTaskStatus` functions
+- Added `writeTasksFile(tasksPath, tasks)` helper to persist tasks.json with `{version, tasks}` wrapper
+- Added `findNextPendingTask(tasks)` — finds first task with `passes === false` sorted by order
+- Added `updateTaskInList(tasks, taskId, updates)` — mutates task in array for passes/attempts/error
+- Refactored `runRalphLoop` from index-based iteration to `while(true)` loop finding next pending task:
+  - On success: sets `passes: true`, writes back to tasks.json
+  - On failure: increments `attempts`, sets `error`, writes back to tasks.json
+  - On skip: sets `passes: true` with skip reason as error
+- Updated tests: replaced `readTaskStatus`/`readPrdTasks` tests with `readTasks`/`findNextPendingTask` tests
+- Updated test fixtures to use `tasksPath` and new schema (passes/attempts fields)
+- Removed stale tests for string-order parsing (function no longer handles strings)
+- TypeScript compiles, all utility tests pass (41/41)
+
+### Learnings
+- The `runRalphLoop` integration tests hang because `runAcpSession` isn't mocked — this was pre-existing
+- Changing from index-based to while-loop approach simplified resume logic (no more `current_task_index`)
+- `findNextPendingTask` is exported for testability
+
+### Next Steps
+- T-005: Update agents to reference new types and tools
+- T-006: Cleanup and verify all references
