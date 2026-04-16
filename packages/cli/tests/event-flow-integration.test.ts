@@ -532,17 +532,17 @@ describe('ralph executor event emission', () => {
     fs.mkdirSync(path.join(changeDir, 'session-memories'), { recursive: true });
 
     const prd = {
+      version: 1,
       tasks: [
-        { id: 'T-001', order: 1, title: 'Task 1', description: 'desc' },
-        { id: 'T-002', order: 2, title: 'Task 2', description: 'desc' },
+        { id: 'T-001', order: 1, title: 'Task 1', description: 'desc', passes: false, attempts: 0 },
+        { id: 'T-002', order: 2, title: 'Task 2', description: 'desc', passes: false, attempts: 0 },
       ],
     };
-    fs.writeFileSync(path.join(changeDir, 'prd.json'), JSON.stringify(prd));
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify(prd));
 
     const change = {
       changePath: changeDir,
-      prdPath: path.join(changeDir, 'prd.json'),
-      taskStatusPath: path.join(changeDir, 'task-status.json'),
+      tasksPath: path.join(changeDir, 'tasks.json'),
       sessionMemoriesPath: path.join(changeDir, 'session-memories'),
       proposalPath: path.join(changeDir, 'proposal.md'),
       designPath: path.join(changeDir, 'design.md'),
@@ -596,14 +596,14 @@ describe('ralph executor event emission', () => {
     fs.mkdirSync(path.join(changeDir, 'session-memories'), { recursive: true });
 
     const prd = {
-      tasks: [{ id: 'T-001', order: 1, title: 'Fail Task', description: 'desc' }],
+      version: 1,
+      tasks: [{ id: 'T-001', order: 1, title: 'Fail Task', description: 'desc', passes: false, attempts: 0 }],
     };
-    fs.writeFileSync(path.join(changeDir, 'prd.json'), JSON.stringify(prd));
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify(prd));
 
     const change = {
       changePath: changeDir,
-      prdPath: path.join(changeDir, 'prd.json'),
-      taskStatusPath: path.join(changeDir, 'task-status.json'),
+      tasksPath: path.join(changeDir, 'tasks.json'),
       sessionMemoriesPath: path.join(changeDir, 'session-memories'),
       proposalPath: path.join(changeDir, 'proposal.md'),
       designPath: path.join(changeDir, 'design.md'),
@@ -646,14 +646,14 @@ describe('ralph executor event emission', () => {
     fs.mkdirSync(path.join(changeDir, 'session-memories'), { recursive: true });
 
     const prd = {
-      tasks: [{ id: 'T-001', order: 1, title: 'Task', description: 'desc' }],
+      version: 1,
+      tasks: [{ id: 'T-001', order: 1, title: 'Task', description: 'desc', passes: false, attempts: 0 }],
     };
-    fs.writeFileSync(path.join(changeDir, 'prd.json'), JSON.stringify(prd));
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify(prd));
 
     const change = {
       changePath: changeDir,
-      prdPath: path.join(changeDir, 'prd.json'),
-      taskStatusPath: path.join(changeDir, 'task-status.json'),
+      tasksPath: path.join(changeDir, 'tasks.json'),
       sessionMemoriesPath: path.join(changeDir, 'session-memories'),
       proposalPath: path.join(changeDir, 'proposal.md'),
       designPath: path.join(changeDir, 'design.md'),

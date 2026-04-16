@@ -82,8 +82,8 @@
         "rg 'PrdTask|PrdJson|prdPath|read_prd' packages/cli/src/ 无结果"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated tests/read-prd.test.ts → tests/read-tasks.test.ts, updated tests/workflow-loader-detection.test.ts to use tasks.json/tasksPath"
     }
   ]
 }

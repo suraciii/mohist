@@ -54,7 +54,7 @@ describe('detectOpenSpecChange', () => {
     expect(result).toBeNull();
   });
   
-  it('should return null when change exists but prd.json is missing', () => {
+  it('should return null when change exists but tasks.json is missing', () => {
     const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
     fs.mkdirSync(changesDir, { recursive: true });
     fs.mkdirSync(path.join(changesDir, '42-test-issue'));
@@ -75,11 +75,11 @@ describe('detectOpenSpecChange', () => {
     expect(result).toBeNull();
   });
   
-  it('should return OpenSpecChange when change directory with prd.json exists', () => {
+  it('should return OpenSpecChange when change directory with tasks.json exists', () => {
     const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
     const changeDir = path.join(changesDir, '42-test-issue');
     fs.mkdirSync(changeDir, { recursive: true });
-    fs.writeFileSync(path.join(changeDir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), '{}');
     
     const issue: Issue = {
       id: 'test-id',
@@ -97,8 +97,7 @@ describe('detectOpenSpecChange', () => {
     
     expect(result).not.toBeNull();
     expect(result?.changePath).toBe(changeDir);
-    expect(result?.prdPath).toBe(path.join(changeDir, 'prd.json'));
-    expect(result?.taskStatusPath).toBe(path.join(changeDir, 'task-status.json'));
+    expect(result?.tasksPath).toBe(path.join(changeDir, 'tasks.json'));
     expect(result?.sessionMemoriesPath).toBe(path.join(changeDir, 'session-memories'));
     expect(result?.proposalPath).toBe(path.join(changeDir, 'proposal.md'));
     expect(result?.designPath).toBe(path.join(changeDir, 'design.md'));
@@ -109,7 +108,7 @@ describe('detectOpenSpecChange', () => {
     const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
     const changeDir = path.join(changesDir, '42-add-user-authentication');
     fs.mkdirSync(changeDir, { recursive: true });
-    fs.writeFileSync(path.join(changeDir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), '{}');
     
     const issue: Issue = {
       id: 'test-id',
@@ -136,9 +135,9 @@ describe('detectOpenSpecChange', () => {
     fs.mkdirSync(v1Dir, { recursive: true });
     fs.mkdirSync(v2Dir, { recursive: true });
     fs.mkdirSync(v3Dir, { recursive: true });
-    fs.writeFileSync(path.join(v1Dir, 'prd.json'), '{}');
-    fs.writeFileSync(path.join(v2Dir, 'prd.json'), '{}');
-    fs.writeFileSync(path.join(v3Dir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(v1Dir, 'tasks.json'), '{}');
+    fs.writeFileSync(path.join(v2Dir, 'tasks.json'), '{}');
+    fs.writeFileSync(path.join(v3Dir, 'tasks.json'), '{}');
 
     const issue: Issue = {
       id: 'test-id',
@@ -163,8 +162,8 @@ describe('detectOpenSpecChange', () => {
     const fixBugDir = path.join(changesDir, '42-fix-bug');
     fs.mkdirSync(fixDir, { recursive: true });
     fs.mkdirSync(fixBugDir, { recursive: true });
-    fs.writeFileSync(path.join(fixDir, 'prd.json'), '{}');
-    fs.writeFileSync(path.join(fixBugDir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(fixDir, 'tasks.json'), '{}');
+    fs.writeFileSync(path.join(fixBugDir, 'tasks.json'), '{}');
 
     const issue: Issue = {
       id: 'test-id',
@@ -192,9 +191,9 @@ describe('detectOpenSpecChange', () => {
     fs.mkdirSync(fixDir, { recursive: true });
     fs.mkdirSync(fixV2Dir, { recursive: true });
     fs.mkdirSync(fixBugDir, { recursive: true });
-    fs.writeFileSync(path.join(fixDir, 'prd.json'), '{}');
-    fs.writeFileSync(path.join(fixV2Dir, 'prd.json'), '{}');
-    fs.writeFileSync(path.join(fixBugDir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(fixDir, 'tasks.json'), '{}');
+    fs.writeFileSync(path.join(fixV2Dir, 'tasks.json'), '{}');
+    fs.writeFileSync(path.join(fixBugDir, 'tasks.json'), '{}');
 
     const issue: Issue = {
       id: 'test-id',
@@ -220,8 +219,8 @@ describe('detectOpenSpecChange', () => {
     const v2Dir = path.join(changesDir, '42-feature-v2');
     fs.mkdirSync(v1Dir, { recursive: true });
     fs.mkdirSync(v2Dir, { recursive: true });
-    fs.writeFileSync(path.join(v1Dir, 'prd.json'), '{}');
-    fs.writeFileSync(path.join(v2Dir, 'prd.json'), '{}');
+    fs.writeFileSync(path.join(v1Dir, 'tasks.json'), '{}');
+    fs.writeFileSync(path.join(v2Dir, 'tasks.json'), '{}');
 
     const issue: Issue = {
       id: 'test-id',
@@ -240,14 +239,14 @@ describe('detectOpenSpecChange', () => {
     expect(result?.changePath).toBe(v2Dir);
   });
 
-  it('should return null when latest versioned change has no prd.json', () => {
+  it('should return null when latest versioned change has no tasks.json', () => {
     const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
     const v1Dir = path.join(changesDir, '42-fix');
     const v2Dir = path.join(changesDir, '42-fix-v2');
     fs.mkdirSync(v1Dir, { recursive: true });
     fs.mkdirSync(v2Dir, { recursive: true });
-    fs.writeFileSync(path.join(v1Dir, 'prd.json'), '{}');
-    // v2 has no prd.json
+    fs.writeFileSync(path.join(v1Dir, 'tasks.json'), '{}');
+    // v2 has no tasks.json
 
     const issue: Issue = {
       id: 'test-id',

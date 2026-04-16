@@ -1,91 +1,23 @@
 # Ralph Progress Log
-Started: 2026-04-16T04:49:17.598Z
+Started: 2026-04-16T07:25:21.533Z
 
 ---
+## T-006: Cleanup and verify
+Timestamp: 2026-04-16T07:27:00Z
 
-
-## 2026-04-16 T-001 Update detector and types
-- Renamed prdPath→tasksPath, removed taskStatusPath in detector.ts
-- detectOpenSpecChange now checks tasks.json only, returns null if missing
-- Replaced PrdTask/PrdJson/PrdTaskStatus/TaskStatusValue with Task/TasksFile in change-artifacts-manager.ts
-- New Task interface: id, order (required), title, description, acceptanceCriteria, dependsOn, spec, passes, attempts, error
-- Removed: capability, requirement_ref, estimated_effort, status, startedAt, completedAt
-- readPrd/writePrd→readTasks/writeTasks, updateTaskStatus→updateTaskPasses
-- workflow-results.ts: PrdJson→TasksFile, prd→tasks field
-- Updated downstream consumers: context-assembler.ts, ralph-executor.ts, workflow-controller.ts, planner-agent.ts, workflow-loader.ts, read-workflow.ts
-- TypeScript compiles (only pre-existing log-tail.ts error)
-- Learnings: Need to update all downstream consumers in same task to keep compilation passing
-- Next: T-002 (ContextAssembler), T-003 (rename tools), T-004 (RalphExecutor refactor)
-
-## 2026-04-16 T-002 Update ContextAssembler Task interface
-- Task interface already had new schema fields (passes/attempts/error) from T-001
-- formatTaskForPrompt already used acceptanceCriteria (correct field name)
-- Added spec field output to formatTaskForPrompt so it references task.spec
-- TypeScript compiles (only pre-existing log-tail.ts error, unrelated)
-- Learnings: T-001 already migrated most of the Task interface; T-002 was mostly verification + adding spec to formatted prompt output
-- Next: T-003 (rename read_prd tool, delete task-status tools)
-
-## 2026-04-16 — T-003: Rename read_prd tool to read_tasks, delete task-status tools
-
-### Done
-- Created `read-tasks.ts` replacing `read-prd.ts`: tool name `read_tasks`, reads `tasks.json`, outputs passes/attempts/error status
-- Deleted `task-status.ts` entirely (removed `update_task_status` and `get_task_status` tools)
-- Updated `self-review.ts`: `generatePrd` → `generateTasksFile`, `createGeneratePrdTool` → `createGenerateTasksTool`, outputs `tasks.json` with new schema (Task/TasksFile types from change-artifacts-manager)
-- Updated `main-agent.ts`: imports changed to `createReadTasksTool`, `createGenerateTasksTool`; removed task-status imports and registrations; updated system prompt tool descriptions
-- Deleted `read-prd.ts`
+### What was done
+- Verified no remaining `PrdTask|PrdJson|prdPath|read_prd` references in `packages/cli/src/`
+- No remaining `task-status` or `prd.json` references in source code
+- Deleted stale test file `tests/read-prd.test.ts` (was importing from deleted `read-prd.ts`)
+- Created `tests/read-tasks.test.ts` with updated tests for the new `createReadTasksTool` using `tasks.json` schema
+- Updated `tests/workflow-loader-detection.test.ts`: all `prd.json` → `tasks.json`, `prdPath` → `tasksPath`
+- `npm run build` passes
+- All tests pass except 3 pre-existing e2e failures (unrelated to migration, present before T-001)
 
 ### Learnings
-- T-001 had already created Task/TasksFile types in change-artifacts-manager.ts, which read-tasks.ts and self-review.ts now import
-- The `canGeneratePrd` function name in openspec/self-review.ts is intentionally left as-is — it will be renamed as part of a broader cleanup (T-006)
+- Test files also need updating when renaming source files/tools — the previous tasks updated source code but left test files referencing old names
+- The e2e.test.ts failures are pre-existing (verified by stashing changes and running tests)
 
-### Next Steps
-- T-004: Refactor RalphExecutor to use tasks.json directly (remove task-status.json read/write logic)
+### Next steps
+- All 6 tasks complete. Change is ready for review/archive.
 
-## 2026-04-16 — T-004: Refactor RalphExecutor to use tasks.json directly
-
-### Done
-- Removed `TaskStatusFile`, `TaskStatusEntry` interfaces from ralph-executor.ts
-- Removed `readTaskStatus`, `writeTaskStatus`, `updateTaskStatusEntry`, `initializeTaskStatus` functions
-- Added `writeTasksFile(tasksPath, tasks)` helper to persist tasks.json with `{version, tasks}` wrapper
-- Added `findNextPendingTask(tasks)` — finds first task with `passes === false` sorted by order
-- Added `updateTaskInList(tasks, taskId, updates)` — mutates task in array for passes/attempts/error
-- Refactored `runRalphLoop` from index-based iteration to `while(true)` loop finding next pending task:
-  - On success: sets `passes: true`, writes back to tasks.json
-  - On failure: increments `attempts`, sets `error`, writes back to tasks.json
-  - On skip: sets `passes: true` with skip reason as error
-- Updated tests: replaced `readTaskStatus`/`readPrdTasks` tests with `readTasks`/`findNextPendingTask` tests
-- Updated test fixtures to use `tasksPath` and new schema (passes/attempts fields)
-- Removed stale tests for string-order parsing (function no longer handles strings)
-- TypeScript compiles, all utility tests pass (41/41)
-
-### Learnings
-- The `runRalphLoop` integration tests hang because `runAcpSession` isn't mocked — this was pre-existing
-- Changing from index-based to while-loop approach simplified resume logic (no more `current_task_index`)
-- `findNextPendingTask` is exported for testability
-
-### Next Steps
-- T-005: Update agents to reference new types and tools
-- T-006: Cleanup and verify all references
-
-## 2026-04-16 — T-005: Update agents to reference new types and tools
-
-### Done
-- **planner-agent.ts**: Renamed all internal `prd` references to `tasks`
-  - Return types and variable declarations: `prd: unknown` → `tasks: unknown`
-  - `normalizeParsedArtifacts`: `obj.prd` → `obj.tasks`
-  - `writeArtifactsToFiles`: writes `tasks.json` instead of `prd.json`, initializes each task with `passes: false, attempts: 0, order: index+1`
-  - `selfReview`: label changed from "PRD:" to "Tasks:"
-  - `fixIssues`: JSON prompt template uses `"tasks": {...}` instead of `"prd": {...}`
-  - Prompt template: instructs LLM to output tasks with version, order, passes, attempts fields
-  - `tryRegexFieldExtraction`: regex matches `"tasks"` instead of `"prd"`
-- **planner-default.yaml**: Updated `prd.json` → `tasks.json` with new schema including version, passes, attempts, order fields
-- **main-agent.ts**: Already correctly updated by T-003 (uses createReadTasksTool, createGenerateTasksTool, no task-status references, no prd references)
-- TypeScript compiles (only pre-existing log-tail.ts error, unrelated)
-
-### Learnings
-- main-agent.ts was already fully migrated in T-003; this task was primarily about planner-agent.ts
-- The planner prompt template needed explicit instruction to include `passes: false` and `attempts: 0` per task
-- writeArtifactsToFiles now enforces defaults (passes, attempts, order) as a safety net even if LLM omits them
-
-### Next Steps
-- T-006: Cleanup and verify all references

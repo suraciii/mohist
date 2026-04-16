@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { ChangeArtifactsManager, type PrdTaskStatus } from '../src/artifacts/change-artifacts-manager';
+import { ChangeArtifactsManager } from '../src/artifacts/change-artifacts-manager';
 
-describe('ChangeArtifactsManager.updateTaskStatus', () => {
+describe('ChangeArtifactsManager.updateTaskPasses', () => {
   let tmpDir: string;
   let manager: ChangeArtifactsManager;
   let changesDir: string;
@@ -20,148 +20,116 @@ describe('ChangeArtifactsManager.updateTaskStatus', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function createChangeWithPrd(issueNumber: number, title: string, prd: object) {
+  function createChangeWithTasks(issueNumber: number, title: string, tasks: object) {
     const changeName = `${issueNumber}-${title}`;
     const changePath = path.join(changesDir, changeName);
     fs.mkdirSync(path.join(changePath, 'specs'), { recursive: true });
-    fs.writeFileSync(path.join(changePath, 'prd.json'), JSON.stringify(prd, null, 2));
+    fs.writeFileSync(path.join(changePath, 'tasks.json'), JSON.stringify(tasks, null, 2));
     return changePath;
   }
 
-  it('should return false when prd.json does not exist', () => {
-    const result = manager.updateTaskStatus(999, 'T-001', { status: 'in_progress' });
+  it('should return false when tasks.json does not exist', () => {
+    const result = manager.updateTaskPasses(999, 'T-001', true);
     expect(result).toBe(false);
   });
 
-  it('should return false when task not found in prd.json', () => {
-    createChangeWithPrd(42, 'test-change', {
-      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing' }]
+  it('should return false when task not found in tasks.json', () => {
+    createChangeWithTasks(42, 'test-change', {
+      version: 1,
+      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing', order: 1, passes: false, attempts: 0 }]
     });
-    const result = manager.updateTaskStatus(42, 'T-999', { status: 'in_progress' });
+    const result = manager.updateTaskPasses(42, 'T-999', true);
     expect(result).toBe(false);
   });
 
-  it('should update task status to in_progress with timestamp', () => {
-    createChangeWithPrd(42, 'test-change', {
-      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing' }]
+  it('should update task passes to true', () => {
+    createChangeWithTasks(42, 'test-change', {
+      version: 1,
+      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing', order: 1, passes: false, attempts: 0 }]
     });
-    const startedAt = new Date().toISOString();
-    const result = manager.updateTaskStatus(42, 'T-001', { status: 'in_progress', startedAt });
+    const result = manager.updateTaskPasses(42, 'T-001', true);
     expect(result).toBe(true);
 
-    const prd = manager.readPrd(42);
-    expect(prd!.tasks[0].status).toBe('in_progress');
-    expect(prd!.tasks[0].startedAt).toBe(startedAt);
+    const tasks = manager.readTasks(42);
+    expect(tasks!.tasks[0].passes).toBe(true);
   });
 
-  it('should update task status to completed with completedAt timestamp', () => {
-    createChangeWithPrd(42, 'test-change', {
-      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing' }]
-    });
-    const completedAt = new Date().toISOString();
-    const result = manager.updateTaskStatus(42, 'T-001', { status: 'completed', completedAt });
-    expect(result).toBe(true);
-
-    const prd = manager.readPrd(42);
-    expect(prd!.tasks[0].status).toBe('completed');
-    expect(prd!.tasks[0].completedAt).toBe(completedAt);
-  });
-
-  it('should update task status to failed with error message', () => {
-    createChangeWithPrd(42, 'test-change', {
-      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing' }]
+  it('should update task passes to false with error', () => {
+    createChangeWithTasks(42, 'test-change', {
+      version: 1,
+      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing', order: 1, passes: false, attempts: 0 }]
     });
     const errorMsg = 'Missing implementation';
-    const result = manager.updateTaskStatus(42, 'T-001', { status: 'failed', error: errorMsg });
+    const result = manager.updateTaskPasses(42, 'T-001', false, errorMsg);
     expect(result).toBe(true);
 
-    const prd = manager.readPrd(42);
-    expect(prd!.tasks[0].status).toBe('failed');
-    expect(prd!.tasks[0].error).toBe(errorMsg);
-  });
-
-  it('should track attempt counts', () => {
-    createChangeWithPrd(42, 'test-change', {
-      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing' }]
-    });
-    manager.updateTaskStatus(42, 'T-001', { status: 'in_progress' });
-    manager.updateTaskStatus(42, 'T-001', { status: 'failed', attempts: 2 });
-    manager.updateTaskStatus(42, 'T-001', { status: 'in_progress' });
-    manager.updateTaskStatus(42, 'T-001', { status: 'completed', attempts: 4 });
-
-    const prd = manager.readPrd(42);
-    expect(prd!.tasks[0].attempts).toBe(4);
-  });
-
-  it('should update only status when no optional fields provided', () => {
-    createChangeWithPrd(42, 'test-change', {
-      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing' }]
-    });
-    const result = manager.updateTaskStatus(42, 'T-001', { status: 'pending' });
-    expect(result).toBe(true);
-
-    const prd = manager.readPrd(42);
-    expect(prd!.tasks[0].status).toBe('pending');
-    expect(prd!.tasks[0].startedAt).toBeUndefined();
-    expect(prd!.tasks[0].completedAt).toBeUndefined();
+    const tasks = manager.readTasks(42);
+    expect(tasks!.tasks[0].passes).toBe(false);
+    expect(tasks!.tasks[0].error).toBe(errorMsg);
   });
 
   it('should handle multiple tasks and update correct one', () => {
-    createChangeWithPrd(42, 'test-change', {
+    createChangeWithTasks(42, 'test-change', {
+      version: 1,
       tasks: [
-        { id: 'T-001', title: 'Task 1', description: 'Do thing 1' },
-        { id: 'T-002', title: 'Task 2', description: 'Do thing 2' },
-        { id: 'T-003', title: 'Task 3', description: 'Do thing 3' }
+        { id: 'T-001', title: 'Task 1', description: 'Do thing 1', order: 1, passes: false, attempts: 0 },
+        { id: 'T-002', title: 'Task 2', description: 'Do thing 2', order: 2, passes: false, attempts: 0 },
+        { id: 'T-003', title: 'Task 3', description: 'Do thing 3', order: 3, passes: false, attempts: 0 }
       ]
     });
-    manager.updateTaskStatus(42, 'T-002', { status: 'completed' });
+    manager.updateTaskPasses(42, 'T-002', true);
 
-    const prd = manager.readPrd(42);
-    expect(prd!.tasks[0].status).toBeUndefined();
-    expect(prd!.tasks[1].status).toBe('completed');
-    expect(prd!.tasks[2].status).toBeUndefined();
+    const tasks = manager.readTasks(42);
+    expect(tasks!.tasks[0].passes).toBe(false);
+    expect(tasks!.tasks[1].passes).toBe(true);
+    expect(tasks!.tasks[2].passes).toBe(false);
   });
 
-  it('should preserve existing task fields when updating status', () => {
-    createChangeWithPrd(42, 'test-change', {
+  it('should preserve existing task fields when updating passes', () => {
+    createChangeWithTasks(42, 'test-change', {
+      version: 1,
       tasks: [{
         id: 'T-001',
         title: 'Task 1',
         description: 'Do thing',
         order: 1,
-        acceptance_criteria: ['Crit 1']
+        acceptanceCriteria: ['Crit 1'],
+        passes: false,
+        attempts: 0
       }]
     });
-    manager.updateTaskStatus(42, 'T-001', { status: 'in_progress' });
+    manager.updateTaskPasses(42, 'T-001', true);
 
-    const prd = manager.readPrd(42);
-    expect(prd!.tasks[0].title).toBe('Task 1');
-    expect(prd!.tasks[0].order).toBe(1);
-    expect(prd!.tasks[0].acceptance_criteria).toEqual(['Crit 1']);
+    const tasks = manager.readTasks(42);
+    expect(tasks!.tasks[0].title).toBe('Task 1');
+    expect(tasks!.tasks[0].order).toBe(1);
+    expect(tasks!.tasks[0].acceptanceCriteria).toEqual(['Crit 1']);
   });
 
   it('should update error when task is completed after failure', () => {
-    createChangeWithPrd(42, 'test-change', {
-      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing' }]
+    createChangeWithTasks(42, 'test-change', {
+      version: 1,
+      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing', order: 1, passes: false, attempts: 1 }]
     });
-    manager.updateTaskStatus(42, 'T-001', { status: 'failed', error: 'Some error' });
-    manager.updateTaskStatus(42, 'T-001', { status: 'completed', error: 'Resolved' });
+    manager.updateTaskPasses(42, 'T-001', false, 'Some error');
+    manager.updateTaskPasses(42, 'T-001', true, null);
 
-    const prd = manager.readPrd(42);
-    expect(prd!.tasks[0].status).toBe('completed');
-    expect(prd!.tasks[0].error).toBe('Resolved');
+    const tasks = manager.readTasks(42);
+    expect(tasks!.tasks[0].passes).toBe(true);
+    expect(tasks!.tasks[0].error).toBeNull();
   });
 
   it('should return false when issueNumber is invalid', () => {
-    createChangeWithPrd(42, 'test-change', {
-      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing' }]
+    createChangeWithTasks(42, 'test-change', {
+      version: 1,
+      tasks: [{ id: 'T-001', title: 'Task 1', description: 'Do thing', order: 1, passes: false, attempts: 0 }]
     });
-    const result = manager.updateTaskStatus(0, 'T-001', { status: 'completed' });
+    const result = manager.updateTaskPasses(0, 'T-001', true);
     expect(result).toBe(false);
   });
 });
 
-describe('ChangeArtifactsManager.readPrd', () => {
+describe('ChangeArtifactsManager.readTasks', () => {
   let tmpDir: string;
   let manager: ChangeArtifactsManager;
 
@@ -175,34 +143,35 @@ describe('ChangeArtifactsManager.readPrd', () => {
   });
 
   it('should return null when change directory does not exist', () => {
-    expect(manager.readPrd(999)).toBeNull();
+    expect(manager.readTasks(999)).toBeNull();
   });
 
-  it('should return null when prd.json does not exist in change directory', () => {
+  it('should return null when tasks.json does not exist in change directory', () => {
     const changesDir = path.join(tmpDir, '.mohist', 'changes');
     fs.mkdirSync(path.join(changesDir, '42-test'), { recursive: true });
-    expect(manager.readPrd(42)).toBeNull();
+    expect(manager.readTasks(42)).toBeNull();
   });
 
-  it('should parse valid prd.json', () => {
+  it('should parse valid tasks.json', () => {
     const changesDir = path.join(tmpDir, '.mohist', 'changes');
     const changePath = path.join(changesDir, '42-test');
     fs.mkdirSync(path.join(changePath, 'specs'), { recursive: true });
-    fs.writeFileSync(path.join(changePath, 'prd.json'), JSON.stringify({
-      tasks: [{ id: 'T-001', title: 'Test', description: 'Test task' }]
+    fs.writeFileSync(path.join(changePath, 'tasks.json'), JSON.stringify({
+      version: 1,
+      tasks: [{ id: 'T-001', title: 'Test', description: 'Test task', order: 1, passes: false, attempts: 0 }]
     }));
 
-    const prd = manager.readPrd(42);
-    expect(prd).not.toBeNull();
-    expect(prd!.tasks[0].id).toBe('T-001');
+    const tasks = manager.readTasks(42);
+    expect(tasks).not.toBeNull();
+    expect(tasks!.tasks[0].id).toBe('T-001');
   });
 
   it('should return null for invalid JSON', () => {
     const changesDir = path.join(tmpDir, '.mohist', 'changes');
     const changePath = path.join(changesDir, '42-test');
     fs.mkdirSync(path.join(changePath, 'specs'), { recursive: true });
-    fs.writeFileSync(path.join(changePath, 'prd.json'), '{ invalid json');
+    fs.writeFileSync(path.join(changePath, 'tasks.json'), '{ invalid json');
 
-    expect(manager.readPrd(42)).toBeNull();
+    expect(manager.readTasks(42)).toBeNull();
   });
 });
