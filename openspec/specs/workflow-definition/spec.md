@@ -22,7 +22,7 @@ The plan stage SHALL generate Change artifacts and perform self-review.
 - **WHEN** plan stage executes
 - **THEN** the agent:
   1. Explores codebase
-  2. Creates `.mohist-specs/changes/{name}/`
+  2. Creates `openspec/changes/{name}/`
   3. Writes proposal.md, design.md, specs/*.md
   4. Performs self-review (max 3 iterations)
   5. Generates prd.json if review passes
@@ -85,14 +85,14 @@ The check stage SHALL perform automated testing and human acceptance.
 
 #### Scenario: Archive Change
 - **WHEN** check stage completes with approval
-- **THEN** system moves Change to `.mohist-specs/archive/YYYY-MM-DD-{name}/`
+- **THEN** system moves Change to `openspec/changes/archive/YYYY-MM-DD-{name}/`
 - **AND** marks issue as done
 
 ### Requirement: Backward compatibility
 The system SHALL support traditional workflow for issues without Change artifacts.
 
 #### Scenario: Traditional workflow
-- **WHEN** an issue has no `.mohist-specs/changes/` directory
+- **WHEN** an issue has no `openspec/changes/` directory
 - **THEN** it follows the traditional 3-stage workflow:
   - plan (temporary output)
   - build (single spawn_coder)

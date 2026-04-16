@@ -24,7 +24,7 @@ mohist 的 Plan 阶段产出任务清单，当前文件名为 `prd.json`。该�
 **Non-Goals:**
 - 不改变执行逻辑（RalphExecutor 仍然按 order 顺序执行）
 - 不增加新字段（mode/type/output 等未来按需添加）
-- 不改变 .mohist-specs 目录结构（B-063 目录迁移是独立变更）
+- 本 change 目录已位于 openspec/changes/ 下；代码中硬编码路径的批量迁移是独立变更（B-063）
 
 ## Decisions
 
