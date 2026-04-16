@@ -6,46 +6,22 @@ import { slugify } from '../utils/slugify';
 
 const execFileAsync = promisify(execFile);
 
-export type TaskStatusValue = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
-
-export interface PrdTaskStatus {
-  status: TaskStatusValue;
-  startedAt?: string;
-  completedAt?: string;
-  attempts?: number;
-  error?: string;
-}
-
-export interface PrdTask {
+export interface Task {
   id: string;
-  order?: number;
-  capability?: string;
-  requirement_ref?: string;
+  order: number;
   title: string;
   description: string;
-  acceptance_criteria?: string[];
-  dependencies?: string[];
-  estimated_effort?: string;
-  spec_file?: string;
-  status?: TaskStatusValue;
-  startedAt?: string;
-  completedAt?: string;
-  attempts?: number;
-  error?: string;
+  acceptanceCriteria?: string[];
+  dependsOn?: string[];
+  spec?: string;
+  passes: boolean;
+  attempts: number;
+  error?: string | null;
 }
 
-export interface PrdJson {
-  version?: string;
-  change_id?: string;
-  issue_reference?: string;
-  generated_at?: string;
-  tasks: PrdTask[];
-  metadata?: {
-    total_tasks?: number;
-    capabilities_covered?: string[];
-    session_memory_path?: string;
-    task_status_path?: string;
-  };
+export interface TasksFile {
+  version: number;
+  tasks: Task[];
 }
 
 export interface CommitHistory {
@@ -173,20 +149,20 @@ export class ChangeArtifactsManager {
     return specs;
   }
 
-  readPrd(issueNumber: number): PrdJson | null {
+  readTasks(issueNumber: number): TasksFile | null {
     const changeDir = this.findChangeDir(issueNumber);
     if (!changeDir) {
       return null;
     }
 
-    const prdPath = path.join(changeDir, 'prd.json');
-    if (!fs.existsSync(prdPath)) {
+    const tasksPath = path.join(changeDir, 'tasks.json');
+    if (!fs.existsSync(tasksPath)) {
       return null;
     }
 
     try {
-      const content = fs.readFileSync(prdPath, 'utf-8');
-      return JSON.parse(content) as PrdJson;
+      const content = fs.readFileSync(tasksPath, 'utf-8');
+      return JSON.parse(content) as TasksFile;
     } catch {
       return null;
     }
@@ -235,8 +211,8 @@ export class ChangeArtifactsManager {
     }
   }
 
-  writePrd(issueNumber: number, prd: PrdJson): void {
-    this.writeArtifactByIssue(issueNumber, 'prd.json', JSON.stringify(prd, null, 2));
+  writeTasks(issueNumber: number, tasks: TasksFile): void {
+    this.writeArtifactByIssue(issueNumber, 'tasks.json', JSON.stringify(tasks, null, 2));
   }
 
   private writeArtifactByIssue(issueNumber: number, artifactPath: string, content: string): void {
@@ -372,29 +348,27 @@ export class ChangeArtifactsManager {
     }
   }
 
-  updateTaskStatus(
+  updateTaskPasses(
     issueNumber: number,
     taskId: string,
-    status: PrdTaskStatus
+    passes: boolean,
+    error?: string | null
   ): boolean {
-    const prd = this.readPrd(issueNumber);
-    if (!prd) {
+    const tasksFile = this.readTasks(issueNumber);
+    if (!tasksFile) {
       return false;
     }
 
-    const task = prd.tasks.find(t => t.id === taskId);
+    const task = tasksFile.tasks.find(t => t.id === taskId);
     if (!task) {
       return false;
     }
 
-    task.status = status.status;
-    if (status.startedAt) task.startedAt = status.startedAt;
-    if (status.completedAt) task.completedAt = status.completedAt;
-    if (status.attempts !== undefined) task.attempts = status.attempts;
-    if (status.error !== undefined) task.error = status.error;
+    task.passes = passes;
+    if (error !== undefined) task.error = error;
 
     try {
-      this.writePrd(issueNumber, prd);
+      this.writeTasks(issueNumber, tasksFile);
       return true;
     } catch {
       return false;

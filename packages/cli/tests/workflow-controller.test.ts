@@ -43,8 +43,8 @@ function createMockArtifactManager(): ChangeArtifactsManager {
     readArtifact: vi.fn().mockReturnValue(null),
     writeArtifact: vi.fn().mockReturnValue(true),
     exists: vi.fn().mockReturnValue(true),
-    readPrd: vi.fn().mockReturnValue({ tasks: [] }),
-    updateTaskStatus: vi.fn().mockReturnValue(true),
+    readTasks: vi.fn().mockReturnValue({ tasks: [] }),
+    updateTaskPasses: vi.fn().mockReturnValue(true),
   };
 }
 

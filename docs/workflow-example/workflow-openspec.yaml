@@ -5,7 +5,7 @@ stages:
   - stage: plan
     description: Generate Change artifacts with self-review
     entry: mo propose <issue>
-    exit: prd.json exists
+    exit: tasks.json exists
 
   - stage: review
     description: Human review and approval
@@ -52,17 +52,16 @@ ralph:
     timeout: ask_user
 
   task_status:
-    path: ".mohist-specs/changes/{change}/task-status.json"
+    path: "openspec/changes/{change}/tasks.json"
 
 archival:
   enabled: true
-  path: ".mohist-specs/archive"
+  path: "openspec/changes/archive"
   include:
     - proposal.md
     - design.md
     - specs/
-    - prd.json
-    - task-status.json
+    - tasks.json
     - session-memories/
 
 self_review:

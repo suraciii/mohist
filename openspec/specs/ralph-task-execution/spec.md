@@ -1,20 +1,20 @@
 ## ADDED Requirements
 
 ### Requirement: Ralph-style task loop execution
-The system SHALL execute tasks from prd.json in a loop, one at a time, until all are complete.
+The system SHALL execute tasks from tasks.json in a loop, one at a time, until all are complete.
 
 **Loop Driver:** Mohist Main-agent (not a single long-running coder process)
 
 #### Scenario: Execute pending tasks sequentially
 - **WHEN** the build stage starts
-- **THEN** the main-agent reads prd.json
-- **AND** identifies pending tasks (status: "pending")
+- **THEN** the main-agent reads tasks.json
+- **AND** identifies pending tasks (passes: false)
 - **AND** selects the task with lowest order/priority
 - **AND** assembles complete context (proposal + design + spec + learnings)
 - **AND** calls `spawn_coder` with the assembled prompt
 - **AND** waits for coder to complete
 - **AND** verifies AC satisfaction
-- **AND** updates task-status.json
+- **AND** updates passes/attempts/error in tasks.json
 - **AND** repeats until all tasks are complete
 
 ### Requirement: Task execution context assembly
@@ -61,7 +61,7 @@ The system SHALL verify that task execution meets the acceptance criteria.
   1. Did coder report success?
   2. Does the implementation satisfy all AC?
   3. Run typecheck/tests if specified
-- **AND** if passed, updates task-status.json: status="completed"
+- **AND** if passed, updates tasks.json: passes=true
 - **AND** if failed, captures error details for retry logic
 
 ### Requirement: Task failure handling with retry
@@ -96,26 +96,25 @@ The system SHALL handle task failures with categorized retry logic.
 - **AND** stores the dependency issue in learning
 
 ### Requirement: Task status persistence
-The system SHALL persist task execution status for recovery.
+The system SHALL persist task execution status in tasks.json for recovery.
 
-**File:** `{change-path}/task-status.json`
+**File:** `{change-path}/tasks.json`
 
 ```json
 {
-  "current_task_index": 3,
-  "total_tasks": 7,
+  "version": 1,
   "tasks": [
-    {"id": "T-001", "status": "completed", "attempts": 1},
-    {"id": "T-002", "status": "completed", "attempts": 1},
-    {"id": "T-003", "status": "failed", "attempts": 3, "error": "Missing backend validation"}
+    {"id": "T-001", "order": 1, "title": "...", "passes": true, "attempts": 1, "error": null},
+    {"id": "T-002", "order": 2, "title": "...", "passes": true, "attempts": 1, "error": null},
+    {"id": "T-003", "order": 3, "title": "...", "passes": false, "attempts": 3, "error": "Missing backend validation"}
   ]
 }
 ```
 
 #### Scenario: Resume from failed task
 - **WHEN** user runs `mo issue resume` after build failure
-- **THEN** main-agent reads task-status.json
-- **AND** identifies current_task_index (3, meaning T-003)
+- **THEN** main-agent reads tasks.json
+- **AND** identifies the first task with passes=false
 - **AND** loads learnings from T-001 and T-002
 - **AND** continues execution from T-003
 
@@ -126,5 +125,5 @@ The system SHALL support looping back from check stage to build stage if issues 
 - **WHEN** check stage finds issues (test failures, etc.)
 - **AND** user approves going back to build
 - **THEN** the system transitions back to build stage
-- **AND** the agent can append new tasks to prd.json
+- **AND** the agent can append new tasks to tasks.json
 - **AND** continues the build loop

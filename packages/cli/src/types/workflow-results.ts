@@ -1,4 +1,4 @@
-import type { PrdJson } from '../artifacts/change-artifacts-manager';
+import type { TasksFile } from '../artifacts/change-artifacts-manager';
 
 export interface ReviewIssue {
   severity: 'error' | 'warning';
@@ -29,7 +29,7 @@ export interface PlanResult {
     proposal: string;
     design: string;
     specs: Array<{ name: string; content: string }>;
-    prd: PrdJson | null;
+    tasks: TasksFile | null;
   };
   iterations: number;
   duration: number;

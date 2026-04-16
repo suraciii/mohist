@@ -6,7 +6,7 @@ export interface SelfReviewResult {
   iteration: number;
   issues: string[];
   fixes: string[];
-  canGeneratePrd: boolean;
+  canGenerateTasks: boolean;
 }
 
 export interface SpecFile {
@@ -165,11 +165,11 @@ export async function runSelfReview(options: SelfReviewOptions): Promise<SelfRev
     iteration,
     issues: allIssues,
     fixes: allFixes,
-    canGeneratePrd: passed,
+    canGenerateTasks: passed,
   };
 }
 
-export function canGeneratePrd(changePath: string): boolean {
+export function canGenerateTasks(changePath: string): boolean {
   const proposalPath = path.join(changePath, 'proposal.md');
   const designPath = path.join(changePath, 'design.md');
   const specsPath = path.join(changePath, 'specs');

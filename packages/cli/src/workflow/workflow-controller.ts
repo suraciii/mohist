@@ -1,5 +1,5 @@
 import { Stage, isValidTransition, type Issue } from '../types';
-import type { PrdTask, PrdJson, PrdTaskStatus } from '../artifacts/change-artifacts-manager';
+import type { Task, TasksFile } from '../artifacts/change-artifacts-manager';
 import { executeCoderTask } from '../tools/spawn-coder';
 import type { PlanResult, ReviewResult } from '../types/workflow-results';
 import { detectOpenSpecChange } from '../openspec/detector';
@@ -30,8 +30,8 @@ export interface ChangeArtifactsManager {
   readArtifact(changeDir: string, artifactPath: string): string | null;
   writeArtifact(changeDir: string, artifactPath: string, content: string): boolean;
   exists(changeDir: string): boolean;
-  readPrd(issueNumber: number): PrdJson | null;
-  updateTaskStatus(issueNumber: number, taskId: string, status: PrdTaskStatus): boolean;
+  readTasks(issueNumber: number): TasksFile | null;
+  updateTaskPasses(issueNumber: number, taskId: string, passes: boolean, error?: string | null): boolean;
 }
 
 export interface StageResult {
@@ -163,17 +163,17 @@ export class WorkflowController {
   private async executeBuildStageFallback(issue: Issue): Promise<StageResult> {
     const MAX_RETRIES = 3;
 
-    const prd = this.artifactManager.readPrd(issue.number);
-    if (!prd) {
+    const tasksFile = this.artifactManager.readTasks(issue.number);
+    if (!tasksFile) {
       return {
         success: false,
         requiresApproval: false,
         output: null,
-        message: `No prd.json found for issue #${issue.number}. Cannot execute Build phase.`,
+        message: `No tasks.json found for issue #${issue.number}. Cannot execute Build phase.`,
       };
     }
 
-    const tasks = prd.tasks || [];
+    const tasks = tasksFile.tasks || [];
     if (tasks.length === 0) {
       return {
         success: true,
@@ -188,7 +188,7 @@ export class WorkflowController {
     for (const task of tasks) {
       const taskId = task.id || `task-${taskResults.length}`;
 
-      if (task.status === 'completed') {
+      if (task.passes) {
         log.info('Skipping completed task', { issueNumber: issue.number, taskId, taskTitle: task.title });
         taskResults.push({ taskId, success: true, attempts: task.attempts || 1 });
         continue;
@@ -199,11 +199,7 @@ export class WorkflowController {
       let taskSuccess = false;
       let lastError: string | undefined;
 
-      this.artifactManager.updateTaskStatus(issue.number, taskId, {
-        status: 'in_progress',
-        startedAt: new Date().toISOString(),
-        attempts: attempt + 1,
-      });
+      this.artifactManager.updateTaskPasses(issue.number, taskId, false, undefined);
 
       while (attempt < MAX_RETRIES + currentAttempts && !taskSuccess) {
         attempt++;
@@ -232,15 +228,7 @@ export class WorkflowController {
         error: taskSuccess ? undefined : lastError,
       });
 
-      const statusUpdate: PrdTaskStatus = {
-        status: taskSuccess ? 'completed' : 'failed',
-        completedAt: new Date().toISOString(),
-        attempts: attempt,
-      };
-      if (!taskSuccess && lastError) {
-        statusUpdate.error = lastError;
-      }
-      this.artifactManager.updateTaskStatus(issue.number, taskId, statusUpdate);
+      this.artifactManager.updateTaskPasses(issue.number, taskId, taskSuccess, taskSuccess ? null : lastError ?? null);
 
       if (!taskSuccess) {
         return {
@@ -272,7 +260,7 @@ export class WorkflowController {
     };
   }
 
-  private buildTaskPrompt(issue: Issue, task: PrdTask): string {
+  private buildTaskPrompt(issue: Issue, task: Task): string {
     const lines = [
       `# Task: ${task.title}`,
       '',
@@ -293,17 +281,17 @@ export class WorkflowController {
       lines.push('');
     }
 
-    if (task.acceptance_criteria && task.acceptance_criteria.length > 0) {
+    if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
       lines.push('## Acceptance Criteria');
-      for (const criterion of task.acceptance_criteria) {
+      for (const criterion of task.acceptanceCriteria) {
         lines.push(`- ${criterion}`);
       }
       lines.push('');
     }
 
-    if (task.spec_file) {
+    if (task.spec) {
       lines.push(`## Spec Reference`);
-      lines.push(`See: ${task.spec_file}`);
+      lines.push(`See: ${task.spec}`);
       lines.push('');
     }
 

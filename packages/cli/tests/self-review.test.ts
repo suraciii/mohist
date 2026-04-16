@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { runSelfReview, canGeneratePrd, type SelfReviewResult } from '../src/openspec/self-review';
+import { runSelfReview, canGenerateTasks, type SelfReviewResult } from '../src/openspec/self-review';
 
 describe('self-review', () => {
   let tmpDir: string;
@@ -49,7 +49,7 @@ This system SHALL implement test capability.
 
       const result = await runSelfReview({ changePath: tmpDir, maxIterations: 3 });
       expect(result.passed).toBe(true);
-      expect(result.canGeneratePrd).toBe(true);
+      expect(result.canGenerateTasks).toBe(true);
     });
 
     it('returns issues when specs have no requirements', async () => {
@@ -67,13 +67,13 @@ This system SHALL implement test capability.
     });
   });
 
-  describe('canGeneratePrd', () => {
+  describe('canGenerateTasks', () => {
     it('returns false when specs are incomplete', () => {
       fs.mkdirSync(path.join(tmpDir, 'specs'), { recursive: true });
       fs.writeFileSync(path.join(tmpDir, 'proposal.md'), '# Proposal\nShort.');
       fs.writeFileSync(path.join(tmpDir, 'design.md'), '# Design\nShort.');
 
-      expect(canGeneratePrd(tmpDir)).toBe(false);
+      expect(canGenerateTasks(tmpDir)).toBe(false);
     });
 
     it('returns true when all requirements met', () => {
@@ -93,7 +93,7 @@ This system SHALL do something.
 `
       );
 
-      expect(canGeneratePrd(tmpDir)).toBe(true);
+      expect(canGenerateTasks(tmpDir)).toBe(true);
     });
   });
 });

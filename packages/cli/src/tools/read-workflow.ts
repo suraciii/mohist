@@ -22,10 +22,10 @@ function formatWorkflow(config: WorkflowConfigWithDetection): string {
   if (config.openspec.mode === 'openspec') {
     lines.push(`- **Change detected**: YES`);
     lines.push(`- **Change path**: ${config.openspec.changePath}`);
-    lines.push(`- **PRD**: ${config.openspec.prdPath}`);
-    lines.push(`- **Execution mode**: Ralph-style task loop (Build stage automatically detects prd.json and runs tasks sequentially)`);
+    lines.push(`- **Tasks**: ${config.openspec.tasksPath}`);
+    lines.push(`- **Execution mode**: Ralph-style task loop (Build stage automatically detects tasks.json and runs tasks sequentially)`);
   } else if (config.openspec.detected) {
-    lines.push(`- **Change directory detected**: YES (but no prd.json yet)`);
+    lines.push(`- **Change directory detected**: YES (but no tasks.json yet)`);
     lines.push(`- **Change path**: ${config.openspec.changePath}`);
     lines.push(`- **Execution mode**: Traditional (plan stage in progress)`);
   } else {

@@ -13,11 +13,10 @@ import { createReadWorkflowTool } from '../src/tools/read-workflow';
 import { createAdvanceStageTool } from '../src/tools/advance-stage';
 import { createAddCommentTool } from '../src/tools/add-comment';
 import { createGetIssueTool } from '../src/tools/get-issue';
-import { createReadPrdTool } from '../src/tools/read-prd';
+import { createReadTasksTool } from '../src/tools/read-tasks';
 import { createReadSpecTool } from '../src/tools/read-spec';
 import { createStoreLearningTool, createLoadLearningsTool } from '../src/tools/session-memory';
-import { createUpdateTaskStatusTool, createGetTaskStatusTool } from '../src/tools/task-status';
-import { createSelfReviewTool, createGeneratePrdTool } from '../src/tools/self-review';
+import { createSelfReviewTool, createGenerateTasksTool } from '../src/tools/self-review';
 import { ToolRegistry } from '../src/agent-runtime/tool';
 
 const mockState = vi.hoisted(() => {
@@ -478,14 +477,12 @@ describe('Agent Workflow E2E', () => {
       );
       registry.register(createAddCommentTool({ issue, commentRepo }));
       registry.register(createGetIssueTool({ issue, issueRepo }));
-      registry.register(createReadPrdTool({ projectPath: '/tmp/test' }));
+      registry.register(createReadTasksTool({ projectPath: '/tmp/test' }));
       registry.register(createReadSpecTool({ projectPath: '/tmp/test' }));
       registry.register(createStoreLearningTool({ projectPath: '/tmp/test' }));
       registry.register(createLoadLearningsTool({ projectPath: '/tmp/test' }));
-      registry.register(createUpdateTaskStatusTool({ projectPath: '/tmp/test' }));
-      registry.register(createGetTaskStatusTool({ projectPath: '/tmp/test' }));
       registry.register(createSelfReviewTool({ projectPath: '/tmp/test' }));
-      registry.register(createGeneratePrdTool({ projectPath: '/tmp/test' }));
+      registry.register(createGenerateTasksTool({ projectPath: '/tmp/test' }));
 
       const toolSet = registry.toToolSet();
       expect(Object.keys(toolSet)).toEqual(
@@ -495,17 +492,15 @@ describe('Agent Workflow E2E', () => {
           'advance_stage',
           'add_comment',
           'get_issue',
-          'read_prd',
+          'read_tasks',
           'read_spec',
           'store_learning',
           'load_learnings',
-          'update_task_status',
-          'get_task_status',
           'run_self_review',
-          'generate_prd',
+          'generate_tasks',
         ])
       );
-      expect(Object.keys(toolSet)).toHaveLength(13);
+      expect(Object.keys(toolSet)).toHaveLength(11);
     });
   });
 

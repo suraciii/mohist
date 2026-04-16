@@ -5,7 +5,7 @@ The system SHALL store task execution learnings in structured session memory fil
 
 **Storage Location:**
 ```
-.mohist-specs/changes/{change-name}/session-memories/{task-id}.json
+openspec/changes/{change-name}/session-memories/{task-id}.json
 ```
 
 #### Scenario: Store task learning
@@ -69,7 +69,7 @@ The system SHALL include failure context when retrying a failed task.
 The system SHALL manage the lifecycle of session memories across issue stages.
 
 #### Scenario: Archive memories with change
-- **WHEN** a Change is archived to `.mohist-specs/archive/`
+- **WHEN** a Change is archived to `openspec/changes/archive/`
 - **THEN** the session-memories directory is preserved in the archive
 - **AND** memories remain accessible for future reference
 

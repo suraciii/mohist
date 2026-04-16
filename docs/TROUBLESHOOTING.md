@@ -11,13 +11,13 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 **Cause**: Agent's self-review found issues that couldn't be resolved.
 
 **Solution**:
-1. Check artifacts in `.mohist-specs/changes/{change}/`
+1. Check artifacts in `openspec/changes/{change}/`
 2. Manually fix issues in proposal.md, design.md, or specs/
 3. Run `mo issue resume <id> --skip-to-review` to proceed
 
-### Issue: prd.json not generated
+### Issue: tasks.json not generated
 
-**Symptoms**: Plan stage seems to complete but no prd.json in change directory.
+**Symptoms**: Plan stage seems to complete but no tasks.json in change directory.
 
 **Cause**: Self-review may have failed silently.
 
@@ -25,7 +25,7 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 1. Verify specs are complete in `specs/` directory
 2. Check each spec has proper acceptance criteria
 3. Ensure all REQ-XXX references are valid
-4. Manually create prd.json if needed (see examples/)
+4. Manually create tasks.json if needed (see examples/)
 
 ## Build Stage Issues
 
@@ -37,7 +37,7 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 1. Agent retries automatically (up to 2 times)
 2. Each retry includes failure context
 3. If persistent failure, check:
-   - Acceptance criteria in prd.json
+   - Acceptance criteria in tasks.json
    - Spec requirements in specs/{capability}/spec.md
 4. Manually verify implementation
 5. If criteria are wrong, update them and resume
@@ -59,12 +59,12 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 
 **Symptoms**: Build seems to skip or repeat tasks incorrectly.
 
-**Cause**: task-status.json may be out of sync.
+**Cause**: tasks.json may be out of sync.
 
 **Solution**:
-1. Check `task-status.json` in change directory
-2. Verify `current_task_index` matches expected task
-3. Manually edit task-status.json if needed
+1. Check `tasks.json` in change directory
+2. Verify task `passes`/`attempts`/`error` fields match expected state
+3. Manually edit tasks.json if needed
 4. Ensure previous task artifacts are correct
 
 ## Session Memory Issues
@@ -97,14 +97,14 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 **Solution**:
 - New proposals auto-create `-v2`, `-v3` etc.
 - Use `--force` to overwrite existing
-- Archive old versions: move to `.mohist-specs/archive/`
+- Archive old versions: move to `openspec/changes/archive/`
 
 ### Issue: Specs not visible in PR
 
 **Symptoms**: Reviewers can't see specs during code review.
 
 **Solution**:
-1. Verify `.mohist-specs/` is not in .gitignore
+1. Verify `openspec/` is not in .gitignore
 2. Ensure specs were committed with code
 3. Check `.mohist/config.yaml` has `git_track: true`
 
@@ -136,10 +136,10 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 
 **Symptoms**: Issue goes to traditional workflow instead of Ralph loop.
 
-**Cause**: prd.json not in expected location.
+**Cause**: tasks.json not in expected location.
 
 **Solution**:
-1. Verify `.mohist-specs/changes/{change}/prd.json` exists
+1. Verify `openspec/changes/{change}/tasks.json` exists
 2. Check workflow-loader detects file
 3. Ensure change name matches expected format
 
@@ -168,13 +168,13 @@ mo propose <id> --force
 mo issue show <id>
 
 # View change artifacts
-ls -la .mohist-specs/changes/<change>/
+ls -la openspec/changes/<change>/
 ```
 
 ## Getting Help
 
 1. Check logs: `mo server logs`
-2. Verify OpenSpec artifacts: `.mohist-specs/changes/`
+2. Verify OpenSpec artifacts: `openspec/changes/`
 3. Run typecheck: `npm run typecheck`
 4. Run tests: `npm test`
 5. Open an issue at https://github.com/owner/mohist/issues
