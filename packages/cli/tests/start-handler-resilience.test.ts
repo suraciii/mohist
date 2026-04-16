@@ -148,9 +148,8 @@ describe('POST /issues/:number/start resilience', () => {
     ));
     const server = createTestServer(app);
 
-    const originalStart = agentRunner.start.bind(agentRunner);
     vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
-    vi.spyOn(agentRunner, 'start').mockImplementation((() => {
+    vi.spyOn(agentRunner, 'startPipeline').mockImplementation((() => {
       throw new Error('agent start unexpected failure');
     }) as any);
 
@@ -173,7 +172,7 @@ describe('POST /issues/:number/start resilience', () => {
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
-    vi.spyOn(agentRunner, 'start').mockImplementation((() => {
+    vi.spyOn(agentRunner, 'startPipeline').mockImplementation((() => {
       throw new Error('agent start failed');
     }) as any);
 
@@ -211,7 +210,7 @@ describe('POST /issues/:number/start resilience', () => {
     const worktreeManager = createMockWorktreeManager();
 
     vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
-    vi.spyOn(agentRunner, 'start').mockImplementation((() => {
+    vi.spyOn(agentRunner, 'startPipeline').mockImplementation((() => {
       throw new Error('agent start failed');
     }) as any);
 
@@ -233,10 +232,8 @@ describe('POST /issues/:number/start resilience', () => {
     const worktreeManager = createMockWorktreeManager();
 
     vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
-    vi.spyOn(agentRunner, 'start').mockReturnValue({
+    vi.spyOn(agentRunner, 'startPipeline').mockReturnValue({
       started: true,
-      queued: false,
-      queuePosition: 0,
     } as any);
 
     const app = new Hono();

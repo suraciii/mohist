@@ -73,6 +73,47 @@ describe('context-assembler', () => {
       expect(result).toContain('POST /api/login returns JWT');
       expect(result).toContain('Validates email format');
       expect(result).toContain('Returns 401 for invalid credentials');
+      expect(result).toContain('Depends On: T-001, T-002');
+    });
+
+    it('should include mode, type, and output when present', () => {
+      const taskWithFields: Task = {
+        id: 'T-005',
+        order: 5,
+        title: 'Add migration',
+        description: 'Create database migration',
+        mode: 'AFK',
+        type: 'MIGRATE',
+        output: 'migrations/001.sql',
+        dependsOn: ['T-001'],
+        passes: false,
+        attempts: 0,
+      };
+
+      const result = formatTaskForPrompt(taskWithFields);
+
+      expect(result).toContain('Mode: AFK');
+      expect(result).toContain('Type: MIGRATE');
+      expect(result).toContain('Output: migrations/001.sql');
+      expect(result).toContain('Depends On: T-001');
+    });
+
+    it('should not include mode/type/output/dependsOn when absent', () => {
+      const minimalTask: Task = {
+        id: 'T-001',
+        title: 'Simple task',
+        description: 'A simple task description',
+        order: 1,
+        passes: false,
+        attempts: 0,
+      };
+
+      const result = formatTaskForPrompt(minimalTask);
+
+      expect(result).not.toContain('Mode:');
+      expect(result).not.toContain('Type:');
+      expect(result).not.toContain('Output:');
+      expect(result).not.toContain('Depends On:');
     });
 
     it('should format task without acceptance criteria', () => {

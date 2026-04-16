@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { loadPromptFromFile, loadPrompt, loadReviewerDefaultPrompt, loadPlannerDefaultPrompt, DEFAULT_PROMPTS_DIR } from '../src/agents/prompt-loader';
+import { loadPromptFromFile, loadPrompt, DEFAULT_PROMPTS_DIR } from '../src/agents/prompt-loader';
 
 describe('prompt-loader', () => {
   let tmpDir: string;
@@ -70,28 +70,6 @@ steps:
       fs.writeFileSync(path.join(promptsDir, 'test.yaml'), 'role: test\nname: Test');
       const result = loadPrompt(path.join(promptsDir, 'test.yaml'));
       expect(result).toContain('role: test');
-    });
-  });
-
-  describe('loadPlannerDefaultPrompt', () => {
-    it('should return planner default prompt when file exists', () => {
-      const result = loadPlannerDefaultPrompt();
-      expect(result).toBeTruthy();
-      expect(result).toContain('role');
-    });
-  });
-
-  describe('loadReviewerDefaultPrompt', () => {
-    it('should load reviewer default prompt when file exists', () => {
-      const result = loadReviewerDefaultPrompt();
-      expect(result).toBeTruthy();
-      expect(result).toContain('role');
-    });
-
-    it('should return string type when prompt loaded', () => {
-      const result = loadReviewerDefaultPrompt();
-      expect(typeof result).toBe('string');
-      expect(result.length).toBeGreaterThan(0);
     });
   });
 

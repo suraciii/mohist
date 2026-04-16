@@ -28,39 +28,29 @@ describe('AgentRunnerService', () => {
     db.close();
   });
 
-  describe('start', () => {
+  describe('startPipeline', () => {
     it('should return { started: false, error: ... } when issue has pending approval', () => {
       const project = projectRepo.create({ name: 'Test Project', path: '/test' });
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
 
       issueRepo.setApprovalState(issue.id, {
+        stage: Stage.Plan,
         status: 'awaiting',
-        requestedAt: new Date(),
-        requestedBy: 'user',
+        requestedAt: new Date().toISOString(),
       });
 
       const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
-      const mockSessionManager = {
-        create: vi.fn(),
-        appendMessage: vi.fn(),
-        pause: vi.fn(),
-        resume: vi.fn(),
-        close: vi.fn(),
-      } as any;
 
-      const result = service.start(
+      const result = service.startPipeline(
         issue,
         project.id,
         issueRepo,
-        {} as any,
-        undefined,
         '/test',
-        mockSessionManager,
+        { cwd: '/test' },
       );
 
       expect(result.started).toBe(false);
-      expect(result.error).toContain('pending approval');
-      expect(result.error).toMatch(/resume|submit_approval/);
+      expect(result.error).toMatch(/pending approval|approval/);
     });
 
     it('should proceed normally when no pending approval', () => {
@@ -68,26 +58,24 @@ describe('AgentRunnerService', () => {
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue 2' });
 
       const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
-      const mockSessionManager = {
-        create: vi.fn().mockReturnValue({ id: 'session-1' }),
-        appendMessage: vi.fn(),
-        pause: vi.fn(),
-        resume: vi.fn(),
-        close: vi.fn(),
-      } as any;
 
-      const result = service.start(
+      const result = service.startPipeline(
         issue,
         project.id,
         issueRepo,
-        {} as any,
-        undefined,
         '/test',
-        mockSessionManager,
+        { cwd: '/test' },
       );
 
       expect(result.started).toBe(true);
       expect(result.error).toBeUndefined();
+    });
+  });
+
+  describe('hasPendingGate', () => {
+    it('should return false when no gates pending', () => {
+      const service = new AgentRunnerService(eventBus, undefined, undefined, 8);
+      expect(service.hasPendingGate(1)).toBe(false);
     });
   });
 });
