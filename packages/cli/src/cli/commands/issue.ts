@@ -334,6 +334,28 @@ export function setupIssueCommands(program: Command): void {
     });
 
   issue
+    .command('reject <number>')
+    .description('Reject an issue at an approval gate')
+    .option('-m, --message <message>', 'Rejection reason')
+    .action(async (number, options) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          `/issues/${number}/reject`,
+          { message: options.message }
+        );
+        
+        if (response.success) {
+          console.log(chalk.yellow(`✓ Issue #${number} rejected, pipeline will restart`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to reject issue: ${error}`));
+      }
+    });
+
+  issue
     .command('resume <number>')
     .description('Resume a paused issue with optional skip to review')
     .option('--skip-to-review', 'Skip plan stage and go directly to review (for OpenSpec workflow)')

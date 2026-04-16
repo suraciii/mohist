@@ -3,8 +3,6 @@ export {
   createWorkflowController,
   type WorkflowControllerOptions,
   type StageResult,
-  type PlannerAgent,
-  type ReviewerAgent,
   type ChangeArtifactsManager,
   type PipelineResult,
 } from './workflow-controller';
