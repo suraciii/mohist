@@ -6,6 +6,7 @@ export {
   type PlannerAgent,
   type ReviewerAgent,
   type ChangeArtifactsManager,
+  type PipelineResult,
 } from './workflow-controller';
 
 export { type PlanResult, type ReviewResult } from '../types/workflow-results';
