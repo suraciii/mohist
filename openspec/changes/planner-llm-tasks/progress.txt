@@ -92,3 +92,27 @@ Started: 2026-04-16T12:10:01.067Z
 
 ### Next steps
 - T-005: Implement ExploreService
+
+---
+
+## 2026-04-16T00:00:00Z - T-005 Implement ExploreService
+
+### What was done
+- Created `agents/prompts/explore.md` — explore prompt instruction for ACP agent
+- Added `buildExplorePrompt(issueInfo, changeDir, existingProposal?)` to `artifact-prompt.ts`
+  - Accepts `ExploreIssueInfo` (title, body?, number?) for both new and existing issue scenarios
+  - Includes existing proposal content when updating
+- Created `services/explore-acp-service.ts` with `ExploreAcpService` class:
+  - `run(issueTitle, projectId, acpOptions?)` — creates issue + change dir, runs `runAcpSession()` to generate proposal.md
+  - `runOnIssue(issue, acpOptions?)` — ensures change dir exists, reads existing proposal, runs `runAcpSession()` to update/generate proposal.md
+  - Both methods verify proposal.md was created after ACP session
+- Exported `ExploreAcpService`, `ExploreAcpServiceOptions`, `ExploreResult` from `services/index.ts`
+- Typecheck passes
+
+### Learnings
+- Existing `ExploreService` (DB CRUD for interactive explore sessions) kept intact — new `ExploreAcpService` serves the pipeline-oriented explore use case
+- `run()` creates the issue first to get a number for the change dir, then runs ACP session — matches the design's flow
+- `runOnIssue()` reads existing proposal and passes it to the prompt so the agent can update rather than start from scratch
+
+### Next steps
+- T-006: Delete MainAgent, PlannerAgent, ReviewerAgent, and agent-loop
