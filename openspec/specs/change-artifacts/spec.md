@@ -16,8 +16,7 @@ The system SHALL create a standardized directory structure for each Change under
   - `proposal.md` for the change motivation
   - `design.md` for technical approach
   - `specs/` directory for detailed requirements
-  - `prd.json` (generated during plan phase after self-review)
-  - `task-status.json` (created during build phase)
+  - `tasks.json` (generated during plan phase after self-review)
   - `session-memories/` directory for task learnings
 
 #### Scenario: Handle naming conflict
