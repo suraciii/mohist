@@ -16,3 +16,11 @@ Started: 2026-04-16T04:49:17.598Z
 - TypeScript compiles (only pre-existing log-tail.ts error)
 - Learnings: Need to update all downstream consumers in same task to keep compilation passing
 - Next: T-002 (ContextAssembler), T-003 (rename tools), T-004 (RalphExecutor refactor)
+
+## 2026-04-16 T-002 Update ContextAssembler Task interface
+- Task interface already had new schema fields (passes/attempts/error) from T-001
+- formatTaskForPrompt already used acceptanceCriteria (correct field name)
+- Added spec field output to formatTaskForPrompt so it references task.spec
+- TypeScript compiles (only pre-existing log-tail.ts error, unrelated)
+- Learnings: T-001 already migrated most of the Task interface; T-002 was mostly verification + adding spec to formatted prompt output
+- Next: T-003 (rename read_prd tool, delete task-status tools)
