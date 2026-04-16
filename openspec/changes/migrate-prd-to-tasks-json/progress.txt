@@ -1,0 +1,18 @@
+# Ralph Progress Log
+Started: 2026-04-16T04:49:17.598Z
+
+---
+
+
+## 2026-04-16 T-001 Update detector and types
+- Renamed prdPath→tasksPath, removed taskStatusPath in detector.ts
+- detectOpenSpecChange now checks tasks.json only, returns null if missing
+- Replaced PrdTask/PrdJson/PrdTaskStatus/TaskStatusValue with Task/TasksFile in change-artifacts-manager.ts
+- New Task interface: id, order (required), title, description, acceptanceCriteria, dependsOn, spec, passes, attempts, error
+- Removed: capability, requirement_ref, estimated_effort, status, startedAt, completedAt
+- readPrd/writePrd→readTasks/writeTasks, updateTaskStatus→updateTaskPasses
+- workflow-results.ts: PrdJson→TasksFile, prd→tasks field
+- Updated downstream consumers: context-assembler.ts, ralph-executor.ts, workflow-controller.ts, planner-agent.ts, workflow-loader.ts, read-workflow.ts
+- TypeScript compiles (only pre-existing log-tail.ts error)
+- Learnings: Need to update all downstream consumers in same task to keep compilation passing
+- Next: T-002 (ContextAssembler), T-003 (rename tools), T-004 (RalphExecutor refactor)

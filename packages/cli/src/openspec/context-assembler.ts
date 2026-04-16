@@ -5,15 +5,15 @@ import type { SessionLearning } from '../tools/session-memory';
 
 export interface Task {
   id: string;
-  order?: number | string;
-  capability?: string;
-  requirement_ref?: string;
+  order: number;
   title: string;
   description: string;
-  acceptance_criteria?: string[];
-  dependencies?: string[];
-  estimated_effort?: string;
-  spec_file?: string;
+  acceptanceCriteria?: string[];
+  dependsOn?: string[];
+  spec?: string;
+  passes: boolean;
+  attempts: number;
+  error?: string | null;
 }
 
 export interface BuildContextOptions {
@@ -100,10 +100,10 @@ export function formatTaskForPrompt(task: Task): string {
   lines.push(`Title: ${task.title}`);
   lines.push('');
   lines.push(`Description: ${task.description}`);
-  if (task.acceptance_criteria && task.acceptance_criteria.length > 0) {
+  if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
     lines.push('');
     lines.push('Acceptance Criteria:');
-    for (const ac of task.acceptance_criteria) {
+    for (const ac of task.acceptanceCriteria) {
       lines.push(`  - [ ] ${ac}`);
     }
   }
@@ -137,8 +137,8 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
   const design = readFileIfExists(change.designPath);
 
   let spec: string | null = null;
-  if (task.spec_file) {
-    const specPath = path.join(change.changePath, task.spec_file);
+  if (task.spec) {
+    const specPath = path.join(change.changePath, task.spec);
     spec = readFileIfExists(specPath);
   }
 
@@ -160,10 +160,7 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
   }
 
   if (spec) {
-    sections.push(`[Current Requirement: ${task.spec_file || 'spec'}]`);
-    if (task.requirement_ref) {
-      sections.push(`Requirement Ref: ${task.requirement_ref}`);
-    }
+    sections.push(`[Current Requirement: ${task.spec || 'spec'}]`);
     sections.push(spec);
     sections.push('');
   }
@@ -215,8 +212,7 @@ export class ContextAssembler {
 
     const change: OpenSpecChange = {
       changePath: changeDir,
-      prdPath: path.join(changeDir, 'prd.json'),
-      taskStatusPath: path.join(changeDir, 'task-status.json'),
+      tasksPath: path.join(changeDir, 'tasks.json'),
       sessionMemoriesPath,
       proposalPath,
       designPath,
