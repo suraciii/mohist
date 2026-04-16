@@ -100,6 +100,10 @@ export function formatTaskForPrompt(task: Task): string {
   lines.push(`Title: ${task.title}`);
   lines.push('');
   lines.push(`Description: ${task.description}`);
+  if (task.spec) {
+    lines.push('');
+    lines.push(`Spec: ${task.spec}`);
+  }
   if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
     lines.push('');
     lines.push('Acceptance Criteria:');

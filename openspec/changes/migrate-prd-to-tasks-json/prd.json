@@ -26,7 +26,7 @@
         "formatTaskForPrompt 引用 acceptanceCriteria（非 acceptance_criteria）和 spec（非 spec_file）"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
