@@ -1,0 +1,125 @@
+{
+  "project": "mohist",
+  "description": "Replace MainAgent+PlannerAgent with program-driven pipeline using multi-round ACP connections. Delete MainAgent, PlannerAgent, ReviewerAgent, and all MainAgent tools.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create artifact instruction and template files",
+      "spec": "specs/planner-prompt/spec.md",
+      "description": "Create instruction and template files for proposal, specs, design, tasks (plan stage), and review report (review stage). Tasks instruction derived from OpenSpec schema.yaml's prd instruction, extended with mode/type/output/dependsOn fields.",
+      "acceptanceCriteria": [
+        "Instruction and template files exist for proposal, specs, design, tasks, review",
+        "Tasks instruction contains guidance on granularity, AFK/HITL, task types, dependency ordering",
+        "Self-review instruction exists",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Instruction content sourced from opensrc/OpenSpec/schemas/ralph-driven/schema.yaml"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement AcpConnection and artifact prompt builder",
+      "spec": "specs/pipeline-controller/spec.md",
+      "description": "Add `createAcpConnection()` / `AcpConnection` class to `agent-runtime/acp-session.ts` supporting multiple `prompt()` rounds and `close()`. Create `buildArtifactPrompt(artifactType, issue, changeDir)` that loads the corresponding instruction and template. Create `buildSelfReviewPrompt(issue, changeDir)` and `buildReviewerPrompt(issue, changeDir)`.",
+      "acceptanceCriteria": [
+        "AcpConnection supports at least 5 consecutive prompt rounds",
+        "buildArtifactPrompt returns a prompt containing issue info + artifact instruction + template",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Implement pipeline plan stage with multi-round ACP",
+      "spec": "specs/pipeline-controller/spec.md",
+      "description": "Implement `WorkflowController.runPlanStage()` using AcpConnection: send proposal prompt → verify → send specs prompt → verify → send design prompt → verify → send tasks prompt → verify → send self-review prompt. Clean changeDir before starting. On any round failure, close connection and report which artifact failed.",
+      "acceptanceCriteria": [
+        "runPlanStage() creates AcpConnection and sends 5 rounds of prompts",
+        "Each round verifies the corresponding artifact exists before proceeding",
+        "Change directory is cleaned before starting",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-004",
+      "title": "Implement pipeline core loop, gate controller, and review stage",
+      "spec": "specs/pipeline-controller/spec.md",
+      "description": "Rewrite `WorkflowController` as a pipeline with `run(issue)` method executing plan → gate → build → gate → review → done. Gate controller uses `approvalState` to pause/resume. `runBuildStage()` uses RalphExecutor unchanged. `runReviewStage()` uses AcpConnection with reviewer prompt. Update `AgentRunnerService` to manage gate resume by re-invoking `Pipeline.run()` instead of resuming LLM session.",
+      "acceptanceCriteria": [
+        "Pipeline runs stages in fixed order without LLM decision",
+        "Gates pause pipeline and wait for human approval via approvalState",
+        "Build stage uses RalphExecutor",
+        "Review stage uses AcpConnection with reviewer prompt",
+        "AgentRunnerService manages gate resume by re-invoking Pipeline.run()",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-005",
+      "title": "Implement ExploreService",
+      "spec": "specs/pipeline-controller/spec.md",
+      "description": "Create `ExploreService` that replaces MainAgent's explore capability. It calls `runAcpSession()` with an explore prompt to generate or update `proposal.md`. Support two entry points: creating a new issue from exploration, and updating an existing issue's proposal.",
+      "acceptanceCriteria": [
+        "ExploreService can generate proposal.md for a new issue",
+        "ExploreService can update proposal.md for an existing issue",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-006",
+      "title": "Delete MainAgent, PlannerAgent, ReviewerAgent, and agent-loop",
+      "spec": "specs/pipeline-controller/spec.md",
+      "description": "Delete `main-agent.ts`, `planner-agent.ts`, `reviewer-agent.ts`, `agent-loop.ts`. Remove `PLANNER_DEFAULT_PROMPT`, `loadPlannerDefaultPrompt`, `createPlannerAgent`, `createReviewerAgent`, `runMainAgent`. Update any remaining imports.",
+      "acceptanceCriteria": [
+        "main-agent.ts, planner-agent.ts, reviewer-agent.ts, agent-loop.ts do not exist",
+        "No references to runMainAgent, createPlannerAgent, createReviewerAgent, runAgentLoop",
+        "planner-default.yaml deleted",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-007",
+      "title": "Delete MainAgent tools and update CLI commands",
+      "spec": "specs/pipeline-controller/spec.md",
+      "description": "Delete tools: `execute-stage.ts`, `advance-stage.ts`, `submit-approval.ts`, `spawn-coder.ts`, `read-workflow.ts`, `add-comment.ts`, `get-issue.ts`. Delete `generateTasksFromSpecs`, `generateTasksFile`, `createGenerateTasksTool` from `tools/self-review.ts`. Update CLI `mo issue approve` to directly update `approvalState` and trigger pipeline resume. Update `mo issue reject` similarly.",
+      "acceptanceCriteria": [
+        "execute-stage.ts, advance-stage.ts, submit-approval.ts, spawn-coder.ts, read-workflow-ts do not exist",
+        "CLI approve/reject commands update approvalState directly",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Keep tools used by pipeline: ask-user.ts (for Explore), read-tasks.ts, read-spec.ts, archive-change.ts, session-memory.ts"
+    },
+    {
+      "id": "T-008",
+      "title": "Update context-assembler and tests",
+      "spec": "specs/pipeline-controller/spec.md",
+      "description": "Update `context-assembler.ts` to include task fields `mode`, `type`, `output`, `dependsOn` in the assembled task prompt. Delete tests for deleted agents/tools. Add tests for AcpConnection multi-round behavior. Add tests for pipeline stage ordering and gate behavior. Add tests for `buildArtifactPrompt()`. Run npm run build and npm test.",
+      "acceptanceCriteria": [
+        "context-assembler.ts includes mode/type/output/dependsOn in task prompt",
+        "npm run build passes",
+        "npm test passes",
+        "No test references to deleted agents/tools"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
