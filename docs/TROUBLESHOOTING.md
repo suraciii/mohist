@@ -11,7 +11,7 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 **Cause**: Agent's self-review found issues that couldn't be resolved.
 
 **Solution**:
-1. Check artifacts in `.mohist-specs/changes/{change}/`
+1. Check artifacts in `openspec/changes/{change}/`
 2. Manually fix issues in proposal.md, design.md, or specs/
 3. Run `mo issue resume <id> --skip-to-review` to proceed
 
@@ -97,14 +97,14 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 **Solution**:
 - New proposals auto-create `-v2`, `-v3` etc.
 - Use `--force` to overwrite existing
-- Archive old versions: move to `.mohist-specs/archive/`
+- Archive old versions: move to `openspec/changes/archive/`
 
 ### Issue: Specs not visible in PR
 
 **Symptoms**: Reviewers can't see specs during code review.
 
 **Solution**:
-1. Verify `.mohist-specs/` is not in .gitignore
+1. Verify `openspec/` is not in .gitignore
 2. Ensure specs were committed with code
 3. Check `.mohist/config.yaml` has `git_track: true`
 
@@ -139,7 +139,7 @@ Common issues and solutions for Mohist's OpenSpec workflow.
 **Cause**: prd.json not in expected location.
 
 **Solution**:
-1. Verify `.mohist-specs/changes/{change}/prd.json` exists
+1. Verify `openspec/changes/{change}/prd.json` exists
 2. Check workflow-loader detects file
 3. Ensure change name matches expected format
 
@@ -168,13 +168,13 @@ mo propose <id> --force
 mo issue show <id>
 
 # View change artifacts
-ls -la .mohist-specs/changes/<change>/
+ls -la openspec/changes/<change>/
 ```
 
 ## Getting Help
 
 1. Check logs: `mo server logs`
-2. Verify OpenSpec artifacts: `.mohist-specs/changes/`
+2. Verify OpenSpec artifacts: `openspec/changes/`
 3. Run typecheck: `npm run typecheck`
 4. Run tests: `npm test`
 5. Open an issue at https://github.com/owner/mohist/issues

@@ -71,7 +71,7 @@ ralph:
 
 archival:
   enabled: true
-  path: ".mohist-specs/archive"
+  path: "openspec/changes/archive"
 ```
 
 ## Traditional Workflow

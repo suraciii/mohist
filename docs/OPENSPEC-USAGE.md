@@ -22,7 +22,7 @@ plan → review → build → check → done
 A **Change** is a structured artifact directory containing:
 
 ```
-.mohist-specs/changes/{issue-number}-{slug}/
+openspec/changes/{issue-number}-{slug}/
 ├── proposal.md      # Why this change, what problem it solves
 ├── design.md        # Technical design and decisions
 ├── specs/           # Detailed specifications per capability
@@ -60,7 +60,7 @@ mo propose 42 --force
 ```
 
 The command:
-1. Creates `.mohist-specs/changes/{issue-number}-{slug}/`
+1. Creates `openspec/changes/{issue-number}-{slug}/`
 2. Launches AI agent to explore codebase
 3. Agent generates proposal, design, specs
 4. Agent performs self-review (up to 3 iterations)
@@ -113,7 +113,7 @@ Ralph loop executes tasks from `prd.json`:
 
 1. **Auto tests**: Runs `npm test` and `npm run lint`
 2. **Human acceptance**: Review implementation
-3. **Archival**: Change moved to `.mohist-specs/archive/`
+3. **Archival**: Change moved to `openspec/changes/archive/`
 
 ## Example Workflow
 
@@ -135,8 +135,8 @@ Agent explores the issue and generates artifacts.
 
 ```bash
 # Check generated artifacts
-cat .mohist-specs/changes/42-my-issue/proposal.md
-cat .mohist-specs/changes/42-my-issue/prd.json
+cat openspec/changes/42-my-issue/proposal.md
+cat openspec/changes/42-my-issue/prd.json
 
 # If satisfied, approve
 mo issue approve 42
@@ -164,7 +164,7 @@ Change is archived automatically.
 Learnings from task execution are stored in:
 
 ```
-.mohist-specs/changes/{change}/session-memories/{task-id}.json
+openspec/changes/{change}/session-memories/{task-id}.json
 ```
 
 Each file contains:
@@ -187,7 +187,7 @@ These insights are passed to subsequent tasks.
 Track execution state:
 
 ```bash
-cat .mohist-specs/changes/42-my-issue/task-status.json
+cat openspec/changes/42-my-issue/task-status.json
 ```
 
 ```json
@@ -224,7 +224,7 @@ cat .mohist-specs/changes/42-my-issue/task-status.json
 ```yaml
 specs:
   location: "project"      # "project" or ".mohist"
-  project_path: ".mohist-specs"
+  project_path: "openspec"
   git_track: true
 ```
 
@@ -232,8 +232,8 @@ specs:
 
 | Path | Purpose |
 |------|---------|
-| `.mohist-specs/changes/` | Active changes |
-| `.mohist-specs/archive/` | Completed changes |
+| `openspec/changes/` | Active changes |
+| `openspec/changes/archive/` | Completed changes |
 | `.mohist/mohist.db` | SQLite database |
 | `.mohist/logs/` | Server logs |
 
