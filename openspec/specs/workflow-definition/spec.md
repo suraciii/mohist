@@ -22,10 +22,10 @@ The plan stage SHALL generate Change artifacts and perform self-review.
 - **WHEN** plan stage executes
 - **THEN** the agent:
   1. Explores codebase
-  2. Creates `.mohist-specs/changes/{name}/`
+  2. Creates `openspec/changes/{name}/`
   3. Writes proposal.md, design.md, specs/*.md
   4. Performs self-review (max 3 iterations)
-  5. Generates prd.json if review passes
+  5. Generates tasks.json if review passes
   6. Or pauses if max iterations reached
 
 #### Scenario: Self-review iteration
@@ -44,7 +44,7 @@ The review stage SHALL be an approval gate for human review.
 - **WHEN** review stage executes
 - **THEN** the system presents Change artifacts to user
 - **AND** user can:
-  - Edit any file (proposal.md, design.md, specs/*.md, prd.json)
+  - Edit any file (proposal.md, design.md, specs/*.md, tasks.json)
   - Add comments to issue
   - Approve to proceed to build
   - Or go back to plan
@@ -55,13 +55,13 @@ The build stage SHALL execute Ralph-style task loop.
 #### Scenario: Ralph loop execution
 - **WHEN** build stage executes
 - **THEN** main-agent:
-  1. Reads prd.json and task-status.json
+  1. Reads tasks.json
   2. For each pending task:
      - Assembles context (proposal + design + spec + learnings)
      - Calls spawn_coder
      - Verifies AC
      - Stores learning
-     - Updates task-status.json
+     - Updates passes/attempts/error in tasks.json
   3. Continues until all tasks complete or failure
 
 ### Requirement: Check stage behavior
@@ -85,14 +85,14 @@ The check stage SHALL perform automated testing and human acceptance.
 
 #### Scenario: Archive Change
 - **WHEN** check stage completes with approval
-- **THEN** system moves Change to `.mohist-specs/archive/YYYY-MM-DD-{name}/`
+- **THEN** system moves Change to `openspec/changes/archive/YYYY-MM-DD-{name}/`
 - **AND** marks issue as done
 
 ### Requirement: Backward compatibility
 The system SHALL support traditional workflow for issues without Change artifacts.
 
 #### Scenario: Traditional workflow
-- **WHEN** an issue has no `.mohist-specs/changes/` directory
+- **WHEN** an issue has no `openspec/changes/` directory
 - **THEN** it follows the traditional 3-stage workflow:
   - plan (temporary output)
   - build (single spawn_coder)

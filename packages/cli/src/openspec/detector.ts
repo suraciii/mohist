@@ -4,8 +4,7 @@ import type { Issue } from '../types';
 
 export interface OpenSpecChange {
   changePath: string;
-  prdPath: string;
-  taskStatusPath: string;
+  tasksPath: string;
   sessionMemoriesPath: string;
   proposalPath: string;
   designPath: string;
@@ -73,16 +72,15 @@ export function detectOpenSpecChange(worktreePath: string, issue: Issue): OpenSp
     return null;
   }
 
-  const prdPath = path.join(changePath, 'prd.json');
+  const tasksPath = path.join(changePath, 'tasks.json');
 
-  if (!fs.existsSync(prdPath)) {
+  if (!fs.existsSync(tasksPath)) {
     return null;
   }
 
   return {
     changePath,
-    prdPath,
-    taskStatusPath: path.join(changePath, 'task-status.json'),
+    tasksPath,
     sessionMemoriesPath: path.join(changePath, 'session-memories'),
     proposalPath: path.join(changePath, 'proposal.md'),
     designPath: path.join(changePath, 'design.md'),

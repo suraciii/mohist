@@ -22,17 +22,17 @@ interface ExecutionReport {
 }
 
 function readTaskStatus(changePath: string): { completed: number; failed: number } {
-  const taskStatusPath = path.join(changePath, 'task-status.json');
-  if (!fs.existsSync(taskStatusPath)) {
+  const tasksPath = path.join(changePath, 'tasks.json');
+  if (!fs.existsSync(tasksPath)) {
     return { completed: 0, failed: 0 };
   }
   try {
-    const content = fs.readFileSync(taskStatusPath, 'utf-8');
+    const content = fs.readFileSync(tasksPath, 'utf-8');
     const data = JSON.parse(content);
     const tasks = data.tasks || [];
     return {
-      completed: tasks.filter((t: { status: string }) => t.status === 'completed').length,
-      failed: tasks.filter((t: { status: string }) => t.status === 'failed').length,
+      completed: tasks.filter((t: { passes: boolean }) => t.passes === true).length,
+      failed: tasks.filter((t: { error: string | null }) => t.error != null).length,
     };
   } catch {
     return { completed: 0, failed: 0 };

@@ -1,0 +1,23 @@
+# Ralph Progress Log
+Started: 2026-04-16T07:25:21.533Z
+
+---
+## T-006: Cleanup and verify
+Timestamp: 2026-04-16T07:27:00Z
+
+### What was done
+- Verified no remaining `PrdTask|PrdJson|prdPath|read_prd` references in `packages/cli/src/`
+- No remaining `task-status` or `prd.json` references in source code
+- Deleted stale test file `tests/read-prd.test.ts` (was importing from deleted `read-prd.ts`)
+- Created `tests/read-tasks.test.ts` with updated tests for the new `createReadTasksTool` using `tasks.json` schema
+- Updated `tests/workflow-loader-detection.test.ts`: all `prd.json` → `tasks.json`, `prdPath` → `tasksPath`
+- `npm run build` passes
+- All tests pass except 3 pre-existing e2e failures (unrelated to migration, present before T-001)
+
+### Learnings
+- Test files also need updating when renaming source files/tools — the previous tasks updated source code but left test files referencing old names
+- The e2e.test.ts failures are pre-existing (verified by stashing changes and running tests)
+
+### Next steps
+- All 6 tasks complete. Change is ready for review/archive.
+

@@ -5,7 +5,7 @@ The system SHALL store Change specs in a project-level directory that is version
 
 #### Scenario: Store specs in project
 - **WHEN** creating a new Change
-- **THEN** the system creates `.mohist-specs/changes/{name}/` under the project root
+- **THEN** the system creates `openspec/changes/{name}/` under the project root
 - **AND** the directory is not in .gitignore by default
 - **AND** specs are committed with code changes
 
@@ -14,7 +14,7 @@ The system SHALL ensure specs are visible during code review.
 
 #### Scenario: Review includes specs
 - **WHEN** a developer opens a PR
-- **THEN** the PR includes `.mohist-specs/changes/{name}/` files
+- **THEN** the PR includes `openspec/changes/{name}/` files
 - **AND** reviewers can see proposal.md, design.md, and specs/
 - **AND** reviewers can comment on specific requirements
 - **AND** reviewers can verify implementation matches specs
@@ -28,7 +28,7 @@ The system SHALL support configuration of the specs storage location.
   ```yaml
   specs:
     location: "project"  # or ".mohist"
-    project_path: ".mohist-specs"
+    project_path: "openspec"
     git_track: true
   ```
 - **AND** the project can customize the path
@@ -38,7 +38,7 @@ The system SHALL support archiving completed specs while preserving history.
 
 #### Scenario: Archive completed change specs
 - **WHEN** a Change is completed
-- **THEN** the system moves the directory to `.mohist-specs/archive/YYYY-MM-DD-{name}/`
+- **THEN** the system moves the directory to `openspec/changes/archive/YYYY-MM-DD-{name}/`
 - **AND** the archived specs remain in git history
 - **AND** active development directory remains clean
 

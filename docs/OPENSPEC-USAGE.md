@@ -10,7 +10,7 @@ The OpenSpec workflow introduces structured **Change** artifacts and **Ralph-sty
 plan → review → build → check → done
 ```
 
-- **plan**: Generate Change artifacts (proposal, design, specs, prd.json) with self-review
+- **plan**: Generate Change artifacts (proposal, design, specs, tasks.json) with self-review
 - **review**: Human review and approval gate
 - **build**: Ralph-style task loop execution
 - **check**: Auto tests + human acceptance + Change archival
@@ -22,21 +22,20 @@ plan → review → build → check → done
 A **Change** is a structured artifact directory containing:
 
 ```
-.mohist-specs/changes/{issue-number}-{slug}/
+openspec/changes/{issue-number}-{slug}/
 ├── proposal.md      # Why this change, what problem it solves
 ├── design.md        # Technical design and decisions
 ├── specs/           # Detailed specifications per capability
 │   ├── capability-a/spec.md
 │   └── capability-b/spec.md
-├── prd.json         # Task list (Ralph-style)
-├── task-status.json # Execution state tracking
+├── tasks.json       # Task list with execution state (Ralph-style)
 └── session-memories/ # Learnings from task execution
     └── T-001.json
 ```
 
 ### Ralph Loop
 
-Ralph-style execution iterates through tasks in `prd.json`:
+Ralph-style execution iterates through tasks in `tasks.json`:
 
 1. Select next pending task by order
 2. Assemble full context (proposal + design + spec + learnings)
@@ -60,11 +59,11 @@ mo propose 42 --force
 ```
 
 The command:
-1. Creates `.mohist-specs/changes/{issue-number}-{slug}/`
+1. Creates `openspec/changes/{issue-number}-{slug}/`
 2. Launches AI agent to explore codebase
 3. Agent generates proposal, design, specs
 4. Agent performs self-review (up to 3 iterations)
-5. If self-review passes, generates `prd.json`
+5. If self-review passes, generates `tasks.json`
 
 ### `mo issue resume <id>`
 
@@ -88,7 +87,7 @@ Agent explores the issue and codebase, then generates:
 - **proposal.md**: Motivation, goals, non-goals
 - **design.md**: Architecture decisions, trade-offs
 - **specs/**: Detailed requirements per capability
-- **prd.json**: Task list derived from specs
+- **tasks.json**: Task list derived from specs
 
 Self-review happens within this stage (max 3 iterations).
 
@@ -102,18 +101,18 @@ Human reviews the Change artifacts:
 
 #### Build Stage
 
-Ralph loop executes tasks from `prd.json`:
+Ralph loop executes tasks from `tasks.json`:
 
 - Tasks run sequentially by `order` field
 - Each task gets full context (proposal, design, spec, learnings)
 - Failures are analyzed and retried with failure context
-- Task status tracked in `task-status.json`
+- Task status tracked via `passes`/`attempts`/`error` on each task
 
 #### Check Stage
 
 1. **Auto tests**: Runs `npm test` and `npm run lint`
 2. **Human acceptance**: Review implementation
-3. **Archival**: Change moved to `.mohist-specs/archive/`
+3. **Archival**: Change moved to `openspec/changes/archive/`
 
 ## Example Workflow
 
@@ -135,8 +134,8 @@ Agent explores the issue and generates artifacts.
 
 ```bash
 # Check generated artifacts
-cat .mohist-specs/changes/42-my-issue/proposal.md
-cat .mohist-specs/changes/42-my-issue/prd.json
+cat openspec/changes/42-my-issue/proposal.md
+cat openspec/changes/42-my-issue/tasks.json
 
 # If satisfied, approve
 mo issue approve 42
@@ -144,7 +143,7 @@ mo issue approve 42
 
 ### 4. Build Executes
 
-Agent runs Ralph loop, executing each task in `prd.json`.
+Agent runs Ralph loop, executing each task in `tasks.json`.
 
 ### 5. Check and Accept
 
@@ -164,7 +163,7 @@ Change is archived automatically.
 Learnings from task execution are stored in:
 
 ```
-.mohist-specs/changes/{change}/session-memories/{task-id}.json
+openspec/changes/{change}/session-memories/{task-id}.json
 ```
 
 Each file contains:
@@ -184,19 +183,19 @@ These insights are passed to subsequent tasks.
 
 ## Task Status
 
-Track execution state:
+Track execution state in `tasks.json` — each task has `passes`, `attempts`, and `error` fields:
 
 ```bash
-cat .mohist-specs/changes/42-my-issue/task-status.json
+cat openspec/changes/42-my-issue/tasks.json
 ```
 
 ```json
 {
-  "current_task_index": 2,
+  "version": 1,
   "tasks": [
-    {"id": "T-001", "status": "completed", "attempts": 1},
-    {"id": "T-002", "status": "completed", "attempts": 1},
-    {"id": "T-003", "status": "in_progress", "attempts": 1}
+    {"id": "T-001", "title": "...", "passes": true, "attempts": 1, "error": null},
+    {"id": "T-002", "title": "...", "passes": true, "attempts": 1, "error": null},
+    {"id": "T-003", "title": "...", "passes": false, "attempts": 1, "error": "Type error: ..."}
   ]
 }
 ```
@@ -224,7 +223,7 @@ cat .mohist-specs/changes/42-my-issue/task-status.json
 ```yaml
 specs:
   location: "project"      # "project" or ".mohist"
-  project_path: ".mohist-specs"
+  project_path: "openspec"
   git_track: true
 ```
 
@@ -232,17 +231,17 @@ specs:
 
 | Path | Purpose |
 |------|---------|
-| `.mohist-specs/changes/` | Active changes |
-| `.mohist-specs/archive/` | Completed changes |
+| `openspec/changes/` | Active changes |
+| `openspec/changes/archive/` | Completed changes |
 | `.mohist/mohist.db` | SQLite database |
 | `.mohist/logs/` | Server logs |
 
 ## Backward Compatibility
 
-Issues without `prd.json` use traditional workflow:
+Issues without `tasks.json` use traditional workflow:
 
 ```
 draft → plan → build → check → done
 ```
 
-OpenSpec workflow is opt-in via file existence (`prd.json`).
+OpenSpec workflow is opt-in via file existence (`tasks.json`).

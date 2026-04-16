@@ -1,0 +1,89 @@
+{
+  "project": "mohist",
+  "description": "Migrate prd.json to tasks.json, eliminate task-status.json, unify runtime state into single file",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Update detector and types",
+      "spec": "specs/tasks-json-migration/spec.md",
+      "description": "在 detector.ts 中将 prdPath 重命名为 tasksPath，删除 taskStatusPath，detectOpenSpecChange 只检查 tasks.json（不回退）。在 change-artifacts-manager.ts 中 PrdTask→Task, PrdJson→TasksFile，字段对齐新 schema（砍 capability/requirement_ref/estimated_effort，acceptance_criteria→acceptanceCriteria, spec_file→spec, 新增 passes/attempts/error），readPrd/writePrd→readTasks/writeTasks。在 types/workflow-results.ts 中 PlanResult.artifacts.prd 重命名为 tasks。",
+      "acceptanceCriteria": [
+        "TypeScript 编译通过",
+        "detector.ts 只认 tasks.json，不存在时返回 null",
+        "workflow-results.ts 的 prd 字段已重命名为 tasks"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "先改类型定义和 detector，后续 task 依赖这些类型"
+    },
+    {
+      "id": "T-002",
+      "title": "Update ContextAssembler Task interface",
+      "spec": "specs/tasks-json-migration/spec.md",
+      "description": "在 context-assembler.ts 中更新 Task interface 为新 schema（含 passes/attempts/error），formatTaskForPrompt 使用 acceptanceCriteria 和 spec 字段名。",
+      "acceptanceCriteria": [
+        "TypeScript 编译通过",
+        "formatTaskForPrompt 引用 acceptanceCriteria（非 acceptance_criteria）和 spec（非 spec_file）"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Rename read_prd tool to read_tasks, delete task-status tools",
+      "spec": "specs/tasks-json-migration/spec.md",
+      "description": "将 read-prd.ts 重命名为 read-tasks.ts，工具名 read_prd→read_tasks，输出含 passes/attempts/error。删除 task-status.ts 整个文件（update_task_status 和 get_task_status 工具）。更新 self-review.ts 中 generatePrd→generateTasks，产出 tasks.json。",
+      "acceptanceCriteria": [
+        "TypeScript 编译通过",
+        "read_tasks 工具可读取 tasks.json 并输出含 passes/attempts 的格式",
+        "task-status.ts 文件已删除"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "T-004",
+      "title": "Refactor RalphExecutor to use tasks.json directly",
+      "spec": "specs/tasks-json-migration/spec.md",
+      "description": "在 ralph-executor.ts 中：readPrdTasks→readTasks，删除所有 task-status.json 读写逻辑（readTaskStatus/writeTaskStatus/updateTaskStatusEntry/initializeTaskStatus），改为直接在 tasks.json 上更新 passes/attempts/error。用 passes===false 按 order 找下一个待执行 task。从 detector 和所有引用中移除 taskStatusPath。",
+      "acceptanceCriteria": [
+        "TypeScript 编译通过",
+        "RalphExecutor 不再引用 task-status.json",
+        "task 完成后 passes 设为 true 并写回 tasks.json",
+        "task 失败后 attempts 递增、error 填充并写回 tasks.json"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "这是改动最大的部分，需要仔细处理状态更新逻辑"
+    },
+    {
+      "id": "T-005",
+      "title": "Update agents to reference new types and tools",
+      "spec": "specs/tasks-json-migration/spec.md",
+      "description": "在 planner-agent.ts 中 prd.json→tasks.json，每个 task 初始化 passes:false, attempts:0。在 main-agent.ts 中 read_prd→read_tasks, prdPath→tasksPath，移除 task-status 工具引用。",
+      "acceptanceCriteria": [
+        "TypeScript 编译通过",
+        "PlannerAgent 产出 tasks.json（非 prd.json）"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "T-006",
+      "title": "Cleanup and verify",
+      "spec": "specs/tasks-json-migration/spec.md",
+      "description": "搜索代码库中所有 task-status、prdPath、prd.json、read_prd、PrdTask、PrdJson 引用，确认无遗漏。npm run build 和 npm test 通过。",
+      "acceptanceCriteria": [
+        "npm run build 通过",
+        "npm test 通过",
+        "rg 'PrdTask|PrdJson|prdPath|read_prd' packages/cli/src/ 无结果"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Updated tests/read-prd.test.ts → tests/read-tasks.test.ts, updated tests/workflow-loader-detection.test.ts to use tasks.json/tasksPath"
+    }
+  ]
+}

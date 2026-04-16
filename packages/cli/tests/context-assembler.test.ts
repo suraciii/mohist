@@ -25,18 +25,17 @@ describe('context-assembler', () => {
   const sampleTask: Task = {
     id: 'T-003',
     order: 3,
-    capability: 'core-tools',
-    requirement_ref: 'REQ-003',
     title: 'Implement login API',
     description: 'Create a login endpoint that returns JWT',
-    acceptance_criteria: [
+    acceptanceCriteria: [
       'POST /api/login returns JWT',
       'Validates email format',
       'Returns 401 for invalid credentials',
     ],
-    dependencies: ['T-001', 'T-002'],
-    estimated_effort: 'medium',
-    spec_file: 'specs/auth/spec.md',
+    dependsOn: ['T-001', 'T-002'],
+    spec: 'specs/auth/spec.md',
+    passes: false,
+    attempts: 0,
   };
 
   beforeEach(() => {
@@ -52,8 +51,7 @@ describe('context-assembler', () => {
 
     change = {
       changePath: changeDir,
-      prdPath: path.join(changeDir, 'prd.json'),
-      taskStatusPath: path.join(changeDir, 'task-status.json'),
+      tasksPath: path.join(changeDir, 'tasks.json'),
       sessionMemoriesPath: path.join(changeDir, 'session-memories'),
       proposalPath: path.join(changeDir, 'proposal.md'),
       designPath: path.join(changeDir, 'design.md'),
@@ -82,6 +80,9 @@ describe('context-assembler', () => {
         id: 'T-001',
         title: 'Simple task',
         description: 'A simple task description',
+        order: 1,
+        passes: false,
+        attempts: 0,
       };
 
       const result = formatTaskForPrompt(minimalTask);
@@ -256,7 +257,6 @@ describe('context-assembler', () => {
       expect(result.fullPrompt).toContain('[Proposal]');
       expect(result.fullPrompt).toContain('[Design]');
       expect(result.fullPrompt).toContain('[Current Requirement: specs/auth/spec.md]');
-      expect(result.fullPrompt).toContain('Requirement Ref: REQ-003');
       expect(result.fullPrompt).toContain('[Previous Task Learnings]');
       expect(result.fullPrompt).toContain('From T-001:');
     });
@@ -296,6 +296,9 @@ describe('context-assembler', () => {
         id: 'T-999',
         title: 'Task without spec',
         description: 'No spec file for this task',
+        order: 1,
+        passes: false,
+        attempts: 0,
       };
 
       const result = buildTaskContext({
@@ -308,7 +311,7 @@ describe('context-assembler', () => {
       expect(result.fullPrompt).not.toContain('[Current Requirement]');
     });
 
-    it('should work with task that has spec_file path with subdirectories', () => {
+    it('should work with task that has spec path with subdirectories', () => {
       fs.mkdirSync(path.join(changeDir, 'specs', 'session-memory'), { recursive: true });
       fs.writeFileSync(
         path.join(changeDir, 'specs', 'session-memory', 'spec.md'),
@@ -319,7 +322,10 @@ describe('context-assembler', () => {
         id: 'T-003',
         title: 'Task with nested spec',
         description: 'Uses nested spec path',
-        spec_file: 'specs/session-memory/spec.md',
+        spec: 'specs/session-memory/spec.md',
+        order: 1,
+        passes: false,
+        attempts: 0,
       };
 
       const result = buildTaskContext({

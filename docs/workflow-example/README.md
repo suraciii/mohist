@@ -6,7 +6,7 @@ This directory contains example workflow configurations for the OpenSpec workflo
 
 - `workflow-openspec.yaml` - Full OpenSpec workflow with 4 stages
 - `workflow-traditional.yaml` - Traditional Mohist workflow (backward compatible)
-- `prd-example.json` - Example prd.json from a real change
+- `prd-example.json` - Example tasks.json from a real change
 
 ## Usage
 
@@ -32,7 +32,7 @@ stages:
   - name: plan
     description: Generate Change artifacts with self-review
     entry: auto  # or: mo propose <issue>
-    exit: prd.json exists
+    exit: tasks.json exists
     
   - name: review
     description: Human review and approval
@@ -71,7 +71,7 @@ ralph:
 
 archival:
   enabled: true
-  path: ".mohist-specs/archive"
+  path: "openspec/changes/archive"
 ```
 
 ## Traditional Workflow

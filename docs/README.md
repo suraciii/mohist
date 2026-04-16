@@ -167,7 +167,7 @@ plan → review → build → check → done
 
 ### Key Features
 
-- **Change Artifacts**: Structured proposal/design/specs stored in `.mohist-specs/changes/`
+- **Change Artifacts**: Structured proposal/design/specs stored in `openspec/changes/`
 - **Ralph Loop**: Task-by-task execution with full context and failure recovery
 - **Self-Review**: Agent validates specs before human review (up to 3 iterations)
 - **Session Memory**: Learnings passed between tasks
