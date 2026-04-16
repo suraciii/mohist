@@ -40,7 +40,7 @@
         "task-status.ts 文件已删除"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -14,11 +14,10 @@ import { createAddCommentTool } from '../tools/add-comment';
 import { createGetIssueTool } from '../tools/get-issue';
 import { createAskUserTool } from '../tools/ask-user';
 import { createArchiveChangeTool } from '../tools/archive-change';
-import { createReadPrdTool } from '../tools/read-prd';
+import { createReadTasksTool } from '../tools/read-tasks';
 import { createReadSpecTool } from '../tools/read-spec';
 import { createStoreLearningTool, createLoadLearningsTool } from '../tools/session-memory';
-import { createUpdateTaskStatusTool, createGetTaskStatusTool } from '../tools/task-status';
-import { createSelfReviewTool, createGeneratePrdTool } from '../tools/self-review';
+import { createSelfReviewTool, createGenerateTasksTool } from '../tools/self-review';
 import { createExecuteStageTool } from '../tools/execute-stage';
 import { createSubmitApprovalTool } from '../tools/submit-approval';
 import type { EventBus } from '../services/event-bus';
@@ -74,12 +73,11 @@ ${issue.body ? `- Description: ${issue.body}` : ''}
 - **get_issue**: Check the current state of the issue at any time.
 - **submit_approval**: Submit user approval decision after execute_stage returns requiresApproval: true. Options: approve (proceed to next stage), request_changes (retry current stage), abort (stop workflow).
 - **ask_user**: Ask the user a question and wait for their reply (for clarifications, not stage approvals).
-- **read_prd**: Read the prd.json file for the current OpenSpec Change.
+- **read_tasks**: Read the tasks.json file for the current OpenSpec Change.
 - **read_spec**: Read a spec file from the current OpenSpec Change.
 - **store_learning** / **load_learnings**: Store and retrieve session learnings for the current Change.
-- **update_task_status** / **get_task_status**: Update and query task status in prd.json.
 - **run_self_review**: Run self-review on the current OpenSpec specs.
-- **generate_prd**: Generate prd.json from the current Change's specs.
+- **generate_tasks**: Generate tasks.json from the current Change's specs.
 
 ## When to Use ask_user
 - Requirements are ambiguous and you need clarification
@@ -140,7 +138,7 @@ An OpenSpec Change has been detected for this issue:
 - Change directory: ${detection.changePath}
 - Mode: ${detection.mode}
 
-${detection.mode === 'traditional' ? `A Change directory exists but prd.json has not been generated yet. This means the plan stage is still in progress.
+${detection.mode === 'traditional' ? `A Change directory exists but tasks.json has not been generated yet. This means the plan stage is still in progress.
 
 ### Plan Stage Instructions
 1. Use \`spawn_coder\` to explore the codebase and create the following files in the Change directory (${detection.changePath}):
@@ -148,8 +146,8 @@ ${detection.mode === 'traditional' ? `A Change directory exists but prd.json has
    - \`design.md\`: Technical design document with design decisions
    - \`specs/{capability}/spec.md\`: Capability-based requirement specifications
 2. After creating specs, use \`run_self_review\` to validate spec completeness (up to 3 iterations).
-3. When self-review passes, use \`generate_prd\` to generate prd.json from the specs.
-4. After prd.json is generated, call \`advance_stage("review")\` to enter review stage (do NOT advance directly to "build").` : `prd.json already exists. The plan stage has been completed.
+3. When self-review passes, use \`generate_tasks\` to generate tasks.json from the specs.
+4. After tasks.json is generated, call \`advance_stage("review")\` to enter review stage (do NOT advance directly to "build").` : `tasks.json already exists. The plan stage has been completed.
 
 ### Next Steps
 - If in plan stage: call \`advance_stage("review")\` to enter review stage.
@@ -216,14 +214,12 @@ export async function runMainAgent(
     issue: context.issue,
     worktreePath: context.worktreePath,
   }));
-  toolRegistry.register(createReadPrdTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createReadTasksTool({ projectPath: context.worktreePath }));
   toolRegistry.register(createReadSpecTool({ projectPath: context.worktreePath }));
   toolRegistry.register(createStoreLearningTool({ projectPath: context.worktreePath }));
   toolRegistry.register(createLoadLearningsTool({ projectPath: context.worktreePath }));
-  toolRegistry.register(createUpdateTaskStatusTool({ projectPath: context.worktreePath }));
-  toolRegistry.register(createGetTaskStatusTool({ projectPath: context.worktreePath }));
   toolRegistry.register(createSelfReviewTool({ projectPath: context.worktreePath }));
-  toolRegistry.register(createGeneratePrdTool({ projectPath: context.worktreePath }));
+  toolRegistry.register(createGenerateTasksTool({ projectPath: context.worktreePath }));
   toolRegistry.register(createExecuteStageTool({
     workflowController,
     issue: context.issue,

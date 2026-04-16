@@ -3,36 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
 import { runSelfReview, canGeneratePrd } from '../openspec/self-review';
+import type { Task, TasksFile } from '../artifacts/change-artifacts-manager';
 
 export interface SelfReviewToolContext {
   projectPath: string;
-}
-
-interface PrdTask {
-  id: string;
-  order: number | string;
-  capability: string;
-  requirement_ref: string;
-  title: string;
-  description: string;
-  acceptance_criteria: string[];
-  dependencies: string[];
-  estimated_effort: string;
-  spec_file: string;
-}
-
-interface PrdJson {
-  version: string;
-  change_id: string;
-  issue_reference: string;
-  generated_at: string;
-  tasks: PrdTask[];
-  metadata: {
-    total_tasks: number;
-    capabilities_covered: string[];
-    session_memory_path: string;
-    task_status_path: string;
-  };
 }
 
 function extractRequirementRefs(content: string): { ref: string; title: string }[] {
@@ -47,12 +21,12 @@ function extractRequirementRefs(content: string): { ref: string; title: string }
   });
 }
 
-function generateTasksFromSpecs(specsPath: string): PrdTask[] {
+function generateTasksFromSpecs(specsPath: string): Task[] {
   if (!fs.existsSync(specsPath)) {
     return [];
   }
 
-  const tasks: PrdTask[] = [];
+  const tasks: Task[] = [];
   let order = 1;
 
   try {
@@ -71,14 +45,11 @@ function generateTasksFromSpecs(specsPath: string): PrdTask[] {
           tasks.push({
             id: `T-${String(order).padStart(3, '0')}`,
             order,
-            capability: dir,
-            requirement_ref: `REQ-${String(order).padStart(3, '0')}`,
             title: `Implement ${dir} capability`,
             description: `Implement the ${dir} capability as specified in specs/${dir}/spec.md`,
-            acceptance_criteria: [],
-            dependencies: [],
-            estimated_effort: 'medium',
-            spec_file: `specs/${dir}/spec.md`,
+            spec: `specs/${dir}/spec.md`,
+            passes: false,
+            attempts: 0,
           });
           order++;
         } else {
@@ -86,14 +57,11 @@ function generateTasksFromSpecs(specsPath: string): PrdTask[] {
             tasks.push({
               id: `T-${String(order).padStart(3, '0')}`,
               order,
-              capability: dir,
-              requirement_ref: req.ref,
               title: req.title,
               description: `Implement requirement ${req.ref} for ${dir}`,
-              acceptance_criteria: [],
-              dependencies: [],
-              estimated_effort: 'medium',
-              spec_file: `specs/${dir}/spec.md`,
+              spec: `specs/${dir}/spec.md#${req.ref.replace(/\s/g, '-')}`,
+              passes: false,
+              attempts: 0,
             });
             order++;
           }
@@ -109,7 +77,7 @@ function generateTasksFromSpecs(specsPath: string): PrdTask[] {
   return tasks;
 }
 
-function generatePrd(changePath: string, issueRef: string): PrdJson | null {
+function generateTasksFile(changePath: string): TasksFile | null {
   const specsPath = path.join(changePath, 'specs');
   const tasks = generateTasksFromSpecs(specsPath);
 
@@ -118,17 +86,8 @@ function generatePrd(changePath: string, issueRef: string): PrdJson | null {
   }
 
   return {
-    version: '1.0',
-    change_id: path.basename(changePath),
-    issue_reference: issueRef,
-    generated_at: new Date().toISOString(),
+    version: 1,
     tasks,
-    metadata: {
-      total_tasks: tasks.length,
-      capabilities_covered: [...new Set(tasks.map(t => t.capability))],
-      session_memory_path: './session-memories/',
-      task_status_path: './task-status.json',
-    },
   };
 }
 
@@ -138,7 +97,7 @@ export function createSelfReviewTool(context: SelfReviewToolContext): ToolInstan
     description:
       'Run self-review for OpenSpec Change artifacts after plan stage. ' +
       'Validates specs completeness, design feasibility, and AC coverage. ' +
-      'Iterates up to 3 times, then generates prd.json if passed. ' +
+      'Iterates up to 3 times, then generates tasks.json if passed. ' +
       'Use this after specs are generated during plan stage.',
     parameters: z
       .object({
@@ -148,7 +107,7 @@ export function createSelfReviewTool(context: SelfReviewToolContext): ToolInstan
         issue_ref: z
           .string()
           .optional()
-          .describe('Issue reference for the prd.json (e.g., "Issue #42").'),
+          .describe('Issue reference for the tasks.json (e.g., "Issue #42").'),
       })
       .strict(),
     execute: async (params) => {
@@ -207,7 +166,7 @@ export function createSelfReviewTool(context: SelfReviewToolContext): ToolInstan
       }
 
       if (result.passed) {
-        lines.push('All checks passed. Ready to generate prd.json.');
+        lines.push('All checks passed. Ready to generate tasks.json.');
       } else {
         lines.push(`Reached maximum iterations (${3}) without passing all checks.`);
         lines.push('Manual intervention required. Consider:');
@@ -222,10 +181,10 @@ export function createSelfReviewTool(context: SelfReviewToolContext): ToolInstan
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createGeneratePrdTool(context: SelfReviewToolContext): ToolInstance<any> {
-  return Tool.define('generate_prd', {
+export function createGenerateTasksTool(context: SelfReviewToolContext): ToolInstance<any> {
+  return Tool.define('generate_tasks', {
     description:
-      'Generate prd.json from reviewed specs after self-review passes. ' +
+      'Generate tasks.json from reviewed specs after self-review passes. ' +
       'Reads all spec files and creates structured tasks with IDs, titles, and spec references. ' +
       'Use this only after run_self_review has passed.',
     parameters: z
@@ -236,7 +195,7 @@ export function createGeneratePrdTool(context: SelfReviewToolContext): ToolInsta
         issue_ref: z
           .string()
           .optional()
-          .describe('Issue reference for the prd.json (e.g., "Issue #42").'),
+          .describe('Issue reference for the tasks.json (e.g., "Issue #42").'),
       })
       .strict(),
     execute: async (params) => {
@@ -249,27 +208,26 @@ export function createGeneratePrdTool(context: SelfReviewToolContext): ToolInsta
         return 'Error: change_path is outside the project directory';
       }
 
-      const prdPath = path.join(resolved, 'prd.json');
+      const tasksPath = path.join(resolved, 'tasks.json');
 
       if (!canGeneratePrd(resolved)) {
-        return 'Error: Cannot generate prd.json. Self-review has not passed or specs are incomplete.';
+        return 'Error: Cannot generate tasks.json. Self-review has not passed or specs are incomplete.';
       }
 
-      const issueRef = params.issue_ref ?? `Change at ${params.change_path}`;
-      const prd = generatePrd(resolved, issueRef);
+      const tasksFile = generateTasksFile(resolved);
 
-      if (!prd) {
+      if (!tasksFile) {
         return 'Error: No tasks could be generated from specs.';
       }
 
       try {
-        fs.writeFileSync(prdPath, JSON.stringify(prd, null, 2), 'utf-8');
+        fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return `Error: failed to write prd.json: ${message}`;
+        return `Error: failed to write tasks.json: ${message}`;
       }
 
-      return `prd.json generated successfully with ${prd.tasks.length} tasks at ${params.change_path}/prd.json`;
+      return `tasks.json generated successfully with ${tasksFile.tasks.length} tasks at ${params.change_path}/tasks.json`;
     },
   });
 }

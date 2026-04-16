@@ -24,3 +24,19 @@ Started: 2026-04-16T04:49:17.598Z
 - TypeScript compiles (only pre-existing log-tail.ts error, unrelated)
 - Learnings: T-001 already migrated most of the Task interface; T-002 was mostly verification + adding spec to formatted prompt output
 - Next: T-003 (rename read_prd tool, delete task-status tools)
+
+## 2026-04-16 — T-003: Rename read_prd tool to read_tasks, delete task-status tools
+
+### Done
+- Created `read-tasks.ts` replacing `read-prd.ts`: tool name `read_tasks`, reads `tasks.json`, outputs passes/attempts/error status
+- Deleted `task-status.ts` entirely (removed `update_task_status` and `get_task_status` tools)
+- Updated `self-review.ts`: `generatePrd` → `generateTasksFile`, `createGeneratePrdTool` → `createGenerateTasksTool`, outputs `tasks.json` with new schema (Task/TasksFile types from change-artifacts-manager)
+- Updated `main-agent.ts`: imports changed to `createReadTasksTool`, `createGenerateTasksTool`; removed task-status imports and registrations; updated system prompt tool descriptions
+- Deleted `read-prd.ts`
+
+### Learnings
+- T-001 had already created Task/TasksFile types in change-artifacts-manager.ts, which read-tasks.ts and self-review.ts now import
+- The `canGeneratePrd` function name in openspec/self-review.ts is intentionally left as-is — it will be renamed as part of a broader cleanup (T-006)
+
+### Next Steps
+- T-004: Refactor RalphExecutor to use tasks.json directly (remove task-status.json read/write logic)
