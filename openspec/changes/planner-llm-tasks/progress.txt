@@ -1,0 +1,14 @@
+# Ralph Progress Log
+Started: 2026-04-16T12:10:01.067Z
+
+---
+
+
+[2026-04-16] T-001: Create artifact instruction and template files
+- Created 5 artifact instruction files in src/agents/prompts/artifacts/: proposal.md, specs.md, design.md, tasks.md, self-review.md
+- Created review stage prompt at src/agents/prompts/review.md
+- tasks.md includes guidance on granularity, AFK/HITL (mode), task types (WRITE/TEST/MIGRATE/CONFIG/REVIEW), output, dependsOn, dependency ordering
+- Content derived from OpenSpec ralph-driven/schema.yaml instructions and existing YAML prompt files
+- Typecheck passes
+- Learnings: Build script only copies .yaml files to dist/ - future task (T-002) will need to update build script to also copy .md files
+- Next: T-002 Implement AcpConnection and artifact prompt builder
