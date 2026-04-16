@@ -2,7 +2,7 @@ import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Tool, type ToolInstance } from '../agent-runtime/tool';
-import type { Task, TasksFile } from '../artifacts/change-artifacts-manager';
+import type { TasksFile } from '../artifacts/change-artifacts-manager';
 
 export interface ReadTasksContext {
   projectPath: string;
