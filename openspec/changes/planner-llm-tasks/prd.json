@@ -28,8 +28,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented createAcpConnection() with closure-based AcpConnection supporting unlimited prompt rounds. buildArtifactPrompt/buildSelfReviewPrompt/buildReviewerPrompt in agents/artifact-prompt.ts."
     },
     {
       "id": "T-003",
