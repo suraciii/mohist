@@ -6,10 +6,11 @@
       "id": "T-001",
       "title": "Update detector and types",
       "spec": "specs/tasks-json-migration/spec.md",
-      "description": "在 detector.ts 中将 prdPath 重命名为 tasksPath，删除 taskStatusPath，detectOpenSpecChange 先检查 tasks.json 回退 prd.json。在 change-artifacts-manager.ts 中 PrdTask→Task, PrdJson→TasksFile，字段对齐新 schema（砍 capability/requirement_ref/estimated_effort，acceptance_criteria→acceptanceCriteria, spec_file→spec, 新增 passes/attempts/error），readPrd/writePrd→readTasks/writeTasks。",
+      "description": "在 detector.ts 中将 prdPath 重命名为 tasksPath，删除 taskStatusPath，detectOpenSpecChange 只检查 tasks.json（不回退）。在 change-artifacts-manager.ts 中 PrdTask→Task, PrdJson→TasksFile，字段对齐新 schema（砍 capability/requirement_ref/estimated_effort，acceptance_criteria→acceptanceCriteria, spec_file→spec, 新增 passes/attempts/error），readPrd/writePrd→readTasks/writeTasks。在 types/workflow-results.ts 中 PlanResult.artifacts.prd 重命名为 tasks。",
       "acceptanceCriteria": [
         "TypeScript 编译通过",
-        "detector.ts 同时检查 tasks.json 和 prd.json，优先前者"
+        "detector.ts 只认 tasks.json，不存在时返回 null",
+        "workflow-results.ts 的 prd 字段已重命名为 tasks"
       ],
       "priority": 1,
       "passes": false,
@@ -78,7 +79,7 @@
       "acceptanceCriteria": [
         "npm run build 通过",
         "npm test 通过",
-        "rg 'PrdTask|PrdJson|prdPath|read_prd' packages/cli/src/ 无结果（除兼容回退逻辑）"
+        "rg 'PrdTask|PrdJson|prdPath|read_prd' packages/cli/src/ 无结果"
       ],
       "priority": 6,
       "passes": false,

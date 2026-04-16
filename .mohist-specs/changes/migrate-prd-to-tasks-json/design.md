@@ -3,14 +3,14 @@
 mohist 的 Plan 阶段产出任务清单，当前文件名为 `prd.json`。该文件被以下消费方使用：
 
 1. **RalphExecutor** — `readPrdTasks(prdPath)` 读取任务列表，按 `order` 排序后逐个执行
-2. **ContextAssembler** — 读取 Task 的 `title`、`description`、`acceptance_criteria`、`spec_file` 拼装 prompt
+2. **ContextAssembler** — 读取 Task 的 `title`、`description`、`acceptanceCriteria`、`spec` 拼装 prompt
 3. **ChangeArtifactsManager** — `readPrd()`/`writePrd()` 方法读写文件
 4. **read_prd tool** — 供 agent 查看 task 列表
 5. **self-review tool** — `generatePrd()` 从 specs 生成 prd.json
 
 当前运行时状态通过独立的 `task-status.json` 追踪，导致状态分散在两个文件中，增加了同步复杂度。实际生成的 prd.json 已经在 task 上使用 `passes` 字段。
 
-当前 `PrdTask` interface 中 `capability`、`requirement_ref`、`estimated_effort` 三个字段从未被任何消费方使用。
+当前 `PrdTask` interface 中 `capability`、`requirement_ref`、`estimated_effort` 三个字段仅 `requirement_ref` 在 context-assembler 的 prompt 中被引用，其余两个完全未被使用。为保持 schema 极简，决定一并移除。
 
 ## Goals / Non-Goals
 
@@ -40,9 +40,9 @@ mohist 的 Plan 阶段产出任务清单，当前文件名为 `prd.json`。该�
       "title": "...",             // 必须
       "description": "...",       // 必须
       "order": 1,                 // 必须
-      "acceptanceCriteria": [],   // 可选
+      "acceptanceCriteria": ["..."],   // 可选
       "spec": "specs/x/spec.md#REQ-001",  // 可选
-      "dependsOn": [],            // 可选，文档性
+      "dependsOn": ["T-002"],            // 可选，文档性
       "passes": false,            // 必须，Plan 产出时默认 false
       "attempts": 0,              // 必须，Plan 产出时默认 0
       "error": null               // 可选，失败时填充
@@ -74,6 +74,5 @@ RalphExecutor 直接在 tasks.json 上更新 passes/attempts/error。
 
 ## Risks / Trade-offs
 
-- [Risk] 已有 change 目录下的 `prd.json` 文件需要迁移或兼容读取 → Mitigation: detector 同时检查 `tasks.json` 和 `prd.json`，优先读 `tasks.json`
 - [Risk] 改动面涉及多个文件，需要确保所有引用一致 → Mitigation: TypeScript 类型系统会在编译时捕获遗漏
 - [Risk] tasks.json 变为可变文件，git diff 中会包含运行时状态变更 → Acceptable: 每次执行后 git commit 会记录状态变化，增加可追溯性

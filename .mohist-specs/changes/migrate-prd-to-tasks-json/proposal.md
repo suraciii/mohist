@@ -32,6 +32,7 @@ mohist 当前用 `prd.json` 存放 Plan 阶段产出的任务清单，但 `prd` 
 - `packages/cli/src/openspec/ralph-executor.ts` — readPrdTasks
 - `packages/cli/src/tools/read-prd.ts` — 整个工具重命名为 read-tasks
 - `packages/cli/src/tools/self-review.ts` — generatePrd → generateTasks
-- `packages/cli/src/tools/task-status.ts` — 不直接读 prd.json，不受影响
+- `packages/cli/src/tools/task-status.ts` — 删除整个文件（update_task_status / get_task_status 工具）
 - `packages/cli/src/agents/planner-agent.ts` — 产出 tasks.json 而非 prd.json
 - `packages/cli/src/agents/main-agent.ts` — 引用新工具名
+- `packages/cli/src/types/workflow-results.ts` — PlanResult.artifacts.prd 重命名为 tasks
