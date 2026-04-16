@@ -119,19 +119,6 @@ export interface RalphTaskOptions {
   onRetry?: (task: Task, attempt: number, error: string) => void;
 }
 
-interface TaskStatusFile {
-  current_task_index: number;
-  total_tasks: number;
-  tasks: TaskStatusEntry[];
-}
-
-interface TaskStatusEntry {
-  id: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
-  attempts: number;
-  error?: string;
-}
-
 export function getOrderValue(order: number | undefined): number {
   if (order === undefined) return 999999;
   return order;
@@ -143,18 +130,6 @@ export function sortTasksByOrder(tasks: Task[]): Task[] {
     const orderB = getOrderValue(b.order);
     return orderA - orderB;
   });
-}
-
-export function readTaskStatus(statusPath: string): TaskStatusFile | null {
-  if (!fs.existsSync(statusPath)) {
-    return null;
-  }
-  try {
-    const content = fs.readFileSync(statusPath, 'utf-8');
-    return JSON.parse(content) as TaskStatusFile;
-  } catch {
-    return null;
-  }
 }
 
 export function readTasks(tasksPath: string): Task[] | null {
@@ -173,61 +148,9 @@ export function readTasks(tasksPath: string): Task[] | null {
   }
 }
 
-function writeTaskStatus(statusPath: string, statusFile: TaskStatusFile): void {
-  fs.writeFileSync(statusPath, JSON.stringify(statusFile, null, 2), 'utf-8');
-}
-
-function updateTaskStatusEntry(
-  statusPath: string,
-  taskId: string,
-  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped',
-  error?: string
-): TaskStatusFile {
-  let statusFile: TaskStatusFile;
-
-  if (fs.existsSync(statusPath)) {
-    try {
-      const content = fs.readFileSync(statusPath, 'utf-8');
-      statusFile = JSON.parse(content) as TaskStatusFile;
-    } catch {
-      statusFile = { current_task_index: 0, total_tasks: 0, tasks: [] };
-    }
-  } else {
-    statusFile = { current_task_index: 0, total_tasks: 0, tasks: [] };
-  }
-
-  const taskIndex = statusFile.tasks.findIndex(t => t.id === taskId);
-  if (taskIndex >= 0) {
-    statusFile.tasks[taskIndex].status = status;
-    statusFile.tasks[taskIndex].attempts += 1;
-    if (error) {
-      statusFile.tasks[taskIndex].error = error;
-    } else if (status === 'completed' || status === 'skipped') {
-      delete statusFile.tasks[taskIndex].error;
-    }
-  }
-
-  const nextPendingIndex = statusFile.tasks.findIndex(
-    t => t.status === 'pending' || t.status === 'in_progress'
-  );
-  statusFile.current_task_index = nextPendingIndex >= 0 ? nextPendingIndex : statusFile.tasks.length;
-
-  writeTaskStatus(statusPath, statusFile);
-  return statusFile;
-}
-
-function initializeTaskStatus(statusPath: string, tasks: Task[]): TaskStatusFile {
-  const statusFile: TaskStatusFile = {
-    current_task_index: 0,
-    total_tasks: tasks.length,
-    tasks: tasks.map(t => ({
-      id: t.id,
-      status: 'pending' as const,
-      attempts: 0,
-    })),
-  };
-  writeTaskStatus(statusPath, statusFile);
-  return statusFile;
+function writeTasksFile(tasksPath: string, tasks: Task[]): void {
+  const tasksFile = { version: 1, tasks };
+  fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
 }
 
 export interface RalphExecutorOptions extends RalphTaskOptions {
@@ -291,15 +214,28 @@ function generateAdjustmentsFromCategory(category: FailureCategory, _error: stri
   return adjustments;
 }
 
+export function findNextPendingTask(tasks: Task[]): Task | null {
+  const sorted = sortTasksByOrder(tasks.filter(t => !t.passes));
+  return sorted.length > 0 ? sorted[0] : null;
+}
+
+function updateTaskInList(
+  tasks: Task[],
+  taskId: string,
+  updates: Partial<Pick<Task, 'passes' | 'attempts' | 'error'>>
+): void {
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+  if (updates.passes !== undefined) task.passes = updates.passes;
+  if (updates.attempts !== undefined) task.attempts = updates.attempts;
+  if (updates.error !== undefined) task.error = updates.error;
+}
+
 export async function runRalphLoop(
   change: OpenSpecChange,
   context: RalphExecutorContext,
   options: RalphExecutorOptions = {}
 ): Promise<RalphLoopResult> {
-  const resumeFromTaskIndex = options.resumeFromTaskIndex;
-
-  const taskStatusPath = path.join(change.changePath, 'task-status.json');
-
   const tasks = readTasks(change.tasksPath);
   if (!tasks || tasks.length === 0) {
     return {
@@ -312,14 +248,6 @@ export async function runRalphLoop(
   }
 
   const sortedTasks = sortTasksByOrder(tasks);
-  let statusFile = readTaskStatus(taskStatusPath);
-
-  if (!statusFile) {
-    statusFile = initializeTaskStatus(taskStatusPath, sortedTasks);
-  }
-
-  const startIndex = resumeFromTaskIndex ?? statusFile.current_task_index;
-  const remainingTasks = sortedTasks.slice(startIndex);
 
   const taskResults: TaskResult[] = [];
   let completed = 0;
@@ -361,17 +289,15 @@ export async function runRalphLoop(
     });
   };
 
-  for (let i = 0; i < remainingTasks.length; i++) {
-    const task = remainingTasks[i];
+  while (true) {
+    const nextTask = findNextPendingTask(tasks);
+    if (!nextTask) break;
 
-    context.onTaskStart?.(task);
-
-    const taskStatusEntry = statusFile.tasks.find(t => t.id === task.id);
-    const currentAttempts = taskStatusEntry?.attempts ?? 0;
+    context.onTaskStart?.(nextTask);
 
     const assembledContext = buildTaskContext({
       change,
-      task,
+      task: nextTask,
       learnings,
       isRetry: false,
     });
@@ -379,28 +305,24 @@ export async function runRalphLoop(
     let lastError: string | undefined;
     let lastCategory: FailureCategory = 'ac_not_met';
     let taskSuccess = false;
-    let attemptsUsed = 0;
+    let attemptsUsed = nextTask.attempts;
     let shouldPause = false;
     let pauseReason: string | undefined;
 
     const maxRetries = options.maxRetries ?? 3;
 
-    for (let attempt = currentAttempts + 1; attempt <= maxRetries + currentAttempts; attempt++) {
+    for (let attempt = nextTask.attempts + 1; attempt <= maxRetries + nextTask.attempts; attempt++) {
       const prompt = attempt > 1
         ? buildTaskContext({
             change,
-            task,
+            task: nextTask,
             learnings,
             failureReason: lastError,
             isRetry: true,
           }).fullPrompt
         : assembledContext.fullPrompt;
 
-      updateTaskStatusEntry(taskStatusPath, task.id, 'in_progress');
-
-      if (attempt === currentAttempts + 1) {
-        emitTaskUpdate(task.id, i, remainingTasks.length, 'started', attempt);
-      }
+      emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'started', attempt);
 
       const result = await runAcpSession({
         cwd: context.worktreePath,
@@ -414,11 +336,12 @@ export async function runRalphLoop(
       attemptsUsed = attempt;
       if (result.success) {
         taskSuccess = true;
-        updateTaskStatusEntry(taskStatusPath, task.id, 'completed');
-        emitTaskUpdate(task.id, i, remainingTasks.length, 'completed', attempt);
+        updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null });
+        writeTasksFile(change.tasksPath, tasks);
+        emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'completed', attempt);
         completed++;
         emitLoopProgress(completed, failed, sortedTasks.length);
-        context.onTaskComplete?.(task, true, result.text);
+        context.onTaskComplete?.(nextTask, true, result.text);
         break;
       } else {
         lastError = result.error ?? 'Unknown error';
@@ -427,46 +350,49 @@ export async function runRalphLoop(
         const categoryConfig = FAILURE_CATEGORY_CONFIGS[lastCategory];
         const effectiveMaxAttempts = Math.min(maxRetries, categoryConfig.maxAttempts);
 
-        await storeFailureLearning(change, task, lastError, lastCategory, attempt);
+        await storeFailureLearning(change, nextTask, lastError, lastCategory, attempt);
 
         if (!categoryConfig.retryable) {
           shouldPause = true;
           pauseReason = `${lastCategory} failure: ${lastError}. This cannot be retried automatically.`;
+          updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError });
+          writeTasksFile(change.tasksPath, tasks);
           break;
         }
 
-        if (attempt >= effectiveMaxAttempts + currentAttempts) {
+        if (attempt >= effectiveMaxAttempts + nextTask.attempts) {
           shouldPause = true;
           pauseReason = `Max retries (${effectiveMaxAttempts}) exceeded for ${lastCategory} failure: ${lastError}`;
+          updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError });
+          writeTasksFile(change.tasksPath, tasks);
           break;
         }
 
-        emitTaskUpdate(task.id, i, remainingTasks.length, 'retrying', attempt);
-        options.onRetry?.(task, attempt, lastError);
+        emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'retrying', attempt);
+        options.onRetry?.(nextTask, attempt, lastError);
       }
     }
 
     if (!taskSuccess) {
       failed++;
       taskResults.push({
-        taskId: task.id,
+        taskId: nextTask.id,
         status: 'failed',
         attempts: attemptsUsed,
         error: lastError,
       });
-      updateTaskStatusEntry(taskStatusPath, task.id, 'failed', lastError);
-      emitTaskUpdate(task.id, i, remainingTasks.length, 'failed', attemptsUsed, lastError);
-      context.onTaskComplete?.(task, false, lastError ?? 'Max retries exceeded');
+      emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'failed', attemptsUsed, lastError);
+      context.onTaskComplete?.(nextTask, false, lastError ?? 'Max retries exceeded');
 
       if (shouldPause && context.onAskUser) {
-        const question = `Task ${task.id} failed and requires user intervention.\n\nReason: ${pauseReason}\n\nOptions:\n1. Retry this task\n2. Skip this task and continue\n3. Abort the build\n\nWhat would you like to do?`;
-        const answer = await context.onAskUser(question, task.id);
+        const question = `Task ${nextTask.id} failed and requires user intervention.\n\nReason: ${pauseReason}\n\nOptions:\n1. Retry this task\n2. Skip this task and continue\n3. Abort the build\n\nWhat would you like to do?`;
+        const answer = await context.onAskUser(question, nextTask.id);
 
         if (answer.toLowerCase().includes('skip')) {
-          updateTaskStatusEntry(taskStatusPath, task.id, 'skipped');
+          updateTaskInList(tasks, nextTask.id, { passes: true, error: `Skipped: ${lastError}` });
+          writeTasksFile(change.tasksPath, tasks);
           taskResults[taskResults.length - 1].status = 'skipped';
         } else if (answer.toLowerCase().includes('retry')) {
-          i--;
           continue;
         } else {
           const result: RalphLoopResult = {
@@ -476,7 +402,7 @@ export async function runRalphLoop(
             taskResults,
             success: false,
             paused: true,
-            pausedTaskId: task.id,
+            pausedTaskId: nextTask.id,
             pauseReason,
           };
           context.onLoopComplete?.(result);
@@ -485,15 +411,10 @@ export async function runRalphLoop(
       }
     } else {
       taskResults.push({
-        taskId: task.id,
+        taskId: nextTask.id,
         status: 'completed',
         attempts: attemptsUsed,
       });
-    }
-
-    const updatedStatus = readTaskStatus(taskStatusPath);
-    if (updatedStatus) {
-      statusFile = updatedStatus;
     }
 
     learnings = loadLearningsFromDir(change.sessionMemoriesPath);
