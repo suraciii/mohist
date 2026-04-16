@@ -153,3 +153,25 @@ Started: 2026-04-16T12:10:01.067Z
 
 ### Next steps
 - T-008: Update context-assembler and tests (final task)
+
+## 2026-04-16 T-008: Update context-assembler and tests
+
+### What was done
+- Added `mode` ('AFK'|'HITL'), `type` ('WRITE'|'TEST'|'MIGRATE'|'CONFIG'|'REVIEW'), `output` (string) to `Task` interface in `context-assembler.ts`
+- Updated `formatTaskForPrompt()` to include mode, type, output, and dependsOn fields when present
+- Added context-assembler tests for new fields (mode/type/output present, absent, with dependsOn)
+- Created `artifact-prompt.test.ts`: tests for `buildArtifactPrompt`, `buildSelfReviewPrompt`, `buildReviewerPrompt`, `buildExplorePrompt` — verifies issue info, change dir, goal, instruction content, edge cases
+- Created `acp-connection.test.ts`: tests for AcpConnection multi-round contract (5 rounds, close-then-prompt error, per-round text isolation)
+- Created `pipeline-controller.test.ts`: tests for pipeline stage ordering (gate after plan, no gate after build, approval state, 5 prompts in plan stage) with mocked ACP/RalphExecutor
+- Fixed `agent-runner-service.test.ts`: updated from `start()` to `startPipeline()` API
+- Fixed `prompt-loader.test.ts`: removed tests for deleted `loadPlannerDefaultPrompt`/`loadReviewerDefaultPrompt`
+- Fixed `start-handler-resilience.test.ts`: updated from `agentRunner.start` to `agentRunner.startPipeline`
+- All 462 tests pass, build passes
+
+### Learnings
+- Tests for deleted agents/tools were spread across multiple files: prompt-loader (deleted prompt functions), agent-runner-service (old API), start-handler-resilience (old API). Need to search broadly for references to deleted code.
+- Pipeline controller tests need `vi.mock` for both `createAcpConnection` and `RalphExecutor`/`detectOpenSpecChange` since they spawn subprocesses
+- The `setApprovalState` mock needs a `stage` field (was only `status`+`requestedAt`+`requestedBy` in old test)
+
+### Next steps
+- All 8 tasks complete. Change is ready for review.

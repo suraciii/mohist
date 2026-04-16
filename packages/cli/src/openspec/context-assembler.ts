@@ -14,6 +14,9 @@ export interface Task {
   passes: boolean;
   attempts: number;
   error?: string | null;
+  mode?: 'AFK' | 'HITL';
+  type?: 'WRITE' | 'TEST' | 'MIGRATE' | 'CONFIG' | 'REVIEW';
+  output?: string;
 }
 
 export interface BuildContextOptions {
@@ -98,6 +101,18 @@ export function formatTaskForPrompt(task: Task): string {
   const lines: string[] = [];
   lines.push(`[Task ${task.id}]`);
   lines.push(`Title: ${task.title}`);
+  if (task.mode) {
+    lines.push(`Mode: ${task.mode}`);
+  }
+  if (task.type) {
+    lines.push(`Type: ${task.type}`);
+  }
+  if (task.output) {
+    lines.push(`Output: ${task.output}`);
+  }
+  if (task.dependsOn && task.dependsOn.length > 0) {
+    lines.push(`Depends On: ${task.dependsOn.join(', ')}`);
+  }
   lines.push('');
   lines.push(`Description: ${task.description}`);
   if (task.spec) {

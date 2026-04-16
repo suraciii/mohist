@@ -118,8 +118,9 @@
         "No test references to deleted agents/tools"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added mode/type/output to Task interface and formatTaskForPrompt. Added tests for buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildExplorePrompt, AcpConnection multi-round contract, pipeline stage ordering and gate behavior. Fixed agent-runner-service.test.ts (start→startPipeline), prompt-loader.test.ts (removed deleted prompt tests), start-handler-resilience.test.ts (start→startPipeline). All 462 tests pass."
+    }
     }
   ]
 }
