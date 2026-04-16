@@ -66,3 +66,26 @@ Started: 2026-04-16T04:49:17.598Z
 ### Next Steps
 - T-005: Update agents to reference new types and tools
 - T-006: Cleanup and verify all references
+
+## 2026-04-16 — T-005: Update agents to reference new types and tools
+
+### Done
+- **planner-agent.ts**: Renamed all internal `prd` references to `tasks`
+  - Return types and variable declarations: `prd: unknown` → `tasks: unknown`
+  - `normalizeParsedArtifacts`: `obj.prd` → `obj.tasks`
+  - `writeArtifactsToFiles`: writes `tasks.json` instead of `prd.json`, initializes each task with `passes: false, attempts: 0, order: index+1`
+  - `selfReview`: label changed from "PRD:" to "Tasks:"
+  - `fixIssues`: JSON prompt template uses `"tasks": {...}` instead of `"prd": {...}`
+  - Prompt template: instructs LLM to output tasks with version, order, passes, attempts fields
+  - `tryRegexFieldExtraction`: regex matches `"tasks"` instead of `"prd"`
+- **planner-default.yaml**: Updated `prd.json` → `tasks.json` with new schema including version, passes, attempts, order fields
+- **main-agent.ts**: Already correctly updated by T-003 (uses createReadTasksTool, createGenerateTasksTool, no task-status references, no prd references)
+- TypeScript compiles (only pre-existing log-tail.ts error, unrelated)
+
+### Learnings
+- main-agent.ts was already fully migrated in T-003; this task was primarily about planner-agent.ts
+- The planner prompt template needed explicit instruction to include `passes: false` and `attempts: 0` per task
+- writeArtifactsToFiles now enforces defaults (passes, attempts, order) as a safety net even if LLM omits them
+
+### Next Steps
+- T-006: Cleanup and verify all references

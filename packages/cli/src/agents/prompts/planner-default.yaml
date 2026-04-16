@@ -47,17 +47,19 @@ steps:
           - **WHEN** {action}
           - **THEN** {expected outcome}
 
-      prd.json:
+      tasks.json:
         format: |
           {
-            "project": "project-name",
-            "description": "...",
+            "version": 1,
             "tasks": [
               {
                 "id": "T-001",
                 "title": "...",
                 "description": "...",
-                "acceptanceCriteria": [...]
+                "order": 1,
+                "acceptanceCriteria": [...],
+                "passes": false,
+                "attempts": 0
               }
             ]
           }
@@ -91,7 +93,7 @@ output_format:
     - proposal.md
     - design.md
     - specs/*.md
-    - prd.json
+    - tasks.json
 
   review_summary: |
     Provide a brief summary of the self-review:
