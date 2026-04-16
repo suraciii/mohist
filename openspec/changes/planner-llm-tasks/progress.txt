@@ -34,3 +34,27 @@ Started: 2026-04-16T12:10:01.067Z
 
 ### Next steps
 - T-003: Implement pipeline plan stage using AcpConnection multi-round prompts
+
+---
+
+## 2026-04-16T00:00:00Z - T-003 Implement pipeline plan stage with multi-round ACP
+
+### What was done
+- Added `runPlanStage(issue, acpOptions)` method to `WorkflowController`
+- Uses `createAcpConnection()` to open a multi-round ACP session
+- 5 rounds: proposal → specs → design → tasks → self-review
+- Each round builds prompt via `buildArtifactPrompt()` (rounds 1-4) or `buildSelfReviewPrompt()` (round 5)
+- Each round verifies artifact exists on disk before proceeding (`fs.existsSync`)
+- On any round failure, closes connection and returns `StageResult` with which artifact failed
+- Added `cleanChangeDir(changeDir)` module-level function: removes all entries except `.openspec.yaml`
+- Added `PlanRoundConfig` interface to configure round type, verify function, and label
+- `AcpConnectionOptions` passed as parameter to `runPlanStage()` — caller (future T-004 pipeline) provides cwd, issueId, etc.
+- Typecheck and build pass
+
+### Learnings
+- Kept existing `executePlanStage()` alongside new `runPlanStage()` to avoid breaking callers until T-004 rewrites the pipeline
+- The `cleanChangeDir` function is intentionally simple — just removes everything except `.openspec.yaml` before starting plan stage
+- `AcpConnectionOptions` is passed in rather than stored on the controller, keeping the controller stateless w.r.t. ACP connections
+
+### Next steps
+- T-004: Implement pipeline core loop, gate controller, and review stage

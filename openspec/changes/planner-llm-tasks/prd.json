@@ -43,8 +43,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added runPlanStage() to WorkflowController with 5-round ACP (proposal/specs/design/tasks/self-review). cleanChangeDir() preserves .openspec.yaml. PlanRoundConfig drives rounds with type+verify+label."
     },
     {
       "id": "T-004",
