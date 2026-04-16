@@ -135,3 +135,21 @@ Started: 2026-04-16T12:10:01.067Z
 - Constructor params kept as `_` prefixed unused params in `AgentRunnerService` to maintain server compatibility, but had to use `_paramName` pattern since `noUnusedLocals`/`noUnusedParameters` is enabled.
 
 **Next steps:** T-007 — Delete MainAgent tools and update CLI commands.
+
+## 2026-04-16 T-007 Delete MainAgent tools and update CLI commands
+
+### What was done
+- Deleted 8 tool files: execute-stage.ts, advance-stage.ts, submit-approval.ts, spawn-coder.ts, read-workflow.ts, add-comment.ts, get-issue.ts, self-review.ts
+- Deleted 5 test files: execute-stage.test.ts, submit-approval.test.ts, advance-stage.test.ts, agent-workflow-e2e.test.ts, workflow-controller.test.ts
+- Cleaned workflow-controller.ts: removed PlannerAgent/ReviewerAgent interfaces, old agent-based stage methods (executePlanStage, executeReviewStage, executeBuildStage with fallback, buildTaskPrompt), spawn-coder import
+- Added POST /:number/reject API endpoint: sets approvalState to 'rejected', advances stage (review→build for retry), resumes pipeline
+- Updated POST /:number/approve API endpoint: directly sets approvalState to 'approved', advances stage (plan→build, review→done), then resumes pipeline
+- Added `mo issue reject <number> [-m message]` CLI command
+- Removed PlannerAgent/ReviewerAgent exports from workflow/index.ts
+
+### Learnings
+- The old workflow-controller had both pipeline methods and legacy agent-based methods coexisting. The cleanup consolidated everything into pipeline-only.
+- self-review.ts was a tool wrapper, not the actual logic (that's in openspec/self-review.ts). Safe to delete entirely.
+
+### Next steps
+- T-008: Update context-assembler and tests (final task)

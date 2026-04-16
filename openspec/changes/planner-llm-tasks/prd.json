@@ -103,8 +103,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "Keep tools used by pipeline: ask-user.ts (for Explore), read-tasks.ts, read-spec.ts, archive-change.ts, session-memory.ts"
+      "passes": true,
+      "notes": "Deleted execute-stage.ts, advance-stage.ts, submit-approval.ts, spawn-coder.ts, read-workflow.ts, add-comment.ts, get-issue.ts, self-review.ts. Cleaned workflow-controller.ts (removed PlannerAgent/ReviewerAgent interfaces, old agent-based methods, spawn-coder import). Added reject API endpoint and CLI command. Updated approve to directly set approvalState and advance stage before resuming pipeline."
     },
     {
       "id": "T-008",

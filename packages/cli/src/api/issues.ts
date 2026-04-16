@@ -689,6 +689,36 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
+      const issueRepo = stateManager.getIssueRepo();
+      if (!issueRepo) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'IssueRepo not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const approvalStage = issue.approvalState?.stage;
+      if (approvalStage && issue.approvalState) {
+        issueRepo.setApprovalState(issue.id, {
+          ...issue.approvalState,
+          status: 'approved',
+          respondedAt: new Date().toISOString(),
+        });
+      }
+
+      let nextStage: Stage | undefined;
+      if (approvalStage === Stage.Plan) {
+        nextStage = Stage.Build;
+      } else if (approvalStage === Stage.Review) {
+        nextStage = Stage.Done;
+      }
+
+      let resumedIssue = issue;
+      if (nextStage) {
+        resumedIssue = issueRepo.updateStage(issue.id, nextStage)!;
+      }
+
       const project = projectService.getById(projectId);
       let worktreePath = process.cwd();
       if (worktreeManager && project) {
@@ -705,9 +735,9 @@ export function createIssueRoutes(
       };
 
       agentRunner.resumePipeline(
-        issue,
+        resumedIssue,
         projectId,
-        stateManager.getIssueRepo(),
+        issueRepo,
         worktreePath,
         acpOptions,
         (issueId, status) => issueService.setStatus(issueId, status),
@@ -718,6 +748,123 @@ export function createIssueRoutes(
         data: {
           issue,
           message: `Issue #${number} approved, pipeline resumed`
+        }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/reject', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+      const body = await c.req.json().catch(() => ({}));
+      const message = body.message as string | undefined;
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (!issue.approvalState || issue.approvalState.status !== 'awaiting') {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is not awaiting approval`
+        };
+        return c.json(response, 400);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is already running. Wait for it to complete first.`
+        };
+        return c.json(response, 400);
+      }
+
+      if (!agentRunner) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'AgentRunnerService not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const issueRepo = stateManager.getIssueRepo();
+      if (!issueRepo) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'IssueRepo not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      if (message) {
+        issueService.createComment(issue.id, message);
+      }
+
+      const rejectedStage = issue.approvalState.stage;
+
+      issueRepo.setApprovalState(issue.id, {
+        stage: rejectedStage,
+        status: 'rejected',
+        output: issue.approvalState.output,
+        requestedAt: issue.approvalState.requestedAt,
+        respondedAt: new Date().toISOString(),
+      });
+
+      let resumedIssue = issue;
+      if (rejectedStage === Stage.Review) {
+        resumedIssue = issueRepo.updateStage(issue.id, Stage.Build)!;
+      }
+
+      const project = projectService.getById(projectId);
+      let worktreePath = process.cwd();
+      if (worktreeManager && project) {
+        const existingPath = worktreeManager.getPath(project.name, issue.number);
+        worktreePath = existingPath || process.cwd();
+      }
+
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: issue.id,
+        projectId,
+        workflowLogRepo,
+        coderSessionRepo,
+      };
+
+      agentRunner.resumePipeline(
+        resumedIssue,
+        projectId,
+        issueRepo,
+        worktreePath,
+        acpOptions,
+        (issueId, status) => issueService.setStatus(issueId, status),
+      );
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          issue: resumedIssue,
+          message: `Issue #${number} rejected, pipeline restarted from ${rejectedStage === Stage.Review ? 'build' : 'plan'}`
         }
       };
       return c.json(response);
