@@ -12,3 +12,25 @@ Started: 2026-04-16T12:10:01.067Z
 - Typecheck passes
 - Learnings: Build script only copies .yaml files to dist/ - future task (T-002) will need to update build script to also copy .md files
 - Next: T-002 Implement AcpConnection and artifact prompt builder
+
+## 2026-04-16T00:00:00Z - T-002 Implement AcpConnection and artifact prompt builder
+
+### What was done
+- Added `createAcpConnection()` to `acp-session.ts` returning an `AcpConnection` with `prompt()` and `close()` methods
+- AcpConnection uses closure-based factory pattern, reuses ClientSideConnection across multiple prompt rounds
+- Per-round timeout (15 min default) with `createTimeout()` helper
+- Agent text tracked per-round via `roundStartIndex` offset
+- Created `src/agents/artifact-prompt.ts` with:
+  - `buildArtifactPrompt(artifactType, issue, changeDir)` - loads instruction from `artifacts/{type}.md`
+  - `buildSelfReviewPrompt(issue, changeDir)` - loads from `artifacts/self-review.md`
+  - `buildReviewerPrompt(issue, changeDir)` - loads from `review.md`
+- Updated `agent-runtime/index.ts` exports
+- Updated build script to copy `.md` prompt files and `artifacts/` subdirectory to dist/
+
+### Learnings
+- Existing `runAcpSession` uses a single shared timeout promise for all phases (potential bug)
+- AcpConnection uses per-round timeouts via `createTimeout()` factory
+- Instruction files are cached in module-level Map for performance
+
+### Next steps
+- T-003: Implement pipeline plan stage using AcpConnection multi-round prompts
