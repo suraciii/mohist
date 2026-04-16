@@ -1,9 +1,13 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Stage, isValidTransition, type Issue } from '../types';
 import type { Task, TasksFile } from '../artifacts/change-artifacts-manager';
 import { executeCoderTask } from '../tools/spawn-coder';
 import type { PlanResult, ReviewResult } from '../types/workflow-results';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
+import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
+import { buildArtifactPrompt, buildSelfReviewPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'workflow' });
@@ -337,6 +341,123 @@ export class WorkflowController {
       output: { stage: Stage.Done, issueNumber: issue.number },
       message: 'Issue completed',
     };
+  }
+
+  async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+    const changeDir = this.artifactManager.getChangeDir(issue.number);
+    if (!changeDir) {
+      return {
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `Change directory not found for issue #${issue.number}`,
+      };
+    }
+
+    cleanChangeDir(changeDir);
+
+    const rounds: PlanRoundConfig[] = [
+      { type: 'proposal', verify: () => fs.existsSync(path.join(changeDir, 'proposal.md')), label: 'proposal.md' },
+      { type: 'specs', verify: () => fs.existsSync(path.join(changeDir, 'specs')), label: 'specs/' },
+      { type: 'design', verify: () => fs.existsSync(path.join(changeDir, 'design.md')), label: 'design.md' },
+      { type: 'tasks', verify: () => fs.existsSync(path.join(changeDir, 'tasks.json')), label: 'tasks.json' },
+    ];
+
+    let conn: AcpConnection | undefined;
+
+    try {
+      conn = await createAcpConnection(acpOptions);
+
+      for (const round of rounds) {
+        log.info('Plan stage round', { artifact: round.type, issueNumber: issue.number });
+
+        const prompt = buildArtifactPrompt(round.type as ArtifactType, issue, changeDir);
+        const result = await conn.prompt(prompt);
+
+        if (!result.success) {
+          log.error('Plan stage round failed', { artifact: round.type, error: result.error });
+          await conn.close();
+          return {
+            success: false,
+            requiresApproval: false,
+            output: null,
+            message: `Plan stage failed at artifact "${round.label}": ${result.error ?? 'unknown error'}`,
+          };
+        }
+
+        if (!round.verify()) {
+          log.error('Plan stage artifact not found after round', { artifact: round.label });
+          await conn.close();
+          return {
+            success: false,
+            requiresApproval: false,
+            output: null,
+            message: `Plan stage failed: artifact "${round.label}" not found after generation`,
+          };
+        }
+      }
+
+      log.info('Plan stage self-review round', { issueNumber: issue.number });
+      const selfReviewPrompt = buildSelfReviewPrompt(issue, changeDir);
+      const selfReviewResult = await conn.prompt(selfReviewPrompt);
+
+      if (!selfReviewResult.success) {
+        log.error('Plan stage self-review failed', { error: selfReviewResult.error });
+        await conn.close();
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: `Plan stage failed at self-review: ${selfReviewResult.error ?? 'unknown error'}`,
+        };
+      }
+
+      await conn.close();
+
+      return {
+        success: true,
+        requiresApproval: true,
+        output: {
+          stage: Stage.Plan,
+          issueNumber: issue.number,
+          selfReviewNotes: selfReviewResult.text,
+        },
+        message: 'Plan completed, awaiting user approval',
+      };
+    } catch (err) {
+      if (conn) {
+        try {
+          await conn.close();
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      return {
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `Plan stage error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+}
+
+interface PlanRoundConfig {
+  type: string;
+  verify: () => boolean;
+  label: string;
+}
+
+function cleanChangeDir(changeDir: string): void {
+  if (!fs.existsSync(changeDir)) {
+    return;
+  }
+
+  const entries = fs.readdirSync(changeDir);
+  for (const entry of entries) {
+    if (entry === '.openspec.yaml') continue;
+    const entryPath = path.join(changeDir, entry);
+    fs.rmSync(entryPath, { recursive: true, force: true });
   }
 }
 
