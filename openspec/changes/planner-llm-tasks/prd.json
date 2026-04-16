@@ -74,8 +74,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created ExploreAcpService with run() and runOnIssue() entry points. Uses runAcpSession() with buildExplorePrompt(). Explore prompt at agents/prompts/explore.md."
     },
     {
       "id": "T-006",

@@ -6,6 +6,7 @@ export type ArtifactType = 'proposal' | 'specs' | 'design' | 'tasks';
 
 const ARTIFACTS_DIR = path.join(__dirname, 'prompts', 'artifacts');
 const REVIEW_PROMPT_PATH = path.join(__dirname, 'prompts', 'review.md');
+const EXPLORE_PROMPT_PATH = path.join(__dirname, 'prompts', 'explore.md');
 
 const instructionCache = new Map<string, string>();
 
@@ -91,6 +92,46 @@ export function buildReviewerPrompt(
     '## Instructions\n',
     instruction,
   ];
+
+  return parts.join('\n');
+}
+
+export interface ExploreIssueInfo {
+  title: string;
+  body?: string;
+  number?: number;
+}
+
+export function buildExplorePrompt(
+  issueInfo: ExploreIssueInfo,
+  changeDir: string,
+  existingProposal?: string | null,
+): string {
+  const instruction = loadInstruction(EXPLORE_PROMPT_PATH);
+
+  const parts: string[] = [];
+
+  if (issueInfo.number) {
+    parts.push(`## Issue #${issueInfo.number}: ${issueInfo.title}`);
+  } else {
+    parts.push(`## Issue: ${issueInfo.title}`);
+  }
+
+  if (issueInfo.body) {
+    parts.push('', issueInfo.body);
+  }
+
+  parts.push('', `## Change Directory\n\n${changeDir}`);
+
+  if (existingProposal) {
+    parts.push(
+      '',
+      '## Existing Proposal\n\nThe following proposal already exists. Update it based on your exploration:\n',
+      existingProposal,
+    );
+  }
+
+  parts.push('', '## Instructions\n', instruction);
 
   return parts.join('\n');
 }

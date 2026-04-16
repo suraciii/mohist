@@ -7,3 +7,5 @@ export { AgentRunnerService } from './agent-runner-service';
 export type { AgentStatus } from './agent-runner-service';
 export { ExploreService } from './explore-service';
 export type { ExploreSessionWithMessages, CreateExploreSessionInput } from './explore-service';
+export { ExploreAcpService } from './explore-acp-service';
+export type { ExploreAcpServiceOptions, ExploreResult } from './explore-acp-service';
