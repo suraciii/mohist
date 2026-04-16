@@ -5,7 +5,8 @@ import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
-import { SessionManager, type LlmConfig } from '../agent-runtime';
+import type { LlmConfig } from '../agent-runtime';
+import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { createChange } from '../openspec/change-creator';
 
 export function createProposeRoutes(
@@ -13,7 +14,7 @@ export function createProposeRoutes(
   projectService: ProjectService,
   stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
-  sessionManager: SessionManager = new SessionManager(),
+  _sessionManager?: unknown,
   _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
 ): Hono {
@@ -91,15 +92,18 @@ export function createProposeRoutes(
         return c.json(response, 409);
       }
 
-      const startResult = agentRunner.start(
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: updatedIssue!.id,
+        projectId,
+      };
+
+      const startResult = agentRunner.startPipeline(
         updatedIssue!,
         projectId,
         stateManager.getIssueRepo(),
-        stateManager.getCommentRepo(),
-        stateManager.getQuestionRepo(),
         worktreePath,
-        sessionManager,
-        undefined,
+        acpOptions,
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 
@@ -111,25 +115,17 @@ export function createProposeRoutes(
             changePath: changeResult.changePath,
             changeName: changeResult.changeName,
             isNew: changeResult.isNew,
-            message: `Issue #${number} proposed, Change "${changeResult.changeName}" created, agent is running`
+            message: `Issue #${number} proposed, Change "${changeResult.changeName}" created, pipeline is running`
           }
         };
         return c.json(response);
       }
 
       const response: ApiResponse = {
-        success: true,
-        data: {
-          issue: updatedIssue,
-          changePath: changeResult.changePath,
-          changeName: changeResult.changeName,
-          isNew: changeResult.isNew,
-          message: `Issue #${number} proposed, Change "${changeResult.changeName}" created, queued at position ${startResult.queuePosition}`,
-          queuePosition: startResult.queuePosition,
-          runningAgents: agentRunner.getStatus().activeAgents.length,
-        }
+        success: false,
+        error: startResult.error ?? `Issue #${number} could not be started`,
       };
-      return c.json(response, 202);
+      return c.json(response, 409);
     } catch (error) {
       const response: ApiResponse = {
         success: false,

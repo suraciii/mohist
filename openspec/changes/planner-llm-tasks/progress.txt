@@ -116,3 +116,22 @@ Started: 2026-04-16T12:10:01.067Z
 
 ### Next steps
 - T-006: Delete MainAgent, PlannerAgent, ReviewerAgent, and agent-loop
+
+## 2026-04-16 T-006: Delete MainAgent, PlannerAgent, ReviewerAgent, and agent-loop
+
+**What was done:**
+- Deleted `main-agent.ts`, `planner-agent.ts`, `reviewer-agent.ts`, `agent-loop.ts`, `planner-default.yaml`
+- Cleaned up `agents/index.ts` — removed all exports from deleted modules
+- Cleaned up `agent-runtime/index.ts` — removed `agent-loop` exports
+- Cleaned up `prompt-loader.ts` — removed `loadPlannerDefaultPrompt`, `loadPlannerSelfReviewPrompt`, `loadReviewerDefaultPrompt`, `REVIEWER_DEFAULT_PROMPT` import
+- Rewrote `agent-runner-service.ts` — removed old session-based methods (`start`, `resume`, `executeAgent`, `shouldPauseAtCurrentStage`, `processQueue`, `hasPausedSession`, `pausedSessions`, `agentQueue`). Pipeline methods (`startPipeline`, `resumePipeline`, `executePipeline`) remain.
+- Updated `api/issues.ts` — replaced `agentRunner.start()` with `startPipeline()`, `resume()` with `resumePipeline()`, `hasPausedSession()` with `hasPendingGate()`. Added `AcpConnectionOptions` construction.
+- Updated `api/propose.ts` — same migration to pipeline methods.
+- Deleted 4 test files: `agent-observability.test.ts`, `fix-agent-empty-messages.test.ts`, `event-flow-integration.test.ts`, `reviewer-agent.test.ts`
+
+**Learnings:**
+- Deleting agent files cascaded into API route changes because the old `start`/`resume` methods depended on `runMainAgent`. Had to update both `issues.ts` and `propose.ts` API routes to use pipeline methods.
+- The `WorkflowController` has local `PlannerAgent`/`ReviewerAgent` interfaces (not the deleted classes) — these are fine and the existing tests still reference them correctly through `workflow/index.ts` re-exports.
+- Constructor params kept as `_` prefixed unused params in `AgentRunnerService` to maintain server compatibility, but had to use `_paramName` pattern since `noUnusedLocals`/`noUnusedParameters` is enabled.
+
+**Next steps:** T-007 — Delete MainAgent tools and update CLI commands.

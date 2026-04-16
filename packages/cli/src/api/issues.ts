@@ -5,7 +5,8 @@ import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
-import { SessionManager, type LlmConfig } from '../agent-runtime';
+import type { LlmConfig } from '../agent-runtime';
+import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
@@ -23,7 +24,7 @@ export function createIssueRoutes(
   projectService: ProjectService,
   stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
-  sessionManager: SessionManager = new SessionManager(),
+  _sessionManager?: unknown,
   _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
   workflowLogRepo?: WorkflowLogRepo,
@@ -339,15 +340,20 @@ export function createIssueRoutes(
         return c.json(response, 409);
       }
 
-      const startResult = agentRunner.start(
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: updatedIssue.id,
+        projectId,
+        workflowLogRepo,
+        coderSessionRepo,
+      };
+
+      const startResult = agentRunner.startPipeline(
         updatedIssue,
         projectId,
         stateManager.getIssueRepo(),
-        stateManager.getCommentRepo(),
-        stateManager.getQuestionRepo(),
         worktreePath,
-        sessionManager,
-        undefined,
+        acpOptions,
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 
@@ -356,25 +362,18 @@ export function createIssueRoutes(
           success: true,
           data: {
             issue: updatedIssue,
-            message: `Issue #${number} started, agent is running`,
-            queuePosition: 0,
+            message: `Issue #${number} started, pipeline is running`,
             runningAgents: agentRunner.getStatus().activeAgents.length,
           }
         };
         return c.json(response);
       }
 
-      const maxConcurrent = agentRunner.getMaxConcurrentAgents();
       const response: ApiResponse = {
-        success: true,
-        data: {
-          issue: updatedIssue,
-          message: `Issue #${number} queued, position: ${startResult.queuePosition}/${maxConcurrent}`,
-          queuePosition: startResult.queuePosition,
-          runningAgents: agentRunner.getStatus().activeAgents.length,
-        }
+        success: false,
+        error: startResult.error ?? `Issue #${number} could not be started`,
       };
-      return c.json(response, 202);
+      return c.json(response, 409);
     } catch (error) {
       if (stageTransitioned) {
         try {
@@ -481,7 +480,7 @@ export function createIssueRoutes(
           return c.json(response, 409);
         }
 
-        if (agentRunner.hasPausedSession(number)) {
+        if (agentRunner.hasPendingGate(number)) {
           const project = projectService.getById(projectId);
           let worktreePath = process.cwd();
           if (worktreeManager && project) {
@@ -489,16 +488,20 @@ export function createIssueRoutes(
             worktreePath = existingPath || process.cwd();
           }
 
-          agentRunner.resume(
+          const acpOptions: AcpConnectionOptions = {
+            cwd: worktreePath,
+            issueId: issue.id,
+            projectId,
+            workflowLogRepo,
+            coderSessionRepo,
+          };
+
+          agentRunner.resumePipeline(
             issue,
             projectId,
             stateManager.getIssueRepo(),
-            stateManager.getCommentRepo(),
-            stateManager.getQuestionRepo(),
             worktreePath,
-            sessionManager,
-            '[System] Issue reopened. Continue working.',
-            undefined,
+            acpOptions,
             (issueId, status) => issueService.setStatus(issueId, status),
           );
 
@@ -678,10 +681,10 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      if (!agentRunner.hasPausedSession(number)) {
+      if (!agentRunner.hasPendingGate(number)) {
         const response: ApiResponse = {
           success: false,
-          error: `No paused session for issue #${number}. The session may have expired due to server restart. Try: mo issue reopen ${number} then mo issue start ${number}`
+          error: `No pending gate for issue #${number}. The pipeline may have completed or not been started. Try: mo issue start ${number}`
         };
         return c.json(response, 400);
       }
@@ -693,16 +696,20 @@ export function createIssueRoutes(
         worktreePath = existingPath || process.cwd();
       }
 
-      agentRunner.resume(
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: issue.id,
+        projectId,
+        workflowLogRepo,
+        coderSessionRepo,
+      };
+
+      agentRunner.resumePipeline(
         issue,
         projectId,
         stateManager.getIssueRepo(),
-        stateManager.getCommentRepo(),
-        stateManager.getQuestionRepo(),
         worktreePath,
-        sessionManager,
-        '[System] User approved. Continue to next stage.',
-        undefined,
+        acpOptions,
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 
@@ -710,7 +717,7 @@ export function createIssueRoutes(
         success: true,
         data: {
           issue,
-          message: `Issue #${number} approved, agent resumed`
+          message: `Issue #${number} approved, pipeline resumed`
         }
       };
       return c.json(response);
@@ -762,10 +769,10 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      if (!agentRunner.hasPausedSession(number)) {
+      if (!agentRunner.hasPendingGate(number)) {
         const response: ApiResponse = {
           success: false,
-          error: `Agent is not paused for issue #${number}`
+          error: `Pipeline is not paused for issue #${number}`
         };
         return c.json(response, 409);
       }
@@ -777,16 +784,22 @@ export function createIssueRoutes(
         worktreePath = existingPath || process.cwd();
       }
 
-      agentRunner.resume(
+      issueService.createComment(issue.id, message);
+
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: issue.id,
+        projectId,
+        workflowLogRepo,
+        coderSessionRepo,
+      };
+
+      agentRunner.resumePipeline(
         issue,
         projectId,
         stateManager.getIssueRepo(),
-        stateManager.getCommentRepo(),
-        stateManager.getQuestionRepo(),
         worktreePath,
-        sessionManager,
-        message,
-        undefined,
+        acpOptions,
         (issueId, status) => issueService.setStatus(issueId, status),
       );
 

@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { REVIEWER_DEFAULT_PROMPT } from './reviewer-agent';
 
 export interface PromptConfig {
   role: string;
@@ -46,20 +45,4 @@ export const DEFAULT_PROMPTS_DIR = path.join(__dirname, 'prompts');
 export function loadDefaultPrompt(promptName: string): string {
   const promptPath = resolvePromptPath(DEFAULT_PROMPTS_DIR, promptName);
   return loadPrompt(promptPath);
-}
-
-export function loadPlannerDefaultPrompt(): string {
-  return loadDefaultPrompt('planner-default.yaml');
-}
-
-export function loadPlannerSelfReviewPrompt(): string {
-  return loadDefaultPrompt('planner-self-review.yaml');
-}
-
-export function loadReviewerDefaultPrompt(): string {
-  try {
-    return loadDefaultPrompt('reviewer-default.yaml');
-  } catch {
-    return REVIEWER_DEFAULT_PROMPT;
-  }
 }
