@@ -68,7 +68,7 @@
         "PlannerAgent 产出 tasks.json（非 prd.json）"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

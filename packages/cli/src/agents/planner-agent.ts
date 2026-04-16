@@ -83,7 +83,7 @@ export class PlannerAgent {
                 name,
                 content,
               })),
-              tasks: currentArtifacts.prd as import('../artifacts/change-artifacts-manager').TasksFile | null,
+              tasks: currentArtifacts.tasks as import('../artifacts/change-artifacts-manager').TasksFile | null,
             },
             selfReviewNotes: reviewResult.summary,
             iterations: iterations + 1,
@@ -105,7 +105,7 @@ export class PlannerAgent {
             name,
             content,
           })),
-          tasks: currentArtifacts.prd as import('../artifacts/change-artifacts-manager').TasksFile | null,
+          tasks: currentArtifacts.tasks as import('../artifacts/change-artifacts-manager').TasksFile | null,
         },
         selfReviewNotes: `Max iterations (${maxIterations}) reached. Some issues may remain.`,
         iterations,
@@ -186,7 +186,7 @@ Be concise - provide a summary of your findings.`;
     issue: Issue,
     codebaseInfo: CodebaseInfo,
     changeDir: string
-  ): Promise<{ proposal: string; design: string; specs: Map<string, string>; prd: unknown }> {
+  ): Promise<{ proposal: string; design: string; specs: Map<string, string>; tasks: unknown }> {
     const model = await resolveModel(this.llmConfig);
 
     const prompt_text = `You are a Planner Agent creating design artifacts for this issue:
@@ -207,11 +207,10 @@ Create the following artifacts and return them as a single JSON object:
   "specs": [
     {"name": "capability-name", "content": "## ADDED Requirements\\n\\n### Requirement: [name]\\n\\n..."}
   ],
-  "prd": {
-    "project": "project-name",
-    "description": "...",
+  "tasks": {
+    "version": 1,
     "tasks": [
-      {"id": "T-001", "title": "...", "description": "...", "acceptanceCriteria": [...]}
+      {"id": "T-001", "title": "...", "description": "...", "order": 1, "acceptanceCriteria": [...], "passes": false, "attempts": 0}
     ]
   }
 }
@@ -220,7 +219,7 @@ Return ONLY a valid JSON object with no additional text. The JSON must include:
 - proposal: Markdown string with ## Why and ## What Changes sections
 - design: Markdown string with ## Context, ## Goals/Non-Goals, ## Decisions, ## Risks sections
 - specs: Array of {name, content} objects, each content is markdown
-- prd: Object with project, description, and tasks array
+- tasks: Object with version and tasks array. Each task MUST have passes: false and attempts: 0.
 
 Generate high-quality artifacts that cover all requirements. Be comprehensive and detailed.`;
 
@@ -239,13 +238,13 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
       proposal: artifacts.proposal,
       design: artifacts.design,
       specs: new Map(artifacts.specs.map(s => [s.name, s.content])),
-      prd: artifacts.prd,
+      tasks: artifacts.tasks,
     };
   }
 
   private parseArtifactsJson(
     text: string
-  ): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } {
+  ): { proposal: string; design: string; specs: { name: string; content: string }[]; tasks: unknown } {
     const parsed = this.parseArtifactsWithFallback(text);
     if (parsed) {
       return parsed;
@@ -254,13 +253,13 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
       proposal: '',
       design: '',
       specs: [],
-      prd: null,
+      tasks: null,
     };
   }
 
   private parseArtifactsWithFallback(
     text: string
-  ): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+  ): { proposal: string; design: string; specs: { name: string; content: string }[]; tasks: unknown } | null {
     const strategies = [
       () => this.tryDirectParse(text),
       () => this.tryCodeBlockExtraction(text),
@@ -283,13 +282,13 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
     return null;
   }
 
-  private tryDirectParse(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+  private tryDirectParse(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; tasks: unknown } | null {
     const jsonStr = text.trim();
     const parsed = JSON.parse(jsonStr);
     return this.normalizeParsedArtifacts(parsed);
   }
 
-  private tryCodeBlockExtraction(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+  private tryCodeBlockExtraction(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; tasks: unknown } | null {
     const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (!jsonMatch) {
       return null;
@@ -299,7 +298,7 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
     return this.normalizeParsedArtifacts(parsed);
   }
 
-  private tryRelaxedParsing(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+  private tryRelaxedParsing(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; tasks: unknown } | null {
     let jsonStr = text.trim();
 
     const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -315,7 +314,7 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
     return this.normalizeParsedArtifacts(parsed);
   }
 
-  private tryRegexFieldExtraction(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+  private tryRegexFieldExtraction(text: string): { proposal: string; design: string; specs: { name: string; content: string }[]; tasks: unknown } | null {
     const extractString = (fieldMatch: RegExpMatchArray | null): string => {
       if (!fieldMatch) return '';
       const content = fieldMatch[1] || fieldMatch[2] || '';
@@ -326,7 +325,7 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
     const designMatch = text.match(/"design"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)')/s);
 
     const specsMatch = text.match(/"specs"\s*:\s*\[([\s\S]*?)\]/);
-    const prdMatch = text.match(/"prd"\s*:\s*(\{[\s\S]*\}|\[[\s\S]*\])/);
+    const tasksMatch = text.match(/"tasks"\s*:\s*(\{[\s\S]*\}|\[[\s\S]*\])/);
 
     const specs: { name: string; content: string }[] = [];
     if (specsMatch) {
@@ -339,10 +338,10 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
       }
     }
 
-    let prd: unknown = null;
-    if (prdMatch) {
+    let tasks: unknown = null;
+    if (tasksMatch) {
       try {
-        prd = JSON.parse(prdMatch[1]);
+        tasks = JSON.parse(tasksMatch[1]);
       } catch {
         // ignore parse errors in regex extraction
       }
@@ -351,14 +350,14 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
     const proposal = extractString(proposalMatch as RegExpMatchArray);
     const design = extractString(designMatch as RegExpMatchArray);
 
-    if (!proposal && !design && specs.length === 0 && !prd) {
+    if (!proposal && !design && specs.length === 0 && !tasks) {
       return null;
     }
 
-    return { proposal, design, specs, prd };
+    return { proposal, design, specs, tasks };
   }
 
-  private normalizeParsedArtifacts(parsed: unknown): { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown } | null {
+  private normalizeParsedArtifacts(parsed: unknown): { proposal: string; design: string; specs: { name: string; content: string }[]; tasks: unknown } | null {
     if (typeof parsed !== 'object' || parsed === null) {
       return null;
     }
@@ -367,13 +366,13 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
       proposal: typeof obj.proposal === 'string' ? obj.proposal : '',
       design: typeof obj.design === 'string' ? obj.design : '',
       specs: Array.isArray(obj.specs) ? obj.specs : [],
-      prd: obj.prd ?? null,
+      tasks: obj.tasks ?? null,
     };
   }
 
   private async writeArtifactsToFiles(
     changeDir: string,
-    artifacts: { proposal: string; design: string; specs: { name: string; content: string }[]; prd: unknown }
+    artifacts: { proposal: string; design: string; specs: { name: string; content: string }[]; tasks: unknown }
   ): Promise<void> {
     this.artifactManager.writeArtifact(changeDir, 'proposal.md', artifacts.proposal);
     this.artifactManager.writeArtifact(changeDir, 'design.md', artifacts.design);
@@ -382,13 +381,22 @@ Generate high-quality artifacts that cover all requirements. Be comprehensive an
       this.artifactManager.writeArtifact(changeDir, `specs/${spec.name}.md`, spec.content);
     }
 
-    if (artifacts.prd) {
-      this.artifactManager.writeArtifact(changeDir, 'prd.json', JSON.stringify(artifacts.prd, null, 2));
+    if (artifacts.tasks) {
+      const tasksData = artifacts.tasks as Record<string, unknown>;
+      if (tasksData.tasks && Array.isArray(tasksData.tasks)) {
+        tasksData.tasks = tasksData.tasks.map((task: Record<string, unknown>, index: number) => ({
+          ...task,
+          order: task.order ?? index + 1,
+          passes: false,
+          attempts: 0,
+        }));
+      }
+      this.artifactManager.writeArtifact(changeDir, 'tasks.json', JSON.stringify(tasksData, null, 2));
     }
   }
 
   private async selfReview(
-    artifacts: { proposal: string; design: string; specs: Map<string, string>; prd: unknown },
+    artifacts: { proposal: string; design: string; specs: Map<string, string>; tasks: unknown },
     prompt: string
   ): Promise<{ passed: boolean; issues: string[]; summary: string }> {
     const model = await resolveModel(this.llmConfig);
@@ -408,7 +416,7 @@ ${artifacts.design.slice(0, 2000)}${artifacts.design.length > 2000 ? '...' : ''}
 
 **Specs:** ${Array.from(artifacts.specs.keys()).join(', ')}
 
-**PRD:** ${JSON.stringify(artifacts.prd).slice(0, 1000)}${JSON.stringify(artifacts.prd).length > 1000 ? '...' : ''}
+**Tasks:** ${JSON.stringify(artifacts.tasks).slice(0, 1000)}${JSON.stringify(artifacts.tasks).length > 1000 ? '...' : ''}
 
 Review criteria: ${reviewCriteria.join(', ')}
 
@@ -444,10 +452,10 @@ Provide your review in the specified format.`;
   }
 
   private async fixIssues(
-    artifacts: { proposal: string; design: string; specs: Map<string, string>; prd: unknown },
+    artifacts: { proposal: string; design: string; specs: Map<string, string>; tasks: unknown },
     issues: string[],
     changeDir: string
-  ): Promise<{ proposal: string; design: string; specs: Map<string, string>; prd: unknown }> {
+  ): Promise<{ proposal: string; design: string; specs: Map<string, string>; tasks: unknown }> {
     const model = await resolveModel(this.llmConfig);
 
     const issuesList = issues.map((issue, i) => `${i + 1}. ${issue}`).join('\n');
@@ -468,7 +476,7 @@ Return ONLY a valid JSON object with no additional text:
   "specs": [
     {"name": "capability-name", "content": "[Updated spec content]"}
   ],
-  "prd": {...}
+  "tasks": {...}
 }
 
 Fix the specific issues identified. Be thorough and address each point.`;
@@ -488,7 +496,7 @@ Fix the specific issues identified. Be thorough and address each point.`;
       proposal: fixedArtifacts.proposal,
       design: fixedArtifacts.design,
       specs: new Map(fixedArtifacts.specs.map(s => [s.name, s.content])),
-      prd: fixedArtifacts.prd,
+      tasks: fixedArtifacts.tasks,
     };
   }
 
