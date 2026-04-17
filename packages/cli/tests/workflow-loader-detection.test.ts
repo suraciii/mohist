@@ -18,21 +18,21 @@ describe('detectOpenSpecForIssue', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('should return traditional mode when .mohist-specs does not exist', () => {
+  it('should return traditional mode when openspec does not exist', () => {
     const result = detectOpenSpecForIssue(tempDir, 42);
     expect(result.detected).toBe(false);
     expect(result.mode).toBe('traditional');
   });
 
   it('should return traditional mode when changes directory is empty', () => {
-    fs.mkdirSync(path.join(tempDir, '.mohist-specs', 'changes'), { recursive: true });
+    fs.mkdirSync(path.join(tempDir, 'openspec', 'changes'), { recursive: true });
     const result = detectOpenSpecForIssue(tempDir, 42);
     expect(result.detected).toBe(false);
     expect(result.mode).toBe('traditional');
   });
 
   it('should return traditional mode when no change matches issue number', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     fs.mkdirSync(path.join(changesDir, '43-another-issue'), { recursive: true });
     const result = detectOpenSpecForIssue(tempDir, 42);
     expect(result.detected).toBe(false);
@@ -40,7 +40,7 @@ describe('detectOpenSpecForIssue', () => {
   });
 
   it('should return detected+traditional when change dir exists but no tasks.json', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     const changeDir = path.join(changesDir, '42-test-issue');
     fs.mkdirSync(changeDir, { recursive: true });
 
@@ -52,7 +52,7 @@ describe('detectOpenSpecForIssue', () => {
   });
 
   it('should return openspec mode when tasks.json exists', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     const changeDir = path.join(changesDir, '42-test-issue');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.writeFileSync(path.join(changeDir, 'tasks.json'), '{}');
@@ -65,7 +65,7 @@ describe('detectOpenSpecForIssue', () => {
   });
 
   it('should find change with slug containing issue title', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     const changeDir = path.join(changesDir, '42-add-user-authentication');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.writeFileSync(path.join(changeDir, 'tasks.json'), '{}');
@@ -77,7 +77,7 @@ describe('detectOpenSpecForIssue', () => {
   });
 
   it('should return latest versioned change using unified findChangeDir', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     const v1Dir = path.join(changesDir, '42-fix');
     const v2Dir = path.join(changesDir, '42-fix-v2');
     fs.mkdirSync(v1Dir, { recursive: true });
@@ -91,7 +91,7 @@ describe('detectOpenSpecForIssue', () => {
   });
 
   it('should return detected+traditional for latest version without tasks.json', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     const v1Dir = path.join(changesDir, '42-fix');
     const v2Dir = path.join(changesDir, '42-fix-v2');
     fs.mkdirSync(v1Dir, { recursive: true });
@@ -129,7 +129,7 @@ describe('loadWorkflowWithDetection', () => {
   });
 
   it('should return workflow with openspec mode when tasks.json exists', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     const changeDir = path.join(changesDir, '42-test');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.writeFileSync(path.join(changeDir, 'tasks.json'), '{}');
@@ -144,7 +144,7 @@ describe('loadWorkflowWithDetection', () => {
   });
 
   it('should return workflow with detected+traditional when change dir but no tasks', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     fs.mkdirSync(path.join(changesDir, '42-test'), { recursive: true });
 
     const result = loadWorkflowWithDetection(tempDir, 42);

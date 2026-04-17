@@ -54,7 +54,7 @@ describe('createChange', () => {
   });
 
   it('should find correct next version when gaps exist', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     fs.mkdirSync(changesDir, { recursive: true });
     fs.mkdirSync(path.join(changesDir, '42-fix-bug'));
     fs.mkdirSync(path.join(changesDir, '42-fix-bug-v3'));
@@ -64,7 +64,7 @@ describe('createChange', () => {
   });
 
   it('should not match different slugs in findNextVersion', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     fs.mkdirSync(changesDir, { recursive: true });
     fs.mkdirSync(path.join(changesDir, '42-fix-bug-view'));
     fs.mkdirSync(path.join(changesDir, '42-fix-bug-extra'));
@@ -74,7 +74,7 @@ describe('createChange', () => {
   });
 
   it('should not match different slugs as versions', () => {
-    const changesDir = path.join(tempDir, '.mohist-specs', 'changes');
+    const changesDir = path.join(tempDir, 'openspec', 'changes');
     fs.mkdirSync(changesDir, { recursive: true });
     fs.mkdirSync(path.join(changesDir, '42-fix-bug'));
     fs.mkdirSync(path.join(changesDir, '42-fix-bug-view'));

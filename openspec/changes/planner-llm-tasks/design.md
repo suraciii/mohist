@@ -241,7 +241,7 @@ ExploreService 是轻量级的 `runAcpSession` 封装，不需要 LLM orchestrat
 
 ```
 runPlanStage():
-  changeDir = getChangeDir(issue.number)
+  changeDir = getChangeDir(issue.number) || createChangeDir(issue.number, issue.title)
   cleanChangeDir(changeDir)  // 保留 .openspec.yaml
   conn = createAcpConnection(...)
   // 分轮次生成...

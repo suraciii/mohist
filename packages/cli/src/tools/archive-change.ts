@@ -90,7 +90,7 @@ function generateReport(changePath: string, changeName: string, archivePath: str
 export function createArchiveChangeTool(context: ArchiveChangeContext): ToolInstance<any> {
   return Tool.define('archive_change', {
     description:
-      'Archive the OpenSpec Change for this issue to `.mohist-specs/archive/`. ' +
+      'Archive the OpenSpec Change for this issue to `openspec/archive/`. ' +
       'This moves the Change directory to the archive location with a timestamp. ' +
       'Use this after the check stage approval is granted and the issue should be marked as done.',
     parameters: z.object({
@@ -107,7 +107,7 @@ export function createArchiveChangeTool(context: ArchiveChangeContext): ToolInst
       }
 
       const changeName = path.basename(change.changePath);
-      const archiveDir = path.join(context.worktreePath, '.mohist-specs', 'archive');
+      const archiveDir = path.join(context.worktreePath, 'openspec', 'archive');
 
       if (!fs.existsSync(archiveDir)) {
         fs.mkdirSync(archiveDir, { recursive: true });

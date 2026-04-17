@@ -50,7 +50,7 @@ export class ChangeArtifactsManager {
 
   constructor(projectPath: string, _config: Partial<ArtifactsConfig> = {}) {
     this.projectPath = projectPath;
-    this.changesDir = path.join(projectPath, '.mohist', 'changes');
+    this.changesDir = path.join(projectPath, 'openspec', 'changes');
   }
 
   private ensureDir(dirPath: string): void {

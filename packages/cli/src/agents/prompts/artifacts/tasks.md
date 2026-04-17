@@ -1,6 +1,6 @@
 # Tasks Artifact
 
-Create the prd.json file that defines implementation tasks for autonomous execution.
+Create the tasks.json file that defines implementation tasks for autonomous execution.
 
 ## Guidelines
 
@@ -133,4 +133,4 @@ Extract acceptance criteria from `specs/*/spec.md` SHALL requirements.
 
 ## Output
 
-Write the file to `{changeDir}/prd.json`.
+Write the file to `{changeDir}/tasks.json`.

@@ -8,13 +8,13 @@ Read all generated files in `{changeDir}/`:
 - `proposal.md`
 - `specs/**/*.md`
 - `design.md` (if it exists)
-- `prd.json`
+- `tasks.json`
 
 ## Review Criteria
 
 ### Completeness
 - All requirements from the issue are covered by specs
-- All specs have corresponding tasks in prd.json
+- All specs have corresponding tasks in tasks.json
 - All edge cases are considered
 - No requirement is left unaddressed
 
@@ -34,7 +34,7 @@ Read all generated files in `{changeDir}/`:
 - Specs use SHALL/MUST language, not should/may
 - Scenarios use exact `####` heading format
 - Tasks have verifiable acceptance criteria
-- prd.json includes mode, type, output, dependsOn fields
+- tasks.json includes mode, type, output, dependsOn fields
 
 ## Actions
 
