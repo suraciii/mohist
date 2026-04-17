@@ -51,15 +51,15 @@ The system SHALL retrieve and include relevant session memories.
 - **THEN** the system reads all memories`;
 
   it('should read and return a spec file with metadata', async () => {
-    writeSpec('.mohist-specs/changes/42-test', 'specs/session-memory/spec.md', sampleSpec);
+    writeSpec('openspec/changes/42-test', 'specs/session-memory/spec.md', sampleSpec);
 
     const result = await executeTool({
-      change_path: '.mohist-specs/changes/42-test',
+      change_path: 'openspec/changes/42-test',
       spec_path: 'specs/session-memory/spec.md',
     });
 
     expect(result).toContain('# Spec: specs/session-memory/spec.md');
-    expect(result).toContain('File: .mohist-specs/changes/42-test/specs/session-memory/spec.md');
+    expect(result).toContain('File: openspec/changes/42-test/specs/session-memory/spec.md');
     expect(result).toContain('Requirements: 2');
     expect(result).toContain('### Requirement: Session memory storage');
     expect(result).toContain('### Requirement: Session memory retrieval');
@@ -68,7 +68,7 @@ The system SHALL retrieve and include relevant session memories.
 
   it('should return error when spec file does not exist', async () => {
     const result = await executeTool({
-      change_path: '.mohist-specs/changes/nonexistent',
+      change_path: 'openspec/changes/nonexistent',
       spec_path: 'specs/core/spec.md',
     });
 
@@ -86,7 +86,7 @@ The system SHALL retrieve and include relevant session memories.
 
   it('should return error when spec_path escapes change directory', async () => {
     const result = await executeTool({
-      change_path: '.mohist-specs/changes/42-test',
+      change_path: 'openspec/changes/42-test',
       spec_path: '../../etc/passwd',
     });
 
@@ -94,10 +94,10 @@ The system SHALL retrieve and include relevant session memories.
   });
 
   it('should filter by requirement title', async () => {
-    writeSpec('.mohist-specs/changes/42-test', 'specs/session-memory/spec.md', sampleSpec);
+    writeSpec('openspec/changes/42-test', 'specs/session-memory/spec.md', sampleSpec);
 
     const result = await executeTool({
-      change_path: '.mohist-specs/changes/42-test',
+      change_path: 'openspec/changes/42-test',
       spec_path: 'specs/session-memory/spec.md',
       requirement_ref: 'Session memory storage',
     });
@@ -109,10 +109,10 @@ The system SHALL retrieve and include relevant session memories.
   });
 
   it('should return full spec when requirement_ref not found', async () => {
-    writeSpec('.mohist-specs/changes/42-test', 'specs/session-memory/spec.md', sampleSpec);
+    writeSpec('openspec/changes/42-test', 'specs/session-memory/spec.md', sampleSpec);
 
     const result = await executeTool({
-      change_path: '.mohist-specs/changes/42-test',
+      change_path: 'openspec/changes/42-test',
       spec_path: 'specs/session-memory/spec.md',
       requirement_ref: 'Nonexistent requirement',
     });
@@ -123,10 +123,10 @@ The system SHALL retrieve and include relevant session memories.
   });
 
   it('should handle spec with no requirement sections', async () => {
-    writeSpec('.mohist-specs/changes/42-test', 'specs/simple/spec.md', '# Simple Spec\n\nJust some text.');
+    writeSpec('openspec/changes/42-test', 'specs/simple/spec.md', '# Simple Spec\n\nJust some text.');
 
     const result = await executeTool({
-      change_path: '.mohist-specs/changes/42-test',
+      change_path: 'openspec/changes/42-test',
       spec_path: 'specs/simple/spec.md',
     });
 

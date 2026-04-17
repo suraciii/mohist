@@ -127,7 +127,7 @@ describe('runRalphLoop', () => {
   });
 
   function createMinimalChange(): OpenSpecChange {
-    const changeDir = path.join(tempDir, '.mohist-specs', 'changes', '42-test');
+    const changeDir = path.join(tempDir, 'openspec', 'changes', '42-test');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.mkdirSync(path.join(changeDir, 'session-memories'), { recursive: true });
 

@@ -11,7 +11,7 @@ describe('ChangeArtifactsManager.updateTaskPasses', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-test-'));
-    changesDir = path.join(tmpDir, '.mohist', 'changes');
+    changesDir = path.join(tmpDir, 'openspec', 'changes');
     fs.mkdirSync(changesDir, { recursive: true });
     manager = new ChangeArtifactsManager(tmpDir);
   });
@@ -147,13 +147,13 @@ describe('ChangeArtifactsManager.readTasks', () => {
   });
 
   it('should return null when tasks.json does not exist in change directory', () => {
-    const changesDir = path.join(tmpDir, '.mohist', 'changes');
+    const changesDir = path.join(tmpDir, 'openspec', 'changes');
     fs.mkdirSync(path.join(changesDir, '42-test'), { recursive: true });
     expect(manager.readTasks(42)).toBeNull();
   });
 
   it('should parse valid tasks.json', () => {
-    const changesDir = path.join(tmpDir, '.mohist', 'changes');
+    const changesDir = path.join(tmpDir, 'openspec', 'changes');
     const changePath = path.join(changesDir, '42-test');
     fs.mkdirSync(path.join(changePath, 'specs'), { recursive: true });
     fs.writeFileSync(path.join(changePath, 'tasks.json'), JSON.stringify({
@@ -167,7 +167,7 @@ describe('ChangeArtifactsManager.readTasks', () => {
   });
 
   it('should return null for invalid JSON', () => {
-    const changesDir = path.join(tmpDir, '.mohist', 'changes');
+    const changesDir = path.join(tmpDir, 'openspec', 'changes');
     const changePath = path.join(changesDir, '42-test');
     fs.mkdirSync(path.join(changePath, 'specs'), { recursive: true });
     fs.writeFileSync(path.join(changePath, 'tasks.json'), '{ invalid json');

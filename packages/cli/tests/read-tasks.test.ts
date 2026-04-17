@@ -31,7 +31,7 @@ describe('createReadTasksTool', () => {
   }
 
   it('should read and format a valid tasks.json', async () => {
-    writeTasks('.mohist-specs/changes/42-add-auth', {
+    writeTasks('openspec/changes/42-add-auth', {
       version: 1,
       tasks: [
         {
@@ -58,7 +58,7 @@ describe('createReadTasksTool', () => {
       ],
     });
 
-    const result = await executeTool('.mohist-specs/changes/42-add-auth');
+    const result = await executeTool('openspec/changes/42-add-auth');
 
     expect(result).toContain('### T-001: Setup database [TODO]');
     expect(result).toContain('### T-002: Add API [PASS]');
@@ -69,7 +69,7 @@ describe('createReadTasksTool', () => {
   });
 
   it('should return error when tasks.json does not exist', async () => {
-    const result = await executeTool('.mohist-specs/changes/nonexistent');
+    const result = await executeTool('openspec/changes/nonexistent');
 
     expect(result).toContain('Error: tasks.json not found');
   });

@@ -60,13 +60,14 @@ export class WorkflowController {
   }
 
   async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
-    const changeDir = this.artifactManager.getChangeDir(issue.number);
+    const changeDir = this.artifactManager.getChangeDir(issue.number)
+      || this.artifactManager.createChangeDir(issue.number, issue.title);
     if (!changeDir) {
       return {
         success: false,
         requiresApproval: false,
         output: null,
-        message: `Change directory not found for issue #${issue.number}`,
+        message: `Failed to get or create change directory for issue #${issue.number}`,
       };
     }
 

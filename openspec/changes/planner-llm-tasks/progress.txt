@@ -175,3 +175,16 @@ Started: 2026-04-16T12:10:01.067Z
 
 ### Next steps
 - All 8 tasks complete. Change is ready for review.
+
+## 2026-04-17 Post-implementation fixes
+
+### What was done
+- **Unified change directory path to `openspec/changes/`**: Previously three different directories were used (`.mohist/changes/`, `.mohist-specs/changes/`, `openspec/changes/`). Fixed all to use `openspec/changes/` as the canonical path:
+  - `ChangeArtifactsManager`: `.mohist/changes` → `openspec/changes`
+  - `createChange()`: `.mohist-specs` → `openspec`
+  - `findChangeDir()`/`detectOpenSpecChange()`: `.mohist-specs/changes` → `openspec/changes`
+  - `archive-change.ts`: `.mohist-specs/archive` → `openspec/archive`
+- **Plan stage auto-creates change directory**: `runPlanStage()` now falls back to `createChangeDir()` when `getChangeDir()` returns null, preventing "Change directory not found" errors when using `mo issue start`
+- **Fixed prompt file references**: Changed `prd.json` → `tasks.json` in `artifacts/tasks.md` and `artifacts/self-review.md` to match the actual filename after `migrate-prd-to-tasks-json` migration
+- Updated all test files to use the new `openspec/changes` path
+- Build passes, 461/462 tests pass (1 pre-existing failure in resolve-model.test.ts unrelated to this change)

@@ -63,7 +63,7 @@ export function createChange(
   issueId: string,
   force: boolean = false,
 ): CreateChangeResult {
-  const specsDir = path.join(worktreePath, '.mohist-specs');
+  const specsDir = path.join(worktreePath, 'openspec');
   const changesDir = path.join(specsDir, 'changes');
 
   if (!fs.existsSync(specsDir)) {

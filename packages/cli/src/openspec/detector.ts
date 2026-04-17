@@ -40,7 +40,7 @@ function findMatchingChanges(changeDirs: string[], issuePrefix: string): string[
 }
 
 export function findChangeDir(cwd: string, issueNumber: number): string | null {
-  const changesDir = path.join(cwd, '.mohist-specs', 'changes');
+  const changesDir = path.join(cwd, 'openspec', 'changes');
 
   if (!fs.existsSync(changesDir)) {
     return null;

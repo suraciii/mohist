@@ -37,7 +37,7 @@ describe('createStoreLearningTool', () => {
   }
 
   it('should store a learning to session-memories directory', async () => {
-    const changePath = '.mohist-specs/changes/42-test';
+    const changePath = 'openspec/changes/42-test';
 
     const result = await executeTool({
       change_path: changePath,
@@ -64,7 +64,7 @@ describe('createStoreLearningTool', () => {
   });
 
   it('should store failure learning with failure_reason', async () => {
-    const changePath = '.mohist-specs/changes/42-test';
+    const changePath = 'openspec/changes/42-test';
 
     const result = await executeTool({
       change_path: changePath,
@@ -100,7 +100,7 @@ describe('createStoreLearningTool', () => {
   });
 
   it('should sanitize task_id with special characters', async () => {
-    const changePath = '.mohist-specs/changes/42-test';
+    const changePath = 'openspec/changes/42-test';
 
     const result = await executeTool({
       change_path: changePath,
@@ -176,7 +176,7 @@ describe('createLoadLearningsTool', () => {
   }
 
   it('should load all learnings in full format', async () => {
-    const changePath = '.mohist-specs/changes/42-test';
+    const changePath = 'openspec/changes/42-test';
     writeLearning(changePath, 'T-001', {
       task_id: 'T-001',
       timestamp: '2024-01-01T00:00:00Z',
@@ -205,7 +205,7 @@ describe('createLoadLearningsTool', () => {
   });
 
   it('should load learnings in prompt format', async () => {
-    const changePath = '.mohist-specs/changes/42-test';
+    const changePath = 'openspec/changes/42-test';
     writeLearning(changePath, 'T-001', {
       task_id: 'T-001',
       timestamp: '2024-01-01T00:00:00Z',
@@ -224,7 +224,7 @@ describe('createLoadLearningsTool', () => {
   });
 
   it('should handle failure learning in prompt format', async () => {
-    const changePath = '.mohist-specs/changes/42-test';
+    const changePath = 'openspec/changes/42-test';
     writeLearning(changePath, 'T-002', {
       task_id: 'T-002',
       timestamp: '2024-01-01T01:00:00Z',
@@ -244,7 +244,7 @@ describe('createLoadLearningsTool', () => {
   });
 
   it('should return empty when no session-memories directory exists', async () => {
-    const changePath = '.mohist-specs/changes/nonexistent';
+    const changePath = 'openspec/changes/nonexistent';
 
     const result = await executeTool({ change_path: changePath });
 
@@ -258,7 +258,7 @@ describe('createLoadLearningsTool', () => {
   });
 
   it('should sort learnings by task_id numerically', async () => {
-    const changePath = '.mohist-specs/changes/42-test';
+    const changePath = 'openspec/changes/42-test';
     writeLearning(changePath, 'T-003', {
       task_id: 'T-003',
       timestamp: '2024-01-01T02:00:00Z',
@@ -322,7 +322,7 @@ describe('createLoadLearningsTool', () => {
   });
 
   it('should default to full format when format not specified', async () => {
-    const changePath = '.mohist-specs/changes/42-test';
+    const changePath = 'openspec/changes/42-test';
     writeLearning(changePath, 'T-001', {
       task_id: 'T-001',
       timestamp: '2024-01-01T00:00:00Z',
