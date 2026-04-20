@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
 import { ApiResponse, ExploreSession, ToolCallRecord } from '../types';
-import { ExploreService, IssueService } from '../services';
+import { ExploreService, IssueService, ExploreAcpService } from '../services';
 import { runExploreAgent } from '../agents/explore-agent';
 import { ExploreSessionRepo } from '../db/explore-session-repo';
 import { ProjectService } from '../services/project-service';
@@ -15,12 +15,15 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'explore' });
 
+export type ExploreAcpFactory = (projectPath: string) => ExploreAcpService;
+
 export function createExploreRoutes(
   exploreService: ExploreService,
   issueService: IssueService,
   projectService: ProjectService,
   exploreSessionRepo: ExploreSessionRepo,
   eventBus: EventBus,
+  exploreAcpFactory?: ExploreAcpFactory,
 ): Hono {
   const app = new Hono();
 
@@ -184,6 +187,89 @@ export function createExploreRoutes(
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to update session model',
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:id/crystallize', async (c) => {
+    try {
+      if (!exploreAcpFactory) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'ACP explore not configured',
+        };
+        return c.json(response, 503);
+      }
+
+      const sessionId = c.req.param('id');
+      const sessionData = exploreService.getSession(sessionId);
+      if (!sessionData) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Session not found',
+        };
+        return c.json(response, 404);
+      }
+
+      const session = sessionData.session;
+      const project = projectService.getById(session.projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found',
+        };
+        return c.json(response, 400);
+      }
+
+      const issueNumber = session.issueId
+        ? (() => {
+            const issue = issueService.getById(session.issueId);
+            return issue ? issue.number : null;
+          })()
+        : null;
+
+      if (!issueNumber) {
+        const body = await c.req.json().catch(() => ({}));
+        const title = body.title || session.title || 'New Issue';
+
+        const acpService = exploreAcpFactory(project.path);
+        const result = await acpService.run(title, session.projectId);
+
+        if (result.success && result.issueNumber) {
+          exploreService.crystallize(sessionId, String(result.issueNumber));
+        }
+
+        const response: ApiResponse<typeof result> = {
+          success: result.success,
+          data: result,
+          error: result.error,
+        };
+        return c.json(response, result.success ? 201 : 500);
+      }
+
+      const issue = issueService.getByNumber(session.projectId, issueNumber);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${issueNumber} not found`,
+        };
+        return c.json(response, 404);
+      }
+
+      const acpService = exploreAcpFactory(project.path);
+      const result = await acpService.runOnIssue(issue);
+
+      const response: ApiResponse<typeof result> = {
+        success: result.success,
+        data: result,
+        error: result.error,
+      };
+      return c.json(response, result.success ? 200 : 500);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to crystallize',
       };
       return c.json(response, 500);
     }

@@ -14,8 +14,9 @@ import { createFsRoutes } from '../api/fs';
 import { createQuestionRoutes } from '../api/questions';
 import { createExploreRoutes } from '../api/explore';
 import { createLogRoutes } from '../api/logs';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
+import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { Log } from '../util/log';
 
@@ -120,7 +121,13 @@ async function main(): Promise<void> {
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
   server.addRouter('/api/fs', createFsRoutes());
-  server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), eventBus));
+  server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), eventBus, (projectPath: string) => {
+    return new ExploreAcpService({
+      worktreePath: projectPath,
+      issueService,
+      artifactManager: new ChangeArtifactsManager(projectPath),
+    });
+  }));
   server.addRouter('/api/logs', createLogRoutes());
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');

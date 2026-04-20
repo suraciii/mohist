@@ -746,7 +746,7 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: {
-          issue,
+          issue: resumedIssue,
           message: `Issue #${number} approved, pipeline resumed`
         }
       };
