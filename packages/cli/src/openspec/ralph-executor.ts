@@ -3,7 +3,17 @@ import * as path from 'path';
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
-import { runAcpSession } from '../agent-runtime/acp-session';
+import { runAcpSession as _runAcpSession } from '../agent-runtime/acp-session';
+
+let _acpSessionRunner = _runAcpSession;
+
+export function setAcpSessionRunner(runner: typeof _runAcpSession): void {
+  _acpSessionRunner = runner;
+}
+
+export function resetAcpSessionRunner(): void {
+  _acpSessionRunner = _runAcpSession;
+}
 import type { EventBus } from '../services/event-bus';
 
 export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout';
@@ -324,7 +334,7 @@ export async function runRalphLoop(
 
       emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'started', attempt);
 
-      const result = await runAcpSession({
+      const result = await _acpSessionRunner({
         cwd: context.worktreePath,
         task: prompt,
         issueId: context.issueId,
@@ -374,6 +384,10 @@ export async function runRalphLoop(
     }
 
     if (!taskSuccess) {
+      if (attemptsUsed === nextTask.attempts) {
+        updateTaskInList(tasks, nextTask.id, { passes: true, attempts: nextTask.attempts, error: 'Skipped: no attempts made (maxRetries=0)' });
+        writeTasksFile(change.tasksPath, tasks);
+      }
       failed++;
       taskResults.push({
         taskId: nextTask.id,

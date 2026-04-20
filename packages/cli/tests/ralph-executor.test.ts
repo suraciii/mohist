@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { runRalphLoop, sortTasksByOrder, getOrderValue, readTasks, findNextPendingTask, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS } from '../src/openspec/ralph-executor';
+import { runRalphLoop, sortTasksByOrder, getOrderValue, readTasks, findNextPendingTask, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS, setAcpSessionRunner, resetAcpSessionRunner } from '../src/openspec/ralph-executor';
 import { truncateAgentText } from '../src/agent-runtime/acp-session';
 import type { OpenSpecChange } from '../src/openspec/detector';
 
@@ -18,9 +18,6 @@ describe('ralph-executor utilities', () => {
       expect(getOrderValue(10)).toBe(10);
     });
 
-  });
-
-  describe('sortTasksByOrder', () => {
   });
 
   describe('sortTasksByOrder', () => {
@@ -120,10 +117,15 @@ describe('runRalphLoop', () => {
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-ralph-test-'));
+    setAcpSessionRunner(vi.fn().mockResolvedValue({
+      text: 'done',
+      success: true,
+    }));
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    resetAcpSessionRunner();
   });
 
   function createMinimalChange(): OpenSpecChange {
