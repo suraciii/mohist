@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    setupFiles: ['./vitest.setup.ts'],
     exclude: ['web/tests/**', 'web/node_modules/**', 'node_modules/**', 'dist/**'],
     pool: 'forks',
     poolOptions: {
