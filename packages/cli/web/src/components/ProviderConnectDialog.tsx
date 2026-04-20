@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { Dialog } from './Dialog'
 import { useSaveProvider, useTestProvider } from '../hooks/useQueries'
-import type { Provider, ProviderFormData } from '../lib/provider-api'
+import type { Provider } from '../lib/provider-api'
 
 function CheckCircleIcon({ className }: { className?: string }) {
   return (

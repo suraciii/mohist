@@ -14,6 +14,7 @@ import { detectOpenSpecChange } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Log } from '../util/log';
+import { eventBus } from '../services/event-bus';
 
 const log = Log.create({ service: 'issue' });
 
@@ -346,6 +347,8 @@ export function createIssueRoutes(
         projectId,
         workflowLogRepo,
         coderSessionRepo,
+        eventBus,
+        issueNumber: updatedIssue.number,
       };
 
       const startResult = agentRunner.startPipeline(
@@ -494,6 +497,8 @@ export function createIssueRoutes(
             projectId,
             workflowLogRepo,
             coderSessionRepo,
+            eventBus,
+            issueNumber: issue.number,
           };
 
           agentRunner.resumePipeline(
@@ -732,6 +737,8 @@ export function createIssueRoutes(
         projectId,
         workflowLogRepo,
         coderSessionRepo,
+        eventBus,
+        issueNumber: issue.number,
       };
 
       agentRunner.resumePipeline(
@@ -849,6 +856,8 @@ export function createIssueRoutes(
         projectId,
         workflowLogRepo,
         coderSessionRepo,
+        eventBus,
+        issueNumber: issue.number,
       };
 
       agentRunner.resumePipeline(
@@ -939,6 +948,8 @@ export function createIssueRoutes(
         projectId,
         workflowLogRepo,
         coderSessionRepo,
+        eventBus,
+        issueNumber: issue.number,
       };
 
       agentRunner.resumePipeline(

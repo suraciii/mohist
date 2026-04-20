@@ -80,13 +80,53 @@ export class WorkflowController {
       { type: 'tasks', verify: () => fs.existsSync(path.join(changeDir, 'tasks.json')), label: 'tasks.json' },
     ];
 
+    // roundState is mutated by the for loop and read by onSessionUpdate callback.
+    // Safe because JS is single-threaded.
+    const roundState = { type: '', index: 0 };
+    const planAcpOptions: AcpConnectionOptions = {
+      ...acpOptions,
+      executionId: `plan-${issue.number}`,
+      onSessionUpdate: (_notification) => {
+        if (!this.eventBus) return;
+        try {
+          this.eventBus.emit('plan_session_update', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: roundState.type,
+            roundIndex: roundState.index,
+            sessionUpdate: _notification.update.sessionUpdate,
+            data: _notification.update as unknown,
+          });
+        } catch {
+          // fire-and-forget
+        }
+      },
+    };
+
     let conn: AcpConnection | undefined;
 
     try {
-      conn = await createAcpConnection(acpOptions);
+      conn = await createAcpConnection(planAcpOptions);
 
-      for (const round of rounds) {
+      for (const [index, round] of rounds.entries()) {
+        roundState.type = round.type;
+        roundState.index = index;
+
         log.info('Plan stage round', { artifact: round.type, issueNumber: issue.number });
+
+        if (this.eventBus) {
+          try {
+            this.eventBus.emit('plan_round_start', {
+              issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+              projectId: this.projectId ?? issue.projectId,
+              roundType: round.type,
+              roundLabel: round.label,
+              roundIndex: index,
+            });
+          } catch {
+            // fire-and-forget
+          }
+        }
 
         const prompt = buildArtifactPrompt(round.type as ArtifactType, issue, changeDir);
         const result = await conn.prompt(prompt);
@@ -114,7 +154,26 @@ export class WorkflowController {
         }
       }
 
+      // self-review round
+      roundState.type = 'self-review';
+      roundState.index = rounds.length;
+
       log.info('Plan stage self-review round', { issueNumber: issue.number });
+
+      if (this.eventBus) {
+        try {
+          this.eventBus.emit('plan_round_start', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: 'self-review',
+            roundLabel: 'self-review',
+            roundIndex: rounds.length,
+          });
+        } catch {
+          // fire-and-forget
+        }
+      }
+
       const selfReviewPrompt = buildSelfReviewPrompt(issue, changeDir);
       const selfReviewResult = await conn.prompt(selfReviewPrompt);
 
@@ -206,7 +265,7 @@ export class WorkflowController {
         }
 
         case Stage.Build: {
-          const buildResult = await this.runPipelineBuildStage(currentIssue);
+          const buildResult = await this.runPipelineBuildStage(currentIssue, acpOptions);
           if (!buildResult.success) {
             return {
               completed: false,
@@ -266,7 +325,7 @@ export class WorkflowController {
     return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
   }
 
-  private async runPipelineBuildStage(issue: Issue): Promise<StageResult> {
+  private async runPipelineBuildStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
     const change = detectOpenSpecChange(this.worktreePath, issue);
 
     if (change) {
@@ -275,6 +334,11 @@ export class WorkflowController {
         projectPath: this.worktreePath,
         issueId: issue.id,
         projectId: issue.projectId,
+        eventBus: this.eventBus,
+        executionId: `build-${issue.number}`,
+        workflowLogRepo: acpOptions.workflowLogRepo,
+        coderSessionRepo: acpOptions.coderSessionRepo,
+        issueNumber: issue.number,
       });
 
       const result: RalphLoopResult = await executor.execute(change);
@@ -314,9 +378,43 @@ export class WorkflowController {
       };
     }
 
+    const reviewAcpOptions: AcpConnectionOptions = {
+      ...acpOptions,
+      executionId: `review-${issue.number}`,
+      onSessionUpdate: (notification) => {
+        if (!this.eventBus) return;
+        try {
+          this.eventBus.emit('plan_session_update', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: 'review',
+            roundIndex: 0,
+            sessionUpdate: notification.update.sessionUpdate,
+            data: notification.update as unknown,
+          });
+        } catch {
+          // fire-and-forget
+        }
+      },
+    };
+
     let conn: AcpConnection | undefined;
     try {
-      conn = await createAcpConnection(acpOptions);
+      conn = await createAcpConnection(reviewAcpOptions);
+
+      if (this.eventBus) {
+        try {
+          this.eventBus.emit('plan_round_start', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: 'review',
+            roundLabel: 'review',
+            roundIndex: 0,
+          });
+        } catch {
+          // fire-and-forget
+        }
+      }
 
       const reviewerPrompt = buildReviewerPrompt(issue, changeDir);
       const result = await conn.prompt(reviewerPrompt);

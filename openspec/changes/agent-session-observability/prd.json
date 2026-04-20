@@ -19,7 +19,7 @@
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "passes": false,
+      "passes": true,
       "notes": "Files: packages/cli/src/agent-runtime/acp-session.ts (interfaces + issueId dual-track + onSessionUpdate branching in both handlers), packages/cli/src/api/issues.ts (5 routes). This is the critical unblocker for all other tasks."
     },
     {
@@ -39,7 +39,7 @@
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "passes": false,
+      "passes": true,
       "notes": "Files: packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts, packages/cli/web/src/lib/agent-events.ts, packages/cli/web/src/hooks/useSSE.ts, packages/cli/web/src/lib/types.ts"
     },
     {
@@ -64,7 +64,7 @@
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "passes": false,
+      "passes": true,
       "notes": "Files: packages/cli/src/workflow/workflow-controller.ts (runPlanStage + runPipelineReviewStage + runPipelineBuildStage), packages/cli/src/openspec/ralph-executor.ts (RalphExecutorContext interface + _acpSessionRunner call). Depends on T-001 (onSessionUpdate callback) and T-002 (event type definitions)."
     },
     {
@@ -81,7 +81,7 @@
       "priority": 4,
       "mode": "AFK",
       "type": "WRITE",
-      "passes": false,
+      "passes": true,
       "notes": "File: packages/cli/src/agent-runtime/acp-session.ts. Two locations: runAcpSession sessionUpdate handler and createAcpConnection sessionUpdate handler. The toolCall object has: input, output, title, name, status. Currently only name+status extracted. Add: input→rawInput, output→rawOutput, title→title. NOTE: this only applies when onSessionUpdate is NOT set (Plan/Review skip coder_tool_call per T-001)."
     },
     {
@@ -104,7 +104,7 @@
       "priority": 5,
       "mode": "AFK",
       "type": "WRITE",
-      "passes": false,
+      "passes": true,
       "notes": "New file: packages/cli/web/src/hooks/useSessionTimeline.ts. Also fix in packages/cli/web/src/hooks/useAgentSession.ts: change agentStatus.issueId comparison to agentStatus.issueNumber. Replaces useAgentSession for pipeline session display. Data source: workflow_log API."
     },
     {
@@ -123,7 +123,7 @@
       "priority": 6,
       "mode": "AFK",
       "type": "WRITE",
-      "passes": false,
+      "passes": true,
       "notes": "New file: packages/cli/web/src/components/SessionTimeline.tsx. Reuse ToolCallTimelineEntry from AgentSessionPanel.tsx. Props: rounds from useSessionTimeline."
     },
     {
@@ -142,7 +142,7 @@
       "priority": 7,
       "mode": "AFK",
       "type": "WRITE",
-      "passes": false,
+      "passes": true,
       "notes": "File: packages/cli/web/src/components/IssueDetailPage.tsx. Replace AgentSessionPanel import/usage. Keep old components as dead code initially."
     }
   ]

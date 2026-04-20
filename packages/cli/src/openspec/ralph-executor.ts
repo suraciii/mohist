@@ -103,6 +103,9 @@ export interface RalphExecutorContext {
   onTaskComplete?: (task: Task, success: boolean, output: string) => void;
   onLoopComplete?: (results: RalphLoopResult) => void;
   onAskUser?: (question: string, taskId: string) => Promise<string>;
+  workflowLogRepo?: import('../db/workflow-log-repo').WorkflowLogRepo;
+  coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
+  issueNumber?: number;
 }
 
 export interface RalphLoopResult {
@@ -265,7 +268,10 @@ export async function runRalphLoop(
 
   let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
 
+  const sseIssueId = String(context.issueNumber ?? context.issueId ?? '');
+
   const emitTaskUpdate = (
+    taskExecutionId: string,
     taskId: string,
     taskIndex: number,
     totalTasks: number,
@@ -274,29 +280,37 @@ export async function runRalphLoop(
     error?: string
   ) => {
     if (!context.eventBus) return;
-    context.eventBus.emit('ralph_task_update', {
-      issueId: context.issueId ?? '',
-      projectId: context.projectId ?? '',
-      executionId: context.executionId ?? '',
-      taskId,
-      taskIndex,
-      totalTasks,
-      status,
-      attempt,
-      error,
-    });
+    try {
+      context.eventBus.emit('ralph_task_update', {
+        issueId: sseIssueId,
+        projectId: context.projectId ?? '',
+        executionId: taskExecutionId,
+        taskId,
+        taskIndex,
+        totalTasks,
+        status,
+        attempt,
+        error,
+      });
+    } catch {
+      // fire-and-forget
+    }
   };
 
   const emitLoopProgress = (completedCount: number, failedCount: number, total: number) => {
     if (!context.eventBus) return;
-    context.eventBus.emit('ralph_loop_progress', {
-      issueId: context.issueId ?? '',
-      projectId: context.projectId ?? '',
-      executionId: context.executionId ?? '',
-      completed: completedCount,
-      failed: failedCount,
-      total,
-    });
+    try {
+      context.eventBus.emit('ralph_loop_progress', {
+        issueId: sseIssueId,
+        projectId: context.projectId ?? '',
+        executionId: context.executionId ?? '',
+        completed: completedCount,
+        failed: failedCount,
+        total,
+      });
+    } catch {
+      // fire-and-forget
+    }
   };
 
   while (true) {
@@ -304,6 +318,10 @@ export async function runRalphLoop(
     if (!nextTask) break;
 
     context.onTaskStart?.(nextTask);
+
+    const taskExecutionId = context.executionId
+      ? `${context.executionId}-${nextTask.id}`
+      : undefined;
 
     const assembledContext = buildTaskContext({
       change,
@@ -332,15 +350,18 @@ export async function runRalphLoop(
           }).fullPrompt
         : assembledContext.fullPrompt;
 
-      emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'started', attempt);
+      emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'started', attempt);
 
       const result = await _acpSessionRunner({
         cwd: context.worktreePath,
         task: prompt,
         issueId: context.issueId,
         projectId: context.projectId,
-        executionId: context.executionId,
+        executionId: taskExecutionId,
         eventBus: context.eventBus,
+        workflowLogRepo: context.workflowLogRepo,
+        coderSessionRepo: context.coderSessionRepo,
+        issueNumber: context.issueNumber,
       });
 
       attemptsUsed = attempt;
@@ -348,7 +369,7 @@ export async function runRalphLoop(
         taskSuccess = true;
         updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null });
         writeTasksFile(change.tasksPath, tasks);
-        emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'completed', attempt);
+        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'completed', attempt);
         completed++;
         emitLoopProgress(completed, failed, sortedTasks.length);
         context.onTaskComplete?.(nextTask, true, result.text);
@@ -378,7 +399,7 @@ export async function runRalphLoop(
           break;
         }
 
-        emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'retrying', attempt);
+        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'retrying', attempt);
         options.onRetry?.(nextTask, attempt, lastError);
       }
     }
@@ -395,7 +416,7 @@ export async function runRalphLoop(
         attempts: attemptsUsed,
         error: lastError,
       });
-      emitTaskUpdate(nextTask.id, attemptsUsed, sortedTasks.length, 'failed', attemptsUsed, lastError);
+      emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'failed', attemptsUsed, lastError);
       context.onTaskComplete?.(nextTask, false, lastError ?? 'Max retries exceeded');
 
       if (shouldPause && context.onAskUser) {

@@ -21,6 +21,8 @@ const ALL_EVENT_TYPES: EventName[] = [
   'coder_tool_call',
   'ralph_task_update',
   'ralph_loop_progress',
+  'plan_round_start',
+  'plan_session_update',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {
