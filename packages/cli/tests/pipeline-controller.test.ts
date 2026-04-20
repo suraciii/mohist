@@ -22,6 +22,21 @@ vi.mock('../src/openspec/detector', () => ({
   }),
 }));
 
+vi.mock('fs', () => ({
+  existsSync: vi.fn().mockReturnValue(true),
+  readdirSync: vi.fn().mockReturnValue([]),
+  rmSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  readFileSync: vi.fn(),
+}));
+
+vi.mock('../src/agents/artifact-prompt', () => ({
+  buildArtifactPrompt: vi.fn().mockReturnValue('mock-prompt'),
+  buildSelfReviewPrompt: vi.fn().mockReturnValue('mock-self-review-prompt'),
+  buildReviewerPrompt: vi.fn().mockReturnValue('mock-reviewer-prompt'),
+}));
+
 import { WorkflowController, type ChangeArtifactsManager } from '../src/workflow/workflow-controller';
 import { createAcpConnection } from '../src/agent-runtime/acp-session';
 import type { IssueRepo } from '../src/db/issue-repo';
@@ -63,7 +78,7 @@ function createMockRepos() {
       create: vi.fn(),
       update: vi.fn(),
       remove: vi.fn(),
-      updateStage: vi.fn().mockReturnValue(createMockIssue(Stage.Build)),
+      updateStage: vi.fn().mockImplementation((_id: string, stage: Stage) => createMockIssue(stage)),
       setApprovalState: vi.fn(),
       clearApprovalState: vi.fn(),
       findPendingApprovalByIssueId: vi.fn().mockReturnValue(null),
@@ -154,6 +169,11 @@ describe('WorkflowController pipeline stage ordering', () => {
 
   it('should advance from build to review without gate', async () => {
     const { issueRepo, eventBus } = createMockRepos();
+    const mockConn = {
+      prompt: vi.fn().mockResolvedValue({ text: 'ok', success: true, acpSessionId: 's1' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
     const ctrl = new WorkflowController({
       artifactManager: createMockArtifactManager(),
@@ -163,9 +183,11 @@ describe('WorkflowController pipeline stage ordering', () => {
       projectId: 'proj-1',
     });
 
-    await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
+    const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
     expect(issueRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Review);
+    expect(result.stage).toBe(Stage.Review);
+    expect(result.gateRequired).toBe(true);
   });
 
   it('should send 5 prompts in plan stage (4 artifacts + self-review)', async () => {
