@@ -28,6 +28,8 @@ export interface AcpSessionOptions {
   eventBus?: EventBus;
   throttleMs?: number;
   coderSessionRepo?: CoderSessionRepo;
+  issueNumber?: number;
+  onSessionUpdate?: (notification: SessionNotification) => void;
 }
 
 export interface AcpSessionResult {
@@ -74,8 +76,10 @@ export async function runAcpSession(
     eventBus,
     throttleMs = 100,
     coderSessionRepo,
+    issueNumber,
   } = options;
 
+  const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
 
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100) });
@@ -158,7 +162,7 @@ export async function runAcpSession(
               const now = Date.now();
               if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
                 eventBus.emit('coder_text_chunk', {
-                  issueId: issueId ?? '',
+                  issueId: sseIssueId,
                   projectId: projectId ?? '',
                   executionId,
                   acpSessionId: sessionId,
@@ -206,13 +210,16 @@ export async function runAcpSession(
               }
             }
             eventBus.emit('coder_tool_call', {
-              issueId: issueId ?? '',
+              issueId: sseIssueId,
               projectId: projectId ?? '',
               executionId,
               acpSessionId: sessionId,
               toolName,
               state,
               toolCallId,
+              title: (toolCallData?.title as string) ?? undefined,
+              rawInput: state === 'started' ? toolCallData?.input : undefined,
+              rawOutput: state === 'completed' ? toolCallData?.output : undefined,
             });
           }
         } catch (err) {
@@ -351,6 +358,8 @@ export interface AcpConnectionOptions {
   eventBus?: EventBus;
   throttleMs?: number;
   coderSessionRepo?: CoderSessionRepo;
+  issueNumber?: number;
+  onSessionUpdate?: (notification: SessionNotification) => void;
 }
 
 export interface AcpConnection {
@@ -377,8 +386,11 @@ export async function createAcpConnection(
     eventBus,
     throttleMs = 100,
     coderSessionRepo,
+    issueNumber,
+    onSessionUpdate,
   } = options;
 
+  const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
   let procExited = false;
   let agentText = '';
@@ -463,11 +475,13 @@ export async function createAcpConnection(
                 agentTextTruncated = true;
               }
             }
-            if (eventBus && executionId) {
+            if (onSessionUpdate) {
+              onSessionUpdate(notification);
+            } else if (eventBus && executionId) {
               const now = Date.now();
               if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
                 eventBus.emit('coder_text_chunk', {
-                  issueId: issueId ?? '',
+                  issueId: sseIssueId,
                   projectId: projectId ?? '',
                   executionId,
                   acpSessionId: sessionId,
@@ -476,6 +490,8 @@ export async function createAcpConnection(
                 lastTextChunkTime = now;
               }
             }
+          } else if (onSessionUpdate) {
+            onSessionUpdate(notification);
           }
 
           if (workflowLogRepo) {
@@ -487,7 +503,7 @@ export async function createAcpConnection(
             );
           }
 
-          if (eventType === 'tool_call' && eventBus && executionId) {
+          if (!onSessionUpdate && eventType === 'tool_call' && eventBus && executionId) {
             const toolData = update as Record<string, unknown>;
             const toolCallData = toolData.toolCall as
               | Record<string, unknown>
@@ -515,13 +531,16 @@ export async function createAcpConnection(
               }
             }
             eventBus.emit('coder_tool_call', {
-              issueId: issueId ?? '',
+              issueId: sseIssueId,
               projectId: projectId ?? '',
               executionId,
               acpSessionId: sessionId,
               toolName,
               state,
               toolCallId,
+              title: (toolCallData?.title as string) ?? undefined,
+              rawInput: state === 'started' ? toolCallData?.input : undefined,
+              rawOutput: state === 'completed' ? toolCallData?.output : undefined,
             });
           }
         } catch (err) {

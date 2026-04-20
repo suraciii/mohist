@@ -71,13 +71,32 @@ export interface DiffFile {
   deletions: number
 }
 
+export type PlanRoundStartEvent = {
+  issueId: string
+  projectId: string
+  roundType: string
+  roundLabel: string
+  roundIndex: number
+}
+
+export type PlanSessionUpdateEvent = {
+  issueId: string
+  projectId: string
+  roundType: string
+  roundIndex: number
+  sessionUpdate: string
+  data: unknown
+}
+
 export type AgentDetailEventMap = {
   agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number }
   main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number }
   coder_text_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string }
-  coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed'; toolCallId: string }
+  coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown }
   ralph_task_update: { issueId: string; projectId: string; executionId: string; taskId: string; taskIndex: number; totalTasks: number; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt?: number; error?: string }
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number }
+  plan_round_start: PlanRoundStartEvent
+  plan_session_update: PlanSessionUpdateEvent
 }
 
 export type EventMap = {
@@ -198,6 +217,9 @@ export interface ToolCallEntry {
   timestamp: number
   acpSessionId?: string
   toolCallId?: string
+  rawInput?: string
+  rawOutput?: string
+  title?: string
 }
 
 export interface CoderTextBuffer {

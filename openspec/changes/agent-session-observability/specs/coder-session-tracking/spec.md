@@ -1,11 +1,4 @@
-## MODIFIED Requirements
-
-### Requirement: Coder session mapping persisted on spawn
-When `spawn_coder` tool executes and creates an ACP session, the system SHALL record the mapping of issue_id, acp_session_id, execution_id, and a truncated task description to the `coder_session` table with status 'running'. The `coder_tool_call` SSE event SHALL additionally carry `rawInput`, `rawOutput`, and `title` fields so that the WebUI can display tool call details without querying the workflow_log API.
-
-#### Scenario: Spawn coder creates ACP session
-- **WHEN** runAcpSession successfully initializes ACP and obtains a sessionId (after `connection.newSession` succeeds)
-- **THEN** a coder_session row is created with issue_id (UUID), acp_session_id, execution_id, truncated task (max 200 chars), status='running', and created_at
+## ADDED Requirements
 
 ### Requirement: Coder tool call events carry full payload
 The `coder_tool_call` event emitted by `runAcpSession()` and `createAcpConnection()` SHALL include `rawInput`, `rawOutput`, and `title` fields in its payload when available. This data already exists in the ACP notification's `toolCall` object but is currently discarded.
@@ -47,3 +40,12 @@ The `workflowLogRepo.insert()` call in `acp-session.ts` SHALL store the full ACP
 - **WHEN** the frontend loads workflow_log entries for an issue
 - **THEN** entries with `eventType: "tool_call"` have `data.toolCall.input` (rawInput) and `data.toolCall.title` available
 - **AND** entries with `eventType: "tool_call_update"` and `status: "completed"` have `data.toolCall.output` (rawOutput) available
+
+## MODIFIED Requirements
+
+### Requirement: Coder session mapping persisted on spawn
+When `spawn_coder` tool executes and creates an ACP session, the system SHALL record the mapping of issue_id, acp_session_id, execution_id, and a truncated task description to the `coder_session` table with status 'running'. The `coder_tool_call` SSE event SHALL additionally carry `rawInput`, `rawOutput`, and `title` fields so that the WebUI can display tool call details without querying the workflow_log API.
+
+#### Scenario: Spawn coder creates ACP session
+- **WHEN** runAcpSession successfully initializes ACP and obtains a sessionId (after `connection.newSession` succeeds)
+- **THEN** a coder_session row is created with issue_id (UUID), acp_session_id, execution_id, truncated task (max 200 chars), status='running', and created_at

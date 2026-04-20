@@ -158,6 +158,9 @@ export const api = {
     return json.data
   },
 
+  getWorkflowLogs: (number: number) =>
+    request<import('./types').WorkflowLogItem[]>(`/issues/${number}/logs`),
+
   getLogTail: (cursor?: number, limit?: number, maxBytes?: number) => {
     const search = new URLSearchParams()
     if (cursor != null) search.set('cursor', String(cursor))

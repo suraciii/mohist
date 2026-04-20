@@ -5,10 +5,10 @@ import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile } from '../lib/types'
 import { api } from '../lib/api'
 import { useIssue, useIssueDiff, useAgentStatus, useSendMessage } from '../hooks/useQueries'
-import { useAgentSession } from '../hooks/useAgentSession'
+import { useSessionTimeline } from '../hooks/useSessionTimeline'
 import { EditIssueDialog } from './EditIssueDialog'
 import { QuestionPanel } from './QuestionPanel'
-import { AgentSessionPanel } from './AgentSessionPanel'
+import { SessionTimeline } from './SessionTimeline'
 
 const STAGES = [Stage.Draft, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
@@ -54,13 +54,10 @@ export function IssueDetailPage() {
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
   const {
-    agentText,
-    toolCalls,
-    coderSessions,
-    coderTexts,
+    rounds,
     isStreaming,
     isLoading: sessionLoading,
-  } = useAgentSession(issueNumber)
+  } = useSessionTimeline(issueNumber)
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveIssue(issueNumber),
@@ -112,7 +109,7 @@ export function IssueDetailPage() {
 
   const stageIndex = STAGES.indexOf(issue.stage)
   const isAgentRunning = agentStatus?.running === true
-  const isAgentRunningOnThis = isAgentRunning && agentStatus?.issueId === issue.id
+  const isAgentRunningOnThis = isAgentRunning && agentStatus?.issueNumber === issueNumber
   const isApprovalGate =
     APPROVAL_STAGES.has(issue.stage) &&
     issue.status === IssueStatus.Active &&
@@ -458,13 +455,12 @@ export function IssueDetailPage() {
                 <QuestionPanel issueId={issue.id} />
               )}
 
-              {(isAgentRunningOnThis || (!isDraft && (agentText || toolCalls.length > 0 || coderSessions.length > 0))) && !sessionLoading && (
-                <AgentSessionPanel
-                  agentText={agentText}
-                  toolCalls={toolCalls}
-                  coderSessions={coderSessions}
-                  coderTexts={coderTexts}
+              {(isAgentRunningOnThis || (!isDraft && rounds.length > 0)) && (
+                <SessionTimeline
+                  rounds={rounds}
                   isStreaming={isStreaming}
+                  isLoading={sessionLoading}
+                  currentStage={issue.stage}
                   isLive={isAgentRunningOnThis}
                 />
               )}

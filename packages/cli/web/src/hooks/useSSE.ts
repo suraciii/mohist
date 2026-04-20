@@ -95,6 +95,8 @@ function useSSE(projectId: string | null) {
       'coder_tool_call',
       'ralph_task_update',
       'ralph_loop_progress',
+      'plan_round_start',
+      'plan_session_update',
     ]
 
     for (const type of eventTypes) {
