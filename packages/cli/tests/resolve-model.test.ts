@@ -92,7 +92,7 @@ describe('resolveModel', () => {
     };
     const model = await resolveModel(config);
     expect(model).toBeDefined();
-    expect(model.modelId).toBe('claude-sonnet-4-6');
+    expect(model.modelId).toBe('claude-opus-4-7');
   });
 
   it('should throw on model string without slash', async () => {
