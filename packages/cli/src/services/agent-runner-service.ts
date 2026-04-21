@@ -285,11 +285,18 @@ export class AgentRunnerService {
             error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
           });
         }
-        this.eventBus.emit('agent_error', {
-          issueId: issue.id,
-          projectId,
-          error: errorMsg,
-        });
+        try {
+          this.eventBus.emit('agent_error', {
+            issueId: issue.id,
+            projectId,
+            error: errorMsg,
+          });
+        } catch (emitErr) {
+          log.error('Failed to emit agent_error event', {
+            issueNumber: issue.number,
+            error: emitErr instanceof Error ? emitErr.message : String(emitErr),
+          });
+        }
       } finally {
         this.activeAgents.delete(issue.id);
         this.clearWaiting(issue.id);
