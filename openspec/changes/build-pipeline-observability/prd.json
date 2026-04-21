@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Use existing log instance. Import Log if not already imported. Add eventBus emissions at key points."
     },
     {

@@ -19,6 +19,10 @@ export type EventMap = {
   plan_round_start: { issueId: string; projectId: string; roundType: string; roundLabel: string; roundIndex: number };
   plan_session_update: { issueId: string; projectId: string; roundType: string; roundIndex: number; sessionUpdate: string; data: unknown };
   'config:providers:changed': { providers: Array<{ id: string; name?: string; apiKey?: string; baseURL?: string; sdk?: string; models?: string[] }> };
+  build_stage_started: { issueId: string; projectId: string; stage: 'build'; changePath: string; tasksCount: number; timestamp: string };
+  build_tasks_snapshot: { issueId: string; projectId: string; total: number; pending: number; passed: number };
+  build_stage_completed: { issueId: string; projectId: string; completed: number; failed: number; total: number; duration: number; timestamp: string };
+  build_stage_failed: { issueId: string; projectId: string; reason: string; details: unknown; timestamp: string };
 };
 
 export type EventName = keyof EventMap;

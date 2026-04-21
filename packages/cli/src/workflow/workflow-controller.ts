@@ -8,6 +8,7 @@ import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } fr
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
+import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'workflow' });
@@ -325,26 +326,158 @@ export class WorkflowController {
     return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
   }
 
+  private emitSafe(event: Parameters<EventBus['emit']>[0], data: Parameters<EventBus['emit']>[1]): void {
+    if (!this.eventBus) return;
+    try {
+      this.eventBus.emit(event as keyof import('../services/event-bus').EventMap, data as never);
+    } catch {
+      // fire-and-forget
+    }
+  }
+
+  private writeLog(workflowLogRepo: WorkflowLogRepo | undefined, issueId: string, eventType: string, data: object): void {
+    if (!workflowLogRepo) return;
+    try {
+      workflowLogRepo.insert(issueId, null, eventType, data);
+    } catch {
+      // fire-and-forget
+    }
+  }
+
   private async runPipelineBuildStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+    const buildStartTime = Date.now();
+    const issueId = String(issue.number);
+    const projectId = this.projectId ?? issue.projectId;
+    const workflowLogRepo = acpOptions.workflowLogRepo;
+
     const change = detectOpenSpecChange(this.worktreePath, issue);
 
-    if (change) {
-      const executor = new RalphExecutor({
+    if (!change) {
+      log.warn('detectOpenSpecChange returned null', {
         worktreePath: this.worktreePath,
-        projectPath: this.worktreePath,
-        issueId: issue.id,
-        projectId: issue.projectId,
-        eventBus: this.eventBus,
-        executionId: `build-${issue.number}`,
-        workflowLogRepo: acpOptions.workflowLogRepo,
-        coderSessionRepo: acpOptions.coderSessionRepo,
         issueNumber: issue.number,
       });
 
-      const result: RalphLoopResult = await executor.execute(change);
+      this.emitSafe('build_stage_failed', {
+        issueId,
+        projectId,
+        reason: 'no_change_found',
+        details: { worktreePath: this.worktreePath },
+        timestamp: new Date().toISOString(),
+      });
+      this.writeLog(workflowLogRepo, issueId, 'build_failed', {
+        reason: 'no_change_found',
+        worktreePath: this.worktreePath,
+        issueNumber: issue.number,
+      });
 
       return {
-        success: result.success,
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `No OpenSpec change found for issue #${issue.number}`,
+      };
+    }
+
+    log.info('detectOpenSpecChange found change', {
+      changePath: change.changePath,
+      tasksPath: change.tasksPath,
+      issueNumber: issue.number,
+    });
+
+    let total = 0;
+    let pending = 0;
+    let passed = 0;
+
+    try {
+      const tasksContent = fs.readFileSync(change.tasksPath, 'utf-8');
+      const tasksFile = JSON.parse(tasksContent) as import('../artifacts/change-artifacts-manager').TasksFile;
+      const tasks = tasksFile.tasks;
+      total = tasks.length;
+      pending = tasks.filter(t => !t.passes).length;
+      passed = tasks.filter(t => t.passes).length;
+    } catch {
+      log.warn('Failed to read tasks snapshot for build stage logging', {
+        tasksPath: change.tasksPath,
+        issueNumber: issue.number,
+      });
+    }
+
+    log.info('Build stage tasks snapshot', {
+      issueNumber: issue.number,
+      total,
+      pending,
+      passed,
+    });
+
+    this.emitSafe('build_stage_started', {
+      issueId,
+      projectId,
+      stage: 'build' as const,
+      changePath: change.changePath,
+      tasksCount: total,
+      timestamp: new Date().toISOString(),
+    });
+    this.emitSafe('build_tasks_snapshot', {
+      issueId,
+      projectId,
+      total,
+      pending,
+      passed,
+    });
+    this.writeLog(workflowLogRepo, issueId, 'build_started', {
+      changePath: change.changePath,
+      tasksCount: total,
+      pending,
+      passed,
+    });
+
+    const executor = new RalphExecutor({
+      worktreePath: this.worktreePath,
+      projectPath: this.worktreePath,
+      issueId: issue.id,
+      projectId: issue.projectId,
+      eventBus: this.eventBus,
+      executionId: `build-${issue.number}`,
+      workflowLogRepo: acpOptions.workflowLogRepo,
+      coderSessionRepo: acpOptions.coderSessionRepo,
+      issueNumber: issue.number,
+    });
+
+    const result: RalphLoopResult = await executor.execute(change);
+    const duration = Date.now() - buildStartTime;
+
+    log.info('Ralph loop completed', {
+      issueNumber: issue.number,
+      completed: result.completed,
+      failed: result.failed,
+      total: result.total,
+      success: result.success,
+      duration,
+    });
+
+    if (result.completed === 0 && result.total > 0) {
+      log.warn('Build completed with 0 tasks executed out of total', {
+        total: result.total,
+        issueNumber: issue.number,
+      });
+
+      this.emitSafe('build_stage_failed', {
+        issueId,
+        projectId,
+        reason: 'zero_work',
+        details: { completed: result.completed, total: result.total },
+        timestamp: new Date().toISOString(),
+      });
+      this.writeLog(workflowLogRepo, issueId, 'build_failed', {
+        reason: 'zero_work',
+        completed: result.completed,
+        total: result.total,
+        duration,
+      });
+
+      return {
+        success: false,
         requiresApproval: false,
         output: {
           stage: Stage.Build,
@@ -353,17 +486,56 @@ export class WorkflowController {
           failedTasks: result.failed,
           totalTasks: result.total,
         },
-        message: result.success
-          ? `Build completed - ${result.completed}/${result.total} tasks executed`
-          : `Build completed with ${result.failed} failed task(s)`,
+        message: `Build completed with 0 tasks executed out of ${result.total} total — tasks may have been pre-marked as passed`,
       };
     }
 
+    if (result.success) {
+      this.emitSafe('build_stage_completed', {
+        issueId,
+        projectId,
+        completed: result.completed,
+        failed: result.failed,
+        total: result.total,
+        duration,
+        timestamp: new Date().toISOString(),
+      });
+      this.writeLog(workflowLogRepo, issueId, 'build_completed', {
+        completed: result.completed,
+        failed: result.failed,
+        total: result.total,
+        duration,
+      });
+    } else {
+      this.emitSafe('build_stage_failed', {
+        issueId,
+        projectId,
+        reason: 'tasks_failed',
+        details: { completed: result.completed, failed: result.failed, total: result.total },
+        timestamp: new Date().toISOString(),
+      });
+      this.writeLog(workflowLogRepo, issueId, 'build_failed', {
+        reason: 'tasks_failed',
+        completed: result.completed,
+        failed: result.failed,
+        total: result.total,
+        duration,
+      });
+    }
+
     return {
-      success: false,
+      success: result.success,
       requiresApproval: false,
-      output: null,
-      message: `No OpenSpec change found for issue #${issue.number}`,
+      output: {
+        stage: Stage.Build,
+        issueNumber: issue.number,
+        completedTasks: result.completed,
+        failedTasks: result.failed,
+        totalTasks: result.total,
+      },
+      message: result.success
+        ? `Build completed - ${result.completed}/${result.total} tasks executed`
+        : `Build completed with ${result.failed} failed task(s)`,
     };
   }
 
