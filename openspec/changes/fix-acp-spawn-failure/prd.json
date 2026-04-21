@@ -83,8 +83,8 @@
         "npm run build 通过"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "与 T-004 模式相同但 runAcpSession 返回 AcpSessionResult 而非 throw。错误信息必须包含 [SPAWN_FAILED] 前缀"
+      "passes": true,
+      "notes": "与 T-004 模式相同但 runAcpSession 返回 AcpSessionResult 而非 throw。错误信息必须包含 [SPAWN_FAILED] 前缀。使用 spawnFailure Promise + Promise.race 模式，与 createAcpConnection 一致"
     },
     {
       "id": "T-006",

@@ -114,9 +114,28 @@ export async function runAcpSession(
     ),
   });
 
+  let initialized = false;
+  let rejectOnSpawn: ((err: Error) => void) | undefined;
+  const spawnFailure = new Promise<never>((_, reject) => {
+    rejectOnSpawn = reject;
+  });
+
   proc.on('error', (err) => {
     log.error('opencode acp subprocess error', { error: err.message });
     writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, timestamp: new Date().toISOString() });
+    if (!initialized && rejectOnSpawn) {
+      rejectOnSpawn(new Error(`[SPAWN_FAILED] ${err.message}`));
+    }
+  });
+
+  proc.on('exit', (code) => {
+    if (!initialized && code !== 0) {
+      log.error('opencode acp subprocess exited before initialize', { exitCode: code });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode: code, timestamp: new Date().toISOString() });
+      if (rejectOnSpawn) {
+        rejectOnSpawn(new Error(`[SPAWN_FAILED] opencode process exited before initialize (exit code: ${code ?? 'signal'})`));
+      }
+    }
   });
 
   let procExited = false;
@@ -273,7 +292,11 @@ export async function runAcpSession(
         clientInfo: { name: 'mohist', version: '0.1.0' },
       }),
       timeoutPromise,
+      spawnFailure,
     ]);
+
+    initialized = true;
+    rejectOnSpawn = undefined;
 
     if (initResult === 'timeout') {
       const duration = Date.now() - sessionStartTime;
