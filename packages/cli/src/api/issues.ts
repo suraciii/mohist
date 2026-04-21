@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import * as fs from 'fs';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Issue, Stage, IssueStatus, Comment } from '../types';
 import { IssueService } from '../services';
@@ -1219,6 +1220,168 @@ export function createIssueRoutes(
         data
       };
       return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/build-status', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 400);
+      }
+
+      const worktreePath = worktreeManager?.getPath(project.name, issue.number) || project.path;
+      const change = detectOpenSpecChange(worktreePath, issue);
+
+      if (!change) {
+        const response: ApiResponse = {
+          success: true,
+          data: {
+            stage: issue.stage,
+            status: issue.stage === Stage.Build ? 'running' : (issue.stage === Stage.Done ? 'completed' : 'pending'),
+            progress: { completed: 0, failed: 0, total: 0, currentTask: null },
+            tasks: [],
+          }
+        };
+        return c.json(response);
+      }
+
+      let tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null }> = [];
+      let total = 0;
+      let completed = 0;
+      let failed = 0;
+      let currentTask: string | null = null;
+
+      try {
+        const tasksContent = fs.readFileSync(change.tasksPath, 'utf-8');
+        const tasksFile = JSON.parse(tasksContent) as { tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null }> };
+        tasks = tasksFile.tasks;
+        total = tasks.length;
+        completed = tasks.filter(t => t.passes).length;
+        failed = tasks.filter(t => t.error && !t.passes).length;
+        const pending = tasks.find(t => !t.passes);
+        currentTask = pending ? pending.id : null;
+      } catch {
+        log.warn('Failed to read tasks for build-status', { tasksPath: change.tasksPath, issueNumber: number });
+      }
+
+      let status: string;
+      if (issue.stage === Stage.Done) {
+        status = 'completed';
+      } else if (issue.stage === Stage.Build) {
+        status = 'running';
+      } else if (completed === total && total > 0) {
+        status = 'completed';
+      } else {
+        status = 'pending';
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          stage: issue.stage === Stage.Build ? 'build' : issue.stage,
+          status,
+          progress: { completed, failed, total, currentTask },
+          tasks,
+        }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/tasks', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 400);
+      }
+
+      const worktreePath = worktreeManager?.getPath(project.name, issue.number) || project.path;
+      const change = detectOpenSpecChange(worktreePath, issue);
+
+      if (!change) {
+        const response: ApiResponse = {
+          success: true,
+          data: { version: 1, tasks: [] }
+        };
+        return c.json(response);
+      }
+
+      try {
+        const tasksContent = fs.readFileSync(change.tasksPath, 'utf-8');
+        const tasksFile = JSON.parse(tasksContent);
+        const response: ApiResponse = {
+          success: true,
+          data: tasksFile
+        };
+        return c.json(response);
+      } catch {
+        const response: ApiResponse = {
+          success: true,
+          data: { version: 1, tasks: [] }
+        };
+        return c.json(response);
+      }
     } catch (error) {
       const response: ApiResponse = {
         success: false,

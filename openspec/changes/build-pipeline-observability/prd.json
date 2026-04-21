@@ -81,7 +81,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing patterns in issues.ts for error handling and response format."
     },
     {

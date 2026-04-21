@@ -43,3 +43,14 @@ Started: 2026-04-21T09:03:53.682Z
 - All catch blocks preserved fire-and-forget semantics — only logging added, no behavior change
 - Typecheck passes, all 514 tests pass
 - Next: T-004 (build-status and tasks API endpoints)
+
+
+[2026-04-21T09:35:00Z] T-004 Add build-status and tasks API endpoints
+- Added `import * as fs from 'fs'` to issues.ts for tasks.json reading
+- Added GET /api/issues/:number/build-status endpoint: returns stage, status, progress (completed/failed/total/currentTask), tasks array
+- Added GET /api/issues/:number/tasks endpoint: returns tasks.json current state (raw file content)
+- Both endpoints handle missing issue (404), missing project (400), and server errors (500)
+- Used detectOpenSpecChange + fs.readFileSync to read tasks, consistent with workflow-controller approach
+- Returns graceful empty state when no change found or tasks file missing
+- Typecheck passes, all 514 tests pass
+- Next: T-005 (emitPersistent helper), T-006 (ACP session lifecycle logging), T-007 (Tests)
