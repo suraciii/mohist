@@ -47,3 +47,11 @@ Started: 2026-04-21T16:27:56.429Z
 - spawn failure caught in catch block → cleanup() + return { success: false, error }
 - npm run build passes
 - Next: T-006 (RalphExecutor failure categorization for [SPAWN_FAILED])
+
+## 2026-04-22 T-006
+- Added `[SPAWN_FAILED]` detection in categorizeFailure() before environment pattern matching
+- Uses case-sensitive match on `error.includes('[SPAWN_FAILED]')` to detect the prefix added by T-004/T-005
+- Classified as `dependency` category (maxAttempts: 1, retryable: false) since spawn failures are not recoverable by retry
+- Placed after timeout check but before dependency/environment pattern matching to avoid being caught by the generic 'spawn failed' environment pattern
+- npm run build passes, all 45 ralph-executor tests pass
+- Next: T-007 (catch block exception isolation), T-008 (e2e error rollback verification)

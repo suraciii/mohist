@@ -40,6 +40,10 @@ export function categorizeFailure(error: string): FailureCategory {
     return 'timeout';
   }
 
+  if (error.includes('[SPAWN_FAILED]')) {
+    return 'dependency';
+  }
+
   const dependencyPatterns = [
     'cannot find module',
     'module not found',

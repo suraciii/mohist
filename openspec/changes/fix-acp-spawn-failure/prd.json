@@ -96,7 +96,7 @@
         "npm run build 通过"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "防止 spawn 失败时无意义重试，浪费资源"
     },
     {
