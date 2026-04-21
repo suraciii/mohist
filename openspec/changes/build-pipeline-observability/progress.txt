@@ -20,3 +20,18 @@ Started: 2026-04-21T09:03:53.682Z
 - Learnings: The existing test mocks fs.readFileSync as vi.fn() with no return value, causing JSON.parse("undefined") to fail. Wrapped tasks reading in try-catch to handle this gracefully.
 - Next steps: T-002 (Add logging to runRalphLoop), T-003 (Fix swallow catch), T-004-T-007
 
+
+## T-002: Add logging and events to runRalphLoop
+- Timestamp: 2026-04-21T09:20:00Z
+- What was done:
+  - Added `Log` import and `const log = Log.create({ service: 'ralph' })` at top of ralph-executor.ts
+  - Added `writeTaskLog` helper function for fire-and-forget workflow_log writes
+  - Added tasks state logging at INFO on loop entry (total, pending, passed counts)
+  - Added WARN log when findNextPendingTask returns null and completed===0 && failed===0
+  - Added INFO log for each task attempt start (taskId, attempt number)
+  - Added INFO log for task completion (taskId, attempt)
+  - Added WARN log for task attempt failures (taskId, attempt, category, error summary)
+  - Added workflow_log writes: task_started, task_completed, task_failed, task_retrying
+- Learnings: All 45 existing tests pass without modification. The WARN log for "no pending tasks" is visible in test output, confirming the logging works.
+- Next steps: T-003 (Fix swallow catch), T-004 (API endpoints), T-005 (emitPersistent), T-006 (ACP session logging), T-007 (Tests)
+
