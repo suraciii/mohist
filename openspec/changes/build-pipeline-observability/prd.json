@@ -151,7 +151,7 @@
         "T-005",
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Mock detectOpenSpecChange, _acpSessionRunner, and EventBus for unit tests. Use existing test patterns."
     }
   ]

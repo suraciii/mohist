@@ -65,3 +65,18 @@ Started: 2026-04-21T09:03:53.682Z
 - Changed log service name from 'session' to 'acp-session' for clarity
 - Typecheck passes, all 514 tests pass
 - Next: T-007 (Test build pipeline logging and API endpoints)
+
+[2026-04-21T09:58:00Z] T-007 Test build pipeline logging and API endpoints
+- Created 3 test files with 35 comprehensive tests covering all acceptance criteria:
+  - tests/build-pipeline-observability.test.ts (26 tests): WorkflowController zero-work detection, SSE events (build_stage_started/completed/failed, build_tasks_snapshot), workflow_log entries, swallow catch logging, EventBus emitPersistent
+  - tests/ralph-executor-logging.test.ts (6 tests): task_started/completed/failed/retrying workflow_log entries, SSE task progress events, eventBus.emit failure graceful handling
+  - tests/build-pipeline-api.test.ts (3 tests): tasks API with real filesystem, build-status API with task progress
+- All acceptance criteria verified:
+  - Zero-work detection returns success:false with proper logging
+  - build-status API returns correct stage, status, progress, and tasks
+  - tasks API returns current tasks.json state
+  - SSE events emitted at correct times (started, snapshot, completed/failed)
+  - workflow_log entries created for build_started, build_completed, build_failed
+  - Swallow catch errors logged (eventBus.emit and workflowLogRepo.insert failures)
+- Learnings: Zero-work detection (completed===0 && total>0) fires before tasks_failed check in workflow-controller. Must use completed>0 to test tasks_failed path. Ralph executor tests need real filesystem (not mocked fs).
+- Typecheck passes, all 551 tests pass (549 passed, 2 skipped)
