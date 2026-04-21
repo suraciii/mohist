@@ -35,3 +35,11 @@ Started: 2026-04-21T09:03:53.682Z
 - Learnings: All 45 existing tests pass without modification. The WARN log for "no pending tasks" is visible in test output, confirming the logging works.
 - Next steps: T-003 (Fix swallow catch), T-004 (API endpoints), T-005 (emitPersistent), T-006 (ACP session logging), T-007 (Tests)
 
+
+[2026-04-21T09:27:00Z] T-003 Fix swallow catch in workflow-controller and ralph-executor
+- Added WARN-level logging to all eventBus.emit catch blocks in workflow-controller.ts (7 locations: plan_session_update x2, plan_round_start x3, emitSafe helper, writeLog helper)
+- Added WARN-level logging to eventBus.emit catch blocks in ralph-executor.ts (ralph_task_update, ralph_loop_progress, writeTaskLog)
+- Added ERROR-level logging to writeTasksFile catch block in ralph-executor.ts
+- All catch blocks preserved fire-and-forget semantics — only logging added, no behavior change
+- Typecheck passes, all 514 tests pass
+- Next: T-004 (build-status and tasks API endpoints)

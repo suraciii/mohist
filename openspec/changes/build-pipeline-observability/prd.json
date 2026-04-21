@@ -62,7 +62,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts, packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Be careful not to change behavior — only add logging. Keep fire-and-forget semantics."
     },
     {
