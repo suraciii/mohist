@@ -113,7 +113,7 @@
         "npm test 通过"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "agent-runner-service.ts:263-296。这是防止僵尸状态的关键修复"
     },
     {

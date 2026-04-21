@@ -55,3 +55,9 @@ Started: 2026-04-21T16:27:56.429Z
 - Placed after timeout check but before dependency/environment pattern matching to avoid being caught by the generic 'spawn failed' environment pattern
 - npm run build passes, all 45 ralph-executor tests pass
 - Next: T-007 (catch block exception isolation), T-008 (e2e error rollback verification)
+
+--- 2026-04-22T00:57 ---
+Task: T-007
+What: Wrapped eventBus.emit('agent_error') in try/catch in agent-runner-service.ts catch block. The updateIssueStatus and updateStage/clearApprovalState were already wrapped in separate try/catch blocks from a prior iteration. All three operations are now independently protected.
+Learnings: The first two DB operations were already wrapped - only eventBus.emit was missing isolation.
+Next: T-008 - verify end-to-end error rollback in integration test.
