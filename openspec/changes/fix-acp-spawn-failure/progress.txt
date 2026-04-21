@@ -14,3 +14,5 @@ Started: 2026-04-21T16:27:56.429Z
 - npm run build passes
 - Learning: The acpOptions construction is duplicated across 6 call sites in issues.ts + propose.ts; future refactor could centralize this.
 - Next: T-002 (already done as part of T-001 since it was merged), T-003 spawn call update (also done), T-004/T-005 error propagation
+
+[2026-04-22] T-002: config-schema.ts already had opencode.binPath field (added in T-001). Verified build passes. No additional changes needed.
