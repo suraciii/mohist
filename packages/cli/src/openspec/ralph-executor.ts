@@ -165,8 +165,12 @@ export function readTasks(tasksPath: string): Task[] | null {
 }
 
 function writeTasksFile(tasksPath: string, tasks: Task[]): void {
-  const tasksFile = { version: 1, tasks };
-  fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
+  try {
+    const tasksFile = { version: 1, tasks };
+    fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
+  } catch (e) {
+    log.error('writeTasksFile failed', { tasksPath, error: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 export interface RalphExecutorOptions extends RalphTaskOptions {
@@ -256,8 +260,8 @@ function writeTaskLog(
   if (!workflowLogRepo) return;
   try {
     workflowLogRepo.insert(issueId, null, eventType, data);
-  } catch {
-    // fire-and-forget
+  } catch (e) {
+    log.warn('workflowLogRepo.insert failed', { eventType, issueId, error: e instanceof Error ? e.message : String(e) });
   }
 }
 
@@ -319,8 +323,8 @@ export async function runRalphLoop(
         attempt,
         error,
       });
-    } catch {
-      // fire-and-forget
+    } catch (e) {
+      log.warn('eventBus.emit failed for ralph_task_update', { taskId, status, error: e instanceof Error ? e.message : String(e) });
     }
   };
 
@@ -335,8 +339,8 @@ export async function runRalphLoop(
         failed: failedCount,
         total,
       });
-    } catch {
-      // fire-and-forget
+    } catch (e) {
+      log.warn('eventBus.emit failed for ralph_loop_progress', { error: e instanceof Error ? e.message : String(e) });
     }
   };
 

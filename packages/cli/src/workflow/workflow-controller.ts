@@ -98,8 +98,8 @@ export class WorkflowController {
             sessionUpdate: _notification.update.sessionUpdate,
             data: _notification.update as unknown,
           });
-        } catch {
-          // fire-and-forget
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_session_update', { error: e instanceof Error ? e.message : String(e) });
         }
       },
     };
@@ -124,8 +124,8 @@ export class WorkflowController {
               roundLabel: round.label,
               roundIndex: index,
             });
-          } catch {
-            // fire-and-forget
+          } catch (e) {
+            log.warn('eventBus.emit failed for plan_round_start', { error: e instanceof Error ? e.message : String(e) });
           }
         }
 
@@ -170,8 +170,8 @@ export class WorkflowController {
             roundLabel: 'self-review',
             roundIndex: rounds.length,
           });
-        } catch {
-          // fire-and-forget
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_round_start', { roundType: 'self-review', error: e instanceof Error ? e.message : String(e) });
         }
       }
 
@@ -330,8 +330,8 @@ export class WorkflowController {
     if (!this.eventBus) return;
     try {
       this.eventBus.emit(event as keyof import('../services/event-bus').EventMap, data as never);
-    } catch {
-      // fire-and-forget
+    } catch (e) {
+      log.warn('eventBus.emit failed', { event: String(event), error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -339,8 +339,8 @@ export class WorkflowController {
     if (!workflowLogRepo) return;
     try {
       workflowLogRepo.insert(issueId, null, eventType, data);
-    } catch {
-      // fire-and-forget
+    } catch (e) {
+      log.warn('workflowLogRepo.insert failed', { eventType, issueId, error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -564,8 +564,8 @@ export class WorkflowController {
             sessionUpdate: notification.update.sessionUpdate,
             data: notification.update as unknown,
           });
-        } catch {
-          // fire-and-forget
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_session_update', { roundType: 'review', error: e instanceof Error ? e.message : String(e) });
         }
       },
     };
@@ -583,8 +583,8 @@ export class WorkflowController {
             roundLabel: 'review',
             roundIndex: 0,
           });
-        } catch {
-          // fire-and-forget
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_round_start', { roundType: 'review', error: e instanceof Error ? e.message : String(e) });
         }
       }
 
