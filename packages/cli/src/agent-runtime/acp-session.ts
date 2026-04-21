@@ -433,6 +433,7 @@ export async function createAcpConnection(
   let coderSessionId: string | undefined;
   let sessionId = '';
   let closed = false;
+  let initialized = false;
   const connectionStartTime = Date.now();
 
   log.info('Spawning opencode acp subprocess for multi-round connection', {
@@ -454,9 +455,27 @@ export async function createAcpConnection(
     ),
   });
 
+  let rejectOnInit: ((err: Error) => void) | undefined;
+  const spawnFailure = new Promise<never>((_, reject) => {
+    rejectOnInit = reject;
+  });
+
   proc.on('error', (err) => {
     log.error('opencode acp subprocess error', { error: err.message });
     writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, mode: 'multi-round', timestamp: new Date().toISOString() });
+    if (!initialized && rejectOnInit) {
+      rejectOnInit(new Error(`[SPAWN_FAILED] ${err.message}`));
+    }
+  });
+
+  proc.on('exit', (code) => {
+    if (!initialized && code !== 0) {
+      log.error('opencode acp subprocess exited before initialize', { exitCode: code, mode: 'multi-round' });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode: code, mode: 'multi-round', timestamp: new Date().toISOString() });
+      if (rejectOnInit) {
+        rejectOnInit(new Error(`[SPAWN_FAILED] opencode process exited before initialize (exit code: ${code ?? 'signal'})`));
+      }
+    }
   });
 
   const ensureKill = () => {
@@ -607,7 +626,14 @@ export async function createAcpConnection(
       clientInfo: { name: 'mohist', version: '0.1.0' },
     }),
     createTimeout(timeout),
-  ]);
+    spawnFailure,
+  ]).catch(async (err: unknown) => {
+    await cleanup();
+    throw err;
+  });
+
+  initialized = true;
+  rejectOnInit = undefined;
 
   if (initResult === 'timeout') {
     const duration = Date.now() - connectionStartTime;
