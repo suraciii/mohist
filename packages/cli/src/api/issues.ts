@@ -32,6 +32,7 @@ export function createIssueRoutes(
   workflowLogRepo?: WorkflowLogRepo,
   agentSessionMessageRepo?: AgentSessionMessageRepo,
   coderSessionRepo?: CoderSessionRepo,
+  opencodeBinPath?: string,
 ): Hono {
   const app = new Hono();
 
@@ -350,6 +351,7 @@ export function createIssueRoutes(
         coderSessionRepo,
         eventBus,
         issueNumber: updatedIssue.number,
+        opencodeBinPath,
       };
 
       const startResult = agentRunner.startPipeline(
@@ -500,6 +502,7 @@ export function createIssueRoutes(
             coderSessionRepo,
             eventBus,
             issueNumber: issue.number,
+            opencodeBinPath,
           };
 
           agentRunner.resumePipeline(
@@ -740,6 +743,7 @@ export function createIssueRoutes(
         coderSessionRepo,
         eventBus,
         issueNumber: issue.number,
+        opencodeBinPath,
       };
 
       agentRunner.resumePipeline(
@@ -859,6 +863,7 @@ export function createIssueRoutes(
         coderSessionRepo,
         eventBus,
         issueNumber: issue.number,
+        opencodeBinPath,
       };
 
       agentRunner.resumePipeline(
@@ -951,6 +956,7 @@ export function createIssueRoutes(
         coderSessionRepo,
         eventBus,
         issueNumber: issue.number,
+        opencodeBinPath,
       };
 
       agentRunner.resumePipeline(

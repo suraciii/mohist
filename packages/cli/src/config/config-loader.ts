@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import * as jsonc from 'jsonc-parser';
 import { ConfigInfoSchema, type ConfigInfo } from './config-schema';
 import { BUILTIN_PROVIDERS, type BuiltinProvider } from './builtin-providers';
@@ -169,4 +170,31 @@ export function getLogConfig(config: ConfigInfo): LogConfig {
   return {
     level: config.log?.level ?? 'INFO',
   };
+}
+
+export function resolveOpencodeBinPath(config?: ConfigInfo): string | undefined {
+  const envPath = process.env['OPENCODE_BIN_PATH'];
+  if (envPath) {
+    return envPath;
+  }
+
+  if (config?.opencode?.binPath) {
+    return config.opencode.binPath;
+  }
+
+  const homePath = path.join(os.homedir(), '.opencode', 'bin', 'opencode');
+  if (fs.existsSync(homePath)) {
+    return homePath;
+  }
+
+  try {
+    const whichResult = execFileSync('which', ['opencode'], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    if (whichResult) {
+      return whichResult;
+    }
+  } catch {
+    // which command failed, opencode not in PATH
+  }
+
+  return undefined;
 }

@@ -44,6 +44,7 @@ export interface AcpSessionOptions {
   coderSessionRepo?: CoderSessionRepo;
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
+  opencodeBinPath?: string;
 }
 
 export interface AcpSessionResult {
@@ -91,6 +92,7 @@ export async function runAcpSession(
     throttleMs = 100,
     coderSessionRepo,
     issueNumber,
+    opencodeBinPath,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -100,7 +102,7 @@ export async function runAcpSession(
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100) });
   writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100), timestamp: new Date().toISOString() });
 
-  const proc = spawn('opencode', ['acp'], {
+  const proc = spawn(opencodeBinPath || 'opencode', ['acp'], {
     cwd,
     stdio: ['pipe', 'pipe', 'inherit'],
     env: Object.fromEntries(
@@ -388,6 +390,7 @@ export interface AcpConnectionOptions {
   coderSessionRepo?: CoderSessionRepo;
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
+  opencodeBinPath?: string;
 }
 
 export interface AcpConnection {
@@ -416,6 +419,7 @@ export async function createAcpConnection(
     coderSessionRepo,
     issueNumber,
     onSessionUpdate,
+    opencodeBinPath,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -438,7 +442,7 @@ export async function createAcpConnection(
   });
   writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), mode: 'multi-round', timestamp: new Date().toISOString() });
 
-  const proc = spawn('opencode', ['acp'], {
+  const proc = spawn(opencodeBinPath || 'opencode', ['acp'], {
     cwd,
     stdio: ['pipe', 'pipe', 'inherit'],
     env: Object.fromEntries(
