@@ -16,3 +16,11 @@ Started: 2026-04-21T16:27:56.429Z
 - Next: T-002 (already done as part of T-001 since it was merged), T-003 spawn call update (also done), T-004/T-005 error propagation
 
 [2026-04-22] T-002: config-schema.ts already had opencode.binPath field (added in T-001). Verified build passes. No additional changes needed.
+
+## 2026-04-22 T-003
+- Verified both spawn() calls in acp-session.ts already use `opencodeBinPath || 'opencode'` (lines 105 and 445)
+- Both AcpSessionOptions and AcpConnectionOptions already have opencodeBinPath optional field
+- This was completed as part of T-001 (which merged original T-001/T-002/T-003)
+- npm run build passes
+- No additional changes needed
+- Next: T-004/T-005 spawn error propagation

@@ -47,7 +47,7 @@
         "npm run build 通过"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "可与 T-001 一起完成，因为 opencodeBinPath 字段已在 T-001 中添加"
     },
     {
