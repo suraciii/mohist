@@ -4,6 +4,9 @@ import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
 import { runAcpSession as _runAcpSession } from '../agent-runtime/acp-session';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'ralph' });
 
 let _acpSessionRunner = _runAcpSession;
 
@@ -244,6 +247,20 @@ function updateTaskInList(
   if (updates.error !== undefined) task.error = updates.error;
 }
 
+function writeTaskLog(
+  workflowLogRepo: import('../db/workflow-log-repo').WorkflowLogRepo | undefined,
+  issueId: string,
+  eventType: string,
+  data: object
+): void {
+  if (!workflowLogRepo) return;
+  try {
+    workflowLogRepo.insert(issueId, null, eventType, data);
+  } catch {
+    // fire-and-forget
+  }
+}
+
 export async function runRalphLoop(
   change: OpenSpecChange,
   context: RalphExecutorContext,
@@ -269,6 +286,16 @@ export async function runRalphLoop(
   let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
 
   const sseIssueId = String(context.issueNumber ?? context.issueId ?? '');
+  const logIssueId = sseIssueId || context.issueId || '';
+
+  const pending = tasks.filter(t => !t.passes).length;
+  const passed = tasks.filter(t => t.passes).length;
+  log.info('Ralph loop entry', {
+    issueId: logIssueId,
+    total: sortedTasks.length,
+    pending,
+    passed,
+  });
 
   const emitTaskUpdate = (
     taskExecutionId: string,
@@ -315,7 +342,15 @@ export async function runRalphLoop(
 
   while (true) {
     const nextTask = findNextPendingTask(tasks);
-    if (!nextTask) break;
+    if (!nextTask) {
+      if (completed === 0 && failed === 0) {
+        log.warn('No pending tasks found — all tasks have passes=true', {
+          issueId: logIssueId,
+          total: sortedTasks.length,
+        });
+      }
+      break;
+    }
 
     context.onTaskStart?.(nextTask);
 
@@ -352,6 +387,18 @@ export async function runRalphLoop(
 
       emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'started', attempt);
 
+      log.info('Task attempt started', {
+        issueId: logIssueId,
+        taskId: nextTask.id,
+        attempt,
+      });
+
+      writeTaskLog(context.workflowLogRepo, logIssueId, 'task_started', {
+        taskId: nextTask.id,
+        attempt,
+        executionId: taskExecutionId,
+      });
+
       const result = await _acpSessionRunner({
         cwd: context.worktreePath,
         task: prompt,
@@ -373,10 +420,39 @@ export async function runRalphLoop(
         completed++;
         emitLoopProgress(completed, failed, sortedTasks.length);
         context.onTaskComplete?.(nextTask, true, result.text);
+
+        log.info('Task completed', {
+          issueId: logIssueId,
+          taskId: nextTask.id,
+          attempt,
+        });
+
+        writeTaskLog(context.workflowLogRepo, logIssueId, 'task_completed', {
+          taskId: nextTask.id,
+          attempt,
+          executionId: taskExecutionId,
+        });
+
         break;
       } else {
         lastError = result.error ?? 'Unknown error';
         lastCategory = categorizeFailure(lastError);
+
+        log.warn('Task attempt failed', {
+          issueId: logIssueId,
+          taskId: nextTask.id,
+          attempt,
+          category: lastCategory,
+          error: lastError.slice(0, 200),
+        });
+
+        writeTaskLog(context.workflowLogRepo, logIssueId, 'task_failed', {
+          taskId: nextTask.id,
+          attempt,
+          category: lastCategory,
+          error: lastError.slice(0, 500),
+          executionId: taskExecutionId,
+        });
 
         const categoryConfig = FAILURE_CATEGORY_CONFIGS[lastCategory];
         const effectiveMaxAttempts = Math.min(maxRetries, categoryConfig.maxAttempts);
@@ -400,6 +476,15 @@ export async function runRalphLoop(
         }
 
         emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'retrying', attempt);
+
+        writeTaskLog(context.workflowLogRepo, logIssueId, 'task_retrying', {
+          taskId: nextTask.id,
+          attempt,
+          category: lastCategory,
+          error: lastError?.slice(0, 500),
+          executionId: taskExecutionId,
+        });
+
         options.onRetry?.(nextTask, attempt, lastError);
       }
     }

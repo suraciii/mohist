@@ -42,7 +42,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Add `const log = Log.create({ service: 'ralph' })` at the top of the file."
     },
     {
