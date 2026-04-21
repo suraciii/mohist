@@ -101,7 +101,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/event-bus.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "This is a utility method. It should not change existing EventBus.emit behavior."
     },
     {
