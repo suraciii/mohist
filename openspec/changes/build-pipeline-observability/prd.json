@@ -1,0 +1,158 @@
+{
+  "project": "mohist",
+  "description": "Add structured logging, user visibility, and API endpoints for build pipeline observability",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add logging and events to runPipelineBuildStage",
+      "spec": "specs/build-stage-logging/spec.md",
+      "description": "Add structured logging to runPipelineBuildStage in workflow-controller.ts: log detectOpenSpecChange result (change path or null with worktreePath), log tasks.json snapshot before/after ralph loop (total/pending/passed counts), log ralph loop result (completed/failed/total/success), add zero-work detection that returns success:false when completed===0 && total>0, emit SSE events (build_stage_started, build_tasks_snapshot, build_stage_completed/failed), write critical events to workflow_log.",
+      "acceptanceCriteria": [
+        "detectOpenSpecChange result is logged at INFO when change found, WARN when null",
+        "Tasks snapshot (total, pending, passed counts) is logged before ralph loop",
+        "Ralph loop result (completed, failed, total, success) is logged after completion",
+        "When completed===0 && total>0, a WARN log is emitted and StageResult.success is false",
+        "SSE events are emitted: build_stage_started, build_tasks_snapshot, build_stage_completed/failed",
+        "Critical events are written to workflow_log",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use existing log instance. Import Log if not already imported. Add eventBus emissions at key points."
+    },
+    {
+      "id": "T-002",
+      "title": "Add logging and events to runRalphLoop",
+      "spec": "specs/ralph-task-execution/spec.md",
+      "description": "Add structured logging to runRalphLoop in ralph-executor.ts: log tasks state on loop entry (total/pending/passed counts), log when findNextPendingTask returns null (WARN level), log each task attempt result, log task failures with category and error, write task events to workflow_log, emit SSE events for task progress.",
+      "acceptanceCriteria": [
+        "Tasks state (total, pending, passed) is logged at INFO on loop entry",
+        "When findNextPendingTask returns null immediately, a WARN log explains no pending tasks found",
+        "Each task attempt logs task id and attempt number",
+        "Task failures log at WARN level with failure category and error summary",
+        "Task events are written to workflow_log: task_started, task_completed, task_failed, task_retrying",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Add `const log = Log.create({ service: 'ralph' })` at the top of the file."
+    },
+    {
+      "id": "T-003",
+      "title": "Fix swallow catch in workflow-controller and ralph-executor",
+      "spec": "specs/ralph-task-execution/spec.md",
+      "description": "Fix critical swallow catch blocks: add logging to eventBus.emit failures in workflow-controller.ts (lines ~100, 126), add logging to eventBus.emit failures in ralph-executor.ts (lines ~295, 311), add logging to writeTasksFile failures.",
+      "acceptanceCriteria": [
+        "eventBus.emit failures in workflow-controller.ts are logged at WARN level",
+        "eventBus.emit failures in ralph-executor.ts are logged at WARN level",
+        "writeTasksFile failures are logged at ERROR level",
+        "All existing tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts, packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Be careful not to change behavior — only add logging. Keep fire-and-forget semantics."
+    },
+    {
+      "id": "T-004",
+      "title": "Add build-status and tasks API endpoints",
+      "spec": "specs/build-stage-logging/spec.md",
+      "description": "Add new API endpoints in issues.ts: GET /api/issues/:number/build-status returns current build stage, progress, and task list; GET /api/issues/:number/tasks returns tasks.json current state. Both endpoints should handle errors gracefully and return appropriate HTTP status codes.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/build-status returns stage, status, progress, and tasks array",
+        "GET /api/issues/:number/tasks returns tasks.json current state",
+        "Both endpoints handle missing issue (404), missing project (400), and server errors (500)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follow existing patterns in issues.ts for error handling and response format."
+    },
+    {
+      "id": "T-005",
+      "title": "Add emitPersistent helper to EventBus",
+      "spec": "specs/ralph-task-execution/spec.md",
+      "description": "Add emitPersistent method to EventBus class in event-bus.ts: emitPersistent(event, data, { issueId, sessionId, workflowLogRepo }) emits event via EventBus AND writes to workflow_log, catches and logs errors from either operation, returns void (fire-and-forget).",
+      "acceptanceCriteria": [
+        "emitPersistent method exists on EventBus class",
+        "Method emits event via EventBus",
+        "Method writes event to workflow_log when workflowLogRepo is provided",
+        "Errors from either operation are logged but don't throw",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/event-bus.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is a utility method. It should not change existing EventBus.emit behavior."
+    },
+    {
+      "id": "T-006",
+      "title": "Add ACP session lifecycle logging",
+      "spec": "specs/build-stage-logging/spec.md",
+      "description": "Add lifecycle logging to acp-session.ts: log when ACP session starts (spawn), log when ACP session completes (success/failure), log timeout events, log process errors. Write session lifecycle events to workflow_log.",
+      "acceptanceCriteria": [
+        "ACP session start is logged with cwd, timeout, issueId",
+        "ACP session completion is logged with success/failure and duration",
+        "ACP session timeout is logged with timeout duration",
+        "ACP process errors are logged",
+        "Session lifecycle events are written to workflow_log",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use existing log instance. Add workflowLogRepo.insert calls at key lifecycle points."
+    },
+    {
+      "id": "T-007",
+      "title": "Test build pipeline logging and API endpoints",
+      "spec": "specs/build-stage-logging/spec.md",
+      "description": "Write comprehensive tests: test zero-work detection returns success:false, test build-status API returns correct data, test tasks API returns tasks.json state, test SSE events are emitted, test workflow_log entries are created, test swallow catch logging.",
+      "acceptanceCriteria": [
+        "Test: zero-work detection returns success:false with proper logging",
+        "Test: build-status API returns correct stage, progress, and tasks",
+        "Test: tasks API returns current tasks.json state",
+        "Test: SSE events are emitted at correct times",
+        "Test: workflow_log entries are created for critical events",
+        "Test: swallow catch errors are logged",
+        "All tests pass"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/workflow-controller.test.ts, packages/cli/tests/ralph-executor.test.ts, packages/cli/tests/api-routes.test.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "passes": false,
+      "notes": "Mock detectOpenSpecChange, _acpSessionRunner, and EventBus for unit tests. Use existing test patterns."
+    }
+  ]
+}
