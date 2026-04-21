@@ -32,7 +32,7 @@
         "npm run build 通过"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "原遗漏项，需要在 T-001 之前或同时完成"
     },
     {
