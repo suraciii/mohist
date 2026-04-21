@@ -259,6 +259,36 @@ export class AgentRunnerService {
         log.info('Pipeline run completed', { issueNumber: issue.number, duration, completed: result.completed });
         if (result.completed) {
           this.eventBus.emit('agent_completed', { issueId: issue.id, projectId });
+        } else if (!result.gateRequired) {
+          try {
+            updateIssueStatus?.(issue.id, IssueStatus.Blocked);
+          } catch (updateErr) {
+            log.error('Failed to update issue status to blocked', {
+              issueNumber: issue.number,
+              error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+            });
+          }
+          try {
+            issueRepo.updateStage(issue.id, Stage.Draft);
+            issueRepo.clearApprovalState(issue.id);
+          } catch (rollbackErr) {
+            log.error('Failed to rollback stage to draft', {
+              issueNumber: issue.number,
+              error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+            });
+          }
+          try {
+            this.eventBus.emit('agent_error', {
+              issueId: issue.id,
+              projectId,
+              error: result.message ?? 'Pipeline failed without completing',
+            });
+          } catch (emitErr) {
+            log.error('Failed to emit agent_error event', {
+              issueNumber: issue.number,
+              error: emitErr instanceof Error ? emitErr.message : String(emitErr),
+            });
+          }
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);

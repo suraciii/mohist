@@ -130,8 +130,8 @@
         "npm test 通过"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "集成测试，确认 T-004/T-005/T-006/T-007 协同工作"
+      "passes": true,
+      "notes": "集成测试，确认 T-004/T-005/T-006/T-007 协同工作。发现 executePipeline 对 pipeline 失败结果（completed=false, gateRequired=false）缺少处理，已补充。新增 tests/spawn-failure-e2e.test.ts 3 个测试用例全部通过。"
     }
   ]
 }
