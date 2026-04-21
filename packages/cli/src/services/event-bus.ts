@@ -32,6 +32,11 @@ type ListenerEntry = {
   listener: EventListener;
 };
 
+import { Log } from '../util/log';
+import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+
+const log = Log.create({ service: 'event-bus' });
+
 export class EventBus {
   private listeners = new Map<string, Set<ListenerEntry>>();
 
@@ -65,6 +70,26 @@ export class EventBus {
         entry.listener(data);
       } catch {
         // swallow listener errors to avoid disrupting other listeners
+      }
+    }
+  }
+
+  emitPersistent<T extends EventName>(
+    event: T,
+    data: EventMap[T],
+    opts: { issueId: string; sessionId?: string | null; workflowLogRepo?: WorkflowLogRepo }
+  ): void {
+    try {
+      this.emit(event, data);
+    } catch (err) {
+      log.warn('emitPersistent: EventBus.emit failed', { event, error: String(err) });
+    }
+
+    if (opts.workflowLogRepo) {
+      try {
+        opts.workflowLogRepo.insert(opts.issueId, opts.sessionId ?? null, event, data);
+      } catch (err) {
+        log.warn('emitPersistent: workflow_log write failed', { event, error: String(err) });
       }
     }
   }

@@ -54,3 +54,5 @@ Started: 2026-04-21T09:03:53.682Z
 - Returns graceful empty state when no change found or tasks file missing
 - Typecheck passes, all 514 tests pass
 - Next: T-005 (emitPersistent helper), T-006 (ACP session lifecycle logging), T-007 (Tests)
+
+[2026-04-21] T-005: Added emitPersistent method to EventBus class in event-bus.ts. Method accepts (event, data, { issueId, sessionId?, workflowLogRepo? }), emits via EventBus and optionally writes to workflow_log, catches/logs errors from both operations. Imported Log and WorkflowLogRepo types. Typecheck passes. No existing behavior changed. Next: T-006 (ACP session lifecycle logging).
