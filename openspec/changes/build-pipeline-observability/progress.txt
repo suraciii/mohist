@@ -1,0 +1,22 @@
+# Ralph Progress Log
+Started: 2026-04-21T09:03:53.682Z
+
+---
+
+
+## T-001: Add logging and events to runPipelineBuildStage
+- Timestamp: 2026-04-21T09:12:00Z
+- What was done:
+  - Added 4 new SSE event types to EventBus EventMap: build_stage_started, build_tasks_snapshot, build_stage_completed, build_stage_failed
+  - Added emitSafe() helper method for fire-and-forget event emission
+  - Added writeLog() helper method for fire-and-forget workflow_log writes
+  - Added structured logging for detectOpenSpecChange result (INFO when found, WARN when null)
+  - Added tasks snapshot logging before ralph loop (total/pending/passed counts)
+  - Added ralph loop result logging after completion (completed/failed/total/success/duration)
+  - Added zero-work detection: when completed===0 && total>0, emits WARN and returns success:false
+  - Added SSE event emissions at all key points (started, snapshot, completed/failed)
+  - Added workflow_log writes for build_started, build_completed, build_failed events
+  - Wrapped tasks.json reading in try-catch to handle parse failures gracefully
+- Learnings: The existing test mocks fs.readFileSync as vi.fn() with no return value, causing JSON.parse("undefined") to fail. Wrapped tasks reading in try-catch to handle this gracefully.
+- Next steps: T-002 (Add logging to runRalphLoop), T-003 (Fix swallow catch), T-004-T-007
+
