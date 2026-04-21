@@ -61,3 +61,21 @@ Task: T-007
 What: Wrapped eventBus.emit('agent_error') in try/catch in agent-runner-service.ts catch block. The updateIssueStatus and updateStage/clearApprovalState were already wrapped in separate try/catch blocks from a prior iteration. All three operations are now independently protected.
 Learnings: The first two DB operations were already wrapped - only eventBus.emit was missing isolation.
 Next: T-008 - verify end-to-end error rollback in integration test.
+
+## 2026-04-22 T-008 验证端到端错误回滚
+
+**What was done:**
+- Discovered gap: `executePipeline` in `agent-runner-service.ts` did not handle pipeline failure results (`completed=false, gateRequired=false`). Spawn errors were caught by `runPlanStage`/`runPipelineReviewStage` and returned as failure results, never reaching the catch block.
+- Fixed by adding `else if (!result.gateRequired)` branch after `if (result.completed)` in `executePipeline` that blocks the issue, rolls back stage to draft, clears approval state, and emits `agent_error` event — with independent try/catch protection for each operation.
+- Created `tests/spawn-failure-e2e.test.ts` with 3 test cases:
+  1. Spawn failure blocks issue and rolls back to draft
+  2. ActiveAgents cleanup even when status update callback throws
+  3. agent_error event fires even when updateIssueStatus throws
+
+**Learnings:**
+- The error propagation chain has two paths: (a) exceptions → catch block, (b) failure results → previously unhandled. Both paths need the same rollback logic.
+- Stage-level try-catch in `runPlanStage`/`runPipelineReviewStage` converts spawn errors to `{ success: false }` results, so `executePipeline` must handle both exceptions AND failure results.
+
+**Next steps:**
+- All 8 tasks complete. Change ready for archival.
+
