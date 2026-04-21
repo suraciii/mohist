@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Started: 2026-04-21T16:27:56.429Z
+
+---
+
+
+## 2026-04-22 T-001
+- Implemented resolveOpencodeBinPath() in config-loader.ts with 3-tier priority: env var > config.jsonc > auto-detect
+- Added opencode.binPath to config-schema.ts
+- Added opencodeBinPath optional field to AcpSessionOptions and AcpConnectionOptions
+- Updated both spawn() calls in acp-session.ts to use opencodeBinPath || 'opencode'
+- Updated server/index.ts to resolve opencode path at startup and pass to route creators
+- Updated issues.ts (5 acpOptions constructions) and propose.ts (1 acpOptions) to pass opencodeBinPath
+- npm run build passes
+- Learning: The acpOptions construction is duplicated across 6 call sites in issues.ts + propose.ts; future refactor could centralize this.
+- Next: T-002 (already done as part of T-001 since it was merged), T-003 spawn call update (also done), T-004/T-005 error propagation

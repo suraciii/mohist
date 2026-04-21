@@ -28,6 +28,9 @@ export const ConfigInfoSchema = z.object({
   log: z.object({
     level: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR']).optional(),
   }).strip().optional(),
+  opencode: z.object({
+    binPath: z.string().optional(),
+  }).strip().optional(),
 }).strip();
 
 export type ConfigInfo = z.infer<typeof ConfigInfoSchema>;

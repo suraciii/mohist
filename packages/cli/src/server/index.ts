@@ -20,7 +20,7 @@ import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { Log } from '../util/log';
 
-import { load as loadConfig, getServerConfig, getLogConfig } from '../config/config-loader';
+import { load as loadConfig, getServerConfig, getLogConfig, resolveOpencodeBinPath } from '../config/config-loader';
 import { RateLimiter } from '../utils/rate-limiter';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -77,6 +77,13 @@ async function main(): Promise<void> {
   }
   
   const serverConfig = getServerConfig(fileConfig);
+
+  const opencodeBinPath = resolveOpencodeBinPath(fileConfig);
+  if (opencodeBinPath) {
+    log.info('Resolved opencode binary path', { path: opencodeBinPath });
+  } else {
+    log.warn('Could not resolve opencode binary path; will fall back to PATH lookup');
+  }
   
   const db = new DatabaseManager();
   const stateManager = new StateManager(db);
@@ -111,8 +118,8 @@ async function main(): Promise<void> {
   const server = new HttpServer(config, rateLimiter);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo, stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo()));
-  server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo, stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), opencodeBinPath));
+  server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));

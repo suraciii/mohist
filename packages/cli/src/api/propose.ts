@@ -17,6 +17,7 @@ export function createProposeRoutes(
   _sessionManager?: unknown,
   _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
+  opencodeBinPath?: string,
 ): Hono {
   const app = new Hono();
 
@@ -96,6 +97,7 @@ export function createProposeRoutes(
         cwd: worktreePath,
         issueId: updatedIssue!.id,
         projectId,
+        opencodeBinPath,
       };
 
       const startResult = agentRunner.startPipeline(
