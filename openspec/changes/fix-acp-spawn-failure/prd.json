@@ -65,7 +65,7 @@
         "npm run build 通过"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "关键改动点：acp-session.ts:441-456。使用事件驱动而非轮询等待"
     },
     {
