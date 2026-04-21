@@ -97,8 +97,9 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
         }
       } else {
         toolCallMap.set(toolCallId, {
+          executionId: '',
           toolName: title ?? kind ?? '',
-          state: status ?? 'started',
+          state: ((status ?? 'pending') === 'pending' || (status ?? 'pending') === 'in_progress') ? 'started' : status as 'completed' | 'failed',
           timestamp: new Date(log.createdAt).getTime(),
           toolCallId,
           title,
@@ -120,31 +121,6 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
   }
 
   return rounds
-}
-
-function mergeToolCall(
-  map: Map<string, ToolCallEntry>,
-  data: AgentDetailEventMap['coder_tool_call'],
-) {
-  const existing = map.get(data.toolCallId)
-  if (data.state === 'started') {
-    map.set(data.toolCallId, {
-      executionId: data.executionId,
-      toolName: data.toolName,
-      state: 'started',
-      timestamp: Date.now(),
-      acpSessionId: data.acpSessionId,
-      toolCallId: data.toolCallId,
-      title: data.title,
-      rawInput: typeof data.rawInput === 'string' ? data.rawInput : JSON.stringify(data.rawInput ?? ''),
-    })
-  } else if (existing) {
-    map.set(data.toolCallId, {
-      ...existing,
-      state: data.state,
-      rawOutput: typeof data.rawOutput === 'string' ? data.rawOutput : JSON.stringify(data.rawOutput ?? ''),
-    })
-  }
 }
 
 export function useSessionTimeline(issueNumber: number) {
