@@ -20,6 +20,15 @@ export interface Round {
   toolCalls: ToolCallEntry[]
 }
 
+const PLAN_ROUND_LABELS = ['proposal.md', 'specs/', 'design.md', 'tasks.json', 'self-review']
+
+function inferRoundLabel(roundIndex: number, totalRounds: number): string {
+  if (roundIndex < PLAN_ROUND_LABELS.length && totalRounds <= PLAN_ROUND_LABELS.length) {
+    return PLAN_ROUND_LABELS[roundIndex]
+  }
+  return `Round ${roundIndex + 1}`
+}
+
 function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
   if (logs.length === 0) return []
 
@@ -29,7 +38,8 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
 
   for (const log of logs) {
     if (log.eventType === 'user_message_chunk') {
-      const userData = log.data as { text?: string }
+      const d = log.data as { content?: { text?: string } }
+      const userText = d?.content?.text ?? (d as Record<string, unknown>)?.text as string ?? ''
       if (currentRound) {
         currentRound.completedAt = log.createdAt
         currentRound.toolCalls = Array.from(toolCallMap.values())
@@ -37,10 +47,10 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
       toolCallMap.clear()
       currentRound = {
         roundIndex: rounds.length,
-        label: `Round ${rounds.length + 1}`,
+        label: '',
         startedAt: log.createdAt,
         completedAt: null,
-        userText: userData?.text ?? '',
+        userText,
         agentText: '',
         toolCalls: [],
       }
@@ -51,7 +61,7 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
     if (!currentRound) {
       currentRound = {
         roundIndex: 0,
-        label: 'Round 1',
+        label: '',
         startedAt: log.createdAt,
         completedAt: null,
         userText: '',
@@ -61,38 +71,52 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
       rounds.push(currentRound)
     }
 
-    if (log.eventType === 'plan_session_update') {
-      const data = log.data as AgentDetailEventMap['plan_session_update']
-      if (data?.sessionUpdate === 'agent_message_chunk') {
-        const textData = data.data as { text?: string }
-        if (textData?.text) {
-          currentRound.agentText += textData.text
+    if (log.eventType === 'agent_message_chunk') {
+      const d = log.data as { content?: { text?: string } }
+      const text = d?.content?.text ?? (d as Record<string, unknown>)?.text as string ?? ''
+      if (text) {
+        currentRound.agentText += text
+      }
+    }
+
+    if (log.eventType === 'tool_call' || log.eventType === 'tool_call_update') {
+      const d = log.data as Record<string, unknown>
+      const toolCallId = d.toolCallId as string | undefined
+      const status = d.status as string | undefined
+      const title = d.title as string | undefined
+      const kind = d.kind as string | undefined
+      const rawInput = d.rawInput
+      const rawOutput = d.rawOutput
+      if (!toolCallId) continue
+
+      if (status === 'completed' || status === 'failed') {
+        const existing = toolCallMap.get(toolCallId)
+        if (existing) {
+          existing.state = status === 'completed' ? 'completed' : 'failed'
+          if (rawOutput !== undefined) existing.rawOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput ?? '')
         }
-      }
-    }
-
-    if (log.eventType === 'coder_text_chunk') {
-      const data = log.data as AgentDetailEventMap['coder_text_chunk']
-      if (data?.text) {
-        currentRound.agentText += data.text
-      }
-    }
-
-    if (log.eventType === 'coder_tool_call') {
-      const data = log.data as AgentDetailEventMap['coder_tool_call']
-      mergeToolCall(toolCallMap, data)
-    }
-
-    if (log.eventType === 'plan_round_start') {
-      const data = log.data as AgentDetailEventMap['plan_round_start']
-      if (data?.roundLabel && currentRound.roundIndex === rounds.length - 1) {
-        currentRound.label = data.roundLabel
+      } else {
+        toolCallMap.set(toolCallId, {
+          toolName: title ?? kind ?? '',
+          state: status ?? 'started',
+          timestamp: new Date(log.createdAt).getTime(),
+          toolCallId,
+          title,
+          rawInput: typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? ''),
+        })
       }
     }
   }
 
   if (currentRound) {
     currentRound.toolCalls = Array.from(toolCallMap.values())
+  }
+
+  const totalRounds = rounds.length
+  for (const round of rounds) {
+    if (!round.label) {
+      round.label = inferRoundLabel(round.roundIndex, totalRounds)
+    }
   }
 
   return rounds
