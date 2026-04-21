@@ -15,7 +15,21 @@ import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
 
-const log = Log.create({ service: 'session' });
+const log = Log.create({ service: 'acp-session' });
+
+function writeSessionLog(
+  workflowLogRepo: WorkflowLogRepo | undefined,
+  issueId: string | undefined,
+  eventType: string,
+  data: Record<string, unknown>
+): void {
+  if (!workflowLogRepo || !issueId) return;
+  try {
+    workflowLogRepo.insert(issueId, null, eventType, data);
+  } catch (e) {
+    log.warn('workflowLogRepo.insert failed', { eventType, issueId, error: e instanceof Error ? e.message : String(e) });
+  }
+}
 
 export interface AcpSessionOptions {
   cwd: string;
@@ -81,8 +95,10 @@ export async function runAcpSession(
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
+  const sessionStartTime = Date.now();
 
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100) });
+  writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100), timestamp: new Date().toISOString() });
 
   const proc = spawn('opencode', ['acp'], {
     cwd,
@@ -98,6 +114,7 @@ export async function runAcpSession(
 
   proc.on('error', (err) => {
     log.error('opencode acp subprocess error', { error: err.message });
+    writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, timestamp: new Date().toISOString() });
   });
 
   let procExited = false;
@@ -257,7 +274,9 @@ export async function runAcpSession(
     ]);
 
     if (initResult === 'timeout') {
-      log.error('ACP initialize timed out', { timeout });
+      const duration = Date.now() - sessionStartTime;
+      log.error('ACP initialize timed out', { timeout, duration });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'initialize', timeout, duration, timestamp: new Date().toISOString() });
       await cleanup();
       return { text: agentText, success: false, error: `Timed out during initialize` };
     }
@@ -273,7 +292,9 @@ export async function runAcpSession(
     ]);
 
     if (sessionResult === 'timeout') {
-      log.error('ACP newSession timed out', { timeout });
+      const duration = Date.now() - sessionStartTime;
+      log.error('ACP newSession timed out', { timeout, duration });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'newSession', timeout, duration, timestamp: new Date().toISOString() });
       await cleanup();
       return { text: agentText, success: false, error: `Timed out during newSession` };
     }
@@ -305,7 +326,9 @@ export async function runAcpSession(
     ]);
 
     if (promptResult === 'timeout') {
-      log.error('ACP prompt timed out', { sessionId, timeout });
+      const duration = Date.now() - sessionStartTime;
+      log.error('ACP prompt timed out', { sessionId, timeout, duration });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, timestamp: new Date().toISOString() });
       if (coderSessionRepo && coderSessionId) {
         try {
           coderSessionRepo.updateStatus(coderSessionId, 'failed');
@@ -330,9 +353,14 @@ export async function runAcpSession(
       }
     }
 
+    const successDuration = Date.now() - sessionStartTime;
+    log.info('ACP session completed successfully', { sessionId, duration: successDuration });
+    writeSessionLog(workflowLogRepo, issueId, 'acp_session_completed', { sessionId, success: true, duration: successDuration, timestamp: new Date().toISOString() });
     return { text: agentText, success: true, acpSessionId: sessionId };
   } catch (err) {
-    log.error('ACP session failed', { sessionId, error: err instanceof Error ? err.message : String(err) });
+    const failDuration = Date.now() - sessionStartTime;
+    log.error('ACP session failed', { sessionId, duration: failDuration, error: err instanceof Error ? err.message : String(err) });
+    writeSessionLog(workflowLogRepo, issueId, 'acp_session_completed', { sessionId, success: false, duration: failDuration, error: err instanceof Error ? err.message : String(err), timestamp: new Date().toISOString() });
     if (coderSessionRepo && coderSessionId) {
       try {
         coderSessionRepo.updateStatus(coderSessionId, 'failed');
@@ -401,12 +429,14 @@ export async function createAcpConnection(
   let coderSessionId: string | undefined;
   let sessionId = '';
   let closed = false;
+  const connectionStartTime = Date.now();
 
   log.info('Spawning opencode acp subprocess for multi-round connection', {
     cwd,
     timeout,
     issueId: issueId?.slice(0, 8),
   });
+  writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), mode: 'multi-round', timestamp: new Date().toISOString() });
 
   const proc = spawn('opencode', ['acp'], {
     cwd,
@@ -422,6 +452,7 @@ export async function createAcpConnection(
 
   proc.on('error', (err) => {
     log.error('opencode acp subprocess error', { error: err.message });
+    writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, mode: 'multi-round', timestamp: new Date().toISOString() });
   });
 
   const ensureKill = () => {
@@ -575,7 +606,9 @@ export async function createAcpConnection(
   ]);
 
   if (initResult === 'timeout') {
-    log.error('ACP initialize timed out', { timeout });
+    const duration = Date.now() - connectionStartTime;
+    log.error('ACP initialize timed out', { timeout, duration });
+    writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'initialize', timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
     await cleanup();
     throw new Error('Timed out during initialize');
   }
@@ -588,7 +621,9 @@ export async function createAcpConnection(
   ]);
 
   if (sessionResult === 'timeout') {
-    log.error('ACP newSession timed out', { timeout });
+    const duration = Date.now() - connectionStartTime;
+    log.error('ACP newSession timed out', { timeout, duration });
+    writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'newSession', timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
     await cleanup();
     throw new Error('Timed out during newSession');
   }
@@ -633,7 +668,9 @@ export async function createAcpConnection(
       ]);
 
       if (promptResult === 'timeout') {
-        log.error('ACP prompt timed out', { sessionId, timeout });
+        const duration = Date.now() - connectionStartTime;
+        log.error('ACP prompt timed out', { sessionId, timeout, duration });
+        writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
         if (coderSessionRepo && coderSessionId) {
           try {
             coderSessionRepo.updateStatus(coderSessionId, 'failed');
@@ -664,6 +701,9 @@ export async function createAcpConnection(
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
+      const duration = Date.now() - connectionStartTime;
+      log.info('ACP connection closed', { sessionId, duration });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_completed', { sessionId, success: true, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
       if (coderSessionRepo && coderSessionId) {
         try {
           coderSessionRepo.updateStatus(coderSessionId, 'completed');
