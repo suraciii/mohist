@@ -12,3 +12,7 @@ Started: 2026-04-22T09:16:36.291Z
 [2026-04-22T09:28:47Z] T-002: Refactored buildArtifactPrompt() to generate structured prompts with XML-tagged sections (<task>, <dependencies>, <output>, <template>, <instruction>). Added ARTIFACT_OUTPUT_FILES mapping, ARTIFACT_DESCRIPTIONS, DEPENDENCY_ORDER constants, and buildDependencies() helper. Renamed loadInstruction→loadFile (shared by all prompt builders). Updated 42 tests all passing. Build succeeds.
 - Learnings: fs.existsSync can't be spied in vitest due to module-level caching — used real temp dirs for dependency tests instead. The proposal.md instruction files work well as <instruction> content without modification.
 - Next steps: T-003 (add per-round retry logic in workflow-controller).
+
+[2026-04-22T09:45:00Z] T-003: Added per-round retry logic in workflow-controller.ts runPlanStage(). When verify() fails after an artifact round, a concise retry prompt is sent naming the missing file path and instructing the agent to use write_file tool. Only one retry per round. Added outputPath field to PlanRoundConfig. Retry events logged at warn/info/error levels. Build and typecheck pass.
+- Learnings: The retry prompt stays short and focused — just the missing path + write_file instruction + urgency cue. This avoids re-sending the full artifact prompt while giving the agent enough context to recover.
+- Next steps: All tasks complete.
