@@ -75,10 +75,10 @@ export class WorkflowController {
     cleanChangeDir(changeDir);
 
     const rounds: PlanRoundConfig[] = [
-      { type: 'proposal', verify: () => fs.existsSync(path.join(changeDir, 'proposal.md')), label: 'proposal.md' },
-      { type: 'specs', verify: () => fs.existsSync(path.join(changeDir, 'specs')), label: 'specs/' },
-      { type: 'design', verify: () => fs.existsSync(path.join(changeDir, 'design.md')), label: 'design.md' },
-      { type: 'tasks', verify: () => fs.existsSync(path.join(changeDir, 'tasks.json')), label: 'tasks.json' },
+      { type: 'proposal', verify: () => fs.existsSync(path.join(changeDir, 'proposal.md')), label: 'proposal.md', outputPath: path.join(changeDir, 'proposal.md') },
+      { type: 'specs', verify: () => fs.existsSync(path.join(changeDir, 'specs')), label: 'specs/', outputPath: path.join(changeDir, 'specs') },
+      { type: 'design', verify: () => fs.existsSync(path.join(changeDir, 'design.md')), label: 'design.md', outputPath: path.join(changeDir, 'design.md') },
+      { type: 'tasks', verify: () => fs.existsSync(path.join(changeDir, 'tasks.json')), label: 'tasks.json', outputPath: path.join(changeDir, 'tasks.json') },
     ];
 
     // roundState is mutated by the for loop and read by onSessionUpdate callback.
@@ -144,14 +144,44 @@ export class WorkflowController {
         }
 
         if (!round.verify()) {
-          log.error('Plan stage artifact not found after round', { artifact: round.label });
-          await conn.close();
-          return {
-            success: false,
-            requiresApproval: false,
-            output: null,
-            message: `Plan stage failed: artifact "${round.label}" not found after generation`,
-          };
+          log.warn('Plan stage artifact not found after round, sending retry', { artifact: round.label, roundIndex: index });
+
+          const retryPrompt = [
+            `The artifact file ${round.outputPath} was not found. You MUST create it now.`,
+            '',
+            `Use the write_file tool to write the ${round.type} artifact to:`,
+            round.outputPath,
+            '',
+            'This is a retry. The pipeline cannot continue without this file.',
+          ].join('\n');
+
+          log.info('Plan stage retry prompt sent', { artifact: round.type, roundIndex: index });
+
+          const retryResult = await conn.prompt(retryPrompt);
+
+          if (!retryResult.success) {
+            log.error('Plan stage retry prompt failed', { artifact: round.type, error: retryResult.error });
+            await conn.close();
+            return {
+              success: false,
+              requiresApproval: false,
+              output: null,
+              message: `Plan stage failed: retry for artifact "${round.label}" returned error: ${retryResult.error ?? 'unknown error'}`,
+            };
+          }
+
+          if (!round.verify()) {
+            log.error('Plan stage artifact still missing after retry', { artifact: round.label });
+            await conn.close();
+            return {
+              success: false,
+              requiresApproval: false,
+              output: null,
+              message: `Plan stage failed: artifact "${round.label}" not found after retry`,
+            };
+          }
+
+          log.info('Plan stage retry succeeded', { artifact: round.label });
         }
       }
 
@@ -627,6 +657,7 @@ interface PlanRoundConfig {
   type: string;
   verify: () => boolean;
   label: string;
+  outputPath: string;
 }
 
 function cleanChangeDir(changeDir: string): void {

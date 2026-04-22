@@ -67,7 +67,7 @@
       "type": "WRITE",
       "output": "src/workflow/workflow-controller.ts",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "Keep existing verify() logic. The retry prompt should be short and focused — not the full artifact prompt again."
     }
   ]
