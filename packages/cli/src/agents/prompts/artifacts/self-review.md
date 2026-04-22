@@ -7,7 +7,7 @@ Review all generated artifacts for completeness, consistency, and feasibility.
 Read all generated files in `{changeDir}/`:
 - `proposal.md`
 - `specs/**/*.md`
-- `design.md` (if it exists)
+- `design.md`
 - `tasks.json`
 
 ## Review Criteria
