@@ -505,7 +505,7 @@ export async function runRalphLoop(
 
     if (!taskSuccess) {
       if (attemptsUsed === nextTask.attempts) {
-        updateTaskInList(tasks, nextTask.id, { passes: true, attempts: nextTask.attempts, error: 'Skipped: no attempts made (maxRetries=0)' });
+        updateTaskInList(tasks, nextTask.id, { passes: false, attempts: nextTask.attempts, error: `Skipped: task was not executed (attemptsUsed=${attemptsUsed}, no attempts made)` });
         writeTasksFile(change.tasksPath, tasks);
       }
       failed++;

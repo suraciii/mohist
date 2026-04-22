@@ -29,7 +29,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D2. This is a one-line change in the if-block at line ~501."
     },
     {
