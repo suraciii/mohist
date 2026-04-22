@@ -14,7 +14,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "The file is at src/agents/prompts/artifacts/design.md. Keep the structural guidance (sections, output path) but remove all optional/skip language."
     },
     {

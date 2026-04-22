@@ -1,16 +1,8 @@
 # Design Artifact
 
-Create the design document that explains HOW to implement the change.
+You SHALL always generate this file. The design document explains HOW to implement the change.
 
-## When to Include
-
-Create design.md if any of these apply:
-- Cross-cutting change (multiple services/modules) or new architectural pattern
-- New external dependency or significant data model changes
-- Security, performance, or migration complexity
-- Ambiguity that benefits from technical decisions before coding
-
-If the change is small and straightforward, you may skip this file and note why.
+For simple or small-scope changes, keep the content minimal: a brief Context and any notable Decisions are sufficient. Do not omit the file entirely.
 
 ## Sections
 
