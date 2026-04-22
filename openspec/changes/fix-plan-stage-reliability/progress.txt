@@ -1,0 +1,13 @@
+# Ralph Progress Log
+Started: 2026-04-22T05:14:13.835Z
+
+---
+
+
+[2026-04-22] T-001 Remove skip permission from design.md prompt
+- Removed "When to Include" conditional section and "you may skip this file" language
+- Replaced with mandatory "You SHALL always generate this file" instruction
+- Added guidance for simple changes to keep content minimal
+- Build and typecheck both pass
+- Learnings: The build copies .md files from src/agents/prompts/artifacts/ to dist/, so changes to the source are reflected in dist
+- Next: T-002 (self-review prompt), T-003 (server startup recovery)
