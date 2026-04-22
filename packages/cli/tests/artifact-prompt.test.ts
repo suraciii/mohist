@@ -42,25 +42,91 @@ describe('buildArtifactPrompt', () => {
     expect(result).toContain(changeDir);
   });
 
-  it.each(artifactTypes)('should include goal for %s artifact', (type) => {
+  it.each(artifactTypes)('should include <task> section for %s artifact', (type) => {
     const result = buildArtifactPrompt(type, mockIssue, changeDir);
 
-    expect(result).toContain(`Generate the **${type}** artifact`);
+    expect(result).toContain('<task>');
+    expect(result).toContain('</task>');
+    expect(result).toContain(`Create the ${type} artifact`);
   });
 
-  it.each(artifactTypes)('should include instruction from file for %s artifact', (type) => {
+  it.each(artifactTypes)('should include <dependencies> section for %s artifact', (type) => {
+    const result = buildArtifactPrompt(type, mockIssue, changeDir);
+
+    expect(result).toContain('<dependencies>');
+    expect(result).toContain('</dependencies>');
+  });
+
+  it.each(artifactTypes)('should include <output> section for %s artifact', (type) => {
+    const result = buildArtifactPrompt(type, mockIssue, changeDir);
+
+    expect(result).toContain('<output>');
+    expect(result).toContain('</output>');
+    expect(result).toContain(changeDir);
+  });
+
+  it.each(artifactTypes)('should include <template> section for %s artifact', (type) => {
+    const result = buildArtifactPrompt(type, mockIssue, changeDir);
+
+    expect(result).toContain('<template>');
+    expect(result).toContain('</template>');
+  });
+
+  it.each(artifactTypes)('should include <instruction> section for %s artifact', (type) => {
     const instructionPath = path.join(__dirname, '..', 'src', 'agents', 'prompts', 'artifacts', `${type}.md`);
     const instruction = fs.readFileSync(instructionPath, 'utf-8');
 
     const result = buildArtifactPrompt(type, mockIssue, changeDir);
 
+    expect(result).toContain('<instruction>');
+    expect(result).toContain('</instruction>');
     expect(result).toContain(instruction.slice(0, 100));
   });
 
-  it('should include read_file tip in prompt', () => {
+  it('should have correct output file mapping', () => {
+    const outputMapping: Record<ArtifactType, string> = {
+      proposal: 'proposal.md',
+      specs: 'specs/',
+      design: 'design.md',
+      tasks: 'tasks.json',
+    };
+
+    for (const type of artifactTypes) {
+      const result = buildArtifactPrompt(type, mockIssue, changeDir);
+      expect(result).toContain(path.join(changeDir, outputMapping[type]));
+    }
+  });
+
+  it('should list only existing dependencies', () => {
+    const tmpDir = fs.mkdtempSync('/tmp/mohist-test-deps-');
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'proposal.md'), '# Proposal');
+      fs.mkdirSync(path.join(tmpDir, 'specs'), { recursive: true });
+
+      const result = buildArtifactPrompt('design', mockIssue, tmpDir);
+
+      expect(result).toContain(path.join(tmpDir, 'proposal.md'));
+      expect(result).toContain(path.join(tmpDir, 'specs'));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should show no dependencies for proposal (first artifact)', () => {
     const result = buildArtifactPrompt('proposal', mockIssue, changeDir);
 
-    expect(result).toContain('read_file');
+    expect(result).toContain('No previous artifacts to reference');
+  });
+
+  it('should not list missing dependencies', () => {
+    const tmpDir = fs.mkdtempSync('/tmp/mohist-test-nodeps-');
+    try {
+      const result = buildArtifactPrompt('design', mockIssue, tmpDir);
+
+      expect(result).toContain('No previous artifacts to reference');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('should handle issue without body', () => {
@@ -73,13 +139,13 @@ describe('buildArtifactPrompt', () => {
 
     expect(result).toContain('Issue #42');
     expect(result).toContain('Add authentication');
-    expect(result).toContain('## Goal');
+    expect(result).toContain('<task>');
   });
 
   it('should throw for non-existent artifact type', () => {
     expect(() =>
       buildArtifactPrompt('nonexistent' as ArtifactType, mockIssue, changeDir)
-    ).toThrow('Instruction file not found');
+    ).toThrow('File not found');
   });
 });
 
