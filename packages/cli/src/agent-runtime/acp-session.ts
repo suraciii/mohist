@@ -138,6 +138,10 @@ export async function runAcpSession(
     }
   });
 
+  // Close streams immediately on spawn failure to prevent EPIPE errors
+  proc.stdin.on('error', () => {});
+  proc.stdout.on('error', () => {});
+
   let procExited = false;
   let agentText = '';
   let agentTextTruncated = false;
@@ -500,6 +504,10 @@ export async function createAcpConnection(
       }
     }
   });
+
+  // Close streams immediately on spawn failure to prevent EPIPE errors
+  proc.stdin.on('error', () => {});
+  proc.stdout.on('error', () => {});
 
   const ensureKill = () => {
     if (!procExited) {
