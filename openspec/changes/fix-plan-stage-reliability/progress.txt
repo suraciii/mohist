@@ -11,3 +11,9 @@ Started: 2026-04-22T05:14:13.835Z
 - Build and typecheck both pass
 - Learnings: The build copies .md files from src/agents/prompts/artifacts/ to dist/, so changes to the source are reflected in dist
 - Next: T-002 (self-review prompt), T-003 (server startup recovery)
+
+[2026-04-22] T-002 Update self-review prompt to treat design.md as required
+- Changed `design.md (if it exists)` to `design.md` in self-review.md line 10
+- Build and typecheck both pass
+- Learnings: Simple one-line change, consistent with T-001's mandatory design.md approach
+- Next: T-003 (server startup recovery), T-004 (verify with tests)
