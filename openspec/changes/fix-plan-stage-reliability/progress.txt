@@ -22,3 +22,8 @@ Started: 2026-04-22T05:14:13.835Z
 - **What done**: Added `recoverIssues()` method to AgentRunnerService that queries all active non-draft issues, sets status=blocked, stage=draft, clears approval state, and logs each action. Wired `agentRunner.recoverIssues()` call in server/index.ts after construction. Clears internal recoverableIssues array after recovery.
 - **Learnings**: The existing pipeline failure path (lines 262-279) uses the same pattern — good consistency. `recoverableIssues` array is cleared in-place via `.length = 0` to keep the reference valid for getStatus().
 - **Next steps**: T-004 — run tests to verify no regressions.
+
+## 2026-04-22 T-004
+- **What done**: Ran `npm run typecheck` (clean), `npm run build` (clean), and `npm test` (41 files, 552 passed, 2 skipped — all pass). No regressions found.
+- **Learnings**: All prior changes (T-001, T-002, T-003) are non-breaking. The EPIPE error at end of test output is a known Bun issue with pipe closure, not a test failure.
+- **Next steps**: All 4/4 tasks complete. Change is ready for archive.
