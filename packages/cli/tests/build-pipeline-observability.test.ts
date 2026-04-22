@@ -460,7 +460,7 @@ describe('Build Pipeline Observability - WorkflowController', () => {
       );
 
       expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-        '1',
+        'issue-1',
         null,
         'build_failed',
         expect.objectContaining({ reason: 'no_change_found' }),
@@ -468,138 +468,138 @@ describe('Build Pipeline Observability - WorkflowController', () => {
     });
 
     it('should write build_started and build_completed to workflow_log on success', async () => {
-      const { issueRepo, eventBus } = createMockRepos();
-      const workflowLogRepo = { insert: vi.fn() } as any;
+    const { issueRepo, eventBus } = createMockRepos();
+    const workflowLogRepo = { insert: vi.fn() } as any;
 
-      const tasksJson = JSON.stringify({
-        version: 1,
-        tasks: [
-          { id: 'T-001', order: 1, title: 'Task 1', passes: false, attempts: 0 },
-        ],
-      });
-      (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
+    const tasksJson = JSON.stringify({
+      version: 1,
+      tasks: [
+        { id: 'T-001', order: 1, title: 'Task 1', passes: false, attempts: 0 },
+      ],
+    });
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
 
-      mockDetectResult = FAKE_CHANGE;
-      mockRalphExecuteResult = {
-        completed: 1,
-        failed: 0,
-        total: 1,
-        taskResults: [],
-        success: true,
-      };
+    mockDetectResult = FAKE_CHANGE;
+    mockRalphExecuteResult = {
+      completed: 1,
+      failed: 0,
+      total: 1,
+      taskResults: [],
+      success: true,
+    };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      await ctrl.runPipelineBuildStage(
-        createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
-      );
-
-      expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-        '1',
-        null,
-        'build_started',
-        expect.objectContaining({ tasksCount: 1 }),
-      );
-
-      expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-        '1',
-        null,
-        'build_completed',
-        expect.objectContaining({ completed: 1, total: 1 }),
-      );
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo,
+      eventBus,
+      projectId: 'proj-1',
     });
 
-    it('should write build_failed to workflow_log on zero-work detection', async () => {
-      const { issueRepo, eventBus } = createMockRepos();
-      const workflowLogRepo = { insert: vi.fn() } as any;
+    await ctrl.runPipelineBuildStage(
+      createMockIssue(Stage.Build),
+      { cwd: '/tmp', workflowLogRepo } as any,
+    );
 
-      const tasksJson = JSON.stringify({
-        version: 1,
-        tasks: [
-          { id: 'T-001', order: 1, title: 'Task 1', passes: true, attempts: 1 },
-          { id: 'T-002', order: 2, title: 'Task 2', passes: true, attempts: 1 },
-        ],
-      });
-      (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
+    expect(workflowLogRepo.insert).toHaveBeenCalledWith(
+      'issue-1',
+      null,
+      'build_started',
+      expect.objectContaining({ tasksCount: 1 }),
+    );
 
-      mockDetectResult = FAKE_CHANGE;
-      mockRalphExecuteResult = {
-        completed: 0,
-        failed: 0,
-        total: 2,
-        taskResults: [],
-        success: true,
-      };
+    expect(workflowLogRepo.insert).toHaveBeenCalledWith(
+      'issue-1',
+      null,
+      'build_completed',
+      expect.objectContaining({ completed: 1, total: 1 }),
+    );
+  });
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
+  it('should write build_failed to workflow_log on zero-work detection', async () => {
+    const { issueRepo, eventBus } = createMockRepos();
+    const workflowLogRepo = { insert: vi.fn() } as any;
 
-      await ctrl.runPipelineBuildStage(
-        createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
-      );
+    const tasksJson = JSON.stringify({
+      version: 1,
+      tasks: [
+        { id: 'T-001', order: 1, title: 'Task 1', passes: true, attempts: 1 },
+        { id: 'T-002', order: 2, title: 'Task 2', passes: true, attempts: 1 },
+      ],
+    });
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
 
-      expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-        '1',
-        null,
-        'build_failed',
-        expect.objectContaining({ reason: 'zero_work', total: 2 }),
-      );
+    mockDetectResult = FAKE_CHANGE;
+    mockRalphExecuteResult = {
+      completed: 0,
+      failed: 0,
+      total: 2,
+      taskResults: [],
+      success: true,
+    };
+
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo,
+      eventBus,
+      projectId: 'proj-1',
     });
 
-    it('should write build_failed to workflow_log when tasks fail', async () => {
-      const { issueRepo, eventBus } = createMockRepos();
-      const workflowLogRepo = { insert: vi.fn() } as any;
+    await ctrl.runPipelineBuildStage(
+      createMockIssue(Stage.Build),
+      { cwd: '/tmp', workflowLogRepo } as any,
+    );
 
-      const tasksJson = JSON.stringify({
-        version: 1,
-        tasks: [
-          { id: 'T-001', order: 1, title: 'Task 1', passes: false, attempts: 0 },
-          { id: 'T-002', order: 2, title: 'Task 2', passes: false, attempts: 0 },
-        ],
-      });
-      (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
+    expect(workflowLogRepo.insert).toHaveBeenCalledWith(
+      'issue-1',
+      null,
+      'build_failed',
+      expect.objectContaining({ reason: 'zero_work', total: 2 }),
+    );
+  });
 
-      mockDetectResult = FAKE_CHANGE;
-      mockRalphExecuteResult = {
-        completed: 1,
-        failed: 1,
-        total: 2,
-        taskResults: [],
-        success: false,
-      };
+  it('should write build_failed to workflow_log when tasks fail', async () => {
+    const { issueRepo, eventBus } = createMockRepos();
+    const workflowLogRepo = { insert: vi.fn() } as any;
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
+    const tasksJson = JSON.stringify({
+      version: 1,
+      tasks: [
+        { id: 'T-001', order: 1, title: 'Task 1', passes: false, attempts: 0 },
+        { id: 'T-002', order: 2, title: 'Task 2', passes: false, attempts: 0 },
+      ],
+    });
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
 
-      await ctrl.runPipelineBuildStage(
-        createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
-      );
+    mockDetectResult = FAKE_CHANGE;
+    mockRalphExecuteResult = {
+      completed: 1,
+      failed: 1,
+      total: 2,
+      taskResults: [],
+      success: false,
+    };
 
-      expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-        '1',
-        null,
-        'build_failed',
-        expect.objectContaining({ reason: 'tasks_failed' }),
-      );
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo,
+      eventBus,
+      projectId: 'proj-1',
+    });
+
+    await ctrl.runPipelineBuildStage(
+      createMockIssue(Stage.Build),
+      { cwd: '/tmp', workflowLogRepo } as any,
+    );
+
+    expect(workflowLogRepo.insert).toHaveBeenCalledWith(
+      'issue-1',
+      null,
+      'build_failed',
+      expect.objectContaining({ reason: 'tasks_failed' }),
+    );
     });
   });
 

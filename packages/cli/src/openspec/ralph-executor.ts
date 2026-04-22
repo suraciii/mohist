@@ -299,8 +299,8 @@ export async function runRalphLoop(
 
   let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
 
-  const sseIssueId = String(context.issueNumber ?? context.issueId ?? '');
-  const logIssueId = sseIssueId || context.issueId || '';
+  const sseIssueId = String(context.issueNumber ?? '');
+  const logIssueId = context.issueId || '';
 
   const pending = tasks.filter(t => !t.passes).length;
   const passed = tasks.filter(t => t.passes).length;
@@ -542,6 +542,10 @@ export async function runRalphLoop(
           context.onLoopComplete?.(result);
           return result;
         }
+      } else if (shouldPause && !context.onAskUser) {
+        updateTaskInList(tasks, nextTask.id, { passes: true, error: `Auto-skipped (no onAskUser): ${lastError}` });
+        writeTasksFile(change.tasksPath, tasks);
+        taskResults[taskResults.length - 1].status = 'skipped';
       }
     } else {
       taskResults.push({

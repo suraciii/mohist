@@ -55,18 +55,19 @@ describe('Ralph executor logging', () => {
       worktreePath: tempDir,
       projectPath: tempDir,
       workflowLogRepo,
+      issueId: 'uuid-42',
       issueNumber: 42,
     }, { maxRetries: 1 });
 
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-      '42',
+      'uuid-42',
       null,
       'task_started',
       expect.objectContaining({ taskId: 'T-001', attempt: 1 }),
     );
 
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-      '42',
+      'uuid-42',
       null,
       'task_completed',
       expect.objectContaining({ taskId: 'T-001', attempt: 1 }),
@@ -77,7 +78,7 @@ describe('Ralph executor logging', () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({
       text: '',
       success: false,
-      error: 'Build failed',
+      error: '[SPAWN_FAILED] dependency error',
     }));
 
     const change = createMinimalChange();
@@ -87,21 +88,22 @@ describe('Ralph executor logging', () => {
       worktreePath: tempDir,
       projectPath: tempDir,
       workflowLogRepo,
+      issueId: 'uuid-42',
       issueNumber: 42,
     }, { maxRetries: 1 });
 
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-      '42',
+      'uuid-42',
       null,
       'task_started',
       expect.objectContaining({ taskId: 'T-001' }),
     );
 
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-      '42',
+      'uuid-42',
       null,
       'task_failed',
-      expect.objectContaining({ taskId: 'T-001', category: 'ac_not_met' }),
+      expect.objectContaining({ taskId: 'T-001', category: 'dependency' }),
     );
   });
 
@@ -118,6 +120,7 @@ describe('Ralph executor logging', () => {
       worktreePath: tempDir,
       projectPath: tempDir,
       eventBus,
+      issueId: 'uuid-42',
       issueNumber: 42,
       projectId: 'proj-1',
       executionId: 'build-42',
@@ -125,17 +128,17 @@ describe('Ralph executor logging', () => {
 
     expect(eventBus.emit).toHaveBeenCalledWith(
       'ralph_task_update',
-      expect.objectContaining({ taskId: 'T-001', status: 'started' }),
+      expect.objectContaining({ issueId: '42', taskId: 'T-001', status: 'started' }),
     );
 
     expect(eventBus.emit).toHaveBeenCalledWith(
       'ralph_task_update',
-      expect.objectContaining({ taskId: 'T-001', status: 'completed' }),
+      expect.objectContaining({ issueId: '42', taskId: 'T-001', status: 'completed' }),
     );
 
     expect(eventBus.emit).toHaveBeenCalledWith(
       'ralph_loop_progress',
-      expect.objectContaining({ completed: 1, failed: 0, total: 1 }),
+      expect.objectContaining({ issueId: '42', completed: 1, failed: 0, total: 1 }),
     );
   });
 
@@ -181,11 +184,12 @@ describe('Ralph executor logging', () => {
       worktreePath: tempDir,
       projectPath: tempDir,
       workflowLogRepo,
+      issueId: 'uuid-42',
       issueNumber: 42,
     }, { maxRetries: 3 });
 
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
-      '42',
+      'uuid-42',
       null,
       'task_retrying',
       expect.objectContaining({ taskId: 'T-001', category: 'ac_not_met' }),
@@ -205,6 +209,7 @@ describe('Ralph executor logging', () => {
       worktreePath: tempDir,
       projectPath: tempDir,
       workflowLogRepo,
+      issueId: 'uuid-42',
       issueNumber: 42,
     }, { maxRetries: 1 });
 

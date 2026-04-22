@@ -376,7 +376,7 @@ export class WorkflowController {
 
   private async runPipelineBuildStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
     const buildStartTime = Date.now();
-    const issueId = String(issue.number);
+    const issueId = issue.id;
     const projectId = this.projectId ?? issue.projectId;
     const workflowLogRepo = acpOptions.workflowLogRepo;
 

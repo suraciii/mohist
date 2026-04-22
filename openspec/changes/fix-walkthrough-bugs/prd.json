@@ -46,7 +46,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D3 and D4. This covers both roots of the FK failure."
     },
     {
