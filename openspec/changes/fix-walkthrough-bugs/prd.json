@@ -14,7 +14,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D1. The normalize step goes after JSON.parse and before return."
     },
     {

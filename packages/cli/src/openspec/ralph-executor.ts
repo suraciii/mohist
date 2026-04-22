@@ -160,7 +160,13 @@ export function readTasks(tasksPath: string): Task[] | null {
     const content = fs.readFileSync(tasksPath, 'utf-8');
     const tasksFile = JSON.parse(content);
     if (tasksFile.tasks && Array.isArray(tasksFile.tasks)) {
-      return tasksFile.tasks as Task[];
+      return tasksFile.tasks.map((t: Task) => ({
+        ...t,
+        attempts: t.attempts ?? 0,
+        passes: t.passes ?? false,
+        order: t.order ?? 999999,
+        error: t.error ?? null,
+      })) as Task[];
     }
     return null;
   } catch {
