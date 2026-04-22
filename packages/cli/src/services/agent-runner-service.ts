@@ -108,6 +108,35 @@ export class AgentRunnerService {
       .map(issue => ({ issueNumber: issue.number, stage: issue.stage }));
   }
 
+  recoverIssues(): void {
+    if (!this.issueRepo) return;
+
+    const orphans = this.issueRepo.findAll({ status: IssueStatus.Active })
+      .filter(issue => issue.stage !== Stage.Draft);
+
+    if (orphans.length === 0) return;
+
+    for (const issue of orphans) {
+      try {
+        this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+        this.issueRepo.updateStage(issue.id, Stage.Draft);
+        this.issueRepo.clearApprovalState(issue.id);
+        log.info('Recovered orphaned issue', {
+          issueNumber: issue.number,
+          previousStage: issue.stage,
+          action: 'status=blocked, stage=draft, approval cleared',
+        });
+      } catch (err) {
+        log.error('Failed to recover orphaned issue', {
+          issueNumber: issue.number,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    this.recoverableIssues.length = 0;
+  }
+
   getMaxConcurrentAgents(): number {
     return this.maxConcurrentAgents;
   }
