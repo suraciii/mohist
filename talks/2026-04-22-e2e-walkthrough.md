@@ -43,6 +43,19 @@
 - pipeline 又卡死在 `plan/active`
 - 详见下方问题 #2
 
+### Step 6: 第三次尝试（修复后）✅ (部分)
+- 修复 design.md prompt（强制生成）后重试
+- Server 启动时成功恢复 4 个 orphaned issues (#2-#5)
+- `mo issue reopen 6` → `mo issue start 6` → plan/active
+- ACP 进程启动 (PID: 944894)
+- **Round 1 (proposal)**: 成功 ✅
+- **Round 2 (specs)**: 成功 ✅
+- **Round 3 (design)**: 成功 ✅（46行高质量 design.md）
+- **Round 4 (tasks)**: 失败 ❌（tasks.json 未生成）
+- ACP session 持续 924314ms (~15.4 min) 后关闭
+- pipeline 回滚到 draft/blocked
+- 详见下方问题 #2b
+
 ### Step 6: 再次重试
 - [ ] 恢复 issue 并重新 start
 
@@ -66,7 +79,7 @@
 - **修复**: 重启 server 后，opencode 路径解析成功
 - **建议**: 在 config.jsonc 中显式配置 `opencode.binPath`，或在 PATH 中添加 `~/.opencode/bin/`
 
-### 问题 #2: Agent 自行跳过产物生成 [严重] — 已定位根因
+### 问题 #2: Agent 自行跳过产物生成 [严重] — 已修复 ✅
 - **现象**: Plan stage multi-round ACP 只生成 2/5 个产物 (proposal + specs)，缺少 design, tasks
 - **根因**: Agent (opencode/LLM) 在 specs 回复中明确说 "Skipping design — no cross-cutting concerns"
   - Agent 认为这是一个简单任务，不需要 design.md
@@ -77,33 +90,43 @@
   - 只有 2 次 write tool_call
   - verify() 检测到 design.md 不存在 → planResult.success = false
   - Issue 被回滚到 draft/blocked（这次错误处理生效了）
-- **可复现**: 是（每次尝试都只生成 proposal + specs）
+- **修复**: 
+  - ✅ 修改 design.md prompt：移除 skip 许可，改为强制指令 "You SHALL always generate this file"
+  - ✅ 修改 self-review.md prompt：将 design.md 从可选改为必须
+- **验证**: 第三次尝试中 design.md 成功生成（46行高质量内容）
+- **状态**: 已修复，design.md 不再被跳过
+
+### 问题 #2b: tasks.json 未生成 [严重] — 新发现
+- **现象**: Plan stage 前 3 个产物（proposal, specs, design）成功生成，但 tasks.json 缺失
+- **根因调查**:
+  1. **Prompt 分析**: tasks.md prompt 明确说 "Create the tasks.json file" 和 "Write the file to `{changeDir}/tasks.json`"
+  2. **工具可用性**: `write_file` 工具可用，agent 在前几轮成功使用过
+  3. **可能原因**: 
+     - Agent 在 tasks round 只回复了文本说明，没有执行 write_file tool call
+     - 或者 agent 认为 tasks 应该以不同格式生成（如 tasks.md 而非 tasks.json）
+     - 或者 agent 在长时间运行后（~15分钟）出现疲劳/错误
+- **时间线**: 
+  - 14:04:15 - tasks round 开始
+  - 14:14:16 - ACP session 关闭（10分钟后），报告 tasks.json 未找到
 - **建议**:
-  1. **Prompt 工程**: 在 design prompt 中更强调 "即使简单也必须生成 design.md，可以简化但不可省略"
-  2. **Fallback**: 如果 agent 没有生成某个产物，自动生成一个最小化的默认版本
-  3. **验证时机**: 在每个 round 的 prompt 中附带前一个产物的内容，让 agent 感知进度
-  4. **考虑简化 Plan stage**: 对于简单 issue，可以跳过某些 round（需要 workflow 层面的支持）
+  1. **增强 prompt**: 在 tasks prompt 中更强调 "必须使用 write_file 工具写入 tasks.json"
+  2. **增加示例**: 提供完整的 tasks.json 示例，减少 agent 困惑
+  3. **验证前检查**: 在 verify 之前检查 agent 是否实际执行了写操作
+  4. **Timeout 调整**: tasks round 耗时 10 分钟，可能 agent 在超时前未完成
 
-### 问题 #3: Pipeline 卡死无自动恢复 [中等]
-- **现象**: 首次运行时 Issue 卡在 `plan/active`（server 重启后 agent 状态丢失）
-- **影响**: 用户不知道 pipeline 失败了，需要手动检查
-- **备注**: 第二次运行后错误处理正确（回滚到 draft/blocked）
-- **建议**: 
-  1. Server 启动时检查 recoverableIssues，自动恢复或标记为 blocked
-  2. 增加 heartbeat/watchdog 机制
-
-### 问题 #4: mo issue start 对非 draft issue 报错 [低]
-- **现象**: `mo issue start 6` 在 issue 处于 plan stage 时报错
-- **期望**: 应该提供恢复/继续的命令，而非仅报错
-- **当前**: 只能通过 `mo issue resume 6` 回到 draft 再 start
-
-### 问题 #3: Pipeline 卡死无自动恢复 [中等]
+### 问题 #3: Pipeline 卡死无自动恢复 [中等] — 已修复 ✅
 - **现象**: Issue 卡在 `plan/active` 但没有自动恢复或标记为 blocked
 - **影响**: 用户不知道 pipeline 失败了，需要手动检查
-- **建议**: 增加 heartbeat/watchdog 机制，检测 agent 长时间无响应时自动标记为 blocked
+- **修复**: 
+  - ✅ 添加 `AgentRunnerService.recoverIssues()` 方法
+  - ✅ Server 启动时自动调用，将 orphaned issues 标记为 blocked + 回滚 draft
+  - ✅ 日志记录恢复动作
+- **验证**: Server 启动时成功恢复 4 个 issues (#2 plan, #3 plan, #4 plan, #5 build)
+- **状态**: 已修复
 
 ### 问题 #4: mo issue start 对非 draft issue 报错 [低]
 - **现象**: `mo issue start 6` 在 issue 处于 plan stage 时报错
 - **期望**: 应该提供恢复/继续的命令，而非仅报错
 - **当前**: 只能通过 `mo issue resume 6` 回到 draft 再 start
+- **建议**: UX 改进，提供 `mo issue continue` 或自动 resume 功能
 
