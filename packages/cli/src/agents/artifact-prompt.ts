@@ -56,9 +56,8 @@ function buildDependencies(artifactType: ArtifactType, changeDir: string): strin
     const depType = DEPENDENCY_ORDER[i];
     const depFile = ARTIFACT_OUTPUT_FILES[depType];
     const depPath = path.join(changeDir, depFile);
-    const checkPath = depFile.endsWith('/') ? depPath : depPath;
-    if (fs.existsSync(checkPath)) {
-      lines.push(`- ${checkPath}`);
+    if (fs.existsSync(depPath)) {
+      lines.push(`- ${depPath}`);
     }
   }
 
