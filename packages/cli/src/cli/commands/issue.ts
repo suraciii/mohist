@@ -171,6 +171,22 @@ export function setupIssueCommands(program: Command): void {
           console.log(`  Stage: ${formatStage(issue.stage)}`);
           console.log(`  Status: ${formatStatus(issue.status)}`);
           
+          if (issue.approvalState) {
+            const statusColors: Record<string, typeof chalk.green> = {
+              awaiting: chalk.yellow,
+              approved: chalk.green,
+              rejected: chalk.red,
+            };
+            const as = issue.approvalState;
+            const color = statusColors[as.status] || chalk.white;
+            console.log(`  Approval: ${color(as.status)} (stage: ${as.stage})`);
+            if (as.output) {
+              const notes = typeof as.output === 'string' ? as.output : JSON.stringify(as.output, null, 2);
+              console.log(`  Self-review notes:`);
+              console.log(`  ${chalk.gray(notes.split('\n').join('\n  '))}`);
+            }
+          }
+          
           if (issue.labels && issue.labels.length > 0) {
             console.log(`  Labels: ${formatLabels(issue.labels)}`);
           }
