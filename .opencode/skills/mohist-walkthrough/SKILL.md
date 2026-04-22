@@ -1,15 +1,17 @@
 ---
 name: mohist-walkthrough
-description: Mohist 项目 E2E walkthrough 流程验证。走一遍完整的 mohist 工作流（build → server → create issue → start → monitor → approve → done），自动监控进度、发现问题、记录到 talks/ 目录。当需要验证 mohist 流程、测试工作流端到端、或走一遍 dev 流程时使用。触发词包括 "walkthrough"、"走流程"、"验证流程"、"e2e 测试"、"端到端测试"。
+description: Mohist 项目 E2E walkthrough 流程验证。走一遍完整的 mohist 工作流（build → server → create issue → start → monitor → approve → done），自动监控进度、发现问题、记录到 walkthrough/ 目录。当需要验证 mohist 流程、测试工作流端到端、或走一遍 dev 流程时使用。触发词包括 "walkthrough"、"走流程"、"验证流程"、"e2e 测试"、"端到端测试"。
 ---
 
 # Mohist E2E Walkthrough
 
 走一遍完整的 mohist 工作流，验证流程能否走通。发现问题、分析原因、记录结果。
 
-**只负责发现和记录问题，不做修复。**
+**你是 QA，只负责发现和记录问题，绝对不做任何修复。** 遇到 bug 时，深入追根因并记录，然后继续流程或标记流程阻塞。不要修改任何源码、配置、数据库或产物文件来绕过问题。
 
 ## 原则
+
+**只观测不修复。** 这是 QA 角色，不是开发者角色。发现的任何问题都记录下来，留给后续修复。修改代码、修改产物文件、修改数据库都属于越权行为。
 
 **优先通过 API 观测系统状态，而非直接访问内部存储。** CLI 命令和 HTTP API 是系统的公开接口，直接查数据库或文件系统是最后手段。当你发现自己频繁绕过 API 直接查 DB 时，说明系统缺乏足够的可观测性——这本身就是一个值得记录的问题。
 
@@ -18,6 +20,20 @@ description: Mohist 项目 E2E walkthrough 流程验证。走一遍完整的 moh
 **相信 agent 的探索能力。** 以下流程提供方向和框架，具体的技术诊断由 agent 自行决定如何探索。不要预设问题类型，让异常自然浮现。
 
 **每个问题都要追到根因。** 发现表面现象后，深入代码和日志定位原因。如果暂时无法定位，明确标记为"未定位"并记录已排除的方向。
+
+## 记录目录
+
+每次 walkthrough 记录到 `walkthrough/` 目录（项目根目录下），每次使用独立文件：
+
+```
+walkthrough/<YYYY-MM-DD>-<HHMMSS>-<简短标识>.md
+```
+
+示例：
+- `walkthrough/2026-04-22-180000-plan-fix-verify.md`
+- `walkthrough/2026-04-23-100000-full-pipeline.md`
+
+时间戳精确到秒级，确保每次 walkthrough 文件唯一。简短标识由 agent 根据本次 walkthrough 的目标拟定（2-4 个词，kebab-case）。
 
 ## 流程
 
@@ -33,7 +49,7 @@ build → server → create issue → start issue → ──→ monitor loop ←
 
 ### 1. 准备
 
-创建记录文件 `talks/<YYYY-MM-DD>-e2e-walkthrough.md`，包含进度和问题两个区域。
+创建记录文件 `walkthrough/<YYYY-MM-DD>-<HHMMSS>-<标识>.md`，包含进度和问题两个区域。
 
 ### 2. 按序执行
 
@@ -77,11 +93,11 @@ start issue 后进入监控循环。定期检查 issue 状态，直到出现以�
 ## 记录文件格式
 
 ```markdown
-# E2E Walkthrough: Mohist 完整流程验证
+# E2E Walkthrough: <简短标题>
 
-**日期**: YYYY-MM-DD
-**目标**: 走一遍完整流程
-**状态**: 进行中 | 已完成
+**日期**: YYYY-MM-DD HH:MM
+**目标**: 本次 walkthrough 的目标
+**状态**: 进行中 | 已完成 | 阻塞
 
 ---
 

@@ -1,7 +1,7 @@
-# E2E Walkthrough: Mohist 完整流程验证
+# E2E Walkthrough: Mohist 完整流程验证（第二轮）
 
 **日期**: 2026-04-22
-**目标**: 启动 dev mohist，走一遍完整流程，验证流程能否走通
+**目标**: 使用修复后的代码重新走一遍完整流程，验证 Plan stage 产物生成修复是否生效
 **状态**: 进行中
 
 ---
@@ -9,124 +9,124 @@
 ## 进度记录
 
 ### Step 1: Build ✅
-- `npm run build` 成功编译
-- 有一个 MODULE_TYPELESS_PACKAGE_JSON 警告（非阻塞）
+- `npm run build` 成功，包含新模板骨架文件的拷贝
+- 构建产物正常输出到 `dist/`
 
 ### Step 2: Server Start ✅
-- Server 已在运行 (PID: 629984, Port: 3456, Uptime: 11h30m)
-- `mo server status` 正常返回
-- `mo status` 正常返回
+- 停止旧 server (PID: 943843, uptime 4h)
+- 启动新 server (PID: 1039601, Port: 3456)
+- 6 个旧 issue (#1-#6) 均为 blocked 状态，未触发异常恢复
 
 ### Step 3: 创建 Issue ✅
-- `mo issue create "E2E测试-添加hello命令" -b "..."` → Issue #6
+- `mo issue create "E2E验证-添加version命令"` → Issue #7
 - Stage: draft, Status: active
-- 已有 5 个旧 issue（#1-#5），状态各异
 
-### Step 4: 首次启动处理 Issue ❌
-- `mo issue start 6` → Stage: plan, Status: active
-- Worktree 创建成功: `~/.mohist/projects/mohist/worktrees/issue-6/`
-- OpenSpec change 目录创建: `openspec/changes/6-e2e-hello/`
-- **根因**: `spawn opencode ENOENT` — opencode 二进制不在 PATH 中
-- Agent runner 的 fallback 逻辑没有生效（旧 server 进程缺少正确路径）
-- Issue 卡在 `plan/active`
-- 详见下方问题 #1
+### Step 4: Start Issue → Plan Stage ✅
+- `mo issue start 7` → plan/active
+- ACP 进程成功 spawn，session 创建成功 (sessionId: ses_24b55a9c...)
+- **Round 1 (proposal)**: 18:09 → 18:13 ✅ 生成 proposal.md (1300 bytes)
+- **Round 2 (specs)**: 18:13 → 18:14 ✅ 生成 specs/version-command/spec.md (1599 bytes)
+- **Round 3 (design)**: 18:14 → 18:15 ✅ 生成 design.md (2291 bytes)
+- **Round 4 (tasks)**: 18:15 → 18:18 ✅ 生成 tasks.json (2355 bytes)
+- **Round 5 (self-review)**: 18:17 → 18:19 ✅ 完成，发现 T-001 缺少 command-registry.ts 并修复
+- **总耗时**: 589,970ms (~9.8 min)
+- **到达审批点**: Pipeline paused at gate, stage: plan ✅
 
-### Step 5: Server 重启 + 重试 ✅ (部分)
-- `mo server stop` → `mo server start` (PID: 853499)
-- `mo issue resume 6` → 回到 draft → `mo issue start 6` → plan/active
-- ACP 进程成功启动 (PID: 854457)
-- **Round 1 (proposal)**: 成功生成 `proposal.md`
-- **Round 2 (specs)**: 成功生成 `specs/hello-command/spec.md`
-- **Round 3 (design)**: ACP session 以 success 结束，但没有生成 design.md
-- ACP session 持续 289713ms (~4.8 min) 后完成
-- 但 5 个 round + self-review 需要的产物只生成了 2 个
-- pipeline 又卡死在 `plan/active`
-- 详见下方问题 #2
+### Step 5: Plan Stage 审批 → Build Stage 失败 ❌
+- `mo issue approve 7` → "Issue #7 approved, agent resumed"
+- Build stage 启动，但 6ms 内完成，0 个任务被执行
+- Issue 回滚到 draft/blocked
+- 详见下方问题 #5（Ralph loop 因 attempts 缺失跳过所有任务）
 
-### Step 6: 第三次尝试（修复后）✅ (部分)
-- 修复 design.md prompt（强制生成）后重试
-- Server 启动时成功恢复 4 个 orphaned issues (#2-#5)
-- `mo issue reopen 6` → `mo issue start 6` → plan/active
-- ACP 进程启动 (PID: 944894)
-- **Round 1 (proposal)**: 成功 ✅
-- **Round 2 (specs)**: 成功 ✅
-- **Round 3 (design)**: 成功 ✅（46行高质量 design.md）
-- **Round 4 (tasks)**: 失败 ❌（tasks.json 未生成）
-- ACP session 持续 924314ms (~15.4 min) 后关闭
-- pipeline 回滚到 draft/blocked
-- 详见下方问题 #2b
-
-### Step 6: 再次重试
-- [ ] 恢复 issue 并重新 start
-
-### Step 7: 审批流程
-- [ ] 等待审批点
-- [ ] approve / reject
-
-### Step 8: 完成
-- [ ] 验证 stage 到达 done
+### Step 6: 流程中断
+- Build stage 因 #5 bug 无法推进，流程在此中断
 
 ---
 
 ## 发现的问题
 
-### 问题 #1: spawn opencode ENOENT [严重] — 已定位
-- **现象**: 首次 `mo issue start 6` 后，workflow_log 显示 `spawn opencode ENOENT`
-- **根因**: 旧 server 进程（运行了 11.5h）的环境变量中没有 opencode 路径
-  - `opencodeBinPath` 配置未设置（config.jsonc 没有 binPath）
-  - `~/.opencode/bin/opencode` 不在 system PATH 中
-  - 代码 fallback 到 `which opencode` 也找不到
-- **修复**: 重启 server 后，opencode 路径解析成功
-- **建议**: 在 config.jsonc 中显式配置 `opencode.binPath`，或在 PATH 中添加 `~/.opencode/bin/`
+### 问题 #5: Ralph loop 因 tasks.json 缺少 `attempts` 字段跳过所有任务 [严重] — 已定位
+- **现象**: Build stage approve 后，Ralph loop 在 6ms 内完成，报告 `completed:0, failed:2, total:2, success:false`
+  - 没有 "Task attempt started" 日志
+  - 没有 ACP spawn 日志
+  - tasks.json 被修改为 `passes: true, error: "Skipped: no attempts made (maxRetries=0)"`
+  - 但 Ralph loop 仍然计数 failed:2
 
-### 问题 #2: Agent 自行跳过产物生成 [严重] — 已修复 ✅
-- **现象**: Plan stage multi-round ACP 只生成 2/5 个产物 (proposal + specs)，缺少 design, tasks
-- **根因**: Agent (opencode/LLM) 在 specs 回复中明确说 "Skipping design — no cross-cutting concerns"
-  - Agent 认为这是一个简单任务，不需要 design.md
-  - 但 workflow controller 的 verify() 要求 design.md 存在
-  - 后续的 design prompt 发送后，agent 可能只回复了文本而没有执行 write
+- **根因**: `ralph-executor.ts:385` 的 for 循环条件使用了 `nextTask.attempts`
+  ```typescript
+  for (let attempt = nextTask.attempts + 1; attempt <= maxRetries + nextTask.attempts; attempt++)
+  ```
+  - Agent 生成的 tasks.json 没有 `attempts` 字段
+  - `nextTask.attempts` 为 `undefined`
+  - `undefined + 1 = NaN`, `NaN <= NaN` 为 `false`
+  - 循环体从未执行
+  - 随后 501 行 `attemptsUsed === nextTask.attempts` → `undefined === undefined` → `true`
+  - 任务被错误标记为 `passes: true`（实际未执行）
+  - 但 505 行仍然 `failed++`
+
 - **证据**:
-  - Agent message: "This is a single-command, zero-dependency addition... Skipping design — no cross-cutting concerns, architectural decisions, or migration needed."
-  - 只有 2 次 write tool_call
-  - verify() 检测到 design.md 不存在 → planResult.success = false
-  - Issue 被回滚到 draft/blocked（这次错误处理生效了）
-- **修复**: 
-  - ✅ 修改 design.md prompt：移除 skip 许可，改为强制指令 "You SHALL always generate this file"
-  - ✅ 修改 self-review.md prompt：将 design.md 从可选改为必须
-- **验证**: 第三次尝试中 design.md 成功生成（46行高质量内容）
-- **状态**: 已修复，design.md 不再被跳过
+  - 日志: `Ralph loop completed completed:0 failed:2 total:2 success:false duration:6`
+  - tasks.json: `"passes": true, "error": "Skipped: no attempts made (maxRetries=0)"`
+  - 无任何 "Task attempt started" 或 ACP spawn 日志
+  - `ralph-executor.ts:385` 循环条件在 attempts=undefined 时产生 NaN 比较
 
-### 问题 #2b: tasks.json 未生成 [严重] — 新发现
-- **现象**: Plan stage 前 3 个产物（proposal, specs, design）成功生成，但 tasks.json 缺失
-- **根因调查**:
-  1. **Prompt 分析**: tasks.md prompt 明确说 "Create the tasks.json file" 和 "Write the file to `{changeDir}/tasks.json`"
-  2. **工具可用性**: `write_file` 工具可用，agent 在前几轮成功使用过
-  3. **可能原因**: 
-     - Agent 在 tasks round 只回复了文本说明，没有执行 write_file tool call
-     - 或者 agent 认为 tasks 应该以不同格式生成（如 tasks.md 而非 tasks.json）
-     - 或者 agent 在长时间运行后（~15分钟）出现疲劳/错误
-- **时间线**: 
-  - 14:04:15 - tasks round 开始
-  - 14:14:16 - ACP session 关闭（10分钟后），报告 tasks.json 未找到
+- **影响范围**: 所有由 agent 生成 tasks.json 的场景都可能触发（agent 通常不生成 `attempts` 字段）
+
 - **建议**:
-  1. **增强 prompt**: 在 tasks prompt 中更强调 "必须使用 write_file 工具写入 tasks.json"
-  2. **增加示例**: 提供完整的 tasks.json 示例，减少 agent 困惑
-  3. **验证前检查**: 在 verify 之前检查 agent 是否实际执行了写操作
-  4. **Timeout 调整**: tasks round 耗时 10 分钟，可能 agent 在超时前未完成
+  1. **立即修复**: `readTasks()` 或 `runRalphLoop()` 中为缺少 `attempts` 的 task 设置默认值 0
+  2. **防御性编程**: 循环条件改为 `const baseAttempts = nextTask.attempts ?? 0`
+  3. **tasks.json schema 验证**: 在读取时验证必需字段，缺失字段补默认值
+  4. **501-503 行逻辑问题**: 跳过时标记 `passes: true` 不合理——应该标记为 `passes: false` 或单独的 skipped 状态
+
+- **相关代码**:
+  - `packages/cli/src/openspec/ralph-executor.ts:155-169` — readTasks()
+  - `packages/cli/src/openspec/ralph-executor.ts:379-385` — attempts 变量和循环条件
+  - `packages/cli/src/openspec/ralph-executor.ts:500-504` — skip 逻辑
+
+### 问题 #6: workflowLogRepo.insert FOREIGN KEY constraint failed [中等] — 已定位
+- **现象**: Build stage 的 `build_started` 和 `build_failed` 事件写入 workflow_log 时报 `FOREIGN KEY constraint failed`
+- **根因**: `writeTaskLog` 传入的 `issueId` 使用 `String(context.issueNumber ?? context.issueId ?? '')` (即 `"7"`)，但 workflow_log 表的 issueId 外键可能期望 UUID 格式（实际 issue.id 是 `13e44188-2d26-4fe0-bcef-6a697fb4ad9d`）
+- **证据**: 日志 `WARN: workflowLogRepo.insert failed eventType:build_started issueId:7 error:FOREIGN KEY constraint failed`
+- **影响**: workflow_log 丢失事件记录，可观测性降低
+- **建议**: 统一 issueId 格式，确保写入 workflow_log 时使用 UUID
+
+### 问题 #7: CLI `mo issue show` 不显示 approval state [低]
+- **现象**: Issue #7 到达审批点后（`approvalState.status: "awaiting"`），CLI `mo issue show` 仍显示 `Stage: plan, Status: active`
+- **根因**: CLI 的 show 命令没有渲染 approvalState 信息
+- **证据**: API `/api/issues/7` 返回 `approvalState.status: "awaiting"`，但 CLI 输出无任何审批相关提示
+- **影响**: 用户无法通过 CLI 判断 issue 是否需要审批
+- **建议**: 在 `mo issue show` 输出中添加审批状态信息
+
+### 问题 #8: Plan stage 产物生成 — 修复验证成功 ✅
+- **验证**: 之前的问题 #2b（tasks.json 未生成）现在已修复
+- **证据**: 
+  - Issue #7 的 Plan stage 成功生成全部 4 个产物 (proposal, specs, design, tasks)
+  - tasks.json 质量高：结构清晰，有 acceptance criteria，依赖关系正确
+  - self-review round 自动执行并修复了 T-001 的遗漏
+  - 总耗时 ~10 分钟，节奏合理
+- **结论**: 结构化 prompt（XML 分区 + 模板骨架）修复有效
+
+---
+
+## 之前的发现（第一轮 walkthrough，#1-#4 保留供参考）
+
+### 问题 #1: spawn opencode ENOENT [严重] — 已修复 ✅
+- 旧 server 进程缺少 opencode 路径，重启后解决
+
+### 问题 #2/#2b: Plan stage 产物跳过/缺失 [严重] — 已修复 ✅
+- 结构化 prompt 修复有效，4/4 产物全部成功生成
 
 ### 问题 #3: Pipeline 卡死无自动恢复 [中等] — 已修复 ✅
-- **现象**: Issue 卡在 `plan/active` 但没有自动恢复或标记为 blocked
-- **影响**: 用户不知道 pipeline 失败了，需要手动检查
-- **修复**: 
-  - ✅ 添加 `AgentRunnerService.recoverIssues()` 方法
-  - ✅ Server 启动时自动调用，将 orphaned issues 标记为 blocked + 回滚 draft
-  - ✅ 日志记录恢复动作
-- **验证**: Server 启动时成功恢复 4 个 issues (#2 plan, #3 plan, #4 plan, #5 build)
-- **状态**: 已修复
+- Server 启动时自动恢复 orphaned issues
 
 ### 问题 #4: mo issue start 对非 draft issue 报错 [低]
-- **现象**: `mo issue start 6` 在 issue 处于 plan stage 时报错
-- **期望**: 应该提供恢复/继续的命令，而非仅报错
-- **当前**: 只能通过 `mo issue resume 6` 回到 draft 再 start
-- **建议**: UX 改进，提供 `mo issue continue` 或自动 resume 功能
+- 未修复，仍需要 resume → start 两步操作
 
+---
+
+## 可观测性改进建议
+
+1. **CLI 显示审批状态**: `mo issue show` 应显示 approvalState，让用户知道是否需要操作
+2. **Ralph loop 任务跳过时的日志**: 当 for 循环因 NaN 不执行时，应有明确的 WARN 日志
+3. **tasks.json schema 验证**: 读取时验证必需字段（attempts, passes），缺失时补默认值并 warn
+4. **workflow_log issueId 一致性**: 统一使用 UUID 或 issue number，避免外键约束失败
