@@ -1,0 +1,9 @@
+# Ralph Progress Log
+Started: 2026-04-22T09:16:36.291Z
+
+---
+
+
+[2026-04-22T00:00:00Z] T-001: Created template skeleton files for all 4 artifacts (proposal, specs, design, tasks) in src/agents/prompts/artifacts/templates/. Updated build script to copy templates to dist. Build passes.
+- Learnings: The existing build script only copied *.md from artifacts/ — needed to add templates/ subdirectory copy.
+- Next steps: T-002 (refactor buildArtifactPrompt to use these templates).

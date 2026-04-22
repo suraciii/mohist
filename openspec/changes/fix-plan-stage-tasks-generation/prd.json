@@ -20,7 +20,7 @@
       "type": "WRITE",
       "output": "src/agents/prompts/artifacts/templates/",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Reference OPSX schemas/spec-driven/templates/ for structure"
     },
     {
