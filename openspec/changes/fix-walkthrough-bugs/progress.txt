@@ -5,3 +5,5 @@ Started: 2026-04-22T11:15:01.388Z
 
 
 [2026-04-22T00:00:00Z] T-001: Fixed readTasks() to normalize parsed tasks with default values (attempts→0, passes→false, order→999999, error→null). Used spread + nullish coalescing to preserve explicit values. Build and typecheck pass. Next: T-002 (skip logic passes:false).
+
+[2026-04-22T00:00:00Z] T-002: Changed skip branch (line 508) from passes:true to passes:false. Updated error message to include actual attemptsUsed value. The condition `attemptsUsed === nextTask.attempts` catches the case where the for-loop never executed (e.g. NaN arithmetic from missing attempts field). Build passes. Next: T-003 (workflow_log issueId format fix).
