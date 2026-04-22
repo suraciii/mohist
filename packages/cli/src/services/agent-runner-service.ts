@@ -51,7 +51,7 @@ export class AgentRunnerService {
   private pendingGates = new Map<number, PipelineGateInfo>();
   private waitingQuestions = new Map<string, WaitingQuestion>();
   private readonly maxConcurrentAgents: number;
-  private readonly recoverableIssues: RecoverableIssue[];
+  private recoverableIssues: RecoverableIssue[];
   private llmConfig?: LlmConfig;
   private readonly providersChangedListener: (data: { providers: Array<{ id: string; name?: string; apiKey?: string; baseURL?: string; sdk?: string; models?: string[] }> }) => void;
 
@@ -134,7 +134,7 @@ export class AgentRunnerService {
       }
     }
 
-    this.recoverableIssues.length = 0;
+    this.recoverableIssues = [];
   }
 
   getMaxConcurrentAgents(): number {
