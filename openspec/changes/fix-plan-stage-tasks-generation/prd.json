@@ -43,7 +43,7 @@
       "type": "WRITE",
       "output": "src/agents/artifact-prompt.ts",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Reference OPSX propose.ts for the prompt structure pattern. Keep existing .md instruction files, they go into <instruction> section."
     },
     {

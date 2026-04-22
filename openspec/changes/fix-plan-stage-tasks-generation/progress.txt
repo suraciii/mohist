@@ -7,3 +7,8 @@ Started: 2026-04-22T09:16:36.291Z
 [2026-04-22T00:00:00Z] T-001: Created template skeleton files for all 4 artifacts (proposal, specs, design, tasks) in src/agents/prompts/artifacts/templates/. Updated build script to copy templates to dist. Build passes.
 - Learnings: The existing build script only copied *.md from artifacts/ — needed to add templates/ subdirectory copy.
 - Next steps: T-002 (refactor buildArtifactPrompt to use these templates).
+
+
+[2026-04-22T09:28:47Z] T-002: Refactored buildArtifactPrompt() to generate structured prompts with XML-tagged sections (<task>, <dependencies>, <output>, <template>, <instruction>). Added ARTIFACT_OUTPUT_FILES mapping, ARTIFACT_DESCRIPTIONS, DEPENDENCY_ORDER constants, and buildDependencies() helper. Renamed loadInstruction→loadFile (shared by all prompt builders). Updated 42 tests all passing. Build succeeds.
+- Learnings: fs.existsSync can't be spied in vitest due to module-level caching — used real temp dirs for dependency tests instead. The proposal.md instruction files work well as <instruction> content without modification.
+- Next steps: T-003 (add per-round retry logic in workflow-controller).
