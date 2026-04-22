@@ -1,0 +1,65 @@
+{
+  "project": "mohist",
+  "description": "Fix plan stage reliability: mandatory design.md generation and server startup recovery for orphaned issues",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Remove skip permission from design.md prompt",
+      "spec": "specs/agent-spec-generation/spec.md",
+      "description": "Edit src/agents/prompts/artifacts/design.md: remove the 'If the change is small and straightforward, you may skip this file and note why' clause and the 'When to Include' conditional section. Replace with mandatory language that the agent SHALL always generate design.md, keeping content minimal for simple changes.",
+      "acceptanceCriteria": [
+        "design.md prompt contains no skip permission language",
+        "design.md prompt instructs agent to always generate the file",
+        "npm run build succeeds",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "The file is at src/agents/prompts/artifacts/design.md. Keep the structural guidance (sections, output path) but remove all optional/skip language."
+    },
+    {
+      "id": "T-002",
+      "title": "Update self-review prompt to treat design.md as required",
+      "spec": "specs/agent-spec-generation/spec.md",
+      "description": "Edit src/agents/prompts/artifacts/self-review.md: change 'design.md (if it exists)' to unconditionally require design.md in the review checklist.",
+      "acceptanceCriteria": [
+        "self-review.md does not contain 'if it exists' qualifier for design.md",
+        "npm run build succeeds",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Add AgentRunnerService.recoverIssues() and wire to server startup",
+      "spec": "specs/pipeline-model/spec.md",
+      "description": "Add recoverIssues() method to AgentRunnerService that iterates over recoverableIssues: for each, set status to blocked, roll back stage to draft, and clear approval state. Log each recovery action. Then call agentRunner.recoverIssues() in src/server/index.ts after AgentRunnerService construction.",
+      "acceptanceCriteria": [
+        "AgentRunnerService has recoverIssues() method",
+        "recoverIssues() sets status=blocked, stage=draft, clears approval state for each orphaned issue",
+        "Recovery actions are logged",
+        "server/index.ts calls agentRunner.recoverIssues() during startup",
+        "npm run build succeeds",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The existing agent-runner-service.ts:103-109 detectRecoverableIssues() already finds these issues. Encapsulate recovery logic in AgentRunnerService for cohesion, then call from server startup. Use issueRepo.updateStage(), issueRepo.updateStatus(), and issueRepo.clearApprovalState()."
+    },
+    {
+      "id": "T-004",
+      "title": "Verify changes with tests",
+      "description": "Run npm test to ensure no regressions. Verify build passes cleanly.",
+      "acceptanceCriteria": [
+        "npm test passes",
+        "npm run build succeeds",
+        "npm run typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
