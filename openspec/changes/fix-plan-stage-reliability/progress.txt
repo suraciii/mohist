@@ -17,3 +17,8 @@ Started: 2026-04-22T05:14:13.835Z
 - Build and typecheck both pass
 - Learnings: Simple one-line change, consistent with T-001's mandatory design.md approach
 - Next: T-003 (server startup recovery), T-004 (verify with tests)
+
+## 2026-04-22 T-003
+- **What done**: Added `recoverIssues()` method to AgentRunnerService that queries all active non-draft issues, sets status=blocked, stage=draft, clears approval state, and logs each action. Wired `agentRunner.recoverIssues()` call in server/index.ts after construction. Clears internal recoverableIssues array after recovery.
+- **Learnings**: The existing pipeline failure path (lines 262-279) uses the same pattern — good consistency. `recoverableIssues` array is cleared in-place via `.length = 0` to keep the reference valid for getStatus().
+- **Next steps**: T-004 — run tests to verify no regressions.
