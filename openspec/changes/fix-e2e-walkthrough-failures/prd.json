@@ -97,7 +97,7 @@
       "type": "WRITE",
       "output": "src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D4. resolveOpencodeBinPath() is already exported from config-loader."
     }
   ]
