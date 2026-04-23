@@ -399,8 +399,10 @@ export async function runRalphLoop(
     let pauseReason: string | undefined;
 
     const maxRetries = options.maxRetries ?? 3;
+    // Total attempts = 1 (initial) + maxRetries (retries). Ensure at least 1 attempt.
+    const totalAttempts = Math.max(1, maxRetries + 1);
 
-    for (let attempt = nextTask.attempts + 1; attempt <= maxRetries + nextTask.attempts; attempt++) {
+    for (let attempt = nextTask.attempts + 1; attempt <= nextTask.attempts + totalAttempts; attempt++) {
       const prompt = attempt > 1
         ? buildTaskContext({
             change,
