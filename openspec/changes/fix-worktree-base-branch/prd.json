@@ -30,7 +30,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "See design decision D1. Both async and sync versions must be updated."
     },
     {
