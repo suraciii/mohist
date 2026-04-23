@@ -26,3 +26,13 @@ Started: 2026-04-23T05:16:29.386Z
 - Typecheck passes
 - Learning: The existing approvalState display code already handled awaiting/approved/rejected. Just needed to add 'error' color mapping and error message display. Separated error display from self-review notes display with an else-if to avoid confusing output.
 - Next: T-004 (add pipeline events to mo issue logs)
+
+[2026-04-23T14:30:00Z] T-004 Add pipeline events to mo issue logs command
+- Modified `cli/commands/issue.ts` logs action: added pipeline events display via API `GET /issues/:number/logs?eventType=build_started,build_completed,build_failed,task_started,task_completed,task_failed`
+- Pipeline events shown first with timestamp, color-coded type label, and human-readable summary
+- Per design review: "叠加显示" — both pipeline events AND file-based logs are shown, not mutually exclusive
+- If no pipeline events and no file logs exist, shows error message. If pipeline events exist but no files, shows pipeline events only.
+- Added helper functions: formatPipelineEventType, formatPipelineEventTimestamp, summarizePipelineEvent
+- Typecheck passes
+- Learning: The design review corrected the original "互斥 fallback" to "叠加显示" — both data sources provide different dimensions of info and should be shown together.
+- Next: T-005 (use resolveOpencodeBinPath in ACP session spawn)

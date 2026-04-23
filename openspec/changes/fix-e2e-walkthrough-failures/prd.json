@@ -77,7 +77,7 @@
       "type": "WRITE",
       "output": "src/cli/commands/issue.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "The API endpoint GET /issues/:number/logs already exists and supports eventType filter."
     },
     {

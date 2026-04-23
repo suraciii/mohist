@@ -446,6 +446,49 @@ export function setupIssueCommands(program: Command): void {
       }
     });
 
+  const PIPELINE_EVENT_TYPES = 'build_started,build_completed,build_failed,task_started,task_completed,task_failed';
+
+  function formatPipelineEventType(eventType: string): string {
+    const labels: Record<string, string> = {
+      build_started: 'BUILD START',
+      build_completed: 'BUILD DONE',
+      build_failed: 'BUILD FAIL',
+      task_started: 'TASK START',
+      task_completed: 'TASK DONE',
+      task_failed: 'TASK FAIL',
+    };
+    return labels[eventType] || eventType;
+  }
+
+  function formatPipelineEventTimestamp(createdAt: string): string {
+    try {
+      const d = new Date(createdAt);
+      return d.toLocaleString();
+    } catch {
+      return createdAt;
+    }
+  }
+
+  function summarizePipelineEvent(event: any): string {
+    const data = event.data || {};
+    switch (event.eventType) {
+      case 'build_started':
+        return `Build stage started${data.changeId ? ` (change: ${data.changeId})` : ''}`;
+      case 'build_completed':
+        return `Build stage completed${data.completed != null && data.total != null ? ` (${data.completed}/${data.total} tasks)` : ''}`;
+      case 'build_failed':
+        return `Build stage failed${data.error ? `: ${data.error}` : ''}`;
+      case 'task_started':
+        return `Task started: ${data.taskId || data.title || 'unknown'}${data.title ? ` - ${data.title}` : ''}`;
+      case 'task_completed':
+        return `Task completed: ${data.taskId || 'unknown'}${data.title ? ` - ${data.title}` : ''}`;
+      case 'task_failed':
+        return `Task failed: ${data.taskId || 'unknown'}${data.error ? ` - ${data.error}` : ''}`;
+      default:
+        return JSON.stringify(data);
+    }
+  }
+
   issue
     .command('logs <number>')
     .description('Show agent logs for an issue')
@@ -463,19 +506,62 @@ export function setupIssueCommands(program: Command): void {
         }
 
         const issue = detailResponse.data;
+
+        let hasPipelineEvents = false;
+        try {
+          const logsResponse = await apiClient<ApiResponse<any[]>>(
+            'GET',
+            `/issues/${number}/logs?eventType=${PIPELINE_EVENT_TYPES}`
+          );
+
+          if (logsResponse.success && logsResponse.data && logsResponse.data.length > 0) {
+            hasPipelineEvents = true;
+            console.log(chalk.bold('\nPipeline Events:\n'));
+            console.log(`  ${'Timestamp'.padEnd(22)} ${'Event'.padEnd(14)} Summary`);
+            console.log('  ' + '─'.repeat(80));
+            for (const event of logsResponse.data) {
+              const ts = formatPipelineEventTimestamp(event.createdAt).padEnd(22);
+              const typeLabel = formatPipelineEventType(event.eventType);
+              const typeColor: Record<string, typeof chalk.green> = {
+                'BUILD START': chalk.blue,
+                'BUILD DONE': chalk.green,
+                'BUILD FAIL': chalk.red,
+                'TASK START': chalk.cyan,
+                'TASK DONE': chalk.green,
+                'TASK FAIL': chalk.red,
+              };
+              const colored = (typeColor[typeLabel] || chalk.white)(typeLabel).padEnd(22);
+              const summary = summarizePipelineEvent(event);
+              console.log(`  ${ts} ${colored} ${summary}`);
+            }
+            console.log();
+          }
+        } catch {
+          // pipeline events unavailable, continue to file logs
+        }
+
+        if (options.follow) {
+          if (hasPipelineEvents) {
+            console.log(chalk.yellow('Note: --follow shows file logs only. Pipeline events are above.\n'));
+          }
+        }
+
         const projectName = issue.projectName;
         if (!projectName || projectName === 'unknown') {
-          console.error(chalk.red('Error: No project name found'));
+          if (!hasPipelineEvents) {
+            console.error(chalk.red('Error: No project name found'));
+          }
           return;
         }
 
         const slug = slugify(projectName);
-
         const home = process.env.HOME || '';
         const logDir = path.join(home, '.mohist', 'projects', slug, 'logs', `issue-${number}`);
 
         if (!fs.existsSync(logDir)) {
-          console.error(chalk.red(`No logs found for issue #${number}`));
+          if (!hasPipelineEvents) {
+            console.error(chalk.red(`No logs found for issue #${number}`));
+          }
           return;
         }
 
@@ -484,7 +570,9 @@ export function setupIssueCommands(program: Command): void {
           .sort();
 
         if (logFiles.length === 0) {
-          console.error(chalk.red(`No logs found for issue #${number}`));
+          if (!hasPipelineEvents) {
+            console.error(chalk.red(`No logs found for issue #${number}`));
+          }
           return;
         }
 
@@ -505,6 +593,7 @@ export function setupIssueCommands(program: Command): void {
             process.exit(0);
           });
         } else {
+          console.log(chalk.bold('Agent Session Logs:\n'));
           for (const logFile of logFiles) {
             const logPath = path.join(logDir, logFile);
             const content = fs.readFileSync(logPath, 'utf-8');
