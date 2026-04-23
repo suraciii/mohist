@@ -10,3 +10,11 @@ Started: 2026-04-23T05:16:29.386Z
 - **Learnings**: The design review refined the original task desc (unconditional reset) to only reset when ALL tasks have passes=true. This preserves normal resume scenarios while still fixing the self-review corruption bug.
 - **Next**: T-002 (persist pipeline failure in approvalState)
 
+
+[2026-04-23T06:04:30Z] T-002 Persist pipeline failure message in approvalState
+- Added issueRepo.setApprovalState() with status:'error' in both result-failure branch (~line 291) and catch branch (~line 335) of executePipeline()
+- Removed clearApprovalState() calls in both error paths (was erasing the error state we just wrote)
+- ApprovalStatus type already included 'error' (fixed in review phase)
+- Typecheck passes, 8/8 agent-runner-service tests pass
+- Learning: The original code called clearApprovalState after setting the error, which would erase it. Removed clearApprovalState from both error paths so the error persists.
+- Next: T-003 (show error in mo issue show CLI)
