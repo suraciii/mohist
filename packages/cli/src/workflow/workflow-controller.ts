@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Stage, type Issue } from '../types';
+import { Stage, IssueStatus, type Issue } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
@@ -353,6 +353,7 @@ export class WorkflowController {
 
     this.issueRepo.updateStage(currentIssue.id, Stage.Done);
     this.issueRepo.clearApprovalState(currentIssue.id);
+    this.issueRepo.updateStatus(currentIssue.id, IssueStatus.Completed);
     return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
   }
 

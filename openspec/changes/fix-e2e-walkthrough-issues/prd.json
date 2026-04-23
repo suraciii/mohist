@@ -20,7 +20,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/types/index.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Also check api/status.ts string comparison 'active' - completed issues should NOT be counted as active. This is correct behavior."
     },
     {
