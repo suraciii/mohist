@@ -295,13 +295,39 @@ function detectBaseBranchSync(projectPath: string): string {
     if (!gitDir) {
       return 'main';
     }
-    const ref = execFileSync(
-      'git',
-      ['symbolic-ref', 'refs/remotes/origin/HEAD'],
-      { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }
-    ).trim();
-    const match = ref.match(/^refs\/remotes\/origin\/(.+)$/);
-    return match ? match[1] : 'main';
+
+    try {
+      const ref = execFileSync(
+        'git',
+        ['symbolic-ref', 'refs/remotes/origin/HEAD'],
+        { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }
+      ).trim();
+      const match = ref.match(/^refs\/remotes\/origin\/(.+)$/);
+      if (match) return match[1];
+    } catch {}
+
+    try {
+      execFileSync('git', ['rev-parse', '--verify', 'origin/main'], {
+        cwd: projectPath, encoding: 'utf-8', timeout: 5000,
+      });
+      return 'main';
+    } catch {}
+
+    try {
+      execFileSync('git', ['rev-parse', '--verify', 'origin/master'], {
+        cwd: projectPath, encoding: 'utf-8', timeout: 5000,
+      });
+      return 'master';
+    } catch {}
+
+    try {
+      const headBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: projectPath, encoding: 'utf-8', timeout: 5000,
+      }).trim();
+      if (headBranch && headBranch !== 'HEAD') return headBranch;
+    } catch {}
+
+    return 'main';
   } catch {
     return 'main';
   }
