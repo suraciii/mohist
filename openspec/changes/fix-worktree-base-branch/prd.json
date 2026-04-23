@@ -1,0 +1,83 @@
+{
+  "project": "mohist",
+  "description": "Fix worktree base branch resolution: multi-level detection, unified consumption, stale ref pruning, and merge base validation",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Rewrite detectBaseBranch with multi-level probe",
+      "spec": "specs/base-branch-resolution/spec.md",
+      "description": "Rewrite detectBaseBranch() in src/git/detect-base-branch.ts to use multi-level probe: origin/HEAD → origin/main → origin/master → HEAD branch → 'main'. Each level checks existence before returning.",
+      "acceptanceCriteria": [
+        "detectBaseBranch returns 'master' when origin/HEAD points to master",
+        "detectBaseBranch returns 'main' when origin/HEAD fails but origin/main exists",
+        "detectBaseBranch returns 'master' when origin/HEAD and origin/main fail but origin/master exists",
+        "detectBaseBranch returns current HEAD branch when all remote probes fail and HEAD is not detached",
+        "detectBaseBranch returns 'main' when project is not a git repo",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "See design decision D1 for rationale on probe order"
+    },
+    {
+      "id": "T-002",
+      "title": "Add --prune to smartFetch and merge-base validation after worktree creation",
+      "spec": "specs/worktree-manager/spec.md",
+      "description": "In src/git/worktree-manager.ts: (1) Change smartFetch to use 'git fetch origin --prune' instead of 'git fetch origin'. (2) After worktree creation, run git merge-base to verify the new branch shares history with base branch. If no merge base, auto-remove the worktree and branch, then throw error.",
+      "acceptanceCriteria": [
+        "smartFetch runs 'git fetch origin --prune'",
+        "Worktree creation succeeds when merge base exists with base branch",
+        "Worktree creation fails with descriptive error when no merge base exists",
+        "Failed worktree creation auto-cleans the created worktree and branch",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "See design decisions D3 and D4. The merge-base check goes after the git worktree add call."
+    },
+    {
+      "id": "T-003",
+      "title": "Fix CLI diff to use project baseBranch and API diff to use origin/ prefix",
+      "spec": "specs/base-branch-resolution/spec.md",
+      "description": "In src/cli/commands/issue.ts: (1) Remove the getDefaultBranch() function. (2) In the diff command action, fetch project info from API and use project.baseBranch. In src/api/issues.ts: (3) In the diff endpoint, use `origin/${project.baseBranch}` instead of raw `project.baseBranch` to reference the remote-tracking ref.",
+      "acceptanceCriteria": [
+        "mo issue diff uses project.baseBranch from API, not local git detection",
+        "getDefaultBranch() function is removed from issue.ts",
+        "API diff endpoint uses origin/${project.baseBranch} in git diff command",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "See design decision D2. CLI already fetches issue detail from API, extract projectPath and baseBranch from there. For baseBranch, add it to the API issue response if not already included."
+    },
+    {
+      "id": "T-004",
+      "title": "Fix propose.ts to pass project.baseBranch to worktreeManager.create()",
+      "spec": "specs/base-branch-resolution/spec.md",
+      "description": "In src/api/propose.ts line 65, pass project.baseBranch as the 4th argument to worktreeManager.create(), matching the pattern in issues.ts line 331.",
+      "acceptanceCriteria": [
+        "propose.ts passes project.baseBranch to worktreeManager.create()",
+        "No other behavior changes in propose flow",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "See design decision D5. One-line fix."
+    },
+    {
+      "id": "T-005",
+      "title": "Verify full pipeline with correct base branch",
+      "spec": "specs/worktree-manager/spec.md",
+      "description": "Build the project and verify: (1) npm run build succeeds, (2) mo server starts, (3) create a test issue, start it, verify worktree is created from correct base branch (check merge-base with master), (4) mo issue diff works without 'no merge base' error.",
+      "acceptanceCriteria": [
+        "npm run build succeeds",
+        "Worktree for new issue has common ancestor with project base branch",
+        "mo issue diff shows output without 'no merge base' error",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Integration verification task. If DB has stale base_branch='main', update it via API to 'master' first."
+    }
+  ]
+}
