@@ -176,11 +176,14 @@ export function setupIssueCommands(program: Command): void {
               awaiting: chalk.yellow,
               approved: chalk.green,
               rejected: chalk.red,
+              error: chalk.red,
             };
             const as = issue.approvalState;
             const color = statusColors[as.status] || chalk.white;
             console.log(`  Approval: ${color(as.status)} (stage: ${as.stage})`);
-            if (as.output) {
+            if (as.status === 'error' && as.output?.error) {
+              console.log(`  ${chalk.red(`Error: ${as.output.error}`)}`);
+            } else if (as.output) {
               const notes = typeof as.output === 'string' ? as.output : JSON.stringify(as.output, null, 2);
               console.log(`  Self-review notes:`);
               console.log(`  ${chalk.gray(notes.split('\n').join('\n  '))}`);

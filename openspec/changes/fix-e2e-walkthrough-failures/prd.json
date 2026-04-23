@@ -58,7 +58,7 @@
       "type": "WRITE",
       "output": "src/cli/commands/issue.ts",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "The API already returns approvalState in the issue response."
     },
     {
