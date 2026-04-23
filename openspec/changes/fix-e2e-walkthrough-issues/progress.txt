@@ -11,3 +11,11 @@ Started: 2026-04-23T15:22:38.091Z
 - Typecheck passes, all 580 tests pass
 - Learnings: workflow-controller.ts didn't previously import IssueStatus at all — status was only managed by agent-runner-service and api layer
 - Next: T-002 (DB fallback for approve endpoint) can proceed in parallel
+
+[2026-04-23T15:27:45] T-002 COMPLETED
+- Added DB fallback in approve endpoint (api/issues.ts): when hasPendingGate(number) returns false, queries issueRepo.findPendingApprovalByIssueId(issue.id) — if approval_state.status === 'awaiting', proceeds with approval instead of returning 400
+- Moved issueRepo fetch before the hasPendingGate check so it's available for the fallback query
+- Normal approve path (gate in memory) is completely unchanged
+- Typecheck passes, all 580 tests pass
+- Learnings: The issue object already has approvalState from DB (fetched via getByNumber), so no need to reconstruct gate info — just need to bypass the hasPendingGate memory check. The issueRepo.findPendingApprovalByIssueId() method already existed and handles the DB query correctly
+- Next: T-003 (recoverIssues preserve awaiting state) depends on T-002
