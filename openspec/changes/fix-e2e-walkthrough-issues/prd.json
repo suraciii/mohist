@@ -1,0 +1,132 @@
+{
+  "project": "mohist",
+  "description": "Fix 5 issues found during E2E walkthrough: approval gate persistence, build git commit, done status, recover issues, ACP EPIPE",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add Completed status to IssueStatus enum and set on done",
+      "spec": "specs/pipeline-model/spec.md#Done 阶段设置 Completed 状态",
+      "description": "Add `Completed = 'completed'` to IssueStatus enum in types/index.ts. In workflow-controller.ts run() method, after the while loop exits (stage reaches Done), call issueRepo.updateStatus(issue.id, IssueStatus.Completed). In issue-service.ts resume() method, add guard to prevent resuming a completed issue (return null if status is Completed).",
+      "acceptanceCriteria": [
+        "IssueStatus enum contains Completed = 'completed'",
+        "workflow-controller.ts sets status to Completed when stage reaches Done",
+        "mo issue list shows 'completed' for done issues",
+        "resume() returns null for completed issues",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types/index.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Also check api/status.ts string comparison 'active' - completed issues should NOT be counted as active. This is correct behavior."
+    },
+    {
+      "id": "T-002",
+      "title": "Add DB fallback to approve endpoint",
+      "spec": "specs/agent-runtime/spec.md#Approve endpoint uses DB fallback after server restart",
+      "description": "In api/issues.ts approve endpoint (around line 694), when agentRunner.hasPendingGate(number) returns false, add a fallback that queries issueRepo.findPendingApprovalByIssueId(). If the DB shows approval_state.status === 'awaiting', treat it as a valid pending gate and proceed with approval. The fallback should reconstruct the gate info from the DB approval_state.",
+      "acceptanceCriteria": [
+        "Approve endpoint works after server restart (pendingGates Map is empty)",
+        "Normal approve path (gate in memory) unchanged",
+        "DB fallback only triggers when memory Map returns false",
+        "Returns 400 only when both memory and DB show no pending gate",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "issueRepo.findPendingApprovalByIssueId() already exists at line 285 of issue-repo.ts. The gate info for resumePipeline() needs to be reconstructed from the DB approval_state (stage, output)."
+    },
+    {
+      "id": "T-003",
+      "title": "Fix recoverIssues to preserve awaiting approval state",
+      "spec": "specs/agent-runtime/spec.md#recoverIssues restores pending gates for awaiting issues",
+      "description": "In agent-runner-service.ts recoverIssues() (line 111-138), before resetting an orphan issue to Blocked/Draft, check if issue.approvalState?.status === 'awaiting'. If true, restore the pendingGates Map entry instead of resetting. Parse the approval state to reconstruct PipelineGateInfo and call pendingGates.set(). Only reset issues that are NOT in awaiting state.",
+      "acceptanceCriteria": [
+        "Orphan issues with approval_state.status === 'awaiting' are NOT reset to Draft/Blocked",
+        "pendingGates Map is restored for awaiting issues on server startup",
+        "Orphan issues without awaiting state are still reset to Draft/Blocked as before",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "The issue object from findAll() should already have approvalState parsed. Check if it's a JSON string or object. PipelineGateInfo interface needs stage and output fields."
+    },
+    {
+      "id": "T-004",
+      "title": "Add git commit step after build stage completion",
+      "spec": "specs/build-commit/spec.md#Build 阶段完成后自动 commit 代码变更",
+      "description": "In workflow-controller.ts runPipelineBuildStage() method, after all tasks complete successfully, add a git commit step using simpleGit. Check for modified/untracked files (excluding openspec/changes/), run git add . && git commit with message 'build(issue-<number>): <issue title>'. Skip if no changes. Log warning on commit failure but don't block pipeline.",
+      "acceptanceCriteria": [
+        "Build stage completion triggers git add + commit in worktree",
+        "Commit message format: 'build(issue-N): issue title'",
+        "No commit if worktree has no changes after build",
+        "Commit failure logs warning but doesn't block pipeline",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "simpleGit is already used in worktree-manager.ts. Import it there. The worktreePath is available in the method context. Check that .gitignore covers openspec/changes/ or explicitly exclude that path."
+    },
+    {
+      "id": "T-005",
+      "title": "Fix ACP EPIPE errors by destroying streams on process exit",
+      "spec": "specs/error-resilience/spec.md#ACP session stream 关闭时序",
+      "description": "In acp-session.ts, add proc.on('exit') handler (for both one-shot and multi-round sessions) that immediately calls proc.stdin.destroy() and proc.stdout.destroy() wrapped in try-catch. This prevents subsequent cleanup() abort() calls from writing to closed pipes. The existing ensureKill() and cleanup() logic remains unchanged.",
+      "acceptanceCriteria": [
+        "proc.on('exit') handler destroys stdin and stdout streams",
+        "Destroy calls wrapped in try-catch (silent failure)",
+        "No EPIPE errors in server.log after agent process exits",
+        "ACP sessions still complete normally",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "There are two code paths - one-shot session (runAcpSession) and multi-round session (createAcpConnection). Both need proc.on('exit') handler added. The existing error handlers on stdin/stdout can remain."
+    },
+    {
+      "id": "T-006",
+      "title": "Add unit tests for all fixes",
+      "description": "Add tests covering: (1) IssueStatus.Completed enum value and done stage transition, (2) approve endpoint DB fallback when memory empty, (3) recoverIssues preserving awaiting state, (4) build stage git commit on completion, (5) ACP stream destroy on process exit. Add to existing test files or create new ones.",
+      "acceptanceCriteria": [
+        "Test: IssueStatus.Completed is set when pipeline reaches done",
+        "Test: approve endpoint falls back to DB when hasPendingGate returns false",
+        "Test: recoverIssues does not reset issues with awaiting approval state",
+        "Test: recoverIssues still resets crashed issues without awaiting state",
+        "Test: build stage commit creates git commit in worktree",
+        "Test: ACP session destroys streams on process exit",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005"],
+      "passes": false,
+      "notes": "Follow existing test patterns using vitest. Mock simpleGit for git commit tests. Mock child_process spawn for ACP tests. Use existing test infrastructure for API route tests."
+    }
+  ]
+}
