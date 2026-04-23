@@ -94,6 +94,7 @@ export class IssueService {
   resume(projectId: string, number: number): Issue | null {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
+    if (issue.status === IssueStatus.Completed) return null;
     
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
   }

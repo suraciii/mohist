@@ -1,0 +1,13 @@
+# Ralph Progress Log
+Started: 2026-04-23T15:22:38.091Z
+
+---
+
+
+[2026-04-23T15:24:32] T-001 COMPLETED
+- Added Completed = 'completed' to IssueStatus enum in types/index.ts
+- Imported IssueStatus in workflow-controller.ts and added updateStatus(issueId, IssueStatus.Completed) after updateStage(Done) and clearApprovalState()
+- Added guard in issue-service.ts resume() to return null when issue.status === IssueStatus.Completed
+- Typecheck passes, all 580 tests pass
+- Learnings: workflow-controller.ts didn't previously import IssueStatus at all — status was only managed by agent-runner-service and api layer
+- Next: T-002 (DB fallback for approve endpoint) can proceed in parallel

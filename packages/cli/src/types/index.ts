@@ -34,7 +34,8 @@ export function isValidTransition(from: Stage, to: Stage): boolean {
 export enum IssueStatus {
   Active = 'active',
   Paused = 'paused',
-  Blocked = 'blocked'
+  Blocked = 'blocked',
+  Completed = 'completed'
 }
 
 export type ApprovalStatus = 'pending' | 'awaiting' | 'approved' | 'rejected' | 'error';
