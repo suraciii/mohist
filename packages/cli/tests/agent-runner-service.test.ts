@@ -80,11 +80,10 @@ describe('AgentRunnerService', () => {
   });
 
   describe('recoverIssues', () => {
-    it('should recover orphaned active issues to blocked/draft', () => {
+    it('should restore pending gates for awaiting issues', () => {
       const project = projectRepo.create({ name: 'Test Project', path: '/test' });
-      const issue = issueService.create({ projectId: project.id, title: 'Orphaned Issue' });
-      
-      // Set issue to active + plan stage (orphaned state)
+      const issue = issueService.create({ projectId: project.id, title: 'Awaiting Issue' });
+
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.setApprovalState(issue.id, {
@@ -94,46 +93,66 @@ describe('AgentRunnerService', () => {
       });
 
       const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
-      
-      // Verify issue is detected as recoverable
+
       const status = service.getStatus();
       expect(status.recoverableIssues).toHaveLength(1);
-      expect(status.recoverableIssues[0].issueNumber).toBe(issue.number);
 
-      // Recover the issue
       service.recoverIssues();
 
-      // Verify issue is recovered
+      const recovered = issueRepo.findById(issue.id);
+      expect(recovered?.status).toBe(IssueStatus.Active);
+      expect(recovered?.stage).toBe(Stage.Plan);
+      expect(recovered?.approvalState?.status).toBe('awaiting');
+      expect(service.hasPendingGate(issue.number)).toBe(true);
+    });
+
+    it('should reset crashed orphaned issues to blocked/draft', () => {
+      const project = projectRepo.create({ name: 'Test Project', path: '/test' });
+      const issue = issueService.create({ projectId: project.id, title: 'Crashed Issue' });
+
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      issueRepo.updateStage(issue.id, Stage.Build);
+
+      const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
+
+      service.recoverIssues();
+
       const recovered = issueRepo.findById(issue.id);
       expect(recovered?.status).toBe(IssueStatus.Blocked);
       expect(recovered?.stage).toBe(Stage.Draft);
       expect(recovered?.approvalState).toBeUndefined();
-
-      // Verify recoverableIssues is cleared
-      const statusAfter = service.getStatus();
-      expect(statusAfter.recoverableIssues).toHaveLength(0);
     });
 
-    it('should handle multiple orphaned issues', () => {
+    it('should handle mixed orphaned issues (awaiting and crashed)', () => {
       const project = projectRepo.create({ name: 'Test Project', path: '/test' });
-      const issue1 = issueService.create({ projectId: project.id, title: 'Orphaned 1' });
-      const issue2 = issueService.create({ projectId: project.id, title: 'Orphaned 2' });
-      
-      issueRepo.updateStatus(issue1.id, IssueStatus.Active);
-      issueRepo.updateStage(issue1.id, Stage.Plan);
-      issueRepo.updateStatus(issue2.id, IssueStatus.Active);
-      issueRepo.updateStage(issue2.id, Stage.Build);
+      const awaitingIssue = issueService.create({ projectId: project.id, title: 'Awaiting' });
+      const crashedIssue = issueService.create({ projectId: project.id, title: 'Crashed' });
+
+      issueRepo.updateStatus(awaitingIssue.id, IssueStatus.Active);
+      issueRepo.updateStage(awaitingIssue.id, Stage.Plan);
+      issueRepo.setApprovalState(awaitingIssue.id, {
+        stage: Stage.Plan,
+        status: 'awaiting',
+        requestedAt: new Date().toISOString(),
+      });
+
+      issueRepo.updateStatus(crashedIssue.id, IssueStatus.Active);
+      issueRepo.updateStage(crashedIssue.id, Stage.Build);
 
       const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
       service.recoverIssues();
 
-      const recovered1 = issueRepo.findById(issue1.id);
-      const recovered2 = issueRepo.findById(issue2.id);
-      
-      expect(recovered1?.status).toBe(IssueStatus.Blocked);
-      expect(recovered1?.stage).toBe(Stage.Draft);
-      expect(recovered2?.status).toBe(IssueStatus.Blocked);
-      expect(recovered2?.stage).toBe(Stage.Draft);
+      const recoveredAwaiting = issueRepo.findById(awaitingIssue.id);
+      expect(recoveredAwaiting?.status).toBe(IssueStatus.Active);
+      expect(recoveredAwaiting?.stage).toBe(Stage.Plan);
+      expect(service.hasPendingGate(awaitingIssue.number)).toBe(true);
+
+      const recoveredCrashed = issueRepo.findById(crashedIssue.id);
+      expect(recoveredCrashed?.status).toBe(IssueStatus.Blocked);
+      expect(recoveredCrashed?.stage).toBe(Stage.Draft);
+
+      const statusAfter = service.getStatus();
+      expect(statusAfter.recoverableIssues).toHaveLength(0);
     });
 
     it('should not affect draft issues', () => {
