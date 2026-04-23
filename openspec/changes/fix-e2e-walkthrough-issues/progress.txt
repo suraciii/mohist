@@ -40,3 +40,10 @@ Started: 2026-04-23T15:22:38.091Z
 - Typecheck passes, all 581 tests pass
 - Learnings: simple-git is NOT a dependency — the codebase uses raw child_process.execFile for git ops (worktree-manager.ts pattern). Also, the spec said "excluding openspec/changes/" — implemented by filtering git status --porcelain lines that contain that path
 - Next: T-005 (ACP EPIPE fix)
+
+[2026-04-23] T-005 Fix ACP EPIPE errors by destroying streams on process exit
+- Added separate proc.on('exit') handler in both runAcpSession and createAcpConnection that destroys proc.stdin and proc.stdout wrapped in try-catch
+- Handler fires first (registered before existing exit handler), ensuring streams are destroyed before any cleanup abort() calls
+- Existing spawn-failure exit handler logic unchanged
+- All 581 tests pass, typecheck clean
+- Next: T-006 (unit tests for all fixes)
