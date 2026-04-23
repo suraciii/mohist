@@ -41,7 +41,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "issueRepo.findPendingApprovalByIssueId() already exists at line 285 of issue-repo.ts. The gate info for resumePipeline() needs to be reconstructed from the DB approval_state (stage, output)."
     },
     {
