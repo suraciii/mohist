@@ -131,6 +131,11 @@ export async function runAcpSession(
     }
   });
 
+  proc.on('exit', () => {
+    try { proc.stdin.destroy(); } catch {}
+    try { proc.stdout.destroy(); } catch {}
+  });
+
   proc.on('exit', (code) => {
     if (!initialized && code !== 0) {
       log.error('opencode acp subprocess exited before initialize', { exitCode: code });
@@ -498,6 +503,11 @@ export async function createAcpConnection(
     if (!initialized && rejectOnInit) {
       rejectOnInit(new Error(`[SPAWN_FAILED] ${err.message}`));
     }
+  });
+
+  proc.on('exit', () => {
+    try { proc.stdin.destroy(); } catch {}
+    try { proc.stdout.destroy(); } catch {}
   });
 
   proc.on('exit', (code) => {

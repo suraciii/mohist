@@ -103,7 +103,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "There are two code paths - one-shot session (runAcpSession) and multi-round session (createAcpConnection). Both need proc.on('exit') handler added. The existing error handlers on stdin/stdout can remain."
     },
     {
