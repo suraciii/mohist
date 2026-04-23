@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { Hono } from 'hono';
 import request from 'supertest';
@@ -15,6 +15,7 @@ import { CommentRepo } from '../src/db/comment-repo';
 import { LabelRepo } from '../src/db/label-repo';
 import { createProjectRoutes } from '../src/api/projects';
 import { createIssueRoutes } from '../src/api/issues';
+import { Stage, IssueStatus } from '../src/types';
 import { createStatusRoutes } from '../src/api/status';
 import { createConfigRoutes } from '../src/api/config';
 
@@ -296,6 +297,39 @@ describe('API Routes', () => {
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(response.body.data.issue.stage).toBe('plan');
+      });
+    });
+
+    describe('POST /api/issues/:number/approve', () => {
+      it('should return 400 when no pending gate in memory or DB', async () => {
+        await issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(server).post('/api/issues/1/approve');
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toMatch(/No pending gate/);
+      });
+
+      it('should fall back to DB when hasPendingGate returns false but DB has awaiting state', async () => {
+        const issue = issueService.create({ projectId, title: 'Awaiting Issue' });
+        issueService.transitionToStage(issue.id, Stage.Plan);
+        issueService.setStatus(issue.id, IssueStatus.Active);
+
+        const issueRepo = stateManager.getIssueRepo();
+        issueRepo.setApprovalState(issue.id, {
+          stage: Stage.Plan,
+          status: 'awaiting',
+          output: { test: true },
+          requestedAt: new Date().toISOString(),
+        });
+
+        const refreshedIssue = issueService.getByNumber(projectId, 1);
+        expect(refreshedIssue?.approvalState?.status).toBe('awaiting');
+
+        const response = await request(server).post('/api/issues/1/approve');
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
       });
     });
   });

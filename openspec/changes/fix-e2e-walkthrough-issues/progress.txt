@@ -47,3 +47,14 @@ Started: 2026-04-23T15:22:38.091Z
 - Existing spawn-failure exit handler logic unchanged
 - All 581 tests pass, typecheck clean
 - Next: T-006 (unit tests for all fixes)
+
+[2026-04-23T15:43:02] T-006 COMPLETED
+- Added tests across 5 test files covering all fixes from T-001 through T-005:
+  1. pipeline-controller.test.ts: IssueStatus.Completed set when pipeline reaches done; not set at gate; build stage commit (skip/commit scenarios); added updateStatus mock to createMockRepos
+  2. services.test.ts: resume() returns null for completed issues, preserves completed status
+  3. api-routes.test.ts: approve endpoint returns 400 when no gate in memory or DB; approve falls back to DB when hasPendingGate false but DB has awaiting state
+  4. acp-connection.test.ts: proc.on('exit') handler destroys stdin/stdout; silently handles destroy errors
+  5. agent-runner-service.test.ts: recoverIssues tests already existed from T-003 — verified all passing
+- Typecheck passes, all 590 tests pass (42 test files)
+- Learnings: Testing done stage required starting with Stage.Done directly (while loop exits immediately), not Stage.Review (which gates). createMockRepos was missing updateStatus mock — needed to add it.
+- All tasks complete! Change is ready.

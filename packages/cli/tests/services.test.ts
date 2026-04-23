@@ -250,6 +250,20 @@ describe('IssueService', () => {
     });
   });
 
+  describe('resume with completed status', () => {
+    it('should return null when issue is completed', () => {
+      const issue = service.create({ projectId, title: 'Completed Issue' });
+      issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+      issueRepo.updateStage(issue.id, Stage.Done);
+
+      const result = service.resume(projectId, 1);
+
+      expect(result).toBeNull();
+      const unchanged = service.getByNumber(projectId, 1);
+      expect(unchanged?.status).toBe(IssueStatus.Completed);
+    });
+  });
+
   describe('getByStage', () => {
     it('should filter issues by stage', () => {
       service.create({ projectId, title: 'Draft 1' });
