@@ -293,6 +293,18 @@ export async function runRalphLoop(
 
   const sortedTasks = sortTasksByOrder(tasks);
 
+  const allTasksPassed = tasks.length > 0 && tasks.every(t => t.passes);
+  if (allTasksPassed) {
+    log.info('All tasks have passes=true (corrupted), resetting to false', {
+      issueId: context.issueId || '',
+      total: tasks.length,
+    });
+    for (const task of tasks) {
+      task.passes = false;
+    }
+    writeTasksFile(change.tasksPath, tasks);
+  }
+
   const taskResults: TaskResult[] = [];
   let completed = 0;
   let failed = 0;

@@ -19,7 +19,7 @@
       "type": "WRITE",
       "output": "src/openspec/ralph-executor.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D1. This is the critical fix — without it, build stage skips all tasks."
     },
     {
