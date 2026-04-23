@@ -37,7 +37,7 @@ export enum IssueStatus {
   Blocked = 'blocked'
 }
 
-export type ApprovalStatus = 'pending' | 'awaiting' | 'approved' | 'rejected';
+export type ApprovalStatus = 'pending' | 'awaiting' | 'approved' | 'rejected' | 'error';
 
 export interface ApprovalState {
   stage: Stage;

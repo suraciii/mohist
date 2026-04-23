@@ -1,0 +1,104 @@
+{
+  "project": "mohist",
+  "description": "Fix E2E walkthrough failures: tasks passes reset, pipeline error visibility, CLI logs pipeline events, ACP spawn absolute path",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Reset all task passes to false at runRalphLoop entry",
+      "spec": "specs/build-stage-tasks-reset/spec.md",
+      "description": "In `ralph-executor.ts` `runRalphLoop()`, after `readTasks()` and `sortTasksByOrder()`, add a loop that sets `task.passes = false` for every task. Then call `writeTasksFile(change.tasksPath, tasks)` to persist the reset. This must happen before the `while (true)` task execution loop.",
+      "acceptanceCriteria": [
+        "runRalphLoop resets all tasks' passes to false before execution",
+        "Reset is persisted to tasks.json via writeTasksFile",
+        "findNextPendingTask finds tasks that were previously passes=true",
+        "Existing tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/openspec/ralph-executor.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "See design.md D1. This is the critical fix — without it, build stage skips all tasks."
+    },
+    {
+      "id": "T-002",
+      "title": "Persist pipeline failure message in approvalState",
+      "spec": "specs/pipeline-error-visibility/spec.md",
+      "description": "In `agent-runner-service.ts` `executePipeline()`, in both the result-failure branch (line ~280) and the catch branch (line ~322), before setting status to blocked, write the error message to `approvalState` with `status: 'error'` and `output: { error: message }`. Use `issueRepo.setApprovalState(issue.id, { stage: currentStage, status: 'error', output: { error: errorMsg }, requestedAt: new Date().toISOString() })`.",
+      "acceptanceCriteria": [
+        "Blocked issues have approvalState.status = 'error' with the failure message",
+        "Both result-failure and exception paths write the error",
+        "API /issues/:number returns the error in approvalState.output.error",
+        "Existing tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/services/agent-runner-service.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "See design.md D2. Reuse approvalState to avoid schema migration."
+    },
+    {
+      "id": "T-003",
+      "title": "Show error state in mo issue show",
+      "spec": "specs/pipeline-error-visibility/spec.md",
+      "description": "In `cli/commands/issue.ts` show action, after the Stage/Status output, check if `approvalState.status === 'error'`. If so, print an `Error:` line with `approvalState.output.error`. Also show approval state for awaiting/approved/rejected status.",
+      "acceptanceCriteria": [
+        "mo issue show displays error message for blocked issues with approvalState.status=error",
+        "mo issue show displays approval state for awaiting/approved/rejected",
+        "No extra output when approvalState is empty",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/cli/commands/issue.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "The API already returns approvalState in the issue response."
+    },
+    {
+      "id": "T-004",
+      "title": "Add pipeline events to mo issue logs command",
+      "spec": "specs/workflow-log/spec.md",
+      "description": "In `cli/commands/issue.ts` logs action, before trying to read log files, call the API `GET /issues/:number/logs` with eventType filter for pipeline events (build_started, build_completed, build_failed, task_started, task_completed, task_failed). Display them in a human-readable format with timestamps. If no pipeline events exist, fall back to the existing file-based log reading.",
+      "acceptanceCriteria": [
+        "mo issue logs shows pipeline events (build/task start/complete/fail) from workflow_log",
+        "Each event shows timestamp, type, and summary",
+        "Falls back to file-based logs when no pipeline events exist",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/cli/commands/issue.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The API endpoint GET /issues/:number/logs already exists and supports eventType filter."
+    },
+    {
+      "id": "T-005",
+      "title": "Use resolveOpencodeBinPath in ACP session spawn",
+      "spec": "specs/ralph-task-execution/spec.md",
+      "description": "In `acp-session.ts`, in both `runAcpSession` and `runMultiRoundAcpSession`, when `opencodeBinPath` is not provided (falsy), call `resolveOpencodeBinPath()` from `config/config-loader` to get the absolute path. Use that path instead of the bare `'opencode'` string fallback.",
+      "acceptanceCriteria": [
+        "ACP session spawn uses absolute path when opencodeBinPath not provided",
+        "spawn no longer depends on PATH containing opencode",
+        "Explicit opencodeBinPath still works unchanged",
+        "Existing tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "See design.md D4. resolveOpencodeBinPath() is already exported from config-loader."
+    }
+  ]
+}
