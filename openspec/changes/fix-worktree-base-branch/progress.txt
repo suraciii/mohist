@@ -13,3 +13,11 @@ Started: 2026-04-23T09:55:28.574Z
 **Next steps**: T-001 (rewrite `detectBaseBranch` with multi-level probe) will fix the root cause so that `project.baseBranch` is correctly set at project registration time. T-002 through T-004 add defensive measures and unification.
 
 [2026-04-23T10:00] T-001: Rewrote detectBaseBranch() (async) and detectBaseBranchSync() (sync) with multi-level probe: origin/HEAD → origin/main → origin/master → HEAD branch → 'main'. Async version uses a helper tryGit() to reduce repetition. Sync version uses try/catch blocks for each probe level. Typecheck passes, all 573 tests pass. Next: T-002 (worktree-manager prune + merge-base validation).
+
+[2026-04-23T00:00:00Z] T-002 COMPLETED
+- Changed smartFetch to use 'git fetch origin --prune' (line 66)
+- Added merge-base validation after worktree creation (lines 144-153)
+- On merge-base failure: auto-removes worktree+branch, throws descriptive error
+- Typecheck passes
+- Learnings: merge-base check uses startPoint (which may be origin/<branch> or local <branch>) to ensure correct validation target
+- Next: T-003 (CLI diff uses API baseBranch)

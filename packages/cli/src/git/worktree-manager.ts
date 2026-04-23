@@ -63,7 +63,7 @@ export async function smartFetch(projectPath: string): Promise<void> {
   let lastError: Error | undefined;
   for (let attempt = 0; attempt < FETCH_MAX_ATTEMPTS; attempt++) {
     try {
-      await execFileAsync('git', ['fetch', 'origin'], { cwd: projectPath });
+      await execFileAsync('git', ['fetch', 'origin', '--prune'], { cwd: projectPath });
       writeLastFetchTime(projectPath, Date.now());
       return;
     } catch (err: any) {
@@ -138,6 +138,17 @@ export class WorktreeManager {
     } catch (error: any) {
       throw new Error(
         `Failed to create worktree: ${error.message || error}`
+      );
+    }
+
+    try {
+      await execFileAsync('git', ['merge-base', branch, startPoint], {
+        cwd: projectPath,
+      });
+    } catch {
+      await this.remove(projectPath, projectName, issueNumber);
+      throw new Error(
+        `Branch '${branch}' has no common ancestor with '${baseBranch}'. Check project base branch configuration.`
       );
     }
 
