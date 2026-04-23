@@ -82,7 +82,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "simpleGit is already used in worktree-manager.ts. Import it there. The worktreePath is available in the method context. Check that .gitignore covers openspec/changes/ or explicitly exclude that path."
     },
     {
