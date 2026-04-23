@@ -55,7 +55,7 @@ describe('smartFetch', () => {
     await smartFetch(tmpDir);
 
     expect(execFileMock).toHaveBeenCalledTimes(1);
-    expect(execFileMock).toHaveBeenCalledWith('git', ['fetch', 'origin'], { cwd: tmpDir }, expect.any(Function));
+    expect(execFileMock).toHaveBeenCalledWith('git', ['fetch', 'origin', '--prune'], { cwd: tmpDir }, expect.any(Function));
     const cached = parseInt(fs.readFileSync(cacheFile, 'utf-8').trim(), 10);
     expect(cached).toBeGreaterThan(oldTime);
   });

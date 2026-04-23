@@ -76,7 +76,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Integration verification task. If DB has stale base_branch='main', update it via API to 'master' first."
     }
   ]
