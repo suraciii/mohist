@@ -38,3 +38,4 @@ Project 模型 SHALL 包含 `baseBranch` 字段，记录该项目的主干分支
 - **THEN** 系统 SHALL 对每个已有 project 执行 baseBranch 自动检测（使用多级探测策略）
 - **AND** 将检测结果写入 `base_branch` 列
 - **AND** 检测失败时使用 `"main"` 作为默认值
+- **AND** `detectBaseBranchSync()` 函数 SHALL 使用与 `detectBaseBranch()` 相同的多级探测逻辑

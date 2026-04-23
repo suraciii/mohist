@@ -62,8 +62,32 @@ mohist 的 worktree 创建流程存在 base branch 不一致问题，导致 agen
 
 **理由**: 零风险修复，与 `issues.ts:331` 保持一致
 
+## Decisions (Added)
+
+### D6: Migration 中的同步检测函数也需更新
+
+**选择**: `src/db/migrations.ts` 中的 `detectBaseBranchSync()` 函数也需要改为多级探测逻辑，与异步版本保持一致
+
+**理由**: Migration 在升级时自动运行，如果检测逻辑不一致，会把错误的 base_branch 写入 DB，导致升级后新项目仍有问题
+
+### D7: Issue detail API 响应包含 baseBranch
+
+**选择**: Issue detail 端点 (`GET /api/issues/:number`) 在响应中添加 `baseBranch` 字段
+
+**理由**: CLI diff 命令需要 baseBranch，当前已调用 issue detail API，添加字段避免额外 API 调用
+
 ## Risks / Trade-offs
 
 - **[fetch --prune 可能误删其他工作流依赖的 remote refs]** → prune 只删除远端已不存在的 refs，不影响本地分支，风险可接受
 - **[DB 中已有错误 baseBranch 值]** → 不做自动迁移，用户可通过 `mo project update` 或 API 手动修正。detectBaseBranch 修复后新项目不会遇到此问题
 - **[merge base 验证在特殊仓库拓扑中可能误报]** → 对于确实有多个无关根的项目（如 git subtree），可能需要后续放宽。当前先严格验证
+
+## Implementation Order
+
+基于风险和价值，建议按以下顺序实施：
+
+1. **T-000** (P0): propose.ts 一行修复 - 立即生效，零风险
+2. **T-001** (P1): detectBaseBranch 多级探测 - 修复根本原因
+3. **T-002** (P2): worktree-manager 增强 - 防御性措施
+4. **T-003** (P3): CLI diff 统一使用 API baseBranch - 消除不一致
+5. **T-004** (P4): 集成验证 - 确保全流程正确

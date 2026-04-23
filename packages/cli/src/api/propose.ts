@@ -62,7 +62,7 @@ export function createProposeRoutes(
         if (worktreeManager.exists(project.name, issue.number)) {
           worktreePath = worktreeManager.getPath(project.name, issue.number) || project.path;
         } else {
-          worktreePath = await worktreeManager.create(project.path, project.name, issue.number);
+          worktreePath = await worktreeManager.create(project.path, project.name, issue.number, project.baseBranch);
         }
       }
 

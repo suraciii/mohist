@@ -1,0 +1,13 @@
+# Ralph Progress Log
+Started: 2026-04-23T09:55:28.574Z
+
+---
+
+
+## 2026-04-23T00:00:00Z - T-000
+
+**What was done**: Passed `project.baseBranch` as the 4th argument to `worktreeManager.create()` in `src/api/propose.ts:65`. Before this fix, the call omitted the baseBranch parameter, defaulting to `'main'` even when the project's actual base branch was `'master'`.
+
+**Learnings**: The `WorktreeManager.create()` method already accepted a `baseBranch` parameter with a default of `'main'`. The fix was truly a one-liner — just threading through the existing `project.baseBranch` value that was already loaded in the route handler.
+
+**Next steps**: T-001 (rewrite `detectBaseBranch` with multi-level probe) will fix the root cause so that `project.baseBranch` is correctly set at project registration time. T-002 through T-004 add defensive measures and unification.

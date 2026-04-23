@@ -58,3 +58,9 @@
 
 - **WHEN** propose 端点创建 worktree
 - **THEN** 将 `project.baseBranch` 传入 `worktreeManager.create()`
+
+#### Scenario: issue detail API 响应包含 baseBranch
+
+- **WHEN** API 返回 issue detail
+- **THEN** 响应中包含 `baseBranch` 字段
+- **AND** CLI diff 命令可直接使用，无需额外 API 调用
