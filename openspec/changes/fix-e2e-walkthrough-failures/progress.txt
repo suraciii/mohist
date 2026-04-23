@@ -36,3 +36,9 @@ Started: 2026-04-23T05:16:29.386Z
 - Typecheck passes
 - Learning: The design review corrected the original "互斥 fallback" to "叠加显示" — both data sources provide different dimensions of info and should be shown together.
 - Next: T-005 (use resolveOpencodeBinPath in ACP session spawn)
+
+## 2026-04-23 T-005: Use resolveOpencodeBinPath in ACP session spawn
+- Added import of `resolveOpencodeBinPath` from `config/config-loader` in `acp-session.ts`
+- In both `runAcpSession` and `createAcpConnection`, replaced `opencodeBinPath || 'opencode'` with `opencodeBinPath || resolveOpencodeBinPath() || 'opencode'`
+- Typecheck passes, all related tests pass (acp-connection, spawn-failure-e2e)
+- All 5 tasks now complete

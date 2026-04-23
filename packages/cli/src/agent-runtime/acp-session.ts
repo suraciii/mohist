@@ -14,6 +14,7 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
+import { resolveOpencodeBinPath } from '../config/config-loader';
 
 const log = Log.create({ service: 'acp-session' });
 
@@ -102,7 +103,9 @@ export async function runAcpSession(
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100) });
   writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100), timestamp: new Date().toISOString() });
 
-  const proc = spawn(opencodeBinPath || 'opencode', ['acp'], {
+  const resolvedBinPath = opencodeBinPath || resolveOpencodeBinPath() || 'opencode';
+
+  const proc = spawn(resolvedBinPath, ['acp'], {
     cwd,
     stdio: ['pipe', 'pipe', 'inherit'],
     env: Object.fromEntries(
@@ -470,7 +473,9 @@ export async function createAcpConnection(
   });
   writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), mode: 'multi-round', timestamp: new Date().toISOString() });
 
-  const proc = spawn(opencodeBinPath || 'opencode', ['acp'], {
+  const resolvedBinPath = opencodeBinPath || resolveOpencodeBinPath() || 'opencode';
+
+  const proc = spawn(resolvedBinPath, ['acp'], {
     cwd,
     stdio: ['pipe', 'pipe', 'inherit'],
     env: Object.fromEntries(
