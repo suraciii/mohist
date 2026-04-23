@@ -39,7 +39,7 @@
       "type": "WRITE",
       "output": "src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D2. Reuse approvalState to avoid schema migration."
     },
     {

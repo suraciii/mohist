@@ -290,6 +290,19 @@ export class AgentRunnerService {
           this.eventBus.emit('agent_completed', { issueId: issue.id, projectId });
         } else if (!result.gateRequired) {
           try {
+            issueRepo.setApprovalState(issue.id, {
+              stage: result.stage,
+              status: 'error',
+              output: { error: result.message ?? 'Pipeline failed without completing' },
+              requestedAt: new Date().toISOString(),
+            });
+          } catch (stateErr) {
+            log.error('Failed to set error approval state', {
+              issueNumber: issue.number,
+              error: stateErr instanceof Error ? stateErr.message : String(stateErr),
+            });
+          }
+          try {
             updateIssueStatus?.(issue.id, IssueStatus.Blocked);
           } catch (updateErr) {
             log.error('Failed to update issue status to blocked', {
@@ -299,7 +312,6 @@ export class AgentRunnerService {
           }
           try {
             issueRepo.updateStage(issue.id, Stage.Draft);
-            issueRepo.clearApprovalState(issue.id);
           } catch (rollbackErr) {
             log.error('Failed to rollback stage to draft', {
               issueNumber: issue.number,
@@ -328,6 +340,19 @@ export class AgentRunnerService {
           error: errorMsg,
         });
         try {
+          issueRepo.setApprovalState(issue.id, {
+            stage: currentIssue?.stage ?? Stage.Draft,
+            status: 'error',
+            output: { error: errorMsg },
+            requestedAt: new Date().toISOString(),
+          });
+        } catch (stateErr) {
+          log.error('Failed to set error approval state', {
+            issueNumber: issue.number,
+            error: stateErr instanceof Error ? stateErr.message : String(stateErr),
+          });
+        }
+        try {
           updateIssueStatus?.(issue.id, IssueStatus.Blocked);
         } catch (updateErr) {
           log.error('Failed to update issue status to blocked', {
@@ -337,7 +362,6 @@ export class AgentRunnerService {
         }
         try {
           issueRepo.updateStage(issue.id, Stage.Draft);
-          issueRepo.clearApprovalState(issue.id);
         } catch (rollbackErr) {
           log.error('Failed to rollback stage to draft', {
             issueNumber: issue.number,
