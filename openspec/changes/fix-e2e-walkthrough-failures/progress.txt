@@ -18,3 +18,11 @@ Started: 2026-04-23T05:16:29.386Z
 - Typecheck passes, 8/8 agent-runner-service tests pass
 - Learning: The original code called clearApprovalState after setting the error, which would erase it. Removed clearApprovalState from both error paths so the error persists.
 - Next: T-003 (show error in mo issue show CLI)
+
+[2026-04-23T14:10:00Z] T-003 Show error state in mo issue show
+- Modified `cli/commands/issue.ts` show action: added 'error' to statusColors map, added conditional display of error message when approvalState.status === 'error' with output.error
+- Error state shows `Error: <message>` in red; other states (awaiting/approved/rejected) show self-review notes as before
+- No output changes when approvalState is empty (the outer `if` guard unchanged)
+- Typecheck passes
+- Learning: The existing approvalState display code already handled awaiting/approved/rejected. Just needed to add 'error' color mapping and error message display. Separated error display from self-review notes display with an else-if to avoid confusing output.
+- Next: T-004 (add pipeline events to mo issue logs)
