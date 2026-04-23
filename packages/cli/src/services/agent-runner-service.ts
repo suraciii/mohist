@@ -118,14 +118,28 @@ export class AgentRunnerService {
 
     for (const issue of orphans) {
       try {
-        this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
-        this.issueRepo.updateStage(issue.id, Stage.Draft);
-        this.issueRepo.clearApprovalState(issue.id);
-        log.info('Recovered orphaned issue', {
-          issueNumber: issue.number,
-          previousStage: issue.stage,
-          action: 'status=blocked, stage=draft, approval cleared',
-        });
+        if (issue.approvalState?.status === 'awaiting') {
+          this.pendingGates.set(issue.number, {
+            issueId: issue.id,
+            issueNumber: issue.number,
+            projectId: issue.projectId,
+            stage: issue.approvalState.stage ?? issue.stage,
+          });
+          log.info('Restored pending gate for awaiting issue', {
+            issueNumber: issue.number,
+            stage: issue.approvalState.stage ?? issue.stage,
+            action: 'pendingGate restored, status remains active',
+          });
+        } else {
+          this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+          this.issueRepo.updateStage(issue.id, Stage.Draft);
+          this.issueRepo.clearApprovalState(issue.id);
+          log.info('Recovered orphaned issue', {
+            issueNumber: issue.number,
+            previousStage: issue.stage,
+            action: 'status=blocked, stage=draft, approval cleared',
+          });
+        }
       } catch (err) {
         log.error('Failed to recover orphaned issue', {
           issueNumber: issue.number,

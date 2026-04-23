@@ -61,7 +61,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "The issue object from findAll() should already have approvalState parsed. Check if it's a JSON string or object. PipelineGateInfo interface needs stage and output fields."
     },
     {

@@ -19,3 +19,13 @@ Started: 2026-04-23T15:22:38.091Z
 - Typecheck passes, all 580 tests pass
 - Learnings: The issue object already has approvalState from DB (fetched via getByNumber), so no need to reconstruct gate info — just need to bypass the hasPendingGate memory check. The issueRepo.findPendingApprovalByIssueId() method already existed and handles the DB query correctly
 - Next: T-003 (recoverIssues preserve awaiting state) depends on T-002
+
+[2026-04-23T23:31:00] T-003 Fix recoverIssues to preserve awaiting approval state
+- Modified recoverIssues() in agent-runner-service.ts to check approvalState.status === 'awaiting' before resetting
+- Awaiting issues now get their pendingGates Map entry restored instead of being reset to Blocked/Draft
+- Non-awaiting crashed issues are still reset to Blocked/Draft as before
+- Updated existing test that incorrectly tested old behavior (was resetting awaiting issues)
+- Added 3 new tests: restore pending gates for awaiting, reset crashed issues, mixed scenario
+- Learning: The existing test had approval_state set to 'awaiting' but was testing reset behavior — it was actually testing the wrong scenario
+- All 581 tests pass, typecheck clean
+- Next: T-004 (git commit after build stage)
