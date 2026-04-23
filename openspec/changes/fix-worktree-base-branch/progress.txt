@@ -28,3 +28,15 @@ Started: 2026-04-23T09:55:28.574Z
 - Updated diff command to use baseBranch from API response with 'main' fallback
 - Typecheck passes cleanly
 - Next: T-004 (integration verification)
+
+[2026-04-23T10:15] T-004 COMPLETED
+- npm run build: succeeds
+- Typecheck: passes (no errors)
+- Fixed test: worktree-manager.test.ts expected ['fetch', 'origin'] but code now uses ['fetch', 'origin', '--prune'] per T-002. Updated test assertion.
+- All 575 tests pass (5 passed | 0 failed)
+- Integration test: updated project baseBranch from 'main' to 'master' via API, created issue #10, started it, worktree created successfully
+- merge-base verification: git merge-base master mo/issue-10 returns 18f74872f (common ancestor exists)
+- mo issue diff 10: exits 0, no 'no merge base' error
+- Issue detail API includes baseBranch: "master" in response
+- Learnings: The test for smartFetch needed updating because T-002 changed the fetch command to include --prune. Integration verification confirmed the full pipeline works end-to-end.
+- All 5/5 tasks complete. Change is ready for archive.
