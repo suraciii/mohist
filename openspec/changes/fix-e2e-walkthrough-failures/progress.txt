@@ -1,0 +1,12 @@
+# Ralph Progress Log
+Started: 2026-04-23T05:16:29.386Z
+
+---
+
+## T-001 — 2026-04-23T13:34:00Z
+- **What**: Added corrupted-state detection and reset in `runRalphLoop()` (ralph-executor.ts:296-306). When all tasks have `passes: true`, resets all to `false` and persists via `writeTasksFile`. Mixed passes states are left untouched (per design review refinement).
+- **Tests**: Updated existing test to reflect new behavior (all-passes=true triggers reset). Added test for mixed-passes scenario. Utility tests pass. `runRalphLoop` integration tests have pre-existing hang (unrelated to this change — verified by reverting and confirming same hang).
+- **Typecheck**: Passes
+- **Learnings**: The design review refined the original task desc (unconditional reset) to only reset when ALL tasks have passes=true. This preserves normal resume scenarios while still fixing the self-review corruption bug.
+- **Next**: T-002 (persist pipeline failure in approvalState)
+

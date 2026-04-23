@@ -193,14 +193,14 @@ describe('runRalphLoop', () => {
     expect(updated.tasks[0].id).toBe('T-001');
   });
 
-  it('should skip tasks that are already passed', async () => {
+  it('should reset all passes=true tasks when all tasks have passes=true (corrupted state)', async () => {
     change = createMinimalChange();
 
     const tasksFile = {
       version: 1,
       tasks: [
-        { id: 'T-001', order: 1, title: 'First Task', description: 'desc', passes: true, attempts: 1 },
-        { id: 'T-002', order: 2, title: 'Second Task', description: 'desc', passes: true, attempts: 1 },
+        { id: 'T-001', order: 1, title: 'First Task', description: 'desc', passes: true, attempts: 0 },
+        { id: 'T-002', order: 2, title: 'Second Task', description: 'desc', passes: true, attempts: 0 },
       ],
     };
     fs.writeFileSync(change.tasksPath, JSON.stringify(tasksFile));
@@ -214,8 +214,37 @@ describe('runRalphLoop', () => {
 
     const result = await runRalphLoop(change, context, { maxRetries: 0 });
 
-    expect(onTaskStart).not.toHaveBeenCalled();
-    expect(result.completed).toBe(0);
+    expect(onTaskStart).toHaveBeenCalled();
+    expect(result.completed).toBe(2);
+
+    const updated = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
+    expect(updated.tasks.every((t: any) => t.passes === true)).toBe(true);
+  });
+
+  it('should not reset passes when tasks have mixed passes values', async () => {
+    change = createMinimalChange();
+
+    const tasksFile = {
+      version: 1,
+      tasks: [
+        { id: 'T-001', order: 1, title: 'First Task', description: 'desc', passes: true, attempts: 1 },
+        { id: 'T-002', order: 2, title: 'Second Task', description: 'desc', passes: false, attempts: 0 },
+      ],
+    };
+    fs.writeFileSync(change.tasksPath, JSON.stringify(tasksFile));
+
+    const onTaskStart = vi.fn();
+    const context = {
+      worktreePath: tempDir,
+      projectPath: tempDir,
+      onTaskStart,
+    };
+
+    const result = await runRalphLoop(change, context, { maxRetries: 0 });
+
+    expect(onTaskStart).toHaveBeenCalledTimes(1);
+    expect(result.completed).toBe(1);
+    expect(result.total).toBe(2);
   });
 
   it('should pass correct context to onLoopComplete', async () => {
