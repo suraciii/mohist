@@ -21,3 +21,10 @@ Started: 2026-04-23T09:55:28.574Z
 - Typecheck passes
 - Learnings: merge-base check uses startPoint (which may be origin/<branch> or local <branch>) to ensure correct validation target
 - Next: T-003 (CLI diff uses API baseBranch)
+
+[2026-04-23] T-003 completed
+- Added baseBranch field to issue detail API response (src/api/issues.ts:155)
+- Removed getDefaultBranch() function from src/cli/commands/issue.ts
+- Updated diff command to use baseBranch from API response with 'main' fallback
+- Typecheck passes cleanly
+- Next: T-004 (integration verification)

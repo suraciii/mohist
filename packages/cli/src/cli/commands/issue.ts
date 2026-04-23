@@ -8,27 +8,6 @@ import { slugify } from '../../utils/slugify';
 import { apiClient } from '../api-client';
 import { requireServer } from '../server-check';
 
-function getDefaultBranch(projectPath: string): string {
-  try {
-    const symbolicRef = execSync('git symbolic-ref refs/remotes/origin/HEAD', {
-      cwd: projectPath,
-      stdio: 'pipe',
-      encoding: 'utf-8',
-    }).trim();
-    return symbolicRef.replace('refs/remotes/origin/', '');
-  } catch {
-    try {
-      return execSync('git rev-parse --abbrev-ref HEAD', {
-        cwd: projectPath,
-        stdio: 'pipe',
-        encoding: 'utf-8',
-      }).trim();
-    } catch {
-      return 'main';
-    }
-  }
-}
-
 function formatStage(stage: string): string {
   const colors: Record<string, typeof chalk.green> = {
     draft: chalk.gray,
@@ -426,10 +405,10 @@ export function setupIssueCommands(program: Command): void {
         }
 
         const branchName = `mo/issue-${number}`;
-        const defaultBranch = getDefaultBranch(projectPath);
+        const baseBranch = issue.baseBranch || 'main';
 
         try {
-          execSync(`git diff ${defaultBranch}...${branchName}`, {
+          execSync(`git diff ${baseBranch}...${branchName}`, {
             cwd: projectPath,
             stdio: 'inherit'
           });

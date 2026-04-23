@@ -151,6 +151,7 @@ export function createIssueRoutes(
           ...issue,
           projectName: project?.name || 'unknown',
           projectPath: project?.path || '',
+          baseBranch: project?.baseBranch || 'main',
           comments
         }
       };
