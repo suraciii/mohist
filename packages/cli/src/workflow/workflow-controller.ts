@@ -379,7 +379,11 @@ export class WorkflowController {
         return;
       }
 
-      await execFileAsync('git', ['add', '.'], { cwd: this.worktreePath });
+      await execFileAsync(
+        'git',
+        ['add', '--', ':!openspec/changes/', ':!.opencode/'],
+        { cwd: this.worktreePath },
+      );
 
       const message = `build(issue-${issue.number}): ${issue.title}`;
       await execFileAsync('git', ['commit', '-m', message, '--no-verify'], {

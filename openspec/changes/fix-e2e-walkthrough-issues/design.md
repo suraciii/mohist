@@ -52,15 +52,21 @@ DB 层 `issue-repo.ts` 已有 `setApprovalState()`、`findPendingApproval()` 等
 
 ### D3: Build 后通过 worktree git commit
 
-**选择**: 在 `runPipelineBuildStage()` 完成后调用 `simpleGit(worktreePath).add('.').commit(message)`
+**选择**: 在 `runPipelineBuildStage()` 完成后使用 `execFileAsync` 执行 `git add` + `git commit`
+
+**实际实现**: 使用 `child_process.execFile` 而非 `simpleGit`，因为：
+- 不需要 simpleGit 的复杂 API
+- execFile 更轻量，无额外依赖
+- 使用 `git add -- ':!openspec/changes/' ':!.opencode/'` 排除 openspec 产物和 opencode 配置
 
 **备选方案**:
 - A: 让 agent 在 ACP session 中自行 commit（依赖 agent 行为）
 - B: 在 workflow controller 中增加 post-build hook
+- C: 使用 simpleGit 库（设计时考虑，实现时简化）
 
-**理由**: 方案 A 不可靠（agent 可能不 commit）；方案 B 过度设计。直接在 build 完成后 commit 最简单可靠。
+**理由**: 方案 A 不可靠（agent 可能不 commit）；方案 B 过度设计；方案 C 增加依赖但无实质收益。execFile 最简单可靠。
 
-**commit 内容**: 只提交代码变更，不提交 openspec/changes/ 下的产物（这些在 worktree 创建时已经存在，且不应被 commit 到代码仓库）。
+**commit 内容**: 只提交代码变更，不提交 openspec/changes/ 和 .opencode/ 下的产物（这些在 worktree 创建时已经存在，且不应被 commit 到代码仓库）。
 
 ### D4: IssueStatus 增加 Completed 枚举值
 
