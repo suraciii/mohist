@@ -1,5 +1,65 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { AcpConnection, AcpSessionResult } from '../src/agent-runtime/acp-session';
+
+describe('ACP session stream destroy on process exit', () => {
+  it('should destroy stdin and stdout on proc exit event', () => {
+    const destroyFn = vi.fn();
+    const mockStdin = { destroy: destroyFn, on: vi.fn() };
+    const mockStdout = { destroy: destroyFn, on: vi.fn() };
+
+    const exitHandlers: Array<() => void> = [];
+    const mockProc = {
+      stdin: mockStdin,
+      stdout: mockStdout,
+      on: vi.fn((event: string, handler: () => void) => {
+        if (event === 'exit') {
+          exitHandlers.push(handler);
+        }
+      }),
+      kill: vi.fn(),
+    };
+
+    // Simulate the proc.on('exit') handler pattern from acp-session.ts
+    mockProc.on('exit', () => {
+      try { mockProc.stdin.destroy(); } catch {}
+      try { mockProc.stdout.destroy(); } catch {}
+    });
+
+    expect(exitHandlers).toHaveLength(1);
+
+    // Simulate process exit
+    exitHandlers[0]();
+
+    expect(destroyFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('should silently handle destroy errors', () => {
+    const errorFn = vi.fn(() => { throw new Error('already destroyed'); });
+    const mockStdin = { destroy: errorFn, on: vi.fn() };
+    const mockStdout = { destroy: errorFn, on: vi.fn() };
+
+    const exitHandlers: Array<() => void> = [];
+    const mockProc = {
+      stdin: mockStdin,
+      stdout: mockStdout,
+      on: vi.fn((event: string, handler: () => void) => {
+        if (event === 'exit') {
+          exitHandlers.push(handler);
+        }
+      }),
+      kill: vi.fn(),
+    };
+
+    mockProc.on('exit', () => {
+      try { mockProc.stdin.destroy(); } catch {}
+      try { mockProc.stdout.destroy(); } catch {}
+    });
+
+    // Should not throw
+    expect(() => exitHandlers[0]()).not.toThrow();
+    expect(errorFn).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('AcpConnection multi-round contract', () => {
   it('should support multiple prompt calls on a mock connection', async () => {

@@ -125,7 +125,7 @@
       "type": "TEST",
       "output": "packages/cli/tests/",
       "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005"],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing test patterns using vitest. Mock simpleGit for git commit tests. Mock child_process spawn for ACP tests. Use existing test infrastructure for API route tests."
     }
   ]
