@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { Stage, IssueStatus, type Issue } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
@@ -10,6 +12,8 @@ import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { Log } from '../util/log';
+
+const execFileAsync = promisify(execFile);
 
 const log = Log.create({ service: 'workflow' });
 
@@ -357,6 +361,40 @@ export class WorkflowController {
     return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
   }
 
+  private async commitBuildChanges(issue: Issue): Promise<void> {
+    try {
+      const { stdout: statusOut } = await execFileAsync(
+        'git',
+        ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: this.worktreePath },
+      );
+
+      const lines = statusOut
+        .split('\n')
+        .filter(l => l.trim() !== '')
+        .filter(l => !l.endsWith('openspec/changes/') && !l.includes('openspec/changes/'));
+
+      if (lines.length === 0) {
+        log.info('No changes to commit after build stage', { issueNumber: issue.number });
+        return;
+      }
+
+      await execFileAsync('git', ['add', '.'], { cwd: this.worktreePath });
+
+      const message = `build(issue-${issue.number}): ${issue.title}`;
+      await execFileAsync('git', ['commit', '-m', message, '--no-verify'], {
+        cwd: this.worktreePath,
+      });
+
+      log.info('Build stage changes committed', { issueNumber: issue.number, files: lines.length });
+    } catch (err) {
+      log.warn('Failed to commit build stage changes', {
+        issueNumber: issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   private emitSafe(event: Parameters<EventBus['emit']>[0], data: Parameters<EventBus['emit']>[1]): void {
     if (!this.eventBus) return;
     try {
@@ -522,6 +560,8 @@ export class WorkflowController {
     }
 
     if (result.success) {
+      await this.commitBuildChanges(issue);
+
       this.emitSafe('build_stage_completed', {
         issueId,
         projectId,

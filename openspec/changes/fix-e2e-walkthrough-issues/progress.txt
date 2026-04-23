@@ -29,3 +29,14 @@ Started: 2026-04-23T15:22:38.091Z
 - Learning: The existing test had approval_state set to 'awaiting' but was testing reset behavior — it was actually testing the wrong scenario
 - All 581 tests pass, typecheck clean
 - Next: T-004 (git commit after build stage)
+
+[2026-04-24T00:34:06] T-004 COMPLETED
+- Added commitBuildChanges() private method to WorkflowController
+- Uses execFileAsync('git', ...) pattern matching existing codebase convention (not simple-git which isn't a dependency)
+- Filters openspec/changes/ paths from git status --porcelain output before deciding to commit
+- Skips commit when no relevant changes detected (logs info message)
+- Wraps everything in try-catch: commit failure logs warning but doesn't block pipeline
+- Commit message format: 'build(issue-N): issue title', uses --no-verify
+- Typecheck passes, all 581 tests pass
+- Learnings: simple-git is NOT a dependency — the codebase uses raw child_process.execFile for git ops (worktree-manager.ts pattern). Also, the spec said "excluding openspec/changes/" — implemented by filtering git status --porcelain lines that contain that path
+- Next: T-005 (ACP EPIPE fix)
