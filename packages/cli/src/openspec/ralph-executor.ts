@@ -113,6 +113,7 @@ export interface RalphExecutorContext {
   workflowLogRepo?: import('../db/workflow-log-repo').WorkflowLogRepo;
   coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
   issueNumber?: number;
+  stageTimeoutMs?: number;
 }
 
 export interface RalphLoopResult {
@@ -292,6 +293,12 @@ export async function runRalphLoop(
   }
 
   const sortedTasks = sortTasksByOrder(tasks);
+  const DEFAULT_TASK_TIMEOUT_MS = 30 * 60 * 1000;
+  const MIN_TASK_TIMEOUT_MS = 5 * 60 * 1000;
+
+  const perTaskTimeout = context.stageTimeoutMs != null && sortedTasks.length > 0
+    ? Math.max(Math.floor(context.stageTimeoutMs / sortedTasks.length), MIN_TASK_TIMEOUT_MS)
+    : DEFAULT_TASK_TIMEOUT_MS;
 
   const allTasksPassed = tasks.length > 0 && tasks.every(t => t.passes);
   if (allTasksPassed) {
@@ -430,6 +437,7 @@ export async function runRalphLoop(
       const result = await _acpSessionRunner({
         cwd: context.worktreePath,
         task: prompt,
+        timeout: perTaskTimeout,
         issueId: context.issueId,
         projectId: context.projectId,
         executionId: taskExecutionId,
