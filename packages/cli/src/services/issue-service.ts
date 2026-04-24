@@ -105,6 +105,7 @@ export class IssueService {
     if (!issue) return null;
     if (issue.status !== IssueStatus.Closed && issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Paused) return null;
     
+    this.issueRepo.clearApprovalState(issue.id);
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
   }
 
