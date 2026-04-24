@@ -94,12 +94,12 @@ RESULT_DIR="$(pwd)/walkthrough"
 
 # 注意:
 # - 不映射端口 (-p)，通过 podman exec 在容器内操作，避免与主机端口冲突
-# - 使用 sleep infinity 保持容器存活（entrypoint 启动 server 后需前台进程）
+# - 使用 entrypoint.sh（容器默认 ENTRYPOINT）自动启动 server 并处理信号
+# - entrypoint.sh 支持 SIGTERM 优雅停止和子进程回收
 podman run -d \
   --name "$CONTAINER_NAME" \
   -v "$RESULT_DIR:/app/results:z" \
-  mohist-walkthrough \
-  sleep infinity
+  mohist-walkthrough
 
 # 验证 server 就绪（容器内 curl，不依赖 jq）
 podman exec "$CONTAINER_NAME" curl -sf http://localhost:3456/api/health
