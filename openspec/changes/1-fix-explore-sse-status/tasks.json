@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix explore SSE message loss on interruption + add session list status filtering",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/explore.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "See design.md D1 and D2 for the exact restructuring pattern."
+      "passes": true,
+      "notes": "See design.md D1 and D2 for the exact restructuring pattern.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -43,7 +45,10 @@
       "output": "packages/cli/src/db/explore-session-repo.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "See design.md D3. Changes span 3 files: explore-session-repo.ts, explore-service.ts, explore.ts GET / route."
+      "notes": "See design.md D3. Changes span 3 files: explore-session-repo.ts, explore-service.ts, explore.ts GET / route.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +67,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Mock runExploreAgent to throw or return controlled streams. Use in-memory SQLite for repo tests."
+      "notes": "Mock runExploreAgent to throw or return controlled streams. Use in-memory SQLite for repo tests.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
