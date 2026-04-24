@@ -78,7 +78,7 @@
       "type": "FIX",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "Mirror workflow-controller.ts:328-338 for approvalState setup. Need access to eventBus in the endpoint handler (already available). approval_requested event enables the CLI/frontend to know there's a gate."
     },
     {

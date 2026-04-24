@@ -665,6 +665,22 @@ export function createIssueRoutes(
       issueService.transitionToStage(issue.id, Stage.Review);
       issueService.setStatus(issue.id, IssueStatus.Active);
 
+      const issueRepo = stateManager.getIssueRepo();
+      if (issueRepo) {
+        issueRepo.setApprovalState(issue.id, {
+          stage: Stage.Review,
+          status: 'awaiting',
+          output: null,
+          requestedAt: new Date().toISOString(),
+        });
+      }
+
+      eventBus.emit('approval_requested', {
+        issueId: issue.id,
+        projectId,
+        stage: Stage.Review,
+      });
+
       const updatedIssue = issueService.getByNumber(projectId, number);
 
       const response: ApiResponse = {

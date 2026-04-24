@@ -38,3 +38,12 @@ Started: 2026-04-24T13:42:07.268Z
 - Tests: 588 passed, 2 failed (pre-existing T-002 test expectations for Draft stage), 2 skipped
 - Learnings: acp-session.ts already accepts `timeout` in options with default 30min — only needed to thread the value through from workflow config
 - Next: T-004 (skip-to-review deadlock)
+
+## 2026-04-24 — T-004 Fix skip-to-review deadlock
+- Added `setApprovalState({stage: Review, status: 'awaiting', output: null})` after transitionToStage/setStatus in skip-to-review endpoint
+- Added `eventBus.emit('approval_requested', ...)` to notify CLI/frontend of the approval gate
+- approve endpoint already has fallback: checks `approvalState.status === 'awaiting'` when no pendingGate exists (line 736)
+- After approval, `approvalStage === Stage.Review` → `nextStage = Stage.Done` (line 757-758), pipeline proceeds to merge-back
+- Typecheck: passes
+- Learnings: ApprovalState requires `output` field (not optional). PendingGate registration is indeed optional — approve endpoint fallback works with just approvalState set.
+- Next: T-005 (reopen resume from current stage)
