@@ -70,7 +70,14 @@ export class ExploreSessionRepo {
     return row ? rowToExploreSession(row) : null;
   }
 
-  findByProject(projectId: string): ExploreSession[] {
+  findByProject(projectId: string, status?: string): ExploreSession[] {
+    if (status) {
+      const rows = this.db.all<ExploreSessionRow>(
+        'SELECT * FROM explore_sessions WHERE project_id = ? AND status = ? ORDER BY updated_at DESC',
+        [projectId, status]
+      );
+      return rows.map(rowToExploreSession);
+    }
     const rows = this.db.all<ExploreSessionRow>(
       'SELECT * FROM explore_sessions WHERE project_id = ? ORDER BY updated_at DESC',
       [projectId]

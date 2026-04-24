@@ -70,7 +70,8 @@ export function createExploreRoutes(
         return c.json(response, 400);
       }
 
-      const sessions = exploreService.listSessions(projectId);
+      const status = c.req.query('status');
+      const sessions = exploreService.listSessions(projectId, status);
       const response: ApiResponse<ExploreSession[]> = {
         success: true,
         data: sessions,
@@ -338,10 +339,10 @@ export function createExploreRoutes(
       const result = await runExploreAgent(agentContext, historyMessages);
 
       return streamSSE(c, async (stream: SSEStreamingApi) => {
+        let assistantContent = '';
+        const toolCallRecords: ToolCallRecord[] = [];
+        let createdIssueId: string | null = null;
         try {
-          const toolCallRecords: ToolCallRecord[] = [];
-          let assistantContent = '';
-          let createdIssueId: string | null = null;
 
           for await (const part of result.fullStream) {
             if (part.type === 'text-delta') {

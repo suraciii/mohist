@@ -24,8 +24,8 @@ export class ExploreService {
     });
   }
 
-  listSessions(projectId: string): ExploreSession[] {
-    return this.sessionRepo.findByProject(projectId);
+  listSessions(projectId: string, status?: string): ExploreSession[] {
+    return this.sessionRepo.findByProject(projectId, status);
   }
 
   getSession(id: string): ExploreSessionWithMessages | null {
