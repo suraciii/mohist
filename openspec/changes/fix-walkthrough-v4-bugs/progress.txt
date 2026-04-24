@@ -15,3 +15,14 @@ Started: 2026-04-24T13:42:07.268Z
 - Typecheck: passes
 - Tests: 590 passed, 2 skipped
 - Next: T-002 (stage regression fix)
+
+## 2026-04-24 — T-002 Fix stage regression on pipeline failure
+- Removed `updateStage(issue.id, Stage.Draft)` from 3 locations in agent-runner-service.ts:
+  1. Pipeline failure path (was line 327-334): removed stage rollback, keeps current stage
+  2. Exception catch handler (was line 377-384): removed stage rollback, keeps current stage
+  3. Orphan recovery else branch (was line 135): removed stage rollback, keeps current stage
+- All three paths already set status=Blocked; now they also preserve the current stage
+- Updated orphan recovery log message to reflect "stage preserved" instead of "stage=draft"
+- Typecheck: passes
+- No `updateStage.*Draft` calls remain in agent-runner-service.ts
+- Next: T-003 (stage timeout passing)

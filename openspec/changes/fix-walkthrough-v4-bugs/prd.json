@@ -39,7 +39,7 @@
       "type": "FIX",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Three locations: line 328 (pipeline failure path), line 378 (catch handler), line 135 (orphan recovery else branch). All must remove updateStage(issue.id, Stage.Draft) and keep only updateStatus(issue.id, IssueStatus.Blocked)."
     },
     {
