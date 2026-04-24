@@ -1,23 +1,43 @@
 # test/agentic/shared/Containerfile
 #
-# Base container for mohist agentic tests.
+# Base container for mohist agentic tests (Layer A).
 #
-# This image contains:
-#   - node:20-slim + python3/make/g++ (for native modules)
-#   - mohist source with npm dependencies and better-sqlite3 rebuilt
-#   - motest user (UID 1001)
-#   - /app/workspace, /home/motest/.mohist
-#   - entrypoint.sh (starts mo-server)
+# Rebuild from project root:
+#   podman build --network=host -t mohist-test -f test/agentic/shared/Containerfile .
 #
-# Layer B tests: extend this image, add opencode binary
+# Layer B: extend this image, add opencode binary
 #   FROM mohist-test
-#   COPY test/agentic/shared/bin/opencode /usr/local/bin/opencode
-#
-# To rebuild from scratch (slow, needs network):
-#   1. Start node:20-slim with --network=host
-#   2. apt-get install git curl jq python3 make g++
-#   3. Copy packages/cli, package.json, package-lock.json, node_modules
-#   4. npm rebuild better-sqlite3
-#   5. Set up motest user, entrypoint, commit as mohist-test
+#   COPY --chmod=755 test/agentic/shared/bin/opencode /usr/local/bin/opencode
 
-FROM mohist-test
+FROM node:20-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git curl python3 make g++ && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -g 1001 motest && useradd -m -u 1001 -g motest motest
+
+WORKDIR /opt/mohist-src
+
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+COPY packages/cli/package.json packages/cli/package-lock.json packages/cli/
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci -w packages/cli
+
+COPY packages/cli/ packages/cli/
+RUN npm run build -w packages/cli
+
+RUN mkdir -p /app/workspace /home/motest/.mohist/projects /home/motest/.mohist/logs && \
+    chown -R motest:motest /app /home/motest
+
+COPY test/agentic/shared/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+USER motest
+WORKDIR /app/workspace
+
+EXPOSE 3456
+ENTRYPOINT ["/entrypoint.sh"]

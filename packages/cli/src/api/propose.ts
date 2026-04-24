@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { StateManager } from '../server/state-manager';
-import { ApiResponse, Stage } from '../types';
+import { ApiResponse, IssueStatus, Stage } from '../types';
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
@@ -46,6 +46,14 @@ export function createProposeRoutes(
           error: `Issue #${number} not found`
         };
         return c.json(response, 404);
+      }
+
+      if (issue.status !== IssueStatus.Active) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is ${issue.status}. Run: mo issue reopen ${number} to reactivate`
+        };
+        return c.json(response, 409);
       }
 
       const project = projectService.getById(projectId);

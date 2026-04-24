@@ -1,94 +1,289 @@
 ---
 name: mohist-walkthrough
-description: Mohist 项目 E2E walkthrough 流程验证。走一遍完整的 mohist 工作流（build → server → create issue → start → monitor → approve → done），自动监控进度、发现问题、记录到 walkthrough/ 目录。当需要验证 mohist 流程、测试工作流端到端、或走一遍 dev 流程时使用。触发词包括 "walkthrough"、"走流程"、"验证流程"、"e2e 测试"、"端到端测试"。
+description: Mohist 项目 E2E walkthrough 流程验证，使用容器隔离环境。走一遍完整的 mohist 工作流（build → container → server → create issue → start → monitor → approve → done），自动监控进度、发现问题、记录到 walkthrough/ 目录。当需要验证 mohist 流程、测试工作流端到端、或走一遍 dev 流程时使用。触发词包括 "walkthrough"、"走流程"、"验证流程"、"e2e 测试"、"端到端测试"。
 ---
 
-# Mohist E2E Walkthrough
+# Mohist E2E Walkthrough (Container-based)
 
-走一遍完整的 mohist 工作流，验证流程能否走通。发现问题、分析原因、记录结果。
+在容器中走一遍完整的 mohist 工作流，验证流程能否走通。发现问题、分析原因、记录结果。
 
 **你是 QA，只负责发现和记录问题，绝对不做任何修复。** 遇到 bug 时，深入追根因并记录，然后继续流程或标记流程阻塞。不要修改任何源码、配置、数据库或产物文件来绕过问题。
 
 ## 原则
 
-**只观测不修复。** 这是 QA 角色，不是开发者角色。发现的任何问题都记录下来，留给后续修复。修改代码、修改产物文件、修改数据库都属于越权行为。
+**只观测不修复。** 修改代码、修改产物文件、修改数据库都属于越权行为。
 
-**优先通过 API 观测系统状态，而非直接访问内部存储。** CLI 命令和 HTTP API 是系统的公开接口，直接查数据库或文件系统是最后手段。当你发现自己频繁绕过 API 直接查 DB 时，说明系统缺乏足够的可观测性——这本身就是一个值得记录的问题。
+**优先通过 API 观测系统状态。** CLI 命令和 HTTP API 是公开接口，直接查数据库是最后手段。频繁绕过 API 说明可观测性不足——记录之。
 
-**当无法有效观测系统内部状态、难以诊断问题原因时，记录"可观测性不足"作为发现的问题之一。** 诊断困难往往意味着系统需要在日志、API、状态报告等方面加强。
+**可观测性不足即问题。** 无法有效诊断时，记录"可观测性不足"作为发现。
 
-**相信 agent 的探索能力。** 以下流程提供方向和框架，具体的技术诊断由 agent 自行决定如何探索。不要预设问题类型，让异常自然浮现。
+**每个问题追到根因。** 无法定位时标记"未定位"并记录已排除的方向。
 
-**每个问题都要追到根因。** 发现表面现象后，深入代码和日志定位原因。如果暂时无法定位，明确标记为"未定位"并记录已排除的方向。
+## 容器环境
+
+使用 `test/agentic/` 共享容器基础设施：
+
+```
+test/agentic/
+├── shared/
+│   ├── Containerfile    # 基础容器 (FROM mohist-test)
+│   └── entrypoint.sh    # 启动 mo-server
+└── verify-e2e-walkthrough/
+    ├── TESTPLAN.md      # Walkthrough 测试计划
+    └── scripts/         # 辅助脚本
+```
+
+容器规格：
+- User: `motest`
+- Workspace: `/app/workspace/`
+- Data: `/home/motest/.mohist/`
+- mohist source: `/opt/mohist-src` (built)
+- Server: `localhost:3456` (entrypoint 自动启动)
+- 工具: `mo`, `mo-server`, `node`, `git`, `curl`（注意: 无 `jq`、无 `opencode`）
+
+**Layer 要求**: 基础镜像 (Layer A) 包含 mohist 核心但不包含 `opencode`。完整 pipeline（需要 agent spawn）需要 Layer B 镜像。如果仅测试 infra 层（server、project、issue CRUD），Layer A 足够。测试完整 pipeline 需要先构建 Layer B 镜像。
+
+使用 `podman`（首选）或 `docker` 运行容器。
 
 ## 记录目录
 
-每次 walkthrough 记录到 `walkthrough/` 目录（项目根目录下），每次使用独立文件：
+每次 walkthrough 记录到 `walkthrough/` 目录，独立文件：
 
 ```
 walkthrough/<YYYY-MM-DD>-<HHMMSS>-<简短标识>.md
 ```
 
-示例：
-- `walkthrough/2026-04-22-180000-plan-fix-verify.md`
-- `walkthrough/2026-04-23-100000-full-pipeline.md`
-
-时间戳精确到秒级，确保每次 walkthrough 文件唯一。简短标识由 agent 根据本次 walkthrough 的目标拟定（2-4 个词，kebab-case）。
-
 ## 流程
 
 ```
-build → server → create issue → start issue → ──→ monitor loop ←──
-                                                  │           │
-                                              正常推进    异常检测
-                                                  │           │
-                                              approve ──→ analyze → 记录
-                                                  │
-                                              done → 总结
+create testplan → build image → run container → create issue → start issue
+                                                                   │
+                                              ┌──→ monitor loop ←──┘
+                                              │        │
+                                              │    正常推进 / 异常
+                                              │        │
+                                              │    approve → analyze → 记录
+                                              │        │
+                                              │    done → collect → cleanup → 总结
 ```
 
-### 1. 准备
+### Step 1: 准备
 
-创建记录文件 `walkthrough/<YYYY-MM-DD>-<HHMMSS>-<标识>.md`，包含进度和问题两个区域。
+确保 `test/agentic/verify-e2e-walkthrough/` 目录存在且包含 TESTPLAN.md 和辅助脚本。同时创建记录文件 `walkthrough/<YYYY-MM-DD>-<HHMMSS>-<标识>.md`。
 
-### 2. 按序执行
+### Step 2: 构建容器镜像
 
-按 build → server → create issue → start issue 的顺序推进，每步记录结果。
+```bash
+# 检查基础镜像是否存在
+podman images mohist-test --format '{{.Repository}}'
 
-### 3. 监控循环
+# 构建 walkthrough 镜像
+podman build \
+  -t mohist-walkthrough \
+  -f test/agentic/shared/Containerfile \
+  test/agentic/
+```
 
-start issue 后进入监控循环。定期检查 issue 状态，直到出现以下情况之一：
+如果基础镜像 `mohist-test` 不存在，参考 `test/agentic/shared/Containerfile` 注释构建。
 
-- 到达审批点 → 执行审批，继续监控下一阶段
-- 状态变为 blocked/draft → pipeline 检测到失败，进入分析
-- 状态长时间无变化且 agent 进程不在 → pipeline 卡死，进入分析
+### Step 3: 启动容器
 
-监控时关注：系统是否正常运行？状态是否在推进？产物是否在生成？agent 进程是否存活？
+```bash
+CONTAINER_NAME="mohist-wt-$(date +%Y%m%d-%H%M%S)"
+RESULT_DIR="$(pwd)/walkthrough"
 
-### 4. 问题分析
+# 注意:
+# - 不映射端口 (-p)，通过 podman exec 在容器内操作，避免与主机端口冲突
+# - 使用 sleep infinity 保持容器存活（entrypoint 启动 server 后需前台进程）
+podman run -d \
+  --name "$CONTAINER_NAME" \
+  -v "$RESULT_DIR:/app/results:z" \
+  mohist-walkthrough \
+  sleep infinity
 
-发现异常时，自行决定如何探索和诊断。可用的观测手段：
+# 验证 server 就绪（容器内 curl，不依赖 jq）
+podman exec "$CONTAINER_NAME" curl -sf http://localhost:3456/api/health
+```
 
-- CLI 命令 (`mo issue show`, `mo issue list`, `mo server status`)
-- HTTP API (`/api/agent/status`, `/api/issues/:id`)
-- 日志文件 (`~/.mohist/logs/`)
-- Agent 进程状态
-- Worktree 文件系统（产物是否生成）
-- 源码阅读（理解 pipeline 行为）
+将容器名记录到 walkthrough 文件中。
 
-当 API 提供的信息不足以诊断时，再考虑直接查数据库或读源码。
+### Step 4: Walkthrough 流程
 
-### 5. 审批与继续
+所有命令通过 `podman exec` 在容器内执行：
 
-到达审批点时，查看 issue 产物内容，执行审批，继续监控。
+```bash
+# CLI 命令
+podman exec "$CONTAINER_NAME" mo issue list
 
-### 6. 总结
+# API 调用（无 jq，直接输出 JSON）
+podman exec "$CONTAINER_NAME" curl -s http://localhost:3456/api/health
 
-流程走完后，更新记录文件：
-- 标记完成状态
-- 汇总所有发现的问题
-- 对每个问题记录现象、根因、建议
-- 对可观测性不足的地方提出改进建议
+# 执行辅助脚本
+podman exec "$CONTAINER_NAME" bash /opt/mohist-src/test/agentic/verify-e2e-walkthrough/scripts/check-status.sh 1
+
+# 检查容器内进程
+podman exec "$CONTAINER_NAME" ps aux
+```
+
+#### 4a: 初始化环境
+
+容器首次使用需要配置 git 和创建干净的 project：
+
+```bash
+# 配置 git（容器内无默认 git identity）
+podman exec "$CONTAINER_NAME" git config --global user.email "motest@test.local"
+podman exec "$CONTAINER_NAME" git config --global user.name "motest"
+```
+
+#### 4b: 创建 Project
+
+```bash
+# 创建 project（需要至少一个 commit，否则 worktree 创建会失败）
+podman exec "$CONTAINER_NAME" bash -c '\
+  mkdir -p /app/workspace/walkthrough-test && \
+  cd /app/workspace/walkthrough-test && \
+  git init && \
+  git commit --allow-empty -m "Initial commit" && \
+  mo project create walkthrough-test --path /app/workspace/walkthrough-test && \
+  mo project use walkthrough-test'
+```
+
+#### 4c: 创建并启动 Issue
+
+```bash
+podman exec "$CONTAINER_NAME" mo issue create "E2E walkthrough test" --body "验证完整工作流"
+podman exec "$CONTAINER_NAME" mo issue start 1
+```
+
+### Step 5: 监控循环
+
+定期（建议 30s 间隔）检查 issue 状态：
+
+```bash
+podman exec "$CONTAINER_NAME" mo issue show <issue-number>
+```
+
+直到出现：
+- 到达审批点 → 执行审批，继续监控
+- 状态变为 blocked/draft → 分析失败原因
+- 状态长时间无变化 → 检查 agent 进程、日志
+
+监控时关注：状态是否推进？产物是否生成？agent 进程是否存活？
+
+### Step 6: 问题分析
+
+发现异常时的诊断手段：
+
+```bash
+# 容器内日志
+podman exec "$CONTAINER_NAME" ls -la /home/motest/.mohist/logs/
+podman exec "$CONTAINER_NAME" cat /home/motest/.mohist/logs/*.log
+
+# Agent 进程
+podman exec "$CONTAINER_NAME" ps aux
+
+# API 状态
+podman exec "$CONTAINER_NAME" curl -s http://localhost:3456/api/agent/status
+podman exec "$CONTAINER_NAME" curl -s http://localhost:3456/api/issues/<id>
+
+# Worktree 产物
+podman exec "$CONTAINER_NAME" ls -laR /home/motest/.mohist/projects/
+```
+
+### Step 7: 收集结果
+
+```bash
+# 收集日志
+podman exec "$CONTAINER_NAME" bash -c 'cp -r /home/motest/.mohist/logs/ /app/results/logs-$(date +%Y%m%d)/'
+
+# 收集数据库快照（最后手段）
+podman exec "$CONTAINER_NAME" bash -c 'cp /home/motest/.mohist/mohist.db /app/results/mohist-$(date +%Y%m%d).db'
+
+# 收集 worktree 产物
+podman exec "$CONTAINER_NAME" bash -c 'cp -r /home/motest/.mohist/projects/ /app/results/projects-$(date +%Y%m%d)/'
+```
+
+### Step 8: 清理
+
+```bash
+podman stop "$CONTAINER_NAME"
+podman rm "$CONTAINER_NAME"
+```
+
+### Step 9: 总结
+
+更新 `walkthrough/` 记录文件，汇总所有发现。
+
+## 辅助脚本
+
+脚本位于 `test/agentic/verify-e2e-walkthrough/scripts/`，在容器内通过 `podman exec` 执行。
+
+注意: 容器内无 `jq`，脚本不应依赖 `jq`。使用 `grep`/`sed`/`python3` 替代。
+
+### scripts/create-project.sh
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+PROJECT_NAME="${1:?Usage: create-project.sh <name>}"
+PROJECT_PATH="/app/workspace/${PROJECT_NAME}"
+
+git config --global user.email "motest@test.local" 2>/dev/null || true
+git config --global user.name "motest" 2>/dev/null || true
+
+mkdir -p "$PROJECT_PATH"
+cd "$PROJECT_PATH"
+git init
+git commit --allow-empty -m "Initial commit"
+
+mo project create "$PROJECT_NAME" --path "$PROJECT_PATH"
+mo project use "$PROJECT_NAME"
+
+echo "Project $PROJECT_NAME created and activated"
+```
+
+### scripts/check-status.sh
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+ISSUE_ID="${1:?Usage: check-status.sh <issue-id>}"
+
+echo "=== Issue #${ISSUE_ID} ==="
+mo issue show "$ISSUE_ID" 2>&1 || echo "(show command failed)"
+echo ""
+echo "=== Agent Processes ==="
+ps aux | grep -E "opencode|mo-server" | grep -v grep || echo "No agent processes"
+echo ""
+echo "=== Server Health ==="
+curl -sf http://localhost:3456/api/health || echo "(health check failed)"
+```
+
+### scripts/collect-logs.sh
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+DEST="/app/results"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+
+mkdir -p "$DEST"
+
+if [ -d /home/motest/.mohist/logs/ ]; then
+    cp -r /home/motest/.mohist/logs/ "$DEST/logs-${TIMESTAMP}/"
+    echo "Logs collected to $DEST/logs-${TIMESTAMP}/"
+else
+    echo "No logs directory found"
+fi
+
+if [ -f /home/motest/.mohist/mohist.db ]; then
+    cp /home/motest/.mohist/mohist.db "$DEST/mohist-${TIMESTAMP}.db"
+    echo "Database snapshot: $DEST/mohist-${TIMESTAMP}.db"
+fi
+```
 
 ## 记录文件格式
 
@@ -98,6 +293,7 @@ start issue 后进入监控循环。定期检查 issue 状态，直到出现以�
 **日期**: YYYY-MM-DD HH:MM
 **目标**: 本次 walkthrough 的目标
 **状态**: 进行中 | 已完成 | 阻塞
+**容器**: <container-name>
 
 ---
 

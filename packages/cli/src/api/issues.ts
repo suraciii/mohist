@@ -302,6 +302,14 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
+      if (issue.status === IssueStatus.Closed) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is closed. Run: mo issue reopen ${number}`
+        };
+        return c.json(response, 400);
+      }
+
       if (issue.status === IssueStatus.Paused) {
         const response: ApiResponse = {
           success: false,
@@ -382,10 +390,12 @@ export function createIssueRoutes(
       };
       return c.json(response, 409);
     } catch (error) {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+      const project = projectId ? projectService.getById(projectId) : null;
+
       if (stageTransitioned) {
         try {
-          const number = parseInt(c.req.param('number'));
-          const projectId = getCurrentProjectId();
           const issue = projectId ? issueService.getByNumber(projectId, number) : null;
           if (issue && issue.stage === Stage.Plan) {
             issueService.transitionToStage(issue.id, Stage.Draft);
@@ -393,7 +403,17 @@ export function createIssueRoutes(
         } catch (rollbackError) {
           log.error('Failed to rollback stage to Draft', { error: rollbackError instanceof Error ? rollbackError.message : rollbackError });
         }
+      } else if (worktreeManager && project) {
+        try {
+          await worktreeManager.remove(project.path, project.name, number);
+        } catch (cleanupError) {
+          log.error('Failed to cleanup worktree after start failure', {
+            issueNumber: number,
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          });
+        }
       }
+
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -432,8 +452,10 @@ export function createIssueRoutes(
         return c.json(response, 409);
       }
 
-      const blockedIssue = issueService.block(projectId, number);
-      if (!blockedIssue) {
+      const { cleanup } = await c.req.json().catch(() => ({ cleanup: false }));
+
+      const closedIssue = issueService.close(projectId, number);
+      if (!closedIssue) {
         const response: ApiResponse = {
           success: false,
           error: `Issue #${number} not found`
@@ -441,9 +463,18 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
+      if (cleanup && worktreeManager) {
+        const project = projectService.getById(projectId);
+        if (project) {
+          await worktreeManager.remove(project.path, project.name, number).catch((err) => {
+            log.warn('Failed to cleanup worktree on close', { number, error: err instanceof Error ? err.message : err });
+          });
+        }
+      }
+
       const response: ApiResponse = {
         success: true,
-        data: { issue: blockedIssue, message: `Issue #${number} closed` }
+        data: { issue: closedIssue, message: `Issue #${number} closed` }
       };
       return c.json(response);
     } catch (error) {
@@ -468,12 +499,12 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const issue = issueService.resume(projectId, number);
+      const issue = issueService.reopen(projectId, number);
       
       if (!issue) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} not found`
+          error: `Issue #${number} not found or not reopenable (current status must be closed, blocked, or paused)`
         };
         return c.json(response, 404);
       }
@@ -1398,6 +1429,45 @@ export function createIssueRoutes(
         error: error instanceof Error ? error.message : 'Unknown error'
       };
       return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/merge', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        return c.json({ success: false, error: 'Project not found' } satisfies ApiResponse, 404);
+      }
+
+      if (!worktreeManager) {
+        return c.json({ success: false, error: 'WorktreeManager not configured' } satisfies ApiResponse, 500);
+      }
+
+      if (!worktreeManager.exists(project.name, issue.number)) {
+        return c.json({ success: false, error: `No worktree found for issue #${number}` } satisfies ApiResponse, 404);
+      }
+
+      const result = await worktreeManager.mergeBack(project.path, project.name, issue.number, project.baseBranch);
+
+      if (!result.success) {
+        return c.json({ success: false, error: result.message } satisfies ApiResponse, 409);
+      }
+
+      return c.json({ success: true, data: { issue, message: result.message } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
   });
 
