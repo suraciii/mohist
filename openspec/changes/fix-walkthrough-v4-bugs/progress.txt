@@ -64,3 +64,22 @@ Started: 2026-04-24T13:42:07.268Z
 **Typecheck:** passes
 
 **Next steps:** T-006 (unit tests for all fixes)
+
+## 2026-04-24 — T-006: Add unit tests for all fixes
+
+**What was done:**
+- Fixed 2 pre-existing broken tests in agent-runner-service.test.ts that expected `Stage.Draft` after orphan recovery (now expects `Stage.Build` — stage preserved)
+- Added 3 ralph-executor tests: auto-skip no failed increment, retry replaces failed with completed, abort increments failed
+- Added 3 timeout calculation tests: 2 tasks gets 15min each, 10 tasks hits 5min floor, no config defaults 30min
+- Added skip-to-review API test: verifies approvalState={stage: Review, status: awaiting} after skip
+- Added reopen API test: verifies resumePipeline called with issue at stage=Build
+
+**Files changed:**
+- packages/cli/tests/agent-runner-service.test.ts (2 tests fixed)
+- packages/cli/tests/ralph-executor.test.ts (6 new tests)
+- packages/cli/tests/api-routes.test.ts (2 new tests, added fs/path/os imports)
+
+**Typecheck:** passes
+**Tests:** 598 passed, 2 skipped
+
+**All tasks complete.**
