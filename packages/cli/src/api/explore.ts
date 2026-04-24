@@ -333,6 +333,8 @@ export function createExploreRoutes(
         eventBus,
       };
 
+      exploreService.addMessage(sessionId, 'user', userContent);
+
       const result = await runExploreAgent(agentContext, historyMessages);
 
       return streamSSE(c, async (stream: SSEStreamingApi) => {
@@ -386,7 +388,6 @@ export function createExploreRoutes(
             }
           }
 
-          exploreService.addMessage(sessionId, 'user', userContent);
           exploreService.addMessage(
             sessionId,
             'assistant',
@@ -398,6 +399,15 @@ export function createExploreRoutes(
             data: JSON.stringify({ type: 'done', issueId: createdIssueId }),
           });
         } catch (error) {
+          if (assistantContent) {
+            try {
+              exploreService.addMessage(sessionId, 'assistant', assistantContent);
+            } catch (saveError) {
+              log.error('Failed to save partial message', {
+                error: saveError instanceof Error ? saveError.message : saveError,
+              });
+            }
+          }
           log.error('Stream error', { error: error instanceof Error ? error.message : error });
           await stream.writeSSE({
             data: JSON.stringify({

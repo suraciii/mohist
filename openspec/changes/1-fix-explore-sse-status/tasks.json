@@ -1,0 +1,70 @@
+{
+  "project": "mohist",
+  "description": "Fix explore SSE message loss on interruption + add session list status filtering",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Move user message write before LLM call and add catch-path assistant save",
+      "spec": "specs/explore-message-persistence/spec.md",
+      "description": "In explore.ts POST /:id/messages: (1) Add addMessage(sessionId, 'user', userContent) BEFORE runExploreAgent call (~line 336). (2) Remove the duplicate user addMessage at line 389. (3) In the catch block (~line 400), add logic to save assistantContent as assistant message if non-empty, wrapped in its own try-catch that logs but does not rethrow. (4) Keep the normal-path assistant addMessage (lines 390-395) unchanged.",
+      "acceptanceCriteria": [
+        "addMessage('user', ...) call exists before runExploreAgent() invocation",
+        "No addMessage('user', ...) remains inside the streamSSE callback",
+        "Catch block saves assistant message when assistantContent is non-empty",
+        "Catch block skips saving when assistantContent is empty string",
+        "Catch block DB write failure is logged but does not prevent SSE error response",
+        "SSE stream loop body is unchanged (no DB writes in hot path)",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/explore.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "See design.md D1 and D2 for the exact restructuring pattern."
+    },
+    {
+      "id": "T-002",
+      "title": "Add status filter to findByProject and wire through service + API",
+      "spec": "specs/http-api/spec.md",
+      "description": "Add optional status parameter to ExploreSessionRepo.findByProject(projectId, status?) — when provided append 'AND status = ?' to SQL. Update ExploreService.listSessions(projectId, status?) to pass it through. Update GET / route in explore.ts to read c.req.query('status') and pass to listSessions.",
+      "acceptanceCriteria": [
+        "findByProject(projectId) with no status returns all sessions (backward compatible)",
+        "findByProject(projectId, 'active') only returns sessions with status='active'",
+        "findByProject(projectId, 'invalid_value') returns empty array",
+        "GET /api/explore?projectId=xxx&status=active only returns active sessions",
+        "GET /api/explore?projectId=xxx (no status) returns all sessions as before",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/db/explore-session-repo.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "See design.md D3. Changes span 3 files: explore-session-repo.ts, explore-service.ts, explore.ts GET / route."
+    },
+    {
+      "id": "T-003",
+      "title": "Write tests for message persistence and status filtering",
+      "spec": "specs/explore-message-persistence/spec.md",
+      "description": "Write tests covering: (1) User message exists in DB after LLM call failure. (2) Partial assistant message saved on SSE stream interruption. (3) No empty assistant message saved when stream fails before any chunks. (4) findByProject with status filter returns correct subset. (5) findByProject without status filter returns all. Follow existing test patterns in packages/cli/tests/.",
+      "acceptanceCriteria": [
+        "Test: user message persisted even when runExploreAgent throws",
+        "Test: partial assistant content saved on stream error",
+        "Test: no assistant message saved when assistantContent is empty on error",
+        "Test: findByProject with status='active' filters correctly",
+        "Test: findByProject without status returns all sessions",
+        "All tests pass: cd packages/cli && npm test"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Mock runExploreAgent to throw or return controlled streams. Use in-memory SQLite for repo tests."
+    }
+  ]
+}
