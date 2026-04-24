@@ -195,6 +195,14 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
     sections.push(taskPrompt);
   }
 
+  sections.push('');
+  sections.push('[Post-Task Instruction]');
+  sections.push(`After completing this task (${task.id}), you MUST commit your changes:`);
+  sections.push('1. Run `git add -A` to stage all changes');
+  sections.push(`2. Run \`git commit -m "${task.id}: <brief summary of what you did>"\``);
+  sections.push('This ensures your work is persisted and visible to subsequent tasks.');
+  sections.push('');
+
   const fullPrompt = sections.join('\n');
 
   return {
