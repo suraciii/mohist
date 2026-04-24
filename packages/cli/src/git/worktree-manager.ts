@@ -201,6 +201,7 @@ export class WorktreeManager {
       return { success: true, message: `No commits to merge for issue #${issueNumber}, worktree cleaned up` };
     }
 
+    let stashed = false;
     try {
       const { stdout: dirtyCheck } = await execFileAsync(
         'git', ['status', '--porcelain', '--ignore-submodules'],
@@ -208,10 +209,14 @@ export class WorktreeManager {
       );
       if (dirtyCheck.trim()) {
         await execFileAsync('git', ['stash', '--include-untracked'], { cwd: projectPath });
+        stashed = true;
       }
 
       await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
     } catch (err) {
+      if (stashed) {
+        await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch(() => {});
+      }
       return { success: false, message: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}` };
     }
 
@@ -219,7 +224,16 @@ export class WorktreeManager {
       await execFileAsync('git', ['merge', branch, '--no-edit'], { cwd: projectPath });
     } catch (err) {
       await execFileAsync('git', ['merge', '--abort'], { cwd: projectPath }).catch(() => {});
+      if (stashed) {
+        await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch(() => {});
+      }
       return { success: false, message: `Merge conflict for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    if (stashed) {
+      await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch((err) => {
+        log.warn('Failed to pop stash after merge', { issueNumber, error: err instanceof Error ? err.message : String(err) });
+      });
     }
 
     await this.remove(projectPath, projectName, issueNumber);

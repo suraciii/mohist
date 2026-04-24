@@ -40,4 +40,5 @@ USER motest
 WORKDIR /app/workspace
 
 EXPOSE 3456
+CMD []
 ENTRYPOINT ["/entrypoint.sh"]

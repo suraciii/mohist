@@ -9,14 +9,17 @@ echo "Node: $(node --version), git: $(git --version)"
 MAX_RESTARTS=3
 restart_count=0
 shutdown=0
+stashed_pid=""
 
-trap 'shutdown=1; kill $SERVER_PID 2>/dev/null' TERM INT
+trap 'shutdown=1; kill $stashed_pid 2>/dev/null' TERM INT
+trap 'wait -n 2>/dev/null || true' CHLD
 
 start_server() {
     echo "Starting mohist server..."
     cd /app/workspace
-    mo-server &
+    setsid mo-server </dev/null >>/home/motest/.mohist/logs/server.log 2>&1 &
     SERVER_PID=$!
+    stashed_pid=$SERVER_PID
 }
 
 wait_for_health() {
