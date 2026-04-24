@@ -39,9 +39,11 @@ test/agentic/
 - Data: `/home/motest/.mohist/`
 - mohist source: `/opt/mohist-src` (built)
 - Server: `localhost:3456` (entrypoint 自动启动)
-- 工具: `mo`, `mo-server`, `node`, `git`, `curl`（注意: 无 `jq`、无 `opencode`）
+- 工具: `mo`, `mo-server`, `node`, `git`, `curl`（注意: 无 `jq`）
 
-**Layer 要求**: 基础镜像 (Layer A) 包含 mohist 核心但不包含 `opencode`。完整 pipeline（需要 agent spawn）需要 Layer B 镜像。如果仅测试 infra 层（server、project、issue CRUD），Layer A 足够。测试完整 pipeline 需要先构建 Layer B 镜像。
+**镜像分层**:
+- **Layer A** (`mohist-test`): mohist CLI + server，不含 opencode。测试 infra 层（server、project、issue CRUD）足够。
+- **Layer B** (`mohist-walkthrough`): 基于 Layer A + opencode binary。完整 pipeline（agent spawn）需要此镜像。
 
 使用 `podman`（首选）或 `docker` 运行容器。
 
@@ -74,17 +76,23 @@ create testplan → build image → run container → create issue → start iss
 ### Step 2: 构建容器镜像
 
 ```bash
-# 检查基础镜像是否存在
-podman images mohist-test --format '{{.Repository}}'
+# Step 2a: 构建 Layer A（首次或源码变更后）
+podman build \
+  -t mohist-test \
+  -f test/agentic/shared/Containerfile \
+  .
 
-# 构建 walkthrough 镜像
+# Step 2b: 准备 opencode binary
+cp $(which opencode) test/agentic/shared/bin/opencode
+
+# Step 2c: 构建 Layer B（含 opencode）
 podman build \
   -t mohist-walkthrough \
-  -f test/agentic/shared/Containerfile \
+  -f test/agentic/shared/Containerfile.layer2 \
   test/agentic/
 ```
 
-如果基础镜像 `mohist-test` 不存在，参考 `test/agentic/shared/Containerfile` 注释构建。
+Layer A 缓存后重建很快（只 COPY 一个 binary）。
 
 ### Step 3: 启动容器
 

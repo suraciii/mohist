@@ -337,7 +337,7 @@ describe('API Routes', () => {
     });
 
     describe('POST /api/issues/:number/skip-to-review', () => {
-      it('should create awaiting approval state', async () => {
+      it('should transition to review stage and trigger pipeline', async () => {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-skip-test-'));
 
         try {
@@ -363,8 +363,6 @@ describe('API Routes', () => {
           const issueRepo = stateManager.getIssueRepo();
           const updated = issueRepo.findById(issue.id);
           expect(updated?.stage).toBe(Stage.Review);
-          expect(updated?.approvalState?.status).toBe('awaiting');
-          expect(updated?.approvalState?.stage).toBe(Stage.Review);
         } finally {
           fs.rmSync(tmpDir, { recursive: true, force: true });
         }

@@ -1,0 +1,4 @@
+# opencode binary — copy from host before building Layer B
+# cp $(which opencode) test/agentic/shared/bin/opencode
+*
+!/.gitignore

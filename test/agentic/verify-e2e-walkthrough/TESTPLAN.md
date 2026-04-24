@@ -6,8 +6,8 @@
 
 **环境**: 容器中 server 已启动 (localhost:3456)，工作目录 /app/workspace。
 **数据目录**: /home/motest/.mohist/
-**范围**: 完整 pipeline — server health → project → issue → design → implement → review → done。
-**前置条件**: 基础镜像 (Layer A) 不含 opencode。完整 pipeline 需要 Layer B 镜像。如果只有 Layer A，pipeline 会在 agent spawn 阶段 blocked。
+**范围**: 完整 pipeline — server health → project → issue → plan → build → review → done。
+**前置条件**: 需要构建 Layer B 镜像（含 opencode binary）。参考 SKILL.md Step 2。
 
 ---
 
@@ -52,7 +52,7 @@ mo issue show 1  # stage=draft, status=active
 
 ---
 
-## Phase 5: Start Issue (Design Phase)
+## Phase 5: Start Issue (Plan Stage)
 
 ```bash
 mo issue start 1
@@ -60,36 +60,37 @@ mo issue start 1
 
 进入监控循环：
 - 每 30s 执行 `@scripts/check-status.sh 1`
-- 关注 stage 变化: plan → designing → waiting-design-review
+- 关注 stage 变化: draft → plan
+- 关注 approval 变化: (none) → awaiting (plan 自评完成)
 - 关注 agent 进程是否存活
 - 如果 agent 消失且 stage 未变化，标记异常
 
-**超时**: 10 分钟内未到达 waiting-design-review → 标记失败并分析。
+**超时**: 15 分钟内未到达 approval=awaiting (stage: plan) → 标记失败并分析。
 
 ---
 
-## Phase 6: Approve Design
+## Phase 6: Approve Plan (Design)
 
-1. 查看设计产物：`mo issue show 1`
+1. 查看设计产物：`mo issue show 1`，确认 self-review notes
 2. 检查 worktree 中 openspec 目录是否生成
-3. 执行审批
-4. 继续监控 implementing 阶段
+3. 执行审批：`mo issue approve 1`
+4. 继续监控 build 阶段
 
-**超时**: 审批后 15 分钟内应到达 waiting-review。
+**超时**: 审批后 15 分钟内应到达 approval=awaiting (stage: review)。
 
 ---
 
-## Phase 7: Approve Implementation
+## Phase 7: Approve Implementation (Review)
 
-1. 等待到达 waiting-review
+1. 等待到达 approval=awaiting (stage: review)
 2. 查看实现产物（worktree 中代码变更）
-3. 执行审批
+3. 执行审批：`mo issue approve 1`
 
 ---
 
 ## Phase 8: Verify Done
 
-1. `mo issue show 1` → stage=done
+1. `mo issue show 1` → stage=done, status=completed
 2. 检查产物完整性
 3. `mo issue list` → 确认 issue 最终状态
 

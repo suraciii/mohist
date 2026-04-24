@@ -1,0 +1,16 @@
+# test/agentic/shared/Containerfile.layer2
+#
+# Layer B: mohist + opencode (full pipeline support)
+#
+# Prerequisites:
+#   1. Place opencode binary at test/agentic/shared/bin/opencode
+#   2. Layer A image must exist as 'mohist-test'
+#
+# Build from project root:
+#   podman build -t mohist-walkthrough -f test/agentic/shared/Containerfile.layer2 test/agentic/
+
+FROM mohist-test
+
+COPY --chmod=755 test/agentic/shared/bin/opencode /usr/local/bin/opencode
+
+USER motest

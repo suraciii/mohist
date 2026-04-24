@@ -653,21 +653,27 @@ export function createIssueRoutes(
       issueService.transitionToStage(issue.id, Stage.Review);
       issueService.setStatus(issue.id, IssueStatus.Active);
 
-      const issueRepo = stateManager.getIssueRepo();
-      if (issueRepo) {
-        issueRepo.setApprovalState(issue.id, {
-          stage: Stage.Review,
-          status: 'awaiting',
-          output: null,
-          requestedAt: new Date().toISOString(),
-        });
-      }
+      if (agentRunner) {
+        const acpOptions: AcpConnectionOptions = {
+          cwd: worktreePath,
+          issueId: issue.id,
+          projectId,
+          workflowLogRepo,
+          coderSessionRepo,
+          eventBus,
+          issueNumber: issue.number,
+          opencodeBinPath,
+        };
 
-      eventBus.emit('approval_requested', {
-        issueId: issue.id,
-        projectId,
-        stage: Stage.Review,
-      });
+        agentRunner.resumePipeline(
+          issue,
+          projectId,
+          stateManager.getIssueRepo(),
+          worktreePath,
+          acpOptions,
+          (issueId, status) => issueService.setStatus(issueId, status),
+        );
+      }
 
       const updatedIssue = issueService.getByNumber(projectId, number);
 
@@ -1470,6 +1476,30 @@ export function createIssueRoutes(
       }
 
       return c.json({ success: true, data: { issue, message: result.message } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.get('/worktrees', async (c) => {
+    try {
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project' } satisfies ApiResponse, 400);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        return c.json({ success: false, error: 'Project not found' } satisfies ApiResponse, 404);
+      }
+
+      if (!worktreeManager) {
+        return c.json({ success: false, error: 'WorktreeManager not configured' } satisfies ApiResponse, 500);
+      }
+
+      const worktrees = await worktreeManager.list(project.path);
+
+      return c.json({ success: true, data: { worktrees } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
