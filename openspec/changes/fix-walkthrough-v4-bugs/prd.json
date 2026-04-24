@@ -1,0 +1,127 @@
+{
+  "project": "fix-walkthrough-v4-bugs",
+  "description": "Fix 4 critical bugs blocking E2E pipeline completion: build task false-positive failure, stage regression on failure, agent timeout not enforced, skip-to-review deadlock",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix build failed counter false-positive",
+      "spec": "specs/build-stage-completion/spec.md",
+      "description": "In ralph-executor.ts, remove the unconditional `failed++` at line 525. The counter should only increment in the abort path (line 546-557), not in auto-skip (line 559-562), user-skip (line 539-542), or retry (line 543) paths. Also fix the retry scenario: when retry succeeds, the previously pushed 'failed' taskResult entry must be replaced with 'completed' to avoid duplicate entries for the same task.",
+      "acceptanceCriteria": [
+        "All tasks pass: result.success is true, failed=0",
+        "All tasks auto-skipped: result.success is true, failed=0",
+        "Task genuinely fails (abort): failed counter is incremented, result.success is false",
+        "Task fails then retry succeeds: taskResults contains one 'completed' entry, not both 'failed' and 'completed'",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "FIX",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Root cause: line 525 failed++ executes before any skip/retry decision. Fix: move failed++ to abort branch only (after line 545). For retry: when taskSuccess becomes true on retry, update the existing taskResults entry instead of pushing a new one."
+    },
+    {
+      "id": "T-002",
+      "title": "Fix stage regression on pipeline failure",
+      "spec": "specs/workflow-stage-management/spec.md",
+      "description": "In agent-runner-service.ts, remove stage rollback to Draft on all failure paths. Lines 328 (pipeline failure), 378 (exception handler), and 135 (orphan recovery) call `updateStage(issue.id, Stage.Draft)` — remove all three. Only set status=Blocked. Keep the current stage.",
+      "acceptanceCriteria": [
+        "Build failure sets status=blocked, keeps stage=build",
+        "Plan failure sets status=blocked, keeps stage=plan",
+        "Exception handler preserves current stage (line 378)",
+        "Orphan recovery preserves current stage (line 135)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "FIX",
+      "output": "packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Three locations: line 328 (pipeline failure path), line 378 (catch handler), line 135 (orphan recovery else branch). All must remove updateStage(issue.id, Stage.Draft) and keep only updateStatus(issue.id, IssueStatus.Blocked)."
+    },
+    {
+      "id": "T-003",
+      "title": "Pass stage timeout to ACP session runner",
+      "spec": "specs/agent-timeout/spec.md",
+      "description": "In ralph-executor.ts, pass the stage timeout to `_acpSessionRunner`. The workflow loader (workflow-loader.ts) already defines timeout per stage (e.g., 1800s for build). Calculate per-task timeout as max(stageTimeoutMs / totalTasks, 300000ms floor) and pass it via the `timeout` option. When no timeout is configured, fall back to the default 30-minute timeout.",
+      "acceptanceCriteria": [
+        "ACP session runner receives timeout from stage config",
+        "Per-task timeout = max(stageTimeoutMs / totalTasks, 300000ms)",
+        "No stage timeout config → uses default 30min",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "FIX",
+      "output": "packages/cli/src/openspec/ralph-executor.ts, packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "workflow-loader.ts line 52 defines timeout: 1800. ralph-executor.ts line 430-440 needs to read stage config and pass timeout to _acpSessionRunner. acp-session.ts already accepts timeout in options."
+    },
+    {
+      "id": "T-004",
+      "title": "Fix skip-to-review deadlock",
+      "spec": "specs/workflow-stage-management/spec.md",
+      "description": "In api/issues.ts, the skip-to-review endpoint (lines 665-666) only sets stage and status. Add: setApprovalState with stage=Review/status=awaiting and emit approval_requested event. The approve endpoint already has fallback logic for missing pendingGate (checks approvalState.status === 'awaiting'), so pendingGate registration is optional.",
+      "acceptanceCriteria": [
+        "skip-to-review sets approvalState={stage: Review, status: awaiting}",
+        "approval_requested event is emitted",
+        "User can approve after skip-to-review (approve endpoint succeeds)",
+        "After approval, pipeline proceeds to merge-back and done",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "FIX",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Mirror workflow-controller.ts:328-338 for approvalState setup. Need access to eventBus in the endpoint handler (already available). approval_requested event enables the CLI/frontend to know there's a gate."
+    },
+    {
+      "id": "T-005",
+      "title": "Fix reopen to resume from current stage",
+      "spec": "specs/workflow-stage-management/spec.md",
+      "description": "In api/issues.ts reopen endpoint (lines 521-564): remove the hasPendingGate check and the reset-to-draft branch. When reopening a blocked/closed/paused issue, always preserve the current stage and automatically resume the pipeline via resumePipeline. This replaces the current two-branch logic (resume if pendingGate else reset to draft) with a single 'resume from current stage' behavior. Also update CLI help text in issue.ts line 252.",
+      "acceptanceCriteria": [
+        "Reopening blocked issue at build stage keeps stage=build and auto-resumes pipeline",
+        "Reopening blocked issue at plan stage keeps stage=plan and auto-resumes pipeline",
+        "Reopening paused issue preserves stage and resumes pipeline",
+        "CLI help text updated to 'Reopen a blocked, closed, or paused issue'",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "FIX",
+      "output": "packages/cli/src/api/issues.ts, packages/cli/src/cli/commands/issue.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Current logic (line 521-564): if hasPendingGate → resumePipeline, else → reset to Draft. New logic: always preserve stage + resumePipeline. Remove hasPendingGate check and the else branch entirely. resumePipeline calls executePipeline which reads issue.stage and starts from the correct stage."
+    },
+    {
+      "id": "T-006",
+      "title": "Add unit tests for all fixes",
+      "description": "Add unit tests covering: (1) ralph-executor failed counter with auto-skip and retry, (2) stage preservation on failure in agent-runner-service, (3) timeout passing to ACP session, (4) skip-to-review creates awaiting approval, (5) reopen preserves stage and resumes pipeline.",
+      "acceptanceCriteria": [
+        "Test: auto-skipped task does not increment failed counter",
+        "Test: retry success replaces failed taskResult with completed",
+        "Test: stage preserved when build fails (agent-runner-service mock)",
+        "Test: timeout calculated correctly from stage config",
+        "Test: skip-to-review creates awaiting approval",
+        "Test: reopen keeps stage and calls resumePipeline",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005"],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
