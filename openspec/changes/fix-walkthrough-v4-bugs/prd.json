@@ -98,7 +98,7 @@
       "type": "FIX",
       "output": "packages/cli/src/api/issues.ts, packages/cli/src/cli/commands/issue.ts",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "Current logic (line 521-564): if hasPendingGate → resumePipeline, else → reset to Draft. New logic: always preserve stage + resumePipeline. Remove hasPendingGate check and the else branch entirely. resumePipeline calls executePipeline which reads issue.stage and starts from the correct stage."
     },
     {
