@@ -1,0 +1,17 @@
+# Ralph Progress Log
+Started: 2026-04-24T13:42:07.268Z
+
+---
+
+
+## 2026-04-24T13:44 — T-001 Fix build failed counter false-positive
+- Removed unconditional `failed++` from line 525 of ralph-executor.ts
+- Added `failed++` only in the abort path (user chooses to abort)
+- Added `failed++` in the else branch for genuine failures without shouldPause
+- Added `taskResults.pop()` before retry `continue` to prevent duplicate entries
+- Auto-skip path: no failed++ (status changed to 'skipped')
+- User-skip path: no failed++ (status changed to 'skipped')
+- Retry path: pop the 'failed' entry, if retry succeeds only 'completed' is pushed
+- Typecheck: passes
+- Tests: 590 passed, 2 skipped
+- Next: T-002 (stage regression fix)
