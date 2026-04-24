@@ -44,9 +44,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/db/explore-session-repo.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D3. Changes span 3 files: explore-session-repo.ts, explore-service.ts, explore.ts GET / route.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
