@@ -132,12 +132,11 @@ export class AgentRunnerService {
           });
         } else {
           this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
-          this.issueRepo.updateStage(issue.id, Stage.Draft);
           this.issueRepo.clearApprovalState(issue.id);
           log.info('Recovered orphaned issue', {
             issueNumber: issue.number,
-            previousStage: issue.stage,
-            action: 'status=blocked, stage=draft, approval cleared',
+            stage: issue.stage,
+            action: 'status=blocked, stage preserved, approval cleared',
           });
         }
       } catch (err) {
@@ -325,14 +324,6 @@ export class AgentRunnerService {
             });
           }
           try {
-            issueRepo.updateStage(issue.id, Stage.Draft);
-          } catch (rollbackErr) {
-            log.error('Failed to rollback stage to draft', {
-              issueNumber: issue.number,
-              error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
-            });
-          }
-          try {
             this.eventBus.emit('agent_error', {
               issueId: issue.id,
               projectId,
@@ -372,14 +363,6 @@ export class AgentRunnerService {
           log.error('Failed to update issue status to blocked', {
             issueNumber: issue.number,
             error: updateErr instanceof Error ? updateErr.message : String(updateErr),
-          });
-        }
-        try {
-          issueRepo.updateStage(issue.id, Stage.Draft);
-        } catch (rollbackErr) {
-          log.error('Failed to rollback stage to draft', {
-            issueNumber: issue.number,
-            error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
           });
         }
         try {
