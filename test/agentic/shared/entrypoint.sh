@@ -12,12 +12,11 @@ shutdown=0
 stashed_pid=""
 
 trap 'shutdown=1; kill $stashed_pid 2>/dev/null' TERM INT
-trap 'wait -n 2>/dev/null || true' CHLD
 
 start_server() {
     echo "Starting mohist server..."
     cd /app/workspace
-    setsid mo-server </dev/null >>/home/motest/.mohist/logs/server.log 2>&1 &
+    mo-server </dev/null >>/home/motest/.mohist/logs/server.log 2>&1 &
     SERVER_PID=$!
     stashed_pid=$SERVER_PID
 }
@@ -57,16 +56,11 @@ while true; do
         exit 0
     fi
 
-    if [ $exit_code -eq 0 ] || [ $exit_code -eq 143 ]; then
-        echo "Server exited cleanly (code: $exit_code)"
-        exit 0
-    fi
-
     restart_count=$((restart_count + 1))
-    echo "WARN: Server crashed (exit: $exit_code), restart $restart_count/$MAX_RESTARTS"
+    echo "WARN: Server exited (code: $exit_code), restart $restart_count/$MAX_RESTARTS"
 
     if [ $restart_count -ge $MAX_RESTARTS ]; then
-        echo "FATAL: Server crashed $MAX_RESTARTS times, giving up"
+        echo "FATAL: Server exited $MAX_RESTARTS times, giving up"
         exit 1
     fi
 
