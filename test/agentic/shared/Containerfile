@@ -5,9 +5,9 @@
 # Rebuild from project root:
 #   podman build --network=host -t mohist-test -f test/agentic/shared/Containerfile .
 #
-# Layer B: extend this image, add opencode binary
-#   FROM mohist-test
-#   COPY --chmod=755 test/agentic/shared/bin/opencode /usr/local/bin/opencode
+# Layer B (full pipeline with opencode):
+#   cp $(which opencode) test/agentic/shared/bin/opencode
+#   podman build -t mohist-walkthrough -f test/agentic/shared/Containerfile.layer2 test/agentic/
 
 FROM node:20-slim
 
