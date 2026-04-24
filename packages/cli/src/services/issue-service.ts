@@ -95,6 +95,15 @@ export class IssueService {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
     if (issue.status === IssueStatus.Completed) return null;
+    if (issue.status === IssueStatus.Closed) return null;
+    
+    return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
+  }
+
+  reopen(projectId: string, number: number): Issue | null {
+    const issue = this.issueRepo.findByNumber(projectId, number);
+    if (!issue) return null;
+    if (issue.status !== IssueStatus.Closed && issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Paused) return null;
     
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
   }
@@ -104,6 +113,13 @@ export class IssueService {
     if (!issue) return null;
     
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+  }
+
+  close(projectId: string, number: number): Issue | null {
+    const issue = this.issueRepo.findByNumber(projectId, number);
+    if (!issue) return null;
+    
+    return this.issueRepo.updateStatus(issue.id, IssueStatus.Closed);
   }
 
   update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[] }>): Issue | null {

@@ -358,6 +358,8 @@ export class WorkflowController {
     this.issueRepo.updateStage(currentIssue.id, Stage.Done);
     this.issueRepo.clearApprovalState(currentIssue.id);
     this.issueRepo.updateStatus(currentIssue.id, IssueStatus.Completed);
+
+    log.info('Pipeline completed', { issueNumber: currentIssue.number });
     return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
   }
 

@@ -139,6 +139,25 @@ async function main(): Promise<void> {
   }));
   server.addRouter('/api/logs', createLogRoutes());
 
+  eventBus.on('agent_completed', async ({ issueNumber, projectId }) => {
+    try {
+      const project = projectService.getById(projectId);
+      if (!project || !worktreeManager) return;
+
+      if (!worktreeManager.exists(project.name, issueNumber)) return;
+
+      log.info('Auto-merging completed issue back to base branch', { issueNumber, projectId, baseBranch: project.baseBranch });
+      const result = await worktreeManager.mergeBack(project.path, project.name, issueNumber, project.baseBranch);
+      if (result.success) {
+        log.info('Auto-merge succeeded', { issueNumber, message: result.message });
+      } else {
+        log.warn('Auto-merge failed, manual merge required', { issueNumber, message: result.message });
+      }
+    } catch (err) {
+      log.error('Auto-merge error', { issueNumber, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
   server.serveStaticFiles(webDistDir);
 

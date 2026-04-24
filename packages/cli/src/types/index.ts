@@ -35,6 +35,7 @@ export enum IssueStatus {
   Active = 'active',
   Paused = 'paused',
   Blocked = 'blocked',
+  Closed = 'closed',
   Completed = 'completed'
 }
 

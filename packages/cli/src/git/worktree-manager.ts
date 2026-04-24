@@ -112,6 +112,14 @@ export class WorktreeManager {
       throw new Error('Project is not a git repository');
     }
 
+    try {
+      await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: projectPath });
+    } catch {
+      throw new Error(
+        'Repository has no commits. Create an initial commit before starting an issue.'
+      );
+    }
+
     const baseDir = getWorktreeBaseDir(projectName);
     fs.mkdirSync(baseDir, { recursive: true });
 
@@ -154,6 +162,79 @@ export class WorktreeManager {
 
     log.info('Worktree created', { projectName, issueNumber, branch, worktreePath });
     return worktreePath;
+  }
+
+  async mergeBack(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<{ success: boolean; message: string }> {
+    const branch = getBranchName(issueNumber);
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+
+    if (!this.exists(projectName, issueNumber)) {
+      return { success: false, message: `Worktree for issue #${issueNumber} not found` };
+    }
+
+    try {
+      const { stdout: statusOut } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath }
+      );
+      const uncommitted = statusOut.trim().split('\n').filter(l => l.trim());
+      if (uncommitted.length > 0) {
+        await execFileAsync('git', ['add', '--', ':!openspec/changes/', ':!.opencode/'], { cwd: worktreePath });
+        const remaining = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd: worktreePath });
+        if (remaining.stdout.trim()) {
+          await execFileAsync('git', ['commit', '-m', `chore: commit remaining changes for issue #${issueNumber}`, '--no-verify'], { cwd: worktreePath });
+        }
+      }
+    } catch (err) {
+      log.warn('Failed to commit uncommitted changes before merge', { issueNumber, error: err instanceof Error ? err.message : String(err) });
+    }
+
+    const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
+    if (!hasCommits) {
+      log.info('No commits to merge back', { issueNumber, branch, baseBranch });
+      await this.remove(projectPath, projectName, issueNumber);
+      return { success: true, message: `No commits to merge for issue #${issueNumber}, worktree cleaned up` };
+    }
+
+    try {
+      const { stdout: dirtyCheck } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: projectPath }
+      );
+      if (dirtyCheck.trim()) {
+        await execFileAsync('git', ['stash', '--include-untracked'], { cwd: projectPath });
+      }
+
+      await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
+    } catch (err) {
+      return { success: false, message: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    try {
+      await execFileAsync('git', ['merge', branch, '--no-edit'], { cwd: projectPath });
+    } catch (err) {
+      await execFileAsync('git', ['merge', '--abort'], { cwd: projectPath }).catch(() => {});
+      return { success: false, message: `Merge conflict for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    await this.remove(projectPath, projectName, issueNumber);
+
+    log.info('Merged worktree branch back to base', { issueNumber, branch, baseBranch });
+    return { success: true, message: `Merged ${branch} into ${baseBranch} and cleaned up worktree` };
+  }
+
+  private async branchHasCommits(projectPath: string, branch: string, baseBranch: string): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync('git', ['log', `${baseBranch}..${branch}`, '--oneline'], { cwd: projectPath });
+      return stdout.trim().length > 0;
+    } catch {
+      return false;
+    }
   }
 
   async remove(

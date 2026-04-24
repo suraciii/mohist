@@ -301,7 +301,7 @@ export class AgentRunnerService {
         const duration = Date.now() - startTime;
         log.info('Pipeline run completed', { issueNumber: issue.number, duration, completed: result.completed });
         if (result.completed) {
-          this.eventBus.emit('agent_completed', { issueId: issue.id, projectId });
+          this.eventBus.emit('agent_completed', { issueId: issue.id, projectId, issueNumber: issue.number });
         } else if (!result.gateRequired) {
           try {
             issueRepo.setApprovalState(issue.id, {
