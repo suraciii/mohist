@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { Hono } from 'hono';
 import request from 'supertest';
 import { DatabaseManager } from '../src/db/database';
@@ -330,6 +333,67 @@ describe('API Routes', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
+      });
+    });
+
+    describe('POST /api/issues/:number/skip-to-review', () => {
+      it('should create awaiting approval state', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-skip-test-'));
+
+        try {
+          const project = await projectService.create({ name: 'SkipTest', path: tmpDir });
+          projectService.setCurrent(project);
+
+          const issue = issueService.create({ projectId: project.id, title: 'Skip Issue' });
+          const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [] }));
+
+          const skipApp = new Hono();
+          const skipEventBus = new EventBus();
+          const skipAgentRunner = new AgentRunnerService(skipEventBus);
+          skipApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, skipAgentRunner));
+          const skipServer = createTestServer(skipApp);
+
+          const response = await request(skipServer).post(`/api/issues/${issue.number}/skip-to-review`);
+
+          expect(response.status).toBe(200);
+          expect(response.body.success).toBe(true);
+
+          const issueRepo = stateManager.getIssueRepo();
+          const updated = issueRepo.findById(issue.id);
+          expect(updated?.stage).toBe(Stage.Review);
+          expect(updated?.approvalState?.status).toBe('awaiting');
+          expect(updated?.approvalState?.stage).toBe(Stage.Review);
+        } finally {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+    });
+
+    describe('POST /api/issues/:number/reopen', () => {
+      it('should preserve stage and resume pipeline for blocked issue', async () => {
+        const issue = issueService.create({ projectId, title: 'Blocked Issue' });
+        const issueRepo = stateManager.getIssueRepo();
+        issueRepo.updateStage(issue.id, Stage.Build);
+        issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+
+        const reopenApp = new Hono();
+        const reopenEventBus = new EventBus();
+        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8);
+        const resumePipelineSpy = vi.spyOn(reopenAgentRunner, 'resumePipeline');
+        reopenApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, reopenAgentRunner));
+        const reopenServer = createTestServer(reopenApp);
+
+        const response = await request(reopenServer).post(`/api/issues/${issue.number}/reopen`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.message).toContain('build');
+
+        expect(resumePipelineSpy).toHaveBeenCalledTimes(1);
+        const resumedIssue = resumePipelineSpy.mock.calls[0][0];
+        expect(resumedIssue.stage).toBe(Stage.Build);
       });
     });
   });

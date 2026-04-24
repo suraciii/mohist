@@ -106,7 +106,7 @@ describe('AgentRunnerService', () => {
       expect(service.hasPendingGate(issue.number)).toBe(true);
     });
 
-    it('should reset crashed orphaned issues to blocked/draft', () => {
+    it('should preserve stage when recovering crashed orphaned issues', () => {
       const project = projectRepo.create({ name: 'Test Project', path: '/test' });
       const issue = issueService.create({ projectId: project.id, title: 'Crashed Issue' });
 
@@ -119,7 +119,7 @@ describe('AgentRunnerService', () => {
 
       const recovered = issueRepo.findById(issue.id);
       expect(recovered?.status).toBe(IssueStatus.Blocked);
-      expect(recovered?.stage).toBe(Stage.Draft);
+      expect(recovered?.stage).toBe(Stage.Build);
       expect(recovered?.approvalState).toBeUndefined();
     });
 
@@ -149,7 +149,7 @@ describe('AgentRunnerService', () => {
 
       const recoveredCrashed = issueRepo.findById(crashedIssue.id);
       expect(recoveredCrashed?.status).toBe(IssueStatus.Blocked);
-      expect(recoveredCrashed?.stage).toBe(Stage.Draft);
+      expect(recoveredCrashed?.stage).toBe(Stage.Build);
 
       const statusAfter = service.getStatus();
       expect(statusAfter.recoverableIssues).toHaveLength(0);
