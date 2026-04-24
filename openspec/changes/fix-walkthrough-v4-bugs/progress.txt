@@ -26,3 +26,15 @@ Started: 2026-04-24T13:42:07.268Z
 - Typecheck: passes
 - No `updateStage.*Draft` calls remain in agent-runner-service.ts
 - Next: T-003 (stage timeout passing)
+
+## 2026-04-24 — T-003 Pass stage timeout to ACP session runner
+- Added `stageTimeoutMs?: number` to `RalphExecutorContext` in ralph-executor.ts
+- In `runRalphLoop`: computed `perTaskTimeout = max(stageTimeoutMs / totalTasks, 300000ms)`, default 30min when no stage timeout configured
+- Passed `perTaskTimeout` via `timeout` option to `_acpSessionRunner` call
+- In workflow-controller.ts: added `getBuildStageTimeoutMs()` helper that loads workflow config and extracts build stage timeout in ms
+- Passed `stageTimeoutMs` when constructing `RalphExecutor` in `runPipelineBuildStage`
+- Added `import { loadWorkflow }` to workflow-controller.ts
+- Typecheck: passes
+- Tests: 588 passed, 2 failed (pre-existing T-002 test expectations for Draft stage), 2 skipped
+- Learnings: acp-session.ts already accepts `timeout` in options with default 30min — only needed to thread the value through from workflow config
+- Next: T-004 (skip-to-review deadlock)

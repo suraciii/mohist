@@ -58,8 +58,8 @@
       "type": "FIX",
       "output": "packages/cli/src/openspec/ralph-executor.ts, packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "workflow-loader.ts line 52 defines timeout: 1800. ralph-executor.ts line 430-440 needs to read stage config and pass timeout to _acpSessionRunner. acp-session.ts already accepts timeout in options."
+      "passes": true,
+      "notes": "Added stageTimeoutMs to RalphExecutorContext. In runRalphLoop, per-task timeout = max(stageTimeoutMs / totalTasks, 300000ms floor), default 30min if no stage timeout. Passed via timeout option to _acpSessionRunner. WorkflowController loads build stage timeout from workflow config."
     },
     {
       "id": "T-004",
