@@ -19,7 +19,7 @@
       "type": "FIX",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Root cause: line 525 failed++ executes before any skip/retry decision. Fix: move failed++ to abort branch only (after line 545). For retry: when taskSuccess becomes true on retry, update the existing taskResults entry instead of pushing a new one."
     },
     {

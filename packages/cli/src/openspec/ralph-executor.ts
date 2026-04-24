@@ -522,7 +522,6 @@ export async function runRalphLoop(
         updateTaskInList(tasks, nextTask.id, { passes: false, attempts: nextTask.attempts, error: `Skipped: task was not executed (attemptsUsed=${attemptsUsed}, no attempts made)` });
         writeTasksFile(change.tasksPath, tasks);
       }
-      failed++;
       taskResults.push({
         taskId: nextTask.id,
         status: 'failed',
@@ -541,8 +540,10 @@ export async function runRalphLoop(
           writeTasksFile(change.tasksPath, tasks);
           taskResults[taskResults.length - 1].status = 'skipped';
         } else if (answer.toLowerCase().includes('retry')) {
+          taskResults.pop();
           continue;
         } else {
+          failed++;
           const result: RalphLoopResult = {
             completed,
             failed,
@@ -560,6 +561,8 @@ export async function runRalphLoop(
         updateTaskInList(tasks, nextTask.id, { passes: true, error: `Auto-skipped (no onAskUser): ${lastError}` });
         writeTasksFile(change.tasksPath, tasks);
         taskResults[taskResults.length - 1].status = 'skipped';
+      } else {
+        failed++;
       }
     } else {
       taskResults.push({
