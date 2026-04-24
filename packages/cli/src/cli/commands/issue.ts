@@ -249,7 +249,7 @@ export function setupIssueCommands(program: Command): void {
 
   issue
     .command('reopen <number>')
-    .description('Reopen a closed issue')
+    .description('Reopen a blocked, closed, or paused issue')
     .action(async (number) => {
       try {
         const response = await apiClient<ApiResponse>(

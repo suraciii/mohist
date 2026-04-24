@@ -518,48 +518,36 @@ export function createIssueRoutes(
           return c.json(response, 409);
         }
 
-        if (agentRunner.hasPendingGate(number)) {
-          const project = projectService.getById(projectId);
-          let worktreePath = process.cwd();
-          if (worktreeManager && project) {
-            const existingPath = worktreeManager.getPath(project.name, issue.number);
-            worktreePath = existingPath || process.cwd();
-          }
-
-          const acpOptions: AcpConnectionOptions = {
-            cwd: worktreePath,
-            issueId: issue.id,
-            projectId,
-            workflowLogRepo,
-            coderSessionRepo,
-            eventBus,
-            issueNumber: issue.number,
-            opencodeBinPath,
-          };
-
-          agentRunner.resumePipeline(
-            issue,
-            projectId,
-            stateManager.getIssueRepo(),
-            worktreePath,
-            acpOptions,
-            (issueId, status) => issueService.setStatus(issueId, status),
-          );
-
-          const response: ApiResponse = {
-            success: true,
-            data: { issue, message: `Issue #${number} reopened and resumed` }
-          };
-          return c.json(response);
+        const project = projectService.getById(projectId);
+        let worktreePath = process.cwd();
+        if (worktreeManager && project) {
+          const existingPath = worktreeManager.getPath(project.name, issue.number);
+          worktreePath = existingPath || process.cwd();
         }
 
-        issueService.transitionToStage(issue.id, Stage.Draft);
-        stateManager.getIssueRepo().clearApprovalState(issue.id);
-        const updatedIssue = issueService.getByNumber(projectId, number) || issue;
+        const acpOptions: AcpConnectionOptions = {
+          cwd: worktreePath,
+          issueId: issue.id,
+          projectId,
+          workflowLogRepo,
+          coderSessionRepo,
+          eventBus,
+          issueNumber: issue.number,
+          opencodeBinPath,
+        };
+
+        agentRunner.resumePipeline(
+          issue,
+          projectId,
+          stateManager.getIssueRepo(),
+          worktreePath,
+          acpOptions,
+          (issueId, status) => issueService.setStatus(issueId, status),
+        );
 
         const response: ApiResponse = {
           success: true,
-          data: { issue: updatedIssue, message: `Issue #${number} reopened and reset to draft, use start to begin again` }
+          data: { issue, message: `Issue #${number} reopened and resumed from stage ${issue.stage}` }
         };
         return c.json(response);
       }

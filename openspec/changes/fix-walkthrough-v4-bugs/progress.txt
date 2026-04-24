@@ -47,3 +47,20 @@ Started: 2026-04-24T13:42:07.268Z
 - Typecheck: passes
 - Learnings: ApprovalState requires `output` field (not optional). PendingGate registration is indeed optional — approve endpoint fallback works with just approvalState set.
 - Next: T-005 (reopen resume from current stage)
+
+## 2026-04-24 — T-005: Fix reopen to resume from current stage
+
+**What was done:**
+- Removed the `hasPendingGate` conditional branch in api/issues.ts reopen endpoint
+- Removed the reset-to-draft else branch (transitionToStage Draft + clearApprovalState)
+- Replaced with single code path: always preserve current stage and call resumePipeline
+- Updated response message to show current stage: "reopened and resumed from stage {stage}"
+- Updated CLI help text in issue.ts from "Reopen a closed issue" to "Reopen a blocked, closed, or paused issue"
+
+**Files changed:**
+- packages/cli/src/api/issues.ts (lines 520-552: removed two-branch logic, single resume path)
+- packages/cli/src/cli/commands/issue.ts (line 252: updated description)
+
+**Typecheck:** passes
+
+**Next steps:** T-006 (unit tests for all fixes)
