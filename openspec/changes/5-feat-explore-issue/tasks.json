@@ -99,9 +99,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "需要在 api/explore.ts POST /:id/messages handler 中查 issue.stage。参考 issueService.getById 或 issueService.getByNumber。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
