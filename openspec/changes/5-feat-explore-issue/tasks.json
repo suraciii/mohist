@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "后端：ExploreSessionRepo 支持可选 issueId + findByIssueId + 列表 JOIN issueNumber",
+      "spec": "specs/explore-issue-link/spec.md#创建-session-时可选指定-issueId,specs/http-api/spec.md#Explore-session-列表-API-返回-issueNumber",
+      "description": "1) ExploreSessionRepo.create() 的 CreateExploreSessionData 新增可选 issueId 字段，INSERT 时写入 issue_id。2) 新增 findByIssueId(issueId) 方法用于唯一性校验。3) 新增 findByProjectWithIssueNumber(projectId) 方法，SQL LEFT JOIN issues 表返回 issueNumber。4) 新增 findByIdWithIssueNumber(id) 方法，同样 LEFT JOIN 返回单个 session 含 issueNumber（供 GET /:id 使用）。5) ExploreSession 类型加 issueNumber?: number。6) rowToExploreSession 函数处理 issueNumber 字段（需新的 row type）。7) ExploreService.createSession 透传 issueId。8) ExploreService.listSessions 改用 findByProjectWithIssueNumber。9) ExploreService.getSession 改用 findByIdWithIssueNumber。",
+      "acceptanceCriteria": [
+        "ExploreSessionRepo.create({projectId, title, issueId}) 正确写入 issue_id",
+        "ExploreSessionRepo.create({projectId, title}) 写入 issue_id = null",
+        "findByIssueId(issueId) 返回匹配的 session 或 null",
+        "findByProjectWithIssueNumber 返回的 session 包含 issueNumber 字段",
+        "findByIdWithIssueNumber 返回的 session 包含 issueNumber 字段",
+        "issueId 为 null 的 session 返回 issueNumber 为 undefined",
+        "ExploreService.getSession 返回含 issueNumber 的 session",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/db/explore-session-repo.ts, packages/cli/src/types/index.ts, packages/cli/src/services/explore-service.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "保留 crystallize() 方法不删（ACP 路由仍在用）。ExploreStatus.Crystallized 枚举值保留。前端 types.ts 的 ExploreSession.status 后续 T-004 统一处理。",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "后端：API 路由接受 issueId + 唯一性校验 + 列表返回 issueNumber",
+      "spec": "specs/http-api/spec.md#Explore-session-创建-API-接受-issueId,specs/http-api/spec.md#Explore-session-列表-API-返回-issueNumber",
+      "description": "1) POST /api/explore route body 解构新增可选 issueId 字段。2) 当 issueId 存在时：校验 issue 是否存在（404）、是否已有 session 关联（409），然后传给 exploreService.createSession。3) GET /api/explore route 改用 exploreService.listSessions（已改为返回含 issueNumber 的结果）。4) GET /api/explore/:id route 改用 exploreService.getSession（已改为返回含 issueNumber 的 session）。5) POST 成功时返回含 issueNumber 的 session。",
+      "acceptanceCriteria": [
+        "POST /api/explore {projectId, issueId} 成功创建并返回 session 含 issueId 和 issueNumber",
+        "POST /api/explore {projectId} 不带 issueId 时正常创建（issue_id = null）",
+        "POST /api/explore {issueId: nonexistent} 返回 404",
+        "POST /api/explore {issueId: alreadyLinked} 返回 409 Conflict",
+        "GET /api/explore?projectId=x 返回的 session 包含 issueNumber 字段",
+        "GET /api/explore/:id 返回的 session 包含 issueNumber 字段",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/explore.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "后端：create_issue tool 改用 updateIssueId + 新增 update_issue tool",
+      "spec": "specs/explore-issue-link/spec.md#create-issue-tool-不再-crystallize-session,specs/explore-issue-link/spec.md#update_issue-tool",
+      "description": "1) create-issue-tool.ts：将 crystallize() 调用改为 updateIssueId()，移除 explore_crystallized 事件 emit。2) 新建 update-issue-tool.ts：定义 update_issue tool，参数为 {title?, body?, labels?}，execute 中校验 issue.stage === 'draft' 否则返回错误，通过 IssueService.update 更新字段。3) ExploreAgentContext 新增可选 issueId 和 issueStage 字段。",
+      "acceptanceCriteria": [
+        "create_issue tool 调用后 session.status 保持 active，issueId 被设置",
+        "create_issue tool 不再 emit explore_crystallized 事件",
+        "update_issue tool 更新 Draft issue 的 title/body/labels 成功",
+        "update_issue tool 在 issue 非 Draft 时返回错误信息",
+        "ExploreAgentContext 接口包含 issueId 和 issueStage 字段",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/tools/create-issue-tool.ts, packages/cli/src/tools/update-issue-tool.ts, packages/cli/src/agents/explore-agent.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "update_issue 的 labels 参数为全量替换，与 IssueService.update 的 addLabels/removeLabels 不同。需要在 tool 内部调用 issueService.getById 获取当前 issue，合并 labels 后调用 issueService.update。或者直接调用 issueRepo 更新。参考 IssueService.update 的实现方式。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "后端：ExploreAgentContext 扩展 + runExploreAgent 动态 prompt + 条件注册 update_issue tool",
+      "spec": "specs/explore-issue-link/spec.md#Agent-prompt-感知关联-issue,specs/explore-issue-link/spec.md#update_issue-tool",
+      "description": "1) 在 api/explore.ts 的 POST /:id/messages handler 中，构建 agentContext 前查 session.issueId，如有则查 issue.stage，填入 ExploreAgentContext.issueId 和 issueStage。2) buildExploreToolRegistry：当 context.issueId 存在且 issueStage 为 'draft' 时注册 update_issue tool（从 T-003 新建的文件 import）。3) runExploreAgent：基于 context.issueId/issueStage 拼接额外 system prompt 段落追加到 EXPLORE_SYSTEM_PROMPT 之后。",
+      "acceptanceCriteria": [
+        "session 无 issueId 时 system prompt 附加 create_issue 可用说明",
+        "session 有 issueId 且 issueStage=draft 时 system prompt 附加 update_issue 可用说明，且 update_issue tool 已注册",
+        "session 有 issueId 且 issueStage 非 draft 时 system prompt 附加只读说明，且 update_issue tool 不注册",
+        "session 无 issueId 时 update_issue tool 不注册",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agents/explore-agent.ts, packages/cli/src/api/explore.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "需要在 api/explore.ts POST /:id/messages handler 中查 issue.stage。参考 issueService.getById 或 issueService.getByNumber。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-005",
+      "title": "前端：类型更新 + API 方法加 issueId + ExplorePage header 改返回 + 显示 issue 关联",
+      "spec": "specs/web-ui/spec.md#ExplorePage-返回按钮导航到列表页,specs/web-ui/spec.md#ExplorePage-显示关联-issue-信息,specs/http-api/spec.md#Explore-session-列表-API-返回-issueNumber",
+      "description": "1) web/src/lib/types.ts：ExploreSession.status 改为 'active' | 'archived'（前端统一将 crystallized 显示为 active），新增 issueNumber?: number。2) web/src/lib/api.ts：createExploreSession data 类型加 issueId?: string。3) web/src/hooks/useQueries.ts：useCreateExploreSession mutation fn data 类型加 issueId。4) ExplorePage.tsx header 返回按钮 navigate('/') 改为 navigate('/explore')。5) ExplorePage header 区域：当 session.issueNumber 存在时显示 'Issue #N' 链接（navigate 到 /issue/:number）。6) ExplorePage header status 显示：crystallized 统一显示为 Active。",
+      "acceptanceCriteria": [
+        "ExplorePage 返回按钮导航到 /explore",
+        "session 有 issueNumber 时 header 显示 Issue #N 链接",
+        "session 无 issueNumber 时不显示 Issue 相关信息",
+        "crystallized status 显示为 Active",
+        "createExploreSession API 方法接受 issueId 参数",
+        "useCreateExploreSession hook 透传 issueId",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts, packages/cli/web/src/components/ExplorePage.tsx",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-006",
+      "title": "前端：ExploreSessionList 列表页组件 + 路由替换 ExploreRedirect",
+      "spec": "specs/explore-session-list/spec.md#Session-列表页替代-ExploreRedirect,specs/explore-session-list/spec.md#Session-列表页创建新-session,specs/explore-session-list/spec.md#Session-列表页删除-session",
+      "description": "1) 新建 ExploreSessionList.tsx 组件：使用 useExploreSessions 获取列表，展示卡片（标题、状态、关联 Issue #N、更新时间），顶部 New Session 按钮，每个卡片可点击进入 /explore/:id，每个卡片有删除按钮（带确认）。空状态显示提示 + New Session。2) App.tsx：将 ExploreRedirect 组件替换为 ExploreSessionList，Route path='/explore' element 改为 ExploreSessionList。3) 删除 ExploreRedirect 组件代码。",
+      "acceptanceCriteria": [
+        "访问 /explore 显示 session 列表，不自动重定向",
+        "每个 session 卡片显示标题、状态、关联 Issue #N（如有）、更新时间",
+        "点击 New Session 创建新 session 并导航到 /explore/:id",
+        "点击 session 卡片导航到 /explore/:id",
+        "删除 session 需确认，确认后调用 DELETE API 并刷新列表",
+        "无 session 时显示空状态和 New Session 按钮",
+        "ExploreRedirect 组件已从 App.tsx 移除",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/ExploreSessionList.tsx, packages/cli/web/src/App.tsx",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "样式参考 KanbanView 的卡片布局，使用 Tailwind CSS。状态统一显示 Active/Archived（crystallized 视为 Active）。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-007",
+      "title": "前端：IssueDetailPage Draft issue 加 Explore 按钮",
+      "spec": "specs/issue-explore-entry/spec.md#Draft-issue-详情页-Explore-按钮,specs/issue-explore-entry/spec.md#Explore-按钮跳转逻辑",
+      "description": "1) IssueDetailPage.tsx Actions 区域：当 issue.stage === 'draft' 时增加 Explore 按钮。2) 点击逻辑：先在 useExploreSessions 返回的列表中查找 issue.id 匹配的 session（session.issueId === issue.id），有则直接 navigate('/explore/:sessionId')，无则调用 useCreateExploreSession({projectId, issueId}) 创建后 navigate。3) 创建失败时在 Actions 区域显示错误提示。",
+      "acceptanceCriteria": [
+        "Draft issue 详情页 Actions 区域显示 Explore 按钮",
+        "非 Draft issue 不显示 Explore 按钮",
+        "已有 session 关联时直接跳转到 /explore/:sessionId",
+        "无 session 关联时创建新 session（含 issueId）后跳转",
+        "创建失败时显示错误提示",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": [
+        "T-005",
+        "T-006"
+      ],
+      "passes": false,
+      "notes": "需要从 useExploreSessions 列表中按 issueId 查找关联 session。useExploreSessions 需要 projectId 参数，从 useProject() 获取。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-008",
+      "title": "测试：后端 explore session 关联 + update_issue tool 测试",
+      "spec": "specs/explore-issue-link/spec.md",
+      "description": "1) 测试 ExploreSessionRepo.create 带 issueId。2) 测试 findByIssueId。3) 测试 findByProjectWithIssueNumber 返回 issueNumber。4) 测试 create_issue tool 不再 crystallize。5) 测试 update_issue tool 更新 Draft issue。6) 测试 update_issue tool 拒绝非 Draft issue。7) 测试 API POST /explore 唯一性校验（409）。8) 测试 API GET /explore 返回 issueNumber。",
+      "acceptanceCriteria": [
+        "所有新增测试通过",
+        "npm test 通过",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "参考现有 explore 相关测试文件的位置和风格。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
