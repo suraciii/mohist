@@ -33,17 +33,20 @@ export function Dialog({ open, onClose, title, children }: Props) {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+    <div className="fixed inset-0 z-50 flex md:items-center md:justify-center">
+      <div
+        className="hidden md:block absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
       <div
         ref={dialogRef}
-        className="relative z-10 w-full max-w-lg rounded-lg border border-gray-200 bg-white shadow-xl"
+        className="relative z-10 flex flex-col inset-0 md:inset-auto md:relative md:w-full md:max-w-lg md:rounded-lg md:border md:border-gray-200 bg-white md:shadow-xl"
       >
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 md:rounded-t-lg">
           <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex items-center justify-center min-h-[44px] min-w-[44px] -mr-2 text-gray-400 hover:text-gray-600 transition-colors"
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path
@@ -54,7 +57,7 @@ export function Dialog({ open, onClose, title, children }: Props) {
             </svg>
           </button>
         </div>
-        <div className="px-4 py-3">{children}</div>
+        <div className="flex-1 overflow-y-auto px-4 py-3">{children}</div>
       </div>
     </div>
   )
