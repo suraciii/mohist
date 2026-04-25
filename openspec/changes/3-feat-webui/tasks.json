@@ -159,9 +159,9 @@
         "T-003",
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "KanbanBoard 使用 md:hidden / hidden md:block 双区域渲染。移动端复用 IssueCard 组件。FAB 的 onClick 需要与 Header 的 CreateIssueDialog 状态协调，可考虑将 showCreateIssue 状态提升到 AppContent 或通过 props 传递。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
