@@ -2,16 +2,18 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProject } from '../context/ProjectContext'
 import type { Project } from '../lib/types'
-import { CreateIssueDialog } from './CreateIssueDialog'
 import { CreateProjectDialog } from './CreateProjectDialog'
 import { Dialog } from './Dialog'
 import { useDeleteProject, useUseProject } from '../hooks/useQueries'
 
-export function Header() {
+interface HeaderProps {
+  onCreateIssue: () => void
+}
+
+export function Header({ onCreateIssue }: HeaderProps) {
   const { projectId, setProjectId, projects, currentProject } = useProject()
   const navigate = useNavigate()
   const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [createIssueOpen, setCreateIssueOpen] = useState(false)
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -171,7 +173,7 @@ export function Header() {
           </button>
           <button
             className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm min-h-[44px]"
-            onClick={() => setCreateIssueOpen(true)}
+            onClick={onCreateIssue}
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
@@ -181,7 +183,6 @@ export function Header() {
         </div>
       </header>
 
-      <CreateIssueDialog open={createIssueOpen} onClose={() => setCreateIssueOpen(false)} />
       <CreateProjectDialog open={createProjectOpen} onClose={() => setCreateProjectOpen(false)} />
 
       <Dialog
