@@ -74,9 +74,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "update_issue 的 labels 参数为全量替换，与 IssueService.update 的 addLabels/removeLabels 不同。需要在 tool 内部调用 issueService.getById 获取当前 issue，合并 labels 后调用 issueService.update。或者直接调用 issueRepo 更新。参考 IssueService.update 的实现方式。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },

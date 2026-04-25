@@ -99,6 +99,32 @@ export function buildExploreToolRegistry(context: ExploreAgentContext): ToolRegi
   return registry;
 }
 
+export function buildExploreSystemPrompt(context: ExploreAgentContext): string {
+  let prompt = EXPLORE_SYSTEM_PROMPT;
+
+  if (!context.issueId) {
+    prompt += `
+
+## Current Session Status
+This session is not linked to any issue yet. You can use \`create_issue\` to create a new draft issue from this exploration when requirements have converged.`;
+  } else if (context.issueStage === 'draft') {
+    prompt += `
+
+## Current Session Status
+This session is linked to a **Draft** issue (ID: ${context.issueId}). You can:
+- Continue exploring and refining requirements
+- Use \`update_issue\` to update the issue's title, body, or labels at any time
+- The issue will remain in Draft stage until it is promoted through the workflow`;
+  } else {
+    prompt += `
+
+## Current Session Status
+This session is linked to issue (ID: ${context.issueId}) which is in **${context.issueStage}** stage. The issue is no longer in Draft, so it cannot be updated from here. You can still explore and discuss, but changes to the issue require workflow actions outside this session.`;
+  }
+
+  return prompt;
+}
+
 export async function runExploreAgent(
   context: ExploreAgentContext,
   messages: ModelMessage[],
@@ -108,10 +134,11 @@ export async function runExploreAgent(
     : context.llmConfig;
   const model = await resolveModel(config);
   const toolRegistry = buildExploreToolRegistry(context);
+  const systemPrompt = buildExploreSystemPrompt(context);
 
   return streamText({
     model,
-    system: EXPLORE_SYSTEM_PROMPT,
+    system: systemPrompt,
     messages,
     tools: toolRegistry.toToolSet(),
     stopWhen: stepCountIs(20),
