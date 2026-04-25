@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { useIssues, useProjects, useCurrentProject, useAgentStatus, useExploreSessions, useCreateExploreSession } from './hooks/useQueries'
 import useSSE from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
@@ -8,9 +8,12 @@ import { Header } from './components/Header'
 import { IssueDetailPage } from './components/IssueDetailPage'
 import { ExplorePage } from './components/ExplorePage'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
+import { CreateIssueDialog } from './components/CreateIssueDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { LogsPage } from './components/LogsPage'
 import { ProjectGuard } from './components/ProjectGuard'
+import { MobileBottomNav } from './components/MobileBottomNav'
+import { FAB } from './components/FAB'
 
 function KanbanView() {
   const { projectId } = useProject()
@@ -111,9 +114,11 @@ function ExploreRedirect() {
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
   useSSE(projectId)
+  const location = useLocation()
 
   const { data: projects } = useProjects()
   const { data: currentProject } = useCurrentProject()
+  const [createIssueOpen, setCreateIssueOpen] = useState(false)
 
   useEffect(() => {
     if (projects) {
@@ -130,8 +135,9 @@ function AppContent() {
   }, [currentProject, projects, projectId, setProjectId])
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <Header />
+    <div className="min-h-screen bg-gray-50 flex flex-col pb-14 md:pb-0">
+      <Header onCreateIssue={() => setCreateIssueOpen(true)} />
+      <MobileBottomNav />
       <Routes>
         <Route element={<ProjectGuard />}>
           <Route path="/" element={<KanbanView />} />
@@ -142,6 +148,8 @@ function AppContent() {
           <Route path="/logs" element={<LogsPage />} />
         </Route>
       </Routes>
+      {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
+      <CreateIssueDialog open={createIssueOpen} onClose={() => setCreateIssueOpen(false)} />
     </div>
   )
 }

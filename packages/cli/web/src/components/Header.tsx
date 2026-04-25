@@ -2,16 +2,18 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProject } from '../context/ProjectContext'
 import type { Project } from '../lib/types'
-import { CreateIssueDialog } from './CreateIssueDialog'
 import { CreateProjectDialog } from './CreateProjectDialog'
 import { Dialog } from './Dialog'
 import { useDeleteProject, useUseProject } from '../hooks/useQueries'
 
-export function Header() {
+interface HeaderProps {
+  onCreateIssue: () => void
+}
+
+export function Header({ onCreateIssue }: HeaderProps) {
   const { projectId, setProjectId, projects, currentProject } = useProject()
   const navigate = useNavigate()
   const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [createIssueOpen, setCreateIssueOpen] = useState(false)
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -55,7 +57,7 @@ export function Header() {
 
   return (
     <>
-      <header className="h-14 border-b border-gray-200 bg-white flex items-center px-6 shrink-0">
+      <header className="h-14 border-b border-gray-200 bg-white flex items-center px-4 md:px-6 shrink-0">
         <h1 className="text-lg font-bold text-gray-900 tracking-tight">mohist</h1>
 
         <div className="ml-6" ref={dropdownRef}>
@@ -71,7 +73,7 @@ export function Header() {
             <div className="relative">
               <button
                 onClick={() => setDropdownOpen(!dropdownOpen)}
-                className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900 font-medium px-2.5 py-1.5 rounded-md hover:bg-gray-100 transition-colors"
+                className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900 font-medium px-2.5 py-1.5 rounded-md hover:bg-gray-100 transition-colors min-h-[44px]"
               >
                 <span>{currentProject?.name ?? 'Select project'}</span>
                 <svg
@@ -131,7 +133,7 @@ export function Header() {
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto hidden md:flex items-center gap-2">
           <button
             className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
             onClick={() => navigate('/explore')}
@@ -170,8 +172,8 @@ export function Header() {
             Settings
           </button>
           <button
-            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
-            onClick={() => setCreateIssueOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm min-h-[44px]"
+            onClick={onCreateIssue}
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
@@ -181,7 +183,6 @@ export function Header() {
         </div>
       </header>
 
-      <CreateIssueDialog open={createIssueOpen} onClose={() => setCreateIssueOpen(false)} />
       <CreateProjectDialog open={createProjectOpen} onClose={() => setCreateProjectOpen(false)} />
 
       <Dialog

@@ -30,7 +30,7 @@ export function ExploreInput({ onSend, disabled }: ExploreInputProps) {
   }
 
   return (
-    <div className="border-t border-gray-200 bg-white px-4 py-3 shrink-0">
+    <div className="border-t border-gray-200 bg-white px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shrink-0">
       <div className="flex items-end gap-2 max-w-3xl mx-auto">
         <textarea
           ref={textareaRef}
@@ -45,7 +45,7 @@ export function ExploreInput({ onSend, disabled }: ExploreInputProps) {
         <button
           onClick={handleSubmit}
           disabled={disabled || !text.trim()}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
         >
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
