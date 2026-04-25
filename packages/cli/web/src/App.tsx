@@ -11,6 +11,7 @@ import { CreateProjectDialog } from './components/CreateProjectDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { LogsPage } from './components/LogsPage'
 import { ProjectGuard } from './components/ProjectGuard'
+import { MobileBottomNav } from './components/MobileBottomNav'
 
 function KanbanView() {
   const { projectId } = useProject()
@@ -132,6 +133,7 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col pb-14 md:pb-0">
       <Header />
+      <MobileBottomNav />
       <Routes>
         <Route element={<ProjectGuard />}>
           <Route path="/" element={<KanbanView />} />
