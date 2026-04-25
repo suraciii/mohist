@@ -175,7 +175,7 @@ export function ModelSelector({ sessionId, currentModel, currentVariant }: Props
   }, [searchQuery])
 
   const currentModelDisplay = currentModel
-    ? flattenedModels.find(m => m.id === currentModel)?.name || currentModel
+    ? flattenedModels.find(m => m.id === currentModel)?.name || currentModel.split('/').pop() || currentModel
     : 'Select model'
 
   return (
@@ -183,13 +183,13 @@ export function ModelSelector({ sessionId, currentModel, currentVariant }: Props
       {({ open }) => (
         <>
           <Popover.Button
-            className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors shadow-sm ${
+            className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors shadow-sm min-h-[44px] md:min-h-0 ${
               open
                 ? 'border-blue-500 bg-blue-50 text-blue-700'
                 : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
             }`}
           >
-            <span>{currentModelDisplay}</span>
+            <span className="max-w-[120px] md:max-w-none truncate">{currentModelDisplay}</span>
             <ChevronDownIcon />
           </Popover.Button>
 
@@ -202,7 +202,7 @@ export function ModelSelector({ sessionId, currentModel, currentVariant }: Props
             leaveFrom="transform opacity-100 scale-100"
             leaveTo="transform opacity-0 scale-95"
           >
-            <Popover.Panel className="absolute right-0 z-50 mt-2 w-80 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
+            <Popover.Panel className="fixed inset-x-2 top-auto z-50 mt-2 md:absolute md:inset-x-auto md:right-0 md:w-80 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
               <div className="p-2">
                 <div className="relative">
                   <div className="absolute left-3 top-1/2 -translate-y-1/2">

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useProviders, useDeleteProvider } from '../hooks/useQueries'
 import type { Provider } from '../lib/provider-api'
 import { ProviderConnectDialog } from './ProviderConnectDialog'
@@ -96,24 +97,26 @@ interface ConnectedProviderCardProps {
 
 function ConnectedProviderCard({ provider, onDisconnect }: ConnectedProviderCardProps) {
   return (
-    <div className="flex items-center gap-4 p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
-      <ProviderIcon providerId={provider.id} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <h4 className="text-sm font-medium text-gray-900">{provider.name}</h4>
-          {provider.isDefault && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-medium">
-              <CheckIcon className="h-3 w-3" />
-              default
-            </span>
-          )}
-          <SourceTag source={provider.source} />
+    <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+      <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
+        <ProviderIcon providerId={provider.id} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h4 className="text-sm font-medium text-gray-900">{provider.name}</h4>
+            {provider.isDefault && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-medium">
+                <CheckIcon className="h-3 w-3" />
+                default
+              </span>
+            )}
+            <SourceTag source={provider.source} />
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5 font-mono">{provider.apiKeyMasked}</p>
         </div>
-        <p className="text-xs text-gray-500 mt-0.5 font-mono">{provider.apiKeyMasked}</p>
       </div>
       <button
         onClick={() => onDisconnect(provider.id)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors"
+        className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors min-h-[44px]"
       >
         <TrashIcon className="h-4 w-4" />
         Remove
@@ -286,20 +289,22 @@ function AvailableProvidersList() {
           {availableProviders.map(provider => (
             <div
               key={provider.id}
-              className="flex items-center gap-4 p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors"
+              className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors"
             >
-              <ProviderIcon providerId={provider.id} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-medium text-gray-900">{provider.name}</h4>
+              <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
+                <ProviderIcon providerId={provider.id} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-medium text-gray-900">{provider.name}</h4>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {providerDescriptions[provider.id] || 'Configure this provider to get started.'}
+                  </p>
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {providerDescriptions[provider.id] || 'Configure this provider to get started.'}
-                </p>
               </div>
               <button
                 onClick={() => handleConnect(provider)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors min-h-[44px]"
               >
                 <CloudIcon className="h-4 w-4" />
                 Connect
@@ -354,12 +359,28 @@ function CustomProvidersSection() {
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState('providers')
+  const navigate = useNavigate()
 
   return (
     <div className="flex-1 bg-gray-50">
-      <div className="max-w-4xl mx-auto px-6 py-6">
+      <div className="max-w-4xl mx-auto px-4 md:px-6 py-6">
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
+        </div>
+
+        <div className="md:hidden mb-4">
+          <button
+            onClick={() => navigate('/logs')}
+            className="inline-flex items-center gap-2 w-full px-4 py-3 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors min-h-[44px]"
+          >
+            <svg className="h-4 w-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2H6zm1 2a1 1 0 000 2h6a1 1 0 100-2H7zm6 7a1 1 0 011 1v3a1 1 0 11-2 0v-3a1 1 0 011-1zm-3 3a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zm-2-2a1 1 0 10-2 0v3a1 1 0 102 0v-3z" clipRule="evenodd" />
+            </svg>
+            View Logs
+            <svg className="h-4 w-4 ml-auto text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+            </svg>
+          </button>
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
