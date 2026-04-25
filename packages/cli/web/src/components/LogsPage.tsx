@@ -119,7 +119,7 @@ export function LogsPage() {
 
   return (
     <div className="flex-1 flex flex-col bg-gray-50 overflow-hidden">
-      <div className="shrink-0 border-b border-gray-200 bg-white px-6 py-3">
+      <div className="shrink-0 border-b border-gray-200 bg-white px-4 md:px-6 py-3">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-lg font-semibold text-gray-900">Logs</h1>
           <div className="flex items-center gap-2">
@@ -195,13 +195,13 @@ export function LogsPage() {
       </div>
 
       {truncated && (
-        <div className="shrink-0 bg-yellow-50 border-b border-yellow-200 px-6 py-1.5 text-xs text-yellow-700">
+        <div className="shrink-0 bg-yellow-50 border-b border-yellow-200 px-4 md:px-6 py-1.5 text-xs text-yellow-700">
           Log output truncated; showing latest chunk
         </div>
       )}
 
       {file && (
-        <div className="shrink-0 bg-gray-100 border-b border-gray-200 px-6 py-1 text-xs text-gray-500 font-mono">
+        <div className="shrink-0 bg-gray-100 border-b border-gray-200 px-4 md:px-6 py-1 text-xs text-gray-500 font-mono">
           File: {file}
         </div>
       )}

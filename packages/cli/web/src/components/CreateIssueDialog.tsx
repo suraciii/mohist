@@ -109,7 +109,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
           <button
             onClick={() => mutation.mutate()}
             disabled={!title.trim() || mutation.isPending}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors min-h-[44px]"
           >
             {mutation.isPending ? 'Creating...' : 'Create'}
           </button>
