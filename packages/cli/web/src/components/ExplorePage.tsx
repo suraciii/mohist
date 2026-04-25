@@ -115,7 +115,7 @@ export function ExplorePage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="border-b border-gray-200 bg-white px-6 py-3 flex items-center gap-3 shrink-0">
+      <div className="border-b border-gray-200 bg-white px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
         <button
           onClick={() => navigate('/')}
           className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -150,7 +150,7 @@ export function ExplorePage() {
       )}
 
       {llmConfigured && streamError && (
-        <div className="mx-6 mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+        <div className="mx-4 md:mx-6 mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
           {streamError}
         </div>
       )}

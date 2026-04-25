@@ -357,7 +357,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex-1 bg-gray-50">
-      <div className="max-w-4xl mx-auto px-6 py-6">
+      <div className="max-w-4xl mx-auto px-4 md:px-6 py-6">
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
         </div>

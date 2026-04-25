@@ -71,7 +71,7 @@ export function Header() {
             <div className="relative">
               <button
                 onClick={() => setDropdownOpen(!dropdownOpen)}
-                className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900 font-medium px-2.5 py-1.5 rounded-md hover:bg-gray-100 transition-colors"
+                className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900 font-medium px-2.5 py-1.5 rounded-md hover:bg-gray-100 transition-colors min-h-[44px]"
               >
                 <span>{currentProject?.name ?? 'Select project'}</span>
                 <svg
@@ -170,7 +170,7 @@ export function Header() {
             Settings
           </button>
           <button
-            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm min-h-[44px]"
             onClick={() => setCreateIssueOpen(true)}
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
