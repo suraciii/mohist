@@ -44,10 +44,35 @@ export function createExploreRoutes(
       }
 
       const title = body.title || 'New Exploration';
-      const session = exploreService.createSession({ projectId, title });
+      const issueId: string | undefined = body.issueId;
+      let issueNumber: number | undefined;
+
+      if (issueId) {
+        const issue = issueService.getById(issueId);
+        if (!issue) {
+          const response: ApiResponse = {
+            success: false,
+            error: `Issue not found: ${issueId}`,
+          };
+          return c.json(response, 404);
+        }
+
+        const existingSession = exploreService.findSessionByIssueId(issueId);
+        if (existingSession) {
+          const response: ApiResponse = {
+            success: false,
+            error: 'Issue is already linked to another explore session',
+          };
+          return c.json(response, 409);
+        }
+
+        issueNumber = issue.number;
+      }
+
+      const session = exploreService.createSession({ projectId, title, issueId });
       const response: ApiResponse<ExploreSession> = {
         success: true,
-        data: session,
+        data: { ...session, issueNumber },
       };
       return c.json(response, 201);
     } catch (error) {
