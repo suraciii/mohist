@@ -15,11 +15,16 @@ interface ExploreSessionRow {
   updated_at: string;
 }
 
-function rowToExploreSession(row: ExploreSessionRow): ExploreSession {
+interface ExploreSessionWithIssueRow extends ExploreSessionRow {
+  issue_number: number | null;
+}
+
+function rowToExploreSession(row: ExploreSessionRow | ExploreSessionWithIssueRow): ExploreSession {
   return {
     id: row.id,
     projectId: row.project_id,
     issueId: row.issue_id,
+    issueNumber: 'issue_number' in row && row.issue_number != null ? row.issue_number : undefined,
     title: row.title,
     status: row.status as ExploreStatus,
     model: row.model ?? undefined,
@@ -32,6 +37,7 @@ function rowToExploreSession(row: ExploreSessionRow): ExploreSession {
 export interface CreateExploreSessionData {
   projectId: string;
   title: string;
+  issueId?: string;
 }
 
 export class ExploreSessionRepo {
@@ -42,17 +48,18 @@ export class ExploreSessionRepo {
     const id = uuidv4();
     const config = load();
     const model = config.model ?? null;
+    const issueId = data.issueId ?? null;
 
     this.db.run(
-      `INSERT INTO explore_sessions (id, project_id, title, status, model, variant, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, data.projectId, data.title, ExploreStatus.Active, model, null, now, now]
+      `INSERT INTO explore_sessions (id, project_id, issue_id, title, status, model, variant, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, data.projectId, issueId, data.title, ExploreStatus.Active, model, null, now, now]
     );
 
     return {
       id,
       projectId: data.projectId,
-      issueId: null,
+      issueId,
       title: data.title,
       status: ExploreStatus.Active,
       model: model ?? undefined,
@@ -70,12 +77,43 @@ export class ExploreSessionRepo {
     return row ? rowToExploreSession(row) : null;
   }
 
+  findByIdWithIssueNumber(id: string): ExploreSession | null {
+    const row = this.db.get<ExploreSessionWithIssueRow>(
+      `SELECT es.*, i.number AS issue_number
+       FROM explore_sessions es
+       LEFT JOIN issues i ON es.issue_id = i.id
+       WHERE es.id = ?`,
+      [id]
+    );
+    return row ? rowToExploreSession(row) : null;
+  }
+
   findByProject(projectId: string): ExploreSession[] {
     const rows = this.db.all<ExploreSessionRow>(
       'SELECT * FROM explore_sessions WHERE project_id = ? ORDER BY updated_at DESC',
       [projectId]
     );
     return rows.map(rowToExploreSession);
+  }
+
+  findByProjectWithIssueNumber(projectId: string): ExploreSession[] {
+    const rows = this.db.all<ExploreSessionWithIssueRow>(
+      `SELECT es.*, i.number AS issue_number
+       FROM explore_sessions es
+       LEFT JOIN issues i ON es.issue_id = i.id
+       WHERE es.project_id = ?
+       ORDER BY es.updated_at DESC`,
+      [projectId]
+    );
+    return rows.map(rowToExploreSession);
+  }
+
+  findByIssueId(issueId: string): ExploreSession | null {
+    const row = this.db.get<ExploreSessionRow>(
+      'SELECT * FROM explore_sessions WHERE issue_id = ?',
+      [issueId]
+    );
+    return row ? rowToExploreSession(row) : null;
   }
 
   delete(id: string): boolean {

@@ -120,6 +120,7 @@ export interface ExploreSession {
   id: string;
   projectId: string;
   issueId: string | null;
+  issueNumber?: number;
   title: string;
   status: ExploreStatus;
   model?: string;
