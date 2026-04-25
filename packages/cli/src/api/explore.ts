@@ -348,6 +348,16 @@ export function createExploreRoutes(
         model: session.model ?? globalConfig.model,
       };
 
+      let agentIssueId: string | undefined;
+      let agentIssueStage: string | undefined;
+      if (session.issueId) {
+        const linkedIssue = issueService.getById(session.issueId);
+        if (linkedIssue) {
+          agentIssueId = linkedIssue.id;
+          agentIssueStage = linkedIssue.stage;
+        }
+      }
+
       const agentContext = {
         projectPath: project.path,
         sessionId,
@@ -356,6 +366,8 @@ export function createExploreRoutes(
         issueService,
         exploreSessionRepo,
         eventBus,
+        issueId: agentIssueId,
+        issueStage: agentIssueStage,
       };
 
       const result = await runExploreAgent(agentContext, historyMessages);
