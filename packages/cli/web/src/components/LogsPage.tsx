@@ -120,12 +120,12 @@ export function LogsPage() {
   return (
     <div className="flex-1 flex flex-col bg-gray-50 overflow-hidden">
       <div className="shrink-0 border-b border-gray-200 bg-white px-4 md:px-6 py-3">
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="text-lg font-semibold text-gray-900">Logs</h1>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between mb-2 gap-2">
+          <h1 className="text-lg font-semibold text-gray-900 shrink-0">Logs</h1>
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setAutoFollow(!autoFollow)}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors min-h-[36px] ${
                 autoFollow
                   ? 'border-blue-300 bg-blue-50 text-blue-700'
                   : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
@@ -135,18 +135,18 @@ export function LogsPage() {
                 <path fillRule="evenodd" d="M5.22 10.22a.75.75 0 001.06 0L10 6.56l3.72 3.66a.75.75 0 001.06-1.06l-4.25-4.18a.75.75 0 00-1.06 0L5.22 9.16a.75.75 0 000 1.06z" clipRule="evenodd" />
                 <path fillRule="evenodd" d="M5.22 14.72a.75.75 0 001.06 0L10 11.06l3.72 3.66a.75.75 0 101.06-1.06l-4.25-4.18a.75.75 0 00-1.06 0L5.22 13.66a.75.75 0 000 1.06z" clipRule="evenodd" />
               </svg>
-              Auto-follow
+              <span className="hidden sm:inline">Auto-follow</span>
             </button>
             <button
               onClick={handleExport}
               disabled={filtered.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm min-h-[36px]"
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
                 <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
               </svg>
-              Export
+              <span className="hidden sm:inline">Export</span>
             </button>
           </div>
         </div>
@@ -171,7 +171,7 @@ export function LogsPage() {
             })}
           </div>
 
-          <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <div className="relative flex-1 w-full md:w-auto md:min-w-[200px] md:max-w-xs">
             <svg
               className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400"
               viewBox="0 0 20 20"

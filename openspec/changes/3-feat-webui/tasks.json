@@ -184,9 +184,9 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "ModelSelector 的 popover panel 当前是 w-80 固定宽度，移动端可能需要改为 w-full max-w-[calc(100vw-2rem)]。精简显示用 md:hidden / hidden md:inline 切换文字。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
