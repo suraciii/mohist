@@ -46,9 +46,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "使用 react-router-dom 的 useLocation 和 useNavigate。Tab 图标用 SVG inline（不引入新依赖）。每个 Tab 占 1/3 宽度 flex-1。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
