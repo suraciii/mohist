@@ -6,6 +6,7 @@ import { createReadFileTool } from '../tools/read-file';
 import { createGlobTool } from '../tools/glob-tool';
 import { createGrepTool } from '../tools/grep-tool';
 import { createCreateIssueTool } from '../tools/create-issue-tool';
+import { createUpdateIssueTool } from '../tools/update-issue-tool';
 import type { IssueService } from '../services/issue-service';
 import type { ExploreSessionRepo } from '../db/explore-session-repo';
 import type { EventBus } from '../services/event-bus';
@@ -20,6 +21,8 @@ export interface ExploreAgentContext {
   issueService: IssueService;
   exploreSessionRepo: ExploreSessionRepo;
   eventBus: EventBus;
+  issueId?: string;
+  issueStage?: string;
 }
 
 const EXPLORE_SYSTEM_PROMPT = `You are a curious thinking partner helping the user explore requirements and understand a codebase. You are NOT an executor — your job is to think together with the user.
@@ -80,9 +83,18 @@ export function buildExploreToolRegistry(context: ExploreAgentContext): ToolRegi
       exploreSessionRepo: context.exploreSessionRepo,
       sessionId: context.sessionId,
       projectId: context.projectId,
-      eventBus: context.eventBus,
     }),
   );
+
+  if (context.issueId && context.issueStage) {
+    registry.register(
+      createUpdateIssueTool({
+        issueService: context.issueService,
+        issueId: context.issueId,
+        issueStage: context.issueStage,
+      }),
+    );
+  }
 
   return registry;
 }
