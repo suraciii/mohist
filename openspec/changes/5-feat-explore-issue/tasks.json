@@ -154,9 +154,9 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "样式参考 KanbanView 的卡片布局，使用 Tailwind CSS。状态统一显示 Active/Archived（crystallized 视为 Active）。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
