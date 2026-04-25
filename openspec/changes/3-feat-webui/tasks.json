@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "WebUI 移动端响应式适配：底部 Tab 导航、Header 简化、Kanban 单列模式、Dialog 全屏、页面间距和触摸目标",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,11 @@
       "type": "WRITE",
       "output": "packages/cli/web/index.html, packages/cli/web/src/App.tsx",
       "dependsOn": [],
-      "passes": false,
-      "notes": "这是所有后续任务的基础。App.tsx 中 AppContent 的主容器 div 需要添加底部 padding。"
+      "passes": true,
+      "notes": "这是所有后续任务的基础。App.tsx 中 AppContent 的主容器 div 需要添加底部 padding。",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -41,9 +43,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/MobileBottomNav.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "使用 react-router-dom 的 useLocation 和 useNavigate。Tab 图标用 SVG inline（不引入新依赖）。每个 Tab 占 1/3 宽度 flex-1。"
+      "notes": "使用 react-router-dom 的 useLocation 和 useNavigate。Tab 图标用 SVG inline（不引入新依赖）。每个 Tab 占 1/3 宽度 flex-1。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +69,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/Header.tsx",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Header 中右侧按钮容器使用 hidden md:flex 控制。CreateProjectDialog 状态保留在 Header 中（项目选择器功能不变）。"
+      "notes": "Header 中右侧按钮容器使用 hidden md:flex 控制。CreateProjectDialog 状态保留在 Header 中（项目选择器功能不变）。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -83,9 +95,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/Dialog.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "overlay 容器：移动端 items-start（顶部对齐），桌面端 md:items-center md:justify-center。dialog panel：移动端 inset-0 rounded-none，桌面端 md:relative md:max-w-lg md:rounded-lg。"
+      "notes": "overlay 容器：移动端 items-start（顶部对齐），桌面端 md:items-center md:justify-center。dialog panel：移动端 inset-0 rounded-none，桌面端 md:relative md:max-w-lg md:rounded-lg。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -107,9 +124,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx, SettingsPage.tsx, LogsPage.tsx, ExplorePage.tsx, Header.tsx",
-      "dependsOn": ["T-003", "T-004"],
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "依赖 T-003（Header 已简化）和 T-004（Dialog 已改全屏）后再添加触摸目标，避免文件冲突。全局搜索 px-6 替换为 px-4 md:px-6。触摸目标优先覆盖 IssueDetailPage 审批、CreateIssueDialog 提交、Header 操作等高频按钮。"
+      "notes": "依赖 T-003（Header 已简化）和 T-004（Dialog 已改全屏）后再添加触摸目标，避免文件冲突。全局搜索 px-6 替换为 px-4 md:px-6。触摸目标优先覆盖 IssueDetailPage 审批、CreateIssueDialog 提交、Header 操作等高频按钮。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -132,9 +155,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/FAB.tsx, packages/cli/web/src/components/KanbanBoard.tsx",
-      "dependsOn": ["T-003", "T-005"],
+      "dependsOn": [
+        "T-003",
+        "T-005"
+      ],
       "passes": false,
-      "notes": "KanbanBoard 使用 md:hidden / hidden md:block 双区域渲染。移动端复用 IssueCard 组件。FAB 的 onClick 需要与 Header 的 CreateIssueDialog 状态协调，可考虑将 showCreateIssue 状态提升到 AppContent 或通过 props 传递。"
+      "notes": "KanbanBoard 使用 md:hidden / hidden md:block 双区域渲染。移动端复用 IssueCard 组件。FAB 的 onClick 需要与 Header 的 CreateIssueDialog 状态协调，可考虑将 showCreateIssue 状态提升到 AppContent 或通过 props 传递。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -152,9 +181,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ModelSelector.tsx, packages/cli/web/src/components/ExploreInput.tsx",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "ModelSelector 的 popover panel 当前是 w-80 固定宽度，移动端可能需要改为 w-full max-w-[calc(100vw-2rem)]。精简显示用 md:hidden / hidden md:inline 切换文字。"
+      "notes": "ModelSelector 的 popover panel 当前是 w-80 固定宽度，移动端可能需要改为 w-full max-w-[calc(100vw-2rem)]。精简显示用 md:hidden / hidden md:inline 切换文字。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -174,9 +208,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SettingsPage.tsx, packages/cli/web/src/components/LogsPage.tsx",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "SettingsPage Provider 卡片区域使用 grid grid-cols-1 md:grid-cols-2。移动端在 SettingsPage 添加 md:inline lg:hidden 的 \"View Logs\" 导航链接（因为移动端 BottomNav 无 Logs Tab，需提供入口）。LogsPage toolbar 使用 flex-wrap gap-2 让搜索框和筛选按钮在窄屏自动换行。"
+      "notes": "SettingsPage Provider 卡片区域使用 grid grid-cols-1 md:grid-cols-2。移动端在 SettingsPage 添加 md:inline lg:hidden 的 \"View Logs\" 导航链接（因为移动端 BottomNav 无 Logs Tab，需提供入口）。LogsPage toolbar 使用 flex-wrap gap-2 让搜索框和筛选按钮在窄屏自动换行。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
