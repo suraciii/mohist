@@ -72,9 +72,9 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Header 中右侧按钮容器使用 hidden md:flex 控制。CreateProjectDialog 状态保留在 Header 中（项目选择器功能不变）。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
