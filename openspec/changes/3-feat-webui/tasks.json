@@ -128,9 +128,9 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "依赖 T-003（Header 已简化）和 T-004（Dialog 已改全屏）后再添加触摸目标，避免文件冲突。全局搜索 px-6 替换为 px-4 md:px-6。触摸目标优先覆盖 IssueDetailPage 审批、CreateIssueDialog 提交、Header 操作等高频按钮。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
