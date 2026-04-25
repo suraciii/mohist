@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
-import { useIssues, useProjects, useCurrentProject, useAgentStatus, useExploreSessions, useCreateExploreSession } from './hooks/useQueries'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { useIssues, useProjects, useCurrentProject, useAgentStatus } from './hooks/useQueries'
 import useSSE from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
 import { Header } from './components/Header'
 import { IssueDetailPage } from './components/IssueDetailPage'
 import { ExplorePage } from './components/ExplorePage'
+import { ExploreSessionList } from './components/ExploreSessionList'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { LogsPage } from './components/LogsPage'
@@ -58,56 +59,6 @@ function KanbanView() {
   )
 }
 
-function ExploreRedirect() {
-  const { projectId } = useProject()
-  const navigate = useNavigate()
-  const { data: sessions } = useExploreSessions(projectId || '')
-  const createSession = useCreateExploreSession()
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!projectId) return
-    if (sessions && sessions.length > 0) {
-      const active = sessions.find((s) => s.status === 'active') || sessions[0]
-      navigate(`/explore/${active.id}`, { replace: true })
-    } else if (!createSession.isPending) {
-      createSession.mutate(
-        { projectId, title: 'New Exploration' },
-        {
-          onSuccess: (session) => {
-            navigate(`/explore/${session.id}`, { replace: true })
-          },
-          onError: (err) => {
-            setError(err instanceof Error ? err.message : 'Failed to create session')
-          },
-        },
-      )
-    }
-  }, [projectId, sessions, navigate, createSession])
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center flex-1">
-        <div className="text-center">
-          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600 mb-2">{error}</div>
-          <button
-            onClick={() => navigate('/')}
-            className="text-sm text-blue-600 hover:text-blue-700"
-          >
-            Go back
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex items-center justify-center flex-1">
-      <div className="text-gray-400">Loading...</div>
-    </div>
-  )
-}
-
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
   useSSE(projectId)
@@ -136,7 +87,7 @@ function AppContent() {
         <Route element={<ProjectGuard />}>
           <Route path="/" element={<KanbanView />} />
           <Route path="/issue/:number" element={<IssueDetailPage />} />
-          <Route path="/explore" element={<ExploreRedirect />} />
+          <Route path="/explore" element={<ExploreSessionList />} />
           <Route path="/explore/:id" element={<ExplorePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/logs" element={<LogsPage />} />
