@@ -55,7 +55,7 @@ export function Header() {
 
   return (
     <>
-      <header className="h-14 border-b border-gray-200 bg-white flex items-center px-6 shrink-0">
+      <header className="h-14 border-b border-gray-200 bg-white flex items-center px-4 md:px-6 shrink-0">
         <h1 className="text-lg font-bold text-gray-900 tracking-tight">mohist</h1>
 
         <div className="ml-6" ref={dropdownRef}>
@@ -131,7 +131,7 @@ export function Header() {
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto hidden md:flex items-center gap-2">
           <button
             className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
             onClick={() => navigate('/explore')}
