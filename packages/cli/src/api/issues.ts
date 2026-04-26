@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import * as fs from 'fs';
+import * as path from 'path';
 import { StateManager } from '../server/state-manager';
 import { ApiResponse, Issue, Stage, IssueStatus, Comment } from '../types';
 import { IssueService } from '../services';
@@ -11,7 +12,7 @@ import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
-import { detectOpenSpecChange } from '../openspec/detector';
+import { detectOpenSpecChange, findChangeDir } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Log } from '../util/log';
@@ -518,22 +519,37 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} already has an agent running. Wait for it to complete first.`
+        };
+        return c.json(response, 409);
+      }
+
+      const project = projectService.getById(projectId);
+      let worktreePath = process.cwd();
+      if (worktreeManager && project) {
+        const existingPath = worktreeManager.getPath(project.name, issue.number);
+        worktreePath = existingPath || process.cwd();
+      }
+
+      let isReviewRecovery = false;
+      if (issue.stage === Stage.Review) {
+        const changeDir = findChangeDir(worktreePath, issue.number);
+        if (changeDir) {
+          try {
+            const tasksPath = path.join(changeDir, 'tasks.json');
+            const tasksContent = fs.readFileSync(tasksPath, 'utf-8');
+            const tasksFile = JSON.parse(tasksContent);
+            if (tasksFile.tasks && tasksFile.tasks.length > 0 && tasksFile.tasks.every((t: { passes: boolean }) => t.passes)) {
+              isReviewRecovery = true;
+            }
+          } catch {}
+        }
+      }
+
       if (agentRunner) {
-        if (agentRunner.isRunning(issue.id)) {
-          const response: ApiResponse = {
-            success: false,
-            error: `Issue #${number} already has an agent running. Wait for it to complete first.`
-          };
-          return c.json(response, 409);
-        }
-
-        const project = projectService.getById(projectId);
-        let worktreePath = process.cwd();
-        if (worktreeManager && project) {
-          const existingPath = worktreeManager.getPath(project.name, issue.number);
-          worktreePath = existingPath || process.cwd();
-        }
-
         const acpOptions: AcpConnectionOptions = {
           cwd: worktreePath,
           issueId: issue.id,
@@ -556,14 +572,24 @@ export function createIssueRoutes(
 
         const response: ApiResponse = {
           success: true,
-          data: { issue, message: `Issue #${number} reopened and resumed from stage ${issue.stage}` }
+          data: {
+            issue,
+            message: isReviewRecovery
+              ? `Issue #${number} reopened at review stage, use start to continue`
+              : `Issue #${number} reopened and resumed from stage ${issue.stage}`,
+          }
         };
         return c.json(response);
       }
 
       const response: ApiResponse = {
         success: true,
-        data: { issue, message: `Issue #${number} reopened` }
+        data: {
+          issue,
+          message: isReviewRecovery
+            ? `Issue #${number} reopened at review stage, use start to continue`
+            : `Issue #${number} reopened`,
+        }
       };
       return c.json(response);
     } catch (error) {
