@@ -127,9 +127,9 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "D2 in design.md — validation at API layer only",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
