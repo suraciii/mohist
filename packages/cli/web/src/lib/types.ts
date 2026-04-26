@@ -19,6 +19,7 @@ export interface ApprovalState {
   output?: Record<string, unknown>
   requestedAt: string
   approvedAt?: string
+  output?: Record<string, unknown>
 }
 
 export interface Issue {
