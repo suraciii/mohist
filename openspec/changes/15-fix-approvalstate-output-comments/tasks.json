@@ -1,0 +1,47 @@
+{
+  "project": "mohist",
+  "description": "Fix approval panel to display approvalState.output review reports instead of depending on comments",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add output field to frontend ApprovalState type",
+      "spec": "specs/approval-output-display/spec.md#前端-approvalstate-类型包含-output-字段",
+      "description": "Add `output?: Record<string, unknown>` field to the frontend `ApprovalState` interface in `packages/cli/web/src/lib/types.ts:15-19`, aligning with the backend type that already has `output: unknown`.",
+      "acceptanceCriteria": [
+        "ApprovalState interface in types.ts has an `output` field of type `Record<string, unknown>`",
+        "Typecheck passes: cd packages/cli/web && npx tsc --noEmit"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-002",
+      "title": "Decouple Approve button from comments and display approvalState.output",
+      "spec": "specs/approval-output-display/spec.md#审批面板展示-approvalstateoutput-审查报告",
+      "description": "In IssueDetailPage.tsx: (1) Add `reviewOutput` computed value that reads `selfReviewNotes` or `reviewReport` from `approvalState.output`, falling back to last comment body. (2) Change Approve button condition from `{isApprovalGate && lastAgentComment && ...}` to `{isApprovalGate && ...}`. (3) Split the approval panel into two independent blocks: report area (`{isApprovalGate && reviewOutput && ...}`) and approve button (`{isApprovalGate && ...}`). (4) Remove `lastAgentComment` variable, inline its fallback logic into `reviewOutput`. (5) Change report area title from 'Latest agent output' to 'Review Report'.",
+      "acceptanceCriteria": [
+        "Approve button displays when `isApprovalGate` is true regardless of comments existence",
+        "Report area shows `selfReviewNotes` from approvalState.output when present (Plan stage)",
+        "Report area shows `reviewReport` from approvalState.output when present (Review stage)",
+        "Report area falls back to last comment body when approvalState.output is empty",
+        "Report area is hidden when both approvalState.output and comments are empty, but Approve button still shows",
+        "lastAgentComment variable is removed",
+        "Report area title is 'Review Report'",
+        "Send Message block remains unchanged (already only depends on isApprovalGate)",
+        "Typecheck passes: cd packages/cli/web && npx tsc --noEmit"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Backend output structure: Plan stage = { stage, issueNumber, selfReviewNotes }, Review stage = { stage, issueNumber, reviewReport }. Handle empty object {} (truthy but no content) by checking extracted string values."
+    }
+  ]
+}

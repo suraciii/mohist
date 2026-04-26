@@ -16,6 +16,7 @@ export interface ApprovalState {
   status: 'awaiting' | 'approved' | 'rejected'
   requestedAt: string
   approvedAt?: string
+  output?: Record<string, unknown>
 }
 
 export interface Issue {
