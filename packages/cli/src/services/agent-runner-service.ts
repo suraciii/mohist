@@ -134,12 +134,11 @@ export class AgentRunnerService {
             action: 'pendingGate restored, status remains active',
           });
         } else {
-          this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
-          this.issueRepo.clearApprovalState(issue.id);
+          this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
           log.info('Recovered orphaned issue', {
             issueNumber: issue.number,
             stage: issue.stage,
-            action: 'status=blocked, stage preserved, approval cleared',
+            action: 'status=interrupted, stage preserved, checkpoint preserved',
           });
         }
       } catch (err) {
