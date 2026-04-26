@@ -11,3 +11,4 @@ export { ExploreSessionRepo, type CreateExploreSessionData } from './explore-ses
 export { ExploreMessageRepo, type CreateExploreMessageData } from './explore-message-repo';
 export { AgentSessionMessageRepo, type AgentSessionMessage, type CreateAgentSessionMessageData } from './agent-session-message-repo';
 export { CoderSessionRepo, type CoderSession, type CreateCoderSessionData } from './coder-session-repo';
+export { PipelineCheckpointRepo, type PipelineCheckpoint } from './pipeline-checkpoint-repo';

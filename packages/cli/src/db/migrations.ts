@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -146,6 +146,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 13) {
     migrateToVersion13(db);
+  }
+
+  if (currentVersion < 14) {
+    migrateToVersion14(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -468,5 +472,23 @@ function migrateToVersion13(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 13);
+  });
+}
+
+const CREATE_PIPELINE_CHECKPOINT_TABLE = `
+CREATE TABLE IF NOT EXISTS pipeline_checkpoint (
+  issue_number   INTEGER NOT NULL,
+  stage          TEXT NOT NULL,
+  completed_steps TEXT NOT NULL DEFAULT '[]',
+  next_step      TEXT,
+  updated_at     TEXT NOT NULL,
+  PRIMARY KEY (issue_number, stage)
+);
+`;
+
+function migrateToVersion14(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_PIPELINE_CHECKPOINT_TABLE);
+    setSchemaVersion(db, 14);
   });
 }
