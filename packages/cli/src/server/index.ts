@@ -16,6 +16,7 @@ import { createExploreRoutes } from '../api/explore';
 import { createLogRoutes } from '../api/logs';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
+import { MergeQueue } from '../git/merge-queue';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { Log } from '../util/log';
@@ -116,11 +117,24 @@ async function main(): Promise<void> {
     log.info(`Expired ${expiredCount} orphaned pending question(s) from previous session`);
   }
 
+  const mergeQueue = new MergeQueue({
+    worktreeManager,
+    eventBus,
+    issueRepo: stateManager.getIssueRepo(),
+    getProjectPath: (projectId: string) => {
+      const project = projectService.getById(projectId);
+      if (!project) return null;
+      return { path: project.path, name: project.name, baseBranch: project.baseBranch };
+    },
+  });
+
+  mergeQueue.recoverFromDB();
+
   const rateLimiter = new RateLimiter(60 * 1000, 30);
   const server = new HttpServer(config, rateLimiter);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo, stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), opencodeBinPath));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo, stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
@@ -146,15 +160,10 @@ async function main(): Promise<void> {
 
       if (!worktreeManager.exists(project.name, issueNumber)) return;
 
-      log.info('Auto-merging completed issue back to base branch', { issueNumber, projectId, baseBranch: project.baseBranch });
-      const result = await worktreeManager.mergeBack(project.path, project.name, issueNumber, project.baseBranch);
-      if (result.success) {
-        log.info('Auto-merge succeeded', { issueNumber, message: result.message });
-      } else {
-        log.warn('Auto-merge failed, manual merge required', { issueNumber, message: result.message });
-      }
+      log.info('Enqueueing completed issue for merge', { issueNumber, projectId });
+      mergeQueue.enqueue(projectId, issueNumber);
     } catch (err) {
-      log.error('Auto-merge error', { issueNumber, error: err instanceof Error ? err.message : String(err) });
+      log.error('Merge enqueue error', { issueNumber, error: err instanceof Error ? err.message : String(err) });
     }
   });
 

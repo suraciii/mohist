@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -146,6 +146,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 13) {
     migrateToVersion13(db);
+  }
+
+  if (currentVersion < 14) {
+    migrateToVersion14(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -468,5 +472,20 @@ function migrateToVersion13(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 13);
+  });
+}
+
+function migrateToVersion14(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(issues)"
+    );
+    const hasMergeState = tableInfo.some(col => col.name === 'merge_state');
+
+    if (!hasMergeState) {
+      db.exec("ALTER TABLE issues ADD COLUMN merge_state TEXT");
+    }
+
+    setSchemaVersion(db, 14);
   });
 }

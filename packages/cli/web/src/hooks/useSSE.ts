@@ -58,6 +58,13 @@ function useSSE(projectId: string | null) {
             }
             break
           }
+          case 'merge_queued':
+          case 'merge_started':
+          case 'merge_completed':
+          case 'merge_failed': {
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            break
+          }
         }
       } catch {
         // ignore malformed events
@@ -97,6 +104,10 @@ function useSSE(projectId: string | null) {
       'ralph_loop_progress',
       'plan_round_start',
       'plan_session_update',
+      'merge_queued',
+      'merge_started',
+      'merge_completed',
+      'merge_failed',
     ]
 
     for (const type of eventTypes) {
