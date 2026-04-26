@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseManager, SqlValue } from './database';
-import { Issue, Stage, IssueStatus, ApprovalState } from '../types';
+import { Issue, Stage, IssueStatus, ApprovalState, Priority } from '../types';
 
 interface IssueRow {
   id: string;
@@ -11,6 +11,7 @@ interface IssueRow {
   stage: string;
   status: string;
   labels: string;
+  priority: string;
   created_at: string;
   updated_at: string;
   approval_state: string | null;
@@ -42,6 +43,7 @@ function rowToIssue(row: IssueRow): Issue {
     status: row.status as IssueStatus,
     projectId: row.project_id,
     labels,
+    priority: (row.priority || 'p2') as Priority,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     approvalState,
@@ -85,6 +87,7 @@ export class IssueRepo {
       status: IssueStatus.Active,
       projectId: data.projectId,
       labels: data.labels || [],
+      priority: 'p2' as Priority,
       createdAt: now,
       updatedAt: now,
     };

@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -146,6 +146,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 13) {
     migrateToVersion13(db);
+  }
+
+  if (currentVersion < 14) {
+    migrateToVersion14(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -468,5 +472,70 @@ function migrateToVersion13(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 13);
+  });
+}
+
+const PRIORITY_LABEL_MAP: Record<string, string> = {
+  'priority:critical': 'p0',
+  'priority:p0': 'p0',
+  'priority:high': 'p1',
+  'priority:p1': 'p1',
+  'priority:medium': 'p2',
+  'priority:p2': 'p2',
+  'priority:low': 'p3',
+  'priority:p3': 'p3',
+  'priority:backlog': 'p4',
+  'priority:p4': 'p4',
+};
+
+function migrateToVersion14(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(issues)"
+    );
+    const hasPriority = tableInfo.some(col => col.name === 'priority');
+
+    if (!hasPriority) {
+      db.exec("ALTER TABLE issues ADD COLUMN priority TEXT NOT NULL DEFAULT 'p2'");
+      db.exec('CREATE INDEX IF NOT EXISTS idx_issues_project_priority ON issues(project_id, priority)');
+    }
+
+    const issues = db.all<{ id: string; labels: string }>(
+      'SELECT id, labels FROM issues WHERE labels IS NOT NULL'
+    );
+
+    for (const issue of issues) {
+      let labels: string[];
+      try {
+        labels = JSON.parse(issue.labels || '[]');
+      } catch {
+        continue;
+      }
+
+      if (!Array.isArray(labels)) continue;
+
+      let priority: string | null = null;
+      const matchedIndices: number[] = [];
+
+      for (let i = 0; i < labels.length; i++) {
+        const label = labels[i];
+        if (typeof label === 'string' && label in PRIORITY_LABEL_MAP) {
+          if (priority === null) {
+            priority = PRIORITY_LABEL_MAP[label];
+          }
+          matchedIndices.push(i);
+        }
+      }
+
+      if (matchedIndices.length > 0) {
+        const remainingLabels = labels.filter((_, i) => !matchedIndices.includes(i));
+        db.run(
+          'UPDATE issues SET priority = ?, labels = ? WHERE id = ?',
+          [priority, JSON.stringify(remainingLabels), issue.id]
+        );
+      }
+    }
+
+    setSchemaVersion(db, 14);
   });
 }

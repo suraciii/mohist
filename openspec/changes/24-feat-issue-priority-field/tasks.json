@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add structured priority field (p0–p4) to issues with DB migration, API support, and CLI flags",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/types/index.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "D5 in design.md — string literal union, not enum"
+      "passes": true,
+      "notes": "D5 in design.md — string literal union, not enum",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -39,9 +41,14 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "packages/cli/src/db/migrations.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Follow existing migration pattern (v9 for ADD COLUMN, v2 for label parsing)"
+      "notes": "Follow existing migration pattern (v9 for ADD COLUMN, v2 for label parsing)",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +69,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/db/issue-repo.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "D4 in design.md — global sort change in findAll()"
+      "notes": "D4 in design.md — global sort change in findAll()",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -82,9 +95,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/issue-service.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -106,9 +124,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "D2 in design.md — validation at API layer only"
+      "notes": "D2 in design.md — validation at API layer only",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -127,9 +150,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/issue.ts",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -150,9 +178,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/",
-      "dependsOn": ["T-006"],
+      "dependsOn": [
+        "T-006"
+      ],
       "passes": false,
-      "notes": "Check existing test files for patterns before writing"
+      "notes": "Check existing test files for patterns before writing",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
