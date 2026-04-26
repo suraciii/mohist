@@ -437,6 +437,7 @@ export async function runRalphLoop(
       const result = await _acpSessionRunner({
         cwd: context.worktreePath,
         task: prompt,
+        taskId: nextTask.id,
         timeout: perTaskTimeout,
         issueId: context.issueId,
         projectId: context.projectId,

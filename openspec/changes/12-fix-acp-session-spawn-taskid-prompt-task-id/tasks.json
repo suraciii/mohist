@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add taskId to AcpSessionOptions and fix log fields",
+      "spec": "specs/agent-runtime/spec.md#spawn_coder-捕获所有-ACP-事件",
+      "description": "Add optional `taskId?: string` to `AcpSessionOptions` interface. In `runAcpSession`, destructure `taskId` from options and update the spawn log (line 103) and `writeSessionLog` call (line 104) to use `taskId` for the actual task ID and `promptPreview: task.slice(0, 100)` for the prompt preview.",
+      "acceptanceCriteria": [
+        "AcpSessionOptions has optional `taskId?: string` field",
+        "Spawn log `taskId` field contains the actual task ID from options (or undefined)",
+        "Spawn log has `promptPreview` field with `task.slice(0, 100)`",
+        "writeSessionLog 'acp_session_start' event uses same taskId and promptPreview fields",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Pass taskId from ralph-executor to runAcpSession",
+      "spec": "specs/ralph-task-execution/spec.md#Ralph-style-task-loop-execution",
+      "description": "In `ralph-executor.ts`, add `taskId: nextTask.id` to the `_acpSessionRunner` call object (around line 437-448). This connects the task ID already known in ralph-executor to the ACP session log.",
+      "acceptanceCriteria": [
+        "_acpSessionRunner call includes `taskId: nextTask.id`",
+        "ACP session spawn log shows actual task ID (e.g. T-001) instead of prompt text",
+        "explore-acp-service.ts callers require no changes (taskId is optional)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Add tests for taskId logging in ACP session",
+      "spec": "specs/agent-runtime/spec.md#spawn_coder-捕获所有-ACP-事件",
+      "description": "Add tests verifying that `runAcpSession` logs the correct `taskId` and `promptPreview` fields when `taskId` is provided, and that `taskId` is undefined/omitted when not provided.",
+      "acceptanceCriteria": [
+        "Test: when taskId is provided, spawn log contains that taskId value",
+        "Test: when taskId is not provided, spawn log taskId is undefined",
+        "Test: promptPreview always contains task.slice(0, 100)",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/acp-session-taskid.test.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}

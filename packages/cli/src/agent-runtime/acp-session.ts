@@ -35,6 +35,7 @@ function writeSessionLog(
 export interface AcpSessionOptions {
   cwd: string;
   task: string;
+  taskId?: string;
   timeout?: number;
   issueId?: string;
   projectId?: string;
@@ -84,6 +85,7 @@ export async function runAcpSession(
   const {
     cwd,
     task,
+    taskId,
     timeout = DEFAULT_TIMEOUT,
     issueId,
     projectId,
@@ -100,8 +102,8 @@ export async function runAcpSession(
   let lastTextChunkTime = 0;
   const sessionStartTime = Date.now();
 
-  log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100) });
-  writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId: task.slice(0, 100), timestamp: new Date().toISOString() });
+  log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: task.slice(0, 100) });
+  writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: task.slice(0, 100), timestamp: new Date().toISOString() });
 
   const resolvedBinPath = opencodeBinPath || resolveOpencodeBinPath() || 'opencode';
 
