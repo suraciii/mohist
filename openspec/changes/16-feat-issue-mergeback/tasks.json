@@ -68,9 +68,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/git/worktree-manager.ts, packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "This must happen before T-004 so MergeQueue can control worktree cleanup timing.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
