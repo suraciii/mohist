@@ -11,6 +11,7 @@ export enum IssueStatus {
   Active = 'active',
   Paused = 'paused',
   Blocked = 'blocked',
+  Interrupted = 'interrupted',
 }
 
 export interface ApprovalState {

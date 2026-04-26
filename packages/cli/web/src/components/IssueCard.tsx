@@ -1,5 +1,9 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Issue, AgentStatus } from '../lib/types'
-import { IssueStatus } from '../lib/types'
+import { Stage, IssueStatus } from '../lib/types'
+import { api } from '../lib/api'
+
+const APPROVAL_STAGES = new Set<string>([Stage.Build])
 
 interface Props {
   issue: Issue
@@ -7,8 +11,18 @@ interface Props {
 }
 
 export function IssueCard({ issue, agentStatus }: Props) {
+  const queryClient = useQueryClient()
   const isAgentRunning = agentStatus.activeAgents.some(a => a.issueNumber === issue.number)
-  const isApprovalGate = issue.approvalState?.status === 'awaiting' && (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked)
+  const isApprovalGate = APPROVAL_STAGES.has(issue.stage) && issue.status === IssueStatus.Active
+  const isInterrupted = issue.status === IssueStatus.Interrupted
+
+  const reopenMutation = useMutation({
+    mutationFn: () => api.reopenIssue(issue.number),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
 
   return (
     <a
@@ -29,6 +43,14 @@ export function IssueCard({ issue, agentStatus }: Props) {
               <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
             </svg>
             Waiting for approval
+          </span>
+        )}
+        {isInterrupted && (
+          <span className="inline-flex items-center gap-1 text-xs text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded">
+            <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M2 10a8 8 0 1116 0 8 8 0 01-16 0zm8-4a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+            </svg>
+            Interrupted
           </span>
         )}
       </div>
@@ -55,6 +77,22 @@ export function IssueCard({ issue, agentStatus }: Props) {
       )}
       {issue.status === IssueStatus.Paused && (
         <div className="mt-2 text-xs text-gray-400">Paused</div>
+      )}
+      {isInterrupted && (
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-xs text-orange-600">Pipeline was interrupted, click to resume</span>
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              reopenMutation.mutate()
+            }}
+            disabled={reopenMutation.isPending}
+            className="rounded bg-orange-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+          >
+            {reopenMutation.isPending ? 'Resuming...' : 'Resume'}
+          </button>
+        </div>
       )}
     </a>
   )

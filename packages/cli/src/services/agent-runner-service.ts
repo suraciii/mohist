@@ -9,6 +9,7 @@ import { Stage } from '../types';
 import { load } from '../config/config-loader';
 import { maskSensitiveData } from '../utils/sensitive-data';
 import { Log } from '../util/log';
+import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 
 export interface RunningAgent {
   issueId: string;
@@ -63,6 +64,7 @@ export class AgentRunnerService {
     maxConcurrentAgents: number = 8,
     _agentSessionMessageRepo?: unknown,
     _coderSessionRepo?: unknown,
+    private readonly checkpointRepo?: PipelineCheckpointRepo,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -132,12 +134,11 @@ export class AgentRunnerService {
             action: 'pendingGate restored, status remains active',
           });
         } else {
-          this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
-          this.issueRepo.clearApprovalState(issue.id);
+          this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
           log.info('Recovered orphaned issue', {
             issueNumber: issue.number,
             stage: issue.stage,
-            action: 'status=blocked, stage preserved, approval cleared',
+            action: 'status=interrupted, stage preserved, checkpoint preserved',
           });
         }
       } catch (err) {
@@ -281,6 +282,7 @@ export class AgentRunnerService {
           issueRepo,
           eventBus: this.eventBus,
           projectId,
+          checkpointRepo: this.checkpointRepo,
         });
 
         const result: PipelineResult = await pipeline.run(issue, acpOptions);

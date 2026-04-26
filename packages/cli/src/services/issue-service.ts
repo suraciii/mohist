@@ -103,7 +103,7 @@ export class IssueService {
   reopen(projectId: string, number: number): Issue | null {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
-    if (issue.status !== IssueStatus.Closed && issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Paused) return null;
+    if (issue.status !== IssueStatus.Closed && issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Paused && issue.status !== IssueStatus.Interrupted) return null;
     
     this.issueRepo.clearApprovalState(issue.id);
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
