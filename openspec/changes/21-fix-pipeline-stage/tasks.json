@@ -70,9 +70,9 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The self-review round at the end of plan stage should be treated as a separate step in the checkpoint (type='self-review').",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
