@@ -12,8 +12,6 @@ import { SessionTimeline } from './SessionTimeline'
 
 const STAGES = [Stage.Draft, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
-const APPROVAL_STAGES = new Set<string>([Stage.Build])
-
 const STAGE_LABELS: Record<string, string> = {
   [Stage.Draft]: 'Draft',
   [Stage.Plan]: 'Plan',
@@ -111,7 +109,7 @@ export function IssueDetailPage() {
   const isAgentRunning = agentStatus?.running === true
   const isAgentRunningOnThis = isAgentRunning && agentStatus?.issueNumber === issueNumber
   const isApprovalGate =
-    APPROVAL_STAGES.has(issue.stage) &&
+    issue.approvalState?.status === 'awaiting' &&
     issue.status === IssueStatus.Active &&
     !isAgentRunningOnThis
   const isDraft = issue.stage === Stage.Draft

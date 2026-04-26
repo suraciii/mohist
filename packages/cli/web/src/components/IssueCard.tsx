@@ -1,7 +1,5 @@
 import type { Issue, AgentStatus } from '../lib/types'
-import { Stage, IssueStatus } from '../lib/types'
-
-const APPROVAL_STAGES = new Set<string>([Stage.Build])
+import { IssueStatus } from '../lib/types'
 
 interface Props {
   issue: Issue
@@ -10,7 +8,7 @@ interface Props {
 
 export function IssueCard({ issue, agentStatus }: Props) {
   const isAgentRunning = agentStatus.running && agentStatus.issueId === issue.id
-  const isApprovalGate = APPROVAL_STAGES.has(issue.stage) && issue.status === IssueStatus.Active
+  const isApprovalGate = issue.approvalState?.status === 'awaiting' && issue.status === IssueStatus.Active
 
   return (
     <a

@@ -12,6 +12,12 @@ export enum IssueStatus {
   Blocked = 'blocked',
 }
 
+export interface ApprovalState {
+  status: 'awaiting' | 'approved' | 'rejected'
+  requestedAt: string
+  approvedAt?: string
+}
+
 export interface Issue {
   id: string
   number: number
@@ -26,6 +32,7 @@ export interface Issue {
   projectName?: string
   projectPath?: string
   comments?: Comment[]
+  approvalState?: ApprovalState
 }
 
 export interface Project {
