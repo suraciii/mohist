@@ -35,6 +35,7 @@ export interface Issue {
   projectPath?: string
   comments?: Comment[]
   approvalState?: ApprovalState
+  mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
 }
 
 export interface Project {
@@ -124,6 +125,10 @@ export type EventMap = {
   question_asked: { issueId: string; projectId: string; questionId: string; question: string }
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
   explore_crystallized: { sessionId: string; issueId: string; projectId: string }
+  merge_queued: { issueId: string; projectId: string; issueNumber: number; position: number }
+  merge_started: { issueId: string; projectId: string; issueNumber: number }
+  merge_completed: { issueId: string; projectId: string; issueNumber: number }
+  merge_failed: { issueId: string; projectId: string; issueNumber: number; reason: string }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap

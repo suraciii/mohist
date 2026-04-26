@@ -6,6 +6,7 @@ import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
+import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
@@ -33,6 +34,7 @@ export function createIssueRoutes(
   agentSessionMessageRepo?: AgentSessionMessageRepo,
   coderSessionRepo?: CoderSessionRepo,
   opencodeBinPath?: string,
+  mergeQueue?: MergeQueue,
 ): Hono {
   const app = new Hono();
 
@@ -116,6 +118,24 @@ export function createIssueRoutes(
         error: error instanceof Error ? error.message : 'Unknown error'
       };
       return c.json(response, 500);
+    }
+  });
+
+  app.get('/merge-queue/status', async (c) => {
+    try {
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      if (!mergeQueue) {
+        return c.json({ success: true, data: { items: [] } } satisfies ApiResponse);
+      }
+
+      const entries = mergeQueue.getStatus().filter(e => e.projectId === projectId);
+      return c.json({ success: true, data: { items: entries } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
   });
 
@@ -1484,6 +1504,10 @@ export function createIssueRoutes(
         return c.json({ success: false, error: result.message } satisfies ApiResponse, 409);
       }
 
+      await worktreeManager.remove(project.path, project.name, issue.number).catch((err) => {
+        log.warn('Failed to cleanup worktree after merge', { number, error: err instanceof Error ? err.message : String(err) });
+      });
+
       return c.json({ success: true, data: { issue, message: result.message } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
@@ -1509,6 +1533,40 @@ export function createIssueRoutes(
       const worktrees = await worktreeManager.list(project.path);
 
       return c.json({ success: true, data: { worktrees } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/retry-merge', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (!mergeQueue) {
+        return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
+      }
+
+      const project = projectService.getById(projectId);
+      if (project && worktreeManager && !worktreeManager.exists(project.name, issue.number)) {
+        return c.json({ success: false, error: `No worktree found for issue #${number}` } satisfies ApiResponse, 404);
+      }
+
+      const retried = mergeQueue.retry(number);
+      if (!retried) {
+        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (build-failed or conflict)` } satisfies ApiResponse, 409);
+      }
+
+      return c.json({ success: true, data: { message: `Issue #${number} re-enqueued for merge` } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

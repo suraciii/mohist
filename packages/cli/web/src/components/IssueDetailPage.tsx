@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import { useIssue, useIssueDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession } from '../hooks/useQueries'
 import { useSessionTimeline } from '../hooks/useSessionTimeline'
 import { EditIssueDialog } from './EditIssueDialog'
+import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionTimeline } from './SessionTimeline'
 
@@ -421,6 +422,8 @@ export function IssueDetailPage() {
                   )}
                 </div>
               </div>
+
+              <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
 
               {isApprovalGate && approvalOutput && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">

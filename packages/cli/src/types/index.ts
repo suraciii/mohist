@@ -39,6 +39,8 @@ export enum IssueStatus {
 
 export type ApprovalStatus = 'pending' | 'awaiting' | 'approved' | 'rejected' | 'error';
 
+export type MergeState = 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict';
+
 export interface ApprovalState {
   stage: Stage;
   status: ApprovalStatus;
@@ -59,6 +61,7 @@ export interface Issue {
   createdAt: string;
   updatedAt: string;
   approvalState?: ApprovalState;
+  mergeState?: MergeState;
 }
 
 export interface Project {
