@@ -44,9 +44,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The 429 check should go after the existing isRunning check (line 347-353) and before the startPipeline call (line 366).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
