@@ -6,6 +6,7 @@ import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
+import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
@@ -33,6 +34,7 @@ export function createIssueRoutes(
   agentSessionMessageRepo?: AgentSessionMessageRepo,
   coderSessionRepo?: CoderSessionRepo,
   opencodeBinPath?: string,
+  mergeQueue?: MergeQueue,
 ): Hono {
   const app = new Hono();
 
@@ -1513,6 +1515,38 @@ export function createIssueRoutes(
       const worktrees = await worktreeManager.list(project.path);
 
       return c.json({ success: true, data: { worktrees } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.get('/merge-queue/status', async (c) => {
+    try {
+      if (!mergeQueue) {
+        return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
+      }
+
+      const entries = mergeQueue.getStatus();
+      return c.json({ success: true, data: { queue: entries } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/retry-merge', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+
+      if (!mergeQueue) {
+        return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
+      }
+
+      const retried = mergeQueue.retry(number);
+      if (!retried) {
+        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (build-failed or conflict)` } satisfies ApiResponse, 409);
+      }
+
+      return c.json({ success: true, data: { message: `Issue #${number} re-enqueued for merge` } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
