@@ -121,11 +121,19 @@ export function IssueDetailPage() {
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
-  const lastAgentComment = isApprovalGate
-    ? [...(issue.comments ?? [])].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )[0]
-    : null
+  const reviewOutput = (() => {
+    const output = issue.approvalState?.output
+    if (output) {
+      const extracted = output.selfReviewNotes || output.reviewReport
+      if (typeof extracted === 'string' && extracted.trim()) return extracted
+      const json = JSON.stringify(output, null, 2)
+      if (json !== '{}') return json
+    }
+    const lastComment = [...(issue.comments ?? [])].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )[0]
+    return lastComment?.body || ''
+  })()
 
   return (
     <>
@@ -382,21 +390,28 @@ export function IssueDetailPage() {
                 </div>
               </div>
 
-              {isApprovalGate && lastAgentComment && (
+              {isApprovalGate && reviewOutput && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <h2 className="text-sm font-semibold text-amber-800 mb-2">
+                    Review Report
+                  </h2>
+                  <div className="rounded bg-white p-3 max-h-64 overflow-y-auto">
+                    <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                      {reviewOutput}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {isApprovalGate && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h2 className="text-sm font-semibold text-amber-800 mb-2">
                     Approval Required
                   </h2>
                   <p className="text-xs text-amber-600 mb-3">
-                    The agent completed the previous stage. Review the output below and approve
+                    The agent completed the previous stage. Review the output above and approve
                     to continue.
                   </p>
-                  <div className="rounded bg-white p-3 mb-3 max-h-64 overflow-y-auto">
-                    <div className="text-xs text-gray-400 mb-1">Latest agent output</div>
-                    <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                      {lastAgentComment.body}
-                    </div>
-                  </div>
                   <div className="flex gap-2">
                     <button
                       onClick={() => approveMutation.mutate()}
