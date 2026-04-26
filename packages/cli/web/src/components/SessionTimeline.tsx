@@ -124,12 +124,12 @@ function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
 const PIPELINE_STAGES = [
   { key: 'plan', label: 'Plan' },
   { key: 'build', label: 'Build' },
-  { key: 'check', label: 'Check' },
+  { key: 'review', label: 'Review' },
   { key: 'done', label: 'Done' },
 ]
 
 function PipelineStatusTimeline({ currentStage }: { currentStage: string }) {
-  const stageOrder = ['draft', 'plan', 'build', 'check', 'done']
+  const stageOrder = ['draft', 'explore', 'plan', 'build', 'review', 'done']
   const currentIndex = stageOrder.indexOf(currentStage)
 
   return (
