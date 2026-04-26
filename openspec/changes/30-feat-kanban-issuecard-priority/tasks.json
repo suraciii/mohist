@@ -1,0 +1,100 @@
+{
+  "project": "mohist",
+  "description": "Kanban IssueCard 信息层次重新设计：priority 显示、类型色带、条件 badge、label 颜色映射、相对时间、Done 列折叠",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "创建 label-colors.ts 和 relative-time.ts 工具模块",
+      "spec": "specs/kanban-issue-card/spec.md#label-color-mapping + specs/kanban-issue-card/spec.md#relative-time",
+      "description": "在 packages/cli/web/src/lib/ 下创建 label-colors.ts（getLabelStyle、getStripColor、isTypeLabel、isUrgencyLabel、isAreaLabel、formatPriority）和 relative-time.ts（formatRelativeTime）。label-colors 需定义类型/紧急度/区域三类标签的颜色映射常量和查询函数。relative-time 使用原生 Date 差值计算，不引入外部库。",
+      "acceptanceCriteria": [
+        "getLabelStyle('bug') 返回 { bg: '#fee2e2', text: '#ef4444', size: 'md' }",
+        "getLabelStyle('critical') 返回 { bg: '#991b1b', text: '#ffffff', size: 'md' }",
+        "getLabelStyle('agent') 返回 { bg: '#f3f4f6', text: '#6b7280', size: 'sm' }",
+        "getStripColor(['bug', 'feature']) 返回 '#ef4444'（bug 优先级最高）",
+        "getStripColor([]) 返回 '#6b7280'（默认灰色）",
+        "formatRelativeTime(45分钟前) 返回 '45m ago'",
+        "formatRelativeTime(7天前) 返回 '7d ago'",
+        "formatRelativeTime(null) 返回 ''",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/label-colors.ts, packages/cli/web/src/lib/relative-time.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "纯工具函数，无副作用，无依赖。后端 priority 格式为 'p0'|'p1'|... 字符串，formatPriority 需处理此格式转换。"
+    },
+    {
+      "id": "T-002",
+      "title": "更新前端 Issue type 添加 priority 字段",
+      "spec": "specs/kanban-issue-card/spec.md#issue-type-priority",
+      "description": "在 packages/cli/web/src/lib/types.ts 的 Issue interface 中添加 priority 字段，类型为 string | null（匹配后端 'p0'|'p1'|'p2'|'p3'|'p4' 格式）。",
+      "acceptanceCriteria": [
+        "Issue interface 包含 priority?: string | null 字段",
+        "现有 Issue 类型其他字段不变",
+        "packages/cli/web 下 typecheck 通过"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "后端 Priority 类型为 'p0'|'p1'|'p2'|'p3'|'p4' 字符串，前端用 string | null 接收。"
+    },
+    {
+      "id": "T-003",
+      "title": "重写 IssueCard 组件",
+      "spec": "specs/kanban-issue-card/spec.md",
+      "description": "全面重写 packages/cli/web/src/components/IssueCard.tsx：左侧 4px border-l-4 类型色带（style={{ borderLeftColor: getStripColor(labels) }}）、头部行显示 priority 文本 + issue number、右上角条件 badge（Merge Conflict 红色 > Closed 灰色叠加 > Approval amber > Running 蓝色脉冲）、APPROVAL_STAGES 扩展为 Plan+Build+Review、title 使用 line-clamp-2 两行截断、底部 label 行按类别着色（类型标签着色药丸、critical 深红白字、区域标签小号灰色）、右下角相对时间灰色小字、Closed issue 整体 opacity-50 叠加。",
+      "acceptanceCriteria": [
+        "卡片左侧有 4px 色带，bug 标签为红色 #ef4444，无类型标签为灰色 #6b7280",
+        "priority 不为 null 时头部显示 'P0'-'P4' 文本，与 #number 同行",
+        "APPROVAL_STAGES 包含 Plan、Build、Review 三个阶段",
+        "agent 运行中显示蓝色脉冲 'Running' badge，approvalState=awaiting 显示 amber 'Approval' badge",
+        "Done 阶段 + mergeState 非 merged/null 时显示红色 badge",
+        "status=blocked 时卡片有 opacity-50 灰色叠加 + 'Closed' 文字",
+        "title 超长时 line-clamp-2 截断",
+        "bug 标签渲染为红色着色药丸 (#fee2e2 bg + #ef4444 text)",
+        "critical 标签渲染为深红背景白字 (#991b1b bg + #ffffff text)",
+        "区域标签渲染为小号灰色药丸且字号小于类型标签",
+        "右下角显示相对时间灰色小字（如 '2d ago'）",
+        "点击卡片仍跳转到 /issue/:number 详情页",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueCard.tsx",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "使用 border-l-4 + inline style 实现色带（D1）。Badge 按优先级只显示最高一个（D2）。Label 排序：类型 > 紧急度 > 区域 > 其他（D4）。Interrupted issue 保留原有的 Resume 按钮交互。"
+    },
+    {
+      "id": "T-004",
+      "title": "StageColumn Done 列折叠",
+      "spec": "specs/kanban-done-column/spec.md",
+      "description": "修改 packages/cli/web/src/components/StageColumn.tsx 和 KanbanBoard.tsx。StageColumn 添加 isDone 布尔 prop，当 isDone=true 时：issue 按 updatedAt 倒序排序，默认只显示前 5 个，底部显示 'N more' 按钮，点击展开/折叠。KanbanBoard 更新 StageColumn 调用处传入 isDone={col.key === Stage.Done}。",
+      "acceptanceCriteria": [
+        "Done 列 issue 按 updatedAt 倒序排列（最近更新在前）",
+        "Done 列默认显示最多 5 个 issue",
+        "超过 5 个时底部显示 'N more' 按钮（N 为实际隐藏数量）",
+        "点击 'N more' 展开显示全部 issue，按钮文本变为 'Show less'",
+        "点击 'Show less' 折叠回 5 个，按钮文本变回 'N more'",
+        "Done 列 issue <= 5 个时不显示折叠按钮",
+        "非 Done 列不受影响，行为与原来一致",
+        "KanbanBoard 向 Done 列 StageColumn 传入 isDone=true",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/StageColumn.tsx, packages/cli/web/src/components/KanbanBoard.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "折叠状态不持久化（D6）。StageColumn 需同时接受新的 isDone prop 且保持现有 label/issues/agentStatus props 不变。"
+    }
+  ]
+}
