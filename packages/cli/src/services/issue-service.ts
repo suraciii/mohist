@@ -1,4 +1,4 @@
-import { Issue, Stage, IssueStatus, Comment } from '../types';
+import { Issue, Stage, IssueStatus, Comment, Priority } from '../types';
 import { IssueRepo, CommentRepo } from '../db';
 import { Log } from '../util/log';
 
@@ -9,6 +9,7 @@ export interface CreateIssueInput {
   title: string;
   body?: string;
   labels?: string[];
+  priority?: Priority;
 }
 
 export class IssueService {
@@ -26,6 +27,7 @@ export class IssueService {
       title: input.title,
       body: input.body,
       labels: input.labels,
+      priority: input.priority || 'p2',
     });
   }
 
@@ -47,6 +49,10 @@ export class IssueService {
 
   getByStatus(projectId: string, status: IssueStatus): Issue[] {
     return this.issueRepo.findByStatus(projectId, status);
+  }
+
+  getByPriority(projectId: string, priority: Priority): Issue[] {
+    return this.issueRepo.findAll({ projectId, priority });
   }
 
   getActive(projectId: string): Issue[] {
@@ -123,7 +129,7 @@ export class IssueService {
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Closed);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[] }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; priority: Priority }>): Issue | null {
     return this.issueRepo.update(issueId, data);
   }
 

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import * as fs from 'fs';
 import { StateManager } from '../server/state-manager';
-import { ApiResponse, Issue, Stage, IssueStatus, Comment } from '../types';
+import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORITIES } from '../types';
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
@@ -57,10 +57,23 @@ export function createIssueRoutes(
 
       const stage = c.req.query('stage') as Stage | undefined;
       const label = c.req.query('label') as string | undefined;
+      const priority = c.req.query('priority') as string | undefined;
+
+      if (priority && !VALID_PRIORITIES.includes(priority as Priority)) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Invalid priority'
+        };
+        return c.json(response, 400);
+      }
       
       let issues = stage 
         ? issueService.getByStage(projectId, stage)
         : issueService.getByProject(projectId);
+
+      if (priority) {
+        issues = issues.filter(issue => issue.priority === priority);
+      }
       
       if (label) {
         issues = issues.filter(issue => issue.labels.includes(label));
@@ -88,12 +101,20 @@ export function createIssueRoutes(
 
   app.post('/', async (c) => {
     try {
-      const { title, body, labels } = await c.req.json();
+      const { title, body, labels, priority } = await c.req.json();
       
       if (!title) {
         const response: ApiResponse = {
           success: false,
           error: 'title is required'
+        };
+        return c.json(response, 400);
+      }
+
+      if (priority !== undefined && !VALID_PRIORITIES.includes(priority as Priority)) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Invalid priority'
         };
         return c.json(response, 400);
       }
@@ -107,7 +128,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const issue = issueService.create({ projectId, title, body, labels });
+      const issue = issueService.create({ projectId, title, body, labels, priority });
 
       const response: ApiResponse<Issue> = {
         success: true,
@@ -209,11 +230,21 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const { title, body, addLabels, removeLabels } = await c.req.json();
-      const updateData: Partial<{ title: string; body: string; labels: string[] }> = {};
+      const { title, body, addLabels, removeLabels, priority } = await c.req.json();
+
+      if (priority !== undefined && !VALID_PRIORITIES.includes(priority as Priority)) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Invalid priority'
+        };
+        return c.json(response, 400);
+      }
+
+      const updateData: Partial<{ title: string; body: string; labels: string[]; priority: Priority }> = {};
       
       if (title !== undefined) updateData.title = title;
       if (body !== undefined) updateData.body = body;
+      if (priority !== undefined) updateData.priority = priority;
       
       if (addLabels || removeLabels) {
         let currentLabels = [...issue.labels];

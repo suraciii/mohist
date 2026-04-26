@@ -486,6 +486,19 @@ CREATE TABLE IF NOT EXISTS pipeline_checkpoint (
 );
 `;
 
+const PRIORITY_LABEL_MAP: Record<string, string> = {
+  'priority:critical': 'p0',
+  'priority:p0': 'p0',
+  'priority:high': 'p1',
+  'priority:p1': 'p1',
+  'priority:medium': 'p2',
+  'priority:p2': 'p2',
+  'priority:low': 'p3',
+  'priority:p3': 'p3',
+  'priority:backlog': 'p4',
+  'priority:p4': 'p4',
+};
+
 function migrateToVersion14(db: DatabaseManager): void {
   db.transaction(() => {
     const tableInfo = db.all<{ name: string }>(
@@ -498,6 +511,50 @@ function migrateToVersion14(db: DatabaseManager): void {
     }
 
     db.exec(CREATE_PIPELINE_CHECKPOINT_TABLE);
+
+    const hasPriority = tableInfo.some(col => col.name === 'priority');
+
+    if (!hasPriority) {
+      db.exec("ALTER TABLE issues ADD COLUMN priority TEXT NOT NULL DEFAULT 'p2'");
+      db.exec('CREATE INDEX IF NOT EXISTS idx_issues_project_priority ON issues(project_id, priority)');
+    }
+
+    const issues = db.all<{ id: string; labels: string }>(
+      'SELECT id, labels FROM issues WHERE labels IS NOT NULL'
+    );
+
+    for (const issue of issues) {
+      let labels: string[];
+      try {
+        labels = JSON.parse(issue.labels || '[]');
+      } catch {
+        continue;
+      }
+
+      if (!Array.isArray(labels)) continue;
+
+      let priority: string | null = null;
+      const matchedIndices: number[] = [];
+
+      for (let i = 0; i < labels.length; i++) {
+        const label = labels[i];
+        if (typeof label === 'string' && label in PRIORITY_LABEL_MAP) {
+          if (priority === null) {
+            priority = PRIORITY_LABEL_MAP[label];
+          }
+          matchedIndices.push(i);
+        }
+      }
+
+      if (matchedIndices.length > 0) {
+        const remainingLabels = labels.filter((_, i) => !matchedIndices.includes(i));
+        db.run(
+          'UPDATE issues SET priority = ?, labels = ? WHERE id = ?',
+          [priority, JSON.stringify(remainingLabels), issue.id]
+        );
+      }
+    }
+
     setSchemaVersion(db, 14);
   });
 }
