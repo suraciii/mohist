@@ -117,6 +117,15 @@ export class ExploreSessionRepo {
     return this.findById(id);
   }
 
+  updateTitle(id: string, title: string): ExploreSession | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE explore_sessions SET title = ?, updated_at = ? WHERE id = ?',
+      [title, now, id]
+    );
+    return this.findById(id);
+  }
+
   crystallize(id: string, issueId: string): ExploreSession | null {
     const now = new Date().toISOString();
     this.db.run(
