@@ -55,9 +55,9 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/label-colors.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "getTypeColor derives from TYPE_LABEL_COLORS per D2. Area labels full replacement per D3. Color values use Tailwind-500 per D4.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },

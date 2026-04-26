@@ -106,9 +106,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "折叠状态不持久化（D6）。StageColumn 需同时接受新的 isDone prop 且保持现有 label/issues/agentStatus props 不变。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
