@@ -46,9 +46,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts, packages/cli/web/src/lib/types.ts, packages/cli/web/src/hooks/useSSE.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },

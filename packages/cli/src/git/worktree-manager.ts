@@ -236,10 +236,8 @@ export class WorktreeManager {
       });
     }
 
-    await this.remove(projectPath, projectName, issueNumber);
-
     log.info('Merged worktree branch back to base', { issueNumber, branch, baseBranch });
-    return { success: true, message: `Merged ${branch} into ${baseBranch} and cleaned up worktree` };
+    return { success: true, message: `Merged ${branch} into ${baseBranch}` };
   }
 
   private async branchHasCommits(projectPath: string, branch: string, baseBranch: string): Promise<boolean> {
