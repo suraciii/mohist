@@ -40,9 +40,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Belt-and-suspenders with T-001. Can be implemented independently since both fixes address the same root cause from different angles.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
