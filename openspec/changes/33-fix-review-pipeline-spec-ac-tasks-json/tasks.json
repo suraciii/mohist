@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix review pipeline three-layer defense: spec compliance, AC verification, tasks.json sync",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/git/worktree-manager.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Highest priority — 100% reproduction rate bug. The primary fix as decided in D1."
+      "passes": true,
+      "notes": "Highest priority — 100% reproduction rate bug. The primary fix as decided in D1.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -39,7 +41,10 @@
       "output": "packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Belt-and-suspenders with T-001. Can be implemented independently since both fixes address the same root cause from different angles."
+      "notes": "Belt-and-suspenders with T-001. Can be implemented independently since both fixes address the same root cause from different angles.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -63,7 +68,10 @@
       "output": "packages/cli/src/agents/artifact-prompt.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Design decision D2: read from changeDir path, no parameter changes needed."
+      "notes": "Design decision D2: read from changeDir path, no parameter changes needed.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -82,9 +90,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agents/prompts/review.md",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Depends on T-003 because the review agent needs specs/AC context in the prompt to act on the Spec Compliance dimension."
+      "notes": "Depends on T-003 because the review agent needs specs/AC context in the prompt to act on the Spec Compliance dimension.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -103,9 +116,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agents/prompts/artifacts/review-self-check.md",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Depends on T-004 because the self-check validates a report that should have the Spec Compliance dimension."
+      "notes": "Depends on T-004 because the self-check validates a report that should have the Spec Compliance dimension.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -126,7 +144,10 @@
       "output": "packages/cli/web/src/lib/format-time.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Design decision D5: extract for testing, don't move. Standard pattern for making component-internal functions testable."
+      "notes": "Design decision D5: extract for testing, don't move. Standard pattern for making component-internal functions testable.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -147,9 +168,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/web/src/lib/format-time.test.ts",
-      "dependsOn": ["T-006"],
+      "dependsOn": [
+        "T-006"
+      ],
       "passes": false,
-      "notes": "vitest is already configured in vite.config.ts with jsdom environment. Tests should assert exact values to prevent Issue #30 regressions."
+      "notes": "vitest is already configured in vite.config.ts with jsdom environment. Tests should assert exact values to prevent Issue #30 regressions.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }

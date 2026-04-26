@@ -1,10 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
 import { runAcpSession as _runAcpSession } from '../agent-runtime/acp-session';
 import { Log } from '../util/log';
+
+const execFileAsync = promisify(execFile);
 
 const log = Log.create({ service: 'ralph' });
 
@@ -181,6 +185,23 @@ function writeTasksFile(tasksPath: string, tasks: Task[]): void {
     fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
   } catch (e) {
     log.error('writeTasksFile failed', { tasksPath, error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+async function commitTasksFile(
+  tasksPath: string,
+  worktreePath: string,
+  taskId: string,
+  passes: boolean
+): Promise<void> {
+  try {
+    const relPath = path.relative(worktreePath, tasksPath);
+    await execFileAsync('git', ['add', '--', relPath], { cwd: worktreePath });
+    const status = passes ? 'passes=true' : 'passes=false';
+    await execFileAsync('git', ['commit', '-m', `chore(tasks): update ${taskId} ${status}`, '--no-verify'], { cwd: worktreePath });
+    log.info('Committed tasks.json', { taskId, status });
+  } catch (e) {
+    log.warn('commitTasksFile failed', { taskId, error: e instanceof Error ? e.message : String(e) });
   }
 }
 
@@ -471,6 +492,7 @@ export async function runRalphLoop(
         taskSuccess = true;
         updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null });
         writeTasksFile(change.tasksPath, tasks);
+        await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
         emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'completed', attempt);
         completed++;
         emitLoopProgress(completed, failed, sortedTasks.length);
