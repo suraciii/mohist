@@ -44,9 +44,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing migration pattern (v9 for ADD COLUMN, v2 for label parsing)",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
