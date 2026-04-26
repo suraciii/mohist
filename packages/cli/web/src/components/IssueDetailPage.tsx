@@ -38,6 +38,10 @@ function statusBadge(status: IssueStatus): string {
       return 'text-red-700 bg-red-50'
     case IssueStatus.Interrupted:
       return 'text-orange-700 bg-orange-50'
+    case IssueStatus.Closed:
+      return 'text-gray-700 bg-gray-50'
+    case IssueStatus.Completed:
+      return 'text-green-700 bg-green-50'
     default:
       return 'text-gray-700 bg-gray-50'
   }
@@ -412,6 +416,16 @@ export function IssueDetailPage() {
                   )}
 
                   {issue.status === IssueStatus.Blocked && (
+                    <button
+                      onClick={() => reopenMutation.mutate()}
+                      disabled={reopenMutation.isPending}
+                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                    >
+                      {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
+                    </button>
+                  )}
+
+                  {(issue.status === IssueStatus.Closed || issue.status === IssueStatus.Completed) && (
                     <button
                       onClick={() => reopenMutation.mutate()}
                       disabled={reopenMutation.isPending}

@@ -73,10 +73,16 @@ export function IssueCard({ issue, agentStatus }: Props) {
       )}
 
       {issue.status === IssueStatus.Blocked && (
-        <div className="mt-2 text-xs text-red-500">Closed</div>
+        <div className="mt-2 text-xs text-red-500">Blocked</div>
       )}
       {issue.status === IssueStatus.Paused && (
         <div className="mt-2 text-xs text-gray-400">Paused</div>
+      )}
+      {issue.status === IssueStatus.Closed && (
+        <div className="mt-2 text-xs text-gray-500">Closed</div>
+      )}
+      {issue.status === IssueStatus.Completed && (
+        <div className="mt-2 text-xs text-green-500">Completed</div>
       )}
       {isInterrupted && (
         <div className="mt-2 flex items-center justify-between">
