@@ -98,6 +98,7 @@ export function KanbanBoard({ issues, agentStatus }: Props) {
             label={col.label}
             issues={col.issues}
             agentStatus={agentStatus}
+            isDone={col.key === Stage.Done}
           />
         ))}
       </div>
