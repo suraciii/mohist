@@ -1,0 +1,71 @@
+{
+  "project": "mohist",
+  "description": "Add self-check round to Review stage for stable review report quality",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create review-self-check prompt instruction file and builder function",
+      "spec": "specs/review-stage-self-check/spec.md#review-self-check-prompt",
+      "description": "Create `packages/cli/src/agents/prompts/artifacts/review-self-check.md` with instructions for the agent to read review.md, verify its format/completeness, and rewrite if needed. Add `buildReviewSelfCheckPrompt(issue, changeDir)` in `artifact-prompt.ts` following the same structure as `buildSelfReviewPrompt`.",
+      "acceptanceCriteria": [
+        "buildReviewSelfCheckPrompt returns a prompt string that includes the changeDir path",
+        "Prompt instructs agent to read review.md from changeDir",
+        "Prompt instructs agent to verify format and rewrite if inadequate",
+        "Function is exported from artifact-prompt.ts",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agents/prompts/artifacts/review-self-check.md",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follow the same pattern as buildSelfReviewPrompt — load instruction file from ARTIFACTS_DIR, combine with formatIssueInfo and changeDir."
+    },
+    {
+      "id": "T-002",
+      "title": "Refactor runPipelineReviewStage to multi-round with roundState and self-check",
+      "spec": "specs/review-stage-self-check/spec.md#review-stage-multi-round-pipeline",
+      "description": "Rewrite `runPipelineReviewStage` in `workflow-controller.ts` to use a `roundState` object (mirroring Plan stage pattern at line 91-110). Round 0 sends reviewer prompt. After round 0 succeeds, update roundState to `{ type: 'review-self-check', index: 1 }`, emit `plan_round_start`, and send the self-check prompt via `conn.prompt()`. On self-check failure, return `success: false`. After both rounds, read `review.md` (fallback to self-check result.text), validate non-empty, then `conn.close()`. Keep the existing error/catch structure.",
+      "acceptanceCriteria": [
+        "Review stage sends two conn.prompt() calls on the same connection",
+        "Round 0 emits plan_round_start with roundType 'review', roundIndex 0",
+        "Round 1 emits plan_round_start with roundType 'review-self-check', roundIndex 1",
+        "onSessionUpdate closure reads roundState.type and roundState.index for plan_session_update events",
+        "Round 0 failure returns success:false without attempting round 1",
+        "Round 1 failure returns success:false with requiresApproval:false",
+        "Final review.md is read after self-check round, non-empty validation applied",
+        "conn.close() called only after both rounds complete (or on early failure)",
+        "Review prompt (review.md) includes instruction to output only final report with no thinking/reasoning",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": ["T-001"],
+      "notes": "Import buildReviewSelfCheckPrompt from artifact-prompt.ts. The roundState mutation + onSessionUpdate closure pattern is proven in Plan stage (lines 91-110). Do NOT close the connection between rounds."
+    },
+    {
+      "id": "T-003",
+      "title": "Update existing tests for multi-round Review stage",
+      "spec": "specs/review-stage-self-check/spec.md#review-stage-multi-round-pipeline",
+      "description": "Update existing tests in `pipeline-controller.test.ts` and `build-pipeline-observability.test.ts` to account for the new second round. Mock `buildReviewSelfCheckPrompt` alongside existing mocks. Verify that the review stage test cases cover: successful two-round flow, round 0 failure skips round 1, round 1 failure returns error, empty report validation.",
+      "acceptanceCriteria": [
+        "buildReviewSelfCheckPrompt is mocked in test setup files",
+        "Test covers successful two-round review (both conn.prompt calls)",
+        "Test covers round 0 failure — no second prompt sent",
+        "Test covers round 1 failure — returns success:false",
+        "Test covers empty report validation after self-check",
+        "All existing tests still pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/pipeline-controller.test.ts",
+      "dependsOn": ["T-002"],
+      "notes": "Check both test files that mock buildReviewerPrompt — they need buildReviewSelfCheckPrompt mock too. The mock ACP connection's prompt() method may need to handle being called twice."
+    }
+  ]
+}
