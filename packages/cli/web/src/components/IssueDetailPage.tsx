@@ -12,8 +12,6 @@ import { SessionTimeline } from './SessionTimeline'
 
 const STAGES = [Stage.Draft, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
-const APPROVAL_STAGES = new Set<string>([Stage.Build])
-
 const STAGE_LABELS: Record<string, string> = {
   [Stage.Draft]: 'Draft',
   [Stage.Plan]: 'Plan',
@@ -136,8 +134,8 @@ export function IssueDetailPage() {
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
   const isCapacityFull = activeAgents.length >= maxConcurrent
   const isApprovalGate =
-    APPROVAL_STAGES.has(issue.stage) &&
-    issue.status === IssueStatus.Active &&
+    issue.approvalState?.status === 'awaiting' &&
+    (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked) &&
     !isAgentRunningOnThis
   const isDraft = issue.stage === Stage.Draft
   const showDiff = DIFF_STAGES.has(issue.stage)
@@ -148,6 +146,9 @@ export function IssueDetailPage() {
     ? [...(issue.comments ?? [])].sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )[0]
+    : null
+  const approvalOutput = isApprovalGate
+    ? (lastAgentComment?.body ?? (issue.approvalState?.output as Record<string, string> | undefined)?.selfReviewNotes ?? null)
     : null
 
   return (
@@ -421,7 +422,7 @@ export function IssueDetailPage() {
                 </div>
               </div>
 
-              {isApprovalGate && lastAgentComment && (
+              {isApprovalGate && approvalOutput && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h2 className="text-sm font-semibold text-amber-800 mb-2">
                     Approval Required
@@ -433,7 +434,7 @@ export function IssueDetailPage() {
                   <div className="rounded bg-white p-3 mb-3 max-h-64 overflow-y-auto">
                     <div className="text-xs text-gray-400 mb-1">Latest agent output</div>
                     <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                      {lastAgentComment.body}
+                      {approvalOutput}
                     </div>
                   </div>
                   <div className="flex gap-2">
