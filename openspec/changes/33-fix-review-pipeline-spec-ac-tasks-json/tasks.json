@@ -67,9 +67,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/agents/artifact-prompt.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Design decision D2: read from changeDir path, no parameter changes needed.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
@@ -93,11 +93,11 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-003 because the review agent needs specs/AC context in the prompt to act on the Spec Compliance dimension.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": "Auto-skipped (no onAskUser): Timed out after 300s"
     },
     {
       "id": "T-005",
