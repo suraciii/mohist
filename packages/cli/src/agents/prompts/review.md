@@ -60,3 +60,7 @@ Write a review report to `{changeDir}/review.md` with:
 ```
 
 Any error-level issue in any dimension means the review FAILS. Warnings-only means PASS with warnings noted.
+
+## Important
+
+Output ONLY the final review report. Do NOT include any thinking process, reasoning, meta-commentary, or step-by-step analysis in your output or in `review.md`. The report must be purely the structured review document.
