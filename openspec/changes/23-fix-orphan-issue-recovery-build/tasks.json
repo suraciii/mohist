@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Unconditional ACP session exit logging with phase",
+      "spec": "specs/error-resilience/spec.md",
+      "description": "In acp-session.ts, modify both proc.on(\"exit\") handlers (runAcpSession ~L139, createAcpConnection ~L515) to always write acp_session_process_exit workflow log with phase (init/running), exitCode, mode, and timestamp. Move writeSessionLog outside the if (!initialized && code !== 0) guard. Keep existing rejectOnSpawn/rejectOnInit logic unchanged inside the guard.",
+      "acceptanceCriteria": [
+        "runAcpSession exit handler writes log with phase:'init' when !initialized and phase:'running' when initialized, mode:'single'",
+        "createAcpConnection exit handler writes log with phase:'init' when !initialized and phase:'running' when initialized, mode:'multi-round'",
+        "Existing rejection logic (rejectOnSpawn/rejectOnInit) still fires only when !initialized && code !== 0",
+        "Typecheck passes",
+        "Existing tests pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Smart build-stage orphan recovery in recoverIssues()",
+      "spec": "specs/orphan-recovery/spec.md",
+      "description": "Modify AgentRunnerService: add optional ProjectRepo + WorktreeManager constructor params. In recoverIssues(), for stage=build non-awaiting orphans: use findChangeDir() + fs.readFileSync(tasks.json) to inspect task progress. If all tasks pass → updateStage(review), keep active. If partial → blocked with progress summary log. If no tasks.json or invalid → blocked (existing behavior). Also wire the new params in server/index.ts where AgentRunnerService is constructed.",
+      "acceptanceCriteria": [
+        "AgentRunnerService constructor accepts optional ProjectRepo and WorktreeManager params",
+        "server/index.ts passes projectRepo and worktreeManager to AgentRunnerService constructor",
+        "Build-stage orphan with all tasks passing: stage updated to review, status remains active, NOT blocked",
+        "Build-stage orphan with partial tasks: status=blocked, log contains progress summary (e.g. '2/3 tasks completed, T-003 pending')",
+        "Build-stage orphan with no change dir or no tasks.json: status=blocked, log mentions missing tasks.json",
+        "Build-stage orphan with invalid tasks.json: status=blocked, log mentions malformed tasks.json",
+        "Plan/explore stage orphans still get blocked (existing behavior unchanged)",
+        "Awaiting approval issues still restore pendingGate (existing behavior unchanged)",
+        "No ProjectRepo/WorktreeManager: recoverIssues() falls back to blind-block for all orphans",
+        "Typecheck passes",
+        "Existing tests pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Use findChangeDir from openspec/detector.ts (not detectOpenSpecChange, which requires tasks.json to exist). Import ProjectRepo type from db/project-repo, WorktreeManager from git/worktree-manager.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Reopen handler preserves review stage for auto-advanced issues",
+      "spec": "specs/reopen-resume/spec.md",
+      "description": "In api/issues.ts reopen handler (~L498), after issueService.reopen() returns: if issue.stage=review and tasks.json exists with all tasks passing (use findChangeDir + fs.readFileSync), return message 'reopened at review stage, use start to continue'. Otherwise keep existing message. No stage reset needed since issueService.reopen() doesn't reset stage currently.",
+      "acceptanceCriteria": [
+        "Reopen on blocked issue at review stage with all tasks passing: response message contains 'reopened at review stage'",
+        "Reopen on blocked issue at other stages or without tasks.json: response message unchanged",
+        "Typecheck passes",
+        "Existing tests pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "The reopen handler already has access to worktreeManager. Use the same tasks.json inspection pattern from T-002.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "Tests for orphan recovery scenarios",
+      "spec": "specs/orphan-recovery/spec.md",
+      "description": "Create packages/cli/tests/recover-issues.test.ts covering all recovery branches: build-stage all-pass (auto-advance to review), build-stage partial (blocked with summary), build-stage no tasks.json (blocked), build-stage invalid JSON (blocked), plan-stage (blocked), awaiting (pendingGate restored), no ProjectRepo fallback, mixed orphans. Use in-memory DB + temp directories with real tasks.json files. Follow existing test patterns from agent-runner-service.test.ts.",
+      "acceptanceCriteria": [
+        "All orphan-recovery spec scenarios have corresponding test cases",
+        "Build all-pass test: verifies stage=review, status=active after recovery",
+        "Build partial test: verifies status=blocked after recovery",
+        "No tasks.json test: verifies status=blocked after recovery",
+        "Invalid JSON test: verifies status=blocked after recovery",
+        "Existing agent-runner-service.test.ts tests still pass",
+        "Typecheck passes",
+        "All new tests pass"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/recover-issues.test.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Use vitest. Create temp directories with openspec/changes/<n>-test-change/tasks.json for file-system-based tests. Mock WorktreeManager.getPath() to return temp dir.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
