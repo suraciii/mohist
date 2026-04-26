@@ -39,9 +39,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/agents/prompts/artifacts/self-review.md",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
