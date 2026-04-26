@@ -67,9 +67,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/agents/prompts/artifacts/tasks.md",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Prompt changes are independent of executor changes — can be done in parallel with T-001/T-002",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
