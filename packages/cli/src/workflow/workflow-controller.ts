@@ -85,7 +85,19 @@ export class WorkflowController {
       };
     }
 
-    cleanChangeDir(changeDir);
+    const checkpoint = this.checkpointRepo?.get(issue.number, 'plan') ?? null;
+    const completedSteps: string[] = checkpoint ? [...checkpoint.completedSteps] : [];
+    const isResuming = completedSteps.length > 0;
+
+    if (!isResuming) {
+      cleanChangeDir(changeDir);
+    } else {
+      log.info('Plan stage resuming from checkpoint', {
+        issueNumber: issue.number,
+        completedSteps,
+        nextStep: checkpoint?.nextStep,
+      });
+    }
 
     const rounds: PlanRoundConfig[] = [
       { type: 'proposal', verify: () => fs.existsSync(path.join(changeDir, 'proposal.md')), label: 'proposal.md', outputPath: path.join(changeDir, 'proposal.md') },
@@ -94,8 +106,6 @@ export class WorkflowController {
       { type: 'tasks', verify: () => fs.existsSync(path.join(changeDir, 'tasks.json')), label: 'tasks.json', outputPath: path.join(changeDir, 'tasks.json') },
     ];
 
-    // roundState is mutated by the for loop and read by onSessionUpdate callback.
-    // Safe because JS is single-threaded.
     const roundState = { type: '', index: 0 };
     const planAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
@@ -125,6 +135,22 @@ export class WorkflowController {
       for (const [index, round] of rounds.entries()) {
         roundState.type = round.type;
         roundState.index = index;
+
+        if (completedSteps.includes(round.type)) {
+          if (round.verify()) {
+            log.info('Plan stage round skipped (checkpoint + artifact exists)', { artifact: round.type, issueNumber: issue.number });
+            continue;
+          }
+          log.info('Plan stage round in checkpoint but artifact missing, re-running', { artifact: round.type, issueNumber: issue.number });
+          const idx = completedSteps.indexOf(round.type);
+          completedSteps.splice(idx);
+        } else if (!completedSteps.includes(round.type) && round.verify()) {
+          log.info('Plan stage artifact exists but not in checkpoint, marking complete', { artifact: round.type, issueNumber: issue.number });
+          completedSteps.push(round.type);
+          const nextRound = rounds[index + 1];
+          this.checkpointRepo?.upsert(issue.number, 'plan', [...completedSteps], nextRound?.type ?? 'self-review');
+          continue;
+        }
 
         log.info('Plan stage round', { artifact: round.type, issueNumber: issue.number });
 
@@ -196,6 +222,10 @@ export class WorkflowController {
 
           log.info('Plan stage retry succeeded', { artifact: round.label });
         }
+
+        completedSteps.push(round.type);
+        const nextRound = rounds[index + 1];
+        this.checkpointRepo?.upsert(issue.number, 'plan', [...completedSteps], nextRound?.type ?? 'self-review');
       }
 
       // self-review round
@@ -233,6 +263,8 @@ export class WorkflowController {
       }
 
       await conn.close();
+
+      this.checkpointRepo?.delete(issue.number, 'plan');
 
       const selfReviewReport = readReportFile(changeDir, 'self-review.md') ?? selfReviewResult.text;
 
@@ -369,6 +401,7 @@ export class WorkflowController {
     this.issueRepo.updateStage(currentIssue.id, Stage.Done);
     this.issueRepo.clearApprovalState(currentIssue.id);
     this.issueRepo.updateStatus(currentIssue.id, IssueStatus.Completed);
+    this.checkpointRepo?.deleteAll(currentIssue.number);
 
     log.info('Pipeline completed', { issueNumber: currentIssue.number });
     return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
