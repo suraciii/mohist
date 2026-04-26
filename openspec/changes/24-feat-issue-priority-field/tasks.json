@@ -1,0 +1,158 @@
+{
+  "project": "mohist",
+  "description": "Add structured priority field (p0–p4) to issues with DB migration, API support, and CLI flags",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add Priority type and update Issue interface",
+      "spec": "specs/issue-priority/spec.md",
+      "description": "Add `Priority` type union (`'p0'|'p1'|'p2'|'p3'|'p4'`) and `VALID_PRIORITIES` constant to `types/index.ts`. Add `priority: Priority` field to the `Issue` interface.",
+      "acceptanceCriteria": [
+        "`Priority` type is exported from types/index.ts",
+        "`VALID_PRIORITIES` array contains all 5 values",
+        "`Issue` interface has `priority: Priority` field",
+        "`npm run build` in packages/cli passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types/index.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "D5 in design.md — string literal union, not enum"
+    },
+    {
+      "id": "T-002",
+      "title": "Database migration v14 — priority column + label migration",
+      "spec": "specs/issue-priority/spec.md",
+      "description": "Bump SCHEMA_VERSION to 14. Add `migrateToVersion14()` that adds `priority TEXT NOT NULL DEFAULT 'p2'` column to issues table, creates index `idx_issues_project_priority`, and migrates existing `priority:*` labels (critical→p0, high→p1, medium→p2, low→p3, backlog→p4) removing them from the labels JSON array.",
+      "acceptanceCriteria": [
+        "SCHEMA_VERSION is 14",
+        "Migration adds priority column with DEFAULT 'p2'",
+        "Index idx_issues_project_priority created on (project_id, priority)",
+        "priority:critical/p0 labels → p0, priority:high/p1 → p1, priority:medium/p2 → p2, priority:low/p3 → p3, priority:backlog/p4 → p4",
+        "Matched priority:* labels removed from labels JSON array",
+        "Issues without priority:* labels get default 'p2'",
+        "`npm run build` in packages/cli passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/migrations.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Follow existing migration pattern (v9 for ADD COLUMN, v2 for label parsing)"
+    },
+    {
+      "id": "T-003",
+      "title": "Update IssueRepo for priority field",
+      "spec": "specs/issue-priority/spec.md",
+      "description": "Update IssueRow to include `priority` field, update `rowToIssue` to map it, update `create()` to accept and store priority (default 'p2'), update `findAll()` to support `priority` filter in IssueQueryOptions and change default sort to `priority ASC, number ASC`, update `update()` to accept priority in the data parameter.",
+      "acceptanceCriteria": [
+        "IssueRow has priority field",
+        "rowToIssue maps row.priority to Issue.priority",
+        "create() stores priority (defaults to 'p2')",
+        "findAll() filters by priority when IssueQueryOptions.priority is set",
+        "findAll() sorts by priority ASC, number ASC by default",
+        "update() accepts priority in data parameter",
+        "CreateIssueData has optional priority field",
+        "`npm run build` in packages/cli passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/db/issue-repo.ts",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "D4 in design.md — global sort change in findAll()"
+    },
+    {
+      "id": "T-004",
+      "title": "Update IssueService for priority",
+      "spec": "specs/local-issue-store/spec.md",
+      "description": "Add `priority` to `CreateIssueInput`, pass it through to `IssueRepo.create()`. Update `update()` method signature to accept `priority` in the data parameter. Add `getByPriority(projectId, priority)` method that calls `findAll({ projectId, priority })` so the API can filter by priority at the SQL level.",
+      "acceptanceCriteria": [
+        "CreateIssueInput has optional priority field",
+        "create() passes priority to repo (defaults to 'p2' if not provided)",
+        "update() method accepts priority in data param",
+        "getByPriority(projectId, priority) method exists and delegates to findAll",
+        "`npm run build` in packages/cli passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/issue-service.ts",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-005",
+      "title": "Update API routes for priority support",
+      "spec": "specs/http-api/spec.md",
+      "description": "Update `GET /api/issues` to accept `?priority=pX` query param and filter by priority. Update `POST /api/issues` to accept optional `priority` in body with validation (400 for invalid). Update `PATCH /api/issues/:number` to accept `priority` in body with validation. Use `VALID_PRIORITIES` for validation — return 400 with 'Invalid priority' message for bad values.",
+      "acceptanceCriteria": [
+        "GET /api/issues?priority=p0 returns only p0 issues, sorted priority ASC, number ASC",
+        "GET /api/issues (no priority param) returns all issues sorted by priority ASC, number ASC",
+        "POST /api/issues with priority creates issue with that priority",
+        "POST /api/issues without priority defaults to p2",
+        "POST /api/issues with invalid priority returns 400 with 'Invalid priority'",
+        "PATCH /api/issues/:number with priority updates the issue priority",
+        "PATCH /api/issues/:number with invalid priority returns 400",
+        "GET /api/issues/:number response includes priority field",
+        "`npm run build` in packages/cli passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "D2 in design.md — validation at API layer only"
+    },
+    {
+      "id": "T-006",
+      "title": "Update CLI commands for priority flags",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Add `--priority <level>` flag to `mo issue create`, `mo issue update`, and `mo issue list` commands. Update `mo issue list` to pass `?priority=` query param. Update `mo issue show` and `mo issue list` output to display priority. Update create/update to send priority in request body.",
+      "acceptanceCriteria": [
+        "`mo issue create 'title' --priority p0` sends priority in POST body",
+        "`mo issue update 1 --priority p1` sends priority in PATCH body",
+        "`mo issue list --priority p1` passes ?priority=p1 to GET request",
+        "`mo issue list` output includes priority column",
+        "`mo issue show 1` output displays priority field",
+        "`npm run build` in packages/cli passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-007",
+      "title": "Write tests for priority feature",
+      "spec": "specs/issue-priority/spec.md",
+      "description": "Write tests covering: migration v14 (column added, labels migrated, defaults set), IssueRepo priority filter and sort, API validation (valid/invalid priority on create/update, filter on list), and CLI flag parsing. Follow existing test patterns in the project.",
+      "acceptanceCriteria": [
+        "Test: migration v14 adds priority column with default 'p2'",
+        "Test: migration converts priority:high label → p1 and removes label",
+        "Test: IssueRepo.findAll sorts by priority ASC, number ASC",
+        "Test: IssueRepo.findAll with priority filter returns only matching issues",
+        "Test: POST /api/issues with invalid priority returns 400",
+        "Test: PATCH /api/issues/:number with priority updates correctly",
+        "Test: GET /api/issues?priority=p0 filters correctly",
+        "`npm test` in packages/cli passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "Check existing test files for patterns before writing"
+    }
+  ]
+}
