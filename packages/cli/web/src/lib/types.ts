@@ -70,6 +70,11 @@ export interface AgentStatus {
   running: boolean
   issueId: string | null
   issueNumber: number | null
+  activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>
+  maxConcurrentAgents: number
+  queueDepth: number
+  waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>
+  recoverableIssues: Array<{ issueNumber: number; stage: string }>
 }
 
 export interface DiffFile {

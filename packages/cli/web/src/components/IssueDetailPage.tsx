@@ -12,6 +12,8 @@ import { SessionTimeline } from './SessionTimeline'
 
 const STAGES = [Stage.Draft, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
+const APPROVAL_STAGES = new Set<string>([Stage.Build])
+
 const STAGE_LABELS: Record<string, string> = {
   [Stage.Draft]: 'Draft',
   [Stage.Plan]: 'Plan',
@@ -106,10 +108,12 @@ export function IssueDetailPage() {
   }
 
   const stageIndex = STAGES.indexOf(issue.stage)
-  const isAgentRunning = agentStatus?.running === true
-  const isAgentRunningOnThis = isAgentRunning && agentStatus?.issueNumber === issueNumber
+  const activeAgents = agentStatus?.activeAgents ?? []
+  const maxConcurrent = agentStatus?.maxConcurrentAgents ?? Infinity
+  const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
+  const isCapacityFull = activeAgents.length >= maxConcurrent
   const isApprovalGate =
-    issue.approvalState?.status === 'awaiting' &&
+    APPROVAL_STAGES.has(issue.stage) &&
     issue.status === IssueStatus.Active &&
     !isAgentRunningOnThis
   const isDraft = issue.stage === Stage.Draft
@@ -126,7 +130,7 @@ export function IssueDetailPage() {
   return (
     <>
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-4 md:px-6 py-6">
+        <div className="max-w-4xl mx-auto px-6 py-6">
           <button
             onClick={() => navigate('/')}
             className="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
@@ -329,14 +333,16 @@ export function IssueDetailPage() {
                   {isDraft && (
                     <button
                       onClick={() => startMutation.mutate()}
-                      disabled={isAgentRunning || startMutation.isPending}
-                      className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors min-h-[44px]"
+                      disabled={isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
+                      className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {startMutation.isPending
                         ? 'Starting...'
-                        : isAgentRunning
-                          ? 'Agent busy...'
-                          : 'Start'}
+                        : isAgentRunningOnThis
+                          ? 'Agent running...'
+                          : isCapacityFull
+                            ? 'Capacity full...'
+                            : 'Start'}
                     </button>
                   )}
 
@@ -344,7 +350,7 @@ export function IssueDetailPage() {
                     <button
                       onClick={() => closeMutation.mutate()}
                       disabled={closeMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors min-h-[44px]"
+                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                     >
                       {closeMutation.isPending ? 'Closing...' : 'Close'}
                     </button>
@@ -354,7 +360,7 @@ export function IssueDetailPage() {
                     <button
                       onClick={() => reopenMutation.mutate()}
                       disabled={reopenMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors min-h-[44px]"
+                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                     >
                       {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
                     </button>
@@ -368,9 +374,9 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {isAgentRunning && (
+                  {!isAgentRunningOnThis && activeAgents.length > 0 && !isDraft && (
                     <div className="text-xs text-gray-400 text-center">
-                      Agent is running on another issue
+                      {activeAgents.length} agent{activeAgents.length > 1 ? 's' : ''} running on other issues
                     </div>
                   )}
                 </div>
@@ -394,13 +400,13 @@ export function IssueDetailPage() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => approveMutation.mutate()}
-                      disabled={approveMutation.isPending || isAgentRunning}
-                      className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors min-h-[44px]"
+                      disabled={approveMutation.isPending || isAgentRunningOnThis}
+                      className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {approveMutation.isPending
                         ? 'Approving...'
-                        : isAgentRunning
-                          ? 'Agent busy...'
+                        : isAgentRunningOnThis
+                          ? 'Agent running...'
                           : 'Approve & Continue'}
                     </button>
                   </div>
