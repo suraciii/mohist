@@ -35,6 +35,7 @@ vi.mock('../src/agents/artifact-prompt', () => ({
   buildArtifactPrompt: vi.fn().mockReturnValue('mock-prompt'),
   buildSelfReviewPrompt: vi.fn().mockReturnValue('mock-self-review-prompt'),
   buildReviewerPrompt: vi.fn().mockReturnValue('mock-reviewer-prompt'),
+  buildReviewSelfCheckPrompt: vi.fn().mockReturnValue('mock-review-self-check-prompt'),
 }));
 
 import { WorkflowController, type ChangeArtifactsManager } from '../src/workflow/workflow-controller';
@@ -368,5 +369,134 @@ describe('WorkflowController build stage git commit', () => {
     const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
     expect(result.gateRequired).toBe(true);
+  });
+});
+
+describe('WorkflowController review stage multi-round', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should send 2 prompts in review stage (review + self-check)', async () => {
+    const { issueRepo, eventBus } = createMockRepos();
+    const mockConn = {
+      prompt: vi.fn().mockResolvedValue({ text: 'review report content', success: true, acpSessionId: 's1' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo,
+      eventBus,
+      projectId: 'proj-1',
+    });
+
+    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+
+    expect(mockConn.prompt).toHaveBeenCalledTimes(2);
+    expect(mockConn.close).toHaveBeenCalled();
+    expect(result.gateRequired).toBe(true);
+    expect(result.stage).toBe(Stage.Review);
+  });
+
+  it('should not send self-check prompt when review round fails', async () => {
+    const { issueRepo, eventBus } = createMockRepos();
+    const mockConn = {
+      prompt: vi.fn().mockResolvedValue({ text: '', success: false, error: 'review failed', acpSessionId: 's1' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo,
+      eventBus,
+      projectId: 'proj-1',
+    });
+
+    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+
+    expect(mockConn.prompt).toHaveBeenCalledTimes(1);
+    expect(result.gateRequired).toBe(false);
+    expect(result.message).toContain('Review failed');
+  });
+
+  it('should return error when self-check round fails', async () => {
+    const { issueRepo, eventBus } = createMockRepos();
+    const mockConn = {
+      prompt: vi.fn()
+        .mockResolvedValueOnce({ text: 'review content', success: true, acpSessionId: 's1' })
+        .mockResolvedValueOnce({ text: '', success: false, error: 'self-check failed', acpSessionId: 's2' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo,
+      eventBus,
+      projectId: 'proj-1',
+    });
+
+    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+
+    expect(mockConn.prompt).toHaveBeenCalledTimes(2);
+    expect(result.gateRequired).toBe(false);
+    expect(result.message).toContain('self-check');
+  });
+
+  it('should return error when report is empty after self-check', async () => {
+    const { issueRepo, eventBus } = createMockRepos();
+    const mockConn = {
+      prompt: vi.fn().mockResolvedValue({ text: '', success: true, acpSessionId: 's1' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo,
+      eventBus,
+      projectId: 'proj-1',
+    });
+
+    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+
+    expect(mockConn.prompt).toHaveBeenCalledTimes(2);
+    expect(result.gateRequired).toBe(false);
+    expect(result.message).toContain('empty');
+  });
+
+  it('should emit plan_round_start for both review and self-check rounds', async () => {
+    const { issueRepo, eventBus } = createMockRepos();
+    const mockConn = {
+      prompt: vi.fn().mockResolvedValue({ text: 'review report', success: true, acpSessionId: 's1' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo,
+      eventBus,
+      projectId: 'proj-1',
+    });
+
+    await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      'plan_round_start',
+      expect.objectContaining({ roundType: 'review', roundIndex: 0 }),
+    );
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      'plan_round_start',
+      expect.objectContaining({ roundType: 'review-self-check', roundIndex: 1 }),
+    );
   });
 });

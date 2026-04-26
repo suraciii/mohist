@@ -8,7 +8,7 @@ import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { loadWorkflow } from './workflow-loader';
-import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
@@ -702,22 +702,24 @@ export class WorkflowController {
       };
     }
 
+    const roundState = { type: '', index: 0 };
+
     const reviewAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `review-${issue.number}`,
-      onSessionUpdate: (notification) => {
+      onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
           this.eventBus.emit('plan_session_update', {
             issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
             projectId: this.projectId ?? issue.projectId,
-            roundType: 'review',
-            roundIndex: 0,
-            sessionUpdate: notification.update.sessionUpdate,
-            data: notification.update as unknown,
+            roundType: roundState.type,
+            roundIndex: roundState.index,
+            sessionUpdate: _notification.update.sessionUpdate,
+            data: _notification.update as unknown,
           });
         } catch (e) {
-          log.warn('eventBus.emit failed for plan_session_update', { roundType: 'review', error: e instanceof Error ? e.message : String(e) });
+          log.warn('eventBus.emit failed for plan_session_update', { roundType: roundState.type, error: e instanceof Error ? e.message : String(e) });
         }
       },
     };
@@ -725,6 +727,12 @@ export class WorkflowController {
     let conn: AcpConnection | undefined;
     try {
       conn = await createAcpConnection(reviewAcpOptions);
+
+      // Round 0: review
+      roundState.type = 'review';
+      roundState.index = 0;
+
+      log.info('Review stage round', { roundType: 'review', issueNumber: issue.number });
 
       if (this.eventBus) {
         try {
@@ -743,21 +751,73 @@ export class WorkflowController {
       const reviewerPrompt = buildReviewerPrompt(issue, changeDir);
       const result = await conn.prompt(reviewerPrompt);
 
+      if (!result.success) {
+        log.error('Review stage round failed', { roundType: 'review', error: result.error });
+        await conn.close();
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: `Review failed: ${result.error ?? 'unknown error'}`,
+        };
+      }
+
+      // Round 1: self-check
+      roundState.type = 'review-self-check';
+      roundState.index = 1;
+
+      log.info('Review stage self-check round', { issueNumber: issue.number });
+
+      if (this.eventBus) {
+        try {
+          this.eventBus.emit('plan_round_start', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: 'review-self-check',
+            roundLabel: 'review-self-check',
+            roundIndex: 1,
+          });
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_round_start', { roundType: 'review-self-check', error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      const selfCheckPrompt = buildReviewSelfCheckPrompt(issue, changeDir);
+      const selfCheckResult = await conn.prompt(selfCheckPrompt);
+
+      if (!selfCheckResult.success) {
+        log.error('Review stage self-check failed', { error: selfCheckResult.error });
+        await conn.close();
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: `Review stage failed at self-check: ${selfCheckResult.error ?? 'unknown error'}`,
+        };
+      }
+
       await conn.close();
 
-      const reviewReport = readReportFile(changeDir, 'review.md') ?? result.text;
+      const reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
+
+      if (!reviewReport || reviewReport.trim().length === 0) {
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: 'Review stage failed: review.md is empty after self-check',
+        };
+      }
 
       return {
-        success: result.success,
+        success: true,
         requiresApproval: true,
         output: {
           stage: Stage.Review,
           issueNumber: issue.number,
           reviewReport,
         },
-        message: result.success
-          ? 'Review completed, awaiting user approval'
-          : `Review failed: ${result.error ?? 'unknown error'}`,
+        message: 'Review completed, awaiting user approval',
       };
     } catch (err) {
       if (conn) {

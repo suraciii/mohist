@@ -60,6 +60,7 @@ vi.mock('../src/agents/artifact-prompt', () => ({
   buildArtifactPrompt: vi.fn().mockReturnValue('mock-prompt'),
   buildSelfReviewPrompt: vi.fn().mockReturnValue('mock-self-review-prompt'),
   buildReviewerPrompt: vi.fn().mockReturnValue('mock-reviewer-prompt'),
+  buildReviewSelfCheckPrompt: vi.fn().mockReturnValue('mock-review-self-check-prompt'),
 }));
 
 import { WorkflowController } from '../src/workflow/workflow-controller';
