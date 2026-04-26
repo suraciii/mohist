@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix ACP session spawn log taskId field to store actual task ID instead of prompt text",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -37,9 +39,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -56,9 +63,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/acp-session-taskid.test.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
