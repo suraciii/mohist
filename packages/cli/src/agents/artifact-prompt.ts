@@ -9,6 +9,7 @@ const TEMPLATES_DIR = path.join(ARTIFACTS_DIR, 'templates');
 const REVIEW_PROMPT_PATH = path.join(__dirname, 'prompts', 'review.md');
 const REVIEW_SELF_CHECK_PATH = path.join(ARTIFACTS_DIR, 'review-self-check.md');
 const EXPLORE_PROMPT_PATH = path.join(__dirname, 'prompts', 'explore.md');
+const CONFLICT_RESOLUTION_PROMPT_PATH = path.join(__dirname, 'prompts', 'conflict-resolution.md');
 
 const ARTIFACT_OUTPUT_FILES: Record<ArtifactType, string> = {
   proposal: 'proposal.md',
@@ -177,6 +178,32 @@ export interface ExploreIssueInfo {
   title: string;
   body?: string;
   number?: number;
+}
+
+export function buildConflictResolutionPrompt(
+  issue: Issue,
+  changeDir: string,
+  conflictFiles: string[],
+): string {
+  const instruction = loadFile(CONFLICT_RESOLUTION_PROMPT_PATH);
+
+  const conflictFileList = conflictFiles
+    .map((f) => `- ${f}`)
+    .join('\n');
+
+  const parts: string[] = [
+    formatIssueInfo(issue),
+    '',
+    `## Change Directory\n\n${changeDir}`,
+    '',
+    '## Conflict Files\n',
+    conflictFileList,
+    '',
+    '## Instructions\n',
+    instruction,
+  ];
+
+  return parts.join('\n');
 }
 
 export function buildExplorePrompt(
