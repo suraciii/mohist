@@ -30,6 +30,7 @@ export interface AgentStatus {
   waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>;
   recoverableIssues: RecoverableIssue[];
   queueDepth: number;
+  maxConcurrentAgents: number;
 }
 
 export interface WaitingQuestion {
@@ -201,6 +202,7 @@ export class AgentRunnerService {
       waitingQuestions: waiting,
       recoverableIssues: this.recoverableIssues,
       queueDepth: 0,
+      maxConcurrentAgents: this.maxConcurrentAgents,
     };
   }
 
@@ -224,6 +226,10 @@ export class AgentRunnerService {
   ): { started: boolean; error?: string } {
     if (this.activeAgents.has(issue.id)) {
       return { started: false, error: `Issue #${issue.number} already has an agent running` };
+    }
+
+    if (this.activeAgents.size >= this.maxConcurrentAgents) {
+      return { started: false, error: `Concurrent agent limit reached (${this.maxConcurrentAgents})` };
     }
 
     const pendingApproval = issueRepo.findPendingApprovalByIssueId(issue.id);
