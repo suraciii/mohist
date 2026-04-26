@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Rewrite Explore Agent system prompt for thinking-partner quality: stance model, entry-point differentiation, rhythm control, guardrails, visual-first, and natural crystallization timing",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -24,8 +23,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/agents/explore-agent.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Reference .opencode/skills/openspec-explore/SKILL.md for the thinking-partner stance. Use flat sectioned structure per D1. Guardrails as Don't/Do pairs per D2. Preserve create_issue format per D4."
+      "passes": true,
+      "notes": "Reference .opencode/skills/openspec-explore/SKILL.md for the thinking-partner stance. Use flat sectioned structure per D1. Guardrails as Don't/Do pairs per D2. Preserve create_issue format per D4.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -44,9 +46,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agents/prompts/explore.md",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Lighter treatment per D3. This is a pipeline task instruction, not a conversational stance. Share philosophy, not structure."
+      "notes": "Lighter treatment per D3. This is a pipeline task instruction, not a conversational stance. Share philosophy, not structure.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +69,15 @@
       "mode": "AFK",
       "type": "CONFIG",
       "output": "Build output (pass/fail)",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Run: cd packages/cli && npm run build. Optionally add a character count assertion for EXPLORE_SYSTEM_PROMPT."
+      "notes": "Run: cd packages/cli && npm run build. Optionally add a character count assertion for EXPLORE_SYSTEM_PROMPT.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
