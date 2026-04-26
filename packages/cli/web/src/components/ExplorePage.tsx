@@ -117,7 +117,7 @@ export function ExplorePage() {
     <div className="flex flex-col flex-1 min-h-0">
       <div className="border-b border-gray-200 bg-white px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/explore')}
           className="text-gray-400 hover:text-gray-600 transition-colors"
         >
           <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -131,7 +131,18 @@ export function ExplorePage() {
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold text-gray-900">{session.title}</h2>
           <div className="text-xs text-gray-400">
-            {session.status === 'active' ? 'Active' : 'Crystallized'}
+            {session.status === 'archived' ? 'Archived' : 'Active'}
+            {session.issueNumber != null && (
+              <>
+                {' · '}
+                <button
+                  onClick={() => navigate(`/issue/${session.issueNumber}`)}
+                  className="text-blue-600 hover:text-blue-700"
+                >
+                  Issue #{session.issueNumber}
+                </button>
+              </>
+            )}
             {' · '}
             {new Date(session.createdAt).toLocaleString()}
           </div>

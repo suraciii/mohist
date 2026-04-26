@@ -6,6 +6,7 @@ import { createReadFileTool } from '../tools/read-file';
 import { createGlobTool } from '../tools/glob-tool';
 import { createGrepTool } from '../tools/grep-tool';
 import { createCreateIssueTool } from '../tools/create-issue-tool';
+import { createUpdateIssueTool } from '../tools/update-issue-tool';
 import type { IssueService } from '../services/issue-service';
 import type { ExploreSessionRepo } from '../db/explore-session-repo';
 import type { EventBus } from '../services/event-bus';
@@ -20,6 +21,8 @@ export interface ExploreAgentContext {
   issueService: IssueService;
   exploreSessionRepo: ExploreSessionRepo;
   eventBus: EventBus;
+  issueId?: string;
+  issueStage?: string;
 }
 
 const EXPLORE_SYSTEM_PROMPT = `You are a curious thinking partner helping the user explore requirements and understand a codebase. You are NOT an executor — your job is to think together with the user.
@@ -80,11 +83,46 @@ export function buildExploreToolRegistry(context: ExploreAgentContext): ToolRegi
       exploreSessionRepo: context.exploreSessionRepo,
       sessionId: context.sessionId,
       projectId: context.projectId,
-      eventBus: context.eventBus,
     }),
   );
 
+  if (context.issueId && context.issueStage) {
+    registry.register(
+      createUpdateIssueTool({
+        issueService: context.issueService,
+        issueId: context.issueId,
+        issueStage: context.issueStage,
+      }),
+    );
+  }
+
   return registry;
+}
+
+export function buildExploreSystemPrompt(context: ExploreAgentContext): string {
+  let prompt = EXPLORE_SYSTEM_PROMPT;
+
+  if (!context.issueId) {
+    prompt += `
+
+## Current Session Status
+This session is not linked to any issue yet. You can use \`create_issue\` to create a new draft issue from this exploration when requirements have converged.`;
+  } else if (context.issueStage === 'draft') {
+    prompt += `
+
+## Current Session Status
+This session is linked to a **Draft** issue (ID: ${context.issueId}). You can:
+- Continue exploring and refining requirements
+- Use \`update_issue\` to update the issue's title, body, or labels at any time
+- The issue will remain in Draft stage until it is promoted through the workflow`;
+  } else {
+    prompt += `
+
+## Current Session Status
+This session is linked to issue (ID: ${context.issueId}) which is in **${context.issueStage}** stage. The issue is no longer in Draft, so it cannot be updated from here. You can still explore and discuss, but changes to the issue require workflow actions outside this session.`;
+  }
+
+  return prompt;
 }
 
 export async function runExploreAgent(
@@ -96,10 +134,11 @@ export async function runExploreAgent(
     : context.llmConfig;
   const model = await resolveModel(config);
   const toolRegistry = buildExploreToolRegistry(context);
+  const systemPrompt = buildExploreSystemPrompt(context);
 
   return streamText({
     model,
-    system: EXPLORE_SYSTEM_PROMPT,
+    system: systemPrompt,
     messages,
     tools: toolRegistry.toToolSet(),
     stopWhen: stepCountIs(20),

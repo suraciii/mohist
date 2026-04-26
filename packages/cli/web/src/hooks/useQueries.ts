@@ -125,7 +125,7 @@ export function useExploreSessions(projectId: string) {
 export function useCreateExploreSession() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { projectId?: string; title?: string }) => api.createExploreSession(data),
+    mutationFn: (data: { projectId?: string; title?: string; issueId?: string }) => api.createExploreSession(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['explore-sessions'] })
     },
