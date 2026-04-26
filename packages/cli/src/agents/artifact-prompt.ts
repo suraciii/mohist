@@ -7,6 +7,7 @@ export type ArtifactType = 'proposal' | 'specs' | 'design' | 'tasks';
 const ARTIFACTS_DIR = path.join(__dirname, 'prompts', 'artifacts');
 const TEMPLATES_DIR = path.join(ARTIFACTS_DIR, 'templates');
 const REVIEW_PROMPT_PATH = path.join(__dirname, 'prompts', 'review.md');
+const REVIEW_SELF_CHECK_PATH = path.join(ARTIFACTS_DIR, 'review-self-check.md');
 const EXPLORE_PROMPT_PATH = path.join(__dirname, 'prompts', 'explore.md');
 
 const ARTIFACT_OUTPUT_FILES: Record<ArtifactType, string> = {
@@ -144,6 +145,26 @@ export function buildReviewerPrompt(
     `## Change Directory\n\n${changeDir}`,
     '',
     '## Goal\n\nReview the implementation for quality.',
+    '',
+    '## Instructions\n',
+    instruction,
+  ];
+
+  return parts.join('\n');
+}
+
+export function buildReviewSelfCheckPrompt(
+  issue: Issue,
+  changeDir: string
+): string {
+  const instruction = loadFile(REVIEW_SELF_CHECK_PATH);
+
+  const parts: string[] = [
+    formatIssueInfo(issue),
+    '',
+    `## Change Directory\n\n${changeDir}`,
+    '',
+    '## Goal\n\nVerify the review report is properly formatted and complete.',
     '',
     '## Instructions\n',
     instruction,
