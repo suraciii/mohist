@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix approval panel to display approvalState.output review reports instead of depending on comments",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -16,8 +15,11 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -39,9 +41,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Backend output structure: Plan stage = { stage, issueNumber, selfReviewNotes }, Review stage = { stage, issueNumber, reviewReport }. Handle empty object {} (truthy but no content) by checking extracted string values."
+      "notes": "Backend output structure: Plan stage = { stage, issueNumber, selfReviewNotes }, Review stage = { stage, issueNumber, reviewReport }. Handle empty object {} (truthy but no content) by checking extracted string values.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
