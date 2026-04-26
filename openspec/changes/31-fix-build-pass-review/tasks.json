@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix deadlock where recoverBuildStageIssue() all-pass branch advances to Review without starting review pipeline",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "server/index.ts:109 already passes workflowLogRepo and coderSessionRepo to the constructor — they just need to be stored instead of discarded. opencodeBinPath is resolved at line 82 and needs one more constructor argument. Use startPipeline (not resumePipeline) because it returns {started,error} instead of throwing and checks maxConcurrentAgents."
+      "passes": true,
+      "notes": "server/index.ts:109 already passes workflowLogRepo and coderSessionRepo to the constructor — they just need to be stored instead of discarded. opencodeBinPath is resolved at line 82 and needs one more constructor argument. Use startPipeline (not resumePipeline) because it returns {started,error} instead of throwing and checks maxConcurrentAgents.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -38,9 +40,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/recover-build-all-pass.test.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Check existing test patterns in packages/cli/tests/ for mock conventions."
+      "notes": "Check existing test patterns in packages/cli/tests/ for mock conventions.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
