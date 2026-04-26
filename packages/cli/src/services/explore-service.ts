@@ -4,6 +4,7 @@ import { ExploreSessionRepo, ExploreMessageRepo } from '../db';
 export interface CreateExploreSessionInput {
   projectId: string;
   title: string;
+  issueId?: string;
 }
 
 export interface ExploreSessionWithMessages {
@@ -21,19 +22,27 @@ export class ExploreService {
     return this.sessionRepo.create({
       projectId: input.projectId,
       title: input.title,
+      issueId: input.issueId,
     });
   }
 
   listSessions(projectId: string, status?: string): ExploreSession[] {
-    return this.sessionRepo.findByProject(projectId, status);
+    if (status) {
+      return this.sessionRepo.findByProject(projectId, status);
+    }
+    return this.sessionRepo.findByProjectWithIssueNumber(projectId);
   }
 
   getSession(id: string): ExploreSessionWithMessages | null {
-    const session = this.sessionRepo.findById(id);
+    const session = this.sessionRepo.findByIdWithIssueNumber(id);
     if (!session) return null;
 
     const messages = this.messageRepo.findBySession(id);
     return { session, messages };
+  }
+
+  findSessionByIssueId(issueId: string): ExploreSession | null {
+    return this.sessionRepo.findByIssueId(issueId);
   }
 
   deleteSession(id: string): boolean {

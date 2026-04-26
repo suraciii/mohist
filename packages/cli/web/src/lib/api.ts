@@ -109,7 +109,7 @@ export const api = {
 
   getHomeDir: () => request<string>('/fs/home'),
 
-  createExploreSession: (data: { projectId?: string; title?: string }) =>
+  createExploreSession: (data: { projectId?: string; title?: string; issueId?: string }) =>
     request<import('./types').ExploreSession>('/explore', {
       method: 'POST',
       body: JSON.stringify(data),
