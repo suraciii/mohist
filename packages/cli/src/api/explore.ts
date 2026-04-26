@@ -277,6 +277,7 @@ export function createExploreRoutes(
 
         if (result.success && result.issueNumber) {
           exploreService.crystallize(sessionId, String(result.issueNumber));
+          exploreSessionRepo.updateTitle(sessionId, title);
         }
 
         const response: ApiResponse<typeof result> = {
@@ -374,6 +375,29 @@ export function createExploreRoutes(
 
       exploreService.addMessage(sessionId, 'user', userContent);
 
+      let updatedTitle: string | null = null;
+      if (session.title === 'New Exploration' && existingMessages.length === 0) {
+        const chars = Array.from(userContent.replace(/\n/g, ' ').trim());
+        if (chars.length <= 50) {
+          updatedTitle = chars.join('');
+        } else {
+          const slice = chars.slice(0, 50);
+          let lastSpace = -1;
+          for (let i = slice.length - 1; i >= 0; i--) {
+            if (/\s/.test(slice[i])) {
+              lastSpace = i;
+              break;
+            }
+          }
+          if (lastSpace > 0) {
+            updatedTitle = chars.slice(0, lastSpace).join('') + '...';
+          } else {
+            updatedTitle = chars.slice(0, 47).join('') + '...';
+          }
+        }
+        exploreSessionRepo.updateTitle(sessionId, updatedTitle);
+      }
+
       const result = await runExploreAgent(agentContext, historyMessages);
 
       return streamSSE(c, async (stream: SSEStreamingApi) => {
@@ -435,7 +459,7 @@ export function createExploreRoutes(
           );
 
           await stream.writeSSE({
-            data: JSON.stringify({ type: 'done', issueId: createdIssueId }),
+            data: JSON.stringify({ type: 'done', issueId: createdIssueId, ...(updatedTitle ? { updatedTitle } : {}) }),
           });
         } catch (error) {
           if (assistantContent) {
@@ -453,6 +477,7 @@ export function createExploreRoutes(
               type: 'done',
               issueId: null,
               error: error instanceof Error ? error.message : 'Stream error',
+              ...(updatedTitle ? { updatedTitle } : {}),
             }),
           });
         }
