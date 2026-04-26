@@ -138,6 +138,44 @@ export function createExploreRoutes(
     }
   });
 
+  app.patch('/:id', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const body = await c.req.json();
+      const { title } = body;
+
+      if (!title || typeof title !== 'string' || title.trim() === '') {
+        const response: ApiResponse = {
+          success: false,
+          error: 'title is required and must be non-empty',
+        };
+        return c.json(response, 400);
+      }
+
+      const session = exploreSessionRepo.findById(id);
+      if (!session) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Session not found',
+        };
+        return c.json(response, 404);
+      }
+
+      const updatedSession = exploreService.updateTitle(id, title.trim());
+      const response: ApiResponse<ExploreSession> = {
+        success: true,
+        data: updatedSession!,
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update session title',
+      };
+      return c.json(response, 500);
+    }
+  });
+
   app.post('/:id/model', async (c) => {
     try {
       const id = c.req.param('id');
