@@ -23,6 +23,10 @@ const ALL_EVENT_TYPES: EventName[] = [
   'ralph_loop_progress',
   'plan_round_start',
   'plan_session_update',
+  'merge_queued',
+  'merge_started',
+  'merge_completed',
+  'merge_failed',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {
