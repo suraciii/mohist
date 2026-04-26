@@ -72,6 +72,10 @@ export class ExploreService {
     return this.messageRepo.findBySession(sessionId);
   }
 
+  updateTitle(sessionId: string, title: string): ExploreSession | null {
+    return this.sessionRepo.updateTitle(sessionId, title);
+  }
+
   crystallize(sessionId: string, issueId: string): ExploreSession | null {
     return this.sessionRepo.crystallize(sessionId, issueId);
   }
