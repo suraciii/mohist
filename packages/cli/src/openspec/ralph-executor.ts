@@ -119,6 +119,7 @@ export interface RalphExecutorContext {
 export interface RalphLoopResult {
   completed: number;
   failed: number;
+  skipped: number;
   total: number;
   taskResults: TaskResult[];
   success: boolean;
@@ -288,6 +289,7 @@ export async function runRalphLoop(
     return {
       completed: 0,
       failed: 0,
+      skipped: 0,
       total: 0,
       taskResults: [],
       success: false,
@@ -333,6 +335,7 @@ export async function runRalphLoop(
   const taskResults: TaskResult[] = [];
   let completed = 0;
   let failed = 0;
+  let skipped = 0;
 
   let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
 
@@ -391,9 +394,11 @@ export async function runRalphLoop(
     }
   };
 
+  const processedTaskIds = new Set<string>();
+
   while (true) {
     const nextTask = findNextPendingTask(tasks);
-    if (!nextTask) {
+    if (!nextTask || processedTaskIds.has(nextTask.id)) {
       if (completed === 0 && failed === 0) {
         log.warn('No pending tasks found — all tasks have passes=true', {
           issueId: logIssueId,
@@ -576,6 +581,7 @@ export async function runRalphLoop(
           const result: RalphLoopResult = {
             completed,
             failed,
+            skipped,
             total: sortedTasks.length,
             taskResults,
             success: false,
@@ -587,11 +593,15 @@ export async function runRalphLoop(
           return result;
         }
       } else if (shouldPause && !context.onAskUser) {
-        updateTaskInList(tasks, nextTask.id, { passes: true, error: `Auto-skipped (no onAskUser): ${lastError}` });
+        updateTaskInList(tasks, nextTask.id, { passes: false, error: `Auto-skipped (no onAskUser): ${lastError}` });
         writeTasksFile(change.tasksPath, tasks);
         taskResults[taskResults.length - 1].status = 'skipped';
+        failed++;
+        skipped++;
+        processedTaskIds.add(nextTask.id);
       } else {
         failed++;
+        processedTaskIds.add(nextTask.id);
       }
     } else {
       taskResults.push({
@@ -607,6 +617,7 @@ export async function runRalphLoop(
   const result: RalphLoopResult = {
     completed,
     failed,
+    skipped,
     total: sortedTasks.length,
     taskResults,
     success: failed === 0,
