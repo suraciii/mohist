@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add agent_thought_chunk handling in acp-session.ts",
+      "spec": "specs/agent-runtime/spec.md#spawn_coder-捕获所有-acp-事件",
+      "description": "In acp-session.ts sessionUpdate handler, add an explicit no-op branch for `agent_thought_chunk` events so they are never appended to `agentText`. The event must still be logged to workflow_log (existing unconditional logging after the if/else block handles this). agentText accumulation must only include `agent_message_chunk` content.",
+      "acceptanceCriteria": [
+        "agent_thought_chunk events do NOT append text to agentText",
+        "agent_thought_chunk events ARE still logged to workflow_log",
+        "agent_message_chunk behavior is unchanged",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Add file-write instruction to self-review prompt",
+      "spec": "specs/agent-report-extraction/spec.md#stage-report-extracted-from-agent-output-file",
+      "description": "Update `packages/cli/src/agents/prompts/artifacts/self-review.md` to instruct the agent to write its review summary to `{changeDir}/self-review.md`. This mirrors what the review prompt already does for `review.md`. Add an Output Format section at the end specifying the file path and a brief template.",
+      "acceptanceCriteria": [
+        "self-review.md prompt contains instruction to write output to {changeDir}/self-review.md",
+        "Instruction includes a clear output format template",
+        "Existing review criteria sections are unchanged",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agents/prompts/artifacts/self-review.md",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Read report from disk file in workflow-controller",
+      "spec": "specs/agent-report-extraction/spec.md#stage-report-extracted-from-agent-output-file",
+      "description": "Add a helper function `readReportFile(changeDir, filename)` in workflow-controller.ts that reads a file from disk, returning its content if non-empty or null otherwise. Then update plan self-review (line ~235) to read `{changeDir}/self-review.md` as `selfReviewNotes`, and review stage (line ~689) to read `{changeDir}/review.md` as `reviewReport`. Both must fall back to `result.text` when the file is missing or empty.",
+      "acceptanceCriteria": [
+        "Plan self-review reads {changeDir}/self-review.md when it exists and is non-empty",
+        "Review stage reads {changeDir}/review.md when it exists and is non-empty",
+        "Both stages fall back to result.text when file is missing or empty",
+        "Fallback also triggers when file exists but has 0 bytes",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Depends on T-002 because self-review prompt must instruct agent to write the file before the controller can read it.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
