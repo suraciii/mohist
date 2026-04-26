@@ -37,6 +37,10 @@ export enum IssueStatus {
   Completed = 'completed'
 }
 
+export type Priority = 'p0' | 'p1' | 'p2' | 'p3' | 'p4';
+
+export const VALID_PRIORITIES: Priority[] = ['p0', 'p1', 'p2', 'p3', 'p4'];
+
 export type ApprovalStatus = 'pending' | 'awaiting' | 'approved' | 'rejected' | 'error';
 
 export interface ApprovalState {
@@ -56,6 +60,7 @@ export interface Issue {
   status: IssueStatus;
   projectId: string;
   labels: string[];
+  priority: Priority;
   createdAt: string;
   updatedAt: string;
   approvalState?: ApprovalState;
