@@ -49,9 +49,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Lighter treatment per D3. This is a pipeline task instruction, not a conversational stance. Share philosophy, not structure.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
