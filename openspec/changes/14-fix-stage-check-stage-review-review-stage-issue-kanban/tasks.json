@@ -1,0 +1,27 @@
+{
+  "project": "mohist",
+  "description": "Fix frontend Stage enum to match backend: Check→Review, add Explore, update all consumers",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Align frontend Stage enum and update all consumers",
+      "spec": "specs/web-ui/spec.md#前端-stage-enum-与后端完全对齐",
+      "description": "Update frontend Stage enum in types.ts to mirror backend exactly (add Explore, replace Check with Review). Update KanbanBoard.tsx STAGES array to include all 6 stages in correct order. Update IssueDetailPage.tsx STAGES array and DIFF_STAGES set. Update SessionTimeline.tsx stage labels and stageOrder array.",
+      "acceptanceCriteria": [
+        "Frontend Stage enum contains Draft, Explore, Plan, Build, Review, Done — no Check",
+        "KanbanBoard STAGES array has 6 entries in order: Draft, Explore, Plan, Build, Review, Done",
+        "IssueDetailPage STAGES and DIFF_STAGES use Stage.Review not Stage.Check",
+        "SessionTimeline uses 'review' not 'check' in stage labels and stageOrder",
+        "No remaining references to 'check' or Stage.Check in web/src/",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "web/src/lib/types.ts, web/src/components/KanbanBoard.tsx, web/src/components/IssueDetailPage.tsx, web/src/components/SessionTimeline.tsx",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "All 4 files are tightly coupled to the enum change — must be updated together. Grep for 'check' and 'Stage.Check' after edits to verify no stragglers."
+    }
+  ]
+}

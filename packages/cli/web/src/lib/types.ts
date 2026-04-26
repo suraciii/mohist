@@ -1,8 +1,9 @@
 export enum Stage {
   Draft = 'draft',
+  Explore = 'explore',
   Plan = 'plan',
   Build = 'build',
-  Check = 'check',
+  Review = 'review',
   Done = 'done',
 }
 
