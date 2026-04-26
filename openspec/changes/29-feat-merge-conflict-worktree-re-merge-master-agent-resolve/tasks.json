@@ -91,9 +91,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/agents/prompts/conflict-resolution.md, packages/cli/src/agents/artifact-prompt.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
