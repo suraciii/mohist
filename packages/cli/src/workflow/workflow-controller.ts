@@ -477,6 +477,17 @@ export class WorkflowController {
     const projectId = this.projectId ?? issue.projectId;
     const workflowLogRepo = acpOptions.workflowLogRepo;
 
+    const checkpoint = this.checkpointRepo?.get(issue.number, 'build') ?? null;
+    const completedTaskIds: string[] = checkpoint ? [...checkpoint.completedSteps] : [];
+
+    if (completedTaskIds.length > 0) {
+      log.info('Build stage resuming from checkpoint', {
+        issueNumber: issue.number,
+        completedTaskIds,
+        nextStep: checkpoint?.nextStep,
+      });
+    }
+
     const change = detectOpenSpecChange(this.worktreePath, issue);
 
     if (!change) {
@@ -572,7 +583,16 @@ export class WorkflowController {
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
     });
 
-    const result: RalphLoopResult = await executor.execute(change);
+    const activeCompletedTaskIds = [...completedTaskIds];
+
+    const result: RalphLoopResult = await executor.execute(change, {
+      skipTaskIds: completedTaskIds.length > 0 ? completedTaskIds : undefined,
+      onTaskCompleted: (taskId: string) => {
+        if (!this.checkpointRepo) return;
+        activeCompletedTaskIds.push(taskId);
+        this.checkpointRepo.upsert(issue.number, 'build', [...activeCompletedTaskIds], null);
+      },
+    });
     const duration = Date.now() - buildStartTime;
 
     log.info('Ralph loop completed', {
@@ -620,6 +640,8 @@ export class WorkflowController {
 
     if (result.success) {
       await this.commitBuildChanges(issue);
+
+      this.checkpointRepo?.delete(issue.number, 'build');
 
       this.emitSafe('build_stage_completed', {
         issueId,
