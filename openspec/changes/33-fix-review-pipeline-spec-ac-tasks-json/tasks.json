@@ -1,0 +1,155 @@
+{
+  "project": "mohist",
+  "description": "Fix review pipeline three-layer defense: spec compliance, AC verification, tasks.json sync",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix mergeBack exclusion to preserve tasks.json updates",
+      "spec": "specs/worktree-manager/spec.md#requirement-mergeback-shall-include-openspecchanges-in-commit",
+      "description": "Remove the `:!openspec/changes/` pathspec exclusion from the `git add` command in `worktree-manager.ts:187`. Change `['add', '--', ':!openspec/changes/', ':!.opencode/']` to `['add', '--', ':!.opencode/']`. This ensures tasks.json updates committed by ralph survive the mergeBack merge.",
+      "acceptanceCriteria": [
+        "Line 187 in worktree-manager.ts no longer has `:!openspec/changes/` in the git add pathspec",
+        "The `:!.opencode/` exclusion is preserved",
+        "Typecheck passes",
+        "Existing tests pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Highest priority — 100% reproduction rate bug. The primary fix as decided in D1."
+    },
+    {
+      "id": "T-002",
+      "title": "Commit tasks.json after ralph updates task status",
+      "spec": "specs/ralph-task-execution/spec.md#requirement-task-status-persistence",
+      "description": "After `writeTasksFile` in `ralph-executor.ts:472-473`, add a `git add` + `git commit` for tasks.json in the worktree. The commit message should reference the task ID and status. This is a belt-and-suspenders fix alongside T-001's mergeBack exclusion removal.",
+      "acceptanceCriteria": [
+        "After writeTasksFile call, ralph-executor runs git add and git commit for tasks.json in the worktree",
+        "Commit message includes the task ID (e.g. 'chore(tasks): update T-001 passes=true')",
+        "The commit uses --no-verify flag",
+        "Typecheck passes",
+        "Existing tests pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Belt-and-suspenders with T-001. Can be implemented independently since both fixes address the same root cause from different angles."
+    },
+    {
+      "id": "T-003",
+      "title": "Inject specs and tasks.json into buildReviewerPrompt",
+      "spec": "specs/agent-spec-review/spec.md#requirement-review-prompt-includes-spec-and-ac-context",
+      "description": "Add a `loadSpecContext(changeDir: string): string` helper to `artifact-prompt.ts` that reads all `*.md` files under `{changeDir}/specs/` recursively and reads `{changeDir}/tasks.json`, returning formatted `## Specs` and `## Tasks & Acceptance Criteria` sections. Insert the result into `buildReviewerPrompt`'s parts array between 'Change Directory' and 'Goal'. If specs/ doesn't exist, omit gracefully.",
+      "acceptanceCriteria": [
+        "New `loadSpecContext` helper function exists in artifact-prompt.ts",
+        "Helper reads all *.md files under {changeDir}/specs/ recursively using glob",
+        "Helper reads {changeDir}/tasks.json",
+        "Output includes '## Specs' section with full spec content when specs/ exists",
+        "Output includes '## Tasks & Acceptance Criteria' section with tasks.json content",
+        "When specs/ directory doesn't exist, the specs section is omitted (no error thrown)",
+        "buildReviewerPrompt includes the spec context between Change Directory and Goal sections",
+        "Typecheck passes",
+        "Existing tests pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agents/artifact-prompt.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design decision D2: read from changeDir path, no parameter changes needed."
+    },
+    {
+      "id": "T-004",
+      "title": "Add Spec Compliance dimension to review.md",
+      "spec": "specs/agent-spec-review/spec.md#requirement-review-includes-spec-compliance-dimension",
+      "description": "Add a new `### Spec Compliance` section to `review.md` between Security and Review Process, with instructions to check each AC from tasks.json against the implementation, verify exact values, and report per-criterion pass/fail. Update the Output Format template to include Spec Compliance alongside the existing four dimensions.",
+      "acceptanceCriteria": [
+        "review.md has a '### Spec Compliance' section between Security and Review Process",
+        "Section instructs to check each acceptance criterion from tasks.json",
+        "Section instructs to verify exact values (colors, strings, formats, constants)",
+        "Section instructs to report per-criterion pass/fail with specific deviations",
+        "Output Format template includes '### Spec Compliance: PASS / FAIL' with [findings]",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agents/prompts/review.md",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Depends on T-003 because the review agent needs specs/AC context in the prompt to act on the Spec Compliance dimension."
+    },
+    {
+      "id": "T-005",
+      "title": "Enhance review-self-check.md to validate spec compliance coverage",
+      "spec": "specs/agent-runtime/spec.md#requirement-review-self-check-validates-spec-compliance-content",
+      "description": "Add a new 'Spec Compliance Coverage' section to `review-self-check.md` that checks: report has a '### Spec Compliance' section, each AC from tasks.json is explicitly addressed, findings are specific (not generic). If coverage is missing, the self-check rewrites the report.",
+      "acceptanceCriteria": [
+        "review-self-check.md has a new 'Spec Compliance Coverage' verification section",
+        "Checks that report has a '### Spec Compliance' section",
+        "Checks that each AC from tasks.json is addressed in the report",
+        "Checks that findings reference specific spec requirements, not generic statements",
+        "Format section lists Spec Compliance alongside the existing four dimensions",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agents/prompts/artifacts/review-self-check.md",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Depends on T-004 because the self-check validates a report that should have the Spec Compliance dimension."
+    },
+    {
+      "id": "T-006",
+      "title": "Extract web utility functions for testability",
+      "spec": "specs/web-unit-tests/spec.md#requirement-pure-utility-function-unit-tests",
+      "description": "Extract `formatTime` and `statusBadge` from `IssueDetailPage.tsx` into `src/lib/format-time.ts` and `src/lib/status-badge.ts`. Extract `formatTimeAgo` from `ExploreSessionList.tsx` into `src/lib/format-time.ts`. Extract `LEVEL_COLORS` and `LEVEL_CHIP_COLORS` from `LogsPage.tsx` into `src/lib/log-levels.ts`. Update all components to import from the new modules. Keep function signatures identical.",
+      "acceptanceCriteria": [
+        "New file src/lib/format-time.ts exports formatTime and formatTimeAgo functions with identical behavior",
+        "New file src/lib/status-badge.ts exports statusBadge function with identical behavior",
+        "New file src/lib/log-levels.ts exports LEVEL_COLORS and LEVEL_CHIP_COLORS constants",
+        "IssueDetailPage.tsx, ExploreSessionList.tsx, and LogsPage.tsx import from the new modules",
+        "Web app builds successfully (npm run build in packages/cli/web)",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/format-time.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design decision D5: extract for testing, don't move. Standard pattern for making component-internal functions testable."
+    },
+    {
+      "id": "T-007",
+      "title": "Write unit tests for web utility functions",
+      "spec": "specs/web-unit-tests/spec.md#requirement-tests-must-prevent-regressions-found-in-issue-30",
+      "description": "Write vitest tests for all extracted utility functions. Test `formatTime` with various ISO date strings. Test `formatTimeAgo` with recent dates, older dates, and month+ boundary. Test `statusBadge` for all IssueStatus values with exact Tailwind class assertions. Test `LEVEL_COLORS` and `LEVEL_CHIP_COLORS` for exact values. Tests should catch the specific regressions from Issue #30 (wrong color values, missing format cases).",
+      "acceptanceCriteria": [
+        "Test file for formatTime exists with exact output assertions for known inputs",
+        "Test file for formatTimeAgo exists covering sub-minute, minutes, hours, days, and 30+ day thresholds",
+        "Test file for statusBadge exists asserting exact Tailwind classes per IssueStatus value",
+        "Test file for LEVEL_COLORS and LEVEL_CHIP_COLORS exists asserting exact values for all log levels",
+        "Tests cover all IssueStatus enum values (Active, Paused, Blocked, Interrupted, default)",
+        "Changing any statusBadge color value or LEVEL_COLORS entry causes a test failure",
+        "Tests run successfully via vitest (npx vitest run in packages/cli/web)",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/web/src/lib/format-time.test.ts",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "vitest is already configured in vite.config.ts with jsdom environment. Tests should assert exact values to prevent Issue #30 regressions."
+    }
+  ]
+}

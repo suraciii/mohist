@@ -184,7 +184,7 @@ export class WorktreeManager {
       );
       const uncommitted = statusOut.trim().split('\n').filter(l => l.trim());
       if (uncommitted.length > 0) {
-        await execFileAsync('git', ['add', '--', ':!openspec/changes/', ':!.opencode/'], { cwd: worktreePath });
+        await execFileAsync('git', ['add', '--', ':!.opencode/'], { cwd: worktreePath });
         const remaining = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd: worktreePath });
         if (remaining.stdout.trim()) {
           await execFileAsync('git', ['commit', '-m', `chore: commit remaining changes for issue #${issueNumber}`, '--no-verify'], { cwd: worktreePath });
