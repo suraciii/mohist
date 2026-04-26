@@ -132,6 +132,18 @@ export function useCreateExploreSession() {
   })
 }
 
+export function useUpdateExploreSessionTitle() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
+      api.updateExploreSessionTitle(sessionId, title),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['explore-sessions'] })
+      queryClient.invalidateQueries({ queryKey: ['explore', variables.sessionId] })
+    },
+  })
+}
+
 export function useStatus() {
   return useQuery({
     queryKey: ['status'],

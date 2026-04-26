@@ -1,6 +1,6 @@
-import { useCallback } from 'react'
+import { useCallback, useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useExploreSession, useStatus } from '../hooks/useQueries'
+import { useExploreSession, useStatus, useUpdateExploreSessionTitle } from '../hooks/useQueries'
 import { useExploreStream } from '../hooks/useExploreStream'
 import { useQueryClient } from '@tanstack/react-query'
 import { ExploreChat } from './ExploreChat'
@@ -61,6 +61,71 @@ function LlmGuidanceCard() {
   )
 }
 
+function EditableTitle({ title, sessionId }: { title: string; sessionId: string }) {
+  const updateTitle = useUpdateExploreSessionTitle()
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState(title)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setEditValue(title)
+  }, [title])
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.select()
+    }
+  }, [isEditing])
+
+  const handleSave = useCallback(() => {
+    const trimmed = editValue.trim()
+    if (trimmed && trimmed !== title) {
+      updateTitle.mutate({ sessionId, title: trimmed })
+    } else {
+      setEditValue(title)
+    }
+    setIsEditing(false)
+  }, [editValue, title, sessionId, updateTitle])
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        handleSave()
+      } else if (e.key === 'Escape') {
+        setEditValue(title)
+        setIsEditing(false)
+      }
+    },
+    [handleSave, title],
+  )
+
+  if (isEditing) {
+    return (
+      <input
+        ref={inputRef}
+        type="text"
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={handleKeyDown}
+        className="text-sm font-semibold text-gray-900 bg-white border border-blue-400 rounded px-1 outline-none w-full"
+        autoFocus
+      />
+    )
+  }
+
+  return (
+    <h2
+      className="text-sm font-semibold text-gray-900 cursor-pointer hover:text-blue-600 transition-colors"
+      onDoubleClick={() => setIsEditing(true)}
+      title="Double-click to edit title"
+    >
+      {title}
+    </h2>
+  )
+}
+
 export function ExplorePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -73,6 +138,7 @@ export function ExplorePage() {
     streamToolCalls,
     streamIssueId,
     streamError,
+    streamUpdatedTitle,
     send,
   } = useExploreStream()
 
@@ -111,6 +177,8 @@ export function ExplorePage() {
 
   const { session, messages } = data
 
+  const displayTitle = streamUpdatedTitle || session.title
+
   const llmConfigured = statusData?.llm?.configured !== false
 
   return (
@@ -129,7 +197,7 @@ export function ExplorePage() {
           </svg>
         </button>
         <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-semibold text-gray-900">{session.title}</h2>
+          <EditableTitle title={displayTitle} sessionId={session.id} />
           <div className="text-xs text-gray-400">
             {session.status === 'archived' ? 'Archived' : 'Active'}
             {session.issueNumber != null && (

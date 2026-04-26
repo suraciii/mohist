@@ -141,6 +141,12 @@ export const api = {
       body: JSON.stringify({ model, variant }),
     }),
 
+  updateExploreSessionTitle: (sessionId: string, title: string) =>
+    request<import('./types').ExploreSession>(`/explore/${encodeURIComponent(sessionId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
+
   getAgentSession: (number: number) =>
     request<import('./types').AgentSessionMessageItem[]>(`/issues/${number}/agent-session`),
 
