@@ -43,9 +43,9 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "后端 Priority 类型为 'p0'|'p1'|'p2'|'p3'|'p4' 字符串，前端用 string | null 接收。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
