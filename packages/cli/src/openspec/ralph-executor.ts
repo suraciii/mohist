@@ -394,9 +394,11 @@ export async function runRalphLoop(
     }
   };
 
+  const processedTaskIds = new Set<string>();
+
   while (true) {
     const nextTask = findNextPendingTask(tasks);
-    if (!nextTask) {
+    if (!nextTask || processedTaskIds.has(nextTask.id)) {
       if (completed === 0 && failed === 0) {
         log.warn('No pending tasks found — all tasks have passes=true', {
           issueId: logIssueId,
@@ -596,8 +598,10 @@ export async function runRalphLoop(
         taskResults[taskResults.length - 1].status = 'skipped';
         failed++;
         skipped++;
+        processedTaskIds.add(nextTask.id);
       } else {
         failed++;
+        processedTaskIds.add(nextTask.id);
       }
     } else {
       taskResults.push({

@@ -597,7 +597,7 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
     };
   }
 
-  it('auto-skipped task does not increment failed counter', async () => {
+  it('auto-skipped task increments failed and skipped counters', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({
       success: false,
       error: 'Timed out after 1800000ms',
@@ -611,8 +611,9 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
 
     const result = await runRalphLoop(change, context, { maxRetries: 0 });
 
-    expect(result.failed).toBe(0);
-    expect(result.success).toBe(true);
+    expect(result.failed).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.success).toBe(false);
     expect(result.taskResults).toHaveLength(1);
     expect(result.taskResults[0].status).toBe('skipped');
   });
