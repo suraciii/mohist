@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add self-check round to Review stage for stable review report quality",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/agents/prompts/artifacts/review-self-check.md",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow the same pattern as buildSelfReviewPrompt — load instruction file from ARTIFACTS_DIR, combine with formatIssueInfo and changeDir."
+      "passes": true,
+      "notes": "Follow the same pattern as buildSelfReviewPrompt — load instruction file from ARTIFACTS_DIR, combine with formatIssueInfo and changeDir.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -43,8 +45,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-001"],
-      "notes": "Import buildReviewSelfCheckPrompt from artifact-prompt.ts. The roundState mutation + onSessionUpdate closure pattern is proven in Plan stage (lines 91-110). Do NOT close the connection between rounds."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "Import buildReviewSelfCheckPrompt from artifact-prompt.ts. The roundState mutation + onSessionUpdate closure pattern is proven in Plan stage (lines 91-110). Do NOT close the connection between rounds.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -64,8 +72,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/pipeline-controller.test.ts",
-      "dependsOn": ["T-002"],
-      "notes": "Check both test files that mock buildReviewerPrompt — they need buildReviewSelfCheckPrompt mock too. The mock ACP connection's prompt() method may need to handle being called twice."
+      "dependsOn": [
+        "T-002"
+      ],
+      "notes": "Check both test files that mock buildReviewerPrompt — they need buildReviewSelfCheckPrompt mock too. The mock ACP connection's prompt() method may need to handle being called twice.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     }
   ]
 }
