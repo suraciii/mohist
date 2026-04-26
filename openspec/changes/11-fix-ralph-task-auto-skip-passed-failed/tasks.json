@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix Ralph executor auto-skip branch that marks timed-out tasks as passed and never increments failed counter",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Key lines to change: 589-592 (auto-skip branch), 119-128 (RalphLoopResult type), 288-294 and 576-587 and 607-613 (result objects)."
+      "passes": true,
+      "notes": "Key lines to change: 589-592 (auto-skip branch), 119-128 (RalphLoopResult type), 288-294 and 576-587 and 607-613 (result objects).",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -40,9 +42,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/ralph-executor-auto-skip.test.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Look at existing test files in packages/cli/tests/ for test framework and patterns used."
+      "notes": "Look at existing test files in packages/cli/tests/ for test framework and patterns used.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
