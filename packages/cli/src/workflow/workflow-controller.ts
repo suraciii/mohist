@@ -226,13 +226,15 @@ export class WorkflowController {
 
       await conn.close();
 
+      const selfReviewReport = readReportFile(changeDir, 'self-review.md') ?? selfReviewResult.text;
+
       return {
         success: true,
         requiresApproval: true,
         output: {
           stage: Stage.Plan,
           issueNumber: issue.number,
-          selfReviewNotes: selfReviewResult.text,
+          selfReviewNotes: selfReviewReport,
         },
         message: 'Plan completed, awaiting user approval',
       };
@@ -680,13 +682,15 @@ export class WorkflowController {
 
       await conn.close();
 
+      const reviewReport = readReportFile(changeDir, 'review.md') ?? result.text;
+
       return {
         success: result.success,
         requiresApproval: true,
         output: {
           stage: Stage.Review,
           issueNumber: issue.number,
-          reviewReport: result.text,
+          reviewReport,
         },
         message: result.success
           ? 'Review completed, awaiting user approval'
@@ -715,6 +719,17 @@ interface PlanRoundConfig {
   verify: () => boolean;
   label: string;
   outputPath: string;
+}
+
+function readReportFile(changeDir: string, filename: string): string | null {
+  const filePath = path.join(changeDir, filename);
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const content = fs.readFileSync(filePath, 'utf-8').trim();
+    return content.length > 0 ? content : null;
+  } catch {
+    return null;
+  }
 }
 
 function cleanChangeDir(changeDir: string): void {

@@ -195,7 +195,9 @@ export async function runAcpSession(
           const update = notification.update;
           const eventType = update.sessionUpdate;
 
-          if (
+          if (eventType === 'agent_thought_chunk') {
+            // excluded from agentText — only agent_message_chunk contributes
+          } else if (
             eventType === 'agent_message_chunk' &&
             update.content &&
             'text' in update.content
@@ -562,7 +564,9 @@ export async function createAcpConnection(
           const update = notification.update;
           const eventType = update.sessionUpdate;
 
-          if (
+          if (eventType === 'agent_thought_chunk') {
+            // excluded from agentText — only agent_message_chunk contributes
+          } else if (
             eventType === 'agent_message_chunk' &&
             update.content &&
             'text' in update.content
