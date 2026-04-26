@@ -108,8 +108,10 @@ export function IssueDetailPage() {
   }
 
   const stageIndex = STAGES.indexOf(issue.stage)
-  const isAgentRunning = agentStatus?.running === true
-  const isAgentRunningOnThis = isAgentRunning && agentStatus?.issueNumber === issueNumber
+  const activeAgents = agentStatus?.activeAgents ?? []
+  const maxConcurrent = agentStatus?.maxConcurrentAgents ?? Infinity
+  const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
+  const isCapacityFull = activeAgents.length >= maxConcurrent
   const isApprovalGate =
     APPROVAL_STAGES.has(issue.stage) &&
     issue.status === IssueStatus.Active &&
@@ -331,14 +333,16 @@ export function IssueDetailPage() {
                   {isDraft && (
                     <button
                       onClick={() => startMutation.mutate()}
-                      disabled={isAgentRunning || startMutation.isPending}
+                      disabled={isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
                       className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {startMutation.isPending
                         ? 'Starting...'
-                        : isAgentRunning
-                          ? 'Agent busy...'
-                          : 'Start'}
+                        : isAgentRunningOnThis
+                          ? 'Agent running...'
+                          : isCapacityFull
+                            ? 'Capacity full...'
+                            : 'Start'}
                     </button>
                   )}
 
@@ -370,9 +374,9 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {isAgentRunning && (
+                  {!isAgentRunningOnThis && activeAgents.length > 0 && !isDraft && (
                     <div className="text-xs text-gray-400 text-center">
-                      Agent is running on another issue
+                      {activeAgents.length} agent{activeAgents.length > 1 ? 's' : ''} running on other issues
                     </div>
                   )}
                 </div>
@@ -396,13 +400,13 @@ export function IssueDetailPage() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => approveMutation.mutate()}
-                      disabled={approveMutation.isPending || isAgentRunning}
+                      disabled={approveMutation.isPending || isAgentRunningOnThis}
                       className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {approveMutation.isPending
                         ? 'Approving...'
-                        : isAgentRunning
-                          ? 'Agent busy...'
+                        : isAgentRunningOnThis
+                          ? 'Agent running...'
                           : 'Approve & Continue'}
                     </button>
                   </div>
