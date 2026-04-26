@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix explore session titles: auto-naming from first message, PATCH endpoint for manual edit, crystallize title update",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -17,8 +16,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/db/explore-session-repo.ts, packages/cli/src/services/explore-service.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -35,9 +37,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/explore.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -56,9 +63,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/explore.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -74,9 +86,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/explore.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -92,9 +109,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -113,9 +135,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ExplorePage.tsx, packages/cli/web/src/hooks/useExploreStream.ts",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
