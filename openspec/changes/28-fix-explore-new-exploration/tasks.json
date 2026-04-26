@@ -1,0 +1,121 @@
+{
+  "project": "mohist",
+  "description": "Fix explore session titles: auto-naming from first message, PATCH endpoint for manual edit, crystallize title update",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add updateTitle to ExploreSessionRepo and ExploreService",
+      "spec": "specs/explore-session-title/spec.md#PATCH端点支持更新session标题",
+      "description": "Add `updateTitle(id: string, title: string): ExploreSession | null` method to ExploreSessionRepo (follow same pattern as updateModel/updateStatus — SQL UPDATE + findById). Add matching `updateTitle` method to ExploreService that delegates to the repo.",
+      "acceptanceCriteria": [
+        "ExploreSessionRepo.updateTitle runs UPDATE explore_sessions SET title=?, updated_at=? WHERE id=?",
+        "ExploreService.updateTitle delegates to repo",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/db/explore-session-repo.ts, packages/cli/src/services/explore-service.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-002",
+      "title": "Add PATCH /api/explore/:id endpoint",
+      "spec": "specs/explore-session-title/spec.md#PATCH端点支持更新session标题",
+      "description": "Add `app.patch('/:id', ...)` route in createExploreRoutes (packages/cli/src/api/explore.ts). Accept `{ title: string }` body, validate non-empty, call exploreService.updateTitle, return updated session. Follow existing error handling pattern from updateModel endpoint.",
+      "acceptanceCriteria": [
+        "PATCH /api/explore/:id with valid title returns 200 + updated session",
+        "PATCH with non-existent id returns 404",
+        "PATCH with empty title returns 400",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/explore.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Auto-name session from first user message",
+      "spec": "specs/explore-session-title/spec.md#Session创建时从用户首条消息自动命名",
+      "description": "In the POST /:id/messages handler (packages/cli/src/api/explore.ts), after `exploreService.addMessage(sessionId, 'user', userContent)` at line 337, check if session.title === 'New Exploration' AND existingMessages.length === 0. If so, truncate userContent to 50 chars using Array.from() for safe unicode handling, break at word boundary, append '...' if truncated. Call exploreSessionRepo.updateTitle(). Also send the updated title in the SSE 'done' event so frontend can refresh.",
+      "acceptanceCriteria": [
+        "First message triggers title update when session title is 'New Exploration'",
+        "Title truncated at word boundary with '...' suffix, max 50 chars",
+        "Title NOT updated if session title was already changed from default",
+        "Unicode content truncated correctly by codepoint, not byte",
+        "SSE done event includes updatedTitle field when title changed",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/explore.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-004",
+      "title": "Update session title on crystallize",
+      "spec": "specs/explore-session-title/spec.md#Crystallize时用issue标题更新session标题",
+      "description": "In the POST /:id/crystallize handler, in the `!issueNumber` branch after successful crystallize (line 241), call exploreSessionRepo.updateTitle with the issue title. Only update when creating a new issue (not in the existing-issue branch). The issue title is already available as the `title` variable at line 235.",
+      "acceptanceCriteria": [
+        "Session title updated to issue title when crystallize creates new issue",
+        "Session title NOT changed when crystallize operates on existing issue",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/explore.ts",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-005",
+      "title": "Add frontend API method and mutation hook for title update",
+      "spec": "specs/explore-session-title/spec.md#前端APIclient和hooks支持标题更新",
+      "description": "Add `updateExploreSessionTitle(sessionId: string, title: string)` to api.ts using PATCH method. Add `useUpdateExploreSessionTitle()` mutation hook to useQueries.ts that invalidates both 'explore-sessions' and 'explore' query keys on success.",
+      "acceptanceCriteria": [
+        "api.updateExploreSessionTitle sends PATCH /api/explore/:id with { title }",
+        "useUpdateExploreSessionTitle invalidates 'explore-sessions' and 'explore' queries on success",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-006",
+      "title": "Add inline title editing to ExplorePage header",
+      "spec": "specs/explore-session-title/spec.md#ExploreSessionList卡片支持双击编辑标题",
+      "description": "In ExplorePage.tsx, replace the static `<h2>` title (line 132) with a component that supports double-click to edit. Use useState for isEditing/editValue. On double-click: switch to input with current value selected. On Enter/blur: call useUpdateExploreSessionTitle if value changed and non-empty. On Escape: revert. On empty submit: revert without API call. Also handle SSE updatedTitle from useExploreStream to update session title in real-time.",
+      "acceptanceCriteria": [
+        "Double-click on title switches to inline input with text selected",
+        "Enter or blur saves new title via PATCH",
+        "Escape reverts to original title without API call",
+        "Empty value reverts without API call",
+        "SSE stream done event with updatedTitle refreshes displayed title",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/ExplorePage.tsx, packages/cli/web/src/hooks/useExploreStream.ts",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
