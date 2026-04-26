@@ -6,8 +6,7 @@ import { IssueCard } from './IssueCard'
 
 const STAGES: { key: Stage; label: string }[] = [
   { key: Stage.Draft, label: 'Draft' },
-  { key: Stage.Explore, label: 'Explore' },
-  { key: Stage.Plan, label: 'Plan' },
+ { key: Stage.Plan, label: 'Plan' },
   { key: Stage.Build, label: 'Build' },
   { key: Stage.Review, label: 'Review' },
   { key: Stage.Done, label: 'Done' },
