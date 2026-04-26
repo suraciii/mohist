@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix IssueCard spec deviations: relative-time missing months, color value mismatches, missing getTypeColor export, area labels mismatch, tasks.json metadata",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,9 +19,9 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/relative-time.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Use Math.floor(days / 30) per D1 in design.md. Insert months check before the existing days check.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
