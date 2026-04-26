@@ -69,9 +69,9 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "This is a pure type change. The backend already returns these fields — frontend just needs to declare them.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
