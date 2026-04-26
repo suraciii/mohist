@@ -11,6 +11,7 @@ import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
+import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -33,6 +34,7 @@ export function createIssueRoutes(
   agentSessionMessageRepo?: AgentSessionMessageRepo,
   coderSessionRepo?: CoderSessionRepo,
   opencodeBinPath?: string,
+  checkpointRepo?: PipelineCheckpointRepo,
 ): Hono {
   const app = new Hono();
 
@@ -1157,6 +1159,61 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: entries
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/checkpoint', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (!checkpointRepo) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'PipelineCheckpointRepo not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const stages: string[] = ['plan', 'build'];
+      const data = stages
+        .map(stage => checkpointRepo!.get(issue.number, stage))
+        .filter((cp): cp is NonNullable<typeof cp> => cp !== null)
+        .map(cp => ({
+          stage: cp.stage,
+          completedSteps: cp.completedSteps,
+          nextStep: cp.nextStep,
+          updatedAt: cp.updatedAt,
+        }));
+
+      const response: ApiResponse = {
+        success: true,
+        data
       };
       return c.json(response);
     } catch (error) {
