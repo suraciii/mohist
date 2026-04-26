@@ -54,7 +54,7 @@ function KanbanView() {
       ) : (
         <KanbanBoard
           issues={issues ?? []}
-          agentStatus={agentStatus ?? { running: false, issueId: null, issueNumber: null }}
+          agentStatus={agentStatus ?? { running: false, issueId: null, issueNumber: null, activeAgents: [], maxConcurrentAgents: 8, queueDepth: 0, waitingQuestions: [], recoverableIssues: [] }}
         />
       )}
     </>
