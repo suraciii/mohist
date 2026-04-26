@@ -96,9 +96,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Also update the 'Agent is running on another issue' message (line 373-377) to only show when capacity is full, not when any agent runs.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },

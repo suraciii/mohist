@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function IssueCard({ issue, agentStatus }: Props) {
-  const isAgentRunning = agentStatus.running && agentStatus.issueId === issue.id
+  const isAgentRunning = agentStatus.activeAgents.some(a => a.issueNumber === issue.number)
   const isApprovalGate = APPROVAL_STAGES.has(issue.stage) && issue.status === IssueStatus.Active
 
   return (
