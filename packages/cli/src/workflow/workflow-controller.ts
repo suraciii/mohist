@@ -12,6 +12,7 @@ import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, type A
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { Log } from '../util/log';
 
 const execFileAsync = promisify(execFile);
@@ -41,6 +42,7 @@ export interface WorkflowControllerOptions {
   issueRepo?: IssueRepo;
   eventBus?: EventBus;
   projectId?: string;
+  checkpointRepo?: PipelineCheckpointRepo;
 }
 
 export interface PipelineResult {
@@ -56,6 +58,7 @@ export class WorkflowController {
   private issueRepo?: IssueRepo;
   private eventBus?: EventBus;
   private projectId?: string;
+  private checkpointRepo?: PipelineCheckpointRepo;
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -63,6 +66,11 @@ export class WorkflowController {
     this.issueRepo = options.issueRepo;
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
+    this.checkpointRepo = options.checkpointRepo;
+  }
+
+  getCheckpointRepo(): PipelineCheckpointRepo | undefined {
+    return this.checkpointRepo;
   }
 
   async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
