@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add PipelineCheckpointRepo and DB migration",
+      "spec": "specs/stage-checkpoint/spec.md",
+      "description": "Create `PipelineCheckpointRepo` class with `get(issueNumber, stage)`, `upsert(issueNumber, stage, completedSteps, nextStep)`, `delete(issueNumber, stage)`, `deleteAll(issueNumber)` methods. Add DB migration v14 to create `pipeline_checkpoint` table with `(issue_number, stage)` composite primary key, `completed_steps TEXT DEFAULT '[]'`, `next_step TEXT`, `updated_at TEXT`. Add `Interrupted = 'interrupted'` to the `IssueStatus` enum in `types/index.ts`. Update the frontend `IssueStatus` enum in `web/src/lib/types.ts` to include `Interrupted`.",
+      "acceptanceCriteria": [
+        "PipelineCheckpointRepo class exists in db/pipeline-checkpoint-repo.ts with get, upsert, delete, deleteAll methods",
+        "Migration v14 creates pipeline_checkpoint table with correct schema",
+        "IssueStatus.Interrupted = 'interrupted' exists in types/index.ts",
+        "Frontend IssueStatus enum includes Interrupted in web/src/lib/types.ts",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/pipeline-checkpoint-repo.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "This is the foundation — all other tasks depend on the repo and enum existing.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Add checkpointRepo to WorkflowController and thread through executePipeline",
+      "spec": "specs/stage-checkpoint/spec.md",
+      "description": "Add `checkpointRepo?: PipelineCheckpointRepo` to `WorkflowControllerOptions` and store it as a private field on `WorkflowController`. In `AgentRunnerService.executePipeline()`, instantiate `PipelineCheckpointRepo` from the database and pass it to the `WorkflowController` constructor. Export `PipelineCheckpointRepo` from `db/index.ts`.",
+      "acceptanceCriteria": [
+        "WorkflowControllerOptions includes optional checkpointRepo field",
+        "WorkflowController stores checkpointRepo as private field",
+        "AgentRunnerService.executePipeline creates PipelineCheckpointRepo and passes it to WorkflowController",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Plan stage checkpoint read/write and round-skip logic",
+      "spec": "specs/stage-checkpoint/spec.md,specs/pipeline-model/spec.md",
+      "description": "Modify `runPlanStage()` to: (1) read checkpoint on entry via `checkpointRepo.get(issue.number, 'plan')`, (2) skip `cleanChangeDir()` if checkpoint has non-empty `completedSteps`, (3) in the rounds loop, for each round check if it's in `completedSteps` — if so, verify artifact exists on disk via `round.verify()`, skip if present or re-run if missing (disk is truth per pipeline-model spec), (4) after each round completes and verifies, call `checkpointRepo.upsert()` to update `completedSteps` and `nextStep`, (5) create initial checkpoint if none exists, (6) delete checkpoint when plan stage returns success. Preserve checkpoint on stage failure so resume can continue from last completed step.",
+      "acceptanceCriteria": [
+        "runPlanStage reads checkpoint before round loop starts",
+        "cleanChangeDir is skipped when checkpoint has non-empty completedSteps",
+        "Rounds in completedSteps with artifact on disk are skipped (no conn.prompt call)",
+        "Rounds in completedSteps but missing artifact are re-executed",
+        "Checkpoint is upserted after each successful round completion",
+        "Checkpoint is deleted when runPlanStage returns success:true",
+        "No checkpoint is written when checkpointRepo is undefined (backward compatible)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "The self-review round at the end of plan stage should be treated as a separate step in the checkpoint (type='self-review').",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "Build stage checkpoint integration with RalphExecutor",
+      "spec": "specs/stage-checkpoint/spec.md,specs/pipeline-model/spec.md",
+      "description": "Modify `runPipelineBuildStage()` to read checkpoint before executing RalphExecutor. Pass `completedTaskIds` from checkpoint to the executor. After RalphExecutor completes each task, upsert the checkpoint with updated completedSteps. Clear checkpoint on build stage success. This requires adding a `skipTaskIds` option and `onTaskCompleted` callback to `RalphExecutor` config.",
+      "acceptanceCriteria": [
+        "runPipelineBuildStage reads checkpoint and extracts completedTaskIds before execution",
+        "RalphExecutor accepts skipTaskIds parameter and skips those tasks",
+        "RalphExecutor accepts onTaskCompleted callback invoked after each task pass",
+        "Checkpoint is upserted with completed task IDs during execution",
+        "Checkpoint is deleted when build stage returns success:true",
+        "No checkpoint logic runs when checkpointRepo is undefined",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-005",
+      "title": "Clear all checkpoints when issue reaches done stage",
+      "spec": "specs/stage-checkpoint/spec.md",
+      "description": "In `WorkflowController.run()`, after the while loop sets issue stage to `done`, call `checkpointRepo.deleteAll(issue.number)` to clean up any remaining checkpoint records.",
+      "acceptanceCriteria": [
+        "All checkpoint records for the issue are deleted when pipeline completes (stage=done)",
+        "No error thrown if checkpointRepo is undefined",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Small change — can be combined with T-003 in practice but listed separately for clarity.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-006",
+      "title": "recoverIssues marks orphaned issues as Interrupted instead of Blocked",
+      "spec": "specs/reopen-resume/spec.md",
+      "description": "In `AgentRunnerService.recoverIssues()`, change the else branch (non-awaiting orphans) to use `IssueStatus.Interrupted` instead of `IssueStatus.Blocked`. Do NOT call `clearApprovalState` for interrupted issues — preserve stage and checkpoint data. Update log message accordingly.",
+      "acceptanceCriteria": [
+        "Non-awaiting orphaned issues are marked as Interrupted (not Blocked)",
+        "Stage is preserved (not reset to Draft)",
+        "clearApprovalState is NOT called for interrupted issues",
+        "Log message reflects 'status=interrupted, stage preserved'",
+        "Awaiting issues still restore pendingGate as before",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-007",
+      "title": "Update reopen API to handle Interrupted status with checkpoint-aware resume",
+      "spec": "specs/reopen-resume/spec.md",
+      "description": "Update `IssueService.reopen()` to accept `interrupted` as a reopenable status (alongside closed, blocked, paused). In the reopen API handler (`api/issues.ts`), after reopen: if issue was `Interrupted` and checkpointRepo has a checkpoint for this issue, call `resumePipeline()` and return 'resuming from <stage>:<next_step>'. If interrupted but no checkpoint, reset stage to Draft. If `Blocked`, keep existing behavior (reset to Draft). Also need to pass checkpointRepo to the reopen handler (via stateManager or directly).",
+      "acceptanceCriteria": [
+        "reopen() accepts Interrupted status as reopenable",
+        "Interrupted + checkpoint exists: status=Active, stage preserved, resumePipeline called, response includes 'resuming from stage:step'",
+        "Interrupted + no checkpoint: status=Active, stage reset to Draft, approval cleared, response includes 'reset to draft'",
+        "Blocked reopen: existing behavior unchanged (reset to Draft)",
+        "Closed/Paused reopen: existing behavior unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-001",
+        "T-006"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-008",
+      "title": "Frontend: display Interrupted status in Kanban and issue detail",
+      "spec": "specs/reopen-resume/spec.md",
+      "description": "Update `IssueCard` component to handle `interrupted` status: show an amber/orange 'Interrupted' badge, display 'Pipeline was interrupted, click to resume' hint, and show a Resume button that calls the reopen API. Update any status-filtering or status-display logic that checks for specific status values to also handle `interrupted`. Ensure Kanban columns correctly include interrupted issues based on their stage.",
+      "acceptanceCriteria": [
+        "IssueCard shows amber Interrupted badge for interrupted status",
+        "Resume button calls POST /:number/reopen endpoint",
+        "Interrupted issues appear in correct Kanban stage column",
+        "Status display logic handles 'interrupted' alongside existing statuses",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueCard.tsx",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-009",
+      "title": "Add checkpoint REST API endpoint",
+      "spec": "specs/stage-checkpoint/spec.md",
+      "description": "Add `GET /api/issues/:number/checkpoint` endpoint that returns the checkpoint data for an issue (all stages). This enables the frontend issue detail page to show completed and pending sub-steps. Requires threading checkpointRepo into the API routes.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/checkpoint returns checkpoint records for the issue",
+        "Returns 200 with {success: true, data: [{stage, completedSteps, nextStep, updatedAt}]}",
+        "Returns 200 with empty array if no checkpoints exist",
+        "Returns 404 if issue not found",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Optional enhancement — frontend detail page can show sub-step progress. Lower priority since core fix works without it.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-010",
+      "title": "Write tests for checkpoint repo and plan stage resume",
+      "spec": "specs/stage-checkpoint/spec.md,specs/pipeline-model/spec.md",
+      "description": "Write unit tests for: (1) PipelineCheckpointRepo CRUD operations (get, upsert, delete, deleteAll, UPSERT semantics), (2) WorkflowController.runPlanStage with checkpoint — verify rounds are skipped when checkpoint exists, cleanChangeDir is skipped, disk verify overrides checkpoint, checkpoint is written after each round, checkpoint is cleared on stage completion. Use the existing test patterns in the project (look at tests/ directory for conventions).",
+      "acceptanceCriteria": [
+        "PipelineCheckpointRepo tests: upsert creates record, upsert updates existing, get returns null for missing, delete removes record, deleteAll removes all for issue",
+        "Plan stage resume test: checkpoint with completedSteps=['proposal'] skips proposal round",
+        "Plan stage resume test: checkpoint exists but artifact missing re-runs that round",
+        "Plan stage resume test: cleanChangeDir not called when checkpoint has completedSteps",
+        "Plan stage resume test: checkpoint deleted on stage success",
+        "All tests pass with npm test",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/pipeline-checkpoint.test.ts",
+      "dependsOn": [
+        "T-003",
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
