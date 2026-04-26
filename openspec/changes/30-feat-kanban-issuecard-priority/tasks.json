@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Kanban IssueCard 信息层次重新设计：priority 显示、类型色带、条件 badge、label 颜色映射、相对时间、Done 列折叠",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -23,8 +22,11 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/label-colors.ts, packages/cli/web/src/lib/relative-time.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "纯工具函数，无副作用，无依赖。后端 priority 格式为 'p0'|'p1'|... 字符串，formatPriority 需处理此格式转换。"
+      "passes": true,
+      "notes": "纯工具函数，无副作用，无依赖。后端 priority 格式为 'p0'|'p1'|... 字符串，formatPriority 需处理此格式转换。",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -42,7 +44,10 @@
       "output": "packages/cli/web/src/lib/types.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "后端 Priority 类型为 'p0'|'p1'|'p2'|'p3'|'p4' 字符串，前端用 string | null 接收。"
+      "notes": "后端 Priority 类型为 'p0'|'p1'|'p2'|'p3'|'p4' 字符串，前端用 string | null 接收。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -68,9 +73,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueCard.tsx",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "使用 border-l-4 + inline style 实现色带（D1）。Badge 按优先级只显示最高一个（D2）。Label 排序：类型 > 紧急度 > 区域 > 其他（D4）。Interrupted issue 保留原有的 Resume 按钮交互。"
+      "notes": "使用 border-l-4 + inline style 实现色带（D1）。Badge 按优先级只显示最高一个（D2）。Label 排序：类型 > 紧急度 > 区域 > 其他（D4）。Interrupted issue 保留原有的 Resume 按钮交互。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -92,9 +103,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/StageColumn.tsx, packages/cli/web/src/components/KanbanBoard.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "折叠状态不持久化（D6）。StageColumn 需同时接受新的 isDone prop 且保持现有 label/issues/agentStatus props 不变。"
+      "notes": "折叠状态不持久化（D6）。StageColumn 需同时接受新的 isDone prop 且保持现有 label/issues/agentStatus props 不变。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }

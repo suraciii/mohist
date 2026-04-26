@@ -38,6 +38,7 @@ export interface Issue {
   comments?: Comment[]
   approvalState?: ApprovalState
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
+  priority?: string | null
 }
 
 export interface Project {
