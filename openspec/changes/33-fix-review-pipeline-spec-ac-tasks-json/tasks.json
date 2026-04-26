@@ -119,9 +119,9 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-004 because the self-check validates a report that should have the Spec Compliance dimension.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
