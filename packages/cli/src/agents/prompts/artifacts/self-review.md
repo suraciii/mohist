@@ -44,3 +44,28 @@ If you find issues:
 3. Do NOT delete artifacts — only fix in place
 
 If all artifacts pass review, do nothing further.
+
+## Output Format
+
+Write a self-review summary to `{changeDir}/self-review.md` with:
+
+```markdown
+# Self-Review Report
+
+## Verdict: PASS / FAIL
+
+## Completeness: PASS / FAIL
+- [findings]
+
+## Consistency: PASS / FAIL
+- [findings]
+
+## Feasibility: PASS / FAIL
+- [findings]
+
+## Quality: PASS / FAIL
+- [findings]
+
+## Fixes Applied
+1. [description of each fix applied, or "None" if all passed]
+```
