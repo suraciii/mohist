@@ -11,17 +11,18 @@ import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionTimeline } from './SessionTimeline'
 
-const STAGES = [Stage.Draft, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
+const STAGES = [Stage.Draft, Stage.Explore, Stage.Plan, Stage.Build, Stage.Review, Stage.Done]
 
 const STAGE_LABELS: Record<string, string> = {
   [Stage.Draft]: 'Draft',
+  [Stage.Explore]: 'Explore',
   [Stage.Plan]: 'Plan',
   [Stage.Build]: 'Build',
-  [Stage.Check]: 'Check',
+  [Stage.Review]: 'Review',
   [Stage.Done]: 'Done',
 }
 
-const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Check, Stage.Done])
+const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Review, Stage.Done])
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString()
