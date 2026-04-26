@@ -14,6 +14,8 @@ export enum IssueStatus {
 
 export interface ApprovalState {
   status: 'awaiting' | 'approved' | 'rejected'
+  stage?: string
+  output?: Record<string, unknown>
   requestedAt: string
   approvedAt?: string
 }
