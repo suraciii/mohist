@@ -1,0 +1,110 @@
+{
+  "project": "mohist",
+  "description": "Fix parallel issue processing — enforce maxConcurrentAgents, expose activeAgents to frontend, replace global lock with per-issue logic",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Enforce maxConcurrentAgents in startPipeline and add field to getStatus",
+      "spec": "specs/agent-pool/spec.md#Concurrent agent execution",
+      "description": "In agent-runner-service.ts: (1) Add `activeAgents.size >= this.maxConcurrentAgents` check in `startPipeline()` after the existing `activeAgents.has(issue.id)` check, returning `{ started: false, error: 'Concurrent agent limit reached (N)' }`. (2) Add `maxConcurrentAgents: this.maxConcurrentAgents` field to `getStatus()` return object. (3) Update the backend `AgentStatus` interface to include the new field.",
+      "acceptanceCriteria": [
+        "startPipeline() rejects with error when activeAgents.size >= maxConcurrentAgents",
+        "startPipeline() allows start when activeAgents.size < maxConcurrentAgents",
+        "getStatus() returns maxConcurrentAgents field with the configured value",
+        "AgentStatus interface includes maxConcurrentAgents: number",
+        "cd packages/cli && npm run build succeeds"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The maxConcurrentAgents field is already stored in the class (line 53) and logged (line 68), just never checked in startPipeline."
+    },
+    {
+      "id": "T-002",
+      "title": "Add 429 response for concurrent limit in start API handler",
+      "spec": "specs/http-api/spec.md#Start handler 校验 issue status",
+      "description": "In packages/cli/src/api/issues.ts POST /:number/start handler AND packages/cli/src/api/propose.ts POST /:number/propose handler: add a check before calling startPipeline that compares agentRunner.getStatus().activeAgents.length >= agentRunner.getMaxConcurrentAgents(). If exceeded, return 429 with error message 'Concurrent agent limit reached (N)'. This gives proper HTTP semantics separate from the 409 already-running check.",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/start returns 429 when concurrent limit reached",
+        "POST /api/issues/:number/propose returns 429 when concurrent limit reached",
+        "Error response includes the limit value in the message",
+        "POST /api/issues/:number/start returns 409 when issue already running (existing behavior preserved)",
+        "POST /api/issues/:number/start returns 200 when under capacity (existing behavior preserved)",
+        "cd packages/cli && npm run build succeeds"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts, packages/cli/src/api/propose.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The 429 check should go after the existing isRunning check (line 347-353) and before the startPipeline call (line 366)."
+    },
+    {
+      "id": "T-003",
+      "title": "Extend frontend AgentStatus type to match backend",
+      "spec": "specs/agent-session-ui/spec.md#Frontend agentStatus uses issueNumber field for matching",
+      "description": "In packages/cli/web/src/lib/types.ts: expand the AgentStatus interface to include activeAgents array, maxConcurrentAgents number, queueDepth number, waitingQuestions array, and recoverableIssues array. Keep existing running/issueId/issueNumber fields for backward compatibility.",
+      "acceptanceCriteria": [
+        "AgentStatus includes activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>",
+        "AgentStatus includes maxConcurrentAgents: number",
+        "AgentStatus includes queueDepth: number",
+        "AgentStatus includes waitingQuestions array",
+        "AgentStatus includes recoverableIssues array",
+        "Existing fields (running, issueId, issueNumber) remain unchanged",
+        "cd packages/cli/web && npx tsc --noEmit succeeds"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is a pure type change. The backend already returns these fields — frontend just needs to declare them."
+    },
+    {
+      "id": "T-004",
+      "title": "Rewrite IssueDetailPage Start/Approve button logic to per-issue",
+      "spec": "specs/web-ui/spec.md#Start 按钮按 issue 粒度判断禁用状态",
+      "description": "In packages/cli/web/src/components/IssueDetailPage.tsx: replace `isAgentRunning = agentStatus?.running === true` with per-issue logic using `activeAgents.some(a => a.issueNumber === issueNumber)`. Derive `isCapacityFull = (agentStatus?.activeAgents.length ?? 0) >= (agentStatus?.maxConcurrentAgents ?? Infinity)`. Start button disabled when this issue is running OR capacity is full. Approve button disabled only when this specific issue has an agent running. Update button text: 'Agent running...' when this issue is running, 'Capacity full...' when at limit.",
+      "acceptanceCriteria": [
+        "Start button enabled when other issues have agents but capacity not full",
+        "Start button disabled with 'Agent running...' when this issue has a running agent",
+        "Start button disabled with 'Capacity full...' when activeAgents.length >= maxConcurrentAgents",
+        "Approve button enabled when other issues have agents running",
+        "Approve button disabled only when this issue's agent is running",
+        "SSE streaming (isAgentRunningOnThis) still works correctly for the viewed issue",
+        "cd packages/cli/web && npx tsc --noEmit succeeds"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Also update the 'Agent is running on another issue' message (line 373-377) to only show when capacity is full, not when any agent runs."
+    },
+    {
+      "id": "T-005",
+      "title": "Update IssueCard to use activeAgents for per-issue running indicator",
+      "spec": "specs/web-ui/spec.md#IssueCard 按 per-issue 显示 running 指示器",
+      "description": "In packages/cli/web/src/components/IssueCard.tsx: replace `isAgentRunning = agentStatus.running && agentStatus.issueId === issue.id` with `isAgentRunning = agentStatus.activeAgents.some(a => a.issueNumber === issue.number)`. No changes needed to KanbanBoard or StageColumn — they already pass agentStatus through unchanged, and the type expansion from T-003 means activeAgents is now available.",
+      "acceptanceCriteria": [
+        "IssueCard shows 'Running' badge only when activeAgents contains this issue's number",
+        "IssueCard does NOT show 'Running' badge when only other issues have agents",
+        "Multiple cards can show 'Running' simultaneously when multiple agents are active",
+        "cd packages/cli/web && npx tsc --noEmit succeeds"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueCard.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "KanbanBoard.tsx and StageColumn.tsx need no changes — they pass agentStatus through as-is, which now includes activeAgents."
+    }
+  ]
+}
