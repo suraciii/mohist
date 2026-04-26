@@ -53,12 +53,12 @@ export class MergeQueue {
       issueNumber,
       projectId,
       issueId: issue.id,
-      mergeState: 'pending' as MergeState,
+      mergeState: MergeState.Pending,
       enqueuedAt: Date.now(),
     };
 
     this.queue.set(issueNumber, entry);
-    this.deps.issueRepo.setMergeState(issue.id, 'pending');
+    this.deps.issueRepo.setMergeState(issue.id, MergeState.Pending);
 
     const position = this.getPendingCount();
     this.deps.eventBus.emit('merge_queued', {
@@ -80,16 +80,16 @@ export class MergeQueue {
       return false;
     }
 
-    if (entry.mergeState !== 'build-failed' && entry.mergeState !== 'conflict') {
+    if (entry.mergeState !== MergeState.BuildFailed && entry.mergeState !== MergeState.Conflict) {
       log.warn('retry: invalid state', { issueNumber, mergeState: entry.mergeState });
       return false;
     }
 
-    entry.mergeState = 'pending';
+    entry.mergeState = MergeState.Pending;
     entry.message = undefined;
     entry.enqueuedAt = Date.now();
 
-    this.deps.issueRepo.setMergeState(entry.issueId, 'pending');
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Pending);
 
     log.info('Issue re-enqueued for retry', { issueNumber, projectId: entry.projectId });
 
@@ -104,12 +104,12 @@ export class MergeQueue {
   }
 
   recoverFromDB(): void {
-    const issues = this.deps.issueRepo.findByMergeStates(['pending', 'merging']);
+    const issues = this.deps.issueRepo.findByMergeStates([MergeState.Pending, MergeState.Merging]);
 
     for (const issue of issues) {
       if (this.queue.has(issue.number)) continue;
 
-      const mergeState: MergeState = issue.mergeState === 'merging' ? 'pending' : 'pending';
+      const mergeState: MergeState = issue.mergeState === MergeState.Merging ? MergeState.Pending : MergeState.Pending;
 
       this.deps.issueRepo.setMergeState(issue.id, mergeState);
 
@@ -117,7 +117,7 @@ export class MergeQueue {
         issueNumber: issue.number,
         projectId: issue.projectId,
         issueId: issue.id,
-        mergeState: 'pending',
+        mergeState: MergeState.Pending,
         enqueuedAt: Date.now(),
       };
 
@@ -138,7 +138,7 @@ export class MergeQueue {
   private getPendingCount(): number {
     let count = 0;
     for (const entry of this.queue.values()) {
-      if (entry.mergeState === 'pending') count++;
+      if (entry.mergeState === MergeState.Pending) count++;
     }
     return count;
   }
@@ -167,7 +167,7 @@ export class MergeQueue {
   private pickNext(): MergeEntry | null {
     let earliest: MergeEntry | null = null;
     for (const entry of this.queue.values()) {
-      if (entry.mergeState !== 'pending') continue;
+      if (entry.mergeState !== MergeState.Pending) continue;
       if (!earliest || entry.enqueuedAt < earliest.enqueuedAt) {
         earliest = entry;
       }
@@ -176,8 +176,8 @@ export class MergeQueue {
   }
 
   private async processItem(entry: MergeEntry): Promise<void> {
-    entry.mergeState = 'merging';
-    this.deps.issueRepo.setMergeState(entry.issueId, 'merging');
+    entry.mergeState = MergeState.Merging;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
 
     this.deps.eventBus.emit('merge_started', {
       issueId: entry.issueId,
@@ -206,7 +206,7 @@ export class MergeQueue {
 
     if (!mergeResult.success) {
       const isConflict = mergeResult.message.toLowerCase().includes('conflict');
-      this.handleFailure(entry, mergeResult.message, isConflict ? 'conflict' : 'build-failed');
+      this.handleFailure(entry, mergeResult.message, isConflict ? MergeState.Conflict : MergeState.BuildFailed);
       return;
     }
 
@@ -238,8 +238,8 @@ export class MergeQueue {
       });
     }
 
-    entry.mergeState = 'merged';
-    this.deps.issueRepo.setMergeState(entry.issueId, 'merged');
+    entry.mergeState = MergeState.Merged;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
 
     this.deps.eventBus.emit('merge_completed', {
       issueId: entry.issueId,
@@ -253,7 +253,7 @@ export class MergeQueue {
   private handleFailure(
     entry: MergeEntry,
     message: string,
-    state: MergeState = 'build-failed',
+    state: MergeState = MergeState.BuildFailed,
   ): void {
     entry.mergeState = state;
     entry.message = message;
@@ -263,7 +263,7 @@ export class MergeQueue {
       issueId: entry.issueId,
       projectId: entry.projectId,
       issueNumber: entry.issueNumber,
-      reason: state === 'conflict' ? 'conflict' : 'build-failed',
+      reason: state === MergeState.Conflict ? MergeState.Conflict : MergeState.BuildFailed,
     });
 
     log.warn('Merge failed', {

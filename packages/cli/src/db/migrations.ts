@@ -555,6 +555,12 @@ function migrateToVersion14(db: DatabaseManager): void {
       }
     }
 
+    const hasConflictRetryCount = tableInfo.some(col => col.name === 'conflict_retry_count');
+
+    if (!hasConflictRetryCount) {
+      db.exec('ALTER TABLE issues ADD COLUMN conflict_retry_count INTEGER DEFAULT 0');
+    }
+
     setSchemaVersion(db, 14);
   });
 }

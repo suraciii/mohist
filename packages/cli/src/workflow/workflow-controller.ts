@@ -2,13 +2,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { Stage, IssueStatus, type Issue } from '../types';
+import { Stage, IssueStatus, MergeState, type Issue } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { loadWorkflow } from './workflow-loader';
-import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildConflictResolutionPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
@@ -368,6 +368,12 @@ export class WorkflowController {
             };
           }
 
+          if (currentIssue.mergeState === MergeState.Resolving) {
+            log.info('Skipping approval gate during conflict resolution', { issueNumber: currentIssue.number });
+            currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Done)!;
+            break;
+          }
+
           this.issueRepo.setApprovalState(currentIssue.id, {
             stage: Stage.Review,
             status: 'awaiting',
@@ -472,6 +478,10 @@ export class WorkflowController {
   }
 
   private async runPipelineBuildStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+    if (issue.mergeState === MergeState.Resolving) {
+      return this.runConflictResolutionStage(issue, acpOptions);
+    }
+
     const buildStartTime = Date.now();
     const issueId = issue.id;
     const projectId = this.projectId ?? issue.projectId;
@@ -689,6 +699,166 @@ export class WorkflowController {
         ? `Build completed - ${result.completed}/${result.total} tasks executed`
         : `Build completed with ${result.failed} failed task(s)`,
     };
+  }
+
+  private async runConflictResolutionStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+    const buildStartTime = Date.now();
+    const issueId = issue.id;
+    const projectId = this.projectId ?? issue.projectId;
+    const workflowLogRepo = acpOptions.workflowLogRepo;
+
+    this.emitSafe('build_stage_started', {
+      issueId,
+      projectId,
+      stage: 'build' as const,
+      changePath: this.worktreePath,
+      tasksCount: 0,
+      timestamp: new Date().toISOString(),
+    });
+    this.writeLog(workflowLogRepo, issueId, 'build_started', {
+      reason: 'conflict_resolution',
+      worktreePath: this.worktreePath,
+      issueNumber: issue.number,
+    });
+
+    let conflictFiles: string[] = [];
+    try {
+      const { stdout } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], { cwd: this.worktreePath });
+      conflictFiles = stdout.split('\n').filter(f => f.trim() !== '');
+    } catch (err) {
+      log.warn('Failed to detect conflict files', { error: err instanceof Error ? err.message : String(err) });
+    }
+
+    log.info('Conflict resolution: detected conflict files', {
+      issueNumber: issue.number,
+      conflictFiles: conflictFiles.length,
+    });
+
+    if (conflictFiles.length === 0) {
+      log.info('No conflict files found, committing any pending changes', { issueNumber: issue.number });
+      await this.commitBuildChanges(issue);
+
+      if (this.issueRepo) {
+        this.issueRepo.setMergeState(issue.id, MergeState.Pending);
+      }
+
+      return {
+        success: true,
+        requiresApproval: false,
+        output: { stage: Stage.Build, issueNumber: issue.number, conflictFiles: 0 },
+        message: 'No conflict files found, proceeding',
+      };
+    }
+
+    const changeDir = this.artifactManager.getChangeDir(issue.number) ?? this.worktreePath;
+    const prompt = buildConflictResolutionPrompt(issue, changeDir, conflictFiles);
+
+    const resolveAcpOptions: AcpConnectionOptions = {
+      ...acpOptions,
+      executionId: `conflict-resolve-${issue.number}`,
+      onSessionUpdate: (notification) => {
+        if (!this.eventBus) return;
+        try {
+          this.eventBus.emit('plan_session_update', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId,
+            roundType: 'conflict-resolution',
+            roundIndex: 0,
+            sessionUpdate: notification.update.sessionUpdate,
+            data: notification.update as unknown,
+          });
+        } catch (e) {
+          log.warn('eventBus.emit failed for conflict resolution session update', {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      },
+    };
+
+    let conn: AcpConnection | undefined;
+    try {
+      conn = await createAcpConnection(resolveAcpOptions);
+      const result = await conn.prompt(prompt);
+      await conn.close();
+
+      const duration = Date.now() - buildStartTime;
+
+      if (!result.success) {
+        log.error('Conflict resolution agent session failed', {
+          issueNumber: issue.number,
+          error: result.error,
+          duration,
+        });
+
+        this.emitSafe('build_stage_failed', {
+          issueId,
+          projectId,
+          reason: 'conflict_resolution_failed',
+          details: { error: result.error, conflictFiles: conflictFiles.length },
+          timestamp: new Date().toISOString(),
+        });
+        this.writeLog(workflowLogRepo, issueId, 'build_failed', {
+          reason: 'conflict_resolution_failed',
+          error: result.error,
+          duration,
+        });
+
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: `Conflict resolution failed: ${result.error ?? 'unknown error'}`,
+        };
+      }
+
+      await this.commitBuildChanges(issue);
+
+      if (this.issueRepo) {
+        this.issueRepo.setMergeState(issue.id, MergeState.Pending);
+      }
+
+      log.info('Conflict resolution completed', {
+        issueNumber: issue.number,
+        conflictFiles: conflictFiles.length,
+        duration,
+      });
+
+      this.emitSafe('build_stage_completed', {
+        issueId,
+        projectId,
+        completed: 0,
+        failed: 0,
+        total: 0,
+        duration,
+        timestamp: new Date().toISOString(),
+      });
+      this.writeLog(workflowLogRepo, issueId, 'build_completed', {
+        reason: 'conflict_resolution',
+        conflictFiles: conflictFiles.length,
+        duration,
+      });
+
+      return {
+        success: true,
+        requiresApproval: false,
+        output: {
+          stage: Stage.Build,
+          issueNumber: issue.number,
+          conflictFiles: conflictFiles.length,
+        },
+        message: `Conflict resolution completed - ${conflictFiles.length} conflict(s) resolved`,
+      };
+    } catch (err) {
+      if (conn) {
+        try { await conn.close(); } catch { /* ignore */ }
+      }
+      return {
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `Conflict resolution error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   private async runPipelineReviewStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
