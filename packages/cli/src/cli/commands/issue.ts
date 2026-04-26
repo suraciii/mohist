@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { execSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ApiResponse, Issue } from '../../types';
+import { ApiResponse, Issue, Priority, VALID_PRIORITIES } from '../../types';
 import { slugify } from '../../utils/slugify';
 import { apiClient } from '../api-client';
 import { requireServer } from '../server-check';
@@ -30,6 +30,18 @@ function formatStatus(status: string): string {
   
   const color = colors[status] || chalk.white;
   return color(status);
+}
+
+function formatPriority(priority: string): string {
+  const colors: Record<string, typeof chalk.green> = {
+    p0: chalk.red.bold,
+    p1: chalk.red,
+    p2: chalk.yellow,
+    p3: chalk.green,
+    p4: chalk.gray,
+  };
+  const color = colors[priority] || chalk.white;
+  return color(priority);
 }
 
 function formatLabels(labels: string[]): string {
@@ -68,16 +80,23 @@ export function setupIssueCommands(program: Command): void {
     .description('Create a new issue')
     .option('-b, --body <body>', 'Issue body/description')
     .option('-l, --label <label>', 'Add label (can be repeated)', (val, prev: string[]) => [...prev, val], [] as string[])
+    .option('-p, --priority <level>', 'Set priority (p0-p4)')
     .action(async (title, options) => {
       try {
+        if (options.priority && !VALID_PRIORITIES.includes(options.priority as Priority)) {
+          console.error(chalk.red(`Invalid priority: ${options.priority}. Must be one of: ${VALID_PRIORITIES.join(', ')}`));
+          return;
+        }
         const response = await apiClient<ApiResponse<Issue>>(
           'POST',
           '/issues',
-          { title, body: options.body, labels: options.label }
+          { title, body: options.body, labels: options.label, priority: options.priority }
         );
         
         if (response.success && response.data) {
-          console.log(chalk.green(`✓ Created issue #${response.data.number}: ${response.data.title}`));
+          const issue = response.data;
+          console.log(chalk.green(`✓ Created issue #${issue.number}: ${issue.title}`));
+          console.log(chalk.gray(`  Priority: ${formatPriority(issue.priority)}`));
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
         }
@@ -91,6 +110,7 @@ export function setupIssueCommands(program: Command): void {
     .description('List issues')
     .option('-s, --status <stage>', 'Filter by stage')
     .option('-l, --label <label>', 'Filter by label')
+    .option('-p, --priority <level>', 'Filter by priority')
     .action(async (options) => {
       try {
         let path = '/issues';
@@ -100,6 +120,9 @@ export function setupIssueCommands(program: Command): void {
         }
         if (options.label) {
           params.push(`label=${options.label}`);
+        }
+        if (options.priority) {
+          params.push(`priority=${options.priority}`);
         }
         if (params.length > 0) {
           path += `?${params.join('&')}`;
@@ -114,17 +137,18 @@ export function setupIssueCommands(program: Command): void {
           }
           
           console.log(chalk.bold('\nIssues:\n'));
-          console.log('  ID                 Stage                     Status    Labels              Title');
-          console.log('  ' + '─'.repeat(95));
+          console.log('  ID                 Priority  Stage                     Status    Labels              Title');
+          console.log('  ' + '─'.repeat(105));
           
           response.data.forEach((issue: any) => {
             const id = chalk.cyan(`${issue.projectName || 'unknown'}#${issue.number}`.padEnd(18));
+            const priority = formatPriority(issue.priority || 'p2').padEnd(9);
             const stage = formatStage(issue.stage).padEnd(25);
             const status = formatStatus(issue.status).padEnd(9);
             const labels = formatLabels(issue.labels).padEnd(20);
             const title = issue.title.substring(0, 40);
             
-            console.log(`  ${id} ${stage} ${status} ${labels} ${title}`);
+            console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${title}`);
           });
           console.log();
         }
@@ -147,6 +171,7 @@ export function setupIssueCommands(program: Command): void {
           const issue = response.data;
           const displayId = `${issue.projectName || 'unknown'}#${issue.number}`;
           console.log(chalk.bold(`\nIssue ${displayId}: ${issue.title}\n`));
+          console.log(`  Priority: ${formatPriority(issue.priority || 'p2')}`);
           console.log(`  Stage: ${formatStage(issue.stage)}`);
           console.log(`  Status: ${formatStatus(issue.status)}`);
           
@@ -202,8 +227,13 @@ export function setupIssueCommands(program: Command): void {
     .option('--title <title>', 'New title')
     .option('--body <body>', 'New body')
     .option('-l, --label <label>', 'Add (+label) or remove (-label) label', (val, prev: string[]) => [...prev, val], [] as string[])
+    .option('-p, --priority <level>', 'Set priority (p0-p4)')
     .action(async (number, options) => {
       try {
+        if (options.priority && !VALID_PRIORITIES.includes(options.priority as Priority)) {
+          console.error(chalk.red(`Invalid priority: ${options.priority}. Must be one of: ${VALID_PRIORITIES.join(', ')}`));
+          return;
+        }
         const { add, remove } = parseLabelFlags(options.label);
         
         const response = await apiClient<ApiResponse<Issue>>(
@@ -212,6 +242,7 @@ export function setupIssueCommands(program: Command): void {
           {
             title: options.title,
             body: options.body,
+            priority: options.priority,
             addLabels: add.length > 0 ? add : undefined,
             removeLabels: remove.length > 0 ? remove : undefined,
           }

@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseManager, SqlValue } from './database';
-import { Issue, Stage, IssueStatus, ApprovalState, MergeState } from '../types';
+import { Issue, Stage, IssueStatus, ApprovalState, MergeState, Priority } from '../types';
 
 interface IssueRow {
   id: string;
@@ -11,6 +11,7 @@ interface IssueRow {
   stage: string;
   status: string;
   labels: string;
+  priority: string;
   created_at: string;
   updated_at: string;
   approval_state: string | null;
@@ -43,6 +44,7 @@ function rowToIssue(row: IssueRow): Issue {
     status: row.status as IssueStatus,
     projectId: row.project_id,
     labels,
+    priority: (row.priority || 'p2') as Priority,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     approvalState,
@@ -56,12 +58,14 @@ export interface CreateIssueData {
   title: string;
   body?: string;
   labels?: string[];
+  priority?: Priority;
 }
 
 export interface IssueQueryOptions {
   projectId?: string;
   stage?: Stage;
   status?: IssueStatus;
+  priority?: Priority;
 }
 
 export class IssueRepo {
@@ -71,11 +75,12 @@ export class IssueRepo {
     const now = new Date().toISOString();
     const id = uuidv4();
     const labels = JSON.stringify(data.labels || []);
+    const priority = data.priority || 'p2';
     
     this.db.run(
-      `INSERT INTO issues (id, number, project_id, title, body, stage, status, labels, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, data.number, data.projectId, data.title, data.body || null, Stage.Draft, IssueStatus.Active, labels, now, now]
+      `INSERT INTO issues (id, number, project_id, title, body, stage, status, labels, priority, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, data.number, data.projectId, data.title, data.body || null, Stage.Draft, IssueStatus.Active, labels, priority, now, now]
     );
     
     return {
@@ -87,6 +92,7 @@ export class IssueRepo {
       status: IssueStatus.Active,
       projectId: data.projectId,
       labels: data.labels || [],
+      priority: priority as Priority,
       createdAt: now,
       updatedAt: now,
     };
@@ -124,8 +130,12 @@ export class IssueRepo {
       sql += ' AND status = ?';
       params.push(options.status);
     }
+    if (options.priority) {
+      sql += ' AND priority = ?';
+      params.push(options.priority);
+    }
     
-    sql += ' ORDER BY number ASC';
+    sql += ' ORDER BY priority ASC, number ASC';
     
     const rows = this.db.all<IssueRow>(sql, params);
     return rows.map(rowToIssue);
@@ -165,7 +175,7 @@ export class IssueRepo {
     return this.findById(issueId);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState; priority: Priority }>): Issue | null {
     const existing = this.findById(issueId);
     if (!existing) return null;
     
@@ -195,6 +205,10 @@ export class IssueRepo {
     if (data.mergeState !== undefined) {
       updates.push('merge_state = ?');
       values.push(data.mergeState);
+    }
+    if (data.priority !== undefined) {
+      updates.push('priority = ?');
+      values.push(data.priority);
     }
     
     if (updates.length === 0) return existing;
