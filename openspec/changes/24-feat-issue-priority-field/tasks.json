@@ -73,9 +73,9 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "D4 in design.md — global sort change in findAll()",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
