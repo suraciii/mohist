@@ -68,6 +68,7 @@ export interface Issue {
   updatedAt: string;
   approvalState?: ApprovalState;
   mergeState?: MergeState;
+  conflictRetryCount?: number;
 }
 
 export interface Project {
@@ -117,6 +118,16 @@ export interface Question {
   status: QuestionStatus;
   createdAt: string;
   answeredAt?: string;
+}
+
+export enum MergeState {
+  Pending = 'pending',
+  Merging = 'merging',
+  Merged = 'merged',
+  BuildFailed = 'build-failed',
+  Conflict = 'conflict',
+  Resolving = 'resolving',
+  Blocked = 'blocked',
 }
 
 export enum ExploreStatus {
