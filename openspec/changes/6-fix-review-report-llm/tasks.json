@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix review report storing LLM thinking instead of clean output",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -38,7 +40,10 @@
       "output": "packages/cli/src/agents/prompts/artifacts/self-review.md",
       "dependsOn": [],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -60,7 +65,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Depends on T-002 because self-review prompt must instruct agent to write the file before the controller can read it."
+      "notes": "Depends on T-002 because self-review prompt must instruct agent to write the file before the controller can read it.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
