@@ -38,6 +38,10 @@ function statusBadge(status: IssueStatus): string {
       return 'text-red-700 bg-red-50'
     case IssueStatus.Interrupted:
       return 'text-orange-700 bg-orange-50'
+    case IssueStatus.Closed:
+      return 'text-gray-600 bg-gray-100'
+    case IssueStatus.Completed:
+      return 'text-green-800 bg-green-100'
     default:
       return 'text-gray-700 bg-gray-50'
   }
@@ -181,11 +185,20 @@ export function IssueDetailPage() {
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-sm font-mono text-gray-400">#{issue.number}</span>
-              <span
-                className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(issue.status)}`}
-              >
-                {issue.status}
-              </span>
+              {issue.status === IssueStatus.Completed ? (
+                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-green-800 bg-green-100">
+                  <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                  </svg>
+                  Completed
+                </span>
+              ) : (
+                <span
+                  className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusBadge(issue.status)}`}
+                >
+                  {issue.status}
+                </span>
+              )}
               {isAgentRunningOnThis && (
                 <span className="inline-flex items-center gap-1 text-xs text-blue-600">
                   <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
@@ -375,43 +388,7 @@ export function IssueDetailPage() {
               <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">Actions</h2>
                 <div className="space-y-2">
-                  {isDraft && (
-                    <button
-                      onClick={() => startMutation.mutate()}
-                      disabled={isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
-                      className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                    >
-                      {startMutation.isPending
-                        ? 'Starting...'
-                        : isAgentRunningOnThis
-                          ? 'Agent running...'
-                          : isCapacityFull
-                            ? 'Capacity full...'
-                            : 'Start'}
-                    </button>
-                  )}
-
-                  {isDraft && (
-                    <button
-                      onClick={handleExplore}
-                      disabled={createExploreMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                    >
-                      {createExploreMutation.isPending ? 'Opening...' : 'Explore'}
-                    </button>
-                  )}
-
-                  {issue.status === IssueStatus.Active && !isDraft && (
-                    <button
-                      onClick={() => closeMutation.mutate()}
-                      disabled={closeMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                    >
-                      {closeMutation.isPending ? 'Closing...' : 'Close'}
-                    </button>
-                  )}
-
-                  {issue.status === IssueStatus.Blocked && (
+                  {issue.status === IssueStatus.Closed && (
                     <button
                       onClick={() => reopenMutation.mutate()}
                       disabled={reopenMutation.isPending}
@@ -421,13 +398,101 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
+                  {issue.status === IssueStatus.Completed && (
+                    <p className="text-sm text-green-700 text-center py-2">
+                      ✓ This issue has been completed.
+                    </p>
+                  )}
+
+                  {issue.status === IssueStatus.Paused && (
+                    <>
+                      <button
+                        onClick={() => reopenMutation.mutate()}
+                        disabled={reopenMutation.isPending}
+                        className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {reopenMutation.isPending ? 'Resuming...' : 'Resume'}
+                      </button>
+                      <button
+                        onClick={() => closeMutation.mutate()}
+                        disabled={closeMutation.isPending}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      >
+                        {closeMutation.isPending ? 'Closing...' : 'Close'}
+                      </button>
+                    </>
+                  )}
+
+                  {issue.status === IssueStatus.Blocked && (
+                    <>
+                      <button
+                        onClick={() => reopenMutation.mutate()}
+                        disabled={reopenMutation.isPending}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      >
+                        {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
+                      </button>
+                      <button
+                        onClick={() => closeMutation.mutate()}
+                        disabled={closeMutation.isPending}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      >
+                        {closeMutation.isPending ? 'Closing...' : 'Close'}
+                      </button>
+                    </>
+                  )}
+
                   {issue.status === IssueStatus.Interrupted && (
+                    <>
+                      <button
+                        onClick={() => reopenMutation.mutate()}
+                        disabled={reopenMutation.isPending}
+                        className="w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                      >
+                        {reopenMutation.isPending ? 'Resuming...' : 'Resume Pipeline'}
+                      </button>
+                      <button
+                        onClick={() => closeMutation.mutate()}
+                        disabled={closeMutation.isPending}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      >
+                        {closeMutation.isPending ? 'Closing...' : 'Close'}
+                      </button>
+                    </>
+                  )}
+
+                  {issue.status === IssueStatus.Active && isDraft && (
+                    <>
+                      <button
+                        onClick={() => startMutation.mutate()}
+                        disabled={isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
+                        className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {startMutation.isPending
+                          ? 'Starting...'
+                          : isAgentRunningOnThis
+                            ? 'Agent running...'
+                            : isCapacityFull
+                              ? 'Capacity full...'
+                              : 'Start'}
+                      </button>
+                      <button
+                        onClick={handleExplore}
+                        disabled={createExploreMutation.isPending}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      >
+                        {createExploreMutation.isPending ? 'Opening...' : 'Explore'}
+                      </button>
+                    </>
+                  )}
+
+                  {issue.status === IssueStatus.Active && !isDraft && (
                     <button
-                      onClick={() => reopenMutation.mutate()}
-                      disabled={reopenMutation.isPending}
-                      className="w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                      onClick={() => closeMutation.mutate()}
+                      disabled={closeMutation.isPending}
+                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                     >
-                      {reopenMutation.isPending ? 'Resuming...' : 'Resume Pipeline'}
+                      {closeMutation.isPending ? 'Closing...' : 'Close'}
                     </button>
                   )}
 
