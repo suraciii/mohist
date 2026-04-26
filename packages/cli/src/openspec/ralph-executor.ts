@@ -312,7 +312,13 @@ export function validateTaskDependencies(tasks: Task[]): DependencyValidationRes
 }
 
 export function findNextPendingTask(tasks: Task[]): Task | null {
-  const sorted = sortTasksByOrder(tasks.filter(t => !t.passes));
+  const passedIds = new Set(tasks.filter(t => t.passes).map(t => t.id));
+  const ready = tasks.filter(t => {
+    if (t.passes) return false;
+    const deps = t.dependsOn ?? [];
+    return deps.every(depId => passedIds.has(depId));
+  });
+  const sorted = sortTasksByOrder(ready);
   return sorted.length > 0 ? sorted[0] : null;
 }
 
@@ -356,6 +362,23 @@ export async function runRalphLoop(
       taskResults: [],
       success: false,
     };
+  }
+
+  const validation = validateTaskDependencies(tasks);
+  if (!validation.valid) {
+    for (const err of validation.errors) {
+      log.error('Task dependency validation failed', { issueId: context.issueId || '', error: err });
+    }
+    const result: RalphLoopResult = {
+      completed: 0,
+      failed: tasks.length,
+      total: tasks.length,
+      taskResults: [],
+      success: false,
+      pauseReason: `Task dependency validation failed: ${validation.errors.join('; ')}`,
+    };
+    context.onLoopComplete?.(result);
+    return result;
   }
 
   const sortedTasks = sortTasksByOrder(tasks);
@@ -458,6 +481,36 @@ export async function runRalphLoop(
   while (true) {
     const nextTask = findNextPendingTask(tasks);
     if (!nextTask) {
+      const remainingPending = tasks.filter(t => !t.passes);
+      if (remainingPending.length > 0) {
+        const blockedIds = remainingPending.map(t => {
+          const deps = (t.dependsOn ?? []).filter(d => !tasks.find(x => x.id === d)?.passes);
+          return `${t.id} (blocked by: ${deps.length > 0 ? deps.join(', ') : 'unknown'})`;
+        });
+        log.warn('Deadlock detected: pending tasks remain but none are ready', {
+          issueId: logIssueId,
+          blockedTasks: blockedIds,
+        });
+        failed += remainingPending.length;
+        for (const t of remainingPending) {
+          taskResults.push({
+            taskId: t.id,
+            status: 'failed',
+            attempts: t.attempts,
+            error: `Deadlock: task blocked by unmet dependencies`,
+          });
+        }
+        const deadlockResult: RalphLoopResult = {
+          completed,
+          failed,
+          total: sortedTasks.length,
+          taskResults,
+          success: false,
+          pauseReason: `Deadlock: ${remainingPending.length} task(s) blocked by unmet dependencies: ${blockedIds.join('; ')}`,
+        };
+        context.onLoopComplete?.(deadlockResult);
+        return deadlockResult;
+      }
       if (completed === 0 && failed === 0) {
         log.warn('No pending tasks found — all tasks have passes=true', {
           issueId: logIssueId,
