@@ -6,10 +6,10 @@ type LabelStyle = {
 
 const TYPE_LABEL_COLORS: Record<string, LabelStyle> = {
   bug: { bg: '#fee2e2', text: '#ef4444', size: 'md' },
-  feature: { bg: '#dcfce7', text: '#16a34a', size: 'md' },
-  enhancement: { bg: '#dbeafe', text: '#2563eb', size: 'md' },
+  feature: { bg: '#dcfce7', text: '#22c55e', size: 'md' },
+  enhancement: { bg: '#dbeafe', text: '#3b82f6', size: 'md' },
   'tech-debt': { bg: '#f3f4f6', text: '#6b7280', size: 'md' },
-  performance: { bg: '#fef9c3', text: '#ca8a04', size: 'md' },
+  performance: { bg: '#fef9c3', text: '#eab308', size: 'md' },
 }
 
 const URGENCY_LABEL_COLORS: Record<string, LabelStyle> = {
@@ -20,9 +20,11 @@ const AREA_LABEL_COLORS: Record<string, LabelStyle> = {
   agent: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
   webui: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
   api: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
-  cli: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
-  db: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
-  infra: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  frontend: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  logging: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  'data-model': { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  recovery: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  explore: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
 }
 
 const DEFAULT_STYLE: LabelStyle = { bg: '#f3f4f6', text: '#6b7280', size: 'md' }
@@ -33,10 +35,10 @@ const TYPE_LABELS = new Set(Object.keys(TYPE_LABEL_COLORS))
 
 const TYPE_STRIP_COLORS: Record<string, string> = {
   bug: '#ef4444',
-  feature: '#16a34a',
-  enhancement: '#2563eb',
+  feature: '#22c55e',
+  enhancement: '#3b82f6',
   'tech-debt': '#6b7280',
-  performance: '#ca8a04',
+  performance: '#eab308',
 }
 
 const STRIP_PRIORITY = ['bug', 'feature', 'enhancement', 'tech-debt', 'performance']
@@ -65,6 +67,12 @@ export function isUrgencyLabel(label: string): boolean {
 
 export function isAreaLabel(label: string): boolean {
   return AREA_LABELS.has(label)
+}
+
+export function getTypeColor(label: string): { bg: string; text: string } {
+  const style = TYPE_LABEL_COLORS[label]
+  if (style) return { bg: style.bg, text: style.text }
+  return { bg: '#f3f4f6', text: '#6b7280' }
 }
 
 export function formatPriority(priority: string): string {
