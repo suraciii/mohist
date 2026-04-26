@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix parallel issue processing — enforce maxConcurrentAgents, expose activeAgents to frontend, replace global lock with per-issue logic",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "The maxConcurrentAgents field is already stored in the class (line 53) and logged (line 68), just never checked in startPipeline."
+      "passes": true,
+      "notes": "The maxConcurrentAgents field is already stored in the class (line 53) and logged (line 68), just never checked in startPipeline.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -39,9 +41,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts, packages/cli/src/api/propose.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "The 429 check should go after the existing isRunning check (line 347-353) and before the startPipeline call (line 366)."
+      "notes": "The 429 check should go after the existing isRunning check (line 347-353) and before the startPipeline call (line 366).",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -63,7 +70,10 @@
       "output": "packages/cli/web/src/lib/types.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "This is a pure type change. The backend already returns these fields — frontend just needs to declare them."
+      "notes": "This is a pure type change. The backend already returns these fields — frontend just needs to declare them.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -83,9 +93,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Also update the 'Agent is running on another issue' message (line 373-377) to only show when capacity is full, not when any agent runs."
+      "notes": "Also update the 'Agent is running on another issue' message (line 373-377) to only show when capacity is full, not when any agent runs.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -102,9 +117,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueCard.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "KanbanBoard.tsx and StageColumn.tsx need no changes — they pass agentStatus through as-is, which now includes activeAgents."
+      "notes": "KanbanBoard.tsx and StageColumn.tsx need no changes — they pass agentStatus through as-is, which now includes activeAgents.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
