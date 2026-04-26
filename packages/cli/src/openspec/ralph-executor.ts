@@ -247,6 +247,70 @@ function generateAdjustmentsFromCategory(category: FailureCategory, _error: stri
   return adjustments;
 }
 
+export interface DependencyValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+export function validateTaskDependencies(tasks: Task[]): DependencyValidationResult {
+  const errors: string[] = [];
+  const taskIds = new Set(tasks.map(t => t.id));
+
+  for (const task of tasks) {
+    const deps = task.dependsOn ?? [];
+    if (deps.length === 0) continue;
+
+    for (const depId of deps) {
+      if (!taskIds.has(depId)) {
+        errors.push(`Task "${task.id}" depends on "${depId}", which does not exist in the task list`);
+      } else {
+        const depTask = tasks.find(t => t.id === depId)!;
+        if (getOrderValue(depTask.order) >= getOrderValue(task.order)) {
+          errors.push(
+            `Task "${task.id}" (order: ${task.order}) depends on "${depId}" (order: ${depTask.order}), ` +
+            `but dependencies must reference tasks with a strictly lower order value`
+          );
+        }
+      }
+    }
+  }
+
+  const visited = new Set<string>();
+  const inStack = new Set<string>();
+  const adj = new Map<string, string[]>();
+
+  for (const task of tasks) {
+    adj.set(task.id, (task.dependsOn ?? []).filter(depId => taskIds.has(depId)));
+  }
+
+  function hasCycle(nodeId: string): boolean {
+    visited.add(nodeId);
+    inStack.add(nodeId);
+
+    for (const neighbor of adj.get(nodeId) ?? []) {
+      if (!visited.has(neighbor)) {
+        if (hasCycle(neighbor)) return true;
+      } else if (inStack.has(neighbor)) {
+        return true;
+      }
+    }
+
+    inStack.delete(nodeId);
+    return false;
+  }
+
+  for (const task of tasks) {
+    if (!visited.has(task.id)) {
+      if (hasCycle(task.id)) {
+        errors.push('Circular dependency detected in the task dependency graph');
+        break;
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
 export function findNextPendingTask(tasks: Task[]): Task | null {
   const sorted = sortTasksByOrder(tasks.filter(t => !t.passes));
   return sorted.length > 0 ? sorted[0] : null;
