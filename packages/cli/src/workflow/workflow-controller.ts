@@ -739,7 +739,7 @@ export class WorkflowController {
       await this.commitBuildChanges(issue);
 
       if (this.issueRepo) {
-        this.issueRepo.updateMergeState(issue.id, MergeState.Pending);
+        this.issueRepo.setMergeState(issue.id, MergeState.Pending);
       }
 
       return {
@@ -814,7 +814,7 @@ export class WorkflowController {
       await this.commitBuildChanges(issue);
 
       if (this.issueRepo) {
-        this.issueRepo.updateMergeState(issue.id, MergeState.Pending);
+        this.issueRepo.setMergeState(issue.id, MergeState.Pending);
       }
 
       log.info('Conflict resolution completed', {
