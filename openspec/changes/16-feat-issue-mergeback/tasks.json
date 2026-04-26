@@ -22,8 +22,11 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/types/index.ts, packages/cli/src/db/migrations.ts, packages/cli/src/db/issue-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -44,7 +47,10 @@
       "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts, packages/cli/web/src/lib/types.ts, packages/cli/web/src/hooks/useSSE.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -63,7 +69,10 @@
       "output": "packages/cli/src/git/worktree-manager.ts, packages/cli/src/api/issues.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "This must happen before T-004 so MergeQueue can control worktree cleanup timing."
+      "notes": "This must happen before T-004 so MergeQueue can control worktree cleanup timing.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -87,9 +96,16 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/git/merge-queue.ts",
-      "dependsOn": ["T-001", "T-002", "T-003"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "MergeQueue constructor receives: WorktreeManager, IssueRepo, ProjectService, EventBus."
+      "notes": "MergeQueue constructor receives: WorktreeManager, IssueRepo, ProjectService, EventBus.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -108,9 +124,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/server/index.ts",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -132,9 +153,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-004", "T-005"],
+      "dependsOn": [
+        "T-004",
+        "T-005"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -158,9 +185,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/MergeStatePanel.tsx, packages/cli/web/src/components/IssueDetailPage.tsx, packages/cli/web/src/lib/api.ts",
-      "dependsOn": ["T-002", "T-006"],
+      "dependsOn": [
+        "T-002",
+        "T-006"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -181,9 +214,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/merge-queue.test.ts",
-      "dependsOn": ["T-004", "T-005"],
+      "dependsOn": [
+        "T-004",
+        "T-005"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }

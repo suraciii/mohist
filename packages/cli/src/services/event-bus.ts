@@ -23,6 +23,10 @@ export type EventMap = {
   build_tasks_snapshot: { issueId: string; projectId: string; total: number; pending: number; passed: number };
   build_stage_completed: { issueId: string; projectId: string; completed: number; failed: number; total: number; duration: number; timestamp: string };
   build_stage_failed: { issueId: string; projectId: string; reason: string; details: unknown; timestamp: string };
+  merge_queued: { issueId: string; projectId: string; issueNumber: number; position: number };
+  merge_started: { issueId: string; projectId: string; issueNumber: number };
+  merge_completed: { issueId: string; projectId: string; issueNumber: number };
+  merge_failed: { issueId: string; projectId: string; issueNumber: number; reason: string };
 };
 
 export type EventName = keyof EventMap;
