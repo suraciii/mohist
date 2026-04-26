@@ -47,9 +47,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Use findChangeDir from openspec/detector.ts (not detectOpenSpecChange, which requires tasks.json to exist). Import ProjectRepo type from db/project-repo, WorktreeManager from git/worktree-manager.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
