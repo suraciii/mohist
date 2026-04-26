@@ -1,4 +1,5 @@
 import type { IssueRepo } from '../db/issue-repo';
+import type { ProjectRepo } from '../db/project-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowController, type PipelineResult } from '../workflow/workflow-controller';
@@ -9,6 +10,10 @@ import { Stage } from '../types';
 import { load } from '../config/config-loader';
 import { maskSensitiveData } from '../utils/sensitive-data';
 import { Log } from '../util/log';
+import { findChangeDir } from '../openspec/detector';
+import { WorktreeManager } from '../git/worktree-manager';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface RunningAgent {
   issueId: string;
@@ -63,6 +68,8 @@ export class AgentRunnerService {
     maxConcurrentAgents: number = 8,
     _agentSessionMessageRepo?: unknown,
     _coderSessionRepo?: unknown,
+    private readonly projectRepo?: ProjectRepo,
+    private readonly worktreeManager?: WorktreeManager,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -131,6 +138,8 @@ export class AgentRunnerService {
             stage: issue.approvalState.stage ?? issue.stage,
             action: 'pendingGate restored, status remains active',
           });
+        } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
+          this.recoverBuildStageIssue(issue);
         } else {
           this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
           this.issueRepo.clearApprovalState(issue.id);
@@ -149,6 +158,96 @@ export class AgentRunnerService {
     }
 
     this.recoverableIssues = [];
+  }
+
+  private recoverBuildStageIssue(issue: Issue): void {
+    const project = this.projectRepo!.findById(issue.projectId);
+    if (!project) {
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.clearApprovalState(issue.id);
+      log.info('Recovered build-stage orphan — project not found', {
+        issueNumber: issue.number,
+        action: 'status=blocked, project lookup failed',
+      });
+      return;
+    }
+
+    const worktreePath = this.worktreeManager!.getPath(project.name, issue.number);
+    if (!worktreePath) {
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.clearApprovalState(issue.id);
+      log.info('Recovered build-stage orphan — no worktree found', {
+        issueNumber: issue.number,
+        action: 'status=blocked, worktree not found',
+      });
+      return;
+    }
+
+    const changeDir = findChangeDir(worktreePath, issue.number);
+    if (!changeDir) {
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.clearApprovalState(issue.id);
+      log.info('Recovered build-stage orphan — missing tasks.json', {
+        issueNumber: issue.number,
+        action: 'status=blocked, no change directory found',
+      });
+      return;
+    }
+
+    const tasksPath = path.join(changeDir, 'tasks.json');
+    if (!fs.existsSync(tasksPath)) {
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.clearApprovalState(issue.id);
+      log.info('Recovered build-stage orphan — missing tasks.json', {
+        issueNumber: issue.number,
+        action: 'status=blocked, change directory exists but no tasks.json',
+      });
+      return;
+    }
+
+    let tasksFile: { version: number; tasks: Array<{ id: string; passes: boolean }> };
+    try {
+      const raw = fs.readFileSync(tasksPath, 'utf-8');
+      tasksFile = JSON.parse(raw);
+    } catch {
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.clearApprovalState(issue.id);
+      log.info('Recovered build-stage orphan — malformed tasks.json', {
+        issueNumber: issue.number,
+        action: 'status=blocked, tasks.json parse failed',
+      });
+      return;
+    }
+
+    if (!tasksFile.tasks || !Array.isArray(tasksFile.tasks)) {
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.clearApprovalState(issue.id);
+      log.info('Recovered build-stage orphan — malformed tasks.json', {
+        issueNumber: issue.number,
+        action: 'status=blocked, tasks.json missing tasks array',
+      });
+      return;
+    }
+
+    const allPass = tasksFile.tasks.every(t => t.passes === true);
+    if (allPass) {
+      this.issueRepo!.updateStage(issue.id, Stage.Review);
+      log.info('Recovered build-stage orphan — all tasks pass, auto-advanced to review', {
+        issueNumber: issue.number,
+        totalTasks: tasksFile.tasks.length,
+        action: 'stage=review, status remains active',
+      });
+    } else {
+      const passed = tasksFile.tasks.filter(t => t.passes === true).length;
+      const pending = tasksFile.tasks.filter(t => t.passes !== true);
+      const pendingIds = pending.map(t => t.id).join(', ');
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.clearApprovalState(issue.id);
+      log.info('Recovered build-stage orphan — partial progress', {
+        issueNumber: issue.number,
+        action: `status=blocked, ${passed}/${tasksFile.tasks.length} tasks completed, ${pendingIds} pending`,
+      });
+    }
   }
 
   getMaxConcurrentAgents(): number {
