@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseManager, SqlValue } from './database';
-import { Issue, Stage, IssueStatus, ApprovalState } from '../types';
+import { Issue, Stage, IssueStatus, ApprovalState, MergeState } from '../types';
 
 interface IssueRow {
   id: string;
@@ -14,6 +14,7 @@ interface IssueRow {
   created_at: string;
   updated_at: string;
   approval_state: string | null;
+  merge_state: string | null;
 }
 
 function rowToIssue(row: IssueRow): Issue {
@@ -45,6 +46,7 @@ function rowToIssue(row: IssueRow): Issue {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     approvalState,
+    mergeState: (row.merge_state as MergeState) || undefined,
   };
 }
 
@@ -163,7 +165,7 @@ export class IssueRepo {
     return this.findById(issueId);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[] }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState }>): Issue | null {
     const existing = this.findById(issueId);
     if (!existing) return null;
     
@@ -189,6 +191,10 @@ export class IssueRepo {
     if (data.labels !== undefined) {
       updates.push('labels = ?');
       values.push(JSON.stringify(data.labels));
+    }
+    if (data.mergeState !== undefined) {
+      updates.push('merge_state = ?');
+      values.push(data.mergeState);
     }
     
     if (updates.length === 0) return existing;
@@ -267,6 +273,27 @@ export class IssueRepo {
     );
 
     return this.findById(issueId);
+  }
+
+  setMergeState(issueId: string, mergeState: MergeState): Issue | null {
+    const now = new Date().toISOString();
+
+    this.db.run(
+      'UPDATE issues SET merge_state = ?, updated_at = ? WHERE id = ?',
+      [mergeState, now, issueId]
+    );
+
+    return this.findById(issueId);
+  }
+
+  findByMergeStates(states: MergeState[]): Issue[] {
+    if (states.length === 0) return [];
+    const placeholders = states.map(() => '?').join(', ');
+    const rows = this.db.all<IssueRow>(
+      `SELECT * FROM issues WHERE merge_state IN (${placeholders})`,
+      states
+    );
+    return rows.map(rowToIssue);
   }
 
   findPendingApproval(projectId: string): Issue | null {
