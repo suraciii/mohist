@@ -101,6 +101,15 @@ export function createProposeRoutes(
         return c.json(response, 409);
       }
 
+      const status = agentRunner.getStatus();
+      if (status.activeAgents.length >= agentRunner.getMaxConcurrentAgents()) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Concurrent agent limit reached (${agentRunner.getMaxConcurrentAgents()})`
+        };
+        return c.json(response, 429);
+      }
+
       const acpOptions: AcpConnectionOptions = {
         cwd: worktreePath,
         issueId: updatedIssue!.id,
