@@ -120,9 +120,9 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Small change — can be combined with T-003 in practice but listed separately for clarity.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
