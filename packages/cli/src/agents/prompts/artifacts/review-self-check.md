@@ -9,7 +9,7 @@ Read `{changeDir}/review.md` and check:
 ### Format
 - Starts with `# Review Report` heading
 - Has a `## Verdict: PASS` or `## Verdict: FAIL` section
-- Has `## Dimensions` section with sub-sections for Correctness, Complexity, Test Coverage, and Security
+- Has `## Dimensions` section with sub-sections for Correctness, Complexity, Test Coverage, Security, and Spec Compliance
 - Each dimension has a PASS/FAIL verdict
 - If any dimension FAILS, the overall verdict is FAIL
 
@@ -18,6 +18,13 @@ Read `{changeDir}/review.md` and check:
 - Each dimension has concrete findings (not empty)
 - Fix suggestions reference specific file paths and line numbers
 - No placeholder text like `[findings]` remains
+
+### Spec Compliance Coverage
+- Report has a `### Spec Compliance` section under `## Dimensions`
+- If the prompt context included a `## Tasks & Acceptance Criteria` section, each acceptance criterion from that section is explicitly addressed in the Spec Compliance findings
+- Findings reference specific spec requirements or acceptance criteria (e.g. "AC: 'hex colors must match #0ea5e9' — PASS: line 42 uses #0ea5e9"), not generic statements like "code looks correct" or "implementation matches spec"
+- Each AC finding states PASS or FAIL with concrete evidence (file path, line number, actual value)
+- If no spec context was provided in the prompt, the Spec Compliance section should note that and be marked PASS
 
 ### Content Quality
 - Findings are specific and actionable
