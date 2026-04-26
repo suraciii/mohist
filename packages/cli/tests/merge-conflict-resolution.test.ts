@@ -95,7 +95,7 @@ function createMockRepos() {
       delete: vi.fn(),
       updateStage: vi.fn().mockImplementation((_id: string, stage: Stage) => createMockIssue({ stage })),
       updateStatus: vi.fn().mockImplementation((_id: string, status: unknown) => createMockIssue({ status: status as IssueStatus })),
-      updateMergeState: vi.fn().mockImplementation((_id: string, ms: MergeState) => createMockIssue({ mergeState: ms })),
+      setMergeState: vi.fn().mockImplementation((_id: string, ms: MergeState) => createMockIssue({ mergeState: ms })),
       updateConflictRetryCount: vi.fn().mockImplementation((_id: string, count: number) => createMockIssue({ conflictRetryCount: count })),
       setApprovalState: vi.fn(),
       clearApprovalState: vi.fn(),
@@ -170,7 +170,7 @@ describe('Migration v14', () => {
     expect(columnNames).toContain('conflict_retry_count');
   });
 
-  it('should set merge_state default to pending', () => {
+  it('should set merge_state column on issues', () => {
     initializeDatabase(db);
 
     const projectRepo = new ProjectRepo(db);
@@ -178,11 +178,11 @@ describe('Migration v14', () => {
     const issueRepo = new IssueRepo(db);
     const issue = issueRepo.create({ number: 1, projectId: project.id, title: 'Test' });
 
-    const row = db.get<{ merge_state: string }>(
+    const row = db.get<{ merge_state: string | null }>(
       'SELECT merge_state FROM issues WHERE id = ?',
       [issue.id]
     );
-    expect(row?.merge_state).toBe('pending');
+    expect(row?.merge_state).toBeNull();
   });
 
   it('should set conflict_retry_count default to 0', () => {
@@ -232,34 +232,34 @@ describe('IssueRepo merge state methods', () => {
     db.close();
   });
 
-  describe('updateMergeState', () => {
+  describe('setMergeState', () => {
     it('should update merge state to resolving', () => {
-      const updated = repo.updateMergeState(issueId, MergeState.Resolving);
+      const updated = repo.setMergeState(issueId, MergeState.Resolving);
       expect(updated?.mergeState).toBe(MergeState.Resolving);
     });
 
     it('should update merge state to blocked', () => {
-      const updated = repo.updateMergeState(issueId, MergeState.Blocked);
+      const updated = repo.setMergeState(issueId, MergeState.Blocked);
       expect(updated?.mergeState).toBe(MergeState.Blocked);
     });
 
     it('should update merge state to merged', () => {
-      const updated = repo.updateMergeState(issueId, MergeState.Merged);
+      const updated = repo.setMergeState(issueId, MergeState.Merged);
       expect(updated?.mergeState).toBe(MergeState.Merged);
     });
 
     it('should update merge state to conflict', () => {
-      const updated = repo.updateMergeState(issueId, MergeState.Conflict);
+      const updated = repo.setMergeState(issueId, MergeState.Conflict);
       expect(updated?.mergeState).toBe(MergeState.Conflict);
     });
 
     it('should return null for non-existent issue', () => {
-      const updated = repo.updateMergeState('nonexistent', MergeState.Resolving);
+      const updated = repo.setMergeState('nonexistent', MergeState.Resolving);
       expect(updated).toBeNull();
     });
 
     it('should persist merge state across reads', () => {
-      repo.updateMergeState(issueId, MergeState.Resolving);
+      repo.setMergeState(issueId, MergeState.Resolving);
       const found = repo.findById(issueId);
       expect(found?.mergeState).toBe(MergeState.Resolving);
     });
@@ -296,14 +296,14 @@ describe('IssueRepo merge state methods', () => {
 
   describe('combined state updates for conflict resolution', () => {
     it('should track full conflict resolution lifecycle', () => {
-      repo.updateMergeState(issueId, MergeState.Resolving);
+      repo.setMergeState(issueId, MergeState.Resolving);
       repo.updateConflictRetryCount(issueId, 1);
 
       let found = repo.findById(issueId);
       expect(found?.mergeState).toBe(MergeState.Resolving);
       expect(found?.conflictRetryCount).toBe(1);
 
-      repo.updateMergeState(issueId, MergeState.Merged);
+      repo.setMergeState(issueId, MergeState.Merged);
       found = repo.findById(issueId);
       expect(found?.mergeState).toBe(MergeState.Merged);
       expect(found?.conflictRetryCount).toBe(1);
@@ -311,7 +311,7 @@ describe('IssueRepo merge state methods', () => {
 
     it('should track escalation to blocked after max retries', () => {
       repo.updateConflictRetryCount(issueId, 3);
-      repo.updateMergeState(issueId, MergeState.Blocked);
+      repo.setMergeState(issueId, MergeState.Blocked);
 
       const found = repo.findById(issueId);
       expect(found?.mergeState).toBe(MergeState.Blocked);
@@ -331,7 +331,7 @@ describe('WorktreeManager.mergeMasterInWorktree', () => {
 
   it('should return success when git merge succeeds', async () => {
     (execFileMock as any).mockImplementation((...args: unknown[]) => {
-      const cb = args[args.length - 1] as (err: any, stdout: string, stderr: string) => void;
+      const cb = typeof args[args.length - 1] === 'function' ? args[args.length - 1] as (err: any, stdout: string, stderr: string) => void : () => {};
       cb(null, 'Already up to date.', '');
     });
 
@@ -344,10 +344,10 @@ describe('WorktreeManager.mergeMasterInWorktree', () => {
   it('should return conflict files when merge has conflicts', async () => {
     (execFileMock as any).mockImplementation((...args: unknown[]) => {
       const cmdArgs = args[1] as string[];
-      const cb = args[args.length - 1] as (err: any, stdout: string, stderr: string) => void;
-      if (cmdArgs[0] === 'merge') {
+      const cb = typeof args[args.length - 1] === 'function' ? args[args.length - 1] as (err: any, stdout: string, stderr: string) => void : () => {};
+      if (cmdArgs?.[0] === 'merge') {
         cb(new Error('CONFLICT (content): Merge conflict in src/foo.ts'), '', '');
-      } else if (cmdArgs[0] === 'diff') {
+      } else if (cmdArgs?.[0] === 'diff') {
         cb(null, 'src/foo.ts\nsrc/bar.ts\n', '');
       } else {
         cb(null, '', '');
@@ -370,8 +370,8 @@ describe('WorktreeManager.mergeMasterInWorktree', () => {
   it('should abort and return failure on non-conflict merge error', async () => {
     (execFileMock as any).mockImplementation((...args: unknown[]) => {
       const cmdArgs = args[1] as string[];
-      const cb = args[args.length - 1] as (err: any, stdout: string, stderr: string) => void;
-      if (cmdArgs[0] === 'merge') {
+      const cb = typeof args[args.length - 1] === 'function' ? args[args.length - 1] as (err: any, stdout: string, stderr: string) => void : () => {};
+      if (cmdArgs?.[0] === 'merge') {
         cb(new Error('fatal: not a git repository'), '', '');
       } else {
         cb(null, '', '');
@@ -387,10 +387,10 @@ describe('WorktreeManager.mergeMasterInWorktree', () => {
   it('should handle empty conflict file list gracefully', async () => {
     (execFileMock as any).mockImplementation((...args: unknown[]) => {
       const cmdArgs = args[1] as string[];
-      const cb = args[args.length - 1] as (err: any, stdout: string, stderr: string) => void;
-      if (cmdArgs[0] === 'merge') {
+      const cb = typeof args[args.length - 1] === 'function' ? args[args.length - 1] as (err: any, stdout: string, stderr: string) => void : () => {};
+      if (cmdArgs?.[0] === 'merge') {
         cb(new Error('CONFLICT: merge conflict'), '', '');
-      } else if (cmdArgs[0] === 'diff') {
+      } else if (cmdArgs?.[0] === 'diff') {
         cb(null, '\n\n', '');
       } else {
         cb(null, '', '');
@@ -489,7 +489,7 @@ describe('WorkflowController conflict resolution path', () => {
 
     await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
-    expect(issueRepo.updateMergeState).toHaveBeenCalledWith('issue-1', MergeState.Pending);
+    expect(issueRepo.setMergeState).toHaveBeenCalledWith('issue-1', MergeState.Pending);
   });
 
   it('should emit build_stage_started for conflict resolution', async () => {
@@ -572,27 +572,27 @@ describe('agent_completed handler conflict logic', () => {
       issueRepo.updateConflictRetryCount('issue-1', currentRetryCount);
 
       if (currentRetryCount >= 3) {
-        (issueRepo.updateMergeState as ReturnType<typeof vi.fn>).mockImplementation(
+        (issueRepo.setMergeState as ReturnType<typeof vi.fn>).mockImplementation(
           (_id: string, ms: MergeState) => createMockIssue({ mergeState: ms }),
         );
-        issueRepo.updateMergeState('issue-1', MergeState.Blocked);
+        issueRepo.setMergeState('issue-1', MergeState.Blocked);
       } else {
         (issueRepo.update as ReturnType<typeof vi.fn>).mockImplementation(
           (_id: string, data: any) => createMockIssue(data),
         );
         issueRepo.update('issue-1', { stage: Stage.Build, status: IssueStatus.Active });
 
-        (issueRepo.updateMergeState as ReturnType<typeof vi.fn>).mockImplementation(
+        (issueRepo.setMergeState as ReturnType<typeof vi.fn>).mockImplementation(
           (_id: string, ms: MergeState) => createMockIssue({ mergeState: ms }),
         );
-        issueRepo.updateMergeState('issue-1', MergeState.Resolving);
+        issueRepo.setMergeState('issue-1', MergeState.Resolving);
       }
     }
 
     expect(issueRepo.updateConflictRetryCount).toHaveBeenCalledWith('issue-1', 1);
     expect(issueRepo.updateConflictRetryCount).toHaveBeenCalledWith('issue-1', 2);
     expect(issueRepo.updateConflictRetryCount).toHaveBeenCalledWith('issue-1', 3);
-    expect(issueRepo.updateMergeState).toHaveBeenCalledWith('issue-1', MergeState.Blocked);
+    expect(issueRepo.setMergeState).toHaveBeenCalledWith('issue-1', MergeState.Blocked);
   });
 
   it('should regress issue state from Done to Build on conflict', () => {
@@ -613,13 +613,13 @@ describe('agent_completed handler conflict logic', () => {
   it('should set mergeState to resolving after state regression', () => {
     const { issueRepo } = createMockRepos();
 
-    (issueRepo.updateMergeState as ReturnType<typeof vi.fn>).mockImplementation(
+    (issueRepo.setMergeState as ReturnType<typeof vi.fn>).mockImplementation(
       (_id: string, ms: MergeState) => createMockIssue({ mergeState: ms }),
     );
 
-    issueRepo.updateMergeState('issue-1', MergeState.Resolving);
+    issueRepo.setMergeState('issue-1', MergeState.Resolving);
 
-    expect(issueRepo.updateMergeState).toHaveBeenCalledWith('issue-1', MergeState.Resolving);
+    expect(issueRepo.setMergeState).toHaveBeenCalledWith('issue-1', MergeState.Resolving);
   });
 
   it('should clear approval state when regressing to build', () => {
@@ -642,14 +642,14 @@ describe('3-retry limit', () => {
       issueRepo.updateConflictRetryCount('issue-1', retry);
 
       if (retry >= 3) {
-        (issueRepo.updateMergeState as ReturnType<typeof vi.fn>).mockImplementation(
+        (issueRepo.setMergeState as ReturnType<typeof vi.fn>).mockImplementation(
           (_id: string, ms: MergeState) => createMockIssue({ mergeState: ms }),
         );
-        issueRepo.updateMergeState('issue-1', MergeState.Blocked);
+        issueRepo.setMergeState('issue-1', MergeState.Blocked);
       }
     }
 
-    expect(issueRepo.updateMergeState).toHaveBeenLastCalledWith('issue-1', MergeState.Blocked);
+    expect(issueRepo.setMergeState).toHaveBeenLastCalledWith('issue-1', MergeState.Blocked);
   });
 
   it('should NOT mark as blocked when retry count is 1', () => {
@@ -662,13 +662,13 @@ describe('3-retry limit', () => {
     issueRepo.updateConflictRetryCount('issue-1', retryCount);
 
     if (retryCount >= 3) {
-      (issueRepo.updateMergeState as ReturnType<typeof vi.fn>).mockImplementation(
+      (issueRepo.setMergeState as ReturnType<typeof vi.fn>).mockImplementation(
         (_id: string, ms: MergeState) => createMockIssue({ mergeState: ms }),
       );
-      issueRepo.updateMergeState('issue-1', MergeState.Blocked);
+      issueRepo.setMergeState('issue-1', MergeState.Blocked);
     }
 
-    expect(issueRepo.updateMergeState).not.toHaveBeenCalledWith('issue-1', MergeState.Blocked);
+    expect(issueRepo.setMergeState).not.toHaveBeenCalledWith('issue-1', MergeState.Blocked);
   });
 
   it('should NOT mark as blocked when retry count is 2', () => {
@@ -681,13 +681,13 @@ describe('3-retry limit', () => {
     issueRepo.updateConflictRetryCount('issue-1', retryCount);
 
     if (retryCount >= 3) {
-      (issueRepo.updateMergeState as ReturnType<typeof vi.fn>).mockImplementation(
+      (issueRepo.setMergeState as ReturnType<typeof vi.fn>).mockImplementation(
         (_id: string, ms: MergeState) => createMockIssue({ mergeState: ms }),
       );
-      issueRepo.updateMergeState('issue-1', MergeState.Blocked);
+      issueRepo.setMergeState('issue-1', MergeState.Blocked);
     }
 
-    expect(issueRepo.updateMergeState).not.toHaveBeenCalledWith('issue-1', MergeState.Blocked);
+    expect(issueRepo.setMergeState).not.toHaveBeenCalledWith('issue-1', MergeState.Blocked);
   });
 
   it('should set resolving and regress to build for retries under limit', () => {
@@ -696,7 +696,7 @@ describe('3-retry limit', () => {
     for (const retryCount of [1, 2]) {
       (issueRepo.updateConflictRetryCount as ReturnType<typeof vi.fn>).mockClear();
       (issueRepo.update as ReturnType<typeof vi.fn>).mockClear();
-      (issueRepo.updateMergeState as ReturnType<typeof vi.fn>).mockClear();
+      (issueRepo.setMergeState as ReturnType<typeof vi.fn>).mockClear();
 
       (issueRepo.updateConflictRetryCount as ReturnType<typeof vi.fn>).mockImplementation(
         (_id: string, count: number) => createMockIssue({ conflictRetryCount: count }),
@@ -708,16 +708,16 @@ describe('3-retry limit', () => {
       );
       issueRepo.update('issue-1', { stage: Stage.Build, status: IssueStatus.Active });
 
-      (issueRepo.updateMergeState as ReturnType<typeof vi.fn>).mockImplementation(
+      (issueRepo.setMergeState as ReturnType<typeof vi.fn>).mockImplementation(
         (_id: string, ms: MergeState) => createMockIssue({ mergeState: ms }),
       );
-      issueRepo.updateMergeState('issue-1', MergeState.Resolving);
+      issueRepo.setMergeState('issue-1', MergeState.Resolving);
 
       expect(issueRepo.update).toHaveBeenCalledWith('issue-1', {
         stage: Stage.Build,
         status: IssueStatus.Active,
       });
-      expect(issueRepo.updateMergeState).toHaveBeenCalledWith('issue-1', MergeState.Resolving);
+      expect(issueRepo.setMergeState).toHaveBeenCalledWith('issue-1', MergeState.Resolving);
     }
   });
 });
@@ -814,7 +814,7 @@ describe('IssueRepo issue with merge state regression', () => {
     expect(doneIssue?.status).toBe(IssueStatus.Completed);
 
     repo.update(issue.id, { stage: Stage.Build, status: IssueStatus.Active });
-    repo.updateMergeState(issue.id, MergeState.Resolving);
+    repo.setMergeState(issue.id, MergeState.Resolving);
 
     const regressedIssue = repo.findById(issue.id);
     expect(regressedIssue?.stage).toBe(Stage.Build);
@@ -825,7 +825,7 @@ describe('IssueRepo issue with merge state regression', () => {
   it('should preserve conflict retry count through stage transitions', () => {
     const issue = repo.create({ number: 1, projectId, title: 'Test' });
     repo.updateConflictRetryCount(issue.id, 2);
-    repo.updateMergeState(issue.id, MergeState.Resolving);
+    repo.setMergeState(issue.id, MergeState.Resolving);
 
     repo.updateStage(issue.id, Stage.Done);
     repo.updateStatus(issue.id, IssueStatus.Completed);
