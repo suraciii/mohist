@@ -77,9 +77,9 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "使用 border-l-4 + inline style 实现色带（D1）。Badge 按优先级只显示最高一个（D2）。Label 排序：类型 > 紧急度 > 区域 > 其他（D4）。Interrupted issue 保留原有的 Resume 按钮交互。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
