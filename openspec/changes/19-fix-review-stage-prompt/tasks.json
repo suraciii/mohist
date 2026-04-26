@@ -49,8 +49,8 @@
         "T-001"
       ],
       "notes": "Import buildReviewSelfCheckPrompt from artifact-prompt.ts. The roundState mutation + onSessionUpdate closure pattern is proven in Plan stage (lines 91-110). Do NOT close the connection between rounds.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
       "error": null
     },
