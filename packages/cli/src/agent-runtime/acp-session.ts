@@ -137,9 +137,10 @@ export async function runAcpSession(
   });
 
   proc.on('exit', (code) => {
+    const phase = initialized ? 'running' : 'init';
+    writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode: code, phase, mode: 'single', timestamp: new Date().toISOString() });
     if (!initialized && code !== 0) {
       log.error('opencode acp subprocess exited before initialize', { exitCode: code });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode: code, timestamp: new Date().toISOString() });
       if (rejectOnSpawn) {
         rejectOnSpawn(new Error(`[SPAWN_FAILED] opencode process exited before initialize (exit code: ${code ?? 'signal'})`));
       }
@@ -513,9 +514,10 @@ export async function createAcpConnection(
   });
 
   proc.on('exit', (code) => {
+    const phase = initialized ? 'running' : 'init';
+    writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode: code, phase, mode: 'multi-round', timestamp: new Date().toISOString() });
     if (!initialized && code !== 0) {
       log.error('opencode acp subprocess exited before initialize', { exitCode: code, mode: 'multi-round' });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode: code, mode: 'multi-round', timestamp: new Date().toISOString() });
       if (rejectOnInit) {
         rejectOnInit(new Error(`[SPAWN_FAILED] opencode process exited before initialize (exit code: ${code ?? 'signal'})`));
       }
