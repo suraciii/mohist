@@ -12,6 +12,7 @@ import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, type A
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { Log } from '../util/log';
 
 const execFileAsync = promisify(execFile);
@@ -41,6 +42,7 @@ export interface WorkflowControllerOptions {
   issueRepo?: IssueRepo;
   eventBus?: EventBus;
   projectId?: string;
+  checkpointRepo?: PipelineCheckpointRepo;
 }
 
 export interface PipelineResult {
@@ -56,6 +58,7 @@ export class WorkflowController {
   private issueRepo?: IssueRepo;
   private eventBus?: EventBus;
   private projectId?: string;
+  private checkpointRepo?: PipelineCheckpointRepo;
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -63,6 +66,11 @@ export class WorkflowController {
     this.issueRepo = options.issueRepo;
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
+    this.checkpointRepo = options.checkpointRepo;
+  }
+
+  getCheckpointRepo(): PipelineCheckpointRepo | undefined {
+    return this.checkpointRepo;
   }
 
   async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
@@ -77,7 +85,19 @@ export class WorkflowController {
       };
     }
 
-    cleanChangeDir(changeDir);
+    const checkpoint = this.checkpointRepo?.get(issue.number, 'plan') ?? null;
+    const completedSteps: string[] = checkpoint ? [...checkpoint.completedSteps] : [];
+    const isResuming = completedSteps.length > 0;
+
+    if (!isResuming) {
+      cleanChangeDir(changeDir);
+    } else {
+      log.info('Plan stage resuming from checkpoint', {
+        issueNumber: issue.number,
+        completedSteps,
+        nextStep: checkpoint?.nextStep,
+      });
+    }
 
     const rounds: PlanRoundConfig[] = [
       { type: 'proposal', verify: () => fs.existsSync(path.join(changeDir, 'proposal.md')), label: 'proposal.md', outputPath: path.join(changeDir, 'proposal.md') },
@@ -86,8 +106,6 @@ export class WorkflowController {
       { type: 'tasks', verify: () => fs.existsSync(path.join(changeDir, 'tasks.json')), label: 'tasks.json', outputPath: path.join(changeDir, 'tasks.json') },
     ];
 
-    // roundState is mutated by the for loop and read by onSessionUpdate callback.
-    // Safe because JS is single-threaded.
     const roundState = { type: '', index: 0 };
     const planAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
@@ -117,6 +135,22 @@ export class WorkflowController {
       for (const [index, round] of rounds.entries()) {
         roundState.type = round.type;
         roundState.index = index;
+
+        if (completedSteps.includes(round.type)) {
+          if (round.verify()) {
+            log.info('Plan stage round skipped (checkpoint + artifact exists)', { artifact: round.type, issueNumber: issue.number });
+            continue;
+          }
+          log.info('Plan stage round in checkpoint but artifact missing, re-running', { artifact: round.type, issueNumber: issue.number });
+          const idx = completedSteps.indexOf(round.type);
+          completedSteps.splice(idx);
+        } else if (!completedSteps.includes(round.type) && round.verify()) {
+          log.info('Plan stage artifact exists but not in checkpoint, marking complete', { artifact: round.type, issueNumber: issue.number });
+          completedSteps.push(round.type);
+          const nextRound = rounds[index + 1];
+          this.checkpointRepo?.upsert(issue.number, 'plan', [...completedSteps], nextRound?.type ?? 'self-review');
+          continue;
+        }
 
         log.info('Plan stage round', { artifact: round.type, issueNumber: issue.number });
 
@@ -188,6 +222,10 @@ export class WorkflowController {
 
           log.info('Plan stage retry succeeded', { artifact: round.label });
         }
+
+        completedSteps.push(round.type);
+        const nextRound = rounds[index + 1];
+        this.checkpointRepo?.upsert(issue.number, 'plan', [...completedSteps], nextRound?.type ?? 'self-review');
       }
 
       // self-review round
@@ -225,6 +263,8 @@ export class WorkflowController {
       }
 
       await conn.close();
+
+      this.checkpointRepo?.delete(issue.number, 'plan');
 
       const selfReviewReport = readReportFile(changeDir, 'self-review.md') ?? selfReviewResult.text;
 
@@ -361,6 +401,7 @@ export class WorkflowController {
     this.issueRepo.updateStage(currentIssue.id, Stage.Done);
     this.issueRepo.clearApprovalState(currentIssue.id);
     this.issueRepo.updateStatus(currentIssue.id, IssueStatus.Completed);
+    this.checkpointRepo?.deleteAll(currentIssue.number);
 
     log.info('Pipeline completed', { issueNumber: currentIssue.number });
     return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
@@ -435,6 +476,17 @@ export class WorkflowController {
     const issueId = issue.id;
     const projectId = this.projectId ?? issue.projectId;
     const workflowLogRepo = acpOptions.workflowLogRepo;
+
+    const checkpoint = this.checkpointRepo?.get(issue.number, 'build') ?? null;
+    const completedTaskIds: string[] = checkpoint ? [...checkpoint.completedSteps] : [];
+
+    if (completedTaskIds.length > 0) {
+      log.info('Build stage resuming from checkpoint', {
+        issueNumber: issue.number,
+        completedTaskIds,
+        nextStep: checkpoint?.nextStep,
+      });
+    }
 
     const change = detectOpenSpecChange(this.worktreePath, issue);
 
@@ -531,7 +583,16 @@ export class WorkflowController {
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
     });
 
-    const result: RalphLoopResult = await executor.execute(change);
+    const activeCompletedTaskIds = [...completedTaskIds];
+
+    const result: RalphLoopResult = await executor.execute(change, {
+      skipTaskIds: completedTaskIds.length > 0 ? completedTaskIds : undefined,
+      onTaskCompleted: (taskId: string) => {
+        if (!this.checkpointRepo) return;
+        activeCompletedTaskIds.push(taskId);
+        this.checkpointRepo.upsert(issue.number, 'build', [...activeCompletedTaskIds], null);
+      },
+    });
     const duration = Date.now() - buildStartTime;
 
     log.info('Ralph loop completed', {
@@ -579,6 +640,8 @@ export class WorkflowController {
 
     if (result.success) {
       await this.commitBuildChanges(issue);
+
+      this.checkpointRepo?.delete(issue.number, 'build');
 
       this.emitSafe('build_stage_completed', {
         issueId,

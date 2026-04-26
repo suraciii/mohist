@@ -36,6 +36,8 @@ function statusBadge(status: IssueStatus): string {
       return 'text-amber-700 bg-amber-50'
     case IssueStatus.Blocked:
       return 'text-red-700 bg-red-50'
+    case IssueStatus.Interrupted:
+      return 'text-orange-700 bg-orange-50'
     default:
       return 'text-gray-700 bg-gray-50'
   }
@@ -358,6 +360,18 @@ export function IssueDetailPage() {
                 </dl>
               </div>
 
+              {issue.status === IssueStatus.Interrupted && (
+                <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+                  <h2 className="text-sm font-semibold text-orange-800 mb-2">
+                    Pipeline Interrupted
+                  </h2>
+                  <p className="text-xs text-orange-600 mb-3">
+                    The pipeline was interrupted (e.g. server restart). Your progress has been preserved.
+                    Click &quot;Resume Pipeline&quot; below to continue from where it left off.
+                  </p>
+                </div>
+              )}
+
               <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">Actions</h2>
                 <div className="space-y-2">
@@ -404,6 +418,16 @@ export function IssueDetailPage() {
                       className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                     >
                       {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
+                    </button>
+                  )}
+
+                  {issue.status === IssueStatus.Interrupted && (
+                    <button
+                      onClick={() => reopenMutation.mutate()}
+                      disabled={reopenMutation.isPending}
+                      className="w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                    >
+                      {reopenMutation.isPending ? 'Resuming...' : 'Resume Pipeline'}
                     </button>
                   )}
 

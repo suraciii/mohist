@@ -186,6 +186,8 @@ function writeTasksFile(tasksPath: string, tasks: Task[]): void {
 
 export interface RalphExecutorOptions extends RalphTaskOptions {
   resumeFromTaskIndex?: number;
+  skipTaskIds?: string[];
+  onTaskCompleted?: (taskId: string) => void;
 }
 
 async function storeFailureLearning(
@@ -300,6 +302,8 @@ export async function runRalphLoop(
     ? Math.max(Math.floor(context.stageTimeoutMs / sortedTasks.length), MIN_TASK_TIMEOUT_MS)
     : DEFAULT_TASK_TIMEOUT_MS;
 
+  const skipTaskIds = new Set(options.skipTaskIds ?? []);
+
   const allTasksPassed = tasks.length > 0 && tasks.every(t => t.passes);
   if (allTasksPassed) {
     log.info('All tasks have passes=true (corrupted), resetting to false', {
@@ -310,6 +314,20 @@ export async function runRalphLoop(
       task.passes = false;
     }
     writeTasksFile(change.tasksPath, tasks);
+  }
+
+  for (const task of tasks) {
+    if (skipTaskIds.has(task.id) && !task.passes) {
+      task.passes = true;
+      task.error = null;
+    }
+  }
+  if (skipTaskIds.size > 0) {
+    writeTasksFile(change.tasksPath, tasks);
+    log.info('Marked tasks as passed from skipTaskIds', {
+      issueId: context.issueId || '',
+      skippedIds: [...skipTaskIds],
+    });
   }
 
   const taskResults: TaskResult[] = [];
@@ -469,6 +487,8 @@ export async function runRalphLoop(
           attempt,
           executionId: taskExecutionId,
         });
+
+        options.onTaskCompleted?.(nextTask.id);
 
         break;
       } else {

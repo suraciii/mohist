@@ -475,6 +475,17 @@ function migrateToVersion13(db: DatabaseManager): void {
   });
 }
 
+const CREATE_PIPELINE_CHECKPOINT_TABLE = `
+CREATE TABLE IF NOT EXISTS pipeline_checkpoint (
+  issue_number   INTEGER NOT NULL,
+  stage          TEXT NOT NULL,
+  completed_steps TEXT NOT NULL DEFAULT '[]',
+  next_step      TEXT,
+  updated_at     TEXT NOT NULL,
+  PRIMARY KEY (issue_number, stage)
+);
+`;
+
 function migrateToVersion14(db: DatabaseManager): void {
   db.transaction(() => {
     const tableInfo = db.all<{ name: string }>(
@@ -486,6 +497,7 @@ function migrateToVersion14(db: DatabaseManager): void {
       db.exec("ALTER TABLE issues ADD COLUMN merge_state TEXT");
     }
 
+    db.exec(CREATE_PIPELINE_CHECKPOINT_TABLE);
     setSchemaVersion(db, 14);
   });
 }
