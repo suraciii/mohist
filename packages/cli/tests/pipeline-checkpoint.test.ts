@@ -1,0 +1,366 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { DatabaseManager } from '../src/db/database';
+import { initializeDatabase } from '../src/db/migrations';
+import { PipelineCheckpointRepo } from '../src/db/pipeline-checkpoint-repo';
+import { Stage, type Issue } from '../src/types';
+import * as path from 'path';
+
+vi.mock('../src/agent-runtime/acp-session', () => ({
+  createAcpConnection: vi.fn(),
+}));
+
+vi.mock('../src/openspec/ralph-executor', () => ({
+  RalphExecutor: vi.fn().mockImplementation(() => ({
+    execute: vi.fn().mockResolvedValue({ success: true, completed: 1, failed: 0, total: 1 }),
+  })),
+}));
+
+vi.mock('../src/openspec/detector', () => ({
+  detectOpenSpecChange: vi.fn().mockReturnValue({
+    changePath: '/tmp/change',
+    tasksPath: '/tmp/change/tasks.json',
+    sessionMemoriesPath: '/tmp/change/session-memories',
+    proposalPath: '/tmp/change/proposal.md',
+    designPath: '/tmp/change/design.md',
+    specsPath: '/tmp/change/specs',
+  }),
+}));
+
+vi.mock('fs', () => ({
+  existsSync: vi.fn().mockReturnValue(false),
+  readdirSync: vi.fn().mockReturnValue([]),
+  rmSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  readFileSync: vi.fn(),
+}));
+
+vi.mock('../src/agents/artifact-prompt', () => ({
+  buildArtifactPrompt: vi.fn().mockReturnValue('mock-prompt'),
+  buildSelfReviewPrompt: vi.fn().mockReturnValue('mock-self-review-prompt'),
+  buildReviewerPrompt: vi.fn().mockReturnValue('mock-reviewer-prompt'),
+}));
+
+import * as fs from 'fs';
+import { WorkflowController, type ChangeArtifactsManager } from '../src/workflow/workflow-controller';
+import { createAcpConnection } from '../src/agent-runtime/acp-session';
+import { buildArtifactPrompt } from '../src/agents/artifact-prompt';
+
+function createMockIssue(overrides?: Partial<Issue>): Issue {
+  return {
+    id: 'issue-1',
+    number: 1,
+    title: 'Test Issue',
+    body: 'Test body',
+    stage: Stage.Plan,
+    status: 'active' as any,
+    projectId: 'proj-1',
+    labels: [],
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function createMockArtifactManager(changeDir: string): ChangeArtifactsManager {
+  return {
+    getChangeDir: vi.fn().mockReturnValue(changeDir),
+    createChangeDir: vi.fn().mockReturnValue(changeDir),
+    readArtifact: vi.fn().mockReturnValue(null),
+    writeArtifact: vi.fn().mockReturnValue(true),
+    exists: vi.fn().mockReturnValue(true),
+    readTasks: vi.fn().mockReturnValue(null),
+    updateTaskPasses: vi.fn().mockReturnValue(true),
+  };
+}
+
+const CHANGE_DIR = '/tmp/change-checkpoint-test';
+
+describe('PipelineCheckpointRepo', () => {
+  let db: DatabaseManager;
+  let repo: PipelineCheckpointRepo;
+
+  beforeEach(() => {
+    db = new DatabaseManager({ inMemory: true });
+    initializeDatabase(db);
+    repo = new PipelineCheckpointRepo(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  describe('get', () => {
+    it('should return null when no checkpoint exists', () => {
+      expect(repo.get(1, 'plan')).toBeNull();
+    });
+
+    it('should return checkpoint after upsert', () => {
+      repo.upsert(1, 'plan', ['proposal'], 'specs');
+      const result = repo.get(1, 'plan');
+      expect(result).not.toBeNull();
+      expect(result!.issueNumber).toBe(1);
+      expect(result!.stage).toBe('plan');
+      expect(result!.completedSteps).toEqual(['proposal']);
+      expect(result!.nextStep).toBe('specs');
+      expect(result!.updatedAt).toBeDefined();
+    });
+  });
+
+  describe('upsert', () => {
+    it('should create a new checkpoint record', () => {
+      repo.upsert(1, 'plan', ['proposal'], 'specs');
+
+      const row = db.get<{ completed_steps: string; next_step: string | null }>(
+        'SELECT completed_steps, next_step FROM pipeline_checkpoint WHERE issue_number = ? AND stage = ?',
+        [1, 'plan']
+      );
+      expect(row).toBeDefined();
+      expect(JSON.parse(row!.completed_steps)).toEqual(['proposal']);
+      expect(row!.next_step).toBe('specs');
+    });
+
+    it('should update existing checkpoint (UPSERT semantics)', () => {
+      repo.upsert(1, 'plan', ['proposal'], 'specs');
+      repo.upsert(1, 'plan', ['proposal', 'specs', 'design'], 'tasks');
+
+      const result = repo.get(1, 'plan');
+      expect(result!.completedSteps).toEqual(['proposal', 'specs', 'design']);
+      expect(result!.nextStep).toBe('tasks');
+    });
+
+    it('should handle empty completedSteps', () => {
+      repo.upsert(1, 'plan', [], 'proposal');
+      const result = repo.get(1, 'plan');
+      expect(result!.completedSteps).toEqual([]);
+      expect(result!.nextStep).toBe('proposal');
+    });
+
+    it('should handle null nextStep', () => {
+      repo.upsert(1, 'plan', ['proposal', 'specs', 'design', 'tasks'], null);
+      const result = repo.get(1, 'plan');
+      expect(result!.nextStep).toBeNull();
+    });
+
+    it('should maintain separate records per stage', () => {
+      repo.upsert(1, 'plan', ['proposal'], 'specs');
+      repo.upsert(1, 'build', ['T-001'], 'T-002');
+
+      expect(repo.get(1, 'plan')!.completedSteps).toEqual(['proposal']);
+      expect(repo.get(1, 'build')!.completedSteps).toEqual(['T-001']);
+    });
+
+    it('should maintain separate records per issue', () => {
+      repo.upsert(1, 'plan', ['proposal'], 'specs');
+      repo.upsert(2, 'plan', ['proposal', 'specs'], 'design');
+
+      expect(repo.get(1, 'plan')!.completedSteps).toEqual(['proposal']);
+      expect(repo.get(2, 'plan')!.completedSteps).toEqual(['proposal', 'specs']);
+    });
+  });
+
+  describe('delete', () => {
+    it('should remove checkpoint for specific issue and stage', () => {
+      repo.upsert(1, 'plan', ['proposal'], 'specs');
+      repo.upsert(1, 'build', ['T-001'], 'T-002');
+
+      repo.delete(1, 'plan');
+
+      expect(repo.get(1, 'plan')).toBeNull();
+      expect(repo.get(1, 'build')).not.toBeNull();
+    });
+
+    it('should be a no-op when checkpoint does not exist', () => {
+      expect(() => repo.delete(999, 'nonexistent')).not.toThrow();
+    });
+  });
+
+  describe('deleteAll', () => {
+    it('should remove all checkpoints for an issue', () => {
+      repo.upsert(1, 'plan', ['proposal'], 'specs');
+      repo.upsert(1, 'build', ['T-001'], 'T-002');
+      repo.upsert(2, 'plan', ['proposal'], 'specs');
+
+      repo.deleteAll(1);
+
+      expect(repo.get(1, 'plan')).toBeNull();
+      expect(repo.get(1, 'build')).toBeNull();
+      expect(repo.get(2, 'plan')).not.toBeNull();
+    });
+
+    it('should be a no-op when no checkpoints exist', () => {
+      expect(() => repo.deleteAll(999)).not.toThrow();
+    });
+  });
+});
+
+describe('WorkflowController runPlanStage checkpoint resume', () => {
+  let db: DatabaseManager;
+  let checkpointRepo: PipelineCheckpointRepo;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    db = new DatabaseManager({ inMemory: true });
+    initializeDatabase(db);
+    checkpointRepo = new PipelineCheckpointRepo(db);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  function setupMockConn() {
+    const mockConn = {
+      prompt: vi.fn().mockResolvedValue({ text: 'ok', success: true, acpSessionId: 's1' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+    return mockConn;
+  }
+
+  it('should skip proposal round when checkpoint has completedSteps=["proposal"]', async () => {
+    checkpointRepo.upsert(1, 'plan', ['proposal'], 'specs');
+
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      if (typeof p === 'string') {
+        if (p === path.join(CHANGE_DIR, 'proposal.md')) return true;
+      }
+      return false;
+    });
+
+    const mockConn = setupMockConn();
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+
+    const ctrl = new WorkflowController({
+      artifactManager,
+      worktreePath: '/tmp/worktree',
+      checkpointRepo,
+    });
+
+    const result = await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+
+    expect(result.success).toBe(true);
+    expect(mockConn.prompt).toHaveBeenCalledTimes(4);
+
+    const roundTypes = (buildArtifactPrompt as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => c[0]
+    );
+    expect(roundTypes).not.toContain('proposal');
+    expect(roundTypes).toContain('specs');
+    expect(roundTypes).toContain('design');
+    expect(roundTypes).toContain('tasks');
+  });
+
+  it('should re-run round when checkpoint marks complete but artifact is missing', async () => {
+    checkpointRepo.upsert(1, 'plan', ['proposal'], 'specs');
+
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const mockConn = setupMockConn();
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+
+    const ctrl = new WorkflowController({
+      artifactManager,
+      worktreePath: '/tmp/worktree',
+      checkpointRepo,
+    });
+
+    const result = await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+
+    expect(result.success).toBe(true);
+    const roundTypes = (buildArtifactPrompt as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => c[0]
+    );
+    expect(roundTypes).toContain('proposal');
+  });
+
+  it('should not call cleanChangeDir when checkpoint has completedSteps', async () => {
+    checkpointRepo.upsert(1, 'plan', ['proposal'], 'specs');
+
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      if (typeof p === 'string') {
+        if (p === path.join(CHANGE_DIR, 'proposal.md')) return true;
+        if (p === CHANGE_DIR) return true;
+      }
+      return false;
+    });
+
+    setupMockConn();
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+
+    const ctrl = new WorkflowController({
+      artifactManager,
+      worktreePath: '/tmp/worktree',
+      checkpointRepo,
+    });
+
+    await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+
+    expect(fs.readdirSync).not.toHaveBeenCalledWith(CHANGE_DIR);
+    expect(fs.rmSync).not.toHaveBeenCalled();
+  });
+
+  it('should call cleanChangeDir when no checkpoint exists', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      if (typeof p === 'string' && p === CHANGE_DIR) return true;
+      return false;
+    });
+
+    setupMockConn();
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+
+    const ctrl = new WorkflowController({
+      artifactManager,
+      worktreePath: '/tmp/worktree',
+      checkpointRepo,
+    });
+
+    await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+
+    expect(fs.readdirSync).toHaveBeenCalledWith(CHANGE_DIR);
+  });
+
+  it('should delete checkpoint on stage success', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    setupMockConn();
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+
+    const ctrl = new WorkflowController({
+      artifactManager,
+      worktreePath: '/tmp/worktree',
+      checkpointRepo,
+    });
+
+    const result = await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+
+    expect(result.success).toBe(true);
+    expect(checkpointRepo.get(1, 'plan')).toBeNull();
+  });
+
+  it('should preserve checkpoint on stage failure', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const mockConn = {
+      prompt: vi.fn().mockResolvedValue({ success: false, error: 'agent failed', text: '', acpSessionId: 's1' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+
+    const ctrl = new WorkflowController({
+      artifactManager,
+      worktreePath: '/tmp/worktree',
+      checkpointRepo,
+    });
+
+    const result = await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+
+    expect(result.success).toBe(false);
+    const checkpoint = checkpointRepo.get(1, 'plan');
+    expect(checkpoint).not.toBeNull();
+  });
+});
