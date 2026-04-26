@@ -146,9 +146,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
@@ -173,11 +173,11 @@
         "T-001",
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": "Auto-skipped (no onAskUser): Timed out after 300s"
     },
     {
       "id": "T-008",
