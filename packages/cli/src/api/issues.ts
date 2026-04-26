@@ -121,6 +121,24 @@ export function createIssueRoutes(
     }
   });
 
+  app.get('/merge-queue/status', async (c) => {
+    try {
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      if (!mergeQueue) {
+        return c.json({ success: true, data: { items: [] } } satisfies ApiResponse);
+      }
+
+      const entries = mergeQueue.getStatus().filter(e => e.projectId === projectId);
+      return c.json({ success: true, data: { items: entries } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
   app.get('/:number', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
@@ -1520,25 +1538,27 @@ export function createIssueRoutes(
     }
   });
 
-  app.get('/merge-queue/status', async (c) => {
+  app.post('/:number/retry-merge', async (c) => {
     try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
       if (!mergeQueue) {
         return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
       }
 
-      const entries = mergeQueue.getStatus();
-      return c.json({ success: true, data: { queue: entries } } satisfies ApiResponse);
-    } catch (error) {
-      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
-    }
-  });
-
-  app.post('/:number/retry-merge', async (c) => {
-    try {
-      const number = parseInt(c.req.param('number'));
-
-      if (!mergeQueue) {
-        return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
+      const project = projectService.getById(projectId);
+      if (project && worktreeManager && !worktreeManager.exists(project.name, issue.number)) {
+        return c.json({ success: false, error: `No worktree found for issue #${number}` } satisfies ApiResponse, 404);
       }
 
       const retried = mergeQueue.retry(number);
