@@ -247,6 +247,24 @@ export interface ToolCallEntry {
   title?: string
 }
 
+export interface TaskProgressEntry {
+  taskId: string
+  taskIndex: number
+  totalTasks: number
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'retrying'
+  executionId?: string
+  attempt?: number
+  error?: string
+}
+
+export type TaskProgressMap = Map<string, TaskProgressEntry>
+
+export interface LoopProgress {
+  completed: number
+  failed: number
+  total: number
+}
+
 export interface CoderTextBuffer {
   executionId: string
   acpSessionId: string
