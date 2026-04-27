@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix agent progress visibility and UI dead zone for running pipelines: extend status API with progress metadata, add force-stop endpoint, replace Close button with live progress panel.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Self-contained change, no dependencies. Touches only the cleanup() closure inside createAcpConnection/runAcpSession."
+      "passes": true,
+      "notes": "Self-contained change, no dependencies. Touches only the cleanup() closure inside createAcpConnection/runAcpSession.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -41,7 +43,10 @@
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Backend types and plumbing only. WorkflowController update sites are in T-003."
+      "notes": "Backend types and plumbing only. WorkflowController update sites are in T-003.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -60,9 +65,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Depends on T-002 for the onProgress callback type in WorkflowControllerOptions."
+      "notes": "Depends on T-002 for the onProgress callback type in WorkflowControllerOptions.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -84,9 +94,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Depends on T-002 for RunningAgent interface. Key challenge: acp-session.ts creates the ChildProcess internally and doesn't expose it. Need to add a callback (onProcessSpawned) to AcpConnectionOptions or modify createAcpConnection/runAcpSession to return the proc ref. This touches acp-session.ts, workflow-controller.ts, and agent-runner-service.ts."
+      "notes": "Depends on T-002 for RunningAgent interface. Key challenge: acp-session.ts creates the ChildProcess internally and doesn't expose it. Need to add a callback (onProcessSpawned) to AcpConnectionOptions or modify createAcpConnection/runAcpSession to return the proc ref. This touches acp-session.ts, workflow-controller.ts, and agent-runner-service.ts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -105,9 +120,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Depends on T-004 for forceStop method on AgentRunnerService."
+      "notes": "Depends on T-004 for forceStop method on AgentRunnerService.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -123,9 +143,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts",
-      "dependsOn": ["T-002", "T-004"],
+      "dependsOn": [
+        "T-002",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Frontend type changes only. Depends on T-002 for progress type shape and T-004 for forceStop return type. UI component is T-007."
+      "notes": "Frontend type changes only. Depends on T-002 for progress type shape and T-004 for forceStop return type. UI component is T-007.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -147,9 +173,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-006"],
+      "dependsOn": [
+        "T-006"
+      ],
       "passes": false,
-      "notes": "useAgentStatus already polls at 5s so no polling change needed. Relative time helper can be a simple function, no library needed."
+      "notes": "useAgentStatus already polls at 5s so no polling change needed. Relative time helper can be a simple function, no library needed.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -165,9 +196,14 @@
       "mode": "AFK",
       "type": "REVIEW",
       "output": "build verification output",
-      "dependsOn": ["T-007"],
+      "dependsOn": [
+        "T-007"
+      ],
       "passes": false,
-      "notes": "Final verification task. Run from packages/cli directory."
+      "notes": "Final verification task. Run from packages/cli directory.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
