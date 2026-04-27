@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "超时前自动保存工作进度：WIP commit 创建、条件重试、恢复上下文注入",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -22,8 +21,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/git/worktree-manager.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Use execFileAsync pattern already in worktree-manager.ts. Exclude openspec/changes/ and .opencode/ from git add, matching mergeBack() behavior."
+      "passes": true,
+      "notes": "Use execFileAsync pattern already in worktree-manager.ts. Exclude openspec/changes/ and .opencode/ from git add, matching mergeBack() behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -43,9 +45,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "The callback receives cwd (the worktree path). Return true if WIP commit was created, false otherwise. Keep the existing timeout flow unchanged — just insert the callback call between connection.cancel() and cleanup()."
+      "notes": "The callback receives cwd (the worktree path). Return true if WIP commit was created, false otherwise. Keep the existing timeout flow unchanged — just insert the callback call between connection.cancel() and cleanup().",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -63,9 +70,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/openspec/context-assembler.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "The caller (ralph-executor) is responsible for building the wipResumeContext string from findWipCommit result. The assembler just injects it as-is."
+      "notes": "The caller (ralph-executor) is responsible for building the wipResumeContext string from findWipCommit result. The assembler just injects it as-is.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -86,9 +98,16 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
-      "dependsOn": ["T-001", "T-002", "T-003"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Add WorktreeManager to RalphExecutorContext. The onBeforeKill callback needs access to worktreePath (from context), taskId (from current task), and attempt number (from loop variable). Use closure to capture these values."
+      "notes": "Add WorktreeManager to RalphExecutorContext. The onBeforeKill callback needs access to worktreePath (from context), taskId (from current task), and attempt number (from loop variable). Use closure to capture these values.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -111,9 +130,17 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/",
-      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Mock git operations for WorktreeManager tests. Use the existing setAcpSessionRunner test pattern for ralph-executor tests."
+      "notes": "Mock git operations for WorktreeManager tests. Use the existing setAcpSessionRunner test pattern for ralph-executor tests.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
