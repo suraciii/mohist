@@ -1708,7 +1708,9 @@ export function createIssueRoutes(
 
       const retried = mergeQueue.retry(number);
       if (!retried) {
-        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (build-failed, conflict, or blocked)` } satisfies ApiResponse, 409);
+        const queueEntry = mergeQueue.getStatus().find(e => e.issueNumber === number);
+        const currentState = queueEntry?.mergeState ?? 'unknown';
+        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (current state: ${currentState}; retryable: build-failed, conflict, blocked)` } satisfies ApiResponse, 409);
       }
 
       return c.json({ success: true, data: { message: `Issue #${number} re-enqueued for merge` } } satisfies ApiResponse);
