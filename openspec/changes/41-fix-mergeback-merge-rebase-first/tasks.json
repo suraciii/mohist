@@ -70,9 +70,9 @@
       "type": "WRITE",
       "output": "packages/cli/src/types/index.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
