@@ -1,40 +1,15 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useLogs } from '../hooks/useLogs'
 import type { ParsedLogEntry } from '../hooks/useLogs'
-
-const LEVEL_COLORS: Record<string, string> = {
-  ERROR: 'text-red-600 bg-red-50',
-  WARN: 'text-yellow-600 bg-yellow-50',
-  INFO: 'text-blue-600 bg-blue-50',
-  DEBUG: 'text-gray-500 bg-gray-100',
-}
-
-const LEVEL_CHIP_COLORS: Record<string, string> = {
-  ERROR: 'bg-red-100 text-red-700 border-red-200',
-  WARN: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  INFO: 'bg-blue-100 text-blue-700 border-blue-200',
-  DEBUG: 'bg-gray-100 text-gray-600 border-gray-200',
-}
-
-const ALL_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const
-type LogLevel = (typeof ALL_LEVELS)[number]
-
-function formatTime(time: string | null): string {
-  if (!time) return '--:--:--'
-  try {
-    const d = new Date(time)
-    return d.toLocaleTimeString('en-US', { hour12: false })
-  } catch {
-    return time
-  }
-}
+import { LEVEL_COLORS, LEVEL_CHIP_COLORS, ALL_LEVELS, type LogLevel } from '../lib/log-levels'
+import { formatLogTime } from '../lib/format-time'
 
 function LogRow({ entry }: { entry: ParsedLogEntry }) {
   const levelColor = entry.level ? LEVEL_COLORS[entry.level] || 'text-gray-600 bg-gray-50' : 'text-gray-400 bg-gray-50'
 
   return (
     <div className="flex items-start gap-3 px-3 py-1 hover:bg-gray-50 text-xs font-mono border-b border-gray-100 last:border-b-0">
-      <span className="text-gray-400 shrink-0 w-20 tabular-nums">{formatTime(entry.time)}</span>
+      <span className="text-gray-400 shrink-0 w-20 tabular-nums">{formatLogTime(entry.time)}</span>
       <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase leading-none ${levelColor}`}>
         {(entry.level || '????').padEnd(5)}
       </span>

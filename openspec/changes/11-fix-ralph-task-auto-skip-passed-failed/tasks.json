@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix auto-skip branch logic in ralph-executor.ts",
+      "spec": "specs/ralph-task-execution/spec.md#task-failure-handling-with-retry",
+      "description": "Fix the auto-skip branch (line 589-592): change `passes: true` to `passes: false`, add `failed++` and `skipped++` after the branch. Add `skipped` variable initialized to 0 at the top of `runRalphLoop`. Update `RalphLoopResult` interface to include `skipped: number`. Update the final result object and early-return result objects to include `skipped`.",
+      "acceptanceCriteria": [
+        "Auto-skip branch sets passes: false (not true) in updateTaskInList",
+        "Auto-skip branch increments failed++ and skipped++",
+        "RalphLoopResult interface has skipped: number field",
+        "Final result object includes skipped counter and success: failed === 0",
+        "Early-return result (line 576-587) includes skipped field",
+        "Empty-tasks early-return (line 288-294) includes skipped: 0",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Key lines to change: 589-592 (auto-skip branch), 119-128 (RalphLoopResult type), 288-294 and 576-587 and 607-613 (result objects).",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Add unit tests for auto-skip failure handling",
+      "spec": "specs/ralph-task-execution/spec.md#task-failure-handling-with-retry",
+      "description": "Write unit tests that verify: (1) a non-retryable failure without onAskUser sets passes=false, increments failed and skipped, and returns success=false; (2) a retryable failure with retries exhausted behaves the same; (3) the skipped counter is 0 when all tasks pass. Mock the task executor to simulate failures.",
+      "acceptanceCriteria": [
+        "Test: non-retryable failure (timeout) without onAskUser → passes=false, failed=1, skipped=1, success=false",
+        "Test: max retries exceeded without onAskUser → passes=false, failed=1, skipped=1, success=false",
+        "Test: all tasks pass → failed=0, skipped=0, success=true",
+        "Test: task fails but onAskUser is provided → onAskUser is called (no auto-skip)",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/ralph-executor-auto-skip.test.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Look at existing test files in packages/cli/tests/ for test framework and patterns used.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}

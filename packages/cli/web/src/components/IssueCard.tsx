@@ -2,18 +2,85 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Issue, AgentStatus } from '../lib/types'
 import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
+import { getStripColor, getLabelStyle, formatPriority, sortLabels } from '../lib/label-colors'
+import { formatRelativeTime } from '../lib/relative-time'
 
-const APPROVAL_STAGES = new Set<string>([Stage.Build])
+export const APPROVAL_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Review])
+
+const MERGE_STATE_LABELS: Record<string, string> = {
+  'build-failed': 'Failed',
+  conflict: 'Conflict',
+  pending: 'Pending',
+  merging: 'Merging',
+}
 
 interface Props {
   issue: Issue
   agentStatus: AgentStatus
 }
 
+type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | null
+
+function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
+  if (
+    issue.stage === Stage.Done &&
+    issue.mergeState != null &&
+    issue.mergeState !== 'merged'
+  ) {
+    return 'conflict'
+  }
+  if (issue.status === IssueStatus.Blocked) {
+    return 'closed'
+  }
+  if (issue.approvalState?.status === 'awaiting') {
+    return 'approval'
+  }
+  if (isAgentRunning) {
+    return 'running'
+  }
+  return null
+}
+
+function Badge({
+  type,
+  mergeState,
+}: {
+  type: Exclude<BadgeType, 'closed' | null>
+  mergeState?: string | null
+}) {
+  if (type === 'conflict') {
+    const label = MERGE_STATE_LABELS[mergeState ?? ''] ?? mergeState ?? 'Failed'
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-white bg-red-500 px-1.5 py-0.5 rounded">
+        {label}
+      </span>
+    )
+  }
+  if (type === 'approval') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-white px-1.5 py-0.5 rounded" style={{ backgroundColor: '#f59e0b' }}>
+        Approval
+      </span>
+    )
+  }
+  if (type === 'running') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+        <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+        Running
+      </span>
+    )
+  }
+  return null
+}
+
 export function IssueCard({ issue, agentStatus }: Props) {
   const queryClient = useQueryClient()
-  const isAgentRunning = agentStatus.activeAgents.some(a => a.issueNumber === issue.number)
-  const isApprovalGate = APPROVAL_STAGES.has(issue.stage) && issue.status === IssueStatus.Active
+  const isAgentRunning = agentStatus.activeAgents.some(
+    (a) => a.issueNumber === issue.number,
+  )
+  const badge = getBadgeType(issue, isAgentRunning)
+  const isClosed = badge === 'closed'
   const isInterrupted = issue.status === IssueStatus.Interrupted
 
   const reopenMutation = useMutation({
@@ -24,76 +91,96 @@ export function IssueCard({ issue, agentStatus }: Props) {
     },
   })
 
+  const priorityText = issue.priority ? formatPriority(issue.priority) : ''
+  const sortedLabels = sortLabels(issue.labels)
+  const relativeTime = formatRelativeTime(issue.updatedAt || issue.createdAt)
+
   return (
     <a
       href={`/issue/${issue.number}`}
-      className="block rounded-lg border border-gray-200 bg-white p-3 shadow-sm hover:border-gray-300 hover:shadow-md transition-colors"
+      className="block rounded-lg border border-gray-200 border-l-4 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors relative overflow-hidden"
+      style={{ borderLeftColor: getStripColor(issue.labels) }}
     >
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs font-mono text-gray-400">#{issue.number}</span>
-        {isAgentRunning && (
-          <span className="inline-flex items-center gap-1 text-xs text-blue-600">
-            <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-            Running
-          </span>
+      {isClosed && (
+        <div className="absolute inset-0 bg-gray-400/50 z-10 flex items-center justify-center">
+          <span className="text-sm font-semibold text-gray-700">Closed</span>
+        </div>
+      )}
+
+      <div className={`p-3 ${isClosed ? 'opacity-50' : ''}`}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-gray-400">
+              #{issue.number}
+            </span>
+            {priorityText && (
+              <span className="text-xs font-semibold text-gray-700">
+                {priorityText}
+              </span>
+            )}
+          </div>
+          {badge && badge !== 'closed' && (
+            <Badge type={badge} mergeState={issue.mergeState} />
+          )}
+        </div>
+
+        <h3
+          className="text-sm font-medium text-gray-900"
+          style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+          title={issue.title}
+        >
+          {issue.title}
+        </h3>
+
+        {sortedLabels.length > 0 && (
+          <div className="mt-2 flex items-center gap-1 flex-nowrap overflow-hidden">
+            {sortedLabels.map((label) => {
+              const s = getLabelStyle(label)
+              return (
+                <span
+                  key={label}
+                  className={`inline-block rounded-full px-1.5 font-medium whitespace-nowrap ${
+                    s.size === 'sm' ? 'text-[10px] py-px' : 'text-xs py-0.5'
+                  }`}
+                  style={{ backgroundColor: s.bg, color: s.text }}
+                >
+                  {label}
+                </span>
+              )
+            })}
+          </div>
         )}
-        {isApprovalGate && !isAgentRunning && (
-          <span className="inline-flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
-            <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-            </svg>
-            Waiting for approval
-          </span>
-        )}
+
+        <div className="mt-1.5 flex justify-end">
+          {relativeTime && (
+            <span className="text-[10px] text-gray-400">{relativeTime}</span>
+          )}
+        </div>
+
         {isInterrupted && (
-          <span className="inline-flex items-center gap-1 text-xs text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded">
-            <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M2 10a8 8 0 1116 0 8 8 0 01-16 0zm8-4a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-            </svg>
-            Interrupted
-          </span>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-xs text-orange-600">
+              Pipeline was interrupted
+            </span>
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                reopenMutation.mutate()
+              }}
+              disabled={reopenMutation.isPending}
+              className="rounded bg-orange-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+            >
+              {reopenMutation.isPending ? 'Resuming...' : 'Resume'}
+            </button>
+          </div>
         )}
       </div>
-
-      <h3 className="text-sm font-medium text-gray-900 truncate" title={issue.title}>
-        {issue.title}
-      </h3>
-
-      {issue.labels.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {issue.labels.map((label) => (
-            <span
-              key={label}
-              className="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600"
-            >
-              {label}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {issue.status === IssueStatus.Blocked && (
-        <div className="mt-2 text-xs text-red-500">Closed</div>
-      )}
-      {issue.status === IssueStatus.Paused && (
-        <div className="mt-2 text-xs text-gray-400">Paused</div>
-      )}
-      {isInterrupted && (
-        <div className="mt-2 flex items-center justify-between">
-          <span className="text-xs text-orange-600">Pipeline was interrupted, click to resume</span>
-          <button
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              reopenMutation.mutate()
-            }}
-            disabled={reopenMutation.isPending}
-            className="rounded bg-orange-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
-          >
-            {reopenMutation.isPending ? 'Resuming...' : 'Resume'}
-          </button>
-        </div>
-      )}
     </a>
   )
 }

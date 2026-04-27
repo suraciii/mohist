@@ -44,7 +44,15 @@ export const VALID_PRIORITIES: Priority[] = ['p0', 'p1', 'p2', 'p3', 'p4'];
 
 export type ApprovalStatus = 'pending' | 'awaiting' | 'approved' | 'rejected' | 'error';
 
-export type MergeState = 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict';
+export enum MergeState {
+  Pending = 'pending',
+  Merging = 'merging',
+  Merged = 'merged',
+  BuildFailed = 'build-failed',
+  Conflict = 'conflict',
+  Resolving = 'resolving',
+  Blocked = 'blocked',
+}
 
 export interface ApprovalState {
   stage: Stage;
@@ -68,6 +76,7 @@ export interface Issue {
   updatedAt: string;
   approvalState?: ApprovalState;
   mergeState?: MergeState;
+  conflictRetryCount?: number;
 }
 
 export interface Project {
