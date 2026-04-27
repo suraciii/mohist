@@ -43,6 +43,7 @@ export interface WorkflowControllerOptions {
   eventBus?: EventBus;
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
+  onProgress?: (update: { stage?: string; roundType?: string; roundIndex?: number; taskProgress?: { completed: number; total: number } | null }) => void;
 }
 
 export interface PipelineResult {
@@ -59,6 +60,7 @@ export class WorkflowController {
   private eventBus?: EventBus;
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
+  private _onProgress?: WorkflowControllerOptions['onProgress'];
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -67,6 +69,11 @@ export class WorkflowController {
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
+    this._onProgress = options.onProgress;
+  }
+
+  protected emitProgress(update: Parameters<NonNullable<WorkflowControllerOptions['onProgress']>>[0]): void {
+    this._onProgress?.(update);
   }
 
   getCheckpointRepo(): PipelineCheckpointRepo | undefined {

@@ -16,11 +16,20 @@ import { WorktreeManager } from '../git/worktree-manager';
 import * as fs from 'fs';
 import * as path from 'path';
 
+export interface AgentProgress {
+  stage?: string;
+  roundType?: string;
+  roundIndex?: number;
+  taskProgress?: { completed: number; total: number } | null;
+  lastActivityAt: string;
+}
+
 export interface RunningAgent {
   issueId: string;
   issueNumber: number;
   promise: Promise<void>;
   projectId: string;
+  progress: AgentProgress;
 }
 
 export interface RecoverableIssue {
@@ -32,7 +41,7 @@ export interface AgentStatus {
   running: boolean;
   issueId: string | null;
   issueNumber: number | null;
-  activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>;
+  activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string; progress: AgentProgress }>;
   waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>;
   recoverableIssues: RecoverableIssue[];
   queueDepth: number;
@@ -279,6 +288,7 @@ export class AgentRunnerService {
       issueId: a.issueId,
       issueNumber: a.issueNumber,
       projectId: a.projectId,
+      progress: { ...a.progress },
     }));
 
     const waiting = Array.from(this.waitingQuestions.entries()).map(([issueId, wq]) => {
@@ -371,6 +381,11 @@ export class AgentRunnerService {
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
     log.info('Pipeline started', { issueNumber: issue.number, projectId });
 
+    const progress: AgentProgress = {
+      stage: issue.stage,
+      lastActivityAt: new Date().toISOString(),
+    };
+
     const startTime = Date.now();
     const promise = (async () => {
       try {
@@ -382,6 +397,13 @@ export class AgentRunnerService {
           eventBus: this.eventBus,
           projectId,
           checkpointRepo: this.checkpointRepo,
+          onProgress: (update) => {
+            if (update.stage !== undefined) progress.stage = update.stage;
+            if (update.roundType !== undefined) progress.roundType = update.roundType;
+            if (update.roundIndex !== undefined) progress.roundIndex = update.roundIndex;
+            if (update.taskProgress !== undefined) progress.taskProgress = update.taskProgress;
+            progress.lastActivityAt = new Date().toISOString();
+          },
         });
 
         const result: PipelineResult = await pipeline.run(issue, acpOptions);
@@ -495,6 +517,7 @@ export class AgentRunnerService {
       issueNumber: issue.number,
       promise,
       projectId,
+      progress,
     });
   }
 }
