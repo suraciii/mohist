@@ -395,6 +395,7 @@ export async function runRalphLoop(
     const result: RalphLoopResult = {
       completed: 0,
       failed: tasks.length,
+      skipped: 0,
       total: tasks.length,
       taskResults: [],
       success: false,
