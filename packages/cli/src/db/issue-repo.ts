@@ -16,6 +16,7 @@ interface IssueRow {
   updated_at: string;
   approval_state: string | null;
   merge_state: string | null;
+  conflict_retry_count: number | null;
 }
 
 function rowToIssue(row: IssueRow): Issue {
@@ -49,6 +50,7 @@ function rowToIssue(row: IssueRow): Issue {
     updatedAt: row.updated_at,
     approvalState,
     mergeState: (row.merge_state as MergeState) || undefined,
+    conflictRetryCount: row.conflict_retry_count ?? undefined,
   };
 }
 
@@ -308,6 +310,17 @@ export class IssueRepo {
       states
     );
     return rows.map(rowToIssue);
+  }
+
+  updateConflictRetryCount(issueId: string, count: number): Issue | null {
+    const now = new Date().toISOString();
+
+    this.db.run(
+      'UPDATE issues SET conflict_retry_count = ?, updated_at = ? WHERE id = ?',
+      [count, now, issueId]
+    );
+
+    return this.findById(issueId);
   }
 
   findPendingApproval(projectId: string): Issue | null {
