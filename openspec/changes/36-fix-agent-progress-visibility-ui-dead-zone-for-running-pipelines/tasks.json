@@ -68,9 +68,9 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-002 for the onProgress callback type in WorkflowControllerOptions.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
