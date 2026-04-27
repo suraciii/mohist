@@ -18,6 +18,7 @@ export interface MergeEntry {
   issueId: string;
   mergeState: MergeState;
   message?: string;
+  conflictingFiles?: string[];
   enqueuedAt: number;
 }
 
@@ -80,7 +81,7 @@ export class MergeQueue {
       return false;
     }
 
-    if (entry.mergeState !== 'build-failed' && entry.mergeState !== 'conflict') {
+    if (entry.mergeState !== 'build-failed' && entry.mergeState !== 'conflict' && entry.mergeState !== 'blocked') {
       log.warn('retry: invalid state', { issueNumber, mergeState: entry.mergeState });
       return false;
     }
@@ -104,7 +105,7 @@ export class MergeQueue {
   }
 
   recoverFromDB(): void {
-    const issues = this.deps.issueRepo.findByMergeStates(['pending', 'merging']);
+    const issues = this.deps.issueRepo.findByMergeStates(['pending', 'merging', 'blocked']);
 
     for (const issue of issues) {
       if (this.queue.has(issue.number)) continue;
