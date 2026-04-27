@@ -10,6 +10,8 @@ import { EditIssueDialog } from './EditIssueDialog'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionTimeline } from './SessionTimeline'
+import { formatTime } from '../lib/format-time'
+import { statusBadge } from '../lib/status-badge'
 
 const STAGES = [Stage.Draft, Stage.Explore, Stage.Plan, Stage.Build, Stage.Review, Stage.Done]
 
@@ -23,25 +25,6 @@ const STAGE_LABELS: Record<string, string> = {
 }
 
 const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Review, Stage.Done])
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
-
-function statusBadge(status: IssueStatus): string {
-  switch (status) {
-    case IssueStatus.Active:
-      return 'text-green-700 bg-green-50'
-    case IssueStatus.Paused:
-      return 'text-amber-700 bg-amber-50'
-    case IssueStatus.Blocked:
-      return 'text-red-700 bg-red-50'
-    case IssueStatus.Interrupted:
-      return 'text-orange-700 bg-orange-50'
-    default:
-      return 'text-gray-700 bg-gray-50'
-  }
-}
 
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()

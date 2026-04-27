@@ -237,7 +237,7 @@ export class WorktreeManager {
       );
       const uncommitted = statusOut.trim().split('\n').filter(l => l.trim());
       if (uncommitted.length > 0) {
-        await execFileAsync('git', ['add', '--', ':!openspec/changes/', ':!.opencode/'], { cwd: worktreePath });
+        await execFileAsync('git', ['add', '--', ':!.opencode/'], { cwd: worktreePath });
         const remaining = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd: worktreePath });
         if (remaining.stdout.trim()) {
           await execFileAsync('git', ['commit', '-m', `chore: commit remaining changes for issue #${issueNumber}`, '--no-verify'], { cwd: worktreePath });
@@ -387,6 +387,44 @@ export class WorktreeManager {
   exists(projectName: string, issueNumber: number): boolean {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     return fs.existsSync(worktreePath);
+  }
+
+  async mergeMasterInWorktree(
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<{ success: boolean; conflictFiles?: string[]; message?: string }> {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+
+    if (!fs.existsSync(worktreePath)) {
+      return { success: false, message: 'Worktree not found' };
+    }
+
+    try {
+      await execFileAsync('git', ['merge', baseBranch, '--no-edit'], {
+        cwd: worktreePath,
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (!msg.includes('Merge conflict') && !msg.includes('CONFLICT') && !msg.includes('merge conflict')) {
+        await execFileAsync('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {});
+        return { success: false, message: `Merge failed: ${msg}` };
+      }
+
+      try {
+        const { stdout } = await execFileAsync(
+          'git', ['diff', '--name-only', '--diff-filter=U'],
+          { cwd: worktreePath }
+        );
+        const conflictFiles = stdout.trim().split('\n').filter((f: string) => f.trim());
+        return { success: false, conflictFiles };
+      } catch {
+        await execFileAsync('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {});
+        return { success: false, message: 'Merge conflict but failed to list conflict files' };
+      }
+    }
   }
 
   async prune(projectPath: string): Promise<void> {

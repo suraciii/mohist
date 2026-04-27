@@ -30,6 +30,12 @@ Read all generated files in `{changeDir}/`:
 - Implementation steps are clear and actionable
 - Task granularity is appropriate (each completable in one agent iteration)
 
+### Dependency Completeness
+- Every non-first task (priority > 1) has at least one `dependsOn` entry
+- All `dependsOn` references point to existing task IDs with lower priority numbers
+- The dependency graph contains no cycles
+- Dependencies reflect actual input/output relationships between tasks
+
 ### Quality
 - Specs use SHALL/MUST language, not should/may
 - Scenarios use exact `####` heading format
@@ -61,6 +67,9 @@ Write a self-review summary to `{changeDir}/self-review.md` with:
 - [findings]
 
 ## Feasibility: PASS / FAIL
+- [findings]
+
+## Dependency Completeness: PASS / FAIL
 - [findings]
 
 ## Quality: PASS / FAIL
