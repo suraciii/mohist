@@ -269,8 +269,78 @@ function generateAdjustmentsFromCategory(category: FailureCategory, _error: stri
   return adjustments;
 }
 
+export interface DependencyValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+export function validateTaskDependencies(tasks: Task[]): DependencyValidationResult {
+  const errors: string[] = [];
+  const taskIds = new Set(tasks.map(t => t.id));
+
+  for (const task of tasks) {
+    const deps = task.dependsOn ?? [];
+    if (deps.length === 0) continue;
+
+    for (const depId of deps) {
+      if (!taskIds.has(depId)) {
+        errors.push(`Task "${task.id}" depends on "${depId}", which does not exist in the task list`);
+      } else {
+        const depTask = tasks.find(t => t.id === depId)!;
+        if (getOrderValue(depTask.order) >= getOrderValue(task.order)) {
+          errors.push(
+            `Task "${task.id}" (order: ${task.order}) depends on "${depId}" (order: ${depTask.order}), ` +
+            `but dependencies must reference tasks with a strictly lower order value`
+          );
+        }
+      }
+    }
+  }
+
+  const visited = new Set<string>();
+  const inStack = new Set<string>();
+  const adj = new Map<string, string[]>();
+
+  for (const task of tasks) {
+    adj.set(task.id, (task.dependsOn ?? []).filter(depId => taskIds.has(depId)));
+  }
+
+  function hasCycle(nodeId: string): boolean {
+    visited.add(nodeId);
+    inStack.add(nodeId);
+
+    for (const neighbor of adj.get(nodeId) ?? []) {
+      if (!visited.has(neighbor)) {
+        if (hasCycle(neighbor)) return true;
+      } else if (inStack.has(neighbor)) {
+        return true;
+      }
+    }
+
+    inStack.delete(nodeId);
+    return false;
+  }
+
+  for (const task of tasks) {
+    if (!visited.has(task.id)) {
+      if (hasCycle(task.id)) {
+        errors.push('Circular dependency detected in the task dependency graph');
+        break;
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
 export function findNextPendingTask(tasks: Task[]): Task | null {
-  const sorted = sortTasksByOrder(tasks.filter(t => !t.passes));
+  const passedIds = new Set(tasks.filter(t => t.passes).map(t => t.id));
+  const ready = tasks.filter(t => {
+    if (t.passes) return false;
+    const deps = t.dependsOn ?? [];
+    return deps.every(depId => passedIds.has(depId));
+  });
+  const sorted = sortTasksByOrder(ready);
   return sorted.length > 0 ? sorted[0] : null;
 }
 
@@ -315,6 +385,24 @@ export async function runRalphLoop(
       taskResults: [],
       success: false,
     };
+  }
+
+  const validation = validateTaskDependencies(tasks);
+  if (!validation.valid) {
+    for (const err of validation.errors) {
+      log.error('Task dependency validation failed', { issueId: context.issueId || '', error: err });
+    }
+    const result: RalphLoopResult = {
+      completed: 0,
+      failed: tasks.length,
+      skipped: 0,
+      total: tasks.length,
+      taskResults: [],
+      success: false,
+      pauseReason: `Task dependency validation failed: ${validation.errors.join('; ')}`,
+    };
+    context.onLoopComplete?.(result);
+    return result;
   }
 
   const sortedTasks = sortTasksByOrder(tasks);
@@ -420,6 +508,39 @@ export async function runRalphLoop(
   while (true) {
     const nextTask = findNextPendingTask(tasks);
     if (!nextTask || processedTaskIds.has(nextTask.id)) {
+      if (!nextTask) {
+        const remainingPending = tasks.filter(t => !t.passes);
+        if (remainingPending.length > 0) {
+          const blockedIds = remainingPending.map(t => {
+            const deps = (t.dependsOn ?? []).filter(d => !tasks.find(x => x.id === d)?.passes);
+            return `${t.id} (blocked by: ${deps.length > 0 ? deps.join(', ') : 'unknown'})`;
+          });
+          log.warn('Deadlock detected: pending tasks remain but none are ready', {
+            issueId: logIssueId,
+            blockedTasks: blockedIds,
+          });
+          failed += remainingPending.length;
+          for (const t of remainingPending) {
+            taskResults.push({
+              taskId: t.id,
+              status: 'failed',
+              attempts: t.attempts,
+              error: `Deadlock: task blocked by unmet dependencies`,
+            });
+          }
+          const deadlockResult: RalphLoopResult = {
+            completed,
+            failed,
+            skipped,
+            total: sortedTasks.length,
+            taskResults,
+            success: false,
+            pauseReason: `Deadlock: ${remainingPending.length} task(s) blocked by unmet dependencies: ${blockedIds.join('; ')}`,
+          };
+          context.onLoopComplete?.(deadlockResult);
+          return deadlockResult;
+        }
+      }
       if (completed === 0 && failed === 0) {
         log.warn('No pending tasks found — all tasks have passes=true', {
           issueId: logIssueId,
