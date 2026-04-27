@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Increase build stage and per-task timeout constants",
+      "spec": "specs/agent-timeout/spec.md#Stage-timeout-SHALL-be-passed-to-ACP-session-runner",
+      "description": "Change two constants: (1) In ralph-executor.ts, change MIN_TASK_TIMEOUT_MS from 5*60*1000 to 10*60*1000. (2) In workflow-loader.ts, change build stage timeout from 1800 to 3600.",
+      "acceptanceCriteria": [
+        "ralph-executor.ts MIN_TASK_TIMEOUT_MS = 10 * 60 * 1000",
+        "workflow-loader.ts build stage timeout = 3600",
+        "6-task build stage allocates 3600/6=600s per task (≥ 600s floor)",
+        "10-task build stage allocates 600s per task (floor overrides 360s)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "packages/cli/src/openspec/ralph-executor.ts, packages/cli/src/workflow/workflow-loader.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
