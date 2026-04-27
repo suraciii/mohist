@@ -42,6 +42,8 @@ export function IssueDetailPage() {
     rounds,
     isStreaming,
     isLoading: sessionLoading,
+    taskProgress,
+    loopProgress,
   } = useSessionTimeline(issueNumber)
 
   const approveMutation = useMutation({
@@ -529,6 +531,8 @@ export function IssueDetailPage() {
                   isLoading={sessionLoading}
                   currentStage={issue.stage}
                   isLive={isAgentRunningOnThis}
+                  taskProgress={taskProgress}
+                  loopProgress={loopProgress}
                 />
               )}
             </div>
