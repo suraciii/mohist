@@ -100,9 +100,9 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Agent conflict resolution loop (continueRebase with agent) is deferred — blocked issues can be retried manually. This task only implements: rebase → success? → merge : → blocked.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
