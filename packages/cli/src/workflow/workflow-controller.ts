@@ -142,6 +142,7 @@ export class WorkflowController {
       for (const [index, round] of rounds.entries()) {
         roundState.type = round.type;
         roundState.index = index;
+        this.emitProgress({ stage: 'plan', roundType: round.type, roundIndex: index });
 
         if (completedSteps.includes(round.type)) {
           if (round.verify()) {
@@ -238,6 +239,7 @@ export class WorkflowController {
       // self-review round
       roundState.type = 'self-review';
       roundState.index = rounds.length;
+      this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length });
 
       log.info('Plan stage self-review round', { issueNumber: issue.number });
 
@@ -318,6 +320,7 @@ export class WorkflowController {
       switch (currentIssue.stage) {
         case Stage.Draft:
         case Stage.Plan: {
+          this.emitProgress({ stage: 'plan' });
           const planResult = await this.runPlanStage(currentIssue, acpOptions);
           if (!planResult.success) {
             return {
@@ -350,6 +353,7 @@ export class WorkflowController {
         }
 
         case Stage.Build: {
+          this.emitProgress({ stage: 'build' });
           const buildResult = await this.runPipelineBuildStage(currentIssue, acpOptions);
           if (!buildResult.success) {
             return {
@@ -365,6 +369,7 @@ export class WorkflowController {
         }
 
         case Stage.Review: {
+          this.emitProgress({ stage: 'review' });
           const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
           if (!reviewResult.success) {
             return {
@@ -598,6 +603,7 @@ export class WorkflowController {
         if (!this.checkpointRepo) return;
         activeCompletedTaskIds.push(taskId);
         this.checkpointRepo.upsert(issue.number, 'build', [...activeCompletedTaskIds], null);
+        this.emitProgress({ stage: 'build', taskProgress: { completed: activeCompletedTaskIds.length, total } });
       },
     });
     const duration = Date.now() - buildStartTime;
@@ -738,6 +744,7 @@ export class WorkflowController {
       // Round 0: review
       roundState.type = 'review';
       roundState.index = 0;
+      this.emitProgress({ stage: 'review', roundType: 'review', roundIndex: 0 });
 
       log.info('Review stage round', { roundType: 'review', issueNumber: issue.number });
 
@@ -772,6 +779,7 @@ export class WorkflowController {
       // Round 1: self-check
       roundState.type = 'review-self-check';
       roundState.index = 1;
+      this.emitProgress({ stage: 'review', roundType: 'review-self-check', roundIndex: 1 });
 
       log.info('Review stage self-check round', { issueNumber: issue.number });
 
