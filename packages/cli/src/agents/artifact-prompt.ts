@@ -9,6 +9,7 @@ const TEMPLATES_DIR = path.join(ARTIFACTS_DIR, 'templates');
 const REVIEW_PROMPT_PATH = path.join(__dirname, 'prompts', 'review.md');
 const REVIEW_SELF_CHECK_PATH = path.join(ARTIFACTS_DIR, 'review-self-check.md');
 const EXPLORE_PROMPT_PATH = path.join(__dirname, 'prompts', 'explore.md');
+const CONFLICT_RESOLUTION_PROMPT_PATH = path.join(__dirname, 'prompts', 'conflict-resolution.md');
 
 const ARTIFACT_OUTPUT_FILES: Record<ArtifactType, string> = {
   proposal: 'proposal.md',
@@ -39,6 +40,39 @@ function loadFile(filePath: string): string {
   const content = fs.readFileSync(filePath, 'utf-8');
   fileCache.set(filePath, content);
   return content;
+}
+
+function loadSpecContext(changeDir: string): string {
+  const parts: string[] = [];
+  const specsDir = path.join(changeDir, 'specs');
+  const tasksPath = path.join(changeDir, 'tasks.json');
+
+  if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
+    const mdFiles: string[] = [];
+    const entries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
+    for (const entry of entries) {
+      if (typeof entry === 'string' && entry.endsWith('.md')) {
+        mdFiles.push(entry);
+      }
+    }
+    mdFiles.sort();
+    if (mdFiles.length > 0) {
+      const sections: string[] = ['## Specs'];
+      for (const relPath of mdFiles) {
+        const fullPath = path.join(specsDir, relPath);
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        sections.push(`### ${relPath}\n\n${content}`);
+      }
+      parts.push(sections.join('\n\n'));
+    }
+  }
+
+  if (fs.existsSync(tasksPath)) {
+    const content = fs.readFileSync(tasksPath, 'utf-8');
+    parts.push(`## Tasks & Acceptance Criteria\n\n${content}`);
+  }
+
+  return parts.join('\n\n');
 }
 
 function formatIssueInfo(issue: Issue): string {
@@ -138,17 +172,25 @@ export function buildReviewerPrompt(
   changeDir: string
 ): string {
   const instruction = loadFile(REVIEW_PROMPT_PATH);
+  const specContext = loadSpecContext(changeDir);
 
   const parts: string[] = [
     formatIssueInfo(issue),
     '',
     `## Change Directory\n\n${changeDir}`,
+  ];
+
+  if (specContext) {
+    parts.push('', specContext);
+  }
+
+  parts.push(
     '',
     '## Goal\n\nReview the implementation for quality.',
     '',
     '## Instructions\n',
     instruction,
-  ];
+  );
 
   return parts.join('\n');
 }
@@ -177,6 +219,32 @@ export interface ExploreIssueInfo {
   title: string;
   body?: string;
   number?: number;
+}
+
+export function buildConflictResolutionPrompt(
+  issue: Issue,
+  changeDir: string,
+  conflictFiles: string[],
+): string {
+  const instruction = loadFile(CONFLICT_RESOLUTION_PROMPT_PATH);
+
+  const conflictFileList = conflictFiles
+    .map((f) => `- ${f}`)
+    .join('\n');
+
+  const parts: string[] = [
+    formatIssueInfo(issue),
+    '',
+    `## Change Directory\n\n${changeDir}`,
+    '',
+    '## Conflict Files\n',
+    conflictFileList,
+    '',
+    '## Instructions\n',
+    instruction,
+  ];
+
+  return parts.join('\n');
 }
 
 export function buildExplorePrompt(

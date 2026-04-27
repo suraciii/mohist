@@ -1,10 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
 import { runAcpSession as _runAcpSession } from '../agent-runtime/acp-session';
 import { Log } from '../util/log';
+
+const execFileAsync = promisify(execFile);
 
 const log = Log.create({ service: 'ralph' });
 
@@ -119,6 +123,7 @@ export interface RalphExecutorContext {
 export interface RalphLoopResult {
   completed: number;
   failed: number;
+  skipped: number;
   total: number;
   taskResults: TaskResult[];
   success: boolean;
@@ -181,6 +186,23 @@ function writeTasksFile(tasksPath: string, tasks: Task[]): void {
     fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
   } catch (e) {
     log.error('writeTasksFile failed', { tasksPath, error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+async function commitTasksFile(
+  tasksPath: string,
+  worktreePath: string,
+  taskId: string,
+  passes: boolean
+): Promise<void> {
+  try {
+    const relPath = path.relative(worktreePath, tasksPath);
+    await execFileAsync('git', ['add', '--', relPath], { cwd: worktreePath });
+    const status = passes ? 'passes=true' : 'passes=false';
+    await execFileAsync('git', ['commit', '-m', `chore(tasks): update ${taskId} ${status}`, '--no-verify'], { cwd: worktreePath });
+    log.info('Committed tasks.json', { taskId, status });
+  } catch (e) {
+    log.warn('commitTasksFile failed', { taskId, error: e instanceof Error ? e.message : String(e) });
   }
 }
 
@@ -358,6 +380,7 @@ export async function runRalphLoop(
     return {
       completed: 0,
       failed: 0,
+      skipped: 0,
       total: 0,
       taskResults: [],
       success: false,
@@ -420,6 +443,7 @@ export async function runRalphLoop(
   const taskResults: TaskResult[] = [];
   let completed = 0;
   let failed = 0;
+  let skipped = 0;
 
   let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
 
@@ -478,38 +502,43 @@ export async function runRalphLoop(
     }
   };
 
+  const processedTaskIds = new Set<string>();
+
   while (true) {
     const nextTask = findNextPendingTask(tasks);
-    if (!nextTask) {
-      const remainingPending = tasks.filter(t => !t.passes);
-      if (remainingPending.length > 0) {
-        const blockedIds = remainingPending.map(t => {
-          const deps = (t.dependsOn ?? []).filter(d => !tasks.find(x => x.id === d)?.passes);
-          return `${t.id} (blocked by: ${deps.length > 0 ? deps.join(', ') : 'unknown'})`;
-        });
-        log.warn('Deadlock detected: pending tasks remain but none are ready', {
-          issueId: logIssueId,
-          blockedTasks: blockedIds,
-        });
-        failed += remainingPending.length;
-        for (const t of remainingPending) {
-          taskResults.push({
-            taskId: t.id,
-            status: 'failed',
-            attempts: t.attempts,
-            error: `Deadlock: task blocked by unmet dependencies`,
+    if (!nextTask || processedTaskIds.has(nextTask.id)) {
+      if (!nextTask) {
+        const remainingPending = tasks.filter(t => !t.passes);
+        if (remainingPending.length > 0) {
+          const blockedIds = remainingPending.map(t => {
+            const deps = (t.dependsOn ?? []).filter(d => !tasks.find(x => x.id === d)?.passes);
+            return `${t.id} (blocked by: ${deps.length > 0 ? deps.join(', ') : 'unknown'})`;
           });
+          log.warn('Deadlock detected: pending tasks remain but none are ready', {
+            issueId: logIssueId,
+            blockedTasks: blockedIds,
+          });
+          failed += remainingPending.length;
+          for (const t of remainingPending) {
+            taskResults.push({
+              taskId: t.id,
+              status: 'failed',
+              attempts: t.attempts,
+              error: `Deadlock: task blocked by unmet dependencies`,
+            });
+          }
+          const deadlockResult: RalphLoopResult = {
+            completed,
+            failed,
+            skipped,
+            total: sortedTasks.length,
+            taskResults,
+            success: false,
+            pauseReason: `Deadlock: ${remainingPending.length} task(s) blocked by unmet dependencies: ${blockedIds.join('; ')}`,
+          };
+          context.onLoopComplete?.(deadlockResult);
+          return deadlockResult;
         }
-        const deadlockResult: RalphLoopResult = {
-          completed,
-          failed,
-          total: sortedTasks.length,
-          taskResults,
-          success: false,
-          pauseReason: `Deadlock: ${remainingPending.length} task(s) blocked by unmet dependencies: ${blockedIds.join('; ')}`,
-        };
-        context.onLoopComplete?.(deadlockResult);
-        return deadlockResult;
       }
       if (completed === 0 && failed === 0) {
         log.warn('No pending tasks found — all tasks have passes=true', {
@@ -588,6 +617,7 @@ export async function runRalphLoop(
         taskSuccess = true;
         updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null });
         writeTasksFile(change.tasksPath, tasks);
+        await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
         emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'completed', attempt);
         completed++;
         emitLoopProgress(completed, failed, sortedTasks.length);
@@ -693,6 +723,7 @@ export async function runRalphLoop(
           const result: RalphLoopResult = {
             completed,
             failed,
+            skipped,
             total: sortedTasks.length,
             taskResults,
             success: false,
@@ -704,11 +735,15 @@ export async function runRalphLoop(
           return result;
         }
       } else if (shouldPause && !context.onAskUser) {
-        updateTaskInList(tasks, nextTask.id, { passes: true, error: `Auto-skipped (no onAskUser): ${lastError}` });
+        updateTaskInList(tasks, nextTask.id, { passes: false, error: `Auto-skipped (no onAskUser): ${lastError}` });
         writeTasksFile(change.tasksPath, tasks);
         taskResults[taskResults.length - 1].status = 'skipped';
+        failed++;
+        skipped++;
+        processedTaskIds.add(nextTask.id);
       } else {
         failed++;
+        processedTaskIds.add(nextTask.id);
       }
     } else {
       taskResults.push({
@@ -724,6 +759,7 @@ export async function runRalphLoop(
   const result: RalphLoopResult = {
     completed,
     failed,
+    skipped,
     total: sortedTasks.length,
     taskResults,
     success: failed === 0,
