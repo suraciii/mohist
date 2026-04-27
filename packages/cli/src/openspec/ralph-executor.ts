@@ -407,7 +407,7 @@ export async function runRalphLoop(
 
   const sortedTasks = sortTasksByOrder(tasks);
   const DEFAULT_TASK_TIMEOUT_MS = 30 * 60 * 1000;
-  const MIN_TASK_TIMEOUT_MS = 5 * 60 * 1000;
+  const MIN_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 
   const perTaskTimeout = context.stageTimeoutMs != null && sortedTasks.length > 0
     ? Math.max(Math.floor(context.stageTimeoutMs / sortedTasks.length), MIN_TASK_TIMEOUT_MS)
