@@ -49,9 +49,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The AcpConnection already has connection.cancel() logic for timeouts (line 382, 766). Reuse the same pattern for abort signal.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
