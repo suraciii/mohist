@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add stop API and force parameter to interrupt running agent pipelines",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -23,8 +22,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "The AbortSignal must propagate through WorkflowController to createAcpConnection so the ACP prompt() call is interrupted. Add signal?: AbortSignal to WorkflowControllerOptions and AcpConnectionOptions."
+      "passes": true,
+      "notes": "The AbortSignal must propagate through WorkflowController to createAcpConnection so the ACP prompt() call is interrupted. Add signal?: AbortSignal to WorkflowControllerOptions and AcpConnectionOptions.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -44,9 +46,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "The AcpConnection already has connection.cancel() logic for timeouts (line 382, 766). Reuse the same pattern for abort signal."
+      "notes": "The AcpConnection already has connection.cancel() logic for timeouts (line 382, 766). Reuse the same pattern for abort signal.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -65,9 +72,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Follow the same pattern as the close handler — check project, check issue, check agent, then act."
+      "notes": "Follow the same pattern as the close handler — check project, check issue, check agent, then act.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -87,9 +99,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001", "T-003"],
+      "dependsOn": [
+        "T-001",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Extract a helper like `ensureAgentStopped(issueId, force)` to avoid duplicating the stop-then-check logic across four handlers."
+      "notes": "Extract a helper like `ensureAgentStopped(issueId, force)` to avoid duplicating the stop-then-check logic across four handlers.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -108,9 +126,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/agent-runner-stop.test.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Mock WorkflowController to simulate long-running pipeline. Use real EventBus and in-memory DB."
+      "notes": "Mock WorkflowController to simulate long-running pipeline. Use real EventBus and in-memory DB.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -133,9 +157,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/agent-stop-api.test.ts",
-      "dependsOn": ["T-003", "T-004"],
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Follow patterns from existing api-routes.test.ts. Mock AgentRunnerService.stop() to avoid needing real ACP subprocess."
+      "notes": "Follow patterns from existing api-routes.test.ts. Mock AgentRunnerService.stop() to avoid needing real ACP subprocess.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
