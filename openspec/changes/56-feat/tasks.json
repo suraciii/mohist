@@ -103,9 +103,9 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Add WorktreeManager to RalphExecutorContext. The onBeforeKill callback needs access to worktreePath (from context), taskId (from current task), and attempt number (from loop variable). Use closure to capture these values.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
