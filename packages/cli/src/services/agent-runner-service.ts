@@ -422,6 +422,7 @@ export class AgentRunnerService {
           eventBus: this.eventBus,
           projectId,
           checkpointRepo: this.checkpointRepo,
+          signal: abortController.signal,
         });
 
         const abortPromise = new Promise<never>((_resolve, reject) => {

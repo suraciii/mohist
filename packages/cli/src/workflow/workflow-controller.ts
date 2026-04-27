@@ -1,17 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
-import type { ChildProcess } from 'child_process';
 import { promisify } from 'util';
-import { Stage, IssueStatus, MergeState, type Issue } from '../types';
+import { Stage, IssueStatus, type Issue } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { loadWorkflow } from './workflow-loader';
-import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
-import type { CommentRepo } from '../db/comment-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
@@ -36,12 +34,6 @@ export interface StageResult {
   requiresApproval: boolean;
   output: unknown;
   message?: string;
-  escalateToStage?: Stage;
-}
-
-export interface MergeBackResult {
-  success: boolean;
-  message: string;
 }
 
 export interface WorkflowControllerOptions {
@@ -51,11 +43,7 @@ export interface WorkflowControllerOptions {
   eventBus?: EventBus;
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
-  commentRepo?: CommentRepo;
-  onProgress?: (update: { stage?: string; roundType?: string; roundIndex?: number; taskProgress?: { completed: number; total: number } | null }) => void;
-  onChildProcess?: (proc: ChildProcess) => void;
-  mergeBackFn?: (issueNumber: number) => Promise<MergeBackResult>;
-  onMergeConflictFn?: (issueNumber: number) => Promise<void>;
+  signal?: AbortSignal;
 }
 
 export interface PipelineResult {
@@ -72,11 +60,7 @@ export class WorkflowController {
   private eventBus?: EventBus;
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
-  private commentRepo?: CommentRepo;
-  private _onProgress?: WorkflowControllerOptions['onProgress'];
-  private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
-  private mergeBackFn?: (issueNumber: number) => Promise<MergeBackResult>;
-  private onMergeConflictFn?: (issueNumber: number) => Promise<void>;
+  private signal?: AbortSignal;
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -85,23 +69,11 @@ export class WorkflowController {
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
-    this.commentRepo = options.commentRepo;
-    this._onProgress = options.onProgress;
-    this._onChildProcess = options.onChildProcess;
-    this.mergeBackFn = options.mergeBackFn;
-    this.onMergeConflictFn = options.onMergeConflictFn;
-  }
-
-  protected emitProgress(update: Parameters<NonNullable<WorkflowControllerOptions['onProgress']>>[0]): void {
-    this._onProgress?.(update);
+    this.signal = options.signal;
   }
 
   getCheckpointRepo(): PipelineCheckpointRepo | undefined {
     return this.checkpointRepo;
-  }
-
-  getCommentRepo(): CommentRepo | undefined {
-    return this.commentRepo;
   }
 
   async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
@@ -128,21 +100,7 @@ export class WorkflowController {
         completedSteps,
         nextStep: checkpoint?.nextStep,
       });
-
-      const resumeRoundTypes = ['proposal', 'specs', 'design', 'tasks', 'self-review'];
-      const resumeCompleted = completedSteps.filter(s => resumeRoundTypes.includes(s)).length;
-      const lastCompletedRoundType = [...completedSteps].reverse().find(s => resumeRoundTypes.includes(s));
-      const lastCompletedIndex = lastCompletedRoundType ? resumeRoundTypes.indexOf(lastCompletedRoundType) : -1;
-      this.emitProgress({
-        stage: 'plan',
-        roundType: lastCompletedRoundType ?? 'proposal',
-        roundIndex: lastCompletedIndex >= 0 ? lastCompletedIndex : 0,
-        taskProgress: { completed: resumeCompleted, total: 5 },
-      });
     }
-
-    const issueId = String(acpOptions.issueNumber ?? acpOptions.issueId ?? '');
-    const projectId = this.projectId ?? issue.projectId;
 
     const rounds: PlanRoundConfig[] = [
       { type: 'proposal', verify: () => fs.existsSync(path.join(changeDir, 'proposal.md')), label: 'proposal.md', outputPath: path.join(changeDir, 'proposal.md') },
@@ -152,14 +110,9 @@ export class WorkflowController {
     ];
 
     const roundState = { type: '', index: 0 };
-    let conn: AcpConnection | undefined;
-
     const planAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
-      stage: Stage.Plan,
       executionId: `plan-${issue.number}`,
-      model: issue.model ?? undefined,
-      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -170,14 +123,14 @@ export class WorkflowController {
             roundIndex: roundState.index,
             sessionUpdate: _notification.update.sessionUpdate,
             data: _notification.update as unknown,
-            acpSessionId: conn?.acpSessionId,
-            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_session_update', { error: e instanceof Error ? e.message : String(e) });
         }
       },
     };
+
+    let conn: AcpConnection | undefined;
 
     try {
       conn = await createAcpConnection(planAcpOptions);
@@ -207,22 +160,17 @@ export class WorkflowController {
         if (this.eventBus) {
           try {
             this.eventBus.emit('plan_round_start', {
-              issueId,
-              projectId,
+              issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+              projectId: this.projectId ?? issue.projectId,
               roundType: round.type,
               roundLabel: round.label,
               roundIndex: index,
-              acpSessionId: conn?.acpSessionId,
-              coderSessionId: conn?.coderSessionId,
             });
           } catch (e) {
             log.warn('eventBus.emit failed for plan_round_start', { error: e instanceof Error ? e.message : String(e) });
           }
         }
 
-        this.emitProgress({ stage: 'plan', roundType: round.type, roundIndex: index, taskProgress: { completed: completedSteps.filter(s => ['proposal', 'specs', 'design', 'tasks', 'self-review'].includes(s)).length, total: 5 } });
-
-        const roundStartTime = Date.now();
         const prompt = buildArtifactPrompt(round.type as ArtifactType, issue, changeDir);
         const result = await conn.prompt(prompt);
 
@@ -281,18 +229,6 @@ export class WorkflowController {
         completedSteps.push(round.type);
         const nextRound = rounds[index + 1];
         this.checkpointRepo?.upsert(issue.number, 'plan', [...completedSteps], nextRound?.type ?? 'self-review');
-
-        this.emitPlanRoundComplete({
-          issueId,
-          projectId,
-          roundType: round.type,
-          roundLabel: round.label,
-          roundIndex: index,
-          startTime: roundStartTime,
-        });
-
-        const completedCount = completedSteps.filter(s => ['proposal', 'specs', 'design', 'tasks', 'self-review'].includes(s)).length;
-        this.emitProgress({ stage: 'plan', roundType: round.type, roundIndex: index, taskProgress: { completed: completedCount, total: 5 } });
       }
 
       // self-review round
@@ -304,22 +240,17 @@ export class WorkflowController {
       if (this.eventBus) {
         try {
           this.eventBus.emit('plan_round_start', {
-            issueId,
-            projectId,
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
             roundType: 'self-review',
             roundLabel: 'self-review',
             roundIndex: rounds.length,
-            acpSessionId: conn?.acpSessionId,
-            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_round_start', { roundType: 'self-review', error: e instanceof Error ? e.message : String(e) });
         }
       }
 
-      this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length, taskProgress: { completed: completedSteps.filter(s => ['proposal', 'specs', 'design', 'tasks', 'self-review'].includes(s)).length, total: 5 } });
-
-      const selfReviewStartTime = Date.now();
       const selfReviewPrompt = buildSelfReviewPrompt(issue, changeDir);
       const selfReviewResult = await conn.prompt(selfReviewPrompt);
 
@@ -334,167 +265,11 @@ export class WorkflowController {
         };
       }
 
-      const selfReviewReport = readReportFile(changeDir, 'self-review.md') ?? selfReviewResult.text;
-
-      const verdict = selfReviewReport ? parseVerdict(selfReviewReport) : 'FAIL';
-
-      this.emitPlanRoundComplete({
-        issueId,
-        projectId,
-        roundType: 'self-review',
-        roundLabel: 'self-review',
-        roundIndex: rounds.length,
-        startTime: selfReviewStartTime,
-        verdict: verdict === 'PASS' || verdict === 'FAIL' ? verdict : undefined,
-      });
-
-      if (verdict === 'PASS') {
-        this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length, taskProgress: { completed: 5, total: 5 } });
-        await conn.close();
-        this.checkpointRepo?.delete(issue.number, 'plan');
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Plan,
-            issueNumber: issue.number,
-            selfReviewNotes: selfReviewReport,
-            verdict,
-            artifacts: readPlanArtifacts(changeDir),
-          },
-          message: 'Plan completed, awaiting user approval',
-        };
-      }
-
-      this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length, taskProgress: { completed: 4, total: 5 } });
-
-      // Verdict FAIL → auto-fix on same connection
-      roundState.type = 'auto-fix';
-      roundState.index = rounds.length + 1;
-      log.info('Plan stage auto-fix round', { issueNumber: issue.number });
-
-      if (this.eventBus) {
-        try {
-          this.eventBus.emit('plan_round_start', {
-            issueId,
-            projectId,
-            roundType: 'auto-fix',
-            roundLabel: 'auto-fix',
-            roundIndex: rounds.length + 1,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_round_start', { roundType: 'auto-fix', error: e instanceof Error ? e.message : String(e) });
-        }
-      }
-
-      const autoFixStartTime = Date.now();
-      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, selfReviewReport ?? '', 'self-review.md');
-      const autoFixResult = await conn.prompt(autoFixPrompt);
-
-      if (!autoFixResult.success) {
-        log.error('Plan stage auto-fix prompt failed', { error: autoFixResult.error });
-        await conn.close();
-        this.checkpointRepo?.delete(issue.number, 'plan');
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Plan,
-            issueNumber: issue.number,
-            selfReviewNotes: selfReviewReport,
-            verdict,
-            artifacts: readPlanArtifacts(changeDir),
-          },
-          message: `Auto-fix failed: ${autoFixResult.error ?? 'unknown error'}. Awaiting user approval`,
-        };
-      }
-
-      this.emitPlanRoundComplete({
-        issueId,
-        projectId,
-        roundType: 'auto-fix',
-        roundLabel: 'auto-fix',
-        roundIndex: rounds.length + 1,
-        startTime: autoFixStartTime,
-      });
-
-      // Close old connection, open new one for full re-self-review
       await conn.close();
 
-      roundState.type = 're-self-review';
-      roundState.index = rounds.length + 2;
-      log.info('Plan stage re-self-review round on new connection', { issueNumber: issue.number });
-
-      conn = await createAcpConnection(planAcpOptions);
-
-      if (this.eventBus) {
-        try {
-          this.eventBus.emit('plan_round_start', {
-            issueId,
-            projectId,
-            roundType: 're-self-review',
-            roundLabel: 're-self-review',
-            roundIndex: rounds.length + 2,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_round_start', { roundType: 're-self-review', error: e instanceof Error ? e.message : String(e) });
-        }
-      }
-
-      const reSelfReviewStartTime = Date.now();
-      const reSelfReviewPrompt = buildSelfReviewPrompt(issue, changeDir);
-      const reSelfReviewResult = await conn.prompt(reSelfReviewPrompt);
-
-      if (!reSelfReviewResult.success) {
-        log.error('Plan stage re-self-review failed', { error: reSelfReviewResult.error });
-        await conn.close();
-        this.checkpointRepo?.delete(issue.number, 'plan');
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Plan,
-            issueNumber: issue.number,
-            selfReviewNotes: selfReviewReport,
-            verdict,
-            artifacts: readPlanArtifacts(changeDir),
-          },
-          message: `Auto-fix succeeded but re-self-review failed: ${reSelfReviewResult.error ?? 'unknown error'}. Awaiting user approval`,
-        };
-      }
-
-      await conn.close();
       this.checkpointRepo?.delete(issue.number, 'plan');
 
-      const recheckReport = readReportFile(changeDir, 'self-review.md') ?? reSelfReviewResult.text;
-      const recheckVerdict = recheckReport ? parseVerdict(recheckReport) : 'FAIL';
-
-      this.emitPlanRoundComplete({
-        issueId,
-        projectId,
-        roundType: 're-self-review',
-        roundLabel: 're-self-review',
-        roundIndex: rounds.length + 2,
-        startTime: reSelfReviewStartTime,
-        verdict: recheckVerdict === 'PASS' || recheckVerdict === 'FAIL' ? recheckVerdict : undefined,
-      });
-
-      this.emitProgress({ stage: 'plan', roundType: 're-self-review', roundIndex: rounds.length + 2, taskProgress: { completed: 5, total: 5 } });
-
-      if (recheckVerdict === 'PASS') {
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Plan,
-            issueNumber: issue.number,
-            selfReviewNotes: recheckReport,
-            verdict: recheckVerdict,
-            artifacts: readPlanArtifacts(changeDir),
-          },
-          message: 'Auto-fix succeeded, re-self-review passed. Awaiting user approval',
-        };
-      }
+      const selfReviewReport = readReportFile(changeDir, 'self-review.md') ?? selfReviewResult.text;
 
       return {
         success: true,
@@ -502,11 +277,9 @@ export class WorkflowController {
         output: {
           stage: Stage.Plan,
           issueNumber: issue.number,
-          selfReviewNotes: recheckReport ?? selfReviewReport,
-          verdict: recheckVerdict,
-          artifacts: readPlanArtifacts(changeDir),
+          selfReviewNotes: selfReviewReport,
         },
-        message: 'Auto-fix attempted but re-self-review still FAIL. Awaiting user approval',
+        message: 'Plan completed, awaiting user approval',
       };
     } catch (err) {
       if (conn) {
@@ -535,13 +308,36 @@ export class WorkflowController {
       };
     }
 
+    if (this.signal?.aborted) {
+      return {
+        completed: false,
+        stage: issue.stage,
+        gateRequired: false,
+        message: 'Agent stopped by user',
+      };
+    }
+
+    const acpOptsWithSignal: AcpConnectionOptions = {
+      ...acpOptions,
+      signal: this.signal,
+    };
+
     let currentIssue = issue;
 
     while (currentIssue.stage !== Stage.Done) {
+      if (this.signal?.aborted) {
+        return {
+          completed: false,
+          stage: currentIssue.stage,
+          gateRequired: false,
+          message: 'Agent stopped by user',
+        };
+      }
+
       switch (currentIssue.stage) {
-        case Stage.Backlog:
+        case Stage.Draft:
         case Stage.Plan: {
-          const planResult = await this.runPlanStage(currentIssue, acpOptions);
+          const planResult = await this.runPlanStage(currentIssue, acpOptsWithSignal);
           if (!planResult.success) {
             return {
               completed: false,
@@ -573,7 +369,7 @@ export class WorkflowController {
         }
 
         case Stage.Build: {
-          const buildResult = await this.runPipelineBuildStage(currentIssue, acpOptions);
+          const buildResult = await this.runPipelineBuildStage(currentIssue, acpOptsWithSignal);
           if (!buildResult.success) {
             return {
               completed: false,
@@ -583,97 +379,22 @@ export class WorkflowController {
             };
           }
 
+          if (this.signal?.aborted) {
+            return {
+              completed: false,
+              stage: Stage.Build,
+              gateRequired: false,
+              message: 'Agent stopped by user',
+            };
+          }
+
           currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Review)!;
           break;
         }
 
         case Stage.Review: {
-          const isApproved = currentIssue.approvalState?.status === 'approved';
-          const isResolving = currentIssue.mergeState === MergeState.Resolving;
-
-          if (isApproved || isResolving) {
-            if (!this.mergeBackFn) {
-              log.info('Skipping to Done (no mergeBackFn)', {
-                issueNumber: currentIssue.number,
-                reason: isResolving ? 'conflict resolution' : 'approved',
-              });
-              currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Done)!;
-              break;
-            }
-
-            const label = isResolving ? 'Resolving' : 'Approved';
-            log.info(`${label}: executing mergeBack`, { issueNumber: currentIssue.number });
-
-            try {
-              const mergeResult = await this.mergeBackFn(currentIssue.number);
-
-              if (mergeResult.success) {
-                log.info(`${label}: mergeBack succeeded`, { issueNumber: currentIssue.number });
-                this.issueRepo.setMergeState(currentIssue.id, MergeState.Merged);
-                currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Done)!;
-                break;
-              }
-
-              log.warn(`${label}: mergeBack failed`, {
-                issueNumber: currentIssue.number,
-                message: mergeResult.message,
-              });
-
-              if (this.onMergeConflictFn) {
-                await this.onMergeConflictFn(currentIssue.number);
-                return {
-                  completed: false,
-                  stage: Stage.Review,
-                  gateRequired: false,
-                  message: `Merge failed: ${mergeResult.message}. Conflict resolution triggered.`,
-                };
-              }
-
-              this.issueRepo.setMergeState(currentIssue.id, MergeState.Blocked);
-              return {
-                completed: false,
-                stage: Stage.Review,
-                gateRequired: false,
-                message: `Merge failed: ${mergeResult.message}`,
-              };
-            } catch (err) {
-              log.error(`${label}: mergeBack threw`, {
-                issueNumber: currentIssue.number,
-                error: err instanceof Error ? err.message : String(err),
-              });
-
-              if (this.onMergeConflictFn) {
-                await this.onMergeConflictFn(currentIssue.number);
-                return {
-                  completed: false,
-                  stage: Stage.Review,
-                  gateRequired: false,
-                  message: `Merge error: ${err instanceof Error ? err.message : String(err)}. Conflict resolution triggered.`,
-                };
-              }
-
-              this.issueRepo.setMergeState(currentIssue.id, MergeState.Blocked);
-              return {
-                completed: false,
-                stage: Stage.Review,
-                gateRequired: false,
-                message: `Merge error: ${err instanceof Error ? err.message : String(err)}`,
-              };
-            }
-          }
-
-          const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
+          const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptsWithSignal);
           if (!reviewResult.success) {
-            if (reviewResult.escalateToStage !== undefined) {
-              log.info('Review stage escalating to build with no-auto-fix checkpoint', {
-                issueNumber: currentIssue.number,
-                escalateTo: reviewResult.escalateToStage,
-              });
-              this.checkpointRepo?.upsert(currentIssue.number, 'review', ['no-auto-fix'], null);
-              currentIssue = this.issueRepo.updateStage(currentIssue.id, reviewResult.escalateToStage)!;
-              break;
-            }
-
             return {
               completed: false,
               stage: Stage.Review,
@@ -712,6 +433,7 @@ export class WorkflowController {
       }
     }
 
+    this.issueRepo.updateStage(currentIssue.id, Stage.Done);
     this.issueRepo.clearApprovalState(currentIssue.id);
     this.issueRepo.updateStatus(currentIssue.id, IssueStatus.Completed);
     this.checkpointRepo?.deleteAll(currentIssue.number);
@@ -765,26 +487,6 @@ export class WorkflowController {
     } catch (e) {
       log.warn('eventBus.emit failed', { event: String(event), error: e instanceof Error ? e.message : String(e) });
     }
-  }
-
-  private emitPlanRoundComplete(opts: {
-    issueId: string;
-    projectId: string;
-    roundType: string;
-    roundLabel: string;
-    roundIndex: number;
-    startTime: number;
-    verdict?: 'PASS' | 'FAIL';
-  }): void {
-    this.emitSafe('plan_round_complete', {
-      issueId: opts.issueId,
-      projectId: opts.projectId,
-      roundType: opts.roundType,
-      roundLabel: opts.roundLabel,
-      roundIndex: opts.roundIndex,
-      duration: Math.round((Date.now() - opts.startTime) / 1000),
-      ...(opts.verdict !== undefined ? { verdict: opts.verdict } : {}),
-    });
   }
 
   private getBuildStageTimeoutMs(): number | undefined {
@@ -914,9 +616,6 @@ export class WorkflowController {
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
-      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
-      stage: Stage.Build,
-      model: issue.model ?? undefined,
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
@@ -1027,178 +726,6 @@ export class WorkflowController {
     };
   }
 
-  private buildReviewAcpOptions(
-    issue: Issue,
-    acpOptions: AcpConnectionOptions,
-    roundState: { type: string; index: number },
-    connRef: { current: AcpConnection | undefined },
-  ): AcpConnectionOptions {
-    return {
-      ...acpOptions,
-      stage: Stage.Review,
-      executionId: `review-${issue.number}`,
-      model: issue.model ?? undefined,
-      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
-      onSessionUpdate: (_notification) => {
-        if (!this.eventBus) return;
-        try {
-          this.eventBus.emit('plan_session_update', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: this.projectId ?? issue.projectId,
-            roundType: roundState.type,
-            roundIndex: roundState.index,
-            sessionUpdate: _notification.update.sessionUpdate,
-            data: _notification.update as unknown,
-            acpSessionId: connRef.current?.acpSessionId,
-            coderSessionId: connRef.current?.coderSessionId,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_session_update', { roundType: roundState.type, error: e instanceof Error ? e.message : String(e) });
-        }
-      },
-    };
-  }
-
-  private async runReviewRound(
-    issue: Issue,
-    acpOptions: AcpConnectionOptions,
-    roundType: string,
-    roundIndex: number,
-    prompt: string,
-  ): Promise<{ success: boolean; text?: string; error?: string }> {
-    const issueId = String(acpOptions.issueNumber ?? acpOptions.issueId ?? '');
-    const projectId = this.projectId ?? issue.projectId;
-
-    log.info('Review stage round', { roundType, roundIndex, issueNumber: issue.number });
-
-    this.emitSafe('plan_round_start', {
-      issueId,
-      projectId,
-      roundType,
-      roundLabel: roundType,
-      roundIndex,
-    });
-
-    let conn: AcpConnection | undefined;
-    try {
-      conn = await createAcpConnection(acpOptions);
-      const result = await conn.prompt(prompt);
-      await conn.close();
-      conn = undefined;
-
-      if (!result.success) {
-        log.error('Review round failed', { roundType, roundIndex, error: result.error });
-        return { success: false, error: result.error ?? 'unknown error' };
-      }
-
-      return { success: true, text: result.text };
-    } catch (err) {
-      if (conn) {
-        try { await conn.close(); } catch { /* ignore */ }
-      }
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-
-  private async runAutoFixLoop(
-    issue: Issue,
-    acpOptions: AcpConnectionOptions,
-    changeDir: string,
-    reviewReport: string,
-    fixSuggestions: string,
-    roundState: { type: string; index: number },
-  ): Promise<StageResult> {
-    const MAX_ATTEMPTS = 2;
-    const connRef = { current: undefined as AcpConnection | undefined };
-
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const autoFixRoundIndex = 2 + attempt * 2;
-      const reVerifyRoundIndex = 3 + attempt * 2;
-
-      roundState.type = 'auto-fix';
-      roundState.index = autoFixRoundIndex;
-
-      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport, 'review.md');
-      const autoFixAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
-      const autoFixResult = await this.runReviewRound(issue, autoFixAcpOptions, 'auto-fix', autoFixRoundIndex, autoFixPrompt);
-
-      if (!autoFixResult.success) {
-        log.warn('Auto-fix round failed, counting as attempt', {
-          attempt: attempt + 1,
-          error: autoFixResult.error,
-          issueNumber: issue.number,
-        });
-        continue;
-      }
-
-      roundState.type = 're-verify';
-      roundState.index = reVerifyRoundIndex;
-
-      const reVerifyPrompt = buildReVerifyPrompt(issue, changeDir, reviewReport);
-      const reVerifyAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
-      const reVerifyResult = await this.runReviewRound(issue, reVerifyAcpOptions, 're-verify', reVerifyRoundIndex, reVerifyPrompt);
-
-      if (!reVerifyResult.success) {
-        log.warn('Re-verify round failed', {
-          attempt: attempt + 1,
-          error: reVerifyResult.error,
-          issueNumber: issue.number,
-        });
-        continue;
-      }
-
-      const updatedReport = readReportFile(changeDir, 'review.md') ?? reVerifyResult.text ?? '';
-      const result = parseVerdict(updatedReport);
-      const updatedDimensions = parseDimensions(updatedReport);
-
-      if (result === 'PASS') {
-        log.info('Auto-fix succeeded', { attempt: attempt + 1, issueNumber: issue.number });
-
-        if (fixSuggestions && this.commentRepo) {
-          try {
-            this.commentRepo.create({
-              issueId: issue.id,
-              body: `**Auto-fix applied** (attempt ${attempt + 1})\n\n${fixSuggestions}`,
-            });
-          } catch (e) {
-            log.warn('Failed to create auto-fix comment', { error: e instanceof Error ? e.message : String(e) });
-          }
-        }
-
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Review,
-            issueNumber: issue.number,
-            reviewReport: updatedReport,
-            verdict: result,
-            dimensions: updatedDimensions,
-          },
-          message: `Review completed with auto-fix (attempt ${attempt + 1}), awaiting user approval`,
-        };
-      }
-
-      log.info('Re-verify still FAIL after auto-fix attempt', {
-        attempt: attempt + 1,
-        issueNumber: issue.number,
-      });
-    }
-
-    log.warn('Auto-fix loop exhausted, escalating to build stage', {
-      issueNumber: issue.number,
-      maxAttempts: MAX_ATTEMPTS,
-    });
-
-    return {
-      success: false,
-      requiresApproval: false,
-      output: null,
-      escalateToStage: Stage.Build,
-      message: `Auto-fix loop exhausted after ${MAX_ATTEMPTS} attempts, escalating to build stage`,
-    };
-  }
-
   private async runPipelineReviewStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
     const changeDir = this.artifactManager.getChangeDir(issue.number);
     if (!changeDir) {
@@ -1210,21 +737,37 @@ export class WorkflowController {
       };
     }
 
-    const hasNoAutoFix = this.checkpointRepo?.get(issue.number, 'review')?.completedSteps.includes('no-auto-fix') ?? false;
-
     const roundState = { type: '', index: 0 };
-    const connRef = { current: undefined as AcpConnection | undefined };
-    const reviewAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
+
+    const reviewAcpOptions: AcpConnectionOptions = {
+      ...acpOptions,
+      executionId: `review-${issue.number}`,
+      onSessionUpdate: (_notification) => {
+        if (!this.eventBus) return;
+        try {
+          this.eventBus.emit('plan_session_update', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: roundState.type,
+            roundIndex: roundState.index,
+            sessionUpdate: _notification.update.sessionUpdate,
+            data: _notification.update as unknown,
+          });
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_session_update', { roundType: roundState.type, error: e instanceof Error ? e.message : String(e) });
+        }
+      },
+    };
 
     let conn: AcpConnection | undefined;
-
     try {
       conn = await createAcpConnection(reviewAcpOptions);
-      connRef.current = conn;
 
       // Round 0: review
       roundState.type = 'review';
       roundState.index = 0;
+
+      log.info('Review stage round', { roundType: 'review', issueNumber: issue.number });
 
       if (this.eventBus) {
         try {
@@ -1234,8 +777,6 @@ export class WorkflowController {
             roundType: 'review',
             roundLabel: 'review',
             roundIndex: 0,
-            acpSessionId: conn?.acpSessionId,
-            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_round_start', { roundType: 'review', error: e instanceof Error ? e.message : String(e) });
@@ -1248,7 +789,12 @@ export class WorkflowController {
       if (!result.success) {
         log.error('Review stage round failed', { roundType: 'review', error: result.error });
         await conn.close();
-        return { success: false, requiresApproval: false, output: null, message: `Review failed: ${result.error ?? 'unknown error'}` };
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: `Review failed: ${result.error ?? 'unknown error'}`,
+        };
       }
 
       // Round 1: self-check
@@ -1265,8 +811,6 @@ export class WorkflowController {
             roundType: 'review-self-check',
             roundLabel: 'review-self-check',
             roundIndex: 1,
-            acpSessionId: conn?.acpSessionId,
-            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_round_start', { roundType: 'review-self-check', error: e instanceof Error ? e.message : String(e) });
@@ -1279,64 +823,51 @@ export class WorkflowController {
       if (!selfCheckResult.success) {
         log.error('Review stage self-check failed', { error: selfCheckResult.error });
         await conn.close();
-        return { success: false, requiresApproval: false, output: null, message: `Review stage failed at self-check: ${selfCheckResult.error ?? 'unknown error'}` };
+        return {
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: `Review stage failed at self-check: ${selfCheckResult.error ?? 'unknown error'}`,
+        };
       }
 
       await conn.close();
-      conn = undefined;
-      connRef.current = undefined;
 
       const reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
 
       if (!reviewReport || reviewReport.trim().length === 0) {
-        return { success: false, requiresApproval: false, output: null, message: 'Review stage failed: review.md is empty after self-check' };
-      }
-
-      const parsedResult = parseVerdict(reviewReport);
-
-      const parsedDimensions = parseDimensions(reviewReport);
-
-      if (parsedResult === 'PASS') {
         return {
-          success: true,
-          requiresApproval: true,
-          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport, verdict: parsedResult, dimensions: parsedDimensions },
-          message: 'Review completed, awaiting user approval',
+          success: false,
+          requiresApproval: false,
+          output: null,
+          message: 'Review stage failed: review.md is empty after self-check',
         };
       }
 
-      log.info('Review Result: FAIL, checking auto-fix eligibility', {
-        issueNumber: issue.number,
-        hasNoAutoFixCheckpoint: hasNoAutoFix,
-      });
-
-      if (hasNoAutoFix) {
-        log.info('no-auto-fix checkpoint present, skipping auto-fix loop', { issueNumber: issue.number });
-        return {
-          success: true,
-          requiresApproval: true,
-          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport, verdict: parsedResult, dimensions: parsedDimensions },
-          message: 'Review completed (auto-fix skipped due to prior exhaustion), awaiting user approval',
-        };
-      }
-
-      const fixSuggestions = extractFixSuggestions(reviewReport);
-      if (!fixSuggestions) {
-        log.info('No Fix Suggestions found, proceeding to awaiting-user without auto-fix', { issueNumber: issue.number });
-        return {
-          success: true,
-          requiresApproval: true,
-          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport, verdict: parsedResult, dimensions: parsedDimensions },
-          message: 'Review completed (no auto-fixable suggestions), awaiting user approval',
-        };
-      }
-
-      return this.runAutoFixLoop(issue, acpOptions, changeDir, reviewReport, fixSuggestions, roundState);
+      return {
+        success: true,
+        requiresApproval: true,
+        output: {
+          stage: Stage.Review,
+          issueNumber: issue.number,
+          reviewReport,
+        },
+        message: 'Review completed, awaiting user approval',
+      };
     } catch (err) {
       if (conn) {
-        try { await conn.close(); } catch { /* ignore */ }
+        try {
+          await conn.close();
+        } catch {
+          // ignore cleanup errors
+        }
       }
-      return { success: false, requiresApproval: false, output: null, message: `Review stage error: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `Review stage error: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   }
 }
@@ -1370,123 +901,6 @@ function cleanChangeDir(changeDir: string): void {
     const entryPath = path.join(changeDir, entry);
     fs.rmSync(entryPath, { recursive: true, force: true });
   }
-}
-
-const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
-const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
-
-export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
-  const match = RESULT_RE.exec(content);
-  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
-  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
-  if (legacyMatch) {
-    log.warn('parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
-    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
-  }
-  return null;
-}
-
-export interface ParsedDimension {
-  name: string;
-  status: 'PASS' | 'FAIL';
-  issues?: string[];
-}
-
-const DIMENSION_RE = /^###\s+(\w[\w\s]*?):\s*(PASS|FAIL)\s*$/gim;
-
-export function parseDimensions(content: string): ParsedDimension[] {
-  const dimensions: ParsedDimension[] = [];
-  const matches: Array<{ name: string; status: 'PASS' | 'FAIL'; index: number; endIndex: number }> = [];
-
-  let m: RegExpExecArray | null;
-  while ((m = DIMENSION_RE.exec(content)) !== null) {
-    matches.push({
-      name: m[1].trim(),
-      status: m[2].toUpperCase() as 'PASS' | 'FAIL',
-      index: m.index + m[0].length,
-      endIndex: -1,
-    });
-  }
-
-  for (let i = 0; i < matches.length; i++) {
-    const start = matches[i].index;
-    const end = i + 1 < matches.length ? matches[i + 1].index - matches[i + 1].name.length - matches[i + 1].status.length - 6 : content.length;
-    const section = content.slice(start, end);
-
-    const issues = section
-      .split('\n')
-      .filter(line => /^[-*]\s+/.test(line.trim()))
-      .map(line => line.trim().replace(/^[-*]\s+/, ''));
-
-    dimensions.push({
-      name: matches[i].name,
-      status: matches[i].status,
-      ...(issues.length > 0 ? { issues } : {}),
-    });
-  }
-
-  return dimensions;
-}
-
-const ARTIFACT_CONTENT_CAP = 5000;
-
-export interface PlanArtifact {
-  name: string;
-  path: string;
-  content: string;
-}
-
-function readPlanArtifacts(changeDir: string): PlanArtifact[] {
-  const artifacts: PlanArtifact[] = [];
-
-  const files = [
-    { name: 'proposal.md', filePath: path.join(changeDir, 'proposal.md') },
-    { name: 'design.md', filePath: path.join(changeDir, 'design.md') },
-    { name: 'tasks.json', filePath: path.join(changeDir, 'tasks.json') },
-  ];
-
-  for (const { name, filePath } of files) {
-    try {
-      if (!fs.existsSync(filePath)) continue;
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const content = raw.length > ARTIFACT_CONTENT_CAP
-        ? raw.slice(0, ARTIFACT_CONTENT_CAP) + '\n... (truncated)'
-        : raw;
-      artifacts.push({ name, path: path.relative(changeDir, filePath), content });
-    } catch {
-      // omit missing artifacts
-    }
-  }
-
-  const specsDir = path.join(changeDir, 'specs');
-  try {
-    if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
-      const entries = fs.readdirSync(specsDir).filter(f => f.endsWith('.md') || f.endsWith('.json'));
-      for (const entry of entries) {
-        const filePath = path.join(specsDir, entry);
-        try {
-          const raw = fs.readFileSync(filePath, 'utf-8');
-          const content = raw.length > ARTIFACT_CONTENT_CAP
-            ? raw.slice(0, ARTIFACT_CONTENT_CAP) + '\n... (truncated)'
-            : raw;
-          artifacts.push({ name: entry, path: path.relative(changeDir, filePath), content });
-        } catch {
-          // omit unreadable spec files
-        }
-      }
-    }
-  } catch {
-    // specs dir not readable
-  }
-
-  return artifacts;
-}
-
-export function extractFixSuggestions(content: string): string {
-  const match = content.match(/^##\s*Fix\s*Suggestions\s*$/im);
-  if (!match) return '';
-  const startIdx = match.index! + match[0].length;
-  return content.slice(startIdx).trim();
 }
 
 export function createWorkflowController(options: WorkflowControllerOptions): WorkflowController {

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { Writable, Readable } from 'stream';
 import {
   ClientSideConnection,
@@ -14,8 +14,7 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
-import { resolveOpencodeBinPath, load } from '../config/config-loader';
-import { getOpencodeDiscoveryService } from '../services/opencode-discovery-service';
+import { resolveOpencodeBinPath } from '../config/config-loader';
 
 const log = Log.create({ service: 'acp-session' });
 
@@ -48,11 +47,6 @@ export interface AcpSessionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
-  onProcessSpawned?: (proc: ChildProcess) => void;
-  onBeforeKill?: (cwd: string) => Promise<boolean>;
-  model?: string;
-  stage?: string;
-  hangIdleMs?: number;
 }
 
 export interface AcpSessionResult {
@@ -60,18 +54,11 @@ export interface AcpSessionResult {
   success: boolean;
   error?: string;
   acpSessionId?: string;
-  wipCommitted?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
-const PER_ROUND_TIMEOUT = 30 * 60 * 1000;
+const PER_ROUND_TIMEOUT = 15 * 60 * 1000;
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024;
-const DEFAULT_HANG_IDLE_MS = 3 * 60 * 1000;
-const HANG_CHECK_INTERVAL_MS = 30 * 1000;
-const RECOVERY_CANCEL_TIMEOUT_MS = 5 * 1000;
-const RECOVERY_WIP_TIMEOUT_MS = 5 * 1000;
-const RECOVERY_COOLDOWN_MS = 1 * 1000;
-const MAX_RECOVERY_ATTEMPTS = 2;
 
 export function truncateAgentText(text: string): string {
   if (text.length <= MAX_AGENT_TEXT_LENGTH) {
@@ -82,224 +69,6 @@ export function truncateAgentText(text: string): string {
   const tail = text.slice(-keepLength);
   const truncated = text.length - MAX_AGENT_TEXT_LENGTH;
   return `${head}\n\n...[truncated ${truncated} characters]...\n\n${tail}`;
-}
-
-interface PromptWithRecoveryParams {
-  connection: ClientSideConnection;
-  sessionId: string;
-  promptText: string;
-  timeoutMs: number;
-  hangIdleMs: number;
-  cwd: string;
-  issueId?: string;
-  projectId?: string;
-  executionId?: string;
-  sseIssueId: string;
-  acpSessionId: string;
-  workflowLogRepo?: WorkflowLogRepo;
-  eventBus?: EventBus;
-  onBeforeKill?: (cwd: string) => Promise<boolean>;
-  cleanup: () => Promise<void>;
-  getLastEventTime: () => number;
-  setLastEventTime: (t: number) => void;
-}
-
-async function runPromptWithHangRecovery(
-  params: PromptWithRecoveryParams
-): Promise<AcpSessionResult> {
-  const {
-    connection,
-    sessionId,
-    promptText,
-    timeoutMs,
-    hangIdleMs,
-    cwd,
-    issueId,
-    projectId,
-    executionId,
-    sseIssueId,
-    acpSessionId,
-    workflowLogRepo,
-    eventBus,
-    onBeforeKill,
-    cleanup,
-    getLastEventTime,
-    setLastEventTime,
-  } = params;
-
-  const startTime = Date.now();
-  const idleDisabled = hangIdleMs <= 0;
-  let recoveryAttemptCount = 0;
-  let idleTimer: ReturnType<typeof setInterval> | undefined;
-  let hangResolved: ((value: 'hang') => void) | undefined;
-
-  const emitRecoveryStatus = (status: 'detected' | 'recovering' | 'recovered' | 'failed', attempt: number, reason?: string) => {
-    if (!eventBus) return;
-    try {
-      eventBus.emit('coder_recovery_status', {
-        issueId: sseIssueId,
-        projectId: projectId ?? '',
-        executionId: executionId ?? '',
-        acpSessionId: acpSessionId || sessionId,
-        status,
-        attempt,
-        reason,
-      });
-    } catch {}
-  };
-
-  const doWipCommit = async (): Promise<boolean> => {
-    if (!onBeforeKill) return false;
-    try {
-      const result = await Promise.race([
-        onBeforeKill(cwd),
-        new Promise<false>((resolve) => setTimeout(() => resolve(false), RECOVERY_WIP_TIMEOUT_MS)),
-      ]);
-      return result;
-    } catch {
-      return false;
-    }
-  };
-
-  const doCancel = async (): Promise<boolean> => {
-    try {
-      await Promise.race([
-        connection.cancel({ sessionId }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('cancel timeout')), RECOVERY_CANCEL_TIMEOUT_MS)),
-      ]);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const doCooldown = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, RECOVERY_COOLDOWN_MS));
-
-  const createTimeoutP = (ms: number): Promise<'timeout'> =>
-    new Promise((resolve) => setTimeout(() => resolve('timeout'), ms));
-
-  const createIdlePromise = (): Promise<'hang'> =>
-    new Promise((resolve) => { hangResolved = resolve; });
-
-  const startIdleMonitor = () => {
-    if (idleDisabled) return;
-    idleTimer = setInterval(() => {
-      const idle = Date.now() - getLastEventTime();
-      if (idle > hangIdleMs) {
-        if (hangResolved) {
-          hangResolved('hang');
-          hangResolved = undefined;
-        }
-        clearInterval(idleTimer!);
-        idleTimer = undefined;
-      }
-    }, HANG_CHECK_INTERVAL_MS);
-  };
-
-  const stopIdleMonitor = () => {
-    if (idleTimer) {
-      clearInterval(idleTimer);
-      idleTimer = undefined;
-    }
-    hangResolved = undefined;
-  };
-
-  const recoveryHint = (idleMs: number) =>
-    `The previous LLM streaming connection was interrupted (idle for ${idleMs}ms). Your session context is preserved. Please continue from where you left off.`;
-
-  try {
-    let currentPrompt = promptText;
-
-    while (true) {
-      setLastEventTime(Date.now());
-      startIdleMonitor();
-
-      const remaining = Math.max(timeoutMs - (Date.now() - startTime), 0);
-      const result = await Promise.race([
-        connection.prompt({
-          sessionId,
-          prompt: [{ type: 'text', text: currentPrompt }],
-        }),
-        createTimeoutP(remaining),
-        createIdlePromise(),
-      ]);
-
-      stopIdleMonitor();
-
-      if (result === 'timeout') {
-        await cleanup();
-        return {
-          text: '',
-          success: false,
-          error: `Timed out after ${timeoutMs / 1000}s`,
-          acpSessionId: sessionId,
-        };
-      }
-
-      if (result !== 'hang') {
-        if (recoveryAttemptCount > 0) {
-          writeSessionLog(workflowLogRepo, issueId, 'acp_session_recovery_succeeded', { sessionId, attempt: recoveryAttemptCount });
-          emitRecoveryStatus('recovered', recoveryAttemptCount);
-        }
-        return {
-          text: '',
-          success: true,
-          acpSessionId: sessionId,
-        };
-      }
-
-      const idleMs = Date.now() - getLastEventTime();
-      const attempt = recoveryAttemptCount + 1;
-
-      log.warn('ACP session hang detected, starting recovery', { sessionId, idleMs, attempt });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_hang_detected', { sessionId, idleMs, attempt });
-      emitRecoveryStatus('detected', attempt);
-
-      if (attempt > MAX_RECOVERY_ATTEMPTS) {
-        log.error('Max recovery attempts exceeded, killing process', { sessionId, attempt });
-        writeSessionLog(workflowLogRepo, issueId, 'acp_session_recovery_failed', { sessionId, attempt, reason: 'max_attempts_exceeded' });
-        emitRecoveryStatus('failed', attempt, 'max_attempts_exceeded');
-        await cleanup();
-        return {
-          text: '',
-          success: false,
-          error: `[HANG_UNRECOVERABLE] max recovery attempts exceeded`,
-          acpSessionId: sessionId,
-        };
-      }
-
-      const wipCommitted = await doWipCommit();
-
-      const cancelOk = await doCancel();
-      if (!cancelOk) {
-        log.error('Cancel timed out during recovery, falling back to kill', { sessionId, attempt });
-        writeSessionLog(workflowLogRepo, issueId, 'acp_session_recovery_failed', { sessionId, attempt, reason: 'cancel_timeout' });
-        emitRecoveryStatus('failed', attempt, 'cancel_timeout');
-        await cleanup();
-        return {
-          text: '',
-          success: false,
-          error: `[HANG_UNRECOVERABLE] cancel timed out`,
-          acpSessionId: sessionId,
-          wipCommitted,
-        };
-      }
-
-      await doCooldown();
-
-      recoveryAttemptCount = attempt;
-      setLastEventTime(Date.now());
-
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_recovery_started', { sessionId, attempt });
-      emitRecoveryStatus('recovering', attempt);
-
-      currentPrompt = recoveryHint(idleMs);
-    }
-  } catch (err) {
-    stopIdleMonitor();
-    const message = err instanceof Error ? err.message : String(err);
-    return { text: '', success: false, error: message, acpSessionId: sessionId };
-  }
 }
 
 function killProc(proc: import('child_process').ChildProcess): void {
@@ -327,15 +96,10 @@ export async function runAcpSession(
     coderSessionRepo,
     issueNumber,
     opencodeBinPath,
-    onBeforeKill,
-    stage,
-    hangIdleMs = DEFAULT_HANG_IDLE_MS,
-    model,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
-  let lastEventTime = Date.now();
   const sessionStartTime = Date.now();
 
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: task.slice(0, 100) });
@@ -354,8 +118,6 @@ export async function runAcpSession(
       )
     ),
   });
-
-  options.onProcessSpawned?.(proc);
 
   let initialized = false;
   let rejectOnSpawn: ((err: Error) => void) | undefined;
@@ -417,26 +179,15 @@ export async function runAcpSession(
   const stream = ndJsonStream(input, output);
 
   const cleanup = async () => {
-    const cleanupPromise = Promise.allSettled([
+    const results = await Promise.allSettled([
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
     ]);
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      timeoutId = setTimeout(() => {
-        log.warn('Cleanup timed out after 5s, forcing kill');
-        resolve('timeout');
-      }, 5000);
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        log.error('Cleanup failed', { index, reason: String(result.reason) });
+      }
     });
-    const result = await Promise.race([cleanupPromise, timeoutPromise]);
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-    if (result !== 'timeout') {
-      (result as PromiseSettledResult<void>[]).forEach((r, index) => {
-        if (r.status === 'rejected') {
-          log.error('Cleanup failed', { index, reason: String(r.reason) });
-        }
-      });
-    }
     ensureKill();
   };
 
@@ -444,7 +195,6 @@ export async function runAcpSession(
     (_agent) => ({
       sessionUpdate: async (notification: SessionNotification) => {
         try {
-          lastEventTime = Date.now();
           const update = notification.update;
           const eventType = update.sessionUpdate;
 
@@ -466,16 +216,13 @@ export async function runAcpSession(
             if (eventBus && executionId) {
               const now = Date.now();
               if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
-                const chunkPayload: Record<string, unknown> = {
+                eventBus.emit('coder_text_chunk', {
                   issueId: sseIssueId,
                   projectId: projectId ?? '',
                   executionId,
                   acpSessionId: sessionId,
                   text: textChunk,
-                };
-                if (coderSessionId) chunkPayload.coderSessionId = coderSessionId;
-                if (options.model) chunkPayload.model = options.model;
-                eventBus.emit('coder_text_chunk', chunkPayload as any);
+                });
                 lastTextChunkTime = now;
               }
             }
@@ -517,7 +264,7 @@ export async function runAcpSession(
                 coderToolCallIds.delete(key);
               }
             }
-            const toolPayload: Record<string, unknown> = {
+            eventBus.emit('coder_tool_call', {
               issueId: sseIssueId,
               projectId: projectId ?? '',
               executionId,
@@ -528,10 +275,7 @@ export async function runAcpSession(
               title: (toolCallData?.title as string) ?? undefined,
               rawInput: state === 'started' ? toolCallData?.input : undefined,
               rawOutput: state === 'completed' ? toolCallData?.output : undefined,
-            };
-            if (coderSessionId) toolPayload.coderSessionId = coderSessionId;
-            if (options.model) toolPayload.model = options.model;
-            eventBus.emit('coder_tool_call', toolPayload as any);
+            });
           }
         } catch (err) {
           log.error('sessionUpdate error', { error: err instanceof Error ? err.message : String(err) });
@@ -600,163 +344,52 @@ export async function runAcpSession(
     sessionId = sessionResult.sessionId;
     log.info('ACP session created', { sessionId });
 
-    let resolvedModel: string | undefined;
-
-    if (model) {
-      log.info('Setting per-issue model override', { sessionId, model });
-      await connection.setSessionConfigOption({
-        configId: 'model',
-        sessionId,
-        value: model,
-      });
-    }
-
     if (coderSessionRepo && issueId) {
       try {
-        resolvedModel = options.model ?? load().model ?? undefined;
         const coderSession = coderSessionRepo.insert({
           issueId,
           acpSessionId: sessionId,
           executionId,
           taskDescription: task.slice(0, 200),
-          model: resolvedModel,
-          coderType: 'opencode',
-          stage: 'build',
         });
         coderSessionId = coderSession.id;
         log.info('coder_session row created', { coderSessionId, acpSessionId: sessionId });
-
-        if (eventBus) {
-          eventBus.emit('coder_session_started', {
-            issueId: sseIssueId,
-            projectId: projectId ?? '',
-            coderSessionId,
-            acpSessionId: sessionId,
-            executionId,
-            model: resolvedModel,
-            coderType: 'opencode',
-            stage: 'build',
-            taskDescription: task.slice(0, 200),
-          });
-        }
       } catch (err) {
         log.error('Failed to create coder_session row', { error: err instanceof Error ? err.message : String(err) });
       }
     }
 
-    if (!model) {
-      const config = load();
-      const configuredModel = stage && config.opencode?.stageModels?.[stage]
-        ? config.opencode.stageModels[stage]
-        : config.opencode?.model ?? null;
+    const promptResult = await Promise.race([
+      connection.prompt({
+        sessionId,
+        prompt: [{ type: 'text', text: task }],
+      }),
+      timeoutPromise,
+    ]);
 
-      if (configuredModel) {
-        try {
-          const availableModels = await getOpencodeDiscoveryService().getAvailableModels();
-          if (!availableModels.includes(configuredModel)) {
-            const errorMsg = `Configured model "${configuredModel}" is not available. Available models: ${availableModels.join(', ')}`;
-            log.error('Model validation failed', { configuredModel, availableModels });
-            writeSessionLog(workflowLogRepo, issueId, 'model_selection_failed', {
-              configuredModel,
-              availableModels,
-              stage,
-              error: errorMsg,
-              timestamp: new Date().toISOString(),
-            });
-            await cleanup();
-            return { text: agentText, success: false, error: errorMsg };
-          }
-        } catch (err) {
-          log.warn('Model discovery probe failed, skipping validation', { error: err instanceof Error ? err.message : String(err) });
-        }
-
-        try {
-          await connection.setSessionConfigOption({
-            configId: 'model',
-            sessionId,
-            value: configuredModel,
-          });
-          log.info('Model override applied', { model: configuredModel, stage });
-          writeSessionLog(workflowLogRepo, issueId, 'model_selected', {
-            model: configuredModel,
-            stage: stage ?? null,
-            source: stage && config.opencode?.stageModels?.[stage] ? 'stageModels' : 'opencode.model',
-            sessionId,
-            timestamp: new Date().toISOString(),
-          });
-        } catch (err) {
-          log.warn('setSessionConfigOption failed, falling back to default model', {
-            configuredModel,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          writeSessionLog(workflowLogRepo, issueId, 'model_fallback', {
-            configuredModel,
-            stage: stage ?? null,
-            reason: err instanceof Error ? err.message : 'setSessionConfigOption failed',
-            timestamp: new Date().toISOString(),
-          });
-        }
-      }
-    }
-
-    const promptResult = await runPromptWithHangRecovery({
-      connection,
-      sessionId,
-      promptText: task,
-      timeoutMs: timeout,
-      hangIdleMs,
-      cwd,
-      issueId,
-      projectId,
-      executionId,
-      sseIssueId,
-      acpSessionId: sessionId,
-      workflowLogRepo,
-      eventBus,
-      onBeforeKill,
-      cleanup,
-      getLastEventTime: () => lastEventTime,
-      setLastEventTime: (t: number) => { lastEventTime = t; },
-    });
-
-    if (!promptResult.success) {
+    if (promptResult === 'timeout') {
+      const duration = Date.now() - sessionStartTime;
+      log.error('ACP prompt timed out', { sessionId, timeout, duration });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, timestamp: new Date().toISOString() });
       if (coderSessionRepo && coderSessionId) {
         try {
           coderSessionRepo.updateStatus(coderSessionId, 'failed');
-          if (eventBus) {
-            eventBus.emit('coder_session_completed', {
-              issueId: sseIssueId,
-              projectId: projectId ?? '',
-              coderSessionId,
-              status: 'failed',
-              duration: Math.round((Date.now() - sessionStartTime) / 1000),
-            });
-          }
         } catch (err) {
           log.error('Failed to update coder_session status', { error: err instanceof Error ? err.message : String(err) });
         }
       }
-      if (!promptResult.error?.includes('[HANG_UNRECOVERABLE]')) {
-        writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration: Date.now() - sessionStartTime, timestamp: new Date().toISOString() });
+      try {
+        await connection.cancel({ sessionId });
+      } catch {
+        // cancel may fail if session already ended
       }
-      return { text: agentText, success: false, error: promptResult.error, wipCommitted: promptResult.wipCommitted };
+      await cleanup();
+      return { text: agentText, success: false, error: `Timed out after ${timeout / 1000}s` };
     }
 
     if (coderSessionRepo && coderSessionId) {
       try {
-        const updatedSession = coderSessionRepo.updateStatus(coderSessionId, 'completed');
-        if (eventBus) {
-          const duration = updatedSession.completedAt && updatedSession.createdAt
-            ? Math.round((new Date(updatedSession.completedAt).getTime() - new Date(updatedSession.createdAt).getTime()) / 1000)
-            : Math.round((Date.now() - sessionStartTime) / 1000);
-          eventBus.emit('coder_session_completed', {
-            issueId: sseIssueId,
-            projectId: projectId ?? '',
-            coderSessionId,
-            status: 'completed',
-            duration,
-          });
-        }
+        coderSessionRepo.updateStatus(coderSessionId, 'completed');
       } catch (err) {
         log.error('Failed to update coder_session status to completed', { error: err instanceof Error ? err.message : String(err) });
       }
@@ -773,15 +406,6 @@ export async function runAcpSession(
     if (coderSessionRepo && coderSessionId) {
       try {
         coderSessionRepo.updateStatus(coderSessionId, 'failed');
-        if (eventBus) {
-          eventBus.emit('coder_session_completed', {
-            issueId: sseIssueId,
-            projectId: projectId ?? '',
-            coderSessionId,
-            status: 'failed',
-            duration: Math.round(failDuration / 1000),
-          });
-        }
       } catch (updateErr) {
         log.error('Failed to update coder_session status', { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
       }
@@ -807,18 +431,12 @@ export interface AcpConnectionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
-  onProcessSpawned?: (proc: ChildProcess) => void;
-  onBeforeKill?: (cwd: string) => Promise<boolean>;
-  model?: string;
-  stage?: string;
-  hangIdleMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface AcpConnection {
   prompt(text: string): Promise<AcpSessionResult>;
   close(): Promise<void>;
-  coderSessionId?: string;
-  acpSessionId?: string;
 }
 
 function createTimeout(ms: number): Promise<'timeout'> {
@@ -843,15 +461,11 @@ export async function createAcpConnection(
     issueNumber,
     onSessionUpdate,
     opencodeBinPath,
-    onBeforeKill,
-    stage,
-    hangIdleMs = DEFAULT_HANG_IDLE_MS,
-    model,
+    signal,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
-  let lastEventTime = Date.now();
   let procExited = false;
   let agentText = '';
   let agentTextTruncated = false;
@@ -884,8 +498,6 @@ export async function createAcpConnection(
       )
     ),
   });
-
-  options.onProcessSpawned?.(proc);
 
   let rejectOnInit: ((err: Error) => void) | undefined;
   const spawnFailure = new Promise<never>((_, reject) => {
@@ -939,26 +551,15 @@ export async function createAcpConnection(
   const stream = ndJsonStream(input, output);
 
   const cleanup = async () => {
-    const cleanupPromise = Promise.allSettled([
+    const results = await Promise.allSettled([
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
     ]);
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      timeoutId = setTimeout(() => {
-        log.warn('Cleanup timed out after 5s, forcing kill');
-        resolve('timeout');
-      }, 5000);
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        log.error('Cleanup failed', { index, reason: String(result.reason) });
+      }
     });
-    const result = await Promise.race([cleanupPromise, timeoutPromise]);
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-    if (result !== 'timeout') {
-      (result as PromiseSettledResult<void>[]).forEach((r, index) => {
-        if (r.status === 'rejected') {
-          log.error('Cleanup failed', { index, reason: String(r.reason) });
-        }
-      });
-    }
     ensureKill();
   };
 
@@ -966,7 +567,6 @@ export async function createAcpConnection(
     (_agent) => ({
       sessionUpdate: async (notification: SessionNotification) => {
         try {
-          lastEventTime = Date.now();
           const update = notification.update;
           const eventType = update.sessionUpdate;
 
@@ -990,16 +590,13 @@ export async function createAcpConnection(
             } else if (eventBus && executionId) {
               const now = Date.now();
               if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
-                const chunkPayload: Record<string, unknown> = {
+                eventBus.emit('coder_text_chunk', {
                   issueId: sseIssueId,
                   projectId: projectId ?? '',
                   executionId,
                   acpSessionId: sessionId,
                   text: textChunk,
-                };
-                if (coderSessionId) chunkPayload.coderSessionId = coderSessionId;
-                if (options.model) chunkPayload.model = options.model;
-                eventBus.emit('coder_text_chunk', chunkPayload as any);
+                });
                 lastTextChunkTime = now;
               }
             }
@@ -1043,7 +640,7 @@ export async function createAcpConnection(
                 coderToolCallIds.delete(key);
               }
             }
-            const toolPayload: Record<string, unknown> = {
+            eventBus.emit('coder_tool_call', {
               issueId: sseIssueId,
               projectId: projectId ?? '',
               executionId,
@@ -1054,10 +651,7 @@ export async function createAcpConnection(
               title: (toolCallData?.title as string) ?? undefined,
               rawInput: state === 'started' ? toolCallData?.input : undefined,
               rawOutput: state === 'completed' ? toolCallData?.output : undefined,
-            };
-            if (coderSessionId) toolPayload.coderSessionId = coderSessionId;
-            if (options.model) toolPayload.model = options.model;
-            eventBus.emit('coder_tool_call', toolPayload as any);
+            });
           }
         } catch (err) {
           log.error('sessionUpdate error', {
@@ -1123,45 +717,19 @@ export async function createAcpConnection(
   sessionId = sessionResult.sessionId;
   log.info('ACP session created', { sessionId });
 
-  if (model) {
-    log.info('Setting per-issue model override', { sessionId, model });
-    await connection.setSessionConfigOption({
-      configId: 'model',
-      sessionId,
-      value: model,
-    });
-  }
-
   if (coderSessionRepo && issueId) {
     try {
-      const resolvedModel = options.model ?? load().model ?? undefined;
       const coderSession = coderSessionRepo.insert({
         issueId,
         acpSessionId: sessionId,
         executionId,
         taskDescription: 'multi-round acp connection',
-        model: resolvedModel,
-        coderType: 'opencode',
-        stage: options.stage,
       });
       coderSessionId = coderSession.id;
       log.info('coder_session row created', {
         coderSessionId,
         acpSessionId: sessionId,
       });
-      if (eventBus) {
-        eventBus.emit('coder_session_started', {
-          issueId: sseIssueId,
-          projectId: projectId ?? '',
-          coderSessionId,
-          acpSessionId: sessionId,
-          executionId,
-          model: resolvedModel,
-          coderType: 'opencode',
-          stage: options.stage ?? undefined,
-          taskDescription: undefined,
-        });
-      }
     } catch (err) {
       log.error('Failed to create coder_session row', {
         error: err instanceof Error ? err.message : String(err),
@@ -1169,67 +737,7 @@ export async function createAcpConnection(
     }
   }
 
-  if (!model) {
-    const config = load();
-    const configuredModel = stage && config.opencode?.stageModels?.[stage]
-      ? config.opencode.stageModels[stage]
-      : config.opencode?.model ?? null;
-
-    if (configuredModel) {
-      try {
-        const availableModels = await getOpencodeDiscoveryService().getAvailableModels();
-        if (!availableModels.includes(configuredModel)) {
-          const errorMsg = `Configured model "${configuredModel}" is not available. Available models: ${availableModels.join(', ')}`;
-          log.error('Model validation failed', { configuredModel, availableModels });
-          writeSessionLog(workflowLogRepo, issueId, 'model_selection_failed', {
-            configuredModel,
-            availableModels,
-            stage,
-            error: errorMsg,
-            timestamp: new Date().toISOString(),
-          });
-          await cleanup();
-          throw new Error(errorMsg);
-        }
-      } catch (err) {
-        if (err instanceof Error && err.message.startsWith('Configured model')) {
-          throw err;
-        }
-        log.warn('Model discovery probe failed, skipping validation', { error: err instanceof Error ? err.message : String(err) });
-      }
-
-      try {
-        await connection.setSessionConfigOption({
-          configId: 'model',
-          sessionId,
-          value: configuredModel,
-        });
-        log.info('Model override applied', { model: configuredModel, stage });
-        writeSessionLog(workflowLogRepo, issueId, 'model_selected', {
-          model: configuredModel,
-          stage: stage ?? null,
-          source: stage && config.opencode?.stageModels?.[stage] ? 'stageModels' : 'opencode.model',
-          sessionId,
-          timestamp: new Date().toISOString(),
-        });
-      } catch (err) {
-        log.warn('setSessionConfigOption failed, falling back to default model', {
-          configuredModel,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        writeSessionLog(workflowLogRepo, issueId, 'model_fallback', {
-          configuredModel,
-          stage: stage ?? null,
-          reason: err instanceof Error ? err.message : 'setSessionConfigOption failed',
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-  }
-
   return {
-    coderSessionId,
-    acpSessionId: sessionId,
     async prompt(text: string): Promise<AcpSessionResult> {
       if (closed) {
         return { text: '', success: false, error: 'Connection is closed' };
@@ -1237,53 +745,65 @@ export async function createAcpConnection(
 
       roundStartIndex = agentText.length;
 
-      const result = await runPromptWithHangRecovery({
-        connection,
-        sessionId,
-        promptText: text,
-        timeoutMs: timeout,
-        hangIdleMs,
-        cwd,
-        issueId,
-        projectId,
-        executionId,
-        sseIssueId,
-        acpSessionId: sessionId,
-        workflowLogRepo,
-        eventBus,
-        onBeforeKill,
-        cleanup,
-        getLastEventTime: () => lastEventTime,
-        setLastEventTime: (t: number) => { lastEventTime = t; },
-      });
+      const abortPromise = signal
+        ? new Promise<'aborted'>((resolve) => {
+            if (signal.aborted) {
+              resolve('aborted');
+              return;
+            }
+            const onAbort = () => resolve('aborted');
+            signal.addEventListener('abort', onAbort, { once: true });
+          })
+        : new Promise<'aborted'>(() => {});
 
-      if (!result.success) {
+      const promptResult = await Promise.race([
+        connection.prompt({
+          sessionId,
+          prompt: [{ type: 'text', text }],
+        }),
+        createTimeout(timeout),
+        abortPromise,
+      ]);
+
+      if (promptResult === 'aborted') {
+        log.info('ACP prompt aborted by signal', { sessionId });
+        writeSessionLog(workflowLogRepo, issueId, 'acp_session_aborted', { sessionId, mode: 'multi-round', timestamp: new Date().toISOString() });
+        try {
+          await connection.cancel({ sessionId });
+        } catch {
+          // cancel may fail
+        }
+        await cleanup();
+        closed = true;
+        return {
+          text: agentText.slice(roundStartIndex),
+          success: false,
+          error: 'Agent stopped by user',
+          acpSessionId: sessionId,
+        };
+      }
+
+      if (promptResult === 'timeout') {
+        const duration = Date.now() - connectionStartTime;
+        log.error('ACP prompt timed out', { sessionId, timeout, duration });
+        writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
         if (coderSessionRepo && coderSessionId) {
           try {
             coderSessionRepo.updateStatus(coderSessionId, 'failed');
-            if (eventBus) {
-              eventBus.emit('coder_session_completed', {
-                issueId: sseIssueId,
-                projectId: projectId ?? '',
-                coderSessionId,
-                status: 'failed',
-                duration: Math.round((Date.now() - connectionStartTime) / 1000),
-              });
-            }
           } catch {
             // ignore
           }
         }
-        if (result.error?.includes('Timed out')) {
-          const duration = Date.now() - connectionStartTime;
-          writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
+        try {
+          await connection.cancel({ sessionId });
+        } catch {
+          // cancel may fail
         }
         return {
           text: agentText.slice(roundStartIndex),
           success: false,
-          error: result.error,
+          error: `Timed out after ${timeout / 1000}s`,
           acpSessionId: sessionId,
-          wipCommitted: result.wipCommitted,
         };
       }
 
@@ -1302,19 +822,7 @@ export async function createAcpConnection(
       writeSessionLog(workflowLogRepo, issueId, 'acp_session_completed', { sessionId, success: true, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
       if (coderSessionRepo && coderSessionId) {
         try {
-          const updatedSession = coderSessionRepo.updateStatus(coderSessionId, 'completed');
-          if (eventBus) {
-            const sessDuration = updatedSession.completedAt && updatedSession.createdAt
-              ? Math.round((new Date(updatedSession.completedAt).getTime() - new Date(updatedSession.createdAt).getTime()) / 1000)
-              : Math.round(duration / 1000);
-            eventBus.emit('coder_session_completed', {
-              issueId: sseIssueId,
-              projectId: projectId ?? '',
-              coderSessionId,
-              status: 'completed',
-              duration: sessDuration,
-            });
-          }
+          coderSessionRepo.updateStatus(coderSessionId, 'completed');
         } catch {
           // ignore
         }
