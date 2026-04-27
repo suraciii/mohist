@@ -136,9 +136,9 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Mock git operations for WorktreeManager tests. Use the existing setAcpSessionRunner test pattern for ralph-executor tests.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
