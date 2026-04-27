@@ -20,11 +20,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/git/worktree-manager.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "New methods are additive — no changes to existing create/remove/list methods",
-      "attempts": 2,
+      "attempts": 3,
       "order": 999999,
-      "error": "Auto-skipped (no onAskUser): Timed out after 300s"
+      "error": null
     },
     {
       "id": "T-002",
