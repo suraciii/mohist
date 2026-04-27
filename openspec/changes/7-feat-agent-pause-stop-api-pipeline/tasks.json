@@ -103,9 +103,9 @@
         "T-001",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Extract a helper like `ensureAgentStopped(issueId, force)` to avoid duplicating the stop-then-check logic across four handlers.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
