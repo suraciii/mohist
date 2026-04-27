@@ -186,7 +186,7 @@ export class MergeQueue {
       issueNumber: entry.issueNumber,
     });
 
-    log.info('Processing merge', { issueNumber: entry.issueNumber, projectId: entry.projectId });
+    log.info('Processing merge (rebase-first)', { issueNumber: entry.issueNumber, projectId: entry.projectId });
 
     const project = this.deps.getProjectPath(entry.projectId);
     if (!project) {
@@ -194,9 +194,50 @@ export class MergeQueue {
       return;
     }
 
-    try {
-      await execFileAsync('git', ['merge', '--abort'], { cwd: project.path, timeout: 10000 }).catch(() => {});
-    } catch {}
+    const rebaseResult = await this.deps.worktreeManager.rebaseOntoMaster(
+      project.path,
+      project.name,
+      entry.issueNumber,
+      project.baseBranch,
+    );
+
+    if (!rebaseResult.success) {
+      log.warn('Rebase conflicts detected, aborting rebase and blocking', {
+        issueNumber: entry.issueNumber,
+        conflicts: rebaseResult.conflicts,
+      });
+
+      try {
+        await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
+      } catch (err) {
+        log.warn('Failed to abort rebase, continuing to blocked state', {
+          issueNumber: entry.issueNumber,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      entry.mergeState = 'blocked';
+      entry.conflictingFiles = rebaseResult.conflicts;
+      entry.message = `Rebase conflicts: ${rebaseResult.conflicts.join(', ')}`;
+      this.deps.issueRepo.setMergeState(entry.issueId, 'blocked');
+
+      this.deps.eventBus.emit('merge_blocked', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
+        issueNumber: entry.issueNumber,
+        conflictingFiles: rebaseResult.conflicts,
+      });
+
+      log.info('Issue blocked due to rebase conflicts', {
+        issueNumber: entry.issueNumber,
+        conflictingFiles: rebaseResult.conflicts,
+      });
+      return;
+    }
+
+    log.info('Rebase succeeded, performing fast-forward merge', {
+      issueNumber: entry.issueNumber,
+    });
 
     const mergeResult = await this.deps.worktreeManager.mergeBack(
       project.path,
@@ -206,12 +247,11 @@ export class MergeQueue {
     );
 
     if (!mergeResult.success) {
-      const isConflict = mergeResult.message.toLowerCase().includes('conflict');
-      this.handleFailure(entry, mergeResult.message, isConflict ? 'conflict' : 'build-failed');
+      this.handleFailure(entry, mergeResult.message);
       return;
     }
 
-    log.info('Merge succeeded, running build verification', {
+    log.info('Fast-forward merge succeeded, running build verification', {
       issueNumber: entry.issueNumber,
       projectPath: project.path,
     });
