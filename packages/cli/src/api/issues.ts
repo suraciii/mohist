@@ -569,11 +569,15 @@ export function createIssueRoutes(
       }
 
       if (agentRunner && agentRunner.isRunning(issue.id)) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} has an agent running. Wait for it to complete or pause first.`
-        };
-        return c.json(response, 409);
+        const force = c.req.query('force') === 'true';
+        if (!force) {
+          const response: ApiResponse = {
+            success: false,
+            error: `Issue #${number} has an agent running. Use ?force=true to stop it first, or wait for it to complete.`
+          };
+          return c.json(response, 409);
+        }
+        await agentRunner.stop(issue.id);
       }
 
       const { cleanup } = await c.req.json().catch(() => ({ cleanup: false }));
@@ -623,22 +627,35 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const issue = issueService.reopen(projectId, number);
-      
-      if (!issue) {
+      const preIssue = issueService.getByNumber(projectId, number);
+      if (!preIssue) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} not found or not reopenable (current status must be closed, blocked, or paused)`
+          error: `Issue #${number} not found`
         };
         return c.json(response, 404);
       }
 
-      if (agentRunner && agentRunner.isRunning(issue.id)) {
+      if (agentRunner && agentRunner.isRunning(preIssue.id)) {
+        const force = c.req.query('force') === 'true';
+        if (!force) {
+          const response: ApiResponse = {
+            success: false,
+            error: `Issue #${number} has an agent running. Use ?force=true to stop it first, or wait for it to complete.`
+          };
+          return c.json(response, 409);
+        }
+        await agentRunner.stop(preIssue.id);
+      }
+
+      const issue = issueService.reopen(projectId, number);
+
+      if (!issue) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} already has an agent running. Wait for it to complete first.`
+          error: `Issue #${number} not reopenable (current status must be closed, blocked, or paused)`
         };
-        return c.json(response, 409);
+        return c.json(response, 404);
       }
 
       const project = projectService.getById(projectId);
@@ -866,11 +883,15 @@ export function createIssueRoutes(
       }
 
       if (agentRunner && agentRunner.isRunning(issue.id)) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} is already running. Wait for it to complete first.`
-        };
-        return c.json(response, 400);
+        const force = c.req.query('force') === 'true';
+        if (!force) {
+          const response: ApiResponse = {
+            success: false,
+            error: `Issue #${number} is already running. Use ?force=true to stop it first, or wait for it to complete.`
+          };
+          return c.json(response, 409);
+        }
+        await agentRunner.stop(issue.id);
       }
 
       if (!agentRunner) {
@@ -999,11 +1020,15 @@ export function createIssueRoutes(
       }
 
       if (agentRunner && agentRunner.isRunning(issue.id)) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} is already running. Wait for it to complete first.`
-        };
-        return c.json(response, 400);
+        const force = c.req.query('force') === 'true';
+        if (!force) {
+          const response: ApiResponse = {
+            success: false,
+            error: `Issue #${number} is already running. Use ?force=true to stop it first, or wait for it to complete.`
+          };
+          return c.json(response, 409);
+        }
+        await agentRunner.stop(issue.id);
       }
 
       if (!agentRunner) {
