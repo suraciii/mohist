@@ -184,38 +184,16 @@ export class WorktreeManager {
       return { success: true, message: `No commits to merge for issue #${issueNumber}, worktree cleaned up` };
     }
 
-    let stashed = false;
     try {
-      const { stdout: dirtyCheck } = await execFileAsync(
-        'git', ['status', '--porcelain', '--ignore-submodules'],
-        { cwd: projectPath }
-      );
-      if (dirtyCheck.trim()) {
-        await execFileAsync('git', ['stash', '--include-untracked'], { cwd: projectPath });
-        stashed = true;
-      }
-
       await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
     } catch (err) {
-      if (stashed) {
-        await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch(() => {});
-      }
       return { success: false, message: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}` };
     }
 
     try {
       await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
     } catch (err) {
-      if (stashed) {
-        await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch(() => {});
-      }
       return { success: false, message: `Fast-forward not possible, rebase required: ${err instanceof Error ? err.message : String(err)}` };
-    }
-
-    if (stashed) {
-      await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch((err) => {
-        log.warn('Failed to pop stash after merge', { issueNumber, error: err instanceof Error ? err.message : String(err) });
-      });
     }
 
     log.info('Fast-forward merge succeeded', { issueNumber, branch, baseBranch });
