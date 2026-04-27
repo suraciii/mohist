@@ -105,7 +105,7 @@ export class MergeQueue {
   }
 
   recoverFromDB(): void {
-    const issues = this.deps.issueRepo.findByMergeStates(['pending', 'merging', 'blocked']);
+    const issues = this.deps.issueRepo.findByMergeStates(['pending', 'merging', 'rebasing', 'blocked']);
 
     for (const issue of issues) {
       if (this.queue.has(issue.number)) continue;
