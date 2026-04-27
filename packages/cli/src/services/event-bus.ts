@@ -27,6 +27,7 @@ export type EventMap = {
   merge_started: { issueId: string; projectId: string; issueNumber: number };
   merge_completed: { issueId: string; projectId: string; issueNumber: number };
   merge_failed: { issueId: string; projectId: string; issueNumber: number; reason: string };
+  merge_blocked: { issueId: string; projectId: string; issueNumber: number; conflictingFiles: string[] };
 };
 
 export type EventName = keyof EventMap;
