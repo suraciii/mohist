@@ -48,9 +48,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The callback receives cwd (the worktree path). Return true if WIP commit was created, false otherwise. Keep the existing timeout flow unchanged — just insert the callback call between connection.cancel() and cleanup().",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
