@@ -1,0 +1,173 @@
+{
+  "project": "mohist",
+  "description": "Fix agent progress visibility and UI dead zone for running pipelines: extend status API with progress metadata, add force-stop endpoint, replace Close button with live progress panel.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add cleanup() defensive timeout in acp-session.ts",
+      "spec": "specs/agent-progress-tracking/spec.md#acp-session-cleanup-has-defensive-timeout",
+      "description": "Wrap the existing `cleanup()` function in `acp-session.ts` (line 551) with a `Promise.race` that adds a 5-second timeout. If stream operations (`readable.cancel`, `writable.abort`) don't settle within 5s, log a warning and proceed to `ensureKill()`. The timeout fires via `setTimeout(resolve, 5000)`.",
+      "acceptanceCriteria": [
+        "cleanup() wraps Promise.allSettled in Promise.race with 5s timeout",
+        "ensureKill() is always called regardless of timeout",
+        "Warning log emitted when cleanup times out",
+        "Normal cleanup (settles within 5s) works unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Self-contained change, no dependencies. Touches only the cleanup() closure inside createAcpConnection/runAcpSession."
+    },
+    {
+      "id": "T-002",
+      "title": "Extend RunningAgent with progress fields and onProgress callback",
+      "spec": "specs/agent-progress-tracking/spec.md#runningagent-carries-mutable-progress-state",
+      "description": "Add `progress` field to `RunningAgent` interface with `{ stage, roundType, roundIndex, taskProgress, lastActivityAt }`. Update `AgentStatus` interface to include `progress` on each `activeAgents` entry. Update `getStatus()` to map progress from RunningAgent. Add `onProgress` callback to `WorkflowControllerOptions`. Wire `executePipeline()` to create the callback closure that mutates `RunningAgent.progress`.",
+      "acceptanceCriteria": [
+        "RunningAgent interface has progress field with stage, roundType, roundIndex, taskProgress, lastActivityAt",
+        "AgentStatus.activeAgents entries include progress field",
+        "getStatus() returns progress snapshot from RunningAgent",
+        "WorkflowControllerOptions has optional onProgress callback",
+        "executePipeline() creates RunningAgent with initial progress, passes onProgress closure to WorkflowController",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Backend types and plumbing only. WorkflowController update sites are in T-003."
+    },
+    {
+      "id": "T-003",
+      "title": "Wire progress updates in WorkflowController stage execution",
+      "spec": "specs/agent-progress-tracking/spec.md#runningagent-carries-mutable-progress-state",
+      "description": "Add `this.onProgress` calls at three sites in WorkflowController: (1) `run()` switch cases on stage entry — emit `{ stage }`, (2) `runPlanStage()` round loop — emit `{ stage:'plan', roundType, roundIndex }` at each round start and self-review round, (3) `runPipelineBuildStage()` — emit `{ stage:'build', taskProgress: { completed, total } }` in the existing `onTaskCompleted` closure. Also wire `runPipelineReviewStage` if it has a round pattern.",
+      "acceptanceCriteria": [
+        "run() calls onProgress on Plan, Build, Review stage entry",
+        "runPlanStage calls onProgress with roundType/roundIndex at each round iteration",
+        "runPipelineBuildStage calls onProgress with taskProgress after each task completion",
+        "runPipelineReviewStage calls onProgress with review round info",
+        "onProgress is optional — no crash if undefined",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Depends on T-002 for the onProgress callback type in WorkflowControllerOptions."
+    },
+    {
+      "id": "T-004",
+      "title": "Add child process ref to RunningAgent and forceStop method",
+      "spec": "specs/agent-force-stop/spec.md#agentrunnerservice-forcestop-method",
+      "description": "Add `childProcess?: ChildProcess` to `RunningAgent` interface. Add `onChildProcess` callback to `WorkflowControllerOptions` that stores the latest spawned process in RunningAgent. Expose the spawned ChildProcess from acp-session.ts — either by returning it from `createAcpConnection`/`runAcpSession` or via an `onProcessSpawned` callback in `AcpConnectionOptions`. Wire all ACP spawn sites in WorkflowController to call `onChildProcess`. Implement `AgentRunnerService.forceStop(issueId)` that kills child process, removes from activeAgents, clears pendingGates/waitingQuestions, and returns idempotent result.",
+      "acceptanceCriteria": [
+        "RunningAgent has childProcess field (ChildProcess | undefined)",
+        "WorkflowControllerOptions has onChildProcess callback",
+        "AcpConnectionOptions or createAcpConnection return exposes the spawned ChildProcess",
+        "Plan/Build/Review stage ACP spawns call onChildProcess with the spawned proc",
+        "forceStop(issueId) calls childProcess.kill('SIGKILL') if present",
+        "forceStop removes agent from activeAgents, clears pendingGates and waitingQuestions",
+        "forceStop is idempotent — returns { stopped: false } if agent already removed",
+        "Child process cleared in finally block of executePipeline",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Depends on T-002 for RunningAgent interface. Key challenge: acp-session.ts creates the ChildProcess internally and doesn't expose it. Need to add a callback (onProcessSpawned) to AcpConnectionOptions or modify createAcpConnection/runAcpSession to return the proc ref. This touches acp-session.ts, workflow-controller.ts, and agent-runner-service.ts."
+    },
+    {
+      "id": "T-005",
+      "title": "Add POST /api/issues/:number/force-stop endpoint",
+      "spec": "specs/agent-force-stop/spec.md#force-stop-api-endpoint",
+      "description": "Register `POST /:number/force-stop` in `createIssueRoutes` (issues.ts). Handler loads issue by number, checks agentRunner is available, calls agentRunner.forceStop(), updates issue status to interrupted via issueService. Return 200 on success, 409 if no agent running, 404 if issue not found. Emit `agent_stopped` event via EventBus.",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/force-stop returns 200 with { ok: true, issueNumber } when agent running",
+        "Returns 409 when no agent running for the issue",
+        "Returns 404 when issue does not exist",
+        "Issue status set to interrupted, stage preserved",
+        "agent_stopped event emitted via EventBus",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Depends on T-004 for forceStop method on AgentRunnerService."
+    },
+    {
+      "id": "T-006",
+      "title": "Update frontend types and API client for progress + force stop",
+      "spec": "specs/agent-force-stop/spec.md#frontend-api-client-provides-forcestop-method",
+      "description": "Add `progress` field to `AgentStatus.activeAgents[]` in frontend `types.ts`. Add `forceStopIssue(number)` method to `api.ts`. The progress type: `{ stage: string; roundType?: string; roundIndex?: number; taskProgress?: { completed: number; total: number } | null; lastActivityAt: string }`.",
+      "acceptanceCriteria": [
+        "AgentStatus.activeAgents entries have progress field in types.ts",
+        "api.ts has forceStopIssue(number) method that POSTs to /issues/:number/force-stop",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts",
+      "dependsOn": ["T-002", "T-004"],
+      "passes": false,
+      "notes": "Frontend type changes only. Depends on T-002 for progress type shape and T-004 for forceStop return type. UI component is T-007."
+    },
+    {
+      "id": "T-007",
+      "title": "Replace Close button with live progress panel and Force Stop UI",
+      "spec": "specs/web-ui/spec.md#issuedetailpage-shows-live-progress-panel-for-active-agents",
+      "description": "In IssueDetailPage.tsx, replace the Close button for active agents (line ~404-412) with a progress panel component. The panel shows: stage label, round type (Plan/Review), task progress X/Y (Build), relative last-activity time. Add Force Stop button with inline confirmation (click once shows 'Confirm Force Stop', 5s auto-reset). Add a `formatRelativeTime` helper for last-activity display. Use a useState for confirmation state and useEffect for 5s timeout reset.",
+      "acceptanceCriteria": [
+        "When agent is running on this issue, sidebar shows progress panel instead of Close button",
+        "Progress panel displays stage, roundType (Plan/Review), taskProgress X/Y (Build)",
+        "Last activity shown as relative time (just now, Xs ago, Xm ago)",
+        "Force Stop button visible in progress panel",
+        "Clicking Force Stop shows inline confirmation, no API call on first click",
+        "Clicking confirmation calls api.forceStopIssue and updates UI",
+        "Confirmation auto-resets after 5 seconds",
+        "After successful force stop, issue shows as interrupted with Resume button",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "useAgentStatus already polls at 5s so no polling change needed. Relative time helper can be a simple function, no library needed."
+    },
+    {
+      "id": "T-008",
+      "title": "Verify build and typecheck",
+      "spec": "",
+      "description": "Run `npm run build` and verify no type errors. Run `npm test` if test infrastructure is available. Verify the full change compiles end-to-end: backend types (RunningAgent, AgentStatus, WorkflowControllerOptions), API route (force-stop), frontend types and components.",
+      "acceptanceCriteria": [
+        "npm run build completes with zero errors",
+        "Typecheck passes across all changed files",
+        "No regressions in existing functionality"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "REVIEW",
+      "output": "build verification output",
+      "dependsOn": ["T-007"],
+      "passes": false,
+      "notes": "Final verification task. Run from packages/cli directory."
+    }
+  ]
+}

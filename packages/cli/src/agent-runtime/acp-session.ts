@@ -179,15 +179,24 @@ export async function runAcpSession(
   const stream = ndJsonStream(input, output);
 
   const cleanup = async () => {
-    const results = await Promise.allSettled([
+    const cleanupPromise = Promise.allSettled([
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
     ]);
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        log.error('Cleanup failed', { index, reason: String(result.reason) });
-      }
-    });
+    const timeoutPromise = new Promise<'timeout'>((resolve) =>
+      setTimeout(() => {
+        log.warn('Cleanup timed out after 5s, forcing kill');
+        resolve('timeout');
+      }, 5000)
+    );
+    const result = await Promise.race([cleanupPromise, timeoutPromise]);
+    if (result !== 'timeout') {
+      (result as PromiseSettledResult<void>[]).forEach((r, index) => {
+        if (r.status === 'rejected') {
+          log.error('Cleanup failed', { index, reason: String(r.reason) });
+        }
+      });
+    }
     ensureKill();
   };
 
@@ -549,15 +558,24 @@ export async function createAcpConnection(
   const stream = ndJsonStream(input, output);
 
   const cleanup = async () => {
-    const results = await Promise.allSettled([
+    const cleanupPromise = Promise.allSettled([
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
     ]);
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        log.error('Cleanup failed', { index, reason: String(result.reason) });
-      }
-    });
+    const timeoutPromise = new Promise<'timeout'>((resolve) =>
+      setTimeout(() => {
+        log.warn('Cleanup timed out after 5s, forcing kill');
+        resolve('timeout');
+      }, 5000)
+    );
+    const result = await Promise.race([cleanupPromise, timeoutPromise]);
+    if (result !== 'timeout') {
+      (result as PromiseSettledResult<void>[]).forEach((r, index) => {
+        if (r.status === 'rejected') {
+          log.error('Cleanup failed', { index, reason: String(r.reason) });
+        }
+      });
+    }
     ensureKill();
   };
 
