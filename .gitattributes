@@ -1,1 +1,2 @@
 * text=auto eol=lf
+packages/cli/src/config/models-snapshot.js merge=ours

@@ -287,10 +287,10 @@ export function validateTaskDependencies(tasks: Task[]): DependencyValidationRes
         errors.push(`Task "${task.id}" depends on "${depId}", which does not exist in the task list`);
       } else {
         const depTask = tasks.find(t => t.id === depId)!;
-        if (getOrderValue(depTask.order) >= getOrderValue(task.order)) {
+        if (getOrderValue(depTask.order) > getOrderValue(task.order)) {
           errors.push(
             `Task "${task.id}" (order: ${task.order}) depends on "${depId}" (order: ${depTask.order}), ` +
-            `but dependencies must reference tasks with a strictly lower order value`
+            `but dependencies must reference tasks with a lower or equal order value`
           );
         }
       }
