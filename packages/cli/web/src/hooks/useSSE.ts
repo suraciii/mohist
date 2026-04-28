@@ -1,10 +1,11 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { EventName, EventMap } from '../lib/types'
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../lib/agent-events'
 import type { AgentDetailEventMap } from '../lib/types'
 
 const SSE_URL = '/api/events'
+const LIVE_TIMER_INTERVAL = 500
 
 type AgentDetailEventName = keyof AgentDetailEventMap
 
@@ -12,9 +13,26 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
 }
 
-function useSSE(projectId: string | null) {
+interface LiveTaskState {
+  activeTaskId: string | null
+  activeTaskElapsedMs: number | null
+}
+
+function useSSE(projectId: string | null): LiveTaskState {
   const queryClient = useQueryClient()
   const eventSourceRef = useRef<EventSource | null>(null)
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
+  const [activeTaskElapsedMs, setActiveTaskElapsedMs] = useState<number | null>(null)
+  const taskStartRef = useRef<number | null>(null)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const clearLiveTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    taskStartRef.current = null
+  }, [])
 
   const handleEvent = useCallback(
     (eventName: string, data: string) => {
@@ -23,6 +41,25 @@ function useSSE(projectId: string | null) {
 
         if (isAgentDetailEvent(eventName)) {
           dispatchAgentEvent(eventName, parsed as AgentDetailEventMap[typeof eventName])
+        }
+
+        if (eventName === 'ralph_task_update') {
+          const taskEvt = parsed as AgentDetailEventMap['ralph_task_update']
+          if (taskEvt.status === 'started') {
+            clearLiveTimer()
+            taskStartRef.current = Date.now()
+            setActiveTaskId(taskEvt.taskId)
+            setActiveTaskElapsedMs(0)
+            timerRef.current = setInterval(() => {
+              if (taskStartRef.current !== null) {
+                setActiveTaskElapsedMs(Date.now() - taskStartRef.current)
+              }
+            }, LIVE_TIMER_INTERVAL)
+          } else if (taskEvt.status === 'completed' || taskEvt.status === 'failed') {
+            clearLiveTimer()
+            setActiveTaskId(taskEvt.taskId)
+            setActiveTaskElapsedMs(null)
+          }
         }
 
         switch (eventName as EventName) {
@@ -70,7 +107,7 @@ function useSSE(projectId: string | null) {
         // ignore malformed events
       }
     },
-    [queryClient],
+    [queryClient, clearLiveTimer],
   )
 
   useEffect(() => {
@@ -136,8 +173,19 @@ function useSSE(projectId: string | null) {
     return () => {
       es.close()
       eventSourceRef.current = null
+      clearLiveTimer()
+      setActiveTaskId(null)
+      setActiveTaskElapsedMs(null)
     }
-  }, [projectId, handleEvent])
+  }, [projectId, handleEvent, clearLiveTimer])
+
+  useEffect(() => {
+    return () => {
+      clearLiveTimer()
+    }
+  }, [clearLiveTimer])
+
+  return { activeTaskId, activeTaskElapsedMs }
 }
 
 export default useSSE
