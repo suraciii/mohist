@@ -524,6 +524,7 @@ export class WorkflowController {
 
     const checkpoint = this.checkpointRepo?.get(issue.number, 'build') ?? null;
     const completedTaskIds: string[] = checkpoint ? [...checkpoint.completedSteps] : [];
+    const hadCheckpoint = completedTaskIds.length > 0;
 
     if (completedTaskIds.length > 0) {
       log.info('Build stage resuming from checkpoint', {
@@ -593,6 +594,44 @@ export class WorkflowController {
       passed,
     });
 
+    if (completedTaskIds.length > 0 && change) {
+      try {
+        const verifyContent = fs.readFileSync(change.tasksPath, 'utf-8');
+        const verifyFile = JSON.parse(verifyContent) as TasksFile;
+        const verifyTasks = verifyFile.tasks;
+        const taskPassMap = new Map(verifyTasks.map(t => [t.id, t.passes === true]));
+        const verifiedIds = completedTaskIds.filter(id => taskPassMap.get(id) === true);
+
+        if (verifiedIds.length < completedTaskIds.length) {
+          const unverified = completedTaskIds.filter(id => taskPassMap.get(id) !== true);
+          log.warn('Checkpoint task IDs not verified in tasks.json, filtering', {
+            issueNumber: issue.number,
+            unverified,
+            verified: verifiedIds.length,
+            total: completedTaskIds.length,
+          });
+          completedTaskIds.length = 0;
+          completedTaskIds.push(...verifiedIds);
+        }
+
+        if (completedTaskIds.length > 0) {
+          const allTaskIds = verifyTasks.map(t => t.id);
+          const allCovered = allTaskIds.every(id => completedTaskIds.includes(id));
+          if (allCovered) {
+            this.checkpointRepo?.delete(issue.number, 'build');
+            log.info('Build checkpoint deleted (fully consistent with tasks.json)', {
+              issueNumber: issue.number,
+              taskCount: completedTaskIds.length,
+            });
+          }
+        }
+      } catch (e) {
+        log.warn('Failed to verify checkpoint consistency, using all checkpoint IDs', {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
     this.emitSafe('build_stage_started', {
       issueId,
       projectId,
@@ -651,7 +690,7 @@ export class WorkflowController {
       duration,
     });
 
-    if (result.completed === 0 && result.total > 0) {
+    if (result.completed === 0 && result.total > 0 && !(result.success && hadCheckpoint)) {
       log.warn('Build completed with 0 tasks executed out of total', {
         total: result.total,
         issueNumber: issue.number,
