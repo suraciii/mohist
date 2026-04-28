@@ -174,9 +174,9 @@
       "dependsOn": [
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "useSSE.ts 是 SSE 事件处理的中心，在这里添加 live timing 逻辑。setInterval 和 state 需要通过 React 机制（zustand store 或 useState）共享给 TaskList 组件",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
