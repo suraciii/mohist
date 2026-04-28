@@ -97,11 +97,11 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-002 for RunningAgent interface. Key challenge: acp-session.ts creates the ChildProcess internally and doesn't expose it. Need to add a callback (onProcessSpawned) to AcpConnectionOptions or modify createAcpConnection/runAcpSession to return the proc ref. This touches acp-session.ts, workflow-controller.ts, and agent-runner-service.ts.",
-      "attempts": 2,
+      "attempts": 3,
       "order": 999999,
-      "error": "Auto-skipped (no onAskUser): Timed out after 600s"
+      "error": null
     },
     {
       "id": "T-005",
