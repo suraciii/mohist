@@ -67,7 +67,7 @@ describe('Priority - Migration v14', () => {
     });
 
     expect(issue.priority).toBe('p2');
-    expect(getSchemaVersion(db)).toBe(14);
+    expect(getSchemaVersion(db)).toBe(15);
   });
 
   it('should convert priority:high label to p1 and remove label', () => {
