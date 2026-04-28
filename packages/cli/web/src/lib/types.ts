@@ -106,6 +106,21 @@ export interface DiffFile {
   deletions: number
 }
 
+export interface CommitEntry {
+  hash: string
+  message: string
+  author: string
+  date: string
+  filesChanged: number
+  additions: number
+  deletions: number
+}
+
+export interface CommitDiff {
+  hash: string
+  diff: string
+}
+
 export type PlanRoundStartEvent = {
   issueId: string
   projectId: string
@@ -249,6 +264,9 @@ export interface CoderSessionItem {
   status: string
   createdAt: string
   completedAt: string | null
+  model: string | null
+  coderType: string | null
+  stage: string | null
   workflowLogs: WorkflowLogItem[]
 }
 

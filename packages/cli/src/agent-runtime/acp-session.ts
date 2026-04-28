@@ -1243,7 +1243,7 @@ export async function createAcpConnection(
                 projectId: projectId ?? '',
                 coderSessionId,
                 status: 'failed',
-                duration: Math.round(duration / 1000),
+                duration: Math.round((Date.now() - connectionStartTime) / 1000),
               });
             }
           } catch {
