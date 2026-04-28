@@ -31,6 +31,9 @@ const EVENT_CONFIGS: Record<string, EventConfig> = {
   approval_requested: { symbol: '??', color: chalk.yellow, description: 'approval requested' },
   question_asked: { symbol: '??', color: chalk.yellow, description: 'question asked' },
   question_answered: { symbol: '✓', color: chalk.green, description: 'question answered' },
+  agent_conflict_resolution_started: { symbol: '>>', color: chalk.yellow, description: 'conflict resolution started' },
+  agent_conflict_resolution_completed: { symbol: 'ok', color: chalk.green, description: 'conflict resolution completed' },
+  agent_conflict_resolution_failed: { symbol: '!!', color: chalk.red, description: 'conflict resolution failed' },
 };
 
 function formatTimestamp(): string {

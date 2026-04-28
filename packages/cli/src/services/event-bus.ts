@@ -27,13 +27,10 @@ export type EventMap = {
   merge_started: { issueId: string; projectId: string; issueNumber: number };
   merge_completed: { issueId: string; projectId: string; issueNumber: number };
   merge_failed: { issueId: string; projectId: string; issueNumber: number; reason: string };
-  agent_stopped: { issueId: string; projectId: string; issueNumber: number; reason: string };
-  rebase_started: { issueId: string; projectId: string; issueNumber: number };
-  rebase_completed: { issueId: string; projectId: string; issueNumber: number };
-  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflictingFiles: string[] };
-  rebase_retry: { issueId: string; projectId: string; issueNumber: number; attempt: number };
-  merge_blocked: { issueId: string; projectId: string; issueNumber: number; reason: string; retryCount: number; lastConflict?: string; conflictingFiles?: string[] };
-  merge_conflict_requiring_resolution: { issueId: string; projectId: string; conflictFiles: string[] };
+  merge_blocked: { issueId: string; projectId: string; issueNumber: number; conflictingFiles: string[]; retryCount: number };
+  agent_conflict_resolution_started: { issueId: string; projectId: string; issueNumber: number; conflictFiles: string[] };
+  agent_conflict_resolution_completed: { issueId: string; projectId: string; issueNumber: number };
+  agent_conflict_resolution_failed: { issueId: string; projectId: string; issueNumber: number; error: string };
 };
 
 export type EventName = keyof EventMap;

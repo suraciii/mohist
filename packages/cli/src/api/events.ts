@@ -27,11 +27,10 @@ const ALL_EVENT_TYPES: EventName[] = [
   'merge_started',
   'merge_completed',
   'merge_failed',
-  'rebase_started',
-  'rebase_completed',
-  'rebase_conflict',
-  'rebase_retry',
   'merge_blocked',
+  'agent_conflict_resolution_started',
+  'agent_conflict_resolution_completed',
+  'agent_conflict_resolution_failed',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {
