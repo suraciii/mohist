@@ -36,6 +36,7 @@ export interface StageResult {
   requiresApproval: boolean;
   output: unknown;
   message?: string;
+  escalateToStage?: Stage;
 }
 
 export interface WorkflowControllerOptions {
@@ -499,6 +500,16 @@ export class WorkflowController {
         case Stage.Review: {
           const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
           if (!reviewResult.success) {
+            if (reviewResult.escalateToStage !== undefined) {
+              log.info('Review stage escalating to build with no-auto-fix checkpoint', {
+                issueNumber: currentIssue.number,
+                escalateTo: reviewResult.escalateToStage,
+              });
+              this.checkpointRepo?.upsert(currentIssue.number, 'review', ['no-auto-fix'], null);
+              currentIssue = this.issueRepo.updateStage(currentIssue.id, reviewResult.escalateToStage)!;
+              break;
+            }
+
             return {
               completed: false,
               stage: Stage.Review,
