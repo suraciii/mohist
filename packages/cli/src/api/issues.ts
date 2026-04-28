@@ -2022,25 +2022,34 @@ export function createIssueRoutes(
       eventBus.emit('rebase_completed', { issueId: issue.id, projectId, issueNumber: number, rebased: true });
 
       if (issue.stage === Stage.Plan && agentRunner) {
-        const acpOptions: AcpConnectionOptions = {
-          cwd: worktreeManager.getPath(project.name, issue.number) || process.cwd(),
-          issueId: issue.id,
-          projectId,
-          workflowLogRepo,
-          coderSessionRepo,
-          eventBus,
-          issueNumber: issue.number,
-          opencodeBinPath,
-        };
-        issueService.createComment(issue.id, 'master has new changes, check if design/tasks can leverage them');
-        agentRunner.resumePipeline(
-          issue,
-          projectId,
-          stateManager.getIssueRepo(),
-          worktreeManager.getPath(project.name, issue.number) || process.cwd(),
-          acpOptions,
-          (issueId, status) => issueService.setStatus(issueId, status),
-        );
+        if (agentRunner.hasPendingGate(number)) {
+          const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
+          const worktreePath = worktreeManager.getPath(project.name, issue.number) || process.cwd();
+
+          issueService.createComment(issue.id, rebaseMessage);
+
+          const acpOptions: AcpConnectionOptions = {
+            cwd: worktreePath,
+            issueId: issue.id,
+            projectId,
+            workflowLogRepo,
+            coderSessionRepo,
+            eventBus,
+            issueNumber: issue.number,
+            opencodeBinPath,
+          };
+
+          agentRunner.resumePipeline(
+            issue,
+            projectId,
+            stateManager.getIssueRepo(),
+            worktreePath,
+            acpOptions,
+            (issueId, status) => issueService.setStatus(issueId, status),
+          );
+        } else {
+          log.info('Skipping re-self-review injection: no pending gate for issue', { issueNumber: number });
+        }
       }
 
       if (issue.stage === Stage.Build && checkpointRepo) {
