@@ -111,9 +111,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing test patterns in packages/cli/tests/. Use mocks for ACP connection (conn.prompt), IssueRepo, EventBus, PipelineCheckpointRepo, CommentRepo.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
