@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface AgentProgress {
-  stage?: string;
+  stage: string;
   roundType?: string;
   roundIndex?: number;
   taskProgress?: { completed: number; total: number } | null;

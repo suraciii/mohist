@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from 'react'
+import { Fragment, useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
@@ -63,11 +63,21 @@ export function IssueDetailPage() {
   const [commentText, setCommentText] = useState('')
   const [messageText, setMessageText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
+  const forceStopPanelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!forceStopConfirming) return
     const timer = setTimeout(() => setForceStopConfirming(false), 5000)
-    return () => clearTimeout(timer)
+    const handleClickOutside = (e: MouseEvent) => {
+      if (forceStopPanelRef.current && !forceStopPanelRef.current.contains(e.target as Node)) {
+        setForceStopConfirming(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
   }, [forceStopConfirming])
 
   const { data: issue, isLoading } = useIssue(issueNumber)
@@ -441,7 +451,7 @@ export function IssueDetailPage() {
                   )}
 
                   {isAgentRunningOnThis && (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+                    <div ref={forceStopPanelRef} className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
                       <div className="flex items-center gap-2">
                         <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
                         <span className="text-xs font-semibold text-blue-800">
