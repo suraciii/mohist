@@ -4,12 +4,16 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useSessionTimeline } from '../hooks/useSessionTimeline'
+import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionTimeline } from './SessionTimeline'
+import { TaskList } from './TaskList'
+import { formatTime } from '../lib/format-time'
+import { statusBadge } from '../lib/status-badge'
 
 const STAGES = [Stage.Draft, Stage.Explore, Stage.Plan, Stage.Build, Stage.Review, Stage.Done]
 
@@ -24,24 +28,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Review, Stage.Done])
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
-
-function statusBadge(status: IssueStatus): string {
-  switch (status) {
-    case IssueStatus.Active:
-      return 'text-green-700 bg-green-50'
-    case IssueStatus.Paused:
-      return 'text-amber-700 bg-amber-50'
-    case IssueStatus.Blocked:
-      return 'text-red-700 bg-red-50'
-    case IssueStatus.Interrupted:
-      return 'text-orange-700 bg-orange-50'
-    default:
-      return 'text-gray-700 bg-gray-50'
-  }
-}
+const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Review, Stage.Done])
 
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
@@ -55,10 +42,31 @@ export function IssueDetailPage() {
   const { data: issue, isLoading } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
+  const { data: buildStatus } = useBuildStatus(issueNumber)
+  const { data: tasksData } = useTasks(issueNumber)
+  useTaskProgress(issueNumber)
+
+  const mergedTasks = (() => {
+    const baseTasks = tasksData?.tasks ?? buildStatus?.tasks
+    if (!baseTasks) return []
+    const statusMap = new Map<string, { passes?: boolean; error?: string | null; attempts?: number }>()
+    if (buildStatus?.tasks) {
+      for (const t of buildStatus.tasks) {
+        statusMap.set(t.id, { passes: t.passes, error: t.error, attempts: t.attempts })
+      }
+    }
+    return baseTasks.map((t) => {
+      const status = statusMap.get(t.id)
+      return status ? { ...t, ...status } : t
+    })
+  })()
+
   const {
     rounds,
     isStreaming,
     isLoading: sessionLoading,
+    taskProgress,
+    loopProgress,
   } = useSessionTimeline(issueNumber)
 
   const approveMutation = useMutation({
@@ -256,6 +264,18 @@ export function IssueDetailPage() {
                   <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
                   <div className="text-sm text-gray-600 whitespace-pre-wrap">{issue.body}</div>
                 </div>
+              )}
+
+              {TASK_LIST_STAGES.has(issue.stage) && mergedTasks.length > 0 && (
+                <TaskList
+                  tasks={mergedTasks}
+                  currentTask={buildStatus?.progress.currentTask ?? null}
+                  progress={{
+                    completed: buildStatus?.progress.completed ?? 0,
+                    failed: buildStatus?.progress.failed ?? 0,
+                    total: buildStatus?.progress.total ?? mergedTasks.length,
+                  }}
+                />
               )}
 
               <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -546,6 +566,8 @@ export function IssueDetailPage() {
                   isLoading={sessionLoading}
                   currentStage={issue.stage}
                   isLive={isAgentRunningOnThis}
+                  taskProgress={taskProgress}
+                  loopProgress={loopProgress}
                 />
               )}
             </div>

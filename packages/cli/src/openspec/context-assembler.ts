@@ -25,6 +25,7 @@ export interface BuildContextOptions {
   learnings?: SessionLearning[];
   failureReason?: string;
   isRetry?: boolean;
+  wipResumeContext?: string;
 }
 
 export function readFileIfExists(filePath: string): string | null {
@@ -150,7 +151,7 @@ export interface AssembledContext {
 }
 
 export function buildTaskContext(options: BuildContextOptions): AssembledContext {
-  const { change, task, learnings = [], failureReason, isRetry = false } = options;
+  const { change, task, learnings = [], failureReason, isRetry = false, wipResumeContext } = options;
 
   const proposal = readFileIfExists(change.proposalPath);
   const design = readFileIfExists(change.designPath);
@@ -186,6 +187,12 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
 
   if (formattedLearnings) {
     sections.push(formattedLearnings);
+    sections.push('');
+  }
+
+  if (wipResumeContext) {
+    sections.push('[WIP Resume]');
+    sections.push(wipResumeContext);
     sections.push('');
   }
 
@@ -229,6 +236,7 @@ export class ContextAssembler {
     options?: {
       failureReason?: string;
       isRetry?: boolean;
+      wipResumeContext?: string;
     }
   ): AssembledContext | null {
     const changeDir = path.resolve(this.projectPath, changePath);
@@ -254,6 +262,7 @@ export class ContextAssembler {
       learnings,
       failureReason: options?.failureReason,
       isRetry: options?.isRetry,
+      wipResumeContext: options?.wipResumeContext,
     });
   }
 }

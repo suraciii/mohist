@@ -1,6 +1,7 @@
 export {
   WorkflowController,
   createWorkflowController,
+  parseVerdict,
   type WorkflowControllerOptions,
   type StageResult,
   type ChangeArtifactsManager,

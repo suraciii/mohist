@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Align frontend IssueStatus enum with backend",
+      "spec": "specs/web-ui/spec.md#前端-issuestatus-枚举与后端对齐",
+      "description": "Add Closed = 'closed' and Completed = 'completed' to the frontend IssueStatus enum in types.ts, matching the backend enum in packages/cli/src/types/index.ts.",
+      "acceptanceCriteria": [
+        "IssueStatus.Closed equals 'closed'",
+        "IssueStatus.Completed equals 'completed'",
+        "All existing IssueStatus values unchanged (Active, Paused, Blocked, Interrupted)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "No other files import IssueStatus by value — adding new enum members is backward compatible.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Rewrite IssueDetailPage Actions panel with Status-first logic",
+      "spec": "specs/web-ui/spec.md#actions-面板以-status-为主轴显示按钮",
+      "description": "Replace the current scattered isDraft-based button conditions with a status-first switch in IssueDetailPage. Closed → Reopen, Completed → completion message only, Paused → Resume + Close, Blocked → Reopen + Close, Interrupted → Resume Pipeline + Close, Active+Draft → Start + Explore, Active+!Draft → Close. Also update statusBadge() to add Closed (gray) and Completed (green) branches, and add Closed/Completed visual labels to the page header status area.",
+      "acceptanceCriteria": [
+        "Closed issue shows only Reopen button, no Start/Explore/Close",
+        "Closed+Draft issue does NOT show Start button",
+        "Completed issue shows completion text, no action buttons",
+        "Paused issue shows Resume + Close buttons",
+        "Blocked issue shows Reopen + Close buttons",
+        "Interrupted issue shows Resume Pipeline (orange) + Close buttons",
+        "Active+Draft shows Start + Explore",
+        "Active+!Draft shows Close",
+        "statusBadge(IssueStatus.Closed) returns gray CSS classes",
+        "statusBadge(IssueStatus.Completed) returns green CSS classes",
+        "Closed issue header shows gray Closed label",
+        "Completed issue header shows green Completed label",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "Paused Resume reuses reopenMutation (api.reopenIssue). Design decision D4.",
+      "attempts": 1,
+      "passes": true,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Fix IssueCard badge labels for Blocked/Closed/Completed/Paused",
+      "spec": "specs/web-ui/spec.md#issuecard-badge-正确区分-blocked-和-closed",
+      "description": "Fix IssueCard.tsx: change Blocked status badge from showing 'Closed' text to showing red 'Blocked' text. Add new conditionals for Closed (gray 'Closed'), Completed (green checkmark + 'Completed'), and keep Paused as-is. Remove the incorrect Blocked→Closed mapping.",
+      "acceptanceCriteria": [
+        "Blocked status shows red 'Blocked' text, NOT gray 'Closed'",
+        "Closed status shows gray 'Closed' text",
+        "Completed status shows green checkmark + 'Completed'",
+        "Paused status still shows 'Paused' text",
+        "Interrupted status still shows resume button and orange text",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueCard.tsx",
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "Independent of T-002 (different file), but both depend on T-001 (enum).",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}

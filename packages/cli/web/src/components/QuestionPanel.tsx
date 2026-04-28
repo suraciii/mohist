@@ -3,10 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Question } from '../lib/types'
 import { api } from '../lib/api'
 import { useQuestions } from '../hooks/useQueries'
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
+import { formatTime } from '../lib/format-time'
 
 export function QuestionPanel({ issueId }: { issueId: string }) {
   const queryClient = useQueryClient()

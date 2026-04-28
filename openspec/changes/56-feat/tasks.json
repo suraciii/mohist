@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add WIP commit methods to WorktreeManager",
+      "spec": "specs/worktree-manager/spec.md",
+      "description": "Add createWipCommit(worktreePath, taskId, attemptNumber), findWipCommit(worktreePath, taskId), and getWipDiffSummary(worktreePath, taskId) methods to WorktreeManager. createWipCommit does git add -A + commit with author mohist-wip, returns hash or null if no changes. findWipCommit searches git log for matching WIP: T-XXX timeout* messages. getWipDiffSummary returns diff --stat for the WIP commit.",
+      "acceptanceCriteria": [
+        "createWipCommit creates commit with message 'WIP: T-XXX timeout (attempt N)' and author 'mohist-wip <mohist@wip>'",
+        "createWipCommit returns null when worktree has no uncommitted changes",
+        "createWipCommit returns commit hash when changes exist",
+        "findWipCommit returns { hash, message, changedFiles, diffStat } for most recent matching commit",
+        "findWipCommit returns null when no WIP commit exists for the task",
+        "getWipDiffSummary returns file list with add/delete line counts",
+        "Git commit failures in createWipCommit are caught and return null without throwing",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Use execFileAsync pattern already in worktree-manager.ts. Exclude openspec/changes/ and .opencode/ from git add, matching mergeBack() behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Add onBeforeKill callback to acp-session timeout path",
+      "spec": "specs/wip-commit/spec.md",
+      "description": "Add onBeforeKill?: (cwd: string) => Promise<boolean> callback to AcpSessionOptions and wipCommitted?: boolean to AcpSessionResult. In both single-session and multi-round timeout paths, call onBeforeKill before cleanup(). If callback returns true, set wipCommitted=true on result. Wrap callback call in try/catch so failures don't block process cleanup.",
+      "acceptanceCriteria": [
+        "onBeforeKill callback is invoked before cleanup() in single-session timeout path (acp-session.ts ~line 370-387)",
+        "onBeforeKill callback is invoked before cleanup in multi-round prompt timeout path (acp-session.ts ~line 754-775)",
+        "AcpSessionResult.wipCommitted is true when onBeforeKill returns true",
+        "AcpSessionResult.wipCommitted is false/undefined when timeout occurs without onBeforeKill callback",
+        "onBeforeKill failure (exception) is caught and logged as warning, does not prevent process cleanup",
+        "No behavioral change when onBeforeKill is not provided (backward compatible)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "The callback receives cwd (the worktree path). Return true if WIP commit was created, false otherwise. Keep the existing timeout flow unchanged — just insert the callback call between connection.cancel() and cleanup().",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Add WIP resume context to context-assembler",
+      "spec": "specs/ralph-task-execution/spec.md",
+      "description": "Add wipResumeContext?: string field to BuildContextOptions. In buildTaskContext(), when wipResumeContext is provided, inject a [WIP Resume] section between the learnings section and the task/retry section. The section tells the agent which files were already modified and that it should continue from the current state.",
+      "acceptanceCriteria": [
+        "BuildContextOptions has wipResumeContext optional string field",
+        "When wipResumeContext is provided, [WIP Resume] section appears in assembled prompt",
+        "[WIP Resume] section is placed after learnings and before task/retry content",
+        "When wipResumeContext is not provided, prompt is identical to current behavior",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/context-assembler.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "The caller (ralph-executor) is responsible for building the wipResumeContext string from findWipCommit result. The assembler just injects it as-is.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "Integrate WIP commit into ralph-executor retry logic",
+      "spec": "specs/ralph-task-execution/spec.md",
+      "description": "Add timeout_with_wip failure category to FAILURE_CATEGORY_CONFIGS with { maxAttempts: 2, retryable: true }. When calling runAcpSession, pass onBeforeKill callback that calls WorktreeManager.createWipCommit(). In categorizeFailure, detect timeout_with_wip when error contains 'timeout' and the result has wipCommitted=true. On timeout_with_wip retry, call findWipCommit() to get diff info, build wipResumeContext string, and pass it to buildTaskContext().",
+      "acceptanceCriteria": [
+        "FAILURE_CATEGORY_CONFIGS has timeout_with_wip entry with maxAttempts: 2, retryable: true",
+        "onBeforeKill callback passed to runAcpSession calls createWipCommit with task ID and attempt number",
+        "categorizeFailure returns timeout_with_wip when result.wipCommitted is true",
+        "categorizeFailure returns timeout (unchanged) when result.wipCommitted is false or undefined",
+        "On timeout_with_wip retry, prompt includes WIP resume context from findWipCommit",
+        "On timeout_without_wip retry, behavior is unchanged (non-retryable, pauses build)",
+        "RalphExecutorContext receives worktreeManager instance for WIP operations",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Add WorktreeManager to RalphExecutorContext. The onBeforeKill callback needs access to worktreePath (from context), taskId (from current task), and attempt number (from loop variable). Use closure to capture these values.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-005",
+      "title": "Write unit tests for WIP commit flow",
+      "spec": "specs/wip-commit/spec.md",
+      "description": "Write unit tests covering: createWipCommit with/without changes, findWipCommit with/without existing WIP, timeout_with_wip categorization, and WIP resume context in assembled prompts. Use existing test patterns from the codebase.",
+      "acceptanceCriteria": [
+        "Test createWipCommit: creates commit with correct message and author when changes exist",
+        "Test createWipCommit: returns null when no changes",
+        "Test findWipCommit: returns commit info when WIP commit exists",
+        "Test findWipCommit: returns null when no WIP commit",
+        "Test categorizeFailure: returns timeout_with_wip for timeout error with wipCommitted=true",
+        "Test categorizeFailure: returns timeout for timeout error with wipCommitted=false",
+        "Test buildTaskContext: includes [WIP Resume] section when wipResumeContext provided",
+        "Test buildTaskContext: no [WIP Resume] section when wipResumeContext absent",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Mock git operations for WorktreeManager tests. Use the existing setAcpSessionRunner test pattern for ralph-executor tests.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
