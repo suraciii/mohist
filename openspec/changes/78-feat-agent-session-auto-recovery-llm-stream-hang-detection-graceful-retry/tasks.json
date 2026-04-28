@@ -114,10 +114,13 @@
         "T-003"
       ],
       "passes": true,
-      "notes": "Integration was already completed as part of T-003. Both runAcpSession (line 589) and createAcpConnection.prompt() (line 983) call runPromptWithHangRecovery with proper getter/setter callbacks for lastEventTime. recoveryAttemptCount resets per call since it's a local variable inside runPromptWithHangRecovery. hangIdleMs passed through from both options interfaces. onBeforeKill wired through for WIP commit during recovery.",
+      "notes": "This task modifies the existing runAcpSession and createAcpConnection functions to call the shared recovery function from T-003. The key challenge is wiring up the mutable state (lastEventTime, hasRecovered) that is shared between the sessionUpdate callback closure and the recovery function.",
       "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        156305
+      ]
     },
     {
       "id": "T-005",
