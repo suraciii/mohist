@@ -1012,7 +1012,8 @@ export class WorkflowController {
         };
       }
 
-      const hasNoAutoFixCheckpoint = this.checkpointRepo?.get(issue.number, 'no-auto-fix') != null;
+      const reviewCheckpoint = this.checkpointRepo?.get(issue.number, 'review');
+      const hasNoAutoFixCheckpoint = reviewCheckpoint?.completedSteps?.includes('no-auto-fix') ?? false;
 
       if (verdict !== 'FAIL' || hasNoAutoFixCheckpoint) {
         await conn.close();
@@ -1055,13 +1056,8 @@ export class WorkflowController {
 
         if (!autoFixResult.success) {
           log.error('Auto-fix round failed', { attempt: attempt + 1, error: autoFixResult.error });
-          await conn.close();
-          return {
-            success: false,
-            requiresApproval: false,
-            output: null,
-            message: `Auto-fix attempt ${attempt + 1} failed: ${autoFixResult.error ?? 'unknown error'}`,
-          };
+          fixHistory.push(`Attempt ${attempt + 1}: auto-fix failed — ${autoFixResult.error ?? 'unknown error'}`);
+          continue;
         }
 
         fixHistory.push(`Attempt ${attempt + 1}: ${autoFixResult.text?.slice(0, 200) ?? 'no output'}`);
@@ -1085,13 +1081,8 @@ export class WorkflowController {
 
         if (!reVerifyResult.success) {
           log.error('Re-verify round failed', { attempt: attempt + 1, error: reVerifyResult.error });
-          await conn.close();
-          return {
-            success: false,
-            requiresApproval: false,
-            output: null,
-            message: `Re-verify attempt ${attempt + 1} failed: ${reVerifyResult.error ?? 'unknown error'}`,
-          };
+          fixHistory.push(`Attempt ${attempt + 1}: re-verify failed — ${reVerifyResult.error ?? 'unknown error'}`);
+          continue;
         }
 
         reviewReport = readReportFile(changeDir, 'review.md') ?? reviewReport;
@@ -1103,9 +1094,21 @@ export class WorkflowController {
 
           if (this.commentRepo && this.issueRepo) {
             try {
+              const fixSuggestions = extractFixSuggestions(reviewReport);
+              const commentBody = [
+                `**Auto-fix applied (attempt ${attempt + 1})**`,
+                '',
+                '**Original Fix Suggestions:**',
+                fixSuggestions || '(none extracted)',
+                '',
+                '**Fix History:**',
+                fixHistory.join('\n\n'),
+                '',
+                'Verdict changed from FAIL to PASS.',
+              ].join('\n');
               this.commentRepo.create({
                 issueId: issue.id,
-                body: `**Auto-fix applied (attempt ${attempt + 1})**\n\n${fixHistory.join('\n\n')}\n\nVerdict changed from FAIL to PASS.`,
+                body: commentBody,
               });
             } catch (commentErr) {
               log.warn('Failed to add auto-fix comment', {
@@ -1133,7 +1136,7 @@ export class WorkflowController {
       log.info('Auto-fix attempts exhausted, escalating to build', { issueNumber: issue.number });
       await conn.close();
 
-      this.checkpointRepo?.upsert(issue.number, 'no-auto-fix', ['exhausted'], null);
+      this.checkpointRepo?.upsert(issue.number, 'review', ['no-auto-fix'], null);
 
       return {
         success: true,
@@ -1201,6 +1204,12 @@ export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
   const match = VERDICT_RE.exec(content);
   if (!match) return null;
   return match[1].toUpperCase() as 'PASS' | 'FAIL';
+}
+
+function extractFixSuggestions(content: string): string | null {
+  const match = content.match(/##\s*Fix\s*Suggestions\s*\n([\s\S]*?)(?=\n##\s|$)/i);
+  if (!match) return null;
+  return match[1].trim() || null;
 }
 
 export function createWorkflowController(options: WorkflowControllerOptions): WorkflowController {
