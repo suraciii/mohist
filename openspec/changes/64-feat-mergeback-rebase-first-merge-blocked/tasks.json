@@ -45,9 +45,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "D1: rebase runs in worktree for full file context. D6: mergeBack simplified to ff-only after rebase",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
