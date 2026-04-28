@@ -151,6 +151,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'merge_started',
       'merge_completed',
       'merge_failed',
+      'coder_recovery_status',
     ]
 
     for (const type of eventTypes) {

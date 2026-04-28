@@ -1,0 +1,145 @@
+{
+  "project": "mohist",
+  "description": "Agent session auto-recovery: LLM stream hang detection (3min idle) and graceful retry via ACP cancel+prompt",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Register coder_recovery_status in all 4 SSE event arrays",
+      "spec": "specs/pipeline-session-events/spec.md",
+      "description": "Add `coder_recovery_status` event type to: (1) `EventMap` in `packages/cli/src/services/event-bus.ts` with payload `{ issueId, projectId, executionId, acpSessionId, status, attempt, reason? }`, (2) `ALL_EVENT_TYPES` in `packages/cli/src/api/events.ts`, (3) `AgentDetailEventMap` in `packages/cli/web/src/lib/types.ts` + `AGENT_DETAIL_EVENTS` in `packages/cli/web/src/lib/agent-events.ts`, (4) `eventTypes` array in `packages/cli/web/src/hooks/useSSE.ts`. This is the foundational event registration that all other tasks depend on.",
+      "acceptanceCriteria": [
+        "coder_recovery_status appears in EventMap type in event-bus.ts with correct payload shape",
+        "coder_recovery_status appears in ALL_EVENT_TYPES array in events.ts",
+        "coder_recovery_status appears in AgentDetailEventMap in web/src/lib/types.ts",
+        "coder_recovery_status appears in AGENT_DETAIL_EVENTS array in agent-events.ts",
+        "coder_recovery_status appears in eventTypes array in useSSE.ts",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts, packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/agent-events.ts, packages/cli/web/src/hooks/useSSE.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is a pure addition — no existing code changes. Follow the pattern of existing events like ralph_task_update."
+    },
+    {
+      "id": "T-002",
+      "title": "Add hang_unrecoverable failure category to ralph-executor",
+      "spec": "specs/ralph-task-execution/spec.md",
+      "description": "Add `'hang_unrecoverable'` to the `FailureCategory` union type, add it to `FAILURE_CATEGORY_CONFIGS` with `{ maxAttempts: 1, retryable: false }`, and add detection logic in `categorizeFailure()` that matches `[HANG_UNRECOVERABLE]` in the error string (check before the generic timeout check). Also add a case in `generateAdjustmentsFromCategory()` with a useful message about LLM provider instability.",
+      "acceptanceCriteria": [
+        "FailureCategory type includes 'hang_unrecoverable'",
+        "FAILURE_CATEGORY_CONFIGS has hang_unrecoverable with retryable=false, maxAttempts=1",
+        "categorizeFailure('[HANG_UNRECOVERABLE] cancel timed out') returns 'hang_unrecoverable'",
+        "categorizeFailure('[HANG_UNRECOVERABLE] max recovery attempts exceeded') returns 'hang_unrecoverable'",
+        "Existing categorizeFailure tests still pass (timeout, dependency, environment, ac_not_met)",
+        "generateAdjustmentsFromCategory('hang_unrecoverable') returns non-empty array",
+        "cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-001 — failure category is consumed by ralph-executor loop, not SSE. Place the [HANG_UNRECOVERABLE] check before the timeout check in categorizeFailure to avoid misclassification."
+    },
+    {
+      "id": "T-003",
+      "title": "Implement runPromptWithHangRecovery shared function",
+      "spec": "specs/acp-hang-recovery/spec.md",
+      "description": "Implement the core `runPromptWithHangRecovery()` function in `packages/cli/src/agent-runtime/acp-session.ts`. This function wraps `connection.prompt()` with idle-based hang detection (setInterval polling every 30s, configurable via `hangIdleMs`, default 180000ms) and recovery flow (WIP commit → cancel → 1s cooldown → re-prompt with recovery hint). Add `hangIdleMs` to `AcpSessionOptions` and `AcpConnectionOptions` interfaces. The function should emit `coder_recovery_status` SSE events and write `acp_session_hang_detected`, `acp_session_recovery_started`, `acp_session_recovery_succeeded`, `acp_session_recovery_failed` to workflow_log. Max 2 recovery attempts. Degradation: cancel timeout (5s) → kill + return `[HANG_UNRECOVERABLE] cancel timed out`; max attempts exceeded → kill + return `[HANG_UNRECOVERABLE] max recovery attempts exceeded`. See design.md D1–D4 for implementation approach.",
+      "acceptanceCriteria": [
+        "runPromptWithHangRecovery function exported from acp-session.ts with PromptWithRecoveryParams interface",
+        "AcpSessionOptions and AcpConnectionOptions include hangIdleMs?: number field",
+        "When hangIdleMs=0, no idle monitoring occurs (function behaves like plain prompt)",
+        "When idle threshold exceeded, recovery sequence executes: emit detected → WIP commit → cancel → cooldown → prompt with hint",
+        "cancel() is raced against 5-second timeout; timeout triggers kill + [HANG_UNRECOVERABLE] error",
+        "Max 2 recovery attempts; 3rd hang returns [HANG_UNRECOVERABLE] max recovery attempts exceeded",
+        "coder_recovery_status SSE events emitted at detected/recovering/recovered/failed lifecycle points",
+        "workflow_log events written: acp_session_hang_detected, acp_session_recovery_started, acp_session_recovery_succeeded, acp_session_recovery_failed",
+        "When agent completes normally (no hang), no recovery events are emitted or logged",
+        "setInterval timer is cleared on all exit paths (success, error, kill)",
+        "cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "This is the largest task. The function uses getter/setter callbacks for mutable state (lastEventTime, hasRecovered, recoveryAttemptCount) to integrate with the existing closure pattern. See design.md D2 for the interface signature. Emit SSE events via eventBus.emit('coder_recovery_status', ...) — the event type is registered in T-001."
+    },
+    {
+      "id": "T-004",
+      "title": "Integrate hang recovery into runAcpSession and createAcpConnection",
+      "spec": "specs/acp-hang-recovery/spec.md",
+      "description": "Refactor the prompt phase in `runAcpSession` (around line 365) and `createAcpConnection.prompt()` (around line 759) to call `runPromptWithHangRecovery()` instead of the raw `connection.prompt()` + `Promise.race` with timeout. Wire up the getter/setter callbacks for `lastEventTime` (updated in sessionUpdate callback), `hasRecovered`, and `recoveryAttemptCount`. Pass through `hangIdleMs` from options. For `createAcpConnection`, reset recoveryAttemptCount to 0 at the start of each `prompt()` call. Remove the old timeout-only prompt handling code that is now replaced by the shared function.",
+      "acceptanceCriteria": [
+        "runAcpSession prompt phase uses runPromptWithHangRecovery instead of raw connection.prompt + Promise.race(timeout)",
+        "createAcpConnection.prompt() uses runPromptWithHangRecovery instead of raw connection.prompt + Promise.race(timeout)",
+        "lastEventTime is updated in every sessionUpdate callback invocation in both functions",
+        "lastEventTime is initialized to Date.now() at start of each prompt call",
+        "recoveryAttemptCount resets to 0 on each createAcpConnection.prompt() call",
+        "hangIdleMs is passed through from AcpSessionOptions/AcpConnectionOptions to runPromptWithHangRecovery",
+        "Existing session completion behavior unchanged when no hang occurs",
+        "onBeforeKill callback is wired through to runPromptWithHangRecovery for WIP commit during recovery",
+        "cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "This task modifies the existing runAcpSession and createAcpConnection functions to call the shared recovery function from T-003. The key challenge is wiring up the mutable state (lastEventTime, hasRecovered) that is shared between the sessionUpdate callback closure and the recovery function."
+    },
+    {
+      "id": "T-005",
+      "title": "Add SessionTimeline recovery status indicators in frontend",
+      "spec": "specs/agent-session-ui/spec.md",
+      "description": "Add recovery status display to the SessionTimeline component in `packages/cli/web/src/components/SessionTimeline.tsx`. Subscribe to `coder_recovery_status` events via `onAgentEvent` in `useSessionTimeline.ts`. Add a `recoveryStatus` state to the hook with fields `{ status, attempt, reason? }`. Render indicators in SessionTimeline: amber warning banner for 'detected' (\"LLM 连接中断，正在尝试恢复...\"), blue progress for 'recovering' (\"正在恢复 (attempt N)...\"), dismiss on 'recovered', red error with reason on 'failed'. Also handle historical workflow_log events (`acp_session_hang_detected`, etc.) in `reconstructRoundsFromLogs` to show recovery events when loading history.",
+      "acceptanceCriteria": [
+        "useSessionTimeline hook subscribes to coder_recovery_status via onAgentEvent",
+        "recoveryStatus state updates on detected/recovering/recovered/failed events",
+        "SessionTimeline renders amber warning banner when status='detected'",
+        "SessionTimeline renders blue progress indicator when status='recovering' with attempt number",
+        "SessionTimeline dismisses recovery indicator when status='recovered'",
+        "SessionTimeline renders red error indicator with reason when status='failed'",
+        "Historical acp_session_hang_detected/recovery events are rendered in reconstructRoundsFromLogs",
+        "cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/SessionTimeline.tsx, packages/cli/web/src/hooks/useSessionTimeline.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 for the event type registration. Use the existing onAgentEvent pattern from useSessionTimeline for coder_text_chunk as a template. The recovery status indicator should appear above the round-based conversation display."
+    },
+    {
+      "id": "T-006",
+      "title": "Add unit tests for hang recovery and failure categorization",
+      "spec": "specs/acp-hang-recovery/spec.md",
+      "description": "Write tests in `packages/cli/tests/` covering: (1) `categorizeFailure` returns 'hang_unrecoverable' for [HANG_UNRECOVERABLE] errors, (2) `runPromptWithHangRecovery` detects idle and triggers recovery, (3) max recovery attempts enforcement returns [HANG_UNRECOVERABLE], (4) cancel timeout degrades to kill, (5) normal session (no idle) completes without recovery events, (6) hangIdleMs=0 disables recovery. Follow the existing mock patterns from acp-session-taskid.test.ts (mock child_process, @agentclientprotocol/sdk, config-loader). Mock the EventBus and WorkflowLogRepo to verify correct events are emitted/logged.",
+      "acceptanceCriteria": [
+        "categorizeFailure tests cover hang_unrecoverable detection and all existing categories still pass",
+        "Test verifies runPromptWithHangRecovery emits coder_recovery_status with status='detected' on idle",
+        "Test verifies max recovery attempts (2) exceeded returns [HANG_UNRECOVERABLE] max recovery attempts exceeded",
+        "Test verifies cancel timeout triggers kill and returns [HANG_UNRECOVERABLE] cancel timed out",
+        "Test verifies normal session (no hang) produces no recovery events in workflow_log",
+        "Test verifies hangIdleMs=0 disables idle monitoring",
+        "All tests pass: cd packages/cli && npx vitest run",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/acp-hang-recovery.test.ts, packages/cli/tests/ralph-executor.test.ts (updated)",
+      "dependsOn": ["T-002", "T-004"],
+      "passes": false,
+      "notes": "Depends on T-002 for the failure category code and T-004 for the integrated acp-session code. Add hang_unrecoverable tests to existing ralph-executor.test.ts. Create new acp-hang-recovery.test.ts for the core recovery function tests. Mock ClientSideConnection to simulate hang (no sessionUpdate events for N ms) and recovery (emit events after cancel+prompt)."
+    }
+  ]
+}

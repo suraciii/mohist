@@ -106,21 +106,6 @@ export interface DiffFile {
   deletions: number
 }
 
-export interface CommitEntry {
-  hash: string
-  message: string
-  author: string
-  date: string
-  filesChanged: number
-  additions: number
-  deletions: number
-}
-
-export interface CommitDiff {
-  hash: string
-  diff: string
-}
-
 export type PlanRoundStartEvent = {
   issueId: string
   projectId: string
@@ -151,6 +136,7 @@ export type AgentDetailEventMap = {
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number }
   plan_round_start: PlanRoundStartEvent
   plan_session_update: PlanSessionUpdateEvent
+  coder_recovery_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
   coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string }
   coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number }
 }
@@ -263,9 +249,6 @@ export interface CoderSessionItem {
   status: string
   createdAt: string
   completedAt: string | null
-  model: string | null
-  coderType: string | null
-  stage: string | null
   workflowLogs: WorkflowLogItem[]
 }
 
