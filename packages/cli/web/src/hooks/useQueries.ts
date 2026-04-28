@@ -53,6 +53,7 @@ export function useTasks(number: number) {
     queryKey: ['issues', number, 'tasks'],
     queryFn: () => api.getTasks(number),
     enabled: number > 0,
+    refetchInterval: 5000,
   })
 }
 
@@ -61,6 +62,7 @@ export function useBuildStatus(number: number) {
     queryKey: ['issues', number, 'build-status'],
     queryFn: () => api.getBuildStatus(number),
     enabled: number > 0,
+    refetchInterval: 5000,
   })
 }
 

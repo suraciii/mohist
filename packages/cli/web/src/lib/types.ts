@@ -295,6 +295,7 @@ export interface Task {
   passes: boolean
   attempts: number
   error?: string | null
+  durations?: number[]
 }
 
 export interface BuildStatus {
@@ -307,4 +308,9 @@ export interface BuildStatus {
     currentTask: string | null
   }
   tasks: Task[]
+}
+
+export interface LiveTaskState {
+  activeTaskId: string | null
+  activeTaskElapsedMs: number | null
 }

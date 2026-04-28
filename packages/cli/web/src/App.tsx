@@ -64,7 +64,7 @@ function KanbanView() {
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
-  useSSE(projectId)
+  const { LiveTaskProvider } = useSSE(projectId)
   const location = useLocation()
 
   const { data: projects } = useProjects()
@@ -86,6 +86,7 @@ function AppContent() {
   }, [currentProject, projects, projectId, setProjectId])
 
   return (
+    <LiveTaskProvider>
     <div className="min-h-screen bg-gray-50 flex flex-col pb-14 md:pb-0">
       <Header onCreateIssue={() => setCreateIssueOpen(true)} />
       <MobileBottomNav />
@@ -102,6 +103,7 @@ function AppContent() {
       {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
       <CreateIssueDialog open={createIssueOpen} onClose={() => setCreateIssueOpen(false)} />
     </div>
+    </LiveTaskProvider>
   )
 }
 
