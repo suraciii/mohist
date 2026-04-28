@@ -50,6 +50,7 @@ export interface AcpSessionOptions {
   opencodeBinPath?: string;
   onProcessSpawned?: (proc: ChildProcess) => void;
   onBeforeKill?: (cwd: string) => Promise<boolean>;
+  model?: string;
   stage?: string;
 }
 
@@ -369,11 +370,15 @@ export async function runAcpSession(
 
     if (coderSessionRepo && issueId) {
       try {
+        const resolvedModel = options.model ?? load().model ?? undefined;
         const coderSession = coderSessionRepo.insert({
           issueId,
           acpSessionId: sessionId,
           executionId,
           taskDescription: task.slice(0, 200),
+          model: resolvedModel,
+          coderType: 'opencode',
+          stage: 'build',
         });
         coderSessionId = coderSession.id;
         log.info('coder_session row created', { coderSessionId, acpSessionId: sessionId });
@@ -520,6 +525,7 @@ export interface AcpConnectionOptions {
   opencodeBinPath?: string;
   onProcessSpawned?: (proc: ChildProcess) => void;
   onBeforeKill?: (cwd: string) => Promise<boolean>;
+  model?: string;
   stage?: string;
 }
 
@@ -839,11 +845,15 @@ export async function createAcpConnection(
 
   if (coderSessionRepo && issueId) {
     try {
+      const resolvedModel = options.model ?? load().model ?? undefined;
       const coderSession = coderSessionRepo.insert({
         issueId,
         acpSessionId: sessionId,
         executionId,
         taskDescription: 'multi-round acp connection',
+        model: resolvedModel,
+        coderType: 'opencode',
+        stage: options.stage,
       });
       coderSessionId = coderSession.id;
       log.info('coder_session row created', {
