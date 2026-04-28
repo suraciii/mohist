@@ -121,10 +121,13 @@
         "T-003"
       ],
       "notes": "Design decision D4: REST initial load + SSE live updates. coder_session_started/completed events must be registered in useSSE.ts AGENT_DETAIL_EVENTS list and agent-events.ts AgentDetailEventMap. The hook should use React Query for the initial fetch and React state for live SSE updates merged on top.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        356978
+      ]
     },
     {
       "id": "T-005",
