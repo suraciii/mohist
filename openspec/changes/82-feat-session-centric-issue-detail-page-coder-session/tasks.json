@@ -51,10 +51,13 @@
         "T-001"
       ],
       "notes": "Both insert sites guard on `if (coderSessionRepo)` — new fields are only passed when repo is available. Thread stage through WorkflowController call sites that invoke createAcpConnection.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        368801
+      ]
     },
     {
       "id": "T-003",
