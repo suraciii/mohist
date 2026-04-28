@@ -12,6 +12,8 @@ export enum IssueStatus {
   Paused = 'paused',
   Blocked = 'blocked',
   Interrupted = 'interrupted',
+  Closed = 'closed',
+  Completed = 'completed',
 }
 
 export interface ApprovalState {
@@ -38,6 +40,7 @@ export interface Issue {
   comments?: Comment[]
   approvalState?: ApprovalState
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
+  priority?: string | null
 }
 
 export interface Project {
@@ -244,8 +247,49 @@ export interface ToolCallEntry {
   title?: string
 }
 
+export interface TaskProgressEntry {
+  taskId: string
+  taskIndex: number
+  totalTasks: number
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'retrying'
+  executionId?: string
+  attempt?: number
+  error?: string
+}
+
+export type TaskProgressMap = Map<string, TaskProgressEntry>
+
+export interface LoopProgress {
+  completed: number
+  failed: number
+  total: number
+}
+
 export interface CoderTextBuffer {
   executionId: string
   acpSessionId: string
   text: string
+}
+
+export interface Task {
+  id: string
+  title: string
+  description?: string
+  acceptanceCriteria?: string[]
+  dependsOn?: string[]
+  passes: boolean
+  attempts: number
+  error?: string | null
+}
+
+export interface BuildStatus {
+  stage: string
+  status: string
+  progress: {
+    completed: number
+    failed: number
+    total: number
+    currentTask: string | null
+  }
+  tasks: Task[]
 }

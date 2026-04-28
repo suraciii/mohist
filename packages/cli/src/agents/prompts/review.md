@@ -24,6 +24,12 @@ You are reviewing code changes for the Mohist workflow. Review the implementatio
 - No SQL, command, or code injection risks
 - No exposed secrets or credentials
 
+### Spec Compliance
+- For each acceptance criterion listed in the Tasks & Acceptance Criteria section of the prompt context, verify the criterion is satisfied by the implementation
+- Verify exact values: colors (hex codes), strings, formats, constants, and other literal values match what the spec requires
+- Report per-criterion pass or fail with the specific deviation when a criterion is not met
+- If no tasks.json or specs context is available in the prompt, mark this dimension as PASS with a note that no spec context was provided
+
 ## Review Process
 
 1. Identify all changed files (git diff or file system scan)
@@ -54,6 +60,9 @@ Write a review report to `{changeDir}/review.md` with:
 
 ### Security: PASS / FAIL
 - [findings]
+
+### Spec Compliance: PASS / FAIL
+- [per-criterion findings with pass/fail and specific deviations]
 
 ## Fix Suggestions
 1. [file:line] description of fix
