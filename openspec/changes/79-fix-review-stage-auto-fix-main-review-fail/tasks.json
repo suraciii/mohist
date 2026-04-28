@@ -51,11 +51,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/agents/prompts/",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "T-001 and T-002 are independent — T-001 changes code, T-002 changes prompts.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        138076
+      ]
     },
     {
       "id": "T-003",
