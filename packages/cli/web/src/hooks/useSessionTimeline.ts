@@ -44,7 +44,7 @@ export function deriveToolCallTitle(toolName: string, title: string | undefined,
     }
     return toolName
   } catch {
-    return toolName
+    return rawInput || toolName
   }
 }
 

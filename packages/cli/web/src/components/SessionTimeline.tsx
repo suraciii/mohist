@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ToolCallEntry, Stage, TaskProgressMap, LoopProgress } from '../lib/types'
 import type { Round } from '../hooks/useSessionTimeline'
+import { deriveToolCallTitle } from '../hooks/useSessionTimeline'
 
 interface SessionTimelineProps {
   rounds: Round[]
@@ -76,7 +77,9 @@ function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
             {entry.toolName}
           </span>
           {entry.title && (
-            <span className="text-xs text-gray-500 truncate">{entry.title}</span>
+            <span className="text-xs text-gray-500 truncate">
+              {deriveToolCallTitle(entry.toolName, entry.title, entry.rawInput)}
+            </span>
           )}
           {entry.state === 'started' && (
             <span className="text-xs text-blue-500">running...</span>
@@ -255,7 +258,7 @@ function RoundSection({
           {round.thoughtText && (
             <details className="pt-1">
               <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
-                Thinking ({(round.thoughtText.length / 1024).toFixed(1)}KB)
+                Thinking...{round.thoughtText.length > 500 ? ` (${(round.thoughtText.length / 1024).toFixed(1)}KB)` : ''}
               </summary>
               <pre className="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-48 overflow-auto bg-gray-50 rounded p-2">
                 {round.thoughtText.length > 20000
