@@ -128,9 +128,9 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Duration recording 在 success 分支（line 632-656）和 failure 分支（line 657-728）都需要。注意 failure 分支有多处 break 或 continue，需确保每条路径都记录 duration",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
