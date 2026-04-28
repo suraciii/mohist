@@ -119,11 +119,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is the core task. Depends on T-001 (parseResult + extractFixSuggestions), T-002 (updated prompts), and T-003 (StageResult.escalateToStage + run() escalation handler).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        205263
+      ]
     },
     {
       "id": "T-005",
