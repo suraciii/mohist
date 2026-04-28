@@ -10,6 +10,8 @@ const REVIEW_PROMPT_PATH = path.join(__dirname, 'prompts', 'review.md');
 const REVIEW_SELF_CHECK_PATH = path.join(ARTIFACTS_DIR, 'review-self-check.md');
 const EXPLORE_PROMPT_PATH = path.join(__dirname, 'prompts', 'explore.md');
 const CONFLICT_RESOLUTION_PROMPT_PATH = path.join(__dirname, 'prompts', 'conflict-resolution.md');
+const AUTO_FIX_PROMPT_PATH = path.join(__dirname, 'prompts', 'auto-fix.md');
+const RE_VERIFY_PROMPT_PATH = path.join(ARTIFACTS_DIR, 're-verify.md');
 
 const ARTIFACT_OUTPUT_FILES: Record<ArtifactType, string> = {
   proposal: 'proposal.md',
@@ -277,6 +279,54 @@ export function buildExplorePrompt(
   }
 
   parts.push('', '## Instructions\n', instruction);
+
+  return parts.join('\n');
+}
+
+export function buildAutoFixPrompt(
+  issue: Issue,
+  changeDir: string,
+  reviewContent: string,
+): string {
+  const instruction = loadFile(AUTO_FIX_PROMPT_PATH);
+
+  const parts: string[] = [
+    formatIssueInfo(issue),
+    '',
+    `## Change Directory\n\n${changeDir}`,
+    '',
+    '## Goal\n\nApply fixes from the review report.',
+    '',
+    '## Review Report\n',
+    reviewContent,
+    '',
+    '## Instructions\n',
+    instruction,
+  ];
+
+  return parts.join('\n');
+}
+
+export function buildReVerifyPrompt(
+  issue: Issue,
+  changeDir: string,
+  reviewContent: string,
+): string {
+  const instruction = loadFile(RE_VERIFY_PROMPT_PATH);
+
+  const parts: string[] = [
+    formatIssueInfo(issue),
+    '',
+    `## Change Directory\n\n${changeDir}`,
+    '',
+    '## Goal\n\nRe-verify specific issues from the review after auto-fix.',
+    '',
+    '## Review Report\n',
+    reviewContent,
+    '',
+    '## Instructions\n',
+    instruction,
+  ];
 
   return parts.join('\n');
 }
