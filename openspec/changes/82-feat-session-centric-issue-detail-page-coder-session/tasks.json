@@ -183,10 +183,13 @@
         "T-005"
       ],
       "notes": "Design decision D6: replace in-place, not layer on top. Old SessionTimeline.tsx file can be kept for reference but is no longer imported by IssueDetailPage. Ensure the right panel still handles the loading and empty states gracefully.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        163279
+      ]
     }
   ]
 }
