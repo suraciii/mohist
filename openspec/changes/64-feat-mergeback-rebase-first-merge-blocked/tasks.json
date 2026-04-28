@@ -100,9 +100,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "D4: use git diff --name-only with caching. Degrades to FIFO on failure",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
