@@ -2,6 +2,17 @@ import type { ApiResponse } from './types'
 
 const BASE = '/api'
 
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly data?: unknown,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -9,10 +20,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
   const json: ApiResponse<T> = await res.json()
   if (!json.success) {
-    throw new Error(json.error ?? `Request failed: ${res.status}`)
+    throw new ApiError(
+      json.error ?? `Request failed: ${res.status}`,
+      res.status,
+      json.data,
+    )
   }
   return json.data as T
 }
+
+export { ApiError }
 
 export const api = {
   getProjects: () => request<import('./types').Project[]>('/projects'),
@@ -173,8 +190,16 @@ export const api = {
   getWorkflowLogs: (number: number) =>
     request<import('./types').WorkflowLogItem[]>(`/issues/${number}/logs`),
 
-  rebaseIssue: (number: number) =>
-    request<{ rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }>(`/issues/${number}/rebase`, { method: 'POST' }),
+  rebaseIssue: async (number: number) => {
+    try {
+      return await request<{ rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }>(`/issues/${number}/rebase`, { method: 'POST' })
+    } catch (err) {
+      if (err instanceof ApiError && err.data && typeof err.data === 'object') {
+        return err.data as { rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }
+      }
+      throw err
+    }
+  },
 
   retryMerge: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/retry-merge`, { method: 'POST' }),

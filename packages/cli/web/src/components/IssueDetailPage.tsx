@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile, CommitEntry } from '../lib/types'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
@@ -240,13 +240,14 @@ export function IssueDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
     },
     onError: (error: Error) => {
-      const conflictsMatch = error.message.match(/conflicts:\s*\[([^\]]*)\]/i)
-      if (conflictsMatch) {
-        const conflicts = conflictsMatch[1].split(',').map(s => s.trim().replace(/"/g, ''))
-        setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts })
-      } else {
-        setRebaseResult({ type: 'error', message: error.message })
+      if (error instanceof ApiError && error.data && typeof error.data === 'object') {
+        const d = error.data as { conflicts?: string[] }
+        if (d.conflicts && d.conflicts.length > 0) {
+          setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: d.conflicts })
+          return
+        }
       }
+      setRebaseResult({ type: 'error', message: error.message })
     },
   })
 
@@ -794,26 +795,8 @@ export function IssueDetailPage() {
                     The agent completed the previous stage. Review the output above and approve
                     to continue.
                   </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => approveMutation.mutate()}
-                      disabled={approveMutation.isPending || isAgentRunningOnThis}
-                      className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                    >
-                      {approveMutation.isPending
-                        ? 'Approving...'
-                        : isAgentRunningOnThis
-                          ? 'Agent running...'
-                          : 'Approve & Continue'}
-                    </button>
-                  </div>
-                  {approveMutation.error && (
-                    <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-                      {approveMutation.error.message}
-                    </div>
-                  )}
                   {issue.stage === Stage.Review && (
-                    <div className="mt-3 pt-3 border-t border-amber-200">
+                    <div className="mb-3 pb-3 border-b border-amber-200">
                       <p className="text-xs text-amber-500 mb-2">Rebase before review for latest diff</p>
                       <button
                         onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
@@ -844,6 +827,24 @@ export function IssueDetailPage() {
                           )}
                         </div>
                       )}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => approveMutation.mutate()}
+                      disabled={approveMutation.isPending || isAgentRunningOnThis}
+                      className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      {approveMutation.isPending
+                        ? 'Approving...'
+                        : isAgentRunningOnThis
+                          ? 'Agent running...'
+                          : 'Approve & Continue'}
+                    </button>
+                  </div>
+                  {approveMutation.error && (
+                    <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+                      {approveMutation.error.message}
                     </div>
                   )}
                   {issue.stage === Stage.Plan && (
