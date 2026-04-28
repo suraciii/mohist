@@ -249,6 +249,29 @@ export function buildConflictResolutionPrompt(
   return parts.join('\n');
 }
 
+export function buildAutoFixPrompt(
+  issue: Issue,
+  changeDir: string,
+  reportContent: string,
+  reportFileName: string,
+): string {
+  const parts: string[] = [
+    formatIssueInfo(issue),
+    '',
+    `## Change Directory\n\n${changeDir}`,
+    '',
+    `## Task\n`,
+    `The self-check report (${reportFileName}) produced a FAIL verdict.`,
+    `Read the report below and apply ALL fix suggestions it describes.`,
+    `Edit the relevant files in ${changeDir} to resolve every issue identified.`,
+    '',
+    `## Report (${reportFileName})\n`,
+    reportContent,
+  ];
+
+  return parts.join('\n');
+}
+
 export function buildExplorePrompt(
   issueInfo: ExploreIssueInfo,
   changeDir: string,

@@ -866,6 +866,12 @@ interface PlanRoundConfig {
   outputPath: string;
 }
 
+export function parseVerdict(content: string): 'PASS' | 'FAIL' {
+  const match = content.match(/^## Verdict:\s*(PASS|FAIL)/m);
+  if (match && match[1] === 'PASS') return 'PASS';
+  return 'FAIL';
+}
+
 function readReportFile(changeDir: string, filename: string): string | null {
   const filePath = path.join(changeDir, filename);
   try {

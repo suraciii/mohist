@@ -1,0 +1,97 @@
+{
+  "project": "mohist",
+  "description": "Add verdict parsing + auto-fix + full re-check to review and plan stages",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add parseVerdict helper and buildAutoFixPrompt function",
+      "spec": "specs/stage-auto-fix/spec.md#Verdict parsing after self-check",
+      "description": "Add a `parseVerdict(content: string): 'PASS' | 'FAIL'` function in workflow-controller.ts that regex-matches `## Verdict: PASS/FAIL` from report file content. Also add `buildAutoFixPrompt(issue, changeDir, reportContent, reportFileName)` in artifact-prompt.ts that constructs a prompt instructing the agent to apply all fix suggestions from the inlined report.",
+      "acceptanceCriteria": [
+        "parseVerdict returns 'PASS' for content containing '## Verdict: PASS'",
+        "parseVerdict returns 'FAIL' for content containing '## Verdict: FAIL'",
+        "parseVerdict returns 'FAIL' for content with no verdict line",
+        "buildAutoFixPrompt includes the report content and changeDir path",
+        "buildAutoFixPrompt is exported from artifact-prompt.ts",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-002",
+      "title": "Add auto-fix + full re-check to review stage",
+      "spec": "specs/stage-auto-fix/spec.md#Auto-fix on same ACP connection",
+      "description": "After the self-check round in runPipelineReviewStage, parse the verdict from review.md. If PASS, return awaiting-user as before. If FAIL: (1) send auto-fix prompt on same conn, (2) close conn, (3) open new conn, (4) re-run buildReviewerPrompt + buildReviewSelfCheckPrompt (full re-check, not targeted), (5) parse new verdict, (6) return awaiting-user regardless — no retry, no escalation. Emit round events for auto-fix, re-review, re-review-self-check. Covers spec requirements: Auto-fix on same ACP connection, Full re-check on new ACP connection, Single auto-fix attempt, No escalation on auto-fix failure, Auto-fix event emission.",
+      "acceptanceCriteria": [
+        "Review stage parses verdict from review.md after self-check",
+        "PASS verdict skips auto-fix and returns requiresApproval: true",
+        "FAIL verdict triggers auto-fix prompt on same ACP connection",
+        "Auto-fix prompt failure falls back to requiresApproval: true with error message",
+        "After auto-fix, old connection is closed and new connection opened",
+        "Re-check runs full buildReviewerPrompt + buildReviewSelfCheckPrompt (not targeted)",
+        "Re-check PASS returns message noting auto-fix succeeded",
+        "Re-check FAIL returns message noting auto-fix attempted but still FAIL",
+        "No escalation to build stage on any failure path",
+        "plan_round_start events emitted with roundType auto-fix, re-review, re-review-self-check",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Add verdict parsing + auto-fix + re-self-review to plan stage",
+      "spec": "specs/stage-auto-fix/spec.md#Full re-check on new ACP connection",
+      "description": "After the self-review round in runPlanStage, parse the verdict from self-review.md. If PASS, return awaiting-user as before. If FAIL: (1) send auto-fix prompt on same conn, (2) close conn, (3) open new conn, (4) re-run buildSelfReviewPrompt only (not artifact generation — D5), (5) parse new verdict, (6) return awaiting-user regardless — no retry, no escalation. Emit round events for auto-fix, re-self-review. Covers spec requirements: Auto-fix on same ACP connection, Full re-check on new ACP connection, Single auto-fix attempt, No escalation on auto-fix failure, Auto-fix event emission.",
+      "acceptanceCriteria": [
+        "Plan stage parses verdict from self-review.md after self-review",
+        "PASS verdict skips auto-fix and returns requiresApproval: true",
+        "FAIL verdict triggers auto-fix prompt on same ACP connection",
+        "Auto-fix prompt failure falls back to requiresApproval: true with error message",
+        "After auto-fix, old connection is closed and new connection opened",
+        "Re-check runs only buildSelfReviewPrompt (not artifact generation rounds)",
+        "Re-check PASS returns message noting auto-fix succeeded",
+        "Re-check FAIL returns message noting auto-fix attempted but still FAIL",
+        "plan_round_start events emitted with roundType auto-fix, re-self-review",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-004",
+      "title": "Add tests for parseVerdict and buildAutoFixPrompt",
+      "spec": "specs/stage-auto-fix/spec.md#Verdict parsing after self-check",
+      "description": "Write unit tests for parseVerdict (PASS, FAIL, missing, case-insensitive, whitespace variants) and buildAutoFixPrompt (includes report content, changeDir, issue info). Follow existing test patterns in artifact-prompt.test.ts.",
+      "acceptanceCriteria": [
+        "Tests cover parseVerdict for PASS, FAIL, missing verdict, extra whitespace",
+        "Tests cover buildAutoFixPrompt includes report content and paths",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/stage-auto-fix.test.ts",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
