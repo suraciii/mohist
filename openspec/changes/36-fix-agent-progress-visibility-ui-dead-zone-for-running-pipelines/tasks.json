@@ -123,9 +123,9 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-004 for forceStop method on AgentRunnerService.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
