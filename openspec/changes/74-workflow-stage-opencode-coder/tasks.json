@@ -122,7 +122,7 @@
       ],
       "passes": false,
       "notes": "",
-      "attempts": 1,
+      "attempts": 3,
       "order": 999999,
       "error": "Auto-skipped (no onAskUser): Timed out after 1028.571s"
     },
