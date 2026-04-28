@@ -138,11 +138,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/server/index.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Independent of T-001 through T-004. Small surgical change to existing SIGTERM handler.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        41759
+      ]
     },
     {
       "id": "T-006",
