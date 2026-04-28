@@ -48,6 +48,7 @@ export function useIssueDiff(number: number) {
   })
 }
 
+<<<<<<< HEAD
 export function useTasks(number: number) {
   return useQuery({
     queryKey: ['issues', number, 'tasks'],
@@ -63,6 +64,21 @@ export function useBuildStatus(number: number) {
     queryFn: () => api.getBuildStatus(number),
     enabled: number > 0,
     refetchInterval: 5000,
+=======
+export function useIssueCommits(number: number) {
+  return useQuery({
+    queryKey: ['issues', number, 'commits'],
+    queryFn: () => api.getIssueCommits(number),
+    enabled: number > 0,
+  })
+}
+
+export function useCommitDiff(number: number, hash: string, enabled: boolean = false) {
+  return useQuery({
+    queryKey: ['issues', number, 'commits', hash, 'diff'],
+    queryFn: () => api.getCommitDiff(number, hash),
+    enabled: enabled && number > 0 && !!hash,
+>>>>>>> 77660dd1ab (T-003: add frontend types, API client, and React Query hooks for issue commits)
   })
 }
 

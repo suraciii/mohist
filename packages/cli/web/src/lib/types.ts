@@ -106,6 +106,21 @@ export interface DiffFile {
   deletions: number
 }
 
+export interface CommitEntry {
+  hash: string
+  message: string
+  author: string
+  date: string
+  filesChanged: number
+  additions: number
+  deletions: number
+}
+
+export interface CommitDiff {
+  hash: string
+  diff: string
+}
+
 export type PlanRoundStartEvent = {
   issueId: string
   projectId: string
