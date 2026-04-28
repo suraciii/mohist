@@ -83,11 +83,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow the same build verify pattern as MergeQueue.processItem()",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        42564
+      ]
     },
     {
       "id": "T-004",
