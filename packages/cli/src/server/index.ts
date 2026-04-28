@@ -180,7 +180,7 @@ async function main(): Promise<void> {
       if (!reverseResult.success && !reverseResult.conflictFiles) {
         log.error('Failed to reverse-merge master into worktree', { issueNumber, message: reverseResult.message });
         issueRepo.setMergeState(issueId, MergeState.Blocked);
-        eventBus.emit('merge_blocked', { issueId, projectId, retryCount: 0 });
+        eventBus.emit('merge_blocked', { issueId, projectId, issueNumber, conflictingFiles: [], retryCount: 0 });
         return;
       }
 
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
 
       if (currentRetryCount >= 3) {
         issueRepo.setMergeState(issueId, MergeState.Blocked);
-        eventBus.emit('merge_blocked', { issueId, projectId, retryCount: currentRetryCount });
+        eventBus.emit('merge_blocked', { issueId, projectId, issueNumber: issue.number, conflictingFiles: reverseResult.conflictFiles ?? [], retryCount: currentRetryCount });
         log.warn('Conflict resolution max retries reached, marking as blocked', { issueNumber, retryCount: currentRetryCount });
         return;
       }
