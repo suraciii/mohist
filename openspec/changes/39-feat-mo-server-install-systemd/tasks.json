@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Implement mo server install/uninstall as systemd user service with start/stop/status delegation and update command",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -23,8 +22,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/server-systemd.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This is the foundation module. All other tasks import from it."
+      "passes": true,
+      "notes": "This is the foundation module. All other tasks import from it.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        211938
+      ]
     },
     {
       "id": "T-002",
@@ -43,9 +48,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/server-systemd.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Appends to server-systemd.ts created in T-001. All functions are exported for use by server.ts."
+      "notes": "Appends to server-systemd.ts created in T-001. All functions are exported for use by server.ts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -66,9 +76,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/server-systemd.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Appends to server-systemd.ts. Uses runSystemctlUser and runLinger from T-002."
+      "notes": "Appends to server-systemd.ts. Uses runSystemctlUser and runLinger from T-002.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -89,9 +104,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/server.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Imports isSystemdServiceInstalled, getSystemdStatus, runSystemctlUser from server-systemd.ts."
+      "notes": "Imports isSystemdServiceInstalled, getSystemdStatus, runSystemctlUser from server-systemd.ts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -110,7 +130,10 @@
       "output": "packages/cli/src/server/index.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Independent of T-001 through T-004. Small surgical change to existing SIGTERM handler."
+      "notes": "Independent of T-001 through T-004. Small surgical change to existing SIGTERM handler.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -131,9 +154,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/server-systemd.ts",
-      "dependsOn": ["T-003", "T-004"],
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "restartServer can go in server-systemd.ts or server.ts. updateServer needs detectInstallMode and runSystemctlUser."
+      "notes": "restartServer can go in server-systemd.ts or server.ts. updateServer needs detectInstallMode and runSystemctlUser.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -154,9 +183,16 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/index.ts",
-      "dependsOn": ["T-003", "T-004", "T-006"],
+      "dependsOn": [
+        "T-003",
+        "T-004",
+        "T-006"
+      ],
       "passes": false,
-      "notes": "Final integration task. All functions must be exported and importable."
+      "notes": "Final integration task. All functions must be exported and importable.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
