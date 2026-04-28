@@ -1,39 +1,13 @@
-import { useState, useEffect, useMemo } from 'react'
-import type { CoderSessionItem, Stage } from '../lib/types'
+import { useState, useEffect } from 'react'
+import type { Stage } from '../lib/types'
 import { useCoderSessions } from '../hooks/useCoderSessions'
-import { reconstructRoundsFromLogs } from '../hooks/useSessionTimeline'
 import { SessionHeader } from './SessionHeader'
-import { RoundSection } from './SessionTimeline'
+import { SessionDetail } from './SessionDetail'
 
 interface SessionListProps {
   issueNumber: number
   currentStage: Stage | string
   isLive: boolean
-}
-
-function SessionDetail({ session, isLive }: { session: CoderSessionItem; isLive: boolean }) {
-  const rounds = useMemo(() => reconstructRoundsFromLogs(session.workflowLogs), [session.workflowLogs])
-
-  if (rounds.length === 0) {
-    return (
-      <div className="px-3 py-3 border-t border-gray-100">
-        <div className="text-xs text-gray-400">No activity recorded</div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="px-3 py-3 space-y-2 border-t border-gray-100 max-h-[400px] overflow-y-auto">
-      {rounds.map((round) => (
-        <RoundSection
-          key={`${round.roundIndex}-${round.label}`}
-          round={round}
-          isLive={isLive && session.status === 'running'}
-          isStreaming={session.status === 'running'}
-        />
-      ))}
-    </div>
-  )
 }
 
 export function SessionList({ issueNumber, isLive }: SessionListProps) {
@@ -87,7 +61,7 @@ export function SessionList({ issueNumber, isLive }: SessionListProps) {
               onClick={() => handleToggle(session.id)}
             />
             {expandedId === session.id && (
-              <SessionDetail session={session} isLive={isLive} />
+              <SessionDetail session={session} issueNumber={issueNumber} isLive={isLive} />
             )}
           </div>
         ))}

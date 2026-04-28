@@ -8,6 +8,7 @@ import type {
   AgentDetailEventMap,
   TaskProgressMap,
   LoopProgress,
+  CoderSessionItem,
 } from '../lib/types'
 
 const FLUSH_INTERVAL = 100
@@ -165,12 +166,17 @@ export function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
   return rounds
 }
 
-export function useSessionTimeline(issueNumber: number) {
+export function useSessionTimeline(issueNumber: number, session?: CoderSessionItem) {
+  const shouldFetchLogs = !session
+
   const { data: logs = [], isLoading: loadingLogs } = useQuery({
     queryKey: ['workflow-logs', issueNumber],
     queryFn: () => api.getWorkflowLogs(issueNumber),
-    enabled: issueNumber > 0,
+    enabled: issueNumber > 0 && shouldFetchLogs,
   })
+
+  const sessionRef = useRef(session)
+  sessionRef.current = session
 
   const { data: agentStatus } = useQuery({
     queryKey: ['agent-status'],
@@ -292,12 +298,17 @@ export function useSessionTimeline(issueNumber: number) {
   }, [flushPlanBuffer])
 
   useEffect(() => {
+    if (session) {
+      const reconstructed = reconstructRoundsFromLogs(session.workflowLogs)
+      setRounds(reconstructed)
+      return
+    }
     if (loadingLogs) return
     if (historyLoadedRef.current) return
     historyLoadedRef.current = true
     const reconstructed = reconstructRoundsFromLogs(logs)
     setRounds(reconstructed)
-  }, [logs, loadingLogs])
+  }, [session?.id, logs, loadingLogs])
 
   useEffect(() => {
     const isRunningOnThis = !!(
@@ -324,6 +335,12 @@ export function useSessionTimeline(issueNumber: number) {
     unsubs.push(
       onAgentEvent('plan_round_start', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
+        const s = sessionRef.current
+        if (s) {
+          if (detail.coderSessionId && detail.coderSessionId !== s.id) return
+          if (!detail.coderSessionId && detail.acpSessionId && detail.acpSessionId !== s.acpSessionId) return
+          if (!detail.coderSessionId && !detail.acpSessionId) return
+        }
         setRoundsRef.current((prev) => {
           const newRound: Round = {
             roundIndex: prev.length,
@@ -343,6 +360,12 @@ export function useSessionTimeline(issueNumber: number) {
     unsubs.push(
       onAgentEvent('plan_session_update', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
+        const s = sessionRef.current
+        if (s) {
+          if (detail.coderSessionId && detail.coderSessionId !== s.id) return
+          if (!detail.coderSessionId && detail.acpSessionId && detail.acpSessionId !== s.acpSessionId) return
+          if (!detail.coderSessionId && !detail.acpSessionId) return
+        }
         planBufferRef.current.push(detail)
         scheduleFlush()
       }),
@@ -351,6 +374,8 @@ export function useSessionTimeline(issueNumber: number) {
     unsubs.push(
       onAgentEvent('coder_text_chunk', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
+        const s = sessionRef.current
+        if (s && detail.acpSessionId !== s.acpSessionId) return
         setRoundsRef.current((prev) => {
           if (prev.length === 0) return prev
           const next = [...prev]
@@ -365,6 +390,8 @@ export function useSessionTimeline(issueNumber: number) {
     unsubs.push(
       onAgentEvent('coder_tool_call', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
+        const s = sessionRef.current
+        if (s && detail.acpSessionId !== s.acpSessionId) return
         const map = liveToolCallMapRef.current
         const existing = map.get(detail.toolCallId)
 
@@ -414,6 +441,7 @@ export function useSessionTimeline(issueNumber: number) {
     unsubs.push(
       onAgentEvent('ralph_task_update', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
+        if (sessionRef.current) return
         setTaskProgress((prev) => {
           const next = new Map(prev)
           const existing = next.get(detail.taskId)
@@ -440,6 +468,7 @@ export function useSessionTimeline(issueNumber: number) {
     unsubs.push(
       onAgentEvent('ralph_loop_progress', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
+        if (sessionRef.current) return
         setLoopProgress({
           completed: detail.completed,
           failed: detail.failed,
