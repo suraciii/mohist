@@ -6,7 +6,7 @@ import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORI
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
-import { WorktreeManager } from '../git/worktree-manager';
+import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
@@ -1912,6 +1912,172 @@ export function createIssueRoutes(
       const worktrees = await worktreeManager.list(project.path);
 
       return c.json({ success: true, data: { worktrees } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Review, Stage.Done];
+
+  app.post('/:number/rebase', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (!REBASE_ALLOWED_STAGES.includes(issue.stage)) {
+        return c.json({ success: false, error: `Rebase not available in current stage (${issue.stage})` } satisfies ApiResponse, 400);
+      }
+
+      if (issue.stage === Stage.Done) {
+        if (!mergeQueue) {
+          return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
+        }
+        const retried = mergeQueue.retry(number);
+        if (!retried) {
+          return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state` } satisfies ApiResponse, 409);
+        }
+        return c.json({ success: true, data: { rebased: true, message: 'Rebase delegated to merge queue retry' } } satisfies ApiResponse);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        return c.json({ success: false, error: 'Project not found' } satisfies ApiResponse, 404);
+      }
+
+      if (!worktreeManager) {
+        return c.json({ success: false, error: 'WorktreeManager not configured' } satisfies ApiResponse, 500);
+      }
+
+      if (!worktreeManager.exists(project.name, issue.number)) {
+        return c.json({ success: false, error: 'Worktree not found' } satisfies ApiResponse, 400);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        return c.json({ success: false, error: 'Agent is running' } satisfies ApiResponse, 409);
+      }
+
+      eventBus.emit('rebase_started', { issueId: issue.id, projectId, issueNumber: number });
+
+      eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'fetching' });
+      await smartFetch(project.path);
+
+      eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'checking' });
+      const canFF = await worktreeManager.canFastForward(project.path, project.name, issue.number, project.baseBranch);
+
+      if (canFF) {
+        eventBus.emit('rebase_completed', { issueId: issue.id, projectId, issueNumber: number, rebased: false });
+        return c.json({ success: true, data: { rebased: false, message: 'Already up to date' } } satisfies ApiResponse);
+      }
+
+      eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'rebasing' });
+      const rebaseResult = await worktreeManager.rebaseOntoMaster(
+        project.path,
+        project.name,
+        issue.number,
+        project.baseBranch,
+        { abortOnConflict: true },
+      );
+
+      if (!rebaseResult.success) {
+        eventBus.emit('rebase_conflict', {
+          issueId: issue.id,
+          projectId,
+          issueNumber: number,
+          conflicts: rebaseResult.conflicts,
+        });
+        return c.json({
+          success: false,
+          error: 'Rebase aborted due to conflicts',
+          data: { rebased: false, conflicts: rebaseResult.conflicts, message: 'Rebase aborted due to conflicts' },
+        } satisfies ApiResponse, 409);
+      }
+
+      let buildPassed: boolean | undefined;
+      if (issue.stage === Stage.Review) {
+        eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'verifying' });
+        try {
+          const worktreePath = worktreeManager.getPath(project.name, issue.number);
+          if (worktreePath) {
+            await execFileAsync('npm', ['run', 'build'], {
+              cwd: worktreePath,
+              timeout: 5 * 60 * 1000,
+              maxBuffer: 10 * 1024 * 1024,
+            });
+            buildPassed = true;
+          }
+        } catch {
+          buildPassed = false;
+        }
+      }
+
+      eventBus.emit('rebase_completed', { issueId: issue.id, projectId, issueNumber: number, rebased: true });
+
+      if (issue.stage === Stage.Plan && agentRunner) {
+        const acpOptions: AcpConnectionOptions = {
+          cwd: worktreeManager.getPath(project.name, issue.number) || process.cwd(),
+          issueId: issue.id,
+          projectId,
+          workflowLogRepo,
+          coderSessionRepo,
+          eventBus,
+          issueNumber: issue.number,
+          opencodeBinPath,
+        };
+        issueService.createComment(issue.id, 'master has new changes, check if design/tasks can leverage them');
+        agentRunner.resumePipeline(
+          issue,
+          projectId,
+          stateManager.getIssueRepo(),
+          worktreeManager.getPath(project.name, issue.number) || process.cwd(),
+          acpOptions,
+          (issueId, status) => issueService.setStatus(issueId, status),
+        );
+      }
+
+      if (issue.stage === Stage.Build && checkpointRepo) {
+        const changeDir = findChangeDir(
+          worktreeManager.getPath(project.name, issue.number) || process.cwd(),
+          issue.number,
+        );
+        if (changeDir) {
+          try {
+            const tasksPath = path.join(changeDir, 'tasks.json');
+            const tasksContent = fs.readFileSync(tasksPath, 'utf-8');
+            const tasksFile = JSON.parse(tasksContent);
+            for (const task of tasksFile.tasks) {
+              task.passes = false;
+              task.error = null;
+              task.attempts = 0;
+            }
+            fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
+          } catch (err) {
+            log.warn('Failed to clear build checkpoint after rebase', { issueNumber: number, error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          rebased: true,
+          message: issue.stage === Stage.Review
+            ? (buildPassed ? 'Rebase successful, build verification passed' : 'Rebase successful but build verification failed')
+            : issue.stage === Stage.Build
+              ? 'Rebase successful, checkpoint cleared, resume pipeline to rebuild'
+              : 'Rebase successful',
+          ...(buildPassed !== undefined && { buildPassed }),
+        },
+      };
+      return c.json(response);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
