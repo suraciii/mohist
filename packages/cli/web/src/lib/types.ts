@@ -249,3 +249,26 @@ export interface CoderTextBuffer {
   acpSessionId: string
   text: string
 }
+
+export interface Task {
+  id: string
+  title: string
+  description?: string
+  acceptanceCriteria?: string[]
+  dependsOn?: string[]
+  passes: boolean
+  attempts: number
+  error?: string | null
+}
+
+export interface BuildStatus {
+  stage: string
+  status: string
+  progress: {
+    completed: number
+    failed: number
+    total: number
+    currentTask: string | null
+  }
+  tasks: Task[]
+}

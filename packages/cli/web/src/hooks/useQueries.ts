@@ -48,6 +48,22 @@ export function useIssueDiff(number: number) {
   })
 }
 
+export function useTasks(number: number) {
+  return useQuery({
+    queryKey: ['issues', number, 'tasks'],
+    queryFn: () => api.getTasks(number),
+    enabled: number > 0,
+  })
+}
+
+export function useBuildStatus(number: number) {
+  return useQuery({
+    queryKey: ['issues', number, 'build-status'],
+    queryFn: () => api.getBuildStatus(number),
+    enabled: number > 0,
+  })
+}
+
 export function useAgentStatus() {
   return useQuery({
     queryKey: ['agent-status'],
