@@ -17,6 +17,7 @@ export interface Task {
   mode?: 'AFK' | 'HITL';
   type?: 'WRITE' | 'TEST' | 'MIGRATE' | 'CONFIG' | 'REVIEW';
   output?: string;
+  durations?: number[];
 }
 
 export interface BuildContextOptions {
