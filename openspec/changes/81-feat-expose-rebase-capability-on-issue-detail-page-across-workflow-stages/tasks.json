@@ -191,11 +191,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/components/MergeStatePanel.tsx",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "P0 priority — pure UI label change, no backend dependency",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        78305
+      ]
     },
     {
       "id": "T-008",
