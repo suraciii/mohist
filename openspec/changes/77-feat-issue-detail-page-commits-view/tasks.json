@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Issue detail page commits view - backend API + frontend tab UI with expandable commit diffs",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow the exact pattern of the existing GET /:number/diff handler (issues.ts:1152-1226). Use execFileAsync for git commands. Place the new route after the /:number/diff handler."
+      "passes": true,
+      "notes": "Follow the exact pattern of the existing GET /:number/diff handler (issues.ts:1152-1226). Use execFileAsync for git commands. Place the new route after the /:number/diff handler.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -42,9 +44,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Place after the GET /:number/commits handler. Hash validation uses `git branch --contains` check — if output is empty, hash does not belong to the branch."
+      "notes": "Place after the GET /:number/commits handler. Hash validation uses `git branch --contains` check — if output is empty, hash does not belong to the branch.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -69,7 +76,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Follow existing patterns: DiffFile type at types.ts:88-92, api.getIssueDiff at api.ts:56-57, useIssueDiff at useQueries.ts:43-49."
+      "notes": "Follow existing patterns: DiffFile type at types.ts:88-92, api.getIssueDiff at api.ts:56-57, useIssueDiff at useQueries.ts:43-49.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -94,9 +104,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Use `useState<'files' | 'commits'>('files')` for tab state and `Set<string>` for tracking expanded commit hashes. Use relative time formatting from existing `formatTime` utility. Keep all existing Files view code intact — only wrap with tab header and conditionally render."
+      "notes": "Use `useState<'files' | 'commits'>('files')` for tab state and `Set<string>` for tracking expanded commit hashes. Use relative time formatting from existing `formatTime` utility. Keep all existing Files view code intact — only wrap with tab header and conditionally render.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
