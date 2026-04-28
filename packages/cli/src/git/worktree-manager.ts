@@ -99,6 +99,11 @@ async function branchExists(projectPath: string, branch: string): Promise<boolea
   }
 }
 
+export interface RebaseResult {
+  success: boolean;
+  conflicts: string[];
+}
+
 export class WorktreeManager {
 
   async create(
@@ -181,10 +186,58 @@ export class WorktreeManager {
     baseBranch: string = 'main'
   ): Promise<{ success: boolean; message: string }> {
     const branch = getBranchName(issueNumber);
+
+    const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
+    if (!hasCommits) {
+      log.info('No commits to merge back', { issueNumber, branch, baseBranch });
+      await this.remove(projectPath, projectName, issueNumber);
+      return { success: true, message: `No commits to merge for issue #${issueNumber}, worktree cleaned up` };
+    }
+
+    try {
+      await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
+    } catch (err) {
+      return { success: false, message: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    try {
+      await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
+    } catch (err) {
+      return { success: false, message: `Fast-forward not possible, rebase required: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    log.info('Fast-forward merge succeeded', { issueNumber, branch, baseBranch });
+    return { success: true, message: `Merged ${branch} into ${baseBranch} (fast-forward)` };
+  }
+
+  private async branchHasCommits(projectPath: string, branch: string, baseBranch: string): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync('git', ['log', `${baseBranch}..${branch}`, '--oneline'], { cwd: projectPath });
+      return stdout.trim().length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  async rebaseOntoMaster(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<RebaseResult> {
     const worktreePath = getWorktreePath(projectName, issueNumber);
+    const branch = getBranchName(issueNumber);
 
     if (!this.exists(projectName, issueNumber)) {
-      return { success: false, message: `Worktree for issue #${issueNumber} not found` };
+      throw new Error(`Worktree for issue #${issueNumber} not found`);
+    }
+
+    await smartFetch(projectPath);
+
+    const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
+    if (!hasCommits) {
+      log.info('No commits to rebase', { issueNumber, branch, baseBranch });
+      return { success: true, conflicts: [] };
     }
 
     try {
@@ -194,68 +247,65 @@ export class WorktreeManager {
       );
       const uncommitted = statusOut.trim().split('\n').filter(l => l.trim());
       if (uncommitted.length > 0) {
-        await execFileAsync('git', ['add', '--', ':!openspec/changes/', ':!.opencode/'], { cwd: worktreePath });
+        await execFileAsync('git', ['add', '--', ':!.opencode/'], { cwd: worktreePath });
         const remaining = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd: worktreePath });
         if (remaining.stdout.trim()) {
           await execFileAsync('git', ['commit', '-m', `chore: commit remaining changes for issue #${issueNumber}`, '--no-verify'], { cwd: worktreePath });
         }
       }
     } catch (err) {
-      log.warn('Failed to commit uncommitted changes before merge', { issueNumber, error: err instanceof Error ? err.message : String(err) });
-    }
-
-    const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
-    if (!hasCommits) {
-      log.info('No commits to merge back', { issueNumber, branch, baseBranch });
-      await this.remove(projectPath, projectName, issueNumber);
-      return { success: true, message: `No commits to merge for issue #${issueNumber}, worktree cleaned up` };
-    }
-
-    let stashed = false;
-    try {
-      const { stdout: dirtyCheck } = await execFileAsync(
-        'git', ['status', '--porcelain', '--ignore-submodules'],
-        { cwd: projectPath }
-      );
-      if (dirtyCheck.trim()) {
-        await execFileAsync('git', ['stash', '--include-untracked'], { cwd: projectPath });
-        stashed = true;
-      }
-
-      await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
-    } catch (err) {
-      if (stashed) {
-        await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch(() => {});
-      }
-      return { success: false, message: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}` };
+      log.warn('Failed to commit uncommitted changes before rebase', { issueNumber, error: err instanceof Error ? err.message : String(err) });
     }
 
     try {
-      await execFileAsync('git', ['merge', branch, '--no-edit'], { cwd: projectPath });
-    } catch (err) {
-      await execFileAsync('git', ['merge', '--abort'], { cwd: projectPath }).catch(() => {});
-      if (stashed) {
-        await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch(() => {});
-      }
-      return { success: false, message: `Merge conflict for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}` };
+      await execFileAsync('git', ['rebase', `origin/${baseBranch}`], { cwd: worktreePath });
+      log.info('Rebase succeeded', { issueNumber, branch, baseBranch });
+      return { success: true, conflicts: [] };
+    } catch (err: any) {
+      const conflicts = await this.getConflictingFiles(worktreePath);
+      log.warn('Rebase conflicts detected', { issueNumber, conflicts });
+      return { success: false, conflicts };
     }
-
-    if (stashed) {
-      await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch((err) => {
-        log.warn('Failed to pop stash after merge', { issueNumber, error: err instanceof Error ? err.message : String(err) });
-      });
-    }
-
-    log.info('Merged worktree branch back to base', { issueNumber, branch, baseBranch });
-    return { success: true, message: `Merged ${branch} into ${baseBranch}` };
   }
 
-  private async branchHasCommits(projectPath: string, branch: string, baseBranch: string): Promise<boolean> {
+  async abortRebase(
+    projectName: string,
+    issueNumber: number
+  ): Promise<void> {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+    await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
+    log.info('Rebase aborted', { issueNumber });
+  }
+
+  async continueRebase(
+    projectName: string,
+    issueNumber: number
+  ): Promise<RebaseResult> {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+
     try {
-      const { stdout } = await execFileAsync('git', ['log', `${baseBranch}..${branch}`, '--oneline'], { cwd: projectPath });
-      return stdout.trim().length > 0;
+      await execFileAsync('git', ['rebase', '--continue'], {
+        cwd: worktreePath,
+        env: { ...process.env, GIT_EDITOR: 'true' },
+      });
+      log.info('Rebase continued successfully', { issueNumber });
+      return { success: true, conflicts: [] };
+    } catch (err: any) {
+      const conflicts = await this.getConflictingFiles(worktreePath);
+      log.warn('Rebase still has conflicts after continue', { issueNumber, conflicts });
+      return { success: false, conflicts };
+    }
+  }
+
+  private async getConflictingFiles(worktreePath: string): Promise<string[]> {
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['diff', '--name-only', '--diff-filter=U'],
+        { cwd: worktreePath }
+      );
+      return stdout.trim().split('\n').filter(l => l.trim());
     } catch {
-      return false;
+      return [];
     }
   }
 
@@ -437,6 +487,44 @@ export class WorktreeManager {
   exists(projectName: string, issueNumber: number): boolean {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     return fs.existsSync(worktreePath);
+  }
+
+  async mergeMasterInWorktree(
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<{ success: boolean; conflictFiles?: string[]; message?: string }> {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+
+    if (!fs.existsSync(worktreePath)) {
+      return { success: false, message: 'Worktree not found' };
+    }
+
+    try {
+      await execFileAsync('git', ['merge', baseBranch, '--no-edit'], {
+        cwd: worktreePath,
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (!msg.includes('Merge conflict') && !msg.includes('CONFLICT') && !msg.includes('merge conflict')) {
+        await execFileAsync('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {});
+        return { success: false, message: `Merge failed: ${msg}` };
+      }
+
+      try {
+        const { stdout } = await execFileAsync(
+          'git', ['diff', '--name-only', '--diff-filter=U'],
+          { cwd: worktreePath }
+        );
+        const conflictFiles = stdout.trim().split('\n').filter((f: string) => f.trim());
+        return { success: false, conflictFiles };
+      } catch {
+        await execFileAsync('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {});
+        return { success: false, message: 'Merge conflict but failed to list conflict files' };
+      }
+    }
   }
 
   async prune(projectPath: string): Promise<void> {

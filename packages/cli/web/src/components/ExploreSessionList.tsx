@@ -5,6 +5,7 @@ import { useExploreSessions, useCreateExploreSession } from '../hooks/useQueries
 import { api } from '../lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ExploreSession } from '../lib/types'
+import { formatTimeAgo } from '../lib/format-time'
 
 function SessionCard({ session, onDelete }: { session: ExploreSession; onDelete: (s: ExploreSession) => void }) {
   const navigate = useNavigate()
@@ -90,20 +91,6 @@ function DeleteConfirmDialog({ session, onConfirm, onCancel }: { session: Explor
       </div>
     </div>
   )
-}
-
-function formatTimeAgo(date: Date): string {
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  const diffHr = Math.floor(diffMin / 60)
-  const diffDay = Math.floor(diffHr / 24)
-
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  if (diffHr < 24) return `${diffHr}h ago`
-  if (diffDay < 30) return `${diffDay}d ago`
-  return date.toLocaleDateString()
 }
 
 export function ExploreSessionList() {
