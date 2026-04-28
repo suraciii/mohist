@@ -228,9 +228,9 @@
         "T-08A",
         "T-08B"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "依赖所有功能修改完成后执行",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
