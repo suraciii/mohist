@@ -74,9 +74,9 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing test patterns: ralph-executor.test.ts uses setAcpSessionRunner mock, build-pipeline-observability.test.ts uses WorkflowController with mock repos. See also recover-build-all-pass.test.ts for the agent-runner-service recovery pattern.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
