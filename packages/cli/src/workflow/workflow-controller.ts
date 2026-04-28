@@ -9,7 +9,7 @@ import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { loadWorkflow } from './workflow-loader';
-import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
 import type { CommentRepo } from '../db/comment-repo';
 import type { EventBus } from '../services/event-bus';
@@ -881,6 +881,159 @@ export class WorkflowController {
         }
       },
     };
+  }
+
+  private async runReviewRound(
+    issue: Issue,
+    acpOptions: AcpConnectionOptions,
+    roundType: string,
+    roundIndex: number,
+    prompt: string,
+  ): Promise<{ success: boolean; text?: string; error?: string }> {
+    const issueId = String(acpOptions.issueNumber ?? acpOptions.issueId ?? '');
+    const projectId = this.projectId ?? issue.projectId;
+
+    log.info('Review stage round', { roundType, roundIndex, issueNumber: issue.number });
+
+    this.emitSafe('plan_round_start', {
+      issueId,
+      projectId,
+      roundType,
+      roundLabel: roundType,
+      roundIndex,
+    });
+
+    let conn: AcpConnection | undefined;
+    try {
+      conn = await createAcpConnection(acpOptions);
+      const result = await conn.prompt(prompt);
+      await conn.close();
+      conn = undefined;
+
+      if (!result.success) {
+        log.error('Review round failed', { roundType, roundIndex, error: result.error });
+        return { success: false, error: result.error ?? 'unknown error' };
+      }
+
+      return { success: true, text: result.text };
+    } catch (err) {
+      if (conn) {
+        try { await conn.close(); } catch { /* ignore */ }
+      }
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private async runAutoFixLoop(
+    issue: Issue,
+    acpOptions: AcpConnectionOptions,
+    changeDir: string,
+    reviewReport: string,
+    fixSuggestions: string,
+    roundState: { type: string; index: number },
+  ): Promise<StageResult> {
+    const MAX_ATTEMPTS = 2;
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const autoFixRoundIndex = 2 + attempt * 2;
+      const reVerifyRoundIndex = 3 + attempt * 2;
+
+      roundState.type = 'auto-fix';
+      roundState.index = autoFixRoundIndex;
+
+      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport);
+      const autoFixAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState);
+      const autoFixResult = await this.runReviewRound(issue, autoFixAcpOptions, 'auto-fix', autoFixRoundIndex, autoFixPrompt);
+
+      if (!autoFixResult.success) {
+        log.warn('Auto-fix round failed, counting as attempt', {
+          attempt: attempt + 1,
+          error: autoFixResult.error,
+          issueNumber: issue.number,
+        });
+        continue;
+      }
+
+      roundState.type = 're-verify';
+      roundState.index = reVerifyRoundIndex;
+
+      const reVerifyPrompt = buildReVerifyPrompt(issue, changeDir, reviewReport);
+      const reVerifyAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState);
+      const reVerifyResult = await this.runReviewRound(issue, reVerifyAcpOptions, 're-verify', reVerifyRoundIndex, reVerifyPrompt);
+
+      if (!reVerifyResult.success) {
+        log.warn('Re-verify round failed', {
+          attempt: attempt + 1,
+          error: reVerifyResult.error,
+          issueNumber: issue.number,
+        });
+        continue;
+      }
+
+      const updatedReport = readReportFile(changeDir, 'review.md') ?? reVerifyResult.text ?? '';
+      const result = parseResult(updatedReport);
+
+      if (result === 'PASS') {
+        log.info('Auto-fix succeeded', { attempt: attempt + 1, issueNumber: issue.number });
+
+        if (fixSuggestions && this.commentRepo) {
+          try {
+            this.commentRepo.create({
+              issueId: issue.id,
+              body: `**Auto-fix applied** (attempt ${attempt + 1})\n\n${fixSuggestions}`,
+            });
+          } catch (e) {
+            log.warn('Failed to create auto-fix comment', { error: e instanceof Error ? e.message : String(e) });
+          }
+        }
+
+        return {
+          success: true,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Review,
+            issueNumber: issue.number,
+            reviewReport: updatedReport,
+          },
+          message: `Review completed with auto-fix (attempt ${attempt + 1}), awaiting user approval`,
+        };
+      }
+
+      log.info('Re-verify still FAIL after auto-fix attempt', {
+        attempt: attempt + 1,
+        issueNumber: issue.number,
+      });
+    }
+
+    log.warn('Auto-fix loop exhausted, escalating to build stage', {
+      issueNumber: issue.number,
+      maxAttempts: MAX_ATTEMPTS,
+    });
+
+    return {
+      success: false,
+      requiresApproval: false,
+      output: null,
+      escalateToStage: Stage.Build,
+      message: `Auto-fix loop exhausted after ${MAX_ATTEMPTS} attempts, escalating to build stage`,
+    };
+  }
+
+  private async runPipelineReviewStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+    const changeDir = this.artifactManager.getChangeDir(issue.number);
+    if (!changeDir) {
+      return {
+        success: false,
+        requiresApproval: false,
+        output: null,
+        message: `Change directory not found for issue #${issue.number}`,
+      };
+    }
+
+    const hasNoAutoFix = this.checkpointRepo?.get(issue.number, 'review')?.completedSteps.includes('no-auto-fix') ?? false;
+
+    const roundState = { type: '', index: 0 };
+    const reviewAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState);
 
     try {
       conn = await createAcpConnection(reviewAcpOptions);
@@ -889,7 +1042,8 @@ export class WorkflowController {
       roundState.type = 'review';
       roundState.index = 0;
 
-      log.info('Review stage round', { roundType: 'review', issueNumber: issue.number });
+      const issueId = String(acpOptions.issueNumber ?? acpOptions.issueId ?? '');
+      const projectId = this.projectId ?? issue.projectId;
 
       if (this.eventBus) {
         try {
@@ -913,12 +1067,7 @@ export class WorkflowController {
       if (!result.success) {
         log.error('Review stage round failed', { roundType: 'review', error: result.error });
         await conn.close();
-        return {
-          success: false,
-          requiresApproval: false,
-          output: null,
-          message: `Review failed: ${result.error ?? 'unknown error'}`,
-        };
+        return { success: false, requiresApproval: false, output: null, message: `Review failed: ${result.error ?? 'unknown error'}` };
       }
 
       // Round 1: self-check
@@ -949,199 +1098,61 @@ export class WorkflowController {
       if (!selfCheckResult.success) {
         log.error('Review stage self-check failed', { error: selfCheckResult.error });
         await conn.close();
-        return {
-          success: false,
-          requiresApproval: false,
-          output: null,
-          message: `Review stage failed at self-check: ${selfCheckResult.error ?? 'unknown error'}`,
-        };
+        return { success: false, requiresApproval: false, output: null, message: `Review stage failed at self-check: ${selfCheckResult.error ?? 'unknown error'}` };
       }
+
+      await conn.close();
+      conn = undefined;
 
       const reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
 
       if (!reviewReport || reviewReport.trim().length === 0) {
-        await conn.close();
-        return {
-          success: false,
-          requiresApproval: false,
-          output: null,
-          message: 'Review stage failed: review.md is empty after self-check',
-        };
+        return { success: false, requiresApproval: false, output: null, message: 'Review stage failed: review.md is empty after self-check' };
       }
 
-      const verdict = parseVerdict(reviewReport);
+      const parsedResult = parseResult(reviewReport);
 
-      if (verdict === 'PASS') {
-        await conn.close();
+      if (parsedResult === 'PASS') {
         return {
           success: true,
           requiresApproval: true,
-          output: {
-            stage: Stage.Review,
-            issueNumber: issue.number,
-            reviewReport,
-          },
+          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport },
           message: 'Review completed, awaiting user approval',
         };
       }
 
-      // Verdict FAIL → auto-fix on same connection
-      roundState.type = 'auto-fix';
-      roundState.index = 2;
-      log.info('Review stage auto-fix round', { issueNumber: issue.number });
+      log.info('Review Result: FAIL, checking auto-fix eligibility', {
+        issueNumber: issue.number,
+        hasNoAutoFixCheckpoint: hasNoAutoFix,
+      });
 
-      if (this.eventBus) {
-        try {
-          this.eventBus.emit('plan_round_start', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: this.projectId ?? issue.projectId,
-            roundType: 'auto-fix',
-            roundLabel: 'auto-fix',
-            roundIndex: 2,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_round_start', { roundType: 'auto-fix', error: e instanceof Error ? e.message : String(e) });
-        }
-      }
-
-      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport, 'review.md');
-      const autoFixResult = await conn.prompt(autoFixPrompt);
-
-      if (!autoFixResult.success) {
-        log.error('Review stage auto-fix prompt failed', { error: autoFixResult.error });
-        await conn.close();
+      if (hasNoAutoFix) {
+        log.info('no-auto-fix checkpoint present, skipping auto-fix loop', { issueNumber: issue.number });
         return {
           success: true,
           requiresApproval: true,
-          output: {
-            stage: Stage.Review,
-            issueNumber: issue.number,
-            reviewReport,
-          },
-          message: `Auto-fix failed: ${autoFixResult.error ?? 'unknown error'}. Awaiting user approval`,
+          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport },
+          message: 'Review completed (auto-fix skipped due to prior exhaustion), awaiting user approval',
         };
       }
 
-      // Close old connection, open new one for full re-check
-      await conn.close();
-
-      roundState.type = 're-review';
-      roundState.index = 3;
-      log.info('Review stage re-review round on new connection', { issueNumber: issue.number });
-
-      conn = await createAcpConnection(reviewAcpOptions);
-
-      if (this.eventBus) {
-        try {
-          this.eventBus.emit('plan_round_start', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: this.projectId ?? issue.projectId,
-            roundType: 're-review',
-            roundLabel: 're-review',
-            roundIndex: 3,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_round_start', { roundType: 're-review', error: e instanceof Error ? e.message : String(e) });
-        }
-      }
-
-      const reReviewerPrompt = buildReviewerPrompt(issue, changeDir);
-      const reReviewResult = await conn.prompt(reReviewerPrompt);
-
-      if (!reReviewResult.success) {
-        log.error('Review stage re-review failed', { error: reReviewResult.error });
-        await conn.close();
+      const fixSuggestions = extractFixSuggestions(reviewReport);
+      if (!fixSuggestions) {
+        log.info('No Fix Suggestions found, proceeding to awaiting-user without auto-fix', { issueNumber: issue.number });
         return {
           success: true,
           requiresApproval: true,
-          output: {
-            stage: Stage.Review,
-            issueNumber: issue.number,
-            reviewReport,
-          },
-          message: `Auto-fix succeeded but re-review failed: ${reReviewResult.error ?? 'unknown error'}. Awaiting user approval`,
+          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport },
+          message: 'Review completed (no auto-fixable suggestions), awaiting user approval',
         };
       }
 
-      // Re-self-check round
-      roundState.type = 're-review-self-check';
-      roundState.index = 4;
-      log.info('Review stage re-review-self-check round', { issueNumber: issue.number });
-
-      if (this.eventBus) {
-        try {
-          this.eventBus.emit('plan_round_start', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: this.projectId ?? issue.projectId,
-            roundType: 're-review-self-check',
-            roundLabel: 're-review-self-check',
-            roundIndex: 4,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_round_start', { roundType: 're-review-self-check', error: e instanceof Error ? e.message : String(e) });
-        }
-      }
-
-      const reSelfCheckPrompt = buildReviewSelfCheckPrompt(issue, changeDir);
-      const reSelfCheckResult = await conn.prompt(reSelfCheckPrompt);
-
-      if (!reSelfCheckResult.success) {
-        log.error('Review stage re-self-check failed', { error: reSelfCheckResult.error });
-        await conn.close();
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Review,
-            issueNumber: issue.number,
-            reviewReport,
-          },
-          message: `Auto-fix succeeded but re-self-check failed: ${reSelfCheckResult.error ?? 'unknown error'}. Awaiting user approval`,
-        };
-      }
-
-      await conn.close();
-
-      const recheckReport = readReportFile(changeDir, 'review.md') ?? reSelfCheckResult.text;
-      const recheckVerdict = recheckReport ? parseVerdict(recheckReport) : 'FAIL';
-
-      if (recheckVerdict === 'PASS') {
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Review,
-            issueNumber: issue.number,
-            reviewReport: recheckReport,
-          },
-          message: 'Auto-fix succeeded, re-review passed. Awaiting user approval',
-        };
-      }
-
-      return {
-        success: true,
-        requiresApproval: true,
-        output: {
-          stage: Stage.Review,
-          issueNumber: issue.number,
-          reviewReport: recheckReport ?? reviewReport,
-        },
-        message: 'Auto-fix attempted but re-review still FAIL. Awaiting user approval',
-      };
+      return this.runAutoFixLoop(issue, acpOptions, changeDir, reviewReport, fixSuggestions, roundState);
     } catch (err) {
       if (conn) {
-        try {
-          await conn.close();
-        } catch {
-          // ignore cleanup errors
-        }
+        try { await conn.close(); } catch { /* ignore */ }
       }
-      return {
-        success: false,
-        requiresApproval: false,
-        output: null,
-        message: `Review stage error: ${err instanceof Error ? err.message : String(err)}`,
-      };
+      return { success: false, requiresApproval: false, output: null, message: `Review stage error: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
 }
