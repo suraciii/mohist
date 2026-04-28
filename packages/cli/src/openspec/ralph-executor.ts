@@ -122,6 +122,7 @@ export interface RalphExecutorContext {
   stageTimeoutMs?: number;
   onProcessSpawned?: (proc: import('child_process').ChildProcess) => void;
   worktreeManager?: WorktreeManager;
+  stage?: string;
 }
 
 export interface RalphLoopResult {
@@ -644,6 +645,7 @@ export async function runRalphLoop(
         coderSessionRepo: context.coderSessionRepo,
         issueNumber: context.issueNumber,
         onProcessSpawned: context.onProcessSpawned,
+        stage: context.stage,
         onBeforeKill: context.worktreeManager
           ? async (cwd: string) => {
               const hash = await context.worktreeManager!.createWipCommit(cwd, nextTask.id, attempt);

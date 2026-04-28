@@ -269,6 +269,7 @@ export class AgentRunnerService {
         eventBus: this.eventBus,
         issueNumber: updatedIssue.number,
         opencodeBinPath: this.opencodeBinPath,
+        stage: Stage.Review,
       };
 
       const startResult = this.startPipeline(
