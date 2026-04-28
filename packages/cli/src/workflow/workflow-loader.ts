@@ -49,7 +49,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
       stage: 'build',
       prompt: '实现 {issue.title}，按 plan 阶段的计划进行',
       approval: false,
-      timeout: 3600,
+      timeout: 7200,
     },
     {
       stage: 'review',

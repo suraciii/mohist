@@ -130,7 +130,7 @@ export class AgentRunnerService {
     if (!this.issueRepo) return [];
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active });
     return activeIssues
-      .filter(issue => issue.stage !== Stage.Draft)
+      .filter(issue => issue.stage !== Stage.Backlog)
       .map(issue => ({ issueNumber: issue.number, stage: issue.stage }));
   }
 
@@ -138,7 +138,7 @@ export class AgentRunnerService {
     if (!this.issueRepo) return;
 
     const orphans = this.issueRepo.findAll({ status: IssueStatus.Active })
-      .filter(issue => issue.stage !== Stage.Draft);
+      .filter(issue => issue.stage !== Stage.Backlog);
 
     if (orphans.length === 0) return;
 
@@ -569,7 +569,7 @@ export class AgentRunnerService {
         });
         try {
           issueRepo.setApprovalState(issue.id, {
-            stage: currentIssue?.stage ?? Stage.Draft,
+            stage: currentIssue?.stage ?? Stage.Backlog,
             status: 'error',
             output: { error: errorMsg },
             requestedAt: new Date().toISOString(),

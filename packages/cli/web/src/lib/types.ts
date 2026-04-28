@@ -1,5 +1,5 @@
 export enum Stage {
-  Draft = 'draft',
+  Backlog = 'backlog',
   Explore = 'explore',
   Plan = 'plan',
   Build = 'build',

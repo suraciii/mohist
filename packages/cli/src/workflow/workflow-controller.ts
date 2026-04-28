@@ -332,7 +332,7 @@ export class WorkflowController {
 
     while (currentIssue.stage !== Stage.Done) {
       switch (currentIssue.stage) {
-        case Stage.Draft:
+        case Stage.Backlog:
         case Stage.Plan: {
           this.emitProgress({ stage: 'plan' });
           const planResult = await this.runPlanStage(currentIssue, acpOptions);

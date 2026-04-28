@@ -20,8 +20,8 @@ export function createUpdateIssueTool(context: UpdateIssueToolContext): ToolInst
       labels: z.array(z.string()).optional().describe('Updated labels (replaces all existing labels)'),
     }),
     execute: async (params) => {
-      if (context.issueStage !== Stage.Draft) {
-        return `Error: cannot update issue — it is no longer in Draft stage (current: ${context.issueStage}). Only Draft issues can be updated from explore.`;
+      if (context.issueStage !== Stage.Backlog) {
+        return `Error: cannot update issue — it is no longer in Backlog stage (current: ${context.issueStage}). Only Backlog issues can be updated from explore.`;
       }
 
       const updates: Partial<{ title: string; body: string; labels: string[] }> = {};

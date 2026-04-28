@@ -5,7 +5,7 @@ import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 
 const STAGES: { key: Stage; label: string }[] = [
-  { key: Stage.Draft, label: 'Draft' },
+  { key: Stage.Backlog, label: 'Backlog' },
  { key: Stage.Plan, label: 'Plan' },
   { key: Stage.Build, label: 'Build' },
   { key: Stage.Review, label: 'Review' },

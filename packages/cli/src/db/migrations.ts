@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS issues (
   project_id  TEXT NOT NULL REFERENCES projects(id),
   title       TEXT NOT NULL,
   body        TEXT,
-  stage       TEXT NOT NULL DEFAULT 'draft',
+  stage       TEXT NOT NULL DEFAULT 'backlog',
   status      TEXT NOT NULL DEFAULT 'active',
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,

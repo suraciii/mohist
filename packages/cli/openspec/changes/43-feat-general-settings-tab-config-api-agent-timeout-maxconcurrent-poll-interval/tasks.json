@@ -1,0 +1,91 @@
+{
+  "project": "mohist",
+  "description": "Wire the General Settings tab to the backend config API, adding frontend types, API client, hooks, and form UI for agent.timeout / maxConcurrent / poll.interval",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Update PUT /api/config/:key response to return full config",
+      "spec": "specs/http-api/spec.md#API-提供配置接口",
+      "description": "Modify the PUT /api/config/:key handler in src/api/config.ts to return the full config object (agentTimeout, maxConcurrentAgents, pollInterval) after setting the value, instead of just { key, value }. Call configService.getConfig() after configService.set() and include it in the response data.",
+      "acceptanceCriteria": [
+        "PUT /api/config/agent.timeout with { value: 2700000 } returns { success: true, data: { agentTimeout: 2700000, maxConcurrentAgents: 8, pollInterval: 30000 } }",
+        "PUT /api/config/agent.maxConcurrent with invalid value (e.g. 20) returns 400 with validation error message",
+        "GET /api/config still works unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/api/config.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follow design D1: replace { key, value } response with configService.getConfig() result"
+    },
+    {
+      "id": "T-002",
+      "title": "Add frontend types, API client methods, and React Query hooks for config",
+      "spec": "specs/web-ui/spec.md#前端-API-client-提供-config-方法",
+      "description": "Add GeneralConfig interface to types.ts, add getConfig and updateConfig methods to api.ts, and add useConfig query + useUpdateConfig mutation hooks to useQueries.ts. The useUpdateConfig hook should follow the optimistic update pattern (onMutate update cache, onError rollback, onSettled invalidate) matching the existing useSaveProvider pattern.",
+      "acceptanceCriteria": [
+        "types.ts exports GeneralConfig interface with agentTimeout, maxConcurrentAgents, pollInterval (all number)",
+        "api.ts has getConfig() calling GET /api/config returning GeneralConfig",
+        "api.ts has updateConfig(key, value) calling PUT /api/config/:key returning GeneralConfig",
+        "useQueries.ts exports useConfig() hook returning { data, isLoading, error }",
+        "useQueries.ts exports useUpdateConfig() mutation with optimistic cache update on ['config'] key",
+        "useUpdateConfig onMutate sets ['config'] cache optimistically, onError rolls back",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "web/src/lib/types.ts, web/src/lib/api.ts, web/src/hooks/useQueries.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Query key: ['config']. Follow useSaveProvider pattern for optimistic updates."
+    },
+    {
+      "id": "T-003",
+      "title": "Build GeneralSettingsSection component and wire into SettingsPage",
+      "spec": "specs/general-settings-ui/spec.md#General-Settings-tab-展示配置表单",
+      "description": "Create GeneralSettingsSection component with three validated form fields (Agent Timeout in minutes, Max Concurrent Agents count, Poll Interval in seconds). Each field has a Save button that calls useUpdateConfig. Include frontend validation (timeout >= 1min, maxConcurrent 1-16, pollInterval >= 5sec). Add Reset to Defaults button with window.confirm dialog. Replace the 'General settings coming soon' placeholder in SettingsPage General tab with <GeneralSettingsSection />.",
+      "acceptanceCriteria": [
+        "General tab shows Agent Timeout (minutes), Max Concurrent Agents, Poll Interval (seconds) fields loaded from GET /api/config",
+        "Values display in user units: agentTimeout/60000 min, maxConcurrentAgents count, pollInterval/1000 sec",
+        "Each field has inline Save button that calls PUT /api/config/:key with converted ms value",
+        "Frontend validation blocks invalid values (timeout<1min, maxConcurrent<1 or >16, pollInterval<5sec, non-numeric) with error messages",
+        "Save failure shows error and reverts field to previous value",
+        "Reset to Defaults button with confirm dialog resets all three to defaults (30/8/30)",
+        "Loading state shown while config fetches, error state with retry button on fetch failure",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "web/src/components/GeneralSettingsSection.tsx, web/src/components/SettingsPage.tsx",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Follow design D2 (extract standalone component), D4 (per-field save), D5 (display units in state). Match existing SettingsPage styling (Tailwind classes, gray-50 backgrounds)."
+    },
+    {
+      "id": "T-004",
+      "title": "Update SettingsPage tests for General tab config form",
+      "spec": "specs/general-settings-ui/spec.md#General-Settings-前端字段验证",
+      "description": "Update web/tests/SettingsPage.test.tsx to replace the 'General settings coming soon' placeholder test with tests for the real General tab: verify fields render with config values, verify validation error messages, verify save button triggers API call, and verify Reset to Defaults button behavior.",
+      "acceptanceCriteria": [
+        "Old 'coming soon' placeholder test is removed or updated",
+        "Test verifies General tab renders Agent Timeout, Max Concurrent, Poll Interval fields with mock config data",
+        "Test verifies frontend validation shows error for timeout < 1, maxConcurrent > 16, pollInterval < 5",
+        "Test verifies Save button calls updateConfig with correct ms-converted values",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "web/tests/SettingsPage.test.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Mock the useConfig and useUpdateConfig hooks in tests. Follow existing test patterns in SettingsPage.test.tsx."
+    }
+  ]
+}
