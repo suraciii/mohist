@@ -14,7 +14,8 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
-import { resolveOpencodeBinPath } from '../config/config-loader';
+import { resolveOpencodeBinPath, load } from '../config/config-loader';
+import { getOpencodeDiscoveryService } from '../services/opencode-discovery-service';
 
 const log = Log.create({ service: 'acp-session' });
 
@@ -49,6 +50,7 @@ export interface AcpSessionOptions {
   opencodeBinPath?: string;
   onProcessSpawned?: (proc: ChildProcess) => void;
   onBeforeKill?: (cwd: string) => Promise<boolean>;
+  stage?: string;
 }
 
 export interface AcpSessionResult {
@@ -100,6 +102,7 @@ export async function runAcpSession(
     issueNumber,
     opencodeBinPath,
     onBeforeKill,
+    stage,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -376,6 +379,59 @@ export async function runAcpSession(
       }
     }
 
+    const config = load();
+    const configuredModel = stage && config.opencode?.stageModels?.[stage]
+      ? config.opencode.stageModels[stage]
+      : config.opencode?.model ?? null;
+
+    if (configuredModel) {
+      try {
+        const availableModels = await getOpencodeDiscoveryService().getAvailableModels();
+        if (!availableModels.includes(configuredModel)) {
+          const errorMsg = `Configured model "${configuredModel}" is not available. Available models: ${availableModels.join(', ')}`;
+          log.error('Model validation failed', { configuredModel, availableModels });
+          writeSessionLog(workflowLogRepo, issueId, 'model_selection_failed', {
+            configuredModel,
+            availableModels,
+            stage,
+            error: errorMsg,
+            timestamp: new Date().toISOString(),
+          });
+          await cleanup();
+          return { text: agentText, success: false, error: errorMsg };
+        }
+      } catch (err) {
+        log.warn('Model discovery probe failed, skipping validation', { error: err instanceof Error ? err.message : String(err) });
+      }
+
+      try {
+        await connection.setSessionConfigOption({
+          configId: 'model',
+          sessionId,
+          value: configuredModel,
+        });
+        log.info('Model override applied', { model: configuredModel, stage });
+        writeSessionLog(workflowLogRepo, issueId, 'model_selected', {
+          model: configuredModel,
+          stage: stage ?? null,
+          source: stage && config.opencode?.stageModels?.[stage] ? 'stageModels' : 'opencode.model',
+          sessionId,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        log.warn('setSessionConfigOption failed, falling back to default model', {
+          configuredModel,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        writeSessionLog(workflowLogRepo, issueId, 'model_fallback', {
+          configuredModel,
+          stage: stage ?? null,
+          reason: err instanceof Error ? err.message : 'setSessionConfigOption failed',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
     const promptResult = await Promise.race([
       connection.prompt({
         sessionId,
@@ -458,6 +514,7 @@ export interface AcpConnectionOptions {
   opencodeBinPath?: string;
   onProcessSpawned?: (proc: ChildProcess) => void;
   onBeforeKill?: (cwd: string) => Promise<boolean>;
+  stage?: string;
 }
 
 export interface AcpConnection {
@@ -488,6 +545,7 @@ export async function createAcpConnection(
     onSessionUpdate,
     opencodeBinPath,
     onBeforeKill,
+    stage,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -772,6 +830,62 @@ export async function createAcpConnection(
     } catch (err) {
       log.error('Failed to create coder_session row', {
         error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const config = load();
+  const configuredModel = stage && config.opencode?.stageModels?.[stage]
+    ? config.opencode.stageModels[stage]
+    : config.opencode?.model ?? null;
+
+  if (configuredModel) {
+    try {
+      const availableModels = await getOpencodeDiscoveryService().getAvailableModels();
+      if (!availableModels.includes(configuredModel)) {
+        const errorMsg = `Configured model "${configuredModel}" is not available. Available models: ${availableModels.join(', ')}`;
+        log.error('Model validation failed', { configuredModel, availableModels });
+        writeSessionLog(workflowLogRepo, issueId, 'model_selection_failed', {
+          configuredModel,
+          availableModels,
+          stage,
+          error: errorMsg,
+          timestamp: new Date().toISOString(),
+        });
+        await cleanup();
+        throw new Error(errorMsg);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Configured model')) {
+        throw err;
+      }
+      log.warn('Model discovery probe failed, skipping validation', { error: err instanceof Error ? err.message : String(err) });
+    }
+
+    try {
+      await connection.setSessionConfigOption({
+        configId: 'model',
+        sessionId,
+        value: configuredModel,
+      });
+      log.info('Model override applied', { model: configuredModel, stage });
+      writeSessionLog(workflowLogRepo, issueId, 'model_selected', {
+        model: configuredModel,
+        stage: stage ?? null,
+        source: stage && config.opencode?.stageModels?.[stage] ? 'stageModels' : 'opencode.model',
+        sessionId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      log.warn('setSessionConfigOption failed, falling back to default model', {
+        configuredModel,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      writeSessionLog(workflowLogRepo, issueId, 'model_fallback', {
+        configuredModel,
+        stage: stage ?? null,
+        reason: err instanceof Error ? err.message : 'setSessionConfigOption failed',
+        timestamp: new Date().toISOString(),
       });
     }
   }

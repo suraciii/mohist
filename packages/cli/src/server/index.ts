@@ -14,6 +14,7 @@ import { createFsRoutes } from '../api/fs';
 import { createQuestionRoutes } from '../api/questions';
 import { createExploreRoutes } from '../api/explore';
 import { createLogRoutes } from '../api/logs';
+import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
@@ -244,6 +245,7 @@ async function main(): Promise<void> {
   server.addRouter('/api', createStatusRoutes(projectService, issueService, fileConfig));
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
+  server.addRouter('/api/opencode', createOpencodeModelsRoutes());
   server.addRouter('/api/fs', createFsRoutes());
   server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), eventBus, (projectPath: string) => {
     return new ExploreAcpService({
