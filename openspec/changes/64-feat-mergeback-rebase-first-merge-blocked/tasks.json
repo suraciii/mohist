@@ -129,9 +129,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "D3: setInterval + master HEAD comparison. retryCount is memory-only (resets on restart)",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
