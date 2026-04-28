@@ -63,6 +63,7 @@ export interface AcpSessionResult {
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
 const PER_ROUND_TIMEOUT = 30 * 60 * 1000;
+const IDLE_TIMEOUT = 5 * 60 * 1000;
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024;
 
 export function truncateAgentText(text: string): string {
@@ -107,6 +108,7 @@ export async function runAcpSession(
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
+  let lastActivityTime = Date.now();
   const sessionStartTime = Date.now();
 
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: task.slice(0, 100) });
@@ -217,6 +219,7 @@ export async function runAcpSession(
         try {
           const update = notification.update;
           const eventType = update.sessionUpdate;
+          lastActivityTime = Date.now();
 
           if (eventType === 'agent_thought_chunk') {
             // excluded from agentText — only agent_message_chunk contributes
@@ -438,12 +441,15 @@ export async function runAcpSession(
         prompt: [{ type: 'text', text: task }],
       }),
       timeoutPromise,
+      createIdleTimeout(() => lastActivityTime, IDLE_TIMEOUT),
     ]);
 
-    if (promptResult === 'timeout') {
+    if (promptResult === 'timeout' || promptResult === 'idle_timeout') {
       const duration = Date.now() - sessionStartTime;
-      log.error('ACP prompt timed out', { sessionId, timeout, duration });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, timestamp: new Date().toISOString() });
+      const reason = promptResult === 'idle_timeout' ? 'idle_timeout' : 'timeout';
+      const idleDuration = Date.now() - lastActivityTime;
+      log.error('ACP prompt timed out', { sessionId, reason, timeout, duration, idleDuration });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, reason, timeout, duration, idleDuration, timestamp: new Date().toISOString() });
       if (coderSessionRepo && coderSessionId) {
         try {
           coderSessionRepo.updateStatus(coderSessionId, 'failed');
@@ -465,7 +471,7 @@ export async function runAcpSession(
         // cancel may fail if session already ended
       }
       await cleanup();
-      return { text: agentText, success: false, error: `Timed out after ${timeout / 1000}s`, wipCommitted };
+      return { text: agentText, success: false, error: promptResult === 'idle_timeout' ? `No activity for ${IDLE_TIMEOUT / 1000}s (idle timeout)` : `Timed out after ${timeout / 1000}s`, wipCommitted };
     }
 
     if (coderSessionRepo && coderSessionId) {
@@ -528,6 +534,21 @@ function createTimeout(ms: number): Promise<'timeout'> {
   );
 }
 
+function createIdleTimeout(
+  getIdleStart: () => number,
+  idleMs: number,
+  pollMs: number = 30_000,
+): Promise<'idle_timeout'> {
+  return new Promise<'idle_timeout'>((resolve) => {
+    const timer = setInterval(() => {
+      if (Date.now() - getIdleStart() >= idleMs) {
+        clearInterval(timer);
+        resolve('idle_timeout');
+      }
+    }, pollMs);
+  });
+}
+
 export async function createAcpConnection(
   options: AcpConnectionOptions
 ): Promise<AcpConnection> {
@@ -550,6 +571,7 @@ export async function createAcpConnection(
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
+  let lastActivityTime = Date.now();
   let procExited = false;
   let agentText = '';
   let agentTextTruncated = false;
@@ -666,6 +688,7 @@ export async function createAcpConnection(
         try {
           const update = notification.update;
           const eventType = update.sessionUpdate;
+          lastActivityTime = Date.now();
 
           if (eventType === 'agent_thought_chunk') {
             // excluded from agentText — only agent_message_chunk contributes
@@ -904,12 +927,15 @@ export async function createAcpConnection(
           prompt: [{ type: 'text', text }],
         }),
         createTimeout(timeout),
+        createIdleTimeout(() => lastActivityTime, IDLE_TIMEOUT),
       ]);
 
-      if (promptResult === 'timeout') {
+      if (promptResult === 'timeout' || promptResult === 'idle_timeout') {
         const duration = Date.now() - connectionStartTime;
-        log.error('ACP prompt timed out', { sessionId, timeout, duration });
-        writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
+        const reason = promptResult === 'idle_timeout' ? 'idle_timeout' : 'timeout';
+        const idleDuration = Date.now() - lastActivityTime;
+        log.error('ACP prompt timed out', { sessionId, reason, timeout, duration, idleDuration });
+        writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, reason, timeout, duration, idleDuration, mode: 'multi-round', timestamp: new Date().toISOString() });
         if (coderSessionRepo && coderSessionId) {
           try {
             coderSessionRepo.updateStatus(coderSessionId, 'failed');
@@ -933,7 +959,7 @@ export async function createAcpConnection(
         return {
           text: agentText.slice(roundStartIndex),
           success: false,
-          error: `Timed out after ${timeout / 1000}s`,
+          error: promptResult === 'idle_timeout' ? `No activity for ${IDLE_TIMEOUT / 1000}s (idle timeout)` : `Timed out after ${timeout / 1000}s`,
           acpSessionId: sessionId,
           wipCommitted,
         };
