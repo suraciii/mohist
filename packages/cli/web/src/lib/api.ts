@@ -56,6 +56,12 @@ export const api = {
   getIssueDiff: (number: number) =>
     request<{ files: import('./types').DiffFile[] }>(`/issues/${number}/diff`),
 
+  getIssueCommits: (number: number) =>
+    request<{ commits: import('./types').CommitEntry[] }>(`/issues/${number}/commits`),
+
+  getCommitDiff: (number: number, hash: string) =>
+    request<import('./types').CommitDiff>(`/issues/${number}/commits/${hash}/diff`),
+
   addComment: (issueNumber: number, body: string) =>
     request<import('./types').Comment>(`/issues/${issueNumber}/comments`, {
       method: 'POST',
