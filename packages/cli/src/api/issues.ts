@@ -1417,10 +1417,10 @@ export function createIssueRoutes(
 
       if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
         const response: ApiResponse = {
-          success: true,
-          data: { diff: '' }
+          success: false,
+          error: `No worktree for issue #${number}`
         };
-        return c.json(response);
+        return c.json(response, 404);
       }
 
       const branchName = `mo/issue-${number}`;
@@ -1446,7 +1446,7 @@ export function createIssueRoutes(
 
       const response: ApiResponse = {
         success: true,
-        data: { diff: diffOutput.stdout }
+        data: { hash, diff: diffOutput.stdout }
       };
       return c.json(response);
     } catch (error) {
