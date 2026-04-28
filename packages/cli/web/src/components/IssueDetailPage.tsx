@@ -4,12 +4,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useSessionTimeline } from '../hooks/useSessionTimeline'
+import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionTimeline } from './SessionTimeline'
+import { TaskList } from './TaskList'
 
 const STAGES = [Stage.Draft, Stage.Explore, Stage.Plan, Stage.Build, Stage.Review, Stage.Done]
 
@@ -23,6 +25,8 @@ const STAGE_LABELS: Record<string, string> = {
 }
 
 const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Review, Stage.Done])
+
+const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Review, Stage.Done])
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString()
@@ -55,6 +59,24 @@ export function IssueDetailPage() {
   const { data: issue, isLoading } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
+  const { data: buildStatus } = useBuildStatus(issueNumber)
+  const { data: tasksData } = useTasks(issueNumber)
+  useTaskProgress(issueNumber)
+
+  const mergedTasks = (() => {
+    if (!buildStatus?.tasks) return []
+    const depMap = new Map<string, string[]>()
+    if (tasksData?.tasks) {
+      for (const t of tasksData.tasks) {
+        if (t.dependsOn && t.dependsOn.length > 0) depMap.set(t.id, t.dependsOn)
+      }
+    }
+    return buildStatus.tasks.map((t) => {
+      const deps = depMap.get(t.id)
+      return deps ? { ...t, dependsOn: deps } : t
+    })
+  })()
+
   const {
     rounds,
     isStreaming,
@@ -256,6 +278,18 @@ export function IssueDetailPage() {
                   <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
                   <div className="text-sm text-gray-600 whitespace-pre-wrap">{issue.body}</div>
                 </div>
+              )}
+
+              {TASK_LIST_STAGES.has(issue.stage) && mergedTasks.length > 0 && (
+                <TaskList
+                  tasks={mergedTasks}
+                  currentTask={buildStatus?.progress.currentTask ?? null}
+                  progress={{
+                    completed: buildStatus?.progress.completed ?? 0,
+                    failed: buildStatus?.progress.failed ?? 0,
+                    total: buildStatus?.progress.total ?? mergedTasks.length,
+                  }}
+                />
               )}
 
               <div className="rounded-lg border border-gray-200 bg-white p-4">
