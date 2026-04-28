@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { startServer, stopServer, serverStatus, serverLogs } from './commands/server';
+import { startServer, stopServer, serverStatus, serverLogs, restartServerCommand, updateServerCommand } from './commands/server';
+import { installSystemdService, uninstallSystemdService } from './commands/server-systemd';
 import { setupProjectCommands, setupInitCommand } from './commands/project';
 import { setupIssueCommands, setupLabelCommands } from './commands/issue';
 import { setupQuickCommands } from './commands/quick';
@@ -47,6 +48,34 @@ serverCmd
   .action(async (options) => {
     const lines = parseInt(options.lines, 10) || 50;
     await serverLogs(lines);
+  });
+
+serverCmd
+  .command('install')
+  .description('Install mohist as a systemd user service')
+  .action(async () => {
+    await installSystemdService();
+  });
+
+serverCmd
+  .command('uninstall')
+  .description('Uninstall mohist systemd user service')
+  .action(async () => {
+    await uninstallSystemdService();
+  });
+
+serverCmd
+  .command('restart')
+  .description('Restart the mohist server')
+  .action(async () => {
+    await restartServerCommand();
+  });
+
+serverCmd
+  .command('update')
+  .description('Rebuild and restart (source mode only)')
+  .action(async () => {
+    await updateServerCommand();
   });
 
 setupProjectCommands(program);

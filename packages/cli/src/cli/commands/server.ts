@@ -7,6 +7,8 @@ import {
   isSystemdServiceInstalled,
   getSystemdStatus,
   runSystemctlUser,
+  restartServer as restartServerSystemd,
+  updateServer as updateServerSystemd,
 } from './server-systemd';
 
 const PID_FILE = path.join(process.env.HOME || '', '.mohist', 'server.pid');
@@ -277,4 +279,12 @@ export async function serverLogs(lines: number = 50): Promise<void> {
   
   console.log(chalk.gray('─'.repeat(60)));
   console.log(chalk.gray(`Full log: ${logFile}`));
+}
+
+export async function restartServerCommand(): Promise<void> {
+  await restartServerSystemd(stopServer, startServer);
+}
+
+export async function updateServerCommand(): Promise<void> {
+  await updateServerSystemd();
 }
