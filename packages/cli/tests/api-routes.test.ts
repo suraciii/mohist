@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -521,6 +523,142 @@ describe('API Routes', () => {
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(response.body.data).toBeDefined();
+      });
+    });
+  });
+
+  describe('Issue Commits Routes', () => {
+    let server: http.Server;
+    let projectId: string;
+    let tmpDir: string;
+    let repoDir: string;
+
+    async function initGitRepo(dir: string): Promise<void> {
+      const execAsync = promisify(execFile);
+      await execAsync('git', ['init', '-b', 'main'], { cwd: dir });
+      await execAsync('git', ['config', 'user.email', 'test@test.com'], { cwd: dir });
+      await execAsync('git', ['config', 'user.name', 'Test'], { cwd: dir });
+      fs.writeFileSync(path.join(dir, 'README.md'), 'init');
+      await execAsync('git', ['add', '-A'], { cwd: dir });
+      await execAsync('git', ['commit', '-m', 'init'], { cwd: dir });
+    }
+
+    beforeEach(async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-commits-test-'));
+      repoDir = path.join(tmpDir, 'repo');
+      fs.mkdirSync(repoDir);
+      await initGitRepo(repoDir);
+
+      const { WorktreeManager } = await import('../src/git/worktree-manager');
+      const app = new Hono();
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+      const wm = new WorktreeManager();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, wm, undefined, undefined, agentRunner));
+      server = createTestServer(app);
+
+      const project = await projectService.create({ name: 'Test Project', path: repoDir });
+      projectId = project.id;
+      projectService.setCurrent(project);
+    });
+
+    afterEach(() => {
+      server?.close();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    describe('GET /api/issues/:number/commits', () => {
+      it('should return 400 when no active project', async () => {
+        projectService.clearCurrent();
+        await issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(server).get('/api/issues/1/commits');
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('No active project');
+      });
+
+      it('should return 404 when issue not found', async () => {
+        const response = await request(server).get('/api/issues/999/commits');
+
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('not found');
+      });
+
+      it('should return empty commits when no worktree', async () => {
+        await issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(server).get('/api/issues/1/commits');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.commits).toEqual([]);
+      });
+
+      it('should return commits with correct fields', async () => {
+        await issueService.create({ projectId, title: 'Test Issue' });
+
+        const git = promisify(execFile);
+        await git('git', ['checkout', '-b', 'mo/issue-1'], { cwd: repoDir });
+        fs.writeFileSync(path.join(repoDir, 'test.txt'), 'hello');
+        await git('git', ['add', '-A'], { cwd: repoDir });
+        await git('git', ['commit', '-m', 'add test file'], { cwd: repoDir });
+        await git('git', ['checkout', 'main'], { cwd: repoDir });
+
+        const worktreeDir = path.join(os.homedir(), '.mohist', 'projects', 'test-project', 'worktrees', 'issue-1');
+        fs.mkdirSync(worktreeDir, { recursive: true });
+
+        const response = await request(server).get('/api/issues/1/commits');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.commits.length).toBeGreaterThanOrEqual(1);
+
+        const commit = response.body.data.commits[0];
+        expect(commit.hash).toBeDefined();
+        expect(commit.message).toBe('add test file');
+        expect(commit.author).toBe('Test');
+        expect(commit.date).toBeDefined();
+        expect(typeof commit.filesChanged).toBe('number');
+        expect(typeof commit.additions).toBe('number');
+        expect(typeof commit.deletions).toBe('number');
+
+        fs.rmSync(worktreeDir, { recursive: true, force: true });
+      });
+    });
+
+    describe('GET /api/issues/:number/commits/:hash/diff', () => {
+      it('should return 400 when no active project', async () => {
+        projectService.clearCurrent();
+        await issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(server).get('/api/issues/1/commits/abc1234/diff');
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('No active project');
+      });
+
+      it('should return 400 for invalid hash format', async () => {
+        await issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(server).get('/api/issues/1/commits/not-a-hash/diff');
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('Invalid commit hash');
+      });
+
+      it('should return 404 when issue not found', async () => {
+        const response = await request(server).get('/api/issues/999/commits/abc1234/diff');
+
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('not found');
+      });
+
+      it('should return 404 when no worktree exists', async () => {
+        await issueService.create({ projectId, title: 'Test Issue' });
+
+        const response = await request(server).get('/api/issues/1/commits/abc1234/diff');
+
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('No worktree');
       });
     });
   });

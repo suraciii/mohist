@@ -1322,7 +1322,7 @@ export function createIssueRoutes(
       const branchName = `mo/issue-${number}`;
       const logOutput = await execFileAsync(
         'git',
-        ['log', `${project.baseBranch}..${branchName}`, '--format=%h%x00%s%x00%an%x00%aI%x00%b%x01', '--stat'],
+        ['log', `${project.baseBranch}..${branchName}`, '--format=%h%x00%s%x00%an%x00%aI%x01', '--stat'],
         { cwd: project.path }
       );
 
@@ -1344,16 +1344,6 @@ export function createIssueRoutes(
           let filesChanged = 0;
           let additions = 0;
           let deletions = 0;
-
-          const statText = statLines.join('\n');
-          const statMatch = statText.match(/(\d+) files? changed(?:,\s*(\d+) insertions?\(\+\))?/);
-          if (statMatch) {
-            filesChanged = parseInt(statMatch[1], 10);
-            const plusSymbols = statText.match(/\+/g);
-            additions = plusSymbols ? plusSymbols.length : 0;
-            const minusSymbols = statText.match(/-/g);
-            deletions = minusSymbols ? minusSymbols.length : 0;
-          }
 
           const statSummary = statLines.find(l => l.includes('files changed') || l.includes('file changed'));
           if (statSummary) {
@@ -1388,6 +1378,14 @@ export function createIssueRoutes(
       const number = parseInt(c.req.param('number'));
       const hash = c.req.param('hash');
       const projectId = getCurrentProjectId();
+
+      if (!/^[0-9a-f]{7,40}$/i.test(hash)) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Invalid commit hash'
+        };
+        return c.json(response, 400);
+      }
 
       if (!projectId) {
         const response: ApiResponse = {
