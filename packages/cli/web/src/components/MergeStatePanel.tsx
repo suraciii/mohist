@@ -82,7 +82,7 @@ export function MergeStatePanel({ issueNumber, mergeState }: MergeStatePanelProp
           disabled={retryMutation.isPending}
           className="mt-3 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
         >
-          {retryMutation.isPending ? 'Retrying...' : 'Retry Merge'}
+          {retryMutation.isPending ? 'Rebasing and retrying...' : 'Rebase and Retry'}
         </button>
         {retryMutation.error && (
           <div className="mt-2 text-xs text-red-500">{retryMutation.error.message}</div>
@@ -108,7 +108,7 @@ export function MergeStatePanel({ issueNumber, mergeState }: MergeStatePanelProp
           disabled={retryMutation.isPending}
           className="mt-3 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
         >
-          {retryMutation.isPending ? 'Retrying...' : 'Retry Merge'}
+          {retryMutation.isPending ? 'Rebasing and retrying...' : 'Rebase and Retry'}
         </button>
         {retryMutation.error && (
           <div className="mt-2 text-xs text-amber-500">{retryMutation.error.message}</div>
@@ -168,7 +168,7 @@ export function MergeStatePanel({ issueNumber, mergeState }: MergeStatePanelProp
           disabled={retryMutation.isPending}
           className="mt-3 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
         >
-          {retryMutation.isPending ? 'Retrying...' : 'Retry Merge'}
+          {retryMutation.isPending ? 'Rebasing and retrying...' : 'Rebase and Retry'}
         </button>
         {retryMutation.error && (
           <div className="mt-2 text-xs text-red-500">{retryMutation.error.message}</div>
