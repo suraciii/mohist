@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { Writable, Readable } from 'stream';
 import {
   ClientSideConnection,
@@ -47,6 +47,7 @@ export interface AcpSessionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
+  onProcessSpawned?: (proc: ChildProcess) => void;
   onBeforeKill?: (cwd: string) => Promise<boolean>;
 }
 
@@ -122,6 +123,8 @@ export async function runAcpSession(
     ),
   });
 
+  options.onProcessSpawned?.(proc);
+
   let initialized = false;
   let rejectOnSpawn: ((err: Error) => void) | undefined;
   const spawnFailure = new Promise<never>((_, reject) => {
@@ -182,15 +185,26 @@ export async function runAcpSession(
   const stream = ndJsonStream(input, output);
 
   const cleanup = async () => {
-    const results = await Promise.allSettled([
+    const cleanupPromise = Promise.allSettled([
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
     ]);
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        log.error('Cleanup failed', { index, reason: String(result.reason) });
-      }
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      timeoutId = setTimeout(() => {
+        log.warn('Cleanup timed out after 5s, forcing kill');
+        resolve('timeout');
+      }, 5000);
     });
+    const result = await Promise.race([cleanupPromise, timeoutPromise]);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (result !== 'timeout') {
+      (result as PromiseSettledResult<void>[]).forEach((r, index) => {
+        if (r.status === 'rejected') {
+          log.error('Cleanup failed', { index, reason: String(r.reason) });
+        }
+      });
+    }
     ensureKill();
   };
 
@@ -442,6 +456,7 @@ export interface AcpConnectionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
+  onProcessSpawned?: (proc: ChildProcess) => void;
   onBeforeKill?: (cwd: string) => Promise<boolean>;
 }
 
@@ -510,6 +525,8 @@ export async function createAcpConnection(
     ),
   });
 
+  options.onProcessSpawned?.(proc);
+
   let rejectOnInit: ((err: Error) => void) | undefined;
   const spawnFailure = new Promise<never>((_, reject) => {
     rejectOnInit = reject;
@@ -562,15 +579,26 @@ export async function createAcpConnection(
   const stream = ndJsonStream(input, output);
 
   const cleanup = async () => {
-    const results = await Promise.allSettled([
+    const cleanupPromise = Promise.allSettled([
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
     ]);
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        log.error('Cleanup failed', { index, reason: String(result.reason) });
-      }
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      timeoutId = setTimeout(() => {
+        log.warn('Cleanup timed out after 5s, forcing kill');
+        resolve('timeout');
+      }, 5000);
     });
+    const result = await Promise.race([cleanupPromise, timeoutPromise]);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (result !== 'timeout') {
+      (result as PromiseSettledResult<void>[]).forEach((r, index) => {
+        if (r.status === 'rejected') {
+          log.error('Cleanup failed', { index, reason: String(r.reason) });
+        }
+      });
+    }
     ensureKill();
   };
 

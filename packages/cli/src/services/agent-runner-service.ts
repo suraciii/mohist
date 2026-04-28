@@ -5,6 +5,7 @@ import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { CommentRepo } from '../db/comment-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
+import type { ChildProcess } from 'child_process';
 import { WorkflowController, type PipelineResult } from '../workflow/workflow-controller';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue } from '../types';
@@ -19,11 +20,21 @@ import { WorktreeManager } from '../git/worktree-manager';
 import * as fs from 'fs';
 import * as path from 'path';
 
+export interface AgentProgress {
+  stage: string;
+  roundType?: string;
+  roundIndex?: number;
+  taskProgress?: { completed: number; total: number } | null;
+  lastActivityAt: string;
+}
+
 export interface RunningAgent {
   issueId: string;
   issueNumber: number;
   promise: Promise<void>;
   projectId: string;
+  progress: AgentProgress;
+  childProcess?: ChildProcess;
 }
 
 export interface RecoverableIssue {
@@ -35,7 +46,7 @@ export interface AgentStatus {
   running: boolean;
   issueId: string | null;
   issueNumber: number | null;
-  activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>;
+  activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string; progress: AgentProgress }>;
   waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>;
   recoverableIssues: RecoverableIssue[];
   queueDepth: number;
@@ -325,6 +336,7 @@ export class AgentRunnerService {
       issueId: a.issueId,
       issueNumber: a.issueNumber,
       projectId: a.projectId,
+      progress: { ...a.progress },
     }));
 
     const waiting = Array.from(this.waitingQuestions.entries()).map(([issueId, wq]) => {
@@ -350,6 +362,47 @@ export class AgentRunnerService {
       queueDepth: 0,
       maxConcurrentAgents: this.maxConcurrentAgents,
     };
+  }
+
+  forceStop(issueId: string): { stopped: boolean; issueNumber?: number } {
+    const agent = this.activeAgents.get(issueId);
+    if (!agent) {
+      return { stopped: false };
+    }
+
+    if (agent.childProcess) {
+      try {
+        agent.childProcess.kill('SIGKILL');
+        log.info('Force-stopped agent child process', { issueNumber: agent.issueNumber, issueId: issueId.slice(0, 8) });
+      } catch (err) {
+        log.warn('Failed to kill child process during force stop', {
+          issueNumber: agent.issueNumber,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    this.activeAgents.delete(issueId);
+
+    for (const [num, gate] of this.pendingGates.entries()) {
+      if (gate.issueId === issueId) {
+        this.pendingGates.delete(num);
+        break;
+      }
+    }
+
+    this.waitingQuestions.delete(issueId);
+
+    this.eventBus.emit('agent_stopped', {
+      issueId,
+      projectId: agent.projectId,
+      issueNumber: agent.issueNumber,
+      reason: 'force_stop',
+    });
+
+    log.info('Agent force-stopped', { issueNumber: agent.issueNumber, issueId: issueId.slice(0, 8) });
+
+    return { stopped: true, issueNumber: agent.issueNumber };
   }
 
   getActiveIssueId(): string | null {
@@ -417,6 +470,11 @@ export class AgentRunnerService {
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
     log.info('Pipeline started', { issueNumber: issue.number, projectId });
 
+    const progress: AgentProgress = {
+      stage: issue.stage,
+      lastActivityAt: new Date().toISOString(),
+    };
+
     const startTime = Date.now();
     const promise = (async () => {
       try {
@@ -428,6 +486,17 @@ export class AgentRunnerService {
           eventBus: this.eventBus,
           projectId,
           checkpointRepo: this.checkpointRepo,
+          onProgress: (update) => {
+            if (update.stage !== undefined) progress.stage = update.stage;
+            if (update.roundType !== undefined) progress.roundType = update.roundType;
+            if (update.roundIndex !== undefined) progress.roundIndex = update.roundIndex;
+            if (update.taskProgress !== undefined) progress.taskProgress = update.taskProgress;
+            progress.lastActivityAt = new Date().toISOString();
+          },
+          onChildProcess: (proc) => {
+            const agent = this.activeAgents.get(issue.id);
+            if (agent) agent.childProcess = proc;
+          },
           commentRepo: this.commentRepo,
         });
 
@@ -532,6 +601,8 @@ export class AgentRunnerService {
           });
         }
       } finally {
+        const agent = this.activeAgents.get(issue.id);
+        if (agent) agent.childProcess = undefined;
         this.activeAgents.delete(issue.id);
         this.clearWaiting(issue.id);
       }
@@ -542,6 +613,7 @@ export class AgentRunnerService {
       issueNumber: issue.number,
       promise,
       projectId,
+      progress,
     });
   }
 }

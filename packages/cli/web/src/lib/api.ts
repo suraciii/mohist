@@ -170,6 +170,9 @@ export const api = {
   retryMerge: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/retry-merge`, { method: 'POST' }),
 
+  forceStopIssue: (number: number) =>
+    request<{ ok: boolean; issueNumber: number }>(`/issues/${number}/force-stop`, { method: 'POST' }),
+
   getLogTail: (cursor?: number, limit?: number, maxBytes?: number) => {
     const search = new URLSearchParams()
     if (cursor != null) search.set('cursor', String(cursor))

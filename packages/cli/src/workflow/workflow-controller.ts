@@ -3,6 +3,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Stage, IssueStatus, MergeState, type Issue } from '../types';
+import type { ChildProcess } from 'child_process';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
@@ -45,6 +46,8 @@ export interface WorkflowControllerOptions {
   eventBus?: EventBus;
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
+  onProgress?: (update: { stage?: string; roundType?: string; roundIndex?: number; taskProgress?: { completed: number; total: number } | null }) => void;
+  onChildProcess?: (proc: ChildProcess) => void;
   commentRepo?: CommentRepo;
 }
 
@@ -62,6 +65,8 @@ export class WorkflowController {
   private eventBus?: EventBus;
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
+  private _onProgress?: WorkflowControllerOptions['onProgress'];
+  private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
   private commentRepo?: CommentRepo;
 
   constructor(options: WorkflowControllerOptions) {
@@ -71,7 +76,13 @@ export class WorkflowController {
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
+    this._onProgress = options.onProgress;
+    this._onChildProcess = options.onChildProcess;
     this.commentRepo = options.commentRepo;
+  }
+
+  protected emitProgress(update: Parameters<NonNullable<WorkflowControllerOptions['onProgress']>>[0]): void {
+    this._onProgress?.(update);
   }
 
   getCheckpointRepo(): PipelineCheckpointRepo | undefined {
@@ -119,6 +130,7 @@ export class WorkflowController {
     const planAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `plan-${issue.number}`,
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -144,6 +156,7 @@ export class WorkflowController {
       for (const [index, round] of rounds.entries()) {
         roundState.type = round.type;
         roundState.index = index;
+        this.emitProgress({ stage: 'plan', roundType: round.type, roundIndex: index });
 
         if (completedSteps.includes(round.type)) {
           if (round.verify()) {
@@ -240,6 +253,7 @@ export class WorkflowController {
       // self-review round
       roundState.type = 'self-review';
       roundState.index = rounds.length;
+      this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length });
 
       log.info('Plan stage self-review round', { issueNumber: issue.number });
 
@@ -320,6 +334,7 @@ export class WorkflowController {
       switch (currentIssue.stage) {
         case Stage.Draft:
         case Stage.Plan: {
+          this.emitProgress({ stage: 'plan' });
           const planResult = await this.runPlanStage(currentIssue, acpOptions);
           if (!planResult.success) {
             return {
@@ -352,6 +367,7 @@ export class WorkflowController {
         }
 
         case Stage.Build: {
+          this.emitProgress({ stage: 'build' });
           const buildResult = await this.runPipelineBuildStage(currentIssue, acpOptions);
           if (!buildResult.success) {
             return {
@@ -367,6 +383,7 @@ export class WorkflowController {
         }
 
         case Stage.Review: {
+          this.emitProgress({ stage: 'review' });
           const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
           if (!reviewResult.success) {
             return {
@@ -609,6 +626,7 @@ export class WorkflowController {
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
@@ -619,6 +637,7 @@ export class WorkflowController {
         if (!this.checkpointRepo) return;
         activeCompletedTaskIds.push(taskId);
         this.checkpointRepo.upsert(issue.number, 'build', [...activeCompletedTaskIds], null);
+        this.emitProgress({ stage: 'build', taskProgress: { completed: activeCompletedTaskIds.length, total } });
       },
     });
     const duration = Date.now() - buildStartTime;
@@ -895,6 +914,7 @@ export class WorkflowController {
     const reviewAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `review-${issue.number}`,
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -919,6 +939,7 @@ export class WorkflowController {
       // Round 0: review
       roundState.type = 'review';
       roundState.index = 0;
+      this.emitProgress({ stage: 'review', roundType: 'review', roundIndex: 0 });
 
       log.info('Review stage round', { roundType: 'review', issueNumber: issue.number });
 
@@ -953,6 +974,7 @@ export class WorkflowController {
       // Round 1: self-check
       roundState.type = 'review-self-check';
       roundState.index = 1;
+      this.emitProgress({ stage: 'review', roundType: 'review-self-check', roundIndex: 1 });
 
       log.info('Review stage self-check round', { issueNumber: issue.number });
 
