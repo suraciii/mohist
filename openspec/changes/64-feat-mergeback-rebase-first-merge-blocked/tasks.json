@@ -185,9 +185,9 @@
         "T-005",
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Mock git commands via child_process stubs. Focus on state transitions and event emissions",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "error": null
     }
