@@ -61,7 +61,7 @@
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
       "passes": true,
-      "notes": "Multi-round 模式 prompt timeout 处理在 line 767-798。Already correctly awaits onBeforeKill (fixed by issue #56 merge commit 3030465292)",
+      "notes": "Multi-round 模式 prompt timeout 处理在 line 767-798",
       "attempts": 1,
       "order": 999999,
       "error": null
