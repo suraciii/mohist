@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import * as fs from 'fs';
 import * as path from 'path';
 import { StateManager } from '../server/state-manager';
-import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORITIES } from '../types';
+import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORITIES, MergeState } from '../types';
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
@@ -157,7 +157,7 @@ export function createIssueRoutes(
         return c.json({ success: false, error: 'IssueRepo not configured' } satisfies ApiResponse, 500);
       }
 
-      const blockedIssues = issueRepo.findByMergeStates(['blocked'])
+      const blockedIssues = issueRepo.findByMergeStates([MergeState.Blocked])
         .filter(issue => issue.projectId === projectId);
 
       const blockedEntries = blockedIssues.map(issue => {

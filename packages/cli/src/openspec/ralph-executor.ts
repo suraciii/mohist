@@ -6,6 +6,7 @@ import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
 import { runAcpSession as _runAcpSession } from '../agent-runtime/acp-session';
+import { WorktreeManager } from '../git/worktree-manager';
 import { Log } from '../util/log';
 
 const execFileAsync = promisify(execFile);
@@ -23,7 +24,7 @@ export function resetAcpSessionRunner(): void {
 }
 import type { EventBus } from '../services/event-bus';
 
-export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout';
+export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip';
 
 export interface FailureCategoryConfig {
   maxAttempts: number;
@@ -35,13 +36,14 @@ export const FAILURE_CATEGORY_CONFIGS: Record<FailureCategory, FailureCategoryCo
   environment: { maxAttempts: 2, retryable: true },
   dependency: { maxAttempts: 1, retryable: false },
   timeout: { maxAttempts: 1, retryable: false },
+  timeout_with_wip: { maxAttempts: 2, retryable: true },
 };
 
-export function categorizeFailure(error: string): FailureCategory {
+export function categorizeFailure(error: string, options?: { wipCommitted?: boolean }): FailureCategory {
   const lowerError = error.toLowerCase();
 
   if (lowerError.includes('timeout') || lowerError.includes('timed out')) {
-    return 'timeout';
+    return options?.wipCommitted ? 'timeout_with_wip' : 'timeout';
   }
 
   if (error.includes('[SPAWN_FAILED]')) {
@@ -118,6 +120,7 @@ export interface RalphExecutorContext {
   coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
   issueNumber?: number;
   stageTimeoutMs?: number;
+  worktreeManager?: WorktreeManager;
 }
 
 export interface RalphLoopResult {
@@ -263,6 +266,10 @@ function generateAdjustmentsFromCategory(category: FailureCategory, _error: stri
     case 'timeout':
       adjustments.push('Consider breaking this task into smaller subtasks');
       adjustments.push('The task may be too complex for a single execution');
+      break;
+    case 'timeout_with_wip':
+      adjustments.push('Previous progress was saved in a WIP commit');
+      adjustments.push('Continue from where the previous attempt left off');
       break;
   }
 
@@ -569,6 +576,7 @@ export async function runRalphLoop(
     let attemptsUsed = nextTask.attempts;
     let shouldPause = false;
     let pauseReason: string | undefined;
+    let wipResumeContext: string | undefined;
 
     const maxRetries = options.maxRetries ?? 3;
     // Total attempts = 1 (initial) + maxRetries (retries). Ensure at least 1 attempt.
@@ -582,6 +590,7 @@ export async function runRalphLoop(
             learnings,
             failureReason: lastError,
             isRetry: true,
+            wipResumeContext,
           }).fullPrompt
         : assembledContext.fullPrompt;
 
@@ -611,6 +620,12 @@ export async function runRalphLoop(
         workflowLogRepo: context.workflowLogRepo,
         coderSessionRepo: context.coderSessionRepo,
         issueNumber: context.issueNumber,
+        onBeforeKill: context.worktreeManager
+          ? async (cwd: string) => {
+              const hash = await context.worktreeManager!.createWipCommit(cwd, nextTask.id, attempt);
+              return hash !== null;
+            }
+          : undefined,
       });
 
       attemptsUsed = attempt;
@@ -641,7 +656,26 @@ export async function runRalphLoop(
         break;
       } else {
         lastError = result.error ?? 'Unknown error';
-        lastCategory = categorizeFailure(lastError);
+        lastCategory = categorizeFailure(lastError, { wipCommitted: result.wipCommitted });
+
+        if (lastCategory === 'timeout_with_wip' && context.worktreeManager) {
+          const wipInfo = await context.worktreeManager.findWipCommit(context.worktreePath, nextTask.id);
+          if (wipInfo) {
+            wipResumeContext = [
+              `Task ${nextTask.id} timed out on attempt ${attempt}.`,
+              'A WIP commit was saved with the following progress:',
+              '',
+              'Modified files:',
+              ...wipInfo.changedFiles.map(f => `- ${f}`),
+              '',
+              'Diff summary:',
+              wipInfo.diffStat,
+              '',
+              'Continue from this state. Do NOT re-read or re-implement the files listed above.',
+              'Focus on completing the remaining acceptance criteria.',
+            ].join('\n');
+          }
+        }
 
         log.warn('Task attempt failed', {
           issueId: logIssueId,

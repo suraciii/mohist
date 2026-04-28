@@ -216,16 +216,17 @@ export class MergeQueue {
         });
       }
 
-      entry.mergeState = 'blocked';
+      entry.mergeState = MergeState.Blocked;
       entry.conflictingFiles = rebaseResult.conflicts;
       entry.message = `Rebase conflicts: ${rebaseResult.conflicts.join(', ')}`;
-      this.deps.issueRepo.setMergeState(entry.issueId, 'blocked');
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Blocked);
 
       this.deps.eventBus.emit('merge_blocked', {
         issueId: entry.issueId,
         projectId: entry.projectId,
         issueNumber: entry.issueNumber,
         conflictingFiles: rebaseResult.conflicts,
+        retryCount: 0,
       });
 
       log.info('Issue blocked due to rebase conflicts', {
