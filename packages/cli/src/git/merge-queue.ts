@@ -1,7 +1,7 @@
 import { execFile } from 'child_process';
 import * as path from 'path';
 import { promisify } from 'util';
-import { WorktreeManager, smartFetch } from './worktree-manager';
+import { WorktreeManager } from './worktree-manager';
 import { EventBus } from '../services/event-bus';
 import { IssueRepo } from '../db/issue-repo';
 import { MergeState } from '../types';
@@ -28,7 +28,6 @@ interface MergeQueueDeps {
   eventBus: EventBus;
   issueRepo: IssueRepo;
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
-  resolveConflicts: (entry: MergeEntry, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>;
 }
 
 export class MergeQueue {
@@ -207,69 +206,69 @@ export class MergeQueue {
       project.baseBranch,
     );
 
+    let rebased = false;
+
     if (!canFF) {
       const rebaseResult = await this.deps.worktreeManager.rebaseOntoMaster(
         project.path,
         project.name,
         entry.issueNumber,
         project.baseBranch,
-        { abortOnConflict: false },
+        { abortOnConflict: true },
       );
 
       if (!rebaseResult.success) {
-        log.info('First rebase had conflicts, retrying with fresh master', {
-          issueNumber: entry.issueNumber,
-          conflicts: rebaseResult.conflicts,
-        });
+        this.handleFailure(entry, `Rebase conflicts: ${rebaseResult.conflicts.join(', ')}`, MergeState.Conflict);
+        return;
+      }
 
-        try {
-          await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
-        } catch (err) {
-          log.warn('Failed to abort rebase before retry', {
-            issueNumber: entry.issueNumber,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+      rebased = true;
 
-        await smartFetch(project.path);
+      const canFFAfterRebase = await this.deps.worktreeManager.canFastForward(
+        project.path,
+        project.name,
+        entry.issueNumber,
+        project.baseBranch,
+      );
 
-        const retryResult = await this.deps.worktreeManager.rebaseOntoMaster(
-          project.path,
-          project.name,
-          entry.issueNumber,
-          project.baseBranch,
-          { abortOnConflict: false },
-        );
-
-        if (!retryResult.success) {
-          const resolved = await this.handleConflictResolution(entry, project, retryResult.conflicts);
-          if (!resolved) return;
-        }
+      if (!canFFAfterRebase) {
+        this.handleFailure(entry, 'Rebase succeeded but branch still cannot fast-forward');
+        return;
       }
     }
 
-    log.info('Branch ready, running build verification before merge', {
-      issueNumber: entry.issueNumber,
-      canFF,
-    });
+    if (rebased) {
+      const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
+      if (!worktreePath) {
+        this.handleFailure(entry, 'Worktree not found for build verification');
+        return;
+      }
 
-    const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
-    if (!worktreePath) {
-      this.handleFailure(entry, 'Worktree not found for build verification');
-      return;
-    }
-
-    const buildOk = await this.runBuildVerification(worktreePath);
-    if (!buildOk) {
-      log.warn('Build verification failed before merge', {
+      log.info('Rebase changed code, running build verification', {
         issueNumber: entry.issueNumber,
         worktreePath,
       });
-      this.handleFailure(entry, 'Build verification failed (npm run build)', MergeState.BuildFailed);
-      return;
+
+      const buildOk = await this.runBuildVerification(worktreePath);
+      if (!buildOk) {
+        log.warn('Build verification failed after rebase', {
+          issueNumber: entry.issueNumber,
+          worktreePath,
+        });
+        this.handleFailure(entry, 'Build verification failed after rebase (npm run build)', MergeState.BuildFailed);
+        return;
+      }
+
+      log.info('Build verification passed after rebase', {
+        issueNumber: entry.issueNumber,
+      });
+    } else {
+      log.info('Branch already fast-forwardable, skipping build verification', {
+        issueNumber: entry.issueNumber,
+      });
     }
 
-    log.info('Build verification passed, performing fast-forward merge', {
+    log.info('Performing fast-forward merge', {
       issueNumber: entry.issueNumber,
     });
 
@@ -312,105 +311,6 @@ export class MergeQueue {
     });
 
     log.info('Merge completed successfully', { issueNumber: entry.issueNumber });
-  }
-
-  private async handleConflictResolution(
-    entry: MergeEntry,
-    project: { path: string; name: string; baseBranch: string },
-    conflictFiles: string[],
-  ): Promise<boolean> {
-    const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
-    if (!worktreePath) {
-      this.blockWithConflict(entry, conflictFiles, 'Worktree not found for conflict resolution');
-      return false;
-    }
-
-    entry.mergeState = MergeState.Resolving;
-    entry.conflictingFiles = conflictFiles;
-    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Resolving);
-
-    this.deps.eventBus.emit('agent_conflict_resolution_started', {
-      issueId: entry.issueId,
-      projectId: entry.projectId,
-      issueNumber: entry.issueNumber,
-      conflictFiles: conflictFiles,
-    });
-
-    log.info('Delegating conflict resolution to agent', {
-      issueNumber: entry.issueNumber,
-      conflictFiles,
-    });
-
-    const result = await this.deps.resolveConflicts(entry, worktreePath, conflictFiles);
-
-    if (!result.success) {
-      this.blockWithConflict(entry, conflictFiles, result.error || 'Agent conflict resolution failed');
-      return false;
-    }
-
-    const continueResult = await this.deps.worktreeManager.rebaseContinue(
-      project.name,
-      entry.issueNumber,
-    );
-
-    if (!continueResult.success) {
-      this.blockWithConflict(entry, continueResult.conflicts, 'Rebase continue failed after agent resolution');
-      return false;
-    }
-
-    this.deps.eventBus.emit('agent_conflict_resolution_completed', {
-      issueId: entry.issueId,
-      projectId: entry.projectId,
-      issueNumber: entry.issueNumber,
-    });
-
-    log.info('Agent conflict resolution succeeded, rebase continued', {
-      issueNumber: entry.issueNumber,
-    });
-
-    return true;
-  }
-
-  private blockWithConflict(entry: MergeEntry, conflictFiles: string[], message: string): void {
-    try {
-      this.deps.worktreeManager.abortRebase(
-        (this.deps.getProjectPath(entry.projectId))!.name,
-        entry.issueNumber,
-      ).catch((err) => {
-        log.warn('Failed to abort rebase on block', {
-          issueNumber: entry.issueNumber,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    } catch {
-      // synchronous wrapper, ignore
-    }
-
-    entry.mergeState = MergeState.Blocked;
-    entry.conflictingFiles = conflictFiles;
-    entry.message = message;
-    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Blocked);
-
-    this.deps.eventBus.emit('agent_conflict_resolution_failed', {
-      issueId: entry.issueId,
-      projectId: entry.projectId,
-      issueNumber: entry.issueNumber,
-      error: message,
-    });
-
-    this.deps.eventBus.emit('merge_blocked', {
-      issueId: entry.issueId,
-      projectId: entry.projectId,
-      issueNumber: entry.issueNumber,
-      conflictingFiles: conflictFiles,
-      retryCount: 0,
-    });
-
-    log.info('Issue blocked due to conflict resolution failure', {
-      issueNumber: entry.issueNumber,
-      conflictFiles,
-      message,
-    });
   }
 
   private handleFailure(
