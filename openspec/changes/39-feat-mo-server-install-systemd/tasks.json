@@ -113,11 +113,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Imports isSystemdServiceInstalled, getSystemdStatus, runSystemctlUser from server-systemd.ts.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        100260
+      ]
     },
     {
       "id": "T-005",
