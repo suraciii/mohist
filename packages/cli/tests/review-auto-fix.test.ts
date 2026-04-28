@@ -42,7 +42,8 @@ vi.mock('../src/agents/artifact-prompt', () => ({
 
 import {
   WorkflowController,
-  parseVerdict,
+  parseResult,
+  extractFixSuggestions,
   type ChangeArtifactsManager,
   type StageResult,
 } from '../src/workflow/workflow-controller';
@@ -119,50 +120,72 @@ function createMockRepos() {
   };
 }
 
-const FAIL_REPORT = '# Review\n\n## Verdict: FAIL\n\n## Fix Suggestions\n- Fix X at line 10\n- Fix Y at line 20';
-const PASS_REPORT = '# Review\n\n## Verdict: PASS\n';
+const FAIL_REPORT = '# Review\n\n## Result: FAIL\n\n## Fix Suggestions\n- Fix X at line 10\n- Fix Y at line 20';
+const PASS_REPORT = '# Review\n\n## Result: PASS\n';
 
-describe('parseVerdict', () => {
+describe('parseResult', () => {
   it('should parse exact PASS', () => {
-    expect(parseVerdict('## Verdict: PASS')).toBe('PASS');
+    expect(parseResult('## Result: PASS')).toBe('PASS');
   });
 
   it('should parse exact FAIL', () => {
-    expect(parseVerdict('## Verdict: FAIL')).toBe('FAIL');
+    expect(parseResult('## Result: FAIL')).toBe('FAIL');
   });
 
-  it('should parse case-insensitive verdict', () => {
-    expect(parseVerdict('## Verdict: pass')).toBe('PASS');
-    expect(parseVerdict('## Verdict: fail')).toBe('FAIL');
-    expect(parseVerdict('## verdict: Pass')).toBe('PASS');
-    expect(parseVerdict('## VERDICT: FAIL')).toBe('FAIL');
+  it('should parse case-insensitive result', () => {
+    expect(parseResult('## Result: pass')).toBe('PASS');
+    expect(parseResult('## Result: fail')).toBe('FAIL');
+    expect(parseResult('## result: Pass')).toBe('PASS');
+    expect(parseResult('## RESULT: FAIL')).toBe('FAIL');
   });
 
   it('should handle whitespace variations', () => {
-    expect(parseVerdict('##   Verdict:   PASS')).toBe('PASS');
-    expect(parseVerdict('## Verdict: FAIL  ')).toBe('FAIL');
-    expect(parseVerdict('## Verdict : PASS')).toBe('PASS');
+    expect(parseResult('##   Result:   PASS')).toBe('PASS');
+    expect(parseResult('## Result: FAIL  ')).toBe('FAIL');
+    expect(parseResult('## Result : PASS')).toBe('PASS');
   });
 
-  it('should return null when no verdict found', () => {
-    expect(parseVerdict('Some random text')).toBeNull();
-    expect(parseVerdict('')).toBeNull();
-    expect(parseVerdict('Verdict: MAYBE')).toBeNull();
+  it('should return null when no result found', () => {
+    expect(parseResult('Some random text')).toBeNull();
+    expect(parseResult('')).toBeNull();
+    expect(parseResult('Result: MAYBE')).toBeNull();
   });
 
-  it('should return first match when multiple verdicts exist', () => {
-    const content = `## Verdict: FAIL\n\nSome text\n\n## Verdict: PASS`;
-    expect(parseVerdict(content)).toBe('FAIL');
+  it('should return first match when multiple results exist', () => {
+    const content = `## Result: FAIL\n\nSome text\n\n## Result: PASS`;
+    expect(parseResult(content)).toBe('FAIL');
   });
 
-  it('should parse verdict within multi-line content', () => {
-    const content = `# Review Report\n\n## Summary\nCode looks fine.\n\n## Verdict: PASS\n\n## Details\nNo issues found.`;
-    expect(parseVerdict(content)).toBe('PASS');
+  it('should parse result within multi-line content', () => {
+    const content = `# Review Report\n\n## Summary\nCode looks fine.\n\n## Result: PASS\n\n## Details\nNo issues found.`;
+    expect(parseResult(content)).toBe('PASS');
   });
 
-  it('should parse verdict from FAIL with fix suggestions', () => {
-    const content = `# Review Report\n\n## Summary\nIssues found.\n\n## Verdict: FAIL\n\n## Fix Suggestions\n- Fix typo at line 10`;
-    expect(parseVerdict(content)).toBe('FAIL');
+  it('should parse result from FAIL with fix suggestions', () => {
+    const content = `# Review Report\n\n## Summary\nIssues found.\n\n## Result: FAIL\n\n## Fix Suggestions\n- Fix typo at line 10`;
+    expect(parseResult(content)).toBe('FAIL');
+  });
+
+  it('should parse legacy Verdict header with backward compat', () => {
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(parseResult('## Verdict: FAIL')).toBe('FAIL');
+    expect(parseResult('## Verdict: pass')).toBe('PASS');
+    expect(stderrSpy).toHaveBeenCalled();
+    const output = stderrSpy.mock.calls.map(c => String(c[0])).join('');
+    expect(output).toContain('legacy');
+    stderrSpy.mockRestore();
+  });
+});
+
+describe('extractFixSuggestions', () => {
+  it('should extract content from Fix Suggestions section', () => {
+    const content = `## Result: FAIL\n\n## Fix Suggestions\n- Fix X at line 10\n- Fix Y at line 20`;
+    expect(extractFixSuggestions(content)).toBe('- Fix X at line 10\n- Fix Y at line 20');
+  });
+
+  it('should return empty string when section absent', () => {
+    expect(extractFixSuggestions('## Result: PASS')).toBe('');
+    expect(extractFixSuggestions('')).toBe('');
   });
 });
 
