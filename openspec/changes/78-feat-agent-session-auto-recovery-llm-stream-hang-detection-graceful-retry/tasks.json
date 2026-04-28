@@ -47,11 +47,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Independent of T-001 — failure category is consumed by ralph-executor loop, not SSE. Place the [HANG_UNRECOVERABLE] check before the timeout check in categorizeFailure to avoid misclassification.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        65259
+      ]
     },
     {
       "id": "T-003",
