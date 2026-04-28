@@ -1,0 +1,160 @@
+{
+  "project": "mohist",
+  "description": "Replace mergeBack's direct git merge with rebase-first strategy to resolve concurrent merge blocked issues",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extend MergeState type and add rebase events to EventBus",
+      "spec": "specs/rebase-first-merge/spec.md",
+      "description": "Update MergeState type in types/index.ts to add 'rebasing' and 'blocked' values. Add rebase lifecycle event types (rebase_started, rebase_completed, rebase_conflict, rebase_retry, merge_blocked) to EventBus EventMap in services/event-bus.ts. Add all new event types to the ALL_EVENT_TYPES array in api/events.ts.",
+      "acceptanceCriteria": [
+        "MergeState type includes 'rebasing' and 'blocked' in its union",
+        "EventMap includes rebase_started, rebase_completed, rebase_conflict, rebase_retry, merge_blocked with correct payload shapes",
+        "ALL_EVENT_TYPES array in api/events.ts includes all new event types",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types/index.ts, packages/cli/src/services/event-bus.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Foundation task — all other tasks depend on these types being available"
+    },
+    {
+      "id": "T-002",
+      "title": "Add rebaseOntoMaster method to WorktreeManager",
+      "spec": "specs/worktree-manager/spec.md",
+      "description": "Add rebaseOntoMaster(worktreePath, baseBranch) method to WorktreeManager that fetches latest origin/baseBranch, auto-commits uncommitted changes, then runs git rebase inside the worktree. On conflict, abort rebase and return conflictingFiles list. Simplify mergeBack() to use --ff-only instead of --no-edit merge.",
+      "acceptanceCriteria": [
+        "rebaseOntoMaster() fetches origin/baseBranch and runs git rebase origin/<baseBranch> inside worktreePath",
+        "Uncommitted changes in worktree are auto-committed before rebase",
+        "Rebase conflict triggers git rebase --abort and returns { success: false, conflictingFiles: string[] }",
+        "Successful rebase returns { success: true }",
+        "mergeBack() uses git merge --ff-only instead of git merge --no-edit",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "D1: rebase runs in worktree for full file context. D6: mergeBack simplified to ff-only after rebase"
+    },
+    {
+      "id": "T-003",
+      "title": "Rewrite MergeQueue.processItem with rebase-first flow",
+      "spec": "specs/rebase-first-merge/spec.md",
+      "description": "Rewrite MergeQueue.processItem() to: (1) check for no-commits case, (2) set mergeState to 'rebasing', (3) call rebaseOntoMaster(), (4) on rebase failure set 'conflict' and emit rebase_conflict, (5) on success set 'merging', (6) call mergeBack() (now ff-only), (7) run build verification, (8) on build failure rollback. Update handleFailure to support 'blocked' state. Extend MergeEntry with retryCount, lastAttemptHead, changedFiles fields.",
+      "acceptanceCriteria": [
+        "processItem transitions: pending -> rebasing -> merging -> merged on success",
+        "Rebase conflict sets mergeState to 'conflict' and emits rebase_conflict event with conflictingFiles",
+        "No-commits case skips rebase/merge, cleans worktree, sets 'merged'",
+        "Build failure after ff-merge triggers rollback and sets 'build-failed'",
+        "MergeEntry interface includes retryCount, lastAttemptHead, changedFiles fields",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/merge-queue.ts",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "This is the core flow change. retryCount starts at 0, incremented in auto-retry (T-005)"
+    },
+    {
+      "id": "T-004",
+      "title": "Implement conflict-aware merge ordering in pickNext",
+      "spec": "specs/conflict-aware-merge-ordering/spec.md",
+      "description": "Override pickNext() to detect file overlap between pending issues using git diff --name-only. Cache changedFiles on MergeEntry. When multiple pending issues overlap, prioritize by FIFO order. Degrade gracefully to FIFO on git diff failure.",
+      "acceptanceCriteria": [
+        "pickNext() computes changedFiles for each pending issue via git diff --name-only",
+        "changedFiles is cached on MergeEntry (computed once per issue)",
+        "When issues A and B have overlapping files, A (earlier enqueue) is processed first",
+        "When no file overlap exists, FIFO order is used",
+        "git diff failure logs warning and falls back to FIFO ordering",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/merge-queue.ts",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "D4: use git diff --name-only with caching. Degrades to FIFO on failure"
+    },
+    {
+      "id": "T-005",
+      "title": "Add auto-retry scheduler for blocked issues",
+      "spec": "specs/blocked-auto-retry/spec.md",
+      "description": "Add startAutoRetry() method to MergeQueue that runs a setInterval (5 min default). Each tick: find entries with mergeState 'conflict' or 'blocked', compare master HEAD (git rev-parse) against lastAttemptHead, if changed re-enqueue as 'pending' and emit rebase_retry. Increment retryCount; when retryCount >= 5, set 'blocked' and emit merge_blocked. Update retry() to accept 'blocked' state in addition to 'build-failed' and 'conflict', and reset retryCount to 0. Update recoverFromDB() to also recover 'conflict' and 'blocked' issues. Add stopAutoRetry() method.",
+      "acceptanceCriteria": [
+        "startAutoRetry() starts a periodic timer (configurable interval, default 5 min)",
+        "Timer detects master HEAD changes via git rev-parse and re-enqueues eligible issues",
+        "retryCount increments on each auto-retry, capped at 5",
+        "Reaching retry limit sets mergeState to 'blocked' and emits merge_blocked event",
+        "Manual retry() accepts 'blocked' state, resets retryCount to 0, and processes immediately",
+        "recoverFromDB() recovers issues with mergeState 'conflict' or 'blocked' into the queue",
+        "stopAutoRetry() clears the interval (called on shutdown)",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/merge-queue.ts",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "D3: setInterval + master HEAD comparison. retryCount is memory-only (resets on restart)"
+    },
+    {
+      "id": "T-006",
+      "title": "Wire auto-retry into server startup and shutdown",
+      "spec": "specs/blocked-auto-retry/spec.md",
+      "description": "Update server/index.ts to call mergeQueue.startAutoRetry() after recoverFromDB(), and mergeQueue.stopAutoRetry() in the SIGTERM/SIGINT handlers. Ensure the existing agent_completed handler still enqueues into mergeQueue.",
+      "acceptanceCriteria": [
+        "Server startup calls startAutoRetry() after recoverFromDB()",
+        "SIGTERM/SIGINT handlers call stopAutoRetry()",
+        "agent_completed handler unchanged (still enqueues)",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/server/index.ts",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Small integration task"
+    },
+    {
+      "id": "T-007",
+      "title": "Add tests for rebase-first merge flow",
+      "spec": "specs/rebase-first-merge/spec.md",
+      "description": "Write unit tests covering: (1) successful rebase + ff-merge flow, (2) rebase conflict detection and abort, (3) no-commits fast path, (4) auto-commit of uncommitted changes before rebase, (5) auto-retry with master HEAD change detection, (6) retry count limit and blocked state, (7) manual retry resets count, (8) conflict-aware ordering with file overlap, (9) FIFO fallback on git diff failure.",
+      "acceptanceCriteria": [
+        "Test for rebase success → ff-merge → merged state transition",
+        "Test for rebase conflict → abort → conflict state with conflictingFiles",
+        "Test for no-commits → skip merge → merged state",
+        "Test for auto-retry triggers when master HEAD changed",
+        "Test for retry count limit (5) → blocked state + merge_blocked event",
+        "Test for manual retry resets retryCount to 0",
+        "Test for file overlap detection in pickNext ordering",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/git/merge-queue-rebase.test.ts",
+      "dependsOn": ["T-004", "T-005", "T-006"],
+      "passes": false,
+      "notes": "Mock git commands via child_process stubs. Focus on state transitions and event emissions"
+    }
+  ]
+}
