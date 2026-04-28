@@ -17,14 +17,12 @@ import { createLogRoutes } from '../api/logs';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
-import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { Log } from '../util/log';
 
 import { load as loadConfig, getServerConfig, getLogConfig, resolveOpencodeBinPath } from '../config/config-loader';
 import { RateLimiter } from '../utils/rate-limiter';
-import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -128,42 +126,6 @@ async function main(): Promise<void> {
       if (!project) return null;
       return { path: project.path, name: project.name, baseBranch: project.baseBranch };
     },
-    resolveConflicts: async (entry, worktreePath, conflictFiles) => {
-      log.info('resolveConflicts callback invoked', { issueNumber: entry.issueNumber, conflictFiles });
-
-      const refreshedIssue = issueRepo.findById(entry.issueId);
-      if (!refreshedIssue) {
-        return { success: false, error: 'Issue not found for conflict resolution' };
-      }
-
-      const acpOptions: AcpConnectionOptions = {
-        cwd: worktreePath,
-        issueId: refreshedIssue.id,
-        projectId: entry.projectId,
-        workflowLogRepo,
-        coderSessionRepo,
-        eventBus,
-        issueNumber: refreshedIssue.number,
-        opencodeBinPath,
-      };
-
-      try {
-        const prompt = buildConflictResolutionPrompt(refreshedIssue, worktreePath, conflictFiles);
-
-        const connection = await createAcpConnection(acpOptions);
-        try {
-          const result = await connection.prompt(prompt);
-          if (!result.success) {
-            return { success: false, error: result.error || 'Agent ACP session failed' };
-          }
-          return { success: true };
-        } finally {
-          await connection.close().catch(() => {});
-        }
-      } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
-      }
-    },
   });
 
   mergeQueue.recoverFromDB();
@@ -190,9 +152,6 @@ async function main(): Promise<void> {
     });
   }));
   server.addRouter('/api/logs', createLogRoutes());
-
-  const issueRepo = stateManager.getIssueRepo();
-  const coderSessionRepo = stateManager.getCoderSessionRepo();
 
   eventBus.on('agent_completed', ({ issueNumber, projectId }) => {
     try {
