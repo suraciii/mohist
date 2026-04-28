@@ -52,6 +52,7 @@ export interface AcpSessionOptions {
   onBeforeKill?: (cwd: string) => Promise<boolean>;
   model?: string;
   stage?: string;
+  hangIdleMs?: number;
 }
 
 export interface AcpSessionResult {
@@ -64,8 +65,13 @@ export interface AcpSessionResult {
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
 const PER_ROUND_TIMEOUT = 30 * 60 * 1000;
-const IDLE_TIMEOUT = 5 * 60 * 1000;
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024;
+const DEFAULT_HANG_IDLE_MS = 3 * 60 * 1000;
+const HANG_CHECK_INTERVAL_MS = 30 * 1000;
+const RECOVERY_CANCEL_TIMEOUT_MS = 5 * 1000;
+const RECOVERY_WIP_TIMEOUT_MS = 5 * 1000;
+const RECOVERY_COOLDOWN_MS = 1 * 1000;
+const MAX_RECOVERY_ATTEMPTS = 2;
 
 export function truncateAgentText(text: string): string {
   if (text.length <= MAX_AGENT_TEXT_LENGTH) {
@@ -76,6 +82,220 @@ export function truncateAgentText(text: string): string {
   const tail = text.slice(-keepLength);
   const truncated = text.length - MAX_AGENT_TEXT_LENGTH;
   return `${head}\n\n...[truncated ${truncated} characters]...\n\n${tail}`;
+}
+
+interface PromptWithRecoveryParams {
+  connection: ClientSideConnection;
+  sessionId: string;
+  promptText: string;
+  timeoutMs: number;
+  hangIdleMs: number;
+  cwd: string;
+  issueId?: string;
+  projectId?: string;
+  executionId?: string;
+  sseIssueId: string;
+  acpSessionId: string;
+  workflowLogRepo?: WorkflowLogRepo;
+  eventBus?: EventBus;
+  onBeforeKill?: (cwd: string) => Promise<boolean>;
+  cleanup: () => Promise<void>;
+  getLastEventTime: () => number;
+  setLastEventTime: (t: number) => void;
+}
+
+async function runPromptWithHangRecovery(
+  params: PromptWithRecoveryParams
+): Promise<AcpSessionResult> {
+  const {
+    connection,
+    sessionId,
+    promptText,
+    timeoutMs,
+    hangIdleMs,
+    cwd,
+    issueId,
+    projectId,
+    executionId,
+    sseIssueId,
+    acpSessionId,
+    workflowLogRepo,
+    eventBus,
+    onBeforeKill,
+    cleanup,
+    getLastEventTime,
+    setLastEventTime,
+  } = params;
+
+  const startTime = Date.now();
+  const idleDisabled = hangIdleMs <= 0;
+  let recoveryAttemptCount = 0;
+  let idleTimer: ReturnType<typeof setInterval> | undefined;
+  let hangResolved: ((value: 'hang') => void) | undefined;
+
+  const emitRecoveryStatus = (status: 'detected' | 'recovering' | 'recovered' | 'failed', attempt: number, reason?: string) => {
+    if (!eventBus) return;
+    try {
+      eventBus.emit('coder_recovery_status', {
+        issueId: sseIssueId,
+        projectId: projectId ?? '',
+        executionId: executionId ?? '',
+        acpSessionId: acpSessionId || sessionId,
+        status,
+        attempt,
+        reason,
+      });
+    } catch {}
+  };
+
+  const doWipCommit = async (): Promise<boolean> => {
+    if (!onBeforeKill) return false;
+    try {
+      const result = await Promise.race([
+        onBeforeKill(cwd),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), RECOVERY_WIP_TIMEOUT_MS)),
+      ]);
+      return result;
+    } catch {
+      return false;
+    }
+  };
+
+  const doCancel = async (): Promise<boolean> => {
+    try {
+      await Promise.race([
+        connection.cancel({ sessionId }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('cancel timeout')), RECOVERY_CANCEL_TIMEOUT_MS)),
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const doCooldown = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, RECOVERY_COOLDOWN_MS));
+
+  const createTimeoutP = (ms: number): Promise<'timeout'> =>
+    new Promise((resolve) => setTimeout(() => resolve('timeout'), ms));
+
+  const createIdlePromise = (): Promise<'hang'> =>
+    new Promise((resolve) => { hangResolved = resolve; });
+
+  const startIdleMonitor = () => {
+    if (idleDisabled) return;
+    idleTimer = setInterval(() => {
+      const idle = Date.now() - getLastEventTime();
+      if (idle > hangIdleMs) {
+        if (hangResolved) {
+          hangResolved('hang');
+          hangResolved = undefined;
+        }
+        clearInterval(idleTimer!);
+        idleTimer = undefined;
+      }
+    }, HANG_CHECK_INTERVAL_MS);
+  };
+
+  const stopIdleMonitor = () => {
+    if (idleTimer) {
+      clearInterval(idleTimer);
+      idleTimer = undefined;
+    }
+    hangResolved = undefined;
+  };
+
+  const recoveryHint = (idleMs: number) =>
+    `The previous LLM streaming connection was interrupted (idle for ${idleMs}ms). Your session context is preserved. Please continue from where you left off.`;
+
+  try {
+    let currentPrompt = promptText;
+
+    while (true) {
+      setLastEventTime(Date.now());
+      startIdleMonitor();
+
+      const remaining = Math.max(timeoutMs - (Date.now() - startTime), 0);
+      const result = await Promise.race([
+        connection.prompt({
+          sessionId,
+          prompt: [{ type: 'text', text: currentPrompt }],
+        }),
+        createTimeoutP(remaining),
+        createIdlePromise(),
+      ]);
+
+      stopIdleMonitor();
+
+      if (result === 'timeout') {
+        await cleanup();
+        return {
+          text: '',
+          success: false,
+          error: `Timed out after ${timeoutMs / 1000}s`,
+          acpSessionId: sessionId,
+        };
+      }
+
+      if (result !== 'hang') {
+        return {
+          text: '',
+          success: true,
+          acpSessionId: sessionId,
+        };
+      }
+
+      const idleMs = Date.now() - getLastEventTime() + hangIdleMs;
+      const attempt = recoveryAttemptCount + 1;
+
+      log.warn('ACP session hang detected, starting recovery', { sessionId, idleMs, attempt });
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_hang_detected', { sessionId, idleMs, attempt });
+      emitRecoveryStatus('detected', attempt);
+
+      if (attempt > MAX_RECOVERY_ATTEMPTS) {
+        log.error('Max recovery attempts exceeded, killing process', { sessionId, attempt });
+        writeSessionLog(workflowLogRepo, issueId, 'acp_session_recovery_failed', { sessionId, attempt, reason: 'max_attempts_exceeded' });
+        emitRecoveryStatus('failed', attempt, 'max_attempts_exceeded');
+        await cleanup();
+        return {
+          text: '',
+          success: false,
+          error: `[HANG_UNRECOVERABLE] max recovery attempts exceeded`,
+          acpSessionId: sessionId,
+        };
+      }
+
+      const wipCommitted = await doWipCommit();
+
+      const cancelOk = await doCancel();
+      if (!cancelOk) {
+        log.error('Cancel timed out during recovery, falling back to kill', { sessionId, attempt });
+        writeSessionLog(workflowLogRepo, issueId, 'acp_session_recovery_failed', { sessionId, attempt, reason: 'cancel_timeout' });
+        emitRecoveryStatus('failed', attempt, 'cancel_timeout');
+        await cleanup();
+        return {
+          text: '',
+          success: false,
+          error: `[HANG_UNRECOVERABLE] cancel timed out`,
+          acpSessionId: sessionId,
+          wipCommitted,
+        };
+      }
+
+      await doCooldown();
+
+      recoveryAttemptCount = attempt;
+      setLastEventTime(Date.now());
+
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_recovery_started', { sessionId, attempt });
+      emitRecoveryStatus('recovering', attempt);
+
+      currentPrompt = recoveryHint(idleMs);
+    }
+  } catch (err) {
+    stopIdleMonitor();
+    const message = err instanceof Error ? err.message : String(err);
+    return { text: '', success: false, error: message, acpSessionId: sessionId };
+  }
 }
 
 function killProc(proc: import('child_process').ChildProcess): void {
@@ -105,11 +325,12 @@ export async function runAcpSession(
     opencodeBinPath,
     onBeforeKill,
     stage,
+    hangIdleMs = DEFAULT_HANG_IDLE_MS,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
-  let lastActivityTime = Date.now();
+  let lastEventTime = Date.now();
   const sessionStartTime = Date.now();
 
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: task.slice(0, 100) });
@@ -218,9 +439,9 @@ export async function runAcpSession(
     (_agent) => ({
       sessionUpdate: async (notification: SessionNotification) => {
         try {
+          lastEventTime = Date.now();
           const update = notification.update;
           const eventType = update.sessionUpdate;
-          lastActivityTime = Date.now();
 
           if (eventType === 'agent_thought_chunk') {
             // excluded from agentText — only agent_message_chunk contributes
@@ -462,21 +683,27 @@ export async function runAcpSession(
       }
     }
 
-    const promptResult = await Promise.race([
-      connection.prompt({
-        sessionId,
-        prompt: [{ type: 'text', text: task }],
-      }),
-      timeoutPromise,
-      createIdleTimeout(() => lastActivityTime, IDLE_TIMEOUT),
-    ]);
+    const promptResult = await runPromptWithHangRecovery({
+      connection,
+      sessionId,
+      promptText: task,
+      timeoutMs: timeout,
+      hangIdleMs,
+      cwd,
+      issueId,
+      projectId,
+      executionId,
+      sseIssueId,
+      acpSessionId: sessionId,
+      workflowLogRepo,
+      eventBus,
+      onBeforeKill,
+      cleanup,
+      getLastEventTime: () => lastEventTime,
+      setLastEventTime: (t: number) => { lastEventTime = t; },
+    });
 
-    if (promptResult === 'timeout' || promptResult === 'idle_timeout') {
-      const duration = Date.now() - sessionStartTime;
-      const reason = promptResult === 'idle_timeout' ? 'idle_timeout' : 'timeout';
-      const idleDuration = Date.now() - lastActivityTime;
-      log.error('ACP prompt timed out', { sessionId, reason, timeout, duration, idleDuration });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, reason, timeout, duration, idleDuration, timestamp: new Date().toISOString() });
+    if (!promptResult.success) {
       if (coderSessionRepo && coderSessionId) {
         try {
           coderSessionRepo.updateStatus(coderSessionId, 'failed');
@@ -493,21 +720,8 @@ export async function runAcpSession(
           log.error('Failed to update coder_session status', { error: err instanceof Error ? err.message : String(err) });
         }
       }
-      let wipCommitted = false;
-      if (onBeforeKill) {
-        try {
-          wipCommitted = await onBeforeKill(cwd);
-        } catch (err) {
-          log.warn('onBeforeKill callback failed during timeout handling', { error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-      try {
-        await connection.cancel({ sessionId });
-      } catch {
-        // cancel may fail if session already ended
-      }
-      await cleanup();
-      return { text: agentText, success: false, error: promptResult === 'idle_timeout' ? `No activity for ${IDLE_TIMEOUT / 1000}s (idle timeout)` : `Timed out after ${timeout / 1000}s`, wipCommitted };
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration: Date.now() - sessionStartTime, timestamp: new Date().toISOString() });
+      return { text: agentText, success: false, error: promptResult.error, wipCommitted: promptResult.wipCommitted };
     }
 
     if (coderSessionRepo && coderSessionId) {
@@ -579,6 +793,7 @@ export interface AcpConnectionOptions {
   onBeforeKill?: (cwd: string) => Promise<boolean>;
   model?: string;
   stage?: string;
+  hangIdleMs?: number;
 }
 
 export interface AcpConnection {
@@ -592,21 +807,6 @@ function createTimeout(ms: number): Promise<'timeout'> {
   return new Promise<'timeout'>((resolve) =>
     setTimeout(() => resolve('timeout'), ms)
   );
-}
-
-function createIdleTimeout(
-  getIdleStart: () => number,
-  idleMs: number,
-  pollMs: number = 30_000,
-): Promise<'idle_timeout'> {
-  return new Promise<'idle_timeout'>((resolve) => {
-    const timer = setInterval(() => {
-      if (Date.now() - getIdleStart() >= idleMs) {
-        clearInterval(timer);
-        resolve('idle_timeout');
-      }
-    }, pollMs);
-  });
 }
 
 export async function createAcpConnection(
@@ -627,11 +827,12 @@ export async function createAcpConnection(
     opencodeBinPath,
     onBeforeKill,
     stage,
+    hangIdleMs = DEFAULT_HANG_IDLE_MS,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
-  let lastActivityTime = Date.now();
+  let lastEventTime = Date.now();
   let procExited = false;
   let agentText = '';
   let agentTextTruncated = false;
@@ -746,9 +947,9 @@ export async function createAcpConnection(
     (_agent) => ({
       sessionUpdate: async (notification: SessionNotification) => {
         try {
+          lastEventTime = Date.now();
           const update = notification.update;
           const eventType = update.sessionUpdate;
-          lastActivityTime = Date.now();
 
           if (eventType === 'agent_thought_chunk') {
             // excluded from agentText — only agent_message_chunk contributes
@@ -1006,21 +1207,27 @@ export async function createAcpConnection(
 
       roundStartIndex = agentText.length;
 
-      const promptResult = await Promise.race([
-        connection.prompt({
-          sessionId,
-          prompt: [{ type: 'text', text }],
-        }),
-        createTimeout(timeout),
-        createIdleTimeout(() => lastActivityTime, IDLE_TIMEOUT),
-      ]);
+      const result = await runPromptWithHangRecovery({
+        connection,
+        sessionId,
+        promptText: text,
+        timeoutMs: timeout,
+        hangIdleMs,
+        cwd,
+        issueId,
+        projectId,
+        executionId,
+        sseIssueId,
+        acpSessionId: sessionId,
+        workflowLogRepo,
+        eventBus,
+        onBeforeKill,
+        cleanup,
+        getLastEventTime: () => lastEventTime,
+        setLastEventTime: (t: number) => { lastEventTime = t; },
+      });
 
-      if (promptResult === 'timeout' || promptResult === 'idle_timeout') {
-        const duration = Date.now() - connectionStartTime;
-        const reason = promptResult === 'idle_timeout' ? 'idle_timeout' : 'timeout';
-        const idleDuration = Date.now() - lastActivityTime;
-        log.error('ACP prompt timed out', { sessionId, reason, timeout, duration, idleDuration });
-        writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, reason, timeout, duration, idleDuration, mode: 'multi-round', timestamp: new Date().toISOString() });
+      if (!result.success) {
         if (coderSessionRepo && coderSessionId) {
           try {
             coderSessionRepo.updateStatus(coderSessionId, 'failed');
@@ -1037,25 +1244,12 @@ export async function createAcpConnection(
             // ignore
           }
         }
-        let wipCommitted = false;
-        if (onBeforeKill) {
-          try {
-            wipCommitted = await onBeforeKill(cwd);
-          } catch (err) {
-            log.warn('onBeforeKill callback failed during timeout handling', { error: err instanceof Error ? err.message : String(err) });
-          }
-        }
-        try {
-          await connection.cancel({ sessionId });
-        } catch {
-          // cancel may fail
-        }
         return {
           text: agentText.slice(roundStartIndex),
           success: false,
-          error: promptResult === 'idle_timeout' ? `No activity for ${IDLE_TIMEOUT / 1000}s (idle timeout)` : `Timed out after ${timeout / 1000}s`,
+          error: result.error,
           acpSessionId: sessionId,
-          wipCommitted,
+          wipCommitted: result.wipCommitted,
         };
       }
 
