@@ -150,9 +150,9 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "只改 type annotation，不需要改逻辑，因为 tasks 直接从 tasks.json 读取",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
