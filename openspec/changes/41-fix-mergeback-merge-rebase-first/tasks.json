@@ -1,0 +1,163 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add rebaseOntoMaster, abortRebase, continueRebase to WorktreeManager",
+      "spec": "specs/worktree-manager/spec.md#WorktreeManager-支持-rebase-onto-master",
+      "description": "Add three new methods to WorktreeManager: rebaseOntoMaster() fetches origin/baseBranch and runs git rebase inside the worktree, returning {success, conflicts}; abortRebase() runs git rebase --abort; continueRebase() runs git rebase --continue. Extract conflict file paths from git diff --name-only --diff-filter=U when rebase fails.",
+      "acceptanceCriteria": [
+        "rebaseOntoMaster() returns {success:true, conflicts:[]} on clean rebase",
+        "rebaseOntoMaster() returns {success:false, conflicts:['file1','file2']} on conflict",
+        "abortRebase() restores branch to pre-rebase state",
+        "continueRebase() returns success when conflicts are staged and resolved",
+        "continueRebase() returns new conflicts if more arise",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "New methods are additive — no changes to existing create/remove/list methods",
+      "attempts": 3,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Simplify mergeBack to fast-forward only",
+      "spec": "specs/worktree-manager/spec.md#WorktreeManager-mergeBack-使用-fast-forward-only",
+      "description": "Replace the current three-way merge logic in mergeBack() (git merge --no-edit) with git merge --ff-only. Remove the stash/uncommitted-changes logic — that moves to rebaseOntoMaster. Keep the commit-uncommitted-changes-before-merge guard (stage any leftover files in worktree before merge). Keep the hasCommits check and cleanup logic.",
+      "acceptanceCriteria": [
+        "mergeBack() uses git merge --ff-only instead of git merge --no-edit",
+        "Returns {success:false} with descriptive message when fast-forward is not possible",
+        "Does NOT modify base branch on failure",
+        "Existing remove/cleanup after successful merge still works",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Update MergeState type and MergeEntry to support rebase-first flow",
+      "spec": "specs/rebase-first-merge/spec.md#MergeQueue-uses-rebase-first-flow",
+      "description": "Add 'rebasing' and 'blocked' to the MergeState type union in types/index.ts. Add conflictingFiles?: string[] to the MergeEntry interface in merge-queue.ts. Update recoverFromDB() to treat 'rebasing' entries as 'pending'. Update retry() to accept 'blocked' state in addition to 'build-failed' and 'conflict'.",
+      "acceptanceCriteria": [
+        "MergeState type includes 'rebasing' and 'blocked'",
+        "MergeEntry has optional conflictingFiles: string[] field",
+        "retry() accepts entries with mergeState 'blocked'",
+        "recoverFromDB() resets 'rebasing' entries to 'pending'",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types/index.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "Restructure MergeQueue.processItem to rebase-first flow",
+      "spec": "specs/rebase-first-merge/spec.md#MergeQueue-uses-rebase-first-flow",
+      "description": "Rewrite processItem() to: (1) Call rebaseOntoMaster() first. (2) If rebase succeeds, proceed to mergeBack (fast-forward) → build verification → cleanup. (3) If rebase has conflicts, abort the rebase via abortRebase(), set mergeState='blocked' with conflict files recorded. (4) Emit merge_blocked event on blocked. Remove the git merge --abort cleanup at start of processItem (no longer needed).",
+      "acceptanceCriteria": [
+        "processItem calls rebaseOntoMaster() before mergeBack()",
+        "Clean rebase → fast-forward merge → build verification → merged",
+        "Conflict rebase → mergeState='blocked' with conflictingFiles populated",
+        "merge_blocked event emitted with conflict details on blocked",
+        "Build verification and rollback still work after fast-forward merge",
+        "Worktree preserved on blocked state",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/merge-queue.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Agent conflict resolution loop (continueRebase with agent) is deferred — blocked issues can be retried manually. This task only implements: rebase → success? → merge : → blocked.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-005",
+      "title": "Add GET /api/issues/merge-blocked endpoint",
+      "spec": "specs/http-api/spec.md#API-提供-blocked-merge-管理端点",
+      "description": "Add GET /api/issues/merge-blocked route that queries all issues with mergeState='blocked' and returns {issueNumber, title, conflictingFiles, blockedAt} for each. Uses issueRepo or issueService to query blocked issues. Gets conflictingFiles from the MergeQueue in-memory entry when available.",
+      "acceptanceCriteria": [
+        "GET /api/issues/merge-blocked returns 200 with array of blocked issues",
+        "Each entry includes issueNumber, title, conflictingFiles, blockedAt",
+        "Returns empty array when no blocked issues exist",
+        "Returns 400 when no active project context",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-006",
+      "title": "Update POST /api/issues/:number/retry-merge to accept blocked state",
+      "spec": "specs/http-api/spec.md#API-提供-blocked-merge-管理端点",
+      "description": "Update the existing retry-merge endpoint to accept 'blocked' as a retryable state (in addition to 'build-failed' and 'conflict'). The response error message for non-retryable states should include the current mergeState value.",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/retry-merge returns 200 for mergeState='blocked'",
+        "Returns 409 for non-retryable mergeState with current state in error message",
+        "Returns 404 for non-existent issue",
+        "Retried issue re-enters merge queue with mergeState='pending'",
+        "Typecheck passes",
+        "Build passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
