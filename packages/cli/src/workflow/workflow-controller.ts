@@ -126,6 +126,8 @@ export class WorkflowController {
     ];
 
     const roundState = { type: '', index: 0 };
+    let conn: AcpConnection | undefined;
+
     const planAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       stage: Stage.Plan,
@@ -141,14 +143,14 @@ export class WorkflowController {
             roundIndex: roundState.index,
             sessionUpdate: _notification.update.sessionUpdate,
             data: _notification.update as unknown,
+            acpSessionId: conn?.acpSessionId,
+            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_session_update', { error: e instanceof Error ? e.message : String(e) });
         }
       },
     };
-
-    let conn: AcpConnection | undefined;
 
     try {
       conn = await createAcpConnection(planAcpOptions);
@@ -183,6 +185,8 @@ export class WorkflowController {
               roundType: round.type,
               roundLabel: round.label,
               roundIndex: index,
+              acpSessionId: conn?.acpSessionId,
+              coderSessionId: conn?.coderSessionId,
             });
           } catch (e) {
             log.warn('eventBus.emit failed for plan_round_start', { error: e instanceof Error ? e.message : String(e) });
@@ -263,6 +267,8 @@ export class WorkflowController {
             roundType: 'self-review',
             roundLabel: 'self-review',
             roundIndex: rounds.length,
+            acpSessionId: conn?.acpSessionId,
+            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_round_start', { roundType: 'self-review', error: e instanceof Error ? e.message : String(e) });
@@ -839,6 +845,8 @@ export class WorkflowController {
 
     const roundState = { type: '', index: 0 };
 
+    let conn: AcpConnection | undefined;
+
     const reviewAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       stage: Stage.Review,
@@ -854,6 +862,8 @@ export class WorkflowController {
             roundIndex: roundState.index,
             sessionUpdate: _notification.update.sessionUpdate,
             data: _notification.update as unknown,
+            acpSessionId: conn?.acpSessionId,
+            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_session_update', { roundType: roundState.type, error: e instanceof Error ? e.message : String(e) });
@@ -861,7 +871,6 @@ export class WorkflowController {
       },
     };
 
-    let conn: AcpConnection | undefined;
     try {
       conn = await createAcpConnection(reviewAcpOptions);
 
@@ -879,6 +888,8 @@ export class WorkflowController {
             roundType: 'review',
             roundLabel: 'review',
             roundIndex: 0,
+            acpSessionId: conn?.acpSessionId,
+            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_round_start', { roundType: 'review', error: e instanceof Error ? e.message : String(e) });
@@ -913,6 +924,8 @@ export class WorkflowController {
             roundType: 'review-self-check',
             roundLabel: 'review-self-check',
             roundIndex: 1,
+            acpSessionId: conn?.acpSessionId,
+            coderSessionId: conn?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_round_start', { roundType: 'review-self-check', error: e instanceof Error ? e.message : String(e) });

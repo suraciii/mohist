@@ -12,12 +12,12 @@ export type EventMap = {
   explore_crystallized: { sessionId: string; issueId: string; projectId: string };
   agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number };
   main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number };
-  coder_text_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string };
-  coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown };
+  coder_text_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string };
+  coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; coderSessionId?: string; model?: string };
   ralph_task_update: { issueId: string; projectId: string; executionId: string; taskId: string; taskIndex: number; totalTasks: number; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt?: number; error?: string };
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number };
-  plan_round_start: { issueId: string; projectId: string; roundType: string; roundLabel: string; roundIndex: number };
-  plan_session_update: { issueId: string; projectId: string; roundType: string; roundIndex: number; sessionUpdate: string; data: unknown };
+  plan_round_start: { issueId: string; projectId: string; roundType: string; roundLabel: string; roundIndex: number; acpSessionId?: string; coderSessionId?: string };
+  plan_session_update: { issueId: string; projectId: string; roundType: string; roundIndex: number; sessionUpdate: string; data: unknown; acpSessionId?: string; coderSessionId?: string };
   'config:providers:changed': { providers: Array<{ id: string; name?: string; apiKey?: string; baseURL?: string; sdk?: string; models?: string[] }> };
   build_stage_started: { issueId: string; projectId: string; stage: 'build'; changePath: string; tasksCount: number; timestamp: string };
   build_tasks_snapshot: { issueId: string; projectId: string; total: number; pending: number; passed: number };
@@ -34,6 +34,8 @@ export type EventMap = {
   agent_build_fix_started: { issueId: string; projectId: string; issueNumber: number; attempt: number };
   agent_build_fix_completed: { issueId: string; projectId: string; issueNumber: number; attempt: number };
   agent_stopped: { issueId: string; projectId: string; issueNumber: number; reason: string };
+  coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string };
+  coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number };
 };
 
 export type EventName = keyof EventMap;

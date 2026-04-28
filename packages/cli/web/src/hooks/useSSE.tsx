@@ -145,6 +145,8 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'ralph_loop_progress',
       'plan_round_start',
       'plan_session_update',
+      'coder_session_started',
+      'coder_session_completed',
       'merge_queued',
       'merge_started',
       'merge_completed',

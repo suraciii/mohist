@@ -240,13 +240,16 @@ export async function runAcpSession(
             if (eventBus && executionId) {
               const now = Date.now();
               if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
-                eventBus.emit('coder_text_chunk', {
+                const chunkPayload: Record<string, unknown> = {
                   issueId: sseIssueId,
                   projectId: projectId ?? '',
                   executionId,
                   acpSessionId: sessionId,
                   text: textChunk,
-                });
+                };
+                if (coderSessionId) chunkPayload.coderSessionId = coderSessionId;
+                if (options.model) chunkPayload.model = options.model;
+                eventBus.emit('coder_text_chunk', chunkPayload as any);
                 lastTextChunkTime = now;
               }
             }
@@ -288,7 +291,7 @@ export async function runAcpSession(
                 coderToolCallIds.delete(key);
               }
             }
-            eventBus.emit('coder_tool_call', {
+            const toolPayload: Record<string, unknown> = {
               issueId: sseIssueId,
               projectId: projectId ?? '',
               executionId,
@@ -299,7 +302,10 @@ export async function runAcpSession(
               title: (toolCallData?.title as string) ?? undefined,
               rawInput: state === 'started' ? toolCallData?.input : undefined,
               rawOutput: state === 'completed' ? toolCallData?.output : undefined,
-            });
+            };
+            if (coderSessionId) toolPayload.coderSessionId = coderSessionId;
+            if (options.model) toolPayload.model = options.model;
+            eventBus.emit('coder_tool_call', toolPayload as any);
           }
         } catch (err) {
           log.error('sessionUpdate error', { error: err instanceof Error ? err.message : String(err) });
@@ -368,9 +374,11 @@ export async function runAcpSession(
     sessionId = sessionResult.sessionId;
     log.info('ACP session created', { sessionId });
 
+    let resolvedModel: string | undefined;
+
     if (coderSessionRepo && issueId) {
       try {
-        const resolvedModel = options.model ?? load().model ?? undefined;
+        resolvedModel = options.model ?? load().model ?? undefined;
         const coderSession = coderSessionRepo.insert({
           issueId,
           acpSessionId: sessionId,
@@ -382,6 +390,20 @@ export async function runAcpSession(
         });
         coderSessionId = coderSession.id;
         log.info('coder_session row created', { coderSessionId, acpSessionId: sessionId });
+
+        if (eventBus) {
+          eventBus.emit('coder_session_started', {
+            issueId: sseIssueId,
+            projectId: projectId ?? '',
+            coderSessionId,
+            acpSessionId: sessionId,
+            executionId,
+            model: resolvedModel,
+            coderType: 'opencode',
+            stage: 'build',
+            taskDescription: task.slice(0, 200),
+          });
+        }
       } catch (err) {
         log.error('Failed to create coder_session row', { error: err instanceof Error ? err.message : String(err) });
       }
@@ -458,6 +480,15 @@ export async function runAcpSession(
       if (coderSessionRepo && coderSessionId) {
         try {
           coderSessionRepo.updateStatus(coderSessionId, 'failed');
+          if (eventBus) {
+            eventBus.emit('coder_session_completed', {
+              issueId: sseIssueId,
+              projectId: projectId ?? '',
+              coderSessionId,
+              status: 'failed',
+              duration: Math.round((Date.now() - sessionStartTime) / 1000),
+            });
+          }
         } catch (err) {
           log.error('Failed to update coder_session status', { error: err instanceof Error ? err.message : String(err) });
         }
@@ -481,7 +512,19 @@ export async function runAcpSession(
 
     if (coderSessionRepo && coderSessionId) {
       try {
-        coderSessionRepo.updateStatus(coderSessionId, 'completed');
+        const updatedSession = coderSessionRepo.updateStatus(coderSessionId, 'completed');
+        if (eventBus) {
+          const duration = updatedSession.completedAt && updatedSession.createdAt
+            ? Math.round((new Date(updatedSession.completedAt).getTime() - new Date(updatedSession.createdAt).getTime()) / 1000)
+            : Math.round((Date.now() - sessionStartTime) / 1000);
+          eventBus.emit('coder_session_completed', {
+            issueId: sseIssueId,
+            projectId: projectId ?? '',
+            coderSessionId,
+            status: 'completed',
+            duration,
+          });
+        }
       } catch (err) {
         log.error('Failed to update coder_session status to completed', { error: err instanceof Error ? err.message : String(err) });
       }
@@ -498,6 +541,15 @@ export async function runAcpSession(
     if (coderSessionRepo && coderSessionId) {
       try {
         coderSessionRepo.updateStatus(coderSessionId, 'failed');
+        if (eventBus) {
+          eventBus.emit('coder_session_completed', {
+            issueId: sseIssueId,
+            projectId: projectId ?? '',
+            coderSessionId,
+            status: 'failed',
+            duration: Math.round(failDuration / 1000),
+          });
+        }
       } catch (updateErr) {
         log.error('Failed to update coder_session status', { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
       }
@@ -532,6 +584,8 @@ export interface AcpConnectionOptions {
 export interface AcpConnection {
   prompt(text: string): Promise<AcpSessionResult>;
   close(): Promise<void>;
+  coderSessionId?: string;
+  acpSessionId?: string;
 }
 
 function createTimeout(ms: number): Promise<'timeout'> {
@@ -716,13 +770,16 @@ export async function createAcpConnection(
             } else if (eventBus && executionId) {
               const now = Date.now();
               if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
-                eventBus.emit('coder_text_chunk', {
+                const chunkPayload: Record<string, unknown> = {
                   issueId: sseIssueId,
                   projectId: projectId ?? '',
                   executionId,
                   acpSessionId: sessionId,
                   text: textChunk,
-                });
+                };
+                if (coderSessionId) chunkPayload.coderSessionId = coderSessionId;
+                if (options.model) chunkPayload.model = options.model;
+                eventBus.emit('coder_text_chunk', chunkPayload as any);
                 lastTextChunkTime = now;
               }
             }
@@ -766,7 +823,7 @@ export async function createAcpConnection(
                 coderToolCallIds.delete(key);
               }
             }
-            eventBus.emit('coder_tool_call', {
+            const toolPayload: Record<string, unknown> = {
               issueId: sseIssueId,
               projectId: projectId ?? '',
               executionId,
@@ -777,7 +834,10 @@ export async function createAcpConnection(
               title: (toolCallData?.title as string) ?? undefined,
               rawInput: state === 'started' ? toolCallData?.input : undefined,
               rawOutput: state === 'completed' ? toolCallData?.output : undefined,
-            });
+            };
+            if (coderSessionId) toolPayload.coderSessionId = coderSessionId;
+            if (options.model) toolPayload.model = options.model;
+            eventBus.emit('coder_tool_call', toolPayload as any);
           }
         } catch (err) {
           log.error('sessionUpdate error', {
@@ -860,6 +920,19 @@ export async function createAcpConnection(
         coderSessionId,
         acpSessionId: sessionId,
       });
+      if (eventBus) {
+        eventBus.emit('coder_session_started', {
+          issueId: sseIssueId,
+          projectId: projectId ?? '',
+          coderSessionId,
+          acpSessionId: sessionId,
+          executionId,
+          model: resolvedModel,
+          coderType: 'opencode',
+          stage: options.stage ?? undefined,
+          taskDescription: undefined,
+        });
+      }
     } catch (err) {
       log.error('Failed to create coder_session row', {
         error: err instanceof Error ? err.message : String(err),
@@ -924,6 +997,8 @@ export async function createAcpConnection(
   }
 
   return {
+    coderSessionId,
+    acpSessionId: sessionId,
     async prompt(text: string): Promise<AcpSessionResult> {
       if (closed) {
         return { text: '', success: false, error: 'Connection is closed' };
@@ -949,6 +1024,15 @@ export async function createAcpConnection(
         if (coderSessionRepo && coderSessionId) {
           try {
             coderSessionRepo.updateStatus(coderSessionId, 'failed');
+            if (eventBus) {
+              eventBus.emit('coder_session_completed', {
+                issueId: sseIssueId,
+                projectId: projectId ?? '',
+                coderSessionId,
+                status: 'failed',
+                duration: Math.round(duration / 1000),
+              });
+            }
           } catch {
             // ignore
           }
@@ -990,7 +1074,19 @@ export async function createAcpConnection(
       writeSessionLog(workflowLogRepo, issueId, 'acp_session_completed', { sessionId, success: true, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
       if (coderSessionRepo && coderSessionId) {
         try {
-          coderSessionRepo.updateStatus(coderSessionId, 'completed');
+          const updatedSession = coderSessionRepo.updateStatus(coderSessionId, 'completed');
+          if (eventBus) {
+            const sessDuration = updatedSession.completedAt && updatedSession.createdAt
+              ? Math.round((new Date(updatedSession.completedAt).getTime() - new Date(updatedSession.createdAt).getTime()) / 1000)
+              : Math.round(duration / 1000);
+            eventBus.emit('coder_session_completed', {
+              issueId: sseIssueId,
+              projectId: projectId ?? '',
+              coderSessionId,
+              status: 'completed',
+              duration: sessDuration,
+            });
+          }
         } catch {
           // ignore
         }
