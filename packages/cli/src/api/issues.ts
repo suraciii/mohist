@@ -1280,6 +1280,184 @@ export function createIssueRoutes(
     }
   });
 
+  app.get('/:number/commits', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        const response: ApiResponse = {
+          success: true,
+          data: { commits: [] }
+        };
+        return c.json(response);
+      }
+
+      const branchName = `mo/issue-${number}`;
+      const logOutput = await execFileAsync(
+        'git',
+        ['log', `${project.baseBranch}..${branchName}`, '--format=%h%x00%s%x00%an%x00%aI%x00%b%x01', '--stat'],
+        { cwd: project.path }
+      );
+
+      const commits: Array<{ hash: string; message: string; author: string; date: string; filesChanged: number; additions: number; deletions: number }> = [];
+      const rawOutput = logOutput.stdout.trim();
+
+      if (rawOutput) {
+        const entries = rawOutput.split('\x01').filter(e => e.trim());
+        for (const entry of entries) {
+          const [headerLine, ...statLines] = entry.trim().split('\n');
+          const parts = headerLine.split('\x00');
+          if (parts.length < 4) continue;
+
+          const hash = parts[0].trim();
+          const message = parts[1].trim();
+          const author = parts[2].trim();
+          const date = parts[3].trim();
+
+          let filesChanged = 0;
+          let additions = 0;
+          let deletions = 0;
+
+          const statText = statLines.join('\n');
+          const statMatch = statText.match(/(\d+) files? changed(?:,\s*(\d+) insertions?\(\+\))?/);
+          if (statMatch) {
+            filesChanged = parseInt(statMatch[1], 10);
+            const plusSymbols = statText.match(/\+/g);
+            additions = plusSymbols ? plusSymbols.length : 0;
+            const minusSymbols = statText.match(/-/g);
+            deletions = minusSymbols ? minusSymbols.length : 0;
+          }
+
+          const statSummary = statLines.find(l => l.includes('files changed') || l.includes('file changed'));
+          if (statSummary) {
+            const fc = statSummary.match(/(\d+) files? changed/);
+            if (fc) filesChanged = parseInt(fc[1], 10);
+            const ins = statSummary.match(/(\d+) insertions?\(\+\)/);
+            if (ins) additions = parseInt(ins[1], 10);
+            const del = statSummary.match(/(\d+) deletions?\(-\)/);
+            if (del) deletions = parseInt(del[1], 10);
+          }
+
+          commits.push({ hash, message, author, date, filesChanged, additions, deletions });
+        }
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: { commits }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/commits/:hash/diff', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const hash = c.req.param('hash');
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        const response: ApiResponse = {
+          success: true,
+          data: { diff: '' }
+        };
+        return c.json(response);
+      }
+
+      const branchName = `mo/issue-${number}`;
+      const containsOutput = await execFileAsync(
+        'git',
+        ['branch', '--contains', hash, '--list', branchName],
+        { cwd: project.path }
+      );
+
+      if (!containsOutput.stdout.trim()) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Commit ${hash} does not belong to branch ${branchName}`
+        };
+        return c.json(response, 404);
+      }
+
+      const diffOutput = await execFileAsync(
+        'git',
+        ['show', '--format=', '--patch', hash],
+        { cwd: project.path }
+      );
+
+      const response: ApiResponse = {
+        success: true,
+        data: { diff: diffOutput.stdout }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
   app.get('/:number/logs', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
