@@ -2059,6 +2059,7 @@ export function createIssueRoutes(
               task.attempts = 0;
             }
             fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
+            checkpointRepo.delete(issue.number, 'build');
           } catch (err) {
             log.warn('Failed to clear build checkpoint after rebase', { issueNumber: number, error: err instanceof Error ? err.message : String(err) });
           }
