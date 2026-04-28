@@ -73,9 +73,9 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is the core flow change. retryCount starts at 0, incremented in auto-retry (T-005)",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
