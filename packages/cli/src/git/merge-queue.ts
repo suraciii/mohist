@@ -154,7 +154,7 @@ export class MergeQueue {
   private async processNext(): Promise<void> {
     if (this.processing) return;
 
-    const entry = this.pickNext();
+    const entry = await this.pickNext();
     if (!entry) return;
 
     this.processing = true;
@@ -172,15 +172,69 @@ export class MergeQueue {
     }
   }
 
-  private pickNext(): MergeEntry | null {
-    let earliest: MergeEntry | null = null;
-    for (const entry of this.queue.values()) {
-      if (entry.mergeState !== 'pending') continue;
-      if (!earliest || entry.enqueuedAt < earliest.enqueuedAt) {
-        earliest = entry;
+  private async pickNext(): Promise<MergeEntry | null> {
+    const pending = Array.from(this.queue.values())
+      .filter((e) => e.mergeState === 'pending');
+
+    if (pending.length === 0) return null;
+
+    const sorted = [...pending].sort((a, b) => a.enqueuedAt - b.enqueuedAt);
+
+    if (sorted.length === 1) return sorted[0];
+
+    for (const entry of sorted) {
+      if (entry.changedFiles) continue;
+      const project = this.deps.getProjectPath(entry.projectId);
+      if (!project) {
+        log.warn('pickNext: project not found, skipping changedFiles', {
+          issueNumber: entry.issueNumber,
+          projectId: entry.projectId,
+        });
+        continue;
       }
+      entry.changedFiles = await this.getChangedFiles(
+        project.path,
+        `mo/issue-${entry.issueNumber}`,
+        project.baseBranch,
+      );
     }
-    return earliest;
+
+    const candidate = sorted[0];
+    if (!candidate.changedFiles) return candidate;
+
+    for (let i = 1; i < sorted.length; i++) {
+      if (!sorted[i].changedFiles) continue;
+      const overlap = candidate.changedFiles.some((f) =>
+        sorted[i].changedFiles!.includes(f),
+      );
+      if (overlap) return sorted[i];
+    }
+
+    return candidate;
+  }
+
+  private async getChangedFiles(
+    projectPath: string,
+    branch: string,
+    baseBranch: string,
+  ): Promise<string[] | undefined> {
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['diff', '--name-only', `${baseBranch}...${branch}`],
+        { cwd: projectPath },
+      );
+      const files = stdout.trim().split('\n').filter((l) => l.trim());
+      log.debug('getChangedFiles', { branch, baseBranch, fileCount: files.length });
+      return files;
+    } catch (err) {
+      log.warn('getChangedFiles failed, degrading to FIFO', {
+        branch,
+        baseBranch,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return undefined;
+    }
   }
 
   private async processItem(entry: MergeEntry): Promise<void> {
