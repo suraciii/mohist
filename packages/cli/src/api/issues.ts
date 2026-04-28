@@ -1556,7 +1556,7 @@ export function createIssueRoutes(
         return c.json(response);
       }
 
-      let tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null }> = [];
+      let tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null; durations?: number[] }> = [];
       let total = 0;
       let completed = 0;
       let failed = 0;
@@ -1564,7 +1564,7 @@ export function createIssueRoutes(
 
       try {
         const tasksContent = fs.readFileSync(change.tasksPath, 'utf-8');
-        const tasksFile = JSON.parse(tasksContent) as { tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null }> };
+        const tasksFile = JSON.parse(tasksContent) as { tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null; durations?: number[] }> };
         tasks = tasksFile.tasks;
         total = tasks.length;
         completed = tasks.filter(t => t.passes).length;
