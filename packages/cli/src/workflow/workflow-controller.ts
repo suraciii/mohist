@@ -282,11 +282,123 @@ export class WorkflowController {
         };
       }
 
+      const selfReviewReport = readReportFile(changeDir, 'self-review.md') ?? selfReviewResult.text;
+
+      const verdict = selfReviewReport ? parseVerdict(selfReviewReport) : 'FAIL';
+
+      if (verdict === 'PASS') {
+        await conn.close();
+        this.checkpointRepo?.delete(issue.number, 'plan');
+        return {
+          success: true,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Plan,
+            issueNumber: issue.number,
+            selfReviewNotes: selfReviewReport,
+          },
+          message: 'Plan completed, awaiting user approval',
+        };
+      }
+
+      // Verdict FAIL → auto-fix on same connection
+      roundState.type = 'auto-fix';
+      roundState.index = rounds.length + 1;
+      log.info('Plan stage auto-fix round', { issueNumber: issue.number });
+
+      if (this.eventBus) {
+        try {
+          this.eventBus.emit('plan_round_start', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: 'auto-fix',
+            roundLabel: 'auto-fix',
+            roundIndex: rounds.length + 1,
+          });
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_round_start', { roundType: 'auto-fix', error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, selfReviewReport ?? '', 'self-review.md');
+      const autoFixResult = await conn.prompt(autoFixPrompt);
+
+      if (!autoFixResult.success) {
+        log.error('Plan stage auto-fix prompt failed', { error: autoFixResult.error });
+        await conn.close();
+        this.checkpointRepo?.delete(issue.number, 'plan');
+        return {
+          success: true,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Plan,
+            issueNumber: issue.number,
+            selfReviewNotes: selfReviewReport,
+          },
+          message: `Auto-fix failed: ${autoFixResult.error ?? 'unknown error'}. Awaiting user approval`,
+        };
+      }
+
+      // Close old connection, open new one for full re-self-review
       await conn.close();
 
+      roundState.type = 're-self-review';
+      roundState.index = rounds.length + 2;
+      log.info('Plan stage re-self-review round on new connection', { issueNumber: issue.number });
+
+      conn = await createAcpConnection(planAcpOptions);
+
+      if (this.eventBus) {
+        try {
+          this.eventBus.emit('plan_round_start', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: 're-self-review',
+            roundLabel: 're-self-review',
+            roundIndex: rounds.length + 2,
+          });
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_round_start', { roundType: 're-self-review', error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      const reSelfReviewPrompt = buildSelfReviewPrompt(issue, changeDir);
+      const reSelfReviewResult = await conn.prompt(reSelfReviewPrompt);
+
+      if (!reSelfReviewResult.success) {
+        log.error('Plan stage re-self-review failed', { error: reSelfReviewResult.error });
+        await conn.close();
+        this.checkpointRepo?.delete(issue.number, 'plan');
+        return {
+          success: true,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Plan,
+            issueNumber: issue.number,
+            selfReviewNotes: selfReviewReport,
+          },
+          message: `Auto-fix succeeded but re-self-review failed: ${reSelfReviewResult.error ?? 'unknown error'}. Awaiting user approval`,
+        };
+      }
+
+      await conn.close();
       this.checkpointRepo?.delete(issue.number, 'plan');
 
-      const selfReviewReport = readReportFile(changeDir, 'self-review.md') ?? selfReviewResult.text;
+      const recheckReport = readReportFile(changeDir, 'self-review.md') ?? reSelfReviewResult.text;
+      const recheckVerdict = recheckReport ? parseVerdict(recheckReport) : 'FAIL';
+
+      if (recheckVerdict === 'PASS') {
+        return {
+          success: true,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Plan,
+            issueNumber: issue.number,
+            selfReviewNotes: recheckReport,
+          },
+          message: 'Auto-fix succeeded, re-self-review passed. Awaiting user approval',
+        };
+      }
 
       return {
         success: true,
@@ -294,9 +406,9 @@ export class WorkflowController {
         output: {
           stage: Stage.Plan,
           issueNumber: issue.number,
-          selfReviewNotes: selfReviewReport,
+          selfReviewNotes: recheckReport ?? selfReviewReport,
         },
-        message: 'Plan completed, awaiting user approval',
+        message: 'Auto-fix attempted but re-self-review still FAIL. Awaiting user approval',
       };
     } catch (err) {
       if (conn) {
