@@ -4,7 +4,7 @@ You are applying fixes identified during code review. Your job is to resolve eve
 
 ## Input
 
-You are given a review report (`review.md` in the change directory) with a `## Verdict: FAIL` and a `## Fix Suggestions` section listing specific issues with file paths and line numbers.
+You are given a review report (`review.md` in the change directory) with a `## Result: FAIL` and a `## Fix Suggestions` section listing specific issues with file paths and line numbers.
 
 ## Process
 
