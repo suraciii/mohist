@@ -5,12 +5,11 @@ import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile } from '../lib/types'
 import { api } from '../lib/api'
 import { useIssue, useIssueDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
-import { useSessionTimeline } from '../hooks/useSessionTimeline'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
-import { SessionTimeline } from './SessionTimeline'
+import { SessionList } from './SessionList'
 import { TaskList } from './TaskList'
 import { formatTime } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
@@ -88,14 +87,6 @@ export function IssueDetailPage() {
       return status ? { ...t, ...status } : t
     })
   })()
-
-  const {
-    rounds,
-    isStreaming,
-    isLoading: sessionLoading,
-    taskProgress,
-    loopProgress,
-  } = useSessionTimeline(issueNumber)
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveIssue(issueNumber),
@@ -652,15 +643,11 @@ export function IssueDetailPage() {
                 <QuestionPanel issueId={issue.id} />
               )}
 
-              {(isAgentRunningOnThis || (!isBacklog && rounds.length > 0)) && (
-                <SessionTimeline
-                  rounds={rounds}
-                  isStreaming={isStreaming}
-                  isLoading={sessionLoading}
+              {!isBacklog && (
+                <SessionList
+                  issueNumber={issueNumber}
                   currentStage={issue.stage}
                   isLive={isAgentRunningOnThis}
-                  taskProgress={taskProgress}
-                  loopProgress={loopProgress}
                 />
               )}
             </div>
