@@ -186,13 +186,15 @@ export async function runAcpSession(
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
     ]);
-    const timeoutPromise = new Promise<'timeout'>((resolve) =>
-      setTimeout(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      timeoutId = setTimeout(() => {
         log.warn('Cleanup timed out after 5s, forcing kill');
         resolve('timeout');
-      }, 5000)
-    );
+      }, 5000);
+    });
     const result = await Promise.race([cleanupPromise, timeoutPromise]);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
     if (result !== 'timeout') {
       (result as PromiseSettledResult<void>[]).forEach((r, index) => {
         if (r.status === 'rejected') {
@@ -568,13 +570,15 @@ export async function createAcpConnection(
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
     ]);
-    const timeoutPromise = new Promise<'timeout'>((resolve) =>
-      setTimeout(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      timeoutId = setTimeout(() => {
         log.warn('Cleanup timed out after 5s, forcing kill');
         resolve('timeout');
-      }, 5000)
-    );
+      }, 5000);
+    });
     const result = await Promise.race([cleanupPromise, timeoutPromise]);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
     if (result !== 'timeout') {
       (result as PromiseSettledResult<void>[]).forEach((r, index) => {
         if (r.status === 'rejected') {
