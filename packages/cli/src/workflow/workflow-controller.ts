@@ -1166,12 +1166,25 @@ function cleanChangeDir(changeDir: string): void {
   }
 }
 
-const VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
+const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
+const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
 
-export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
-  const match = VERDICT_RE.exec(content);
-  if (!match) return null;
-  return match[1].toUpperCase() as 'PASS' | 'FAIL';
+export function parseResult(content: string): 'PASS' | 'FAIL' | null {
+  const match = RESULT_RE.exec(content);
+  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
+  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
+  if (legacyMatch) {
+    log.warn('parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
+    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
+  }
+  return null;
+}
+
+export function extractFixSuggestions(content: string): string {
+  const match = content.match(/^##\s*Fix\s*Suggestions\s*$/im);
+  if (!match) return '';
+  const startIdx = match.index! + match[0].length;
+  return content.slice(startIdx).trim();
 }
 
 export function createWorkflowController(options: WorkflowControllerOptions): WorkflowController {
