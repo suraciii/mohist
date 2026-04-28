@@ -81,11 +81,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is the largest task. The function uses getter/setter callbacks for mutable state (lastEventTime, hasRecovered, recoveryAttemptCount) to integrate with the existing closure pattern. See design.md D2 for the interface signature. Emit SSE events via eventBus.emit('coder_recovery_status', ...) — the event type is registered in T-001.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        528907
+      ]
     },
     {
       "id": "T-004",
