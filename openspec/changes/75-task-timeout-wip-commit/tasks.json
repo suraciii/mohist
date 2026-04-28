@@ -38,8 +38,8 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Single-round 模式 timeout 处理在 line 373-398。注意：当前的 prompt timeout 分支中 onBeforeKill 未被正确 await，需要修复",
+      "passes": true,
+      "notes": "Implementation already present in commit d475eb3284 (await onBeforeKill at line 387)",
       "attempts": 0,
       "order": 999999,
       "error": null
