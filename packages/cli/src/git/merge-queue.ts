@@ -59,13 +59,13 @@ export class MergeQueue {
       issueNumber,
       projectId,
       issueId: issue.id,
-      mergeState: 'pending' as MergeState,
+      mergeState: MergeState.Pending,
       enqueuedAt: Date.now(),
       retryCount: 0,
     };
 
     this.queue.set(issueNumber, entry);
-    this.deps.issueRepo.setMergeState(issue.id, 'pending');
+    this.deps.issueRepo.setMergeState(issue.id, MergeState.Pending);
 
     const position = this.getPendingCount();
     this.deps.eventBus.emit('merge_queued', {
@@ -106,7 +106,7 @@ export class MergeQueue {
   }
 
   private async checkBlockedIssues(): Promise<void> {
-    const retryableStates: MergeState[] = ['conflict', 'blocked'];
+    const retryableStates: MergeState[] = [MergeState.Conflict, MergeState.Blocked];
 
     for (const entry of this.queue.values()) {
       if (!retryableStates.includes(entry.mergeState)) continue;
@@ -132,9 +132,9 @@ export class MergeQueue {
       }
 
       if (entry.retryCount >= MAX_RETRY_COUNT) {
-        if (entry.mergeState !== 'blocked') {
-          entry.mergeState = 'blocked';
-          this.deps.issueRepo.setMergeState(entry.issueId, 'blocked');
+        if (entry.mergeState !== MergeState.Blocked) {
+          entry.mergeState = MergeState.Blocked;
+          this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Blocked);
           this.deps.eventBus.emit('merge_blocked', {
             issueId: entry.issueId,
             projectId: entry.projectId,
@@ -153,11 +153,11 @@ export class MergeQueue {
 
       entry.retryCount++;
       entry.lastAttemptHead = currentHead;
-      entry.mergeState = 'pending';
+      entry.mergeState = MergeState.Pending;
       entry.message = undefined;
       entry.enqueuedAt = Date.now();
 
-      this.deps.issueRepo.setMergeState(entry.issueId, 'pending');
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Pending);
       this.deps.eventBus.emit('rebase_retry', {
         issueId: entry.issueId,
         projectId: entry.projectId,
@@ -199,20 +199,20 @@ export class MergeQueue {
     }
 
     if (
-      entry.mergeState !== 'build-failed' &&
-      entry.mergeState !== 'conflict' &&
-      entry.mergeState !== 'blocked'
+      entry.mergeState !== MergeState.BuildFailed &&
+      entry.mergeState !== MergeState.Conflict &&
+      entry.mergeState !== MergeState.Blocked
     ) {
       log.warn('retry: invalid state', { issueNumber, mergeState: entry.mergeState });
       return false;
     }
 
-    entry.mergeState = 'pending';
+    entry.mergeState = MergeState.Pending;
     entry.message = undefined;
     entry.enqueuedAt = Date.now();
     entry.retryCount = 0;
 
-    this.deps.issueRepo.setMergeState(entry.issueId, 'pending');
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Pending);
 
     log.info('Issue re-enqueued for retry', { issueNumber, projectId: entry.projectId });
 
@@ -227,21 +227,21 @@ export class MergeQueue {
   }
 
   recoverFromDB(): void {
-    const activeStates: MergeState[] = ['pending', 'merging', 'rebasing'];
-    const retryableStates: MergeState[] = ['conflict', 'blocked'];
+    const activeStates: MergeState[] = [MergeState.Pending, MergeState.Merging, MergeState.Rebasing];
+    const retryableStates: MergeState[] = [MergeState.Conflict, MergeState.Blocked];
 
     const activeIssues = this.deps.issueRepo.findByMergeStates(activeStates);
 
     for (const issue of activeIssues) {
       if (this.queue.has(issue.number)) continue;
 
-      this.deps.issueRepo.setMergeState(issue.id, 'pending');
+      this.deps.issueRepo.setMergeState(issue.id, MergeState.Pending);
 
       const entry: MergeEntry = {
         issueNumber: issue.number,
         projectId: issue.projectId,
         issueId: issue.id,
-        mergeState: 'pending',
+        mergeState: MergeState.Pending,
         enqueuedAt: Date.now(),
         retryCount: 0,
       };
@@ -263,7 +263,7 @@ export class MergeQueue {
         issueNumber: issue.number,
         projectId: issue.projectId,
         issueId: issue.id,
-        mergeState: (issue.mergeState as MergeState) || 'conflict',
+        mergeState: (issue.mergeState as MergeState) || MergeState.Conflict,
         enqueuedAt: Date.now(),
         retryCount: 0,
       };
@@ -289,7 +289,7 @@ export class MergeQueue {
   private getPendingCount(): number {
     let count = 0;
     for (const entry of this.queue.values()) {
-      if (entry.mergeState === 'pending') count++;
+      if (entry.mergeState === MergeState.Pending) count++;
     }
     return count;
   }
@@ -320,7 +320,7 @@ export class MergeQueue {
 
   private async pickNext(): Promise<MergeEntry | null> {
     const pending = Array.from(this.queue.values())
-      .filter((e) => e.mergeState === 'pending');
+      .filter((e) => e.mergeState === MergeState.Pending);
 
     if (pending.length === 0) return null;
 
@@ -386,7 +386,7 @@ export class MergeQueue {
   private async processItem(entry: MergeEntry): Promise<void> {
     const project = this.deps.getProjectPath(entry.projectId);
     if (!project) {
-      this.handleFailure(entry, 'Project not found', 'conflict');
+      this.handleFailure(entry, 'Project not found', MergeState.Conflict);
       return;
     }
 
@@ -406,8 +406,8 @@ export class MergeQueue {
         });
       }
 
-      entry.mergeState = 'merged';
-      this.deps.issueRepo.setMergeState(entry.issueId, 'merged');
+      entry.mergeState = MergeState.Merged;
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
       this.deps.eventBus.emit('merge_completed', {
         issueId: entry.issueId,
         projectId: entry.projectId,
@@ -417,8 +417,8 @@ export class MergeQueue {
       return;
     }
 
-    entry.mergeState = 'rebasing';
-    this.deps.issueRepo.setMergeState(entry.issueId, 'rebasing');
+    entry.mergeState = MergeState.Rebasing;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Rebasing);
     this.deps.eventBus.emit('rebase_started', {
       issueId: entry.issueId,
       projectId: entry.projectId,
@@ -427,15 +427,15 @@ export class MergeQueue {
 
     const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
     if (!worktreePath) {
-      this.handleFailure(entry, `Worktree not found for issue #${entry.issueNumber}`, 'conflict');
+      this.handleFailure(entry, `Worktree not found for issue #${entry.issueNumber}`, MergeState.Conflict);
       return;
     }
 
     const rebaseResult = await this.deps.worktreeManager.rebaseOntoMaster(worktreePath, project.baseBranch);
     if (!rebaseResult.success) {
-      entry.mergeState = 'conflict';
+      entry.mergeState = MergeState.Conflict;
       entry.message = rebaseResult.message;
-      this.deps.issueRepo.setMergeState(entry.issueId, 'conflict');
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Conflict);
       this.deps.eventBus.emit('rebase_conflict', {
         issueId: entry.issueId,
         projectId: entry.projectId,
@@ -459,8 +459,8 @@ export class MergeQueue {
       issueNumber: entry.issueNumber,
     });
 
-    entry.mergeState = 'merging';
-    this.deps.issueRepo.setMergeState(entry.issueId, 'merging');
+    entry.mergeState = MergeState.Merging;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
     this.deps.eventBus.emit('merge_started', {
       issueId: entry.issueId,
       projectId: entry.projectId,
@@ -507,8 +507,8 @@ export class MergeQueue {
       });
     }
 
-    entry.mergeState = 'merged';
-    this.deps.issueRepo.setMergeState(entry.issueId, 'merged');
+    entry.mergeState = MergeState.Merged;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
 
     this.deps.eventBus.emit('merge_completed', {
       issueId: entry.issueId,
@@ -522,14 +522,14 @@ export class MergeQueue {
   private handleFailure(
     entry: MergeEntry,
     message: string,
-    state: MergeState = 'build-failed',
+    state: MergeState = MergeState.BuildFailed,
   ): void {
     entry.mergeState = state;
     entry.message = message;
 
     this.deps.issueRepo.setMergeState(entry.issueId, state);
 
-    if (state === 'conflict' || state === 'build-failed' || state === 'blocked') {
+    if (state === MergeState.Conflict || state === MergeState.BuildFailed || state === MergeState.Blocked) {
       this.deps.eventBus.emit('merge_failed', {
         issueId: entry.issueId,
         projectId: entry.projectId,
@@ -538,7 +538,7 @@ export class MergeQueue {
       });
     }
 
-    if (state === 'blocked') {
+    if (state === MergeState.Blocked) {
       this.deps.eventBus.emit('merge_blocked', {
         issueId: entry.issueId,
         projectId: entry.projectId,
