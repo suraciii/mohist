@@ -170,11 +170,14 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "restartServer can go in server-systemd.ts or server.ts. updateServer needs detectInstallMode and runSystemctlUser.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        85772
+      ]
     },
     {
       "id": "T-007",
