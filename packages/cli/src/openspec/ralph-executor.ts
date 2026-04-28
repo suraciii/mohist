@@ -629,6 +629,8 @@ export async function runRalphLoop(
         executionId: taskExecutionId,
       });
 
+      const attemptStartTime = Date.now();
+
       const result = await _acpSessionRunner({
         cwd: context.worktreePath,
         task: prompt,
@@ -650,10 +652,12 @@ export async function runRalphLoop(
           : undefined,
       });
 
+      const attemptDuration = Date.now() - attemptStartTime;
+
       attemptsUsed = attempt;
       if (result.success) {
         taskSuccess = true;
-        updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null });
+        updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null, durations: [attemptDuration] });
         writeTasksFile(change.tasksPath, tasks);
         await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
         emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'completed', attempt);
@@ -723,7 +727,7 @@ export async function runRalphLoop(
         if (!categoryConfig.retryable) {
           shouldPause = true;
           pauseReason = `${lastCategory} failure: ${lastError}. This cannot be retried automatically.`;
-          updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError });
+          updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError, durations: [attemptDuration] });
           writeTasksFile(change.tasksPath, tasks);
           break;
         }
@@ -731,10 +735,13 @@ export async function runRalphLoop(
         if (attempt >= effectiveMaxAttempts + nextTask.attempts) {
           shouldPause = true;
           pauseReason = `Max retries (${effectiveMaxAttempts}) exceeded for ${lastCategory} failure: ${lastError}`;
-          updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError });
+          updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError, durations: [attemptDuration] });
           writeTasksFile(change.tasksPath, tasks);
           break;
         }
+
+        updateTaskInList(tasks, nextTask.id, { durations: [attemptDuration] });
+        writeTasksFile(change.tasksPath, tasks);
 
         emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'retrying', attempt);
 
