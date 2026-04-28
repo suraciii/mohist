@@ -78,9 +78,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Pure presentational component, no hooks or data fetching. Props interface should accept Task[] with dependsOn field.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
