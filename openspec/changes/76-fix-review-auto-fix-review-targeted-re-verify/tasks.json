@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add verdict parsing + auto-fix + full re-check to review and plan stages",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -45,9 +47,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -70,9 +77,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -89,9 +101,16 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/stage-auto-fix.test.ts",
-      "dependsOn": ["T-001", "T-002", "T-003"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
