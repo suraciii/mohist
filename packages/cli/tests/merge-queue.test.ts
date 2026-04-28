@@ -373,7 +373,7 @@ describe('MergeQueue', () => {
   });
 
   describe('build verification', () => {
-    it('should run npm run build after merge and set merged on success', async () => {
+    it('should run npm run build in worktree before merge and set merged on success', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
@@ -390,13 +390,13 @@ describe('MergeQueue', () => {
         (c: any) => c[0] === 'npm' && c[1]?.[0] === 'run' && c[1]?.[1] === 'build',
       );
       expect(buildCalls.length).toBe(1);
-      expect(buildCalls[0][2]?.cwd).toBe(PROJECT_PATH);
+      expect(buildCalls[0][2]?.cwd).toBe(path.join(WORKTREE_PATH, 'packages', 'cli'));
 
       const updated = issueRepo.findById(issue.id);
       expect(updated?.mergeState).toBe('merged');
     });
 
-    it('should rollback and set build-failed when build fails', async () => {
+    it('should set build-failed when build fails before merge', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
@@ -420,11 +420,11 @@ describe('MergeQueue', () => {
 
       expect(buildCalled).toBe(true);
 
+      // No rollback should occur (build happens before merge)
       const resetCalls = execFileMock.mock.calls.filter(
         (c: any) => c[0] === 'git' && c[1]?.[0] === 'reset' && c[1]?.[1] === '--hard',
       );
-      expect(resetCalls.length).toBe(1);
-      expect(resetCalls[0][1]).toEqual(['reset', '--hard', 'HEAD~1']);
+      expect(resetCalls.length).toBe(0);
 
       const updated = issueRepo.findById(issue.id);
       expect(updated?.mergeState).toBe('build-failed');
@@ -440,6 +440,8 @@ describe('MergeQueue', () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
+
+      setupMockExecFile();
 
       worktreeManager.mergeBack = vi.fn().mockResolvedValue({
         success: false,
@@ -463,6 +465,8 @@ describe('MergeQueue', () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
+
+      setupMockExecFile();
 
       worktreeManager.mergeBack = vi.fn().mockResolvedValue({
         success: false,

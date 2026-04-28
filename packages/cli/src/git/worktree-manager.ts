@@ -234,7 +234,7 @@ export class WorktreeManager {
     try {
       await execFileAsync(
         'git',
-        ['merge-base', '--is-ancestor', `origin/${baseBranch}`, branch],
+        ['merge-base', '--is-ancestor', baseBranch, branch],
         { cwd: projectPath }
       );
       return true;
@@ -284,7 +284,7 @@ export class WorktreeManager {
     }
 
     try {
-      await execFileAsync('git', ['rebase', `origin/${baseBranch}`], { cwd: worktreePath });
+      await execFileAsync('git', ['rebase', baseBranch], { cwd: worktreePath });
       log.info('Rebase succeeded', { issueNumber, branch, baseBranch });
       return { success: true, conflicts: [] };
     } catch (err: any) {
