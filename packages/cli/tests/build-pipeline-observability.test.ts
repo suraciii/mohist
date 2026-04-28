@@ -63,6 +63,7 @@ vi.mock('../src/agents/artifact-prompt', () => ({
   buildReviewSelfCheckPrompt: vi.fn().mockReturnValue('mock-review-self-check-prompt'),
 }));
 
+import type { PipelineCheckpointRepo } from '../src/db/pipeline-checkpoint-repo';
 import { WorkflowController } from '../src/workflow/workflow-controller';
 
 function createMockIssue(stage: Stage, overrides?: Partial<Issue>): Issue {
@@ -396,6 +397,122 @@ describe('Build Pipeline Observability - WorkflowController', () => {
       expect(eventBus.emit).toHaveBeenCalledWith(
         'build_stage_failed',
         expect.objectContaining({ reason: 'tasks_failed' }),
+      );
+    });
+
+    it('should NOT emit zero_work on full checkpoint recovery (completed=total, hadCheckpoint=true)', async () => {
+      const { issueRepo, eventBus } = createMockRepos();
+      const workflowLogRepo = { insert: vi.fn() } as any;
+
+      const mockCheckpointRepo = {
+        get: vi.fn().mockReturnValue({
+          issueNumber: 1,
+          stage: 'build',
+          completedSteps: ['T-001', 'T-002'],
+          nextStep: null,
+          updatedAt: '2024-01-01T00:00:00Z',
+        }),
+        upsert: vi.fn(),
+        delete: vi.fn(),
+        deleteAll: vi.fn(),
+      } as unknown as PipelineCheckpointRepo;
+
+      const tasksJson = JSON.stringify({
+        version: 1,
+        tasks: [
+          { id: 'T-001', order: 1, title: 'Task 1', passes: true, attempts: 1 },
+          { id: 'T-002', order: 2, title: 'Task 2', passes: true, attempts: 1 },
+        ],
+      });
+      (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
+
+      mockDetectResult = FAKE_CHANGE;
+      mockRalphExecuteResult = {
+        completed: 2,
+        failed: 0,
+        total: 2,
+        taskResults: [],
+        success: true,
+      };
+
+      const ctrl = new WorkflowController({
+        artifactManager: createMockArtifactManager(),
+        worktreePath: '/tmp/worktree',
+        issueRepo,
+        eventBus,
+        projectId: 'proj-1',
+        checkpointRepo: mockCheckpointRepo,
+      });
+
+      const result = await ctrl.runPipelineBuildStage(
+        createMockIssue(Stage.Build),
+        { cwd: '/tmp', workflowLogRepo } as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(eventBus.emit).toHaveBeenCalledWith(
+        'build_stage_completed',
+        expect.objectContaining({ completed: 2, failed: 0, total: 2 }),
+      );
+      expect(eventBus.emit).not.toHaveBeenCalledWith(
+        'build_stage_failed',
+        expect.objectContaining({ reason: 'zero_work' }),
+      );
+    });
+
+    it('should NOT emit zero_work when completed=0 with success=true and hadCheckpoint=true (defense-in-depth)', async () => {
+      const { issueRepo, eventBus } = createMockRepos();
+      const workflowLogRepo = { insert: vi.fn() } as any;
+
+      const mockCheckpointRepo = {
+        get: vi.fn().mockReturnValue({
+          issueNumber: 1,
+          stage: 'build',
+          completedSteps: ['T-001', 'T-002'],
+          nextStep: null,
+          updatedAt: '2024-01-01T00:00:00Z',
+        }),
+        upsert: vi.fn(),
+        delete: vi.fn(),
+        deleteAll: vi.fn(),
+      } as unknown as PipelineCheckpointRepo;
+
+      const tasksJson = JSON.stringify({
+        version: 1,
+        tasks: [
+          { id: 'T-001', order: 1, title: 'Task 1', passes: true, attempts: 1 },
+          { id: 'T-002', order: 2, title: 'Task 2', passes: true, attempts: 1 },
+        ],
+      });
+      (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
+
+      mockDetectResult = FAKE_CHANGE;
+      mockRalphExecuteResult = {
+        completed: 0,
+        failed: 0,
+        total: 2,
+        taskResults: [],
+        success: true,
+      };
+
+      const ctrl = new WorkflowController({
+        artifactManager: createMockArtifactManager(),
+        worktreePath: '/tmp/worktree',
+        issueRepo,
+        eventBus,
+        projectId: 'proj-1',
+        checkpointRepo: mockCheckpointRepo,
+      });
+
+      const result = await ctrl.runPipelineBuildStage(
+        createMockIssue(Stage.Build),
+        { cwd: '/tmp', workflowLogRepo } as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(eventBus.emit).not.toHaveBeenCalledWith(
+        'build_stage_failed',
+        expect.objectContaining({ reason: 'zero_work' }),
       );
     });
 

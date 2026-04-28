@@ -859,7 +859,7 @@ describe('v4 bug fix: stage timeout calculation', () => {
     expect(capturedTimeouts[1]).toBe(900000);
   });
 
-  it('enforces 5-minute floor for per-task timeout', async () => {
+  it('enforces 10-minute floor for per-task timeout', async () => {
     const capturedTimeouts: number[] = [];
     setAcpSessionRunner(vi.fn().mockImplementation((opts: any) => {
       capturedTimeouts.push(opts.timeout);
@@ -877,7 +877,7 @@ describe('v4 bug fix: stage timeout calculation', () => {
 
     expect(capturedTimeouts).toHaveLength(10);
     for (const t of capturedTimeouts) {
-      expect(t).toBe(300000);
+      expect(t).toBe(600000);
     }
   });
 
@@ -941,7 +941,7 @@ describe('validateTaskDependencies', () => {
     ];
     const result = validateTaskDependencies(tasks);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('strictly lower order'))).toBe(true);
+    expect(result.errors.some(e => e.includes('lower or equal order'))).toBe(true);
   });
 
   it('empty dependsOn is valid', () => {
