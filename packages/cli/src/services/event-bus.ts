@@ -29,6 +29,9 @@ export type EventMap = {
   merge_failed: { issueId: string; projectId: string; issueNumber: number; reason: string };
   merge_conflict_requiring_resolution: { issueId: string; projectId: string; conflictFiles: string[] };
   merge_blocked: { issueId: string; projectId: string; issueNumber: number; conflictingFiles: string[]; retryCount: number };
+  agent_conflict_resolution_started: { issueId: string; projectId: string; issueNumber: number; conflictingFiles: string[] };
+  agent_conflict_resolution_completed: { issueId: string; projectId: string; issueNumber: number };
+  agent_conflict_resolution_failed: { issueId: string; projectId: string; issueNumber: number; conflictingFiles: string[]; error: string };
 };
 
 export type EventName = keyof EventMap;

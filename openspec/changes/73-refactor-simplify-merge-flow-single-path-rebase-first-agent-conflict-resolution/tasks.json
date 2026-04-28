@@ -52,9 +52,9 @@
       ],
       "passes": false,
       "notes": "The resolveConflicts delegate keeps MergeQueue decoupled from agent runtime. Server will inject the actual implementation. MergeQueue only calls the delegate and handles its result.",
-      "attempts": 0,
+      "attempts": 2,
       "order": 999999,
-      "error": null
+      "error": "Auto-skipped (no onAskUser): Timed out after 900s"
     },
     {
       "id": "T-003",
