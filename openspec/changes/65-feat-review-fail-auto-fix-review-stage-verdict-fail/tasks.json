@@ -82,9 +82,9 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Import buildAutoFixPrompt and buildReVerifyPrompt from artifact-prompt.ts. Reuse existing emitSafe helper for SSE events. Round index: R2=2 (auto-fix attempt 1), R3=3 (re-verify attempt 1), R4=4 (auto-fix attempt 2), R5=5 (re-verify attempt 2).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
