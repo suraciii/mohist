@@ -35,7 +35,7 @@ export const FAILURE_CATEGORY_CONFIGS: Record<FailureCategory, FailureCategoryCo
   ac_not_met: { maxAttempts: 3, retryable: true },
   environment: { maxAttempts: 2, retryable: true },
   dependency: { maxAttempts: 1, retryable: false },
-  timeout: { maxAttempts: 1, retryable: false },
+  timeout: { maxAttempts: 3, retryable: true },
   timeout_with_wip: { maxAttempts: 2, retryable: true },
 };
 
