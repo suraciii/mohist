@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix build stage zero_work false positive when all tasks recovered from checkpoint",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Key insertion point: after skipTaskIds processing block (around line 449) and before the main loop setup (line 451). The allTasksPassed guard change is at line 425-435."
+      "passes": true,
+      "notes": "Key insertion point: after skipTaskIds processing block (around line 449) and before the main loop setup (line 451). The allTasksPassed guard change is at line 425-435.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -44,7 +46,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Key locations: checkpoint read at line 490-491, consistency verification before executor call at line 598, zero_work guard at line 617. The completedTaskIds variable is already available — add verification between lines 530-596."
+      "notes": "Key locations: checkpoint read at line 490-491, consistency verification before executor call at line 598, zero_work guard at line 617. The completedTaskIds variable is already available — add verification between lines 530-596.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -70,7 +75,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Follow existing test patterns: ralph-executor.test.ts uses setAcpSessionRunner mock, build-pipeline-observability.test.ts uses WorkflowController with mock repos. See also recover-build-all-pass.test.ts for the agent-runner-service recovery pattern."
+      "notes": "Follow existing test patterns: ralph-executor.test.ts uses setAcpSessionRunner mock, build-pipeline-observability.test.ts uses WorkflowController with mock repos. See also recover-build-all-pass.test.ts for the agent-runner-service recovery pattern.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
