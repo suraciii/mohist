@@ -355,13 +355,16 @@ export function findNextPendingTask(tasks: Task[]): Task | null {
 function updateTaskInList(
   tasks: Task[],
   taskId: string,
-  updates: Partial<Pick<Task, 'passes' | 'attempts' | 'error'>>
+  updates: Partial<Pick<Task, 'passes' | 'attempts' | 'error' | 'durations'>>
 ): void {
   const task = tasks.find(t => t.id === taskId);
   if (!task) return;
   if (updates.passes !== undefined) task.passes = updates.passes;
   if (updates.attempts !== undefined) task.attempts = updates.attempts;
   if (updates.error !== undefined) task.error = updates.error;
+  if (updates.durations !== undefined) {
+    task.durations = [...(task.durations ?? []), ...updates.durations];
+  }
 }
 
 function writeTaskLog(
