@@ -107,9 +107,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use `useState<'files' | 'commits'>('files')` for tab state and `Set<string>` for tracking expanded commit hashes. Use relative time formatting from existing `formatTime` utility. Keep all existing Files view code intact — only wrap with tab header and conditionally render.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
