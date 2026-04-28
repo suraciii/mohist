@@ -424,7 +424,7 @@ export async function runRalphLoop(
   const skipTaskIds = new Set(options.skipTaskIds ?? []);
 
   const allTasksPassed = tasks.length > 0 && tasks.every(t => t.passes);
-  if (allTasksPassed) {
+  if (allTasksPassed && skipTaskIds.size === 0) {
     log.info('All tasks have passes=true (corrupted), resetting to false', {
       issueId: context.issueId || '',
       total: tasks.length,
@@ -447,6 +447,23 @@ export async function runRalphLoop(
       issueId: context.issueId || '',
       skippedIds: [...skipTaskIds],
     });
+  }
+
+  if (skipTaskIds.size > 0 && tasks.every(t => t.passes)) {
+    log.info('recovered-from-checkpoint', {
+      issueId: context.issueId || '',
+      total: tasks.length,
+    });
+    const recoveredResult: RalphLoopResult = {
+      completed: tasks.length,
+      failed: 0,
+      skipped: 0,
+      total: tasks.length,
+      taskResults: [],
+      success: true,
+    };
+    context.onLoopComplete?.(recoveredResult);
+    return recoveredResult;
   }
 
   const taskResults: TaskResult[] = [];

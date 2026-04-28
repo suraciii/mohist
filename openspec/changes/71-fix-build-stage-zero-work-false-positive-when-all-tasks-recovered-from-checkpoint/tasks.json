@@ -1,0 +1,76 @@
+{
+  "project": "mohist",
+  "description": "Fix build stage zero_work false positive when all tasks recovered from checkpoint",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add allTasksPassed guard and short-circuit in RalphExecutor",
+      "spec": "specs/checkpoint-full-recovery/spec.md#Full-checkpoint-short-circuit-in-RalphExecutor",
+      "description": "In `runRalphLoop` (ralph-executor.ts): (1) Guard the allTasksPassed reset with `skipTaskIds.size === 0` so it only fires during non-recovery. (2) After skipTaskIds processing, check if all tasks now have `passes=true`. If so, log `recovered-from-checkpoint` and return immediately with `{ completed: tasks.length, failed: 0, skipped: 0, total: tasks.length, taskResults: [], success: true }`.",
+      "acceptanceCriteria": [
+        "When skipTaskIds covers all task IDs, runRalphLoop returns completed=total, failed=0, success=true without entering the main while-loop",
+        "When all tasks have passes=true AND skipTaskIds is empty, tasks are reset to passes=false and executed normally (corruption case preserved)",
+        "When all tasks have passes=true AND skipTaskIds is non-empty, tasks are NOT reset to passes=false",
+        "Log entry with 'recovered-from-checkpoint' is emitted on full checkpoint short-circuit",
+        "Partial skipTaskIds (not all tasks) still enters the main loop and only executes remaining pending tasks",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Key insertion point: after skipTaskIds processing block (around line 449) and before the main loop setup (line 451). The allTasksPassed guard change is at line 425-435."
+    },
+    {
+      "id": "T-002",
+      "title": "Add checkpoint consistency cleanup and narrow zero_work in workflow-controller",
+      "spec": "specs/checkpoint-full-recovery/spec.md#Checkpoint-consistency-cleanup-in-workflow-controller",
+      "description": "In `runPipelineBuildStage` (workflow-controller.ts): (1) After reading checkpoint and detecting the change, verify each checkpoint task ID against tasks.json — only keep IDs where the task has `passes=true`. (2) If all checkpoint IDs are verified and cover all tasks, delete the redundant checkpoint early. (3) Pass only verified IDs as skipTaskIds. (4) Narrow the zero_work guard: skip zero_work when the executor result has `success=true` AND `completedTaskIds.length > 0` (checkpoint recovery was active).",
+      "acceptanceCriteria": [
+        "Checkpoint task IDs that have passes=false in tasks.json are filtered out of completedTaskIds before being passed as skipTaskIds",
+        "When all checkpoint IDs are verified passed and cover all tasks, the build checkpoint is deleted before executor runs",
+        "zero_work guard does NOT fire when result.success=true AND completedTaskIds.length > 0",
+        "zero_work guard still fires for genuine zero-work (completed=0, total>0, no checkpoint recovery)",
+        "Partially consistent checkpoint (some IDs not verified) preserves the checkpoint and passes only verified IDs",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Key locations: checkpoint read at line 490-491, consistency verification before executor call at line 598, zero_work guard at line 617. The completedTaskIds variable is already available — add verification between lines 530-596."
+    },
+    {
+      "id": "T-003",
+      "title": "Add tests for RalphExecutor checkpoint recovery and workflow-controller zero_work narrowing",
+      "spec": "specs/ralph-task-execution/spec.md#Task-status-persistence",
+      "description": "Add unit tests covering: (1) Full checkpoint recovery — all tasks skipped via skipTaskIds, verify completed=total, success=true, no agent spawned. (2) allTasksPassed with skipTaskIds present — verify no reset. (3) allTasksPassed without skipTaskIds — verify reset happens. (4) workflow-controller zero_work narrowing — verify full checkpoint recovery does not emit zero_work. (5) Partial checkpoint recovery still enters main loop. Tests go in ralph-executor.test.ts and build-pipeline-observability.test.ts following existing patterns.",
+      "acceptanceCriteria": [
+        "Test: full checkpoint recovery returns completed=total, success=true without spawning any agent session",
+        "Test: allTasksPassed with non-empty skipTaskIds does NOT reset tasks to passes=false",
+        "Test: allTasksPassed with empty skipTaskIds DOES reset tasks to passes=false (corruption case)",
+        "Test: partial checkpoint recovery (some tasks skipped) still enters main loop",
+        "Test: workflow-controller does not emit zero_work when result.success=true and completedTaskIds.length > 0",
+        "Test: workflow-controller still emits zero_work for genuine zero-work (completed=0, total>0, no checkpoint)",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/ralph-executor.test.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Follow existing test patterns: ralph-executor.test.ts uses setAcpSessionRunner mock, build-pipeline-observability.test.ts uses WorkflowController with mock repos. See also recover-build-all-pass.test.ts for the agent-runner-service recovery pattern."
+    }
+  ]
+}
