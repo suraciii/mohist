@@ -10,6 +10,7 @@ import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } fr
 import { loadWorkflow } from './workflow-loader';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildConflictResolutionPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
+import type { CommentRepo } from '../db/comment-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
@@ -34,6 +35,7 @@ export interface StageResult {
   requiresApproval: boolean;
   output: unknown;
   message?: string;
+  escalateToStage?: Stage;
 }
 
 export interface WorkflowControllerOptions {
@@ -43,6 +45,7 @@ export interface WorkflowControllerOptions {
   eventBus?: EventBus;
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
+  commentRepo?: CommentRepo;
 }
 
 export interface PipelineResult {
@@ -59,6 +62,7 @@ export class WorkflowController {
   private eventBus?: EventBus;
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
+  private commentRepo?: CommentRepo;
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -67,10 +71,15 @@ export class WorkflowController {
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
+    this.commentRepo = options.commentRepo;
   }
 
   getCheckpointRepo(): PipelineCheckpointRepo | undefined {
     return this.checkpointRepo;
+  }
+
+  getCommentRepo(): CommentRepo | undefined {
+    return this.commentRepo;
   }
 
   async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
@@ -1036,6 +1045,14 @@ function cleanChangeDir(changeDir: string): void {
     const entryPath = path.join(changeDir, entry);
     fs.rmSync(entryPath, { recursive: true, force: true });
   }
+}
+
+const VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
+
+export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
+  const match = VERDICT_RE.exec(content);
+  if (!match) return null;
+  return match[1].toUpperCase() as 'PASS' | 'FAIL';
 }
 
 export function createWorkflowController(options: WorkflowControllerOptions): WorkflowController {
