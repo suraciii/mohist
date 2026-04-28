@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Migration v15 + CoderSessionRepo interface update",
+      "spec": "specs/coder-session-tracking/spec.md",
+      "description": "Add migration v15 to add 3 nullable TEXT columns (model, coder_type, stage) to coder_session table. Extend CreateCoderSessionData with optional model/coderType/stage fields. Extend CoderSession interface with model/coderType/stage nullable fields. Update CoderSessionRepo.insert() to write new columns. Update GET /:number/coder-sessions API response to include new fields. Update frontend CoderSessionItem type.",
+      "acceptanceCriteria": [
+        "Migration v15 adds model, coder_type, stage TEXT columns to coder_session",
+        "Existing coder_session rows have NULL for new columns after migration",
+        "CreateCoderSessionData accepts optional model, coderType, stage",
+        "CoderSessionRepo.insert() persists new fields when provided",
+        "CoderSessionRepo.insert() writes NULL for new fields when omitted",
+        "GET /:number/coder-sessions response includes model, coderType, stage fields",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/migrations.ts, packages/cli/src/db/coder-session-repo.ts, packages/cli/src/api/issues.ts, packages/cli/web/src/lib/types.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Bump SCHEMA_VERSION from 14 to 15. Migration is ALTER TABLE only — no data backfill.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        311948
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Backend: populate new coder_session fields on insert",
+      "spec": "specs/coder-session-tracking/spec.md",
+      "description": "Update runAcpSession and createAcpConnection in acp-session.ts to pass model, coderType, and stage when inserting coder_session rows. Model is resolved from options or opencode config. coderType is always 'opencode'. runAcpSession passes stage='build', createAcpConnection passes stage from options.stage. Add stage and model to AcpSessionOptions and AcpConnectionOptions interfaces.",
+      "acceptanceCriteria": [
+        "runAcpSession passes model, coderType='opencode', stage='build' to coderSessionRepo.insert()",
+        "createAcpConnection passes model, coderType='opencode', stage=options.stage to coderSessionRepo.insert()",
+        "AcpSessionOptions and AcpConnectionOptions include optional model and stage fields",
+        "Model resolution: options.model if provided, else config.opencode.model, else undefined",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "Both insert sites guard on `if (coderSessionRepo)` — new fields are only passed when repo is available. Thread stage through WorkflowController call sites that invoke createAcpConnection.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "SSE event enrichment: coderSessionId + model on existing events + new lifecycle events",
+      "spec": "specs/coder-session-tracking/spec.md",
+      "description": "Add coderSessionId and model to coder_text_chunk and coder_tool_call SSE event payloads. Add coderSessionId and acpSessionId to plan_round_start and plan_session_update events (thread via AcpConnection return). Register coder_session_started and coder_session_completed as new SSE event types in event-bus.ts ALL_EVENT_TYPES. Emit coder_session_started after coderSessionRepo.insert(), coder_session_completed on session completion. Thread coderSessionId from acp-session.ts through AcpConnection interface so WorkflowController can include it in Plan/Review events.",
+      "acceptanceCriteria": [
+        "coder_text_chunk payload includes coderSessionId and model (when available)",
+        "coder_tool_call payload includes coderSessionId and model (when available)",
+        "coder_session_started event emitted after coder_session row creation with full metadata",
+        "coder_session_completed event emitted on session completion with status and duration",
+        "plan_round_start and plan_session_update events include acpSessionId and coderSessionId",
+        "coderSessionId and acpSessionId are available on AcpConnection return object",
+        "ALL_EVENT_TYPES in event-bus.ts includes coder_session_started and coder_session_completed",
+        "Events without coder_session context omit coderSessionId (backward compatible)",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts, packages/cli/src/services/event-bus.ts, packages/cli/web/src/lib/agent-events.ts, packages/cli/web/src/lib/types.ts, packages/cli/web/src/hooks/useSSE.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "notes": "Key design decision (D2/D3): dual-carry coderSessionId + acpSessionId. AcpConnection interface gets coderSessionId and acpSessionId as readonly properties. WorkflowController must be updated to pass these through when emitting plan_round_start/plan_session_update.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "Frontend: useCoderSessions hook + SessionHeader + SessionList components",
+      "spec": "specs/session-list-ui/spec.md",
+      "description": "Create useCoderSessions(issueNumber) hook that fetches GET /:number/coder-sessions and subscribes to coder_session_started/coder_session_completed SSE events for live updates. Running sessions get a 1-second interval timer for duration ticking. Create SessionHeader component (status icon, label, coder/model info, timing, chevron). Create SessionList component that renders sessions ordered by createdAt with accordion expand/collapse (one session expanded at a time). Running sessions auto-expand.",
+      "acceptanceCriteria": [
+        "useCoderSessions(issueNumber) returns { sessions, isLoading }",
+        "Initial data fetched from GET /:number/coder-sessions",
+        "coder_session_started SSE event inserts new session into list",
+        "coder_session_completed SSE event updates matching session status and completedAt",
+        "Running sessions get live duration timer (1-second interval)",
+        "Timer is cleaned up when all sessions complete",
+        "SessionHeader shows: status icon (pulse/checkmark/error), label, coder·model, time, duration, chevron",
+        "SessionList renders sessions ordered by createdAt ascending",
+        "Clicking a session expands its detail; clicking again collapses",
+        "Only one session expanded at a time",
+        "Running sessions auto-expand on mount",
+        "Draft issue with no sessions shows placeholder",
+        "npm run build succeeds"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useCoderSessions.ts, packages/cli/web/src/components/SessionHeader.tsx, packages/cli/web/src/components/SessionList.tsx",
+      "dependsOn": [
+        "T-003"
+      ],
+      "notes": "Design decision D4: REST initial load + SSE live updates. coder_session_started/completed events must be registered in useSSE.ts AGENT_DETAIL_EVENTS list and agent-events.ts AgentDetailEventMap. The hook should use React Query for the initial fetch and React state for live SSE updates merged on top.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-005",
+      "title": "useSessionTimeline coderSessionId filter + SessionDetail component",
+      "spec": "specs/session-list-ui/spec.md",
+      "description": "Extend useSessionTimeline(issueNumber, coderSessionId?) with optional session scoping. When coderSessionId is provided, filter reconstructed rounds and live SSE events to only that session's acpSessionId. Create SessionDetail component that renders expanded round content (reuse RoundSection and ToolCallTimelineEntry from existing SessionTimeline). SessionDetail accepts a CoderSessionItem and uses useSessionTimeline with the session's coderSessionId to get scoped rounds.",
+      "acceptanceCriteria": [
+        "useSessionTimeline(issueNumber) without coderSessionId returns all rounds (backward compatible)",
+        "useSessionTimeline(issueNumber, coderSessionId) returns only rounds for that session",
+        "Filtering uses acpSessionId from CoderSessionItem lookup",
+        "Live SSE events (coder_text_chunk, coder_tool_call) filtered by coderSessionId",
+        "SessionDetail renders rounds with agent text, thoughts, and tool calls",
+        "SessionDetail shows typing cursor animation for running session text streaming",
+        "npm run build succeeds"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useSessionTimeline.ts, packages/cli/web/src/components/SessionDetail.tsx",
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
+      "notes": "Design decision D5: optional filter parameter rather than separate hook. The acpSessionId lookup comes from the CoderSessionItem in useCoderSessions. RoundSection and ToolCallTimelineEntry can be extracted from SessionTimeline.tsx as shared sub-components, or SessionDetail can import from the existing file.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-006",
+      "title": "Integrate SessionList/SessionDetail into IssueDetailPage",
+      "spec": "specs/session-list-ui/spec.md",
+      "description": "Replace SessionTimeline in IssueDetailPage with SessionList (which contains SessionHeader and SessionDetail internally). Remove SessionTimeline import. Wire useCoderSessions hook. Preserve PipelineStatusTimeline and TaskProgressPanel within SessionDetail for appropriate sessions. Update the right panel layout to accommodate the new session-centric view.",
+      "acceptanceCriteria": [
+        "IssueDetailPage renders SessionList instead of SessionTimeline",
+        "SessionList is wired to useCoderSessions(issueNumber)",
+        "PipelineStatusTimeline is preserved within the panel",
+        "TaskProgressPanel is preserved for build-stage sessions",
+        "No regressions in stage progress bar, approval gate, or other panel features",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": [
+        "T-004",
+        "T-005"
+      ],
+      "notes": "Design decision D6: replace in-place, not layer on top. Old SessionTimeline.tsx file can be kept for reference but is no longer imported by IssueDetailPage. Ensure the right panel still handles the loading and empty states gracefully.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
