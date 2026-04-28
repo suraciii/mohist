@@ -85,10 +85,13 @@
         "T-002"
       ],
       "notes": "Key design decision (D2/D3): dual-carry coderSessionId + acpSessionId. AcpConnection interface gets coderSessionId and acpSessionId as readonly properties. WorkflowController must be updated to pass these through when emitting plan_round_start/plan_session_update.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        515166
+      ]
     },
     {
       "id": "T-004",
