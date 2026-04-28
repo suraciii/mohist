@@ -48,9 +48,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow the onAgentEvent + useEffect cleanup pattern from useSessionTimeline.ts. Import AgentDetailEventMap from types for event payload types.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
