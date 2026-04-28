@@ -105,9 +105,9 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The buildConflictResolutionPrompt function already exists in workflow-controller. Extract it to a shared location (e.g., agent/prompts.ts) so both WorkflowController and server can use it. The ACP session creation pattern (createAcpConnection + conn.prompt + conn.close) is the same as in runConflictResolutionStage.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
