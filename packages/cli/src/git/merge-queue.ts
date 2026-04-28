@@ -11,6 +11,8 @@ const log = Log.create({ service: 'merge-queue' });
 const execFileAsync = promisify(execFile);
 
 const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_AUTO_RETRY_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_RETRY_COUNT = 5;
 
 export interface MergeEntry {
   issueNumber: number;
@@ -18,8 +20,10 @@ export interface MergeEntry {
   issueId: string;
   mergeState: MergeState;
   message?: string;
-  conflictingFiles?: string[];
   enqueuedAt: number;
+  retryCount: number;
+  lastAttemptHead?: string;
+  changedFiles?: string[];
 }
 
 interface MergeQueueDeps {
@@ -33,6 +37,7 @@ export class MergeQueue {
   private queue = new Map<number, MergeEntry>();
   private processing = false;
   private deps: MergeQueueDeps;
+  private autoRetryTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps: MergeQueueDeps) {
     this.deps = deps;
@@ -56,6 +61,7 @@ export class MergeQueue {
       issueId: issue.id,
       mergeState: MergeState.Pending,
       enqueuedAt: Date.now(),
+      retryCount: 0,
     };
 
     this.queue.set(issueNumber, entry);
@@ -74,6 +80,117 @@ export class MergeQueue {
     this.processNext();
   }
 
+  startAutoRetry(intervalMs: number = DEFAULT_AUTO_RETRY_INTERVAL_MS): void {
+    if (this.autoRetryTimer) {
+      log.warn('Auto-retry already running');
+      return;
+    }
+
+    this.autoRetryTimer = setInterval(() => {
+      this.checkBlockedIssues().catch((err) => {
+        log.error('Auto-retry check failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }, intervalMs);
+
+    log.info('Auto-retry scheduler started', { intervalMs });
+  }
+
+  stopAutoRetry(): void {
+    if (this.autoRetryTimer) {
+      clearInterval(this.autoRetryTimer);
+      this.autoRetryTimer = null;
+      log.info('Auto-retry scheduler stopped');
+    }
+  }
+
+  private async checkBlockedIssues(): Promise<void> {
+    const retryableStates: MergeState[] = [MergeState.Conflict, MergeState.Blocked];
+
+    for (const entry of this.queue.values()) {
+      if (!retryableStates.includes(entry.mergeState)) continue;
+
+      const project = this.deps.getProjectPath(entry.projectId);
+      if (!project) {
+        log.warn('Auto-retry: project not found', {
+          issueNumber: entry.issueNumber,
+          projectId: entry.projectId,
+        });
+        continue;
+      }
+
+      const currentHead = await this.getMasterHead(project.path, project.baseBranch);
+      if (!currentHead) continue;
+
+      if (entry.lastAttemptHead && currentHead === entry.lastAttemptHead) {
+        log.debug('Auto-retry: master unchanged, skipping', {
+          issueNumber: entry.issueNumber,
+          head: currentHead,
+        });
+        continue;
+      }
+
+      if (entry.retryCount >= MAX_RETRY_COUNT) {
+        if (entry.mergeState !== MergeState.Blocked) {
+          entry.mergeState = MergeState.Blocked;
+          this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Blocked);
+          this.deps.eventBus.emit('merge_blocked', {
+            issueId: entry.issueId,
+            projectId: entry.projectId,
+            issueNumber: entry.issueNumber,
+            reason: `Auto-retry limit reached (${MAX_RETRY_COUNT} attempts)`,
+            retryCount: entry.retryCount,
+            lastConflict: entry.message,
+          });
+          log.warn('Auto-retry: max retries reached, marking blocked', {
+            issueNumber: entry.issueNumber,
+            retryCount: entry.retryCount,
+          });
+        }
+        continue;
+      }
+
+      entry.retryCount++;
+      entry.lastAttemptHead = currentHead;
+      entry.mergeState = MergeState.Pending;
+      entry.message = undefined;
+      entry.enqueuedAt = Date.now();
+
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Pending);
+      this.deps.eventBus.emit('rebase_retry', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
+        issueNumber: entry.issueNumber,
+        attempt: entry.retryCount,
+      });
+
+      log.info('Auto-retry: re-enqueued issue', {
+        issueNumber: entry.issueNumber,
+        retryCount: entry.retryCount,
+        newHead: currentHead,
+      });
+
+      this.processNext();
+    }
+  }
+
+  private async getMasterHead(projectPath: string, baseBranch: string): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', baseBranch], {
+        cwd: projectPath,
+      });
+      return stdout.trim();
+    } catch (err) {
+      log.warn('getMasterHead failed', {
+        projectPath,
+        baseBranch,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
   retry(issueNumber: number): boolean {
     const entry = this.queue.get(issueNumber);
     if (!entry) {
@@ -81,7 +198,11 @@ export class MergeQueue {
       return false;
     }
 
-    if (entry.mergeState !== MergeState.BuildFailed && entry.mergeState !== MergeState.Conflict && entry.mergeState !== MergeState.Blocked) {
+    if (
+      entry.mergeState !== MergeState.BuildFailed &&
+      entry.mergeState !== MergeState.Conflict &&
+      entry.mergeState !== MergeState.Blocked
+    ) {
       log.warn('retry: invalid state', { issueNumber, mergeState: entry.mergeState });
       return false;
     }
@@ -89,6 +210,7 @@ export class MergeQueue {
     entry.mergeState = MergeState.Pending;
     entry.message = undefined;
     entry.enqueuedAt = Date.now();
+    entry.retryCount = 0;
 
     this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Pending);
 
@@ -105,14 +227,15 @@ export class MergeQueue {
   }
 
   recoverFromDB(): void {
-    const issues = this.deps.issueRepo.findByMergeStates([MergeState.Pending, MergeState.Merging, MergeState.Rebasing, MergeState.Blocked]);
+    const activeStates: MergeState[] = [MergeState.Pending, MergeState.Merging, MergeState.Rebasing];
+    const retryableStates: MergeState[] = [MergeState.Conflict, MergeState.Blocked];
 
-    for (const issue of issues) {
+    const activeIssues = this.deps.issueRepo.findByMergeStates(activeStates);
+
+    for (const issue of activeIssues) {
       if (this.queue.has(issue.number)) continue;
 
-      const mergeState: MergeState = issue.mergeState === MergeState.Merging ? MergeState.Pending : MergeState.Pending;
-
-      this.deps.issueRepo.setMergeState(issue.id, mergeState);
+      this.deps.issueRepo.setMergeState(issue.id, MergeState.Pending);
 
       const entry: MergeEntry = {
         issueNumber: issue.number,
@@ -120,6 +243,7 @@ export class MergeQueue {
         issueId: issue.id,
         mergeState: MergeState.Pending,
         enqueuedAt: Date.now(),
+        retryCount: 0,
       };
 
       this.queue.set(issue.number, entry);
@@ -130,8 +254,34 @@ export class MergeQueue {
       });
     }
 
+    const retryableIssues = this.deps.issueRepo.findByMergeStates(retryableStates);
+
+    for (const issue of retryableIssues) {
+      if (this.queue.has(issue.number)) continue;
+
+      const entry: MergeEntry = {
+        issueNumber: issue.number,
+        projectId: issue.projectId,
+        issueId: issue.id,
+        mergeState: (issue.mergeState as MergeState) || MergeState.Conflict,
+        enqueuedAt: Date.now(),
+        retryCount: 0,
+      };
+
+      this.queue.set(issue.number, entry);
+      log.info('Recovered retryable issue from DB', {
+        issueNumber: issue.number,
+        projectId: issue.projectId,
+        mergeState: issue.mergeState,
+      });
+    }
+
     if (this.queue.size > 0) {
-      log.info('Merge queue recovery complete', { recoveredCount: this.queue.size });
+      log.info('Merge queue recovery complete', {
+        recoveredCount: this.queue.size,
+        activeCount: activeIssues.length,
+        retryableCount: retryableIssues.length,
+      });
       this.processNext();
     }
   }
@@ -147,10 +297,13 @@ export class MergeQueue {
   private async processNext(): Promise<void> {
     if (this.processing) return;
 
-    const entry = this.pickNext();
-    if (!entry) return;
-
     this.processing = true;
+
+    const entry = await this.pickNext();
+    if (!entry) {
+      this.processing = false;
+      return;
+    }
 
     try {
       await this.processItem(entry);
@@ -165,78 +318,152 @@ export class MergeQueue {
     }
   }
 
-  private pickNext(): MergeEntry | null {
-    let earliest: MergeEntry | null = null;
-    for (const entry of this.queue.values()) {
-      if (entry.mergeState !== MergeState.Pending) continue;
-      if (!earliest || entry.enqueuedAt < earliest.enqueuedAt) {
-        earliest = entry;
+  private async pickNext(): Promise<MergeEntry | null> {
+    const pending = Array.from(this.queue.values())
+      .filter((e) => e.mergeState === MergeState.Pending);
+
+    if (pending.length === 0) return null;
+
+    const sorted = [...pending].sort((a, b) => a.enqueuedAt - b.enqueuedAt);
+
+    if (sorted.length === 1) return sorted[0];
+
+    for (const entry of sorted) {
+      if (entry.changedFiles) continue;
+      const project = this.deps.getProjectPath(entry.projectId);
+      if (!project) {
+        log.warn('pickNext: project not found, skipping changedFiles', {
+          issueNumber: entry.issueNumber,
+          projectId: entry.projectId,
+        });
+        continue;
       }
+      entry.changedFiles = await this.getChangedFiles(
+        project.path,
+        `mo/issue-${entry.issueNumber}`,
+        project.baseBranch,
+      );
     }
-    return earliest;
+
+    const candidate = sorted[0];
+    if (!candidate.changedFiles) return candidate;
+
+    for (let i = 1; i < sorted.length; i++) {
+      if (!sorted[i].changedFiles) continue;
+      const overlap = candidate.changedFiles.some((f) =>
+        sorted[i].changedFiles!.includes(f),
+      );
+      if (overlap) return candidate;
+    }
+
+    return candidate;
+  }
+
+  private async getChangedFiles(
+    projectPath: string,
+    branch: string,
+    baseBranch: string,
+  ): Promise<string[] | undefined> {
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['diff', '--name-only', `${baseBranch}...${branch}`],
+        { cwd: projectPath },
+      );
+      const files = stdout.trim().split('\n').filter((l) => l.trim());
+      log.debug('getChangedFiles', { branch, baseBranch, fileCount: files.length });
+      return files;
+    } catch (err) {
+      log.warn('getChangedFiles failed, degrading to FIFO', {
+        branch,
+        baseBranch,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return undefined;
+    }
   }
 
   private async processItem(entry: MergeEntry): Promise<void> {
-    entry.mergeState = MergeState.Merging;
-    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
-
-    this.deps.eventBus.emit('merge_started', {
-      issueId: entry.issueId,
-      projectId: entry.projectId,
-      issueNumber: entry.issueNumber,
-    });
-
-    log.info('Processing merge (rebase-first)', { issueNumber: entry.issueNumber, projectId: entry.projectId });
-
     const project = this.deps.getProjectPath(entry.projectId);
     if (!project) {
-      this.handleFailure(entry, 'Project not found');
+      this.handleFailure(entry, 'Project not found', MergeState.Conflict);
       return;
     }
 
-    const rebaseResult = await this.deps.worktreeManager.rebaseOntoMaster(
-      project.path,
-      project.name,
-      entry.issueNumber,
-      project.baseBranch,
-    );
+    const branch = `mo/issue-${entry.issueNumber}`;
 
-    if (!rebaseResult.success) {
-      log.warn('Rebase conflicts detected, aborting rebase and blocking', {
-        issueNumber: entry.issueNumber,
-        conflicts: rebaseResult.conflicts,
-      });
+    log.info('Processing merge', { issueNumber: entry.issueNumber, projectId: entry.projectId });
 
+    const hasCommits = await this.branchHasCommits(project.path, branch, project.baseBranch);
+    if (!hasCommits) {
+      log.info('No commits to merge, cleaning worktree', { issueNumber: entry.issueNumber });
       try {
-        await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
+        await this.deps.worktreeManager.remove(project.path, project.name, entry.issueNumber);
       } catch (err) {
-        log.warn('Failed to abort rebase, continuing to blocked state', {
+        log.warn('Failed to clean worktree for no-commits case', {
           issueNumber: entry.issueNumber,
           error: err instanceof Error ? err.message : String(err),
         });
       }
 
-      entry.mergeState = MergeState.Blocked;
-      entry.conflictingFiles = rebaseResult.conflicts;
-      entry.message = `Rebase conflicts: ${rebaseResult.conflicts.join(', ')}`;
-      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Blocked);
-
-      this.deps.eventBus.emit('merge_blocked', {
+      entry.mergeState = MergeState.Merged;
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
+      this.deps.eventBus.emit('merge_completed', {
         issueId: entry.issueId,
         projectId: entry.projectId,
         issueNumber: entry.issueNumber,
-        conflictingFiles: rebaseResult.conflicts,
-        retryCount: 0,
       });
+      log.info('Merge skipped (no commits), worktree cleaned', { issueNumber: entry.issueNumber });
+      return;
+    }
 
-      log.info('Issue blocked due to rebase conflicts', {
+    entry.mergeState = MergeState.Rebasing;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Rebasing);
+    this.deps.eventBus.emit('rebase_started', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
+      issueNumber: entry.issueNumber,
+    });
+
+    const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
+    if (!worktreePath) {
+      this.handleFailure(entry, `Worktree not found for issue #${entry.issueNumber}`, MergeState.Conflict);
+      return;
+    }
+
+    const rebaseResult = await this.deps.worktreeManager.rebaseOntoMaster(worktreePath, project.baseBranch);
+    if (!rebaseResult.success) {
+      entry.mergeState = MergeState.Conflict;
+      entry.message = rebaseResult.message;
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Conflict);
+      this.deps.eventBus.emit('rebase_conflict', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
         issueNumber: entry.issueNumber,
-        conflictingFiles: rebaseResult.conflicts,
+        conflictingFiles: rebaseResult.conflictingFiles || [],
+      });
+      log.warn('Rebase conflict detected', {
+        issueNumber: entry.issueNumber,
+        conflictingFiles: rebaseResult.conflictingFiles,
       });
       return;
     }
 
-    log.info('Rebase succeeded, performing fast-forward merge', {
+    this.deps.eventBus.emit('rebase_completed', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
+      issueNumber: entry.issueNumber,
+    });
+
+    log.info('Rebase succeeded, proceeding with fast-forward merge', {
+      issueNumber: entry.issueNumber,
+    });
+
+    entry.mergeState = MergeState.Merging;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
+    this.deps.eventBus.emit('merge_started', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
       issueNumber: entry.issueNumber,
     });
 
@@ -248,8 +475,7 @@ export class MergeQueue {
     );
 
     if (!mergeResult.success) {
-      const isConflict = mergeResult.message.toLowerCase().includes('conflict');
-      this.handleFailure(entry, mergeResult.message, isConflict ? MergeState.Conflict : MergeState.BuildFailed);
+      this.handleFailure(entry, mergeResult.message);
       return;
     }
 
@@ -300,20 +526,45 @@ export class MergeQueue {
   ): void {
     entry.mergeState = state;
     entry.message = message;
+
     this.deps.issueRepo.setMergeState(entry.issueId, state);
 
-    this.deps.eventBus.emit('merge_failed', {
-      issueId: entry.issueId,
-      projectId: entry.projectId,
-      issueNumber: entry.issueNumber,
-      reason: state === MergeState.Conflict ? MergeState.Conflict : MergeState.BuildFailed,
-    });
+    if (state === MergeState.Conflict || state === MergeState.BuildFailed || state === MergeState.Blocked) {
+      this.deps.eventBus.emit('merge_failed', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
+        issueNumber: entry.issueNumber,
+        reason: state,
+      });
+    }
+
+    if (state === MergeState.Blocked) {
+      this.deps.eventBus.emit('merge_blocked', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
+        issueNumber: entry.issueNumber,
+        reason: message,
+        retryCount: entry.retryCount,
+        lastConflict: entry.message,
+      });
+    }
 
     log.warn('Merge failed', {
       issueNumber: entry.issueNumber,
       state,
       message,
     });
+  }
+
+  private async branchHasCommits(projectPath: string, branch: string, baseBranch: string): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync('git', ['log', `${baseBranch}..${branch}`, '--oneline'], {
+        cwd: projectPath,
+      });
+      return stdout.trim().length > 0;
+    } catch {
+      return false;
+    }
   }
 
   private async runBuildVerification(projectPath: string): Promise<boolean> {
