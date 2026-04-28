@@ -117,5 +117,65 @@ export function MergeStatePanel({ issueNumber, mergeState }: MergeStatePanelProp
     )
   }
 
+  if (mergeState === 'rebasing') {
+    return (
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="text-sm font-medium text-blue-800">Rebasing...</span>
+        </div>
+        <p className="mt-1 text-xs text-blue-600">
+          Rebasing branch onto latest master.
+        </p>
+      </div>
+    )
+  }
+
+  if (mergeState === 'resolving') {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 animate-spin text-amber-600" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="text-sm font-medium text-amber-800">Resolving conflicts...</span>
+        </div>
+        <p className="mt-1 text-xs text-amber-600">
+          Agent is resolving merge conflicts.
+        </p>
+      </div>
+    )
+  }
+
+  if (mergeState === 'blocked') {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-red-600" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+          </svg>
+          <span className="text-sm font-medium text-red-800">Merge blocked</span>
+        </div>
+        <p className="mt-1 text-xs text-red-600">
+          Merge could not be completed. Review and retry manually.
+        </p>
+        <button
+          onClick={() => retryMutation.mutate()}
+          disabled={retryMutation.isPending}
+          className="mt-3 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+        >
+          {retryMutation.isPending ? 'Retrying...' : 'Retry Merge'}
+        </button>
+        {retryMutation.error && (
+          <div className="mt-2 text-xs text-red-500">{retryMutation.error.message}</div>
+        )}
+      </div>
+    )
+  }
+
   return null
 }
