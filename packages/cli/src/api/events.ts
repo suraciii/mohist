@@ -34,6 +34,10 @@ const ALL_EVENT_TYPES: EventName[] = [
   'coder_recovery_status',
   'coder_session_started',
   'coder_session_completed',
+  'rebase_started',
+  'rebase_progress',
+  'rebase_completed',
+  'rebase_conflict',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {
