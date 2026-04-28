@@ -31,6 +31,8 @@ export type EventMap = {
   agent_conflict_resolution_started: { issueId: string; projectId: string; issueNumber: number; conflictFiles: string[] };
   agent_conflict_resolution_completed: { issueId: string; projectId: string; issueNumber: number };
   agent_conflict_resolution_failed: { issueId: string; projectId: string; issueNumber: number; error: string };
+  agent_build_fix_started: { issueId: string; projectId: string; issueNumber: number; attempt: number };
+  agent_build_fix_completed: { issueId: string; projectId: string; issueNumber: number; attempt: number };
   agent_stopped: { issueId: string; projectId: string; issueNumber: number; reason: string };
 };
 

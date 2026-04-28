@@ -12,6 +12,7 @@ const log = Log.create({ service: 'merge-queue' });
 const execFileAsync = promisify(execFile);
 
 const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_BUILD_FIX_ATTEMPTS = 2;
 
 export interface MergeEntry {
   issueNumber: number;
@@ -29,6 +30,7 @@ interface MergeQueueDeps {
   issueRepo: IssueRepo;
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
   resolveConflicts: (entry: MergeEntry, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>;
+  fixBuildErrors: (entry: MergeEntry, worktreePath: string, buildOutput: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export class MergeQueue {
@@ -250,13 +252,8 @@ export class MergeQueue {
         worktreePath,
       });
 
-      const buildOk = await this.runBuildVerification(worktreePath);
-      if (!buildOk) {
-        log.warn('Build verification failed after rebase', {
-          issueNumber: entry.issueNumber,
-          worktreePath,
-        });
-        this.handleFailure(entry, 'Build verification failed after rebase (npm run build)', MergeState.BuildFailed);
+      const buildResult = await this.runBuildVerificationWithFix(entry, worktreePath);
+      if (!buildResult) {
         return;
       }
 
@@ -410,7 +407,7 @@ export class MergeQueue {
     });
   }
 
-  private async runBuildVerification(worktreePath: string): Promise<boolean> {
+  private async runBuildVerification(worktreePath: string): Promise<{ ok: boolean; output: string }> {
     const buildPath = path.join(worktreePath, 'packages', 'cli');
     try {
       const { stdout, stderr } = await execFileAsync('npm', ['run', 'build'], {
@@ -422,15 +419,70 @@ export class MergeQueue {
         stdout: stdout?.slice(0, 500),
         stderr: stderr?.slice(0, 500),
       });
-      return true;
+      return { ok: true, output: '' };
     } catch (err: any) {
+      const output = [err.stdout, err.stderr, err.message].filter(Boolean).join('\n');
       log.warn('Build verification failed', {
         error: err.message || String(err),
         killed: err.killed || false,
         code: err.code,
       });
-      return false;
+      return { ok: false, output };
     }
+  }
+
+  private async runBuildVerificationWithFix(entry: MergeEntry, worktreePath: string): Promise<boolean> {
+    let attempt = 0;
+
+    while (attempt <= MAX_BUILD_FIX_ATTEMPTS) {
+      const result = await this.runBuildVerification(worktreePath);
+      if (result.ok) return true;
+
+      if (attempt >= MAX_BUILD_FIX_ATTEMPTS) {
+        this.handleFailure(entry, `Build verification failed after ${attempt} fix attempt(s)`, MergeState.BuildFailed);
+        return false;
+      }
+
+      log.info('Build failed, delegating fix to coder agent', {
+        issueNumber: entry.issueNumber,
+        attempt: attempt + 1,
+        maxAttempts: MAX_BUILD_FIX_ATTEMPTS,
+      });
+
+      entry.mergeState = MergeState.BuildFailed;
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.BuildFailed);
+
+      this.deps.eventBus.emit('agent_build_fix_started', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
+        issueNumber: entry.issueNumber,
+        attempt: attempt + 1,
+      });
+
+      const fixResult = await this.deps.fixBuildErrors(entry, worktreePath, result.output);
+
+      if (!fixResult.success) {
+        this.handleFailure(entry, fixResult.error || 'Coder agent build fix failed', MergeState.BuildFailed);
+        return false;
+      }
+
+      this.deps.eventBus.emit('agent_build_fix_completed', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
+        issueNumber: entry.issueNumber,
+        attempt: attempt + 1,
+      });
+
+      log.info('Coder agent finished build fix, re-running verification', {
+        issueNumber: entry.issueNumber,
+        attempt: attempt + 1,
+      });
+
+      attempt++;
+    }
+
+    this.handleFailure(entry, 'Build verification failed', MergeState.BuildFailed);
+    return false;
   }
 
 }
