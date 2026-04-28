@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useSessionTimeline.ts, packages/cli/web/src/lib/types.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "Foundation task — provides the shared utility and types used by all subsequent tasks.",
       "attempts": 1,
       "order": 999999,
@@ -47,7 +47,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Fixes 断层 2 (completed title discarded) and 断层 5 (historical data quality). The event payload already has these fields, they are just being ignored at lines 92-97 and 301-318.",
       "attempts": 1,
       "order": 999999,
@@ -73,7 +73,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Fixes 断层 1 (main_tool_call dead event — Plan stage tool calls now visible via plan_session_update). The onSessionUpdate bridge in workflow-controller.ts already forwards tool_call/tool_call_update/agent_thought_chunk.",
       "attempts": 1,
       "order": 999999,
@@ -101,7 +101,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Fixes 断层 3 (ralph_task_update unconsumed). SSE events are already dispatched by useSSE.ts — just need consumption in useSessionTimeline.",
       "attempts": 1,
       "order": 999999,
@@ -130,7 +130,7 @@
         "T-001",
         "T-004"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Fixes 断层 3 UI component. The data layer is in T-004, this task adds the visual rendering.",
       "attempts": 1,
       "order": 999999,
@@ -159,7 +159,7 @@
         "T-001",
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Fixes 断层 4 (text unclassified) and completes the UI rendering for 断层 2 (tool call context display).",
       "attempts": 1,
       "order": 999999,
@@ -187,7 +187,7 @@
         "T-005",
         "T-006"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Final verification task. Depends on all implementation tasks.",
       "attempts": 2,
       "order": 999999,
