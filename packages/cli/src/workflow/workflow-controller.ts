@@ -2,16 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { Stage, IssueStatus, MergeState, type Issue } from '../types';
-import type { ChildProcess } from 'child_process';
+import { Stage, IssueStatus, type Issue } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { loadWorkflow } from './workflow-loader';
-import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildConflictResolutionPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
-import type { CommentRepo } from '../db/comment-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
@@ -36,7 +34,6 @@ export interface StageResult {
   requiresApproval: boolean;
   output: unknown;
   message?: string;
-  escalateToStage?: Stage;
 }
 
 export interface WorkflowControllerOptions {
@@ -46,9 +43,6 @@ export interface WorkflowControllerOptions {
   eventBus?: EventBus;
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
-  onProgress?: (update: { stage?: string; roundType?: string; roundIndex?: number; taskProgress?: { completed: number; total: number } | null }) => void;
-  onChildProcess?: (proc: ChildProcess) => void;
-  commentRepo?: CommentRepo;
 }
 
 export interface PipelineResult {
@@ -65,9 +59,6 @@ export class WorkflowController {
   private eventBus?: EventBus;
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
-  private _onProgress?: WorkflowControllerOptions['onProgress'];
-  private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
-  private commentRepo?: CommentRepo;
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -76,21 +67,10 @@ export class WorkflowController {
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
-    this._onProgress = options.onProgress;
-    this._onChildProcess = options.onChildProcess;
-    this.commentRepo = options.commentRepo;
-  }
-
-  protected emitProgress(update: Parameters<NonNullable<WorkflowControllerOptions['onProgress']>>[0]): void {
-    this._onProgress?.(update);
   }
 
   getCheckpointRepo(): PipelineCheckpointRepo | undefined {
     return this.checkpointRepo;
-  }
-
-  getCommentRepo(): CommentRepo | undefined {
-    return this.commentRepo;
   }
 
   async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
@@ -130,7 +110,6 @@ export class WorkflowController {
     const planAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `plan-${issue.number}`,
-      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -156,7 +135,6 @@ export class WorkflowController {
       for (const [index, round] of rounds.entries()) {
         roundState.type = round.type;
         roundState.index = index;
-        this.emitProgress({ stage: 'plan', roundType: round.type, roundIndex: index });
 
         if (completedSteps.includes(round.type)) {
           if (round.verify()) {
@@ -253,7 +231,6 @@ export class WorkflowController {
       // self-review round
       roundState.type = 'self-review';
       roundState.index = rounds.length;
-      this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length });
 
       log.info('Plan stage self-review round', { issueNumber: issue.number });
 
@@ -332,9 +309,8 @@ export class WorkflowController {
 
     while (currentIssue.stage !== Stage.Done) {
       switch (currentIssue.stage) {
-        case Stage.Backlog:
+        case Stage.Draft:
         case Stage.Plan: {
-          this.emitProgress({ stage: 'plan' });
           const planResult = await this.runPlanStage(currentIssue, acpOptions);
           if (!planResult.success) {
             return {
@@ -367,7 +343,6 @@ export class WorkflowController {
         }
 
         case Stage.Build: {
-          this.emitProgress({ stage: 'build' });
           const buildResult = await this.runPipelineBuildStage(currentIssue, acpOptions);
           if (!buildResult.success) {
             return {
@@ -383,7 +358,6 @@ export class WorkflowController {
         }
 
         case Stage.Review: {
-          this.emitProgress({ stage: 'review' });
           const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
           if (!reviewResult.success) {
             return {
@@ -392,21 +366,6 @@ export class WorkflowController {
               gateRequired: false,
               message: reviewResult.message,
             };
-          }
-
-          if (reviewResult.escalateToStage) {
-            log.info('Review stage escalating', {
-              issueNumber: currentIssue.number,
-              escalateTo: reviewResult.escalateToStage,
-            });
-            currentIssue = this.issueRepo.updateStage(currentIssue.id, reviewResult.escalateToStage)!;
-            break;
-          }
-
-          if (currentIssue.mergeState === MergeState.Resolving) {
-            log.info('Skipping approval gate during conflict resolution', { issueNumber: currentIssue.number });
-            currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Done)!;
-            break;
           }
 
           this.issueRepo.setApprovalState(currentIssue.id, {
@@ -513,10 +472,6 @@ export class WorkflowController {
   }
 
   private async runPipelineBuildStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
-    if (issue.mergeState === MergeState.Resolving) {
-      return this.runConflictResolutionStage(issue, acpOptions);
-    }
-
     const buildStartTime = Date.now();
     const issueId = issue.id;
     const projectId = this.projectId ?? issue.projectId;
@@ -524,7 +479,6 @@ export class WorkflowController {
 
     const checkpoint = this.checkpointRepo?.get(issue.number, 'build') ?? null;
     const completedTaskIds: string[] = checkpoint ? [...checkpoint.completedSteps] : [];
-    const hadCheckpoint = completedTaskIds.length > 0;
 
     if (completedTaskIds.length > 0) {
       log.info('Build stage resuming from checkpoint', {
@@ -594,44 +548,6 @@ export class WorkflowController {
       passed,
     });
 
-    if (completedTaskIds.length > 0 && change) {
-      try {
-        const verifyContent = fs.readFileSync(change.tasksPath, 'utf-8');
-        const verifyFile = JSON.parse(verifyContent) as TasksFile;
-        const verifyTasks = verifyFile.tasks;
-        const taskPassMap = new Map(verifyTasks.map(t => [t.id, t.passes === true]));
-        const verifiedIds = completedTaskIds.filter(id => taskPassMap.get(id) === true);
-
-        if (verifiedIds.length < completedTaskIds.length) {
-          const unverified = completedTaskIds.filter(id => taskPassMap.get(id) !== true);
-          log.warn('Checkpoint task IDs not verified in tasks.json, filtering', {
-            issueNumber: issue.number,
-            unverified,
-            verified: verifiedIds.length,
-            total: completedTaskIds.length,
-          });
-          completedTaskIds.length = 0;
-          completedTaskIds.push(...verifiedIds);
-        }
-
-        if (completedTaskIds.length > 0) {
-          const allTaskIds = verifyTasks.map(t => t.id);
-          const allCovered = allTaskIds.every(id => completedTaskIds.includes(id));
-          if (allCovered) {
-            this.checkpointRepo?.delete(issue.number, 'build');
-            log.info('Build checkpoint deleted (fully consistent with tasks.json)', {
-              issueNumber: issue.number,
-              taskCount: completedTaskIds.length,
-            });
-          }
-        }
-      } catch (e) {
-        log.warn('Failed to verify checkpoint consistency, using all checkpoint IDs', {
-          error: e instanceof Error ? e.message : String(e),
-        });
-      }
-    }
-
     this.emitSafe('build_stage_started', {
       issueId,
       projectId,
@@ -665,7 +581,6 @@ export class WorkflowController {
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
-      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
@@ -676,7 +591,6 @@ export class WorkflowController {
         if (!this.checkpointRepo) return;
         activeCompletedTaskIds.push(taskId);
         this.checkpointRepo.upsert(issue.number, 'build', [...activeCompletedTaskIds], null);
-        this.emitProgress({ stage: 'build', taskProgress: { completed: activeCompletedTaskIds.length, total } });
       },
     });
     const duration = Date.now() - buildStartTime;
@@ -690,7 +604,7 @@ export class WorkflowController {
       duration,
     });
 
-    if (result.completed === 0 && result.total > 0 && !(result.success && hadCheckpoint)) {
+    if (result.completed === 0 && result.total > 0) {
       log.warn('Build completed with 0 tasks executed out of total', {
         total: result.total,
         issueNumber: issue.number,
@@ -777,166 +691,6 @@ export class WorkflowController {
     };
   }
 
-  private async runConflictResolutionStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
-    const buildStartTime = Date.now();
-    const issueId = issue.id;
-    const projectId = this.projectId ?? issue.projectId;
-    const workflowLogRepo = acpOptions.workflowLogRepo;
-
-    this.emitSafe('build_stage_started', {
-      issueId,
-      projectId,
-      stage: 'build' as const,
-      changePath: this.worktreePath,
-      tasksCount: 0,
-      timestamp: new Date().toISOString(),
-    });
-    this.writeLog(workflowLogRepo, issueId, 'build_started', {
-      reason: 'conflict_resolution',
-      worktreePath: this.worktreePath,
-      issueNumber: issue.number,
-    });
-
-    let conflictFiles: string[] = [];
-    try {
-      const { stdout } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], { cwd: this.worktreePath });
-      conflictFiles = stdout.split('\n').filter(f => f.trim() !== '');
-    } catch (err) {
-      log.warn('Failed to detect conflict files', { error: err instanceof Error ? err.message : String(err) });
-    }
-
-    log.info('Conflict resolution: detected conflict files', {
-      issueNumber: issue.number,
-      conflictFiles: conflictFiles.length,
-    });
-
-    if (conflictFiles.length === 0) {
-      log.info('No conflict files found, committing any pending changes', { issueNumber: issue.number });
-      await this.commitBuildChanges(issue);
-
-      if (this.issueRepo) {
-        this.issueRepo.setMergeState(issue.id, MergeState.Pending);
-      }
-
-      return {
-        success: true,
-        requiresApproval: false,
-        output: { stage: Stage.Build, issueNumber: issue.number, conflictFiles: 0 },
-        message: 'No conflict files found, proceeding',
-      };
-    }
-
-    const changeDir = this.artifactManager.getChangeDir(issue.number) ?? this.worktreePath;
-    const prompt = buildConflictResolutionPrompt(issue, changeDir, conflictFiles);
-
-    const resolveAcpOptions: AcpConnectionOptions = {
-      ...acpOptions,
-      executionId: `conflict-resolve-${issue.number}`,
-      onSessionUpdate: (notification) => {
-        if (!this.eventBus) return;
-        try {
-          this.eventBus.emit('plan_session_update', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId,
-            roundType: 'conflict-resolution',
-            roundIndex: 0,
-            sessionUpdate: notification.update.sessionUpdate,
-            data: notification.update as unknown,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for conflict resolution session update', {
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      },
-    };
-
-    let conn: AcpConnection | undefined;
-    try {
-      conn = await createAcpConnection(resolveAcpOptions);
-      const result = await conn.prompt(prompt);
-      await conn.close();
-
-      const duration = Date.now() - buildStartTime;
-
-      if (!result.success) {
-        log.error('Conflict resolution agent session failed', {
-          issueNumber: issue.number,
-          error: result.error,
-          duration,
-        });
-
-        this.emitSafe('build_stage_failed', {
-          issueId,
-          projectId,
-          reason: 'conflict_resolution_failed',
-          details: { error: result.error, conflictFiles: conflictFiles.length },
-          timestamp: new Date().toISOString(),
-        });
-        this.writeLog(workflowLogRepo, issueId, 'build_failed', {
-          reason: 'conflict_resolution_failed',
-          error: result.error,
-          duration,
-        });
-
-        return {
-          success: false,
-          requiresApproval: false,
-          output: null,
-          message: `Conflict resolution failed: ${result.error ?? 'unknown error'}`,
-        };
-      }
-
-      await this.commitBuildChanges(issue);
-
-      if (this.issueRepo) {
-        this.issueRepo.setMergeState(issue.id, MergeState.Pending);
-      }
-
-      log.info('Conflict resolution completed', {
-        issueNumber: issue.number,
-        conflictFiles: conflictFiles.length,
-        duration,
-      });
-
-      this.emitSafe('build_stage_completed', {
-        issueId,
-        projectId,
-        completed: 0,
-        failed: 0,
-        total: 0,
-        duration,
-        timestamp: new Date().toISOString(),
-      });
-      this.writeLog(workflowLogRepo, issueId, 'build_completed', {
-        reason: 'conflict_resolution',
-        conflictFiles: conflictFiles.length,
-        duration,
-      });
-
-      return {
-        success: true,
-        requiresApproval: false,
-        output: {
-          stage: Stage.Build,
-          issueNumber: issue.number,
-          conflictFiles: conflictFiles.length,
-        },
-        message: `Conflict resolution completed - ${conflictFiles.length} conflict(s) resolved`,
-      };
-    } catch (err) {
-      if (conn) {
-        try { await conn.close(); } catch { /* ignore */ }
-      }
-      return {
-        success: false,
-        requiresApproval: false,
-        output: null,
-        message: `Conflict resolution error: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
-
   private async runPipelineReviewStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
     const changeDir = this.artifactManager.getChangeDir(issue.number);
     if (!changeDir) {
@@ -953,7 +707,6 @@ export class WorkflowController {
     const reviewAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `review-${issue.number}`,
-      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -978,7 +731,6 @@ export class WorkflowController {
       // Round 0: review
       roundState.type = 'review';
       roundState.index = 0;
-      this.emitProgress({ stage: 'review', roundType: 'review', roundIndex: 0 });
 
       log.info('Review stage round', { roundType: 'review', issueNumber: issue.number });
 
@@ -1013,7 +765,6 @@ export class WorkflowController {
       // Round 1: self-check
       roundState.type = 'review-self-check';
       roundState.index = 1;
-      this.emitProgress({ stage: 'review', roundType: 'review-self-check', roundIndex: 1 });
 
       log.info('Review stage self-check round', { issueNumber: issue.number });
 
@@ -1045,10 +796,11 @@ export class WorkflowController {
         };
       }
 
-      let reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
+      await conn.close();
+
+      const reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
 
       if (!reviewReport || reviewReport.trim().length === 0) {
-        await conn.close();
         return {
           success: false,
           requiresApproval: false,
@@ -1057,158 +809,15 @@ export class WorkflowController {
         };
       }
 
-      const verdict = parseVerdict(reviewReport);
-
-      if (verdict === 'PASS') {
-        await conn.close();
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Review,
-            issueNumber: issue.number,
-            reviewReport,
-          },
-          message: 'Review completed, awaiting user approval',
-        };
-      }
-
-      const reviewCheckpoint = this.checkpointRepo?.get(issue.number, 'review');
-      const hasNoAutoFixCheckpoint = reviewCheckpoint?.completedSteps?.includes('no-auto-fix') ?? false;
-
-      if (verdict !== 'FAIL' || hasNoAutoFixCheckpoint) {
-        await conn.close();
-        return {
-          success: true,
-          requiresApproval: true,
-          output: {
-            stage: Stage.Review,
-            issueNumber: issue.number,
-            reviewReport,
-          },
-          message: hasNoAutoFixCheckpoint
-            ? 'Review failed (auto-fix already attempted), awaiting user decision'
-            : 'Review completed (verdict unclear), awaiting user decision',
-        };
-      }
-
-      log.info('Review verdict FAIL, entering auto-fix loop', { issueNumber: issue.number });
-
-      const MAX_AUTO_FIX_ATTEMPTS = 2;
-      const fixHistory: string[] = [];
-
-      for (let attempt = 0; attempt < MAX_AUTO_FIX_ATTEMPTS; attempt++) {
-        // R2: auto-fix
-        roundState.type = 'auto-fix';
-        roundState.index = 2 + attempt * 2;
-
-        log.info('Auto-fix attempt', { attempt: attempt + 1, maxAttempts: MAX_AUTO_FIX_ATTEMPTS, issueNumber: issue.number });
-
-        this.emitSafe('plan_round_start', {
-          issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-          projectId: this.projectId ?? issue.projectId,
-          roundType: 'auto-fix',
-          roundLabel: `auto-fix-${attempt + 1}`,
-          roundIndex: 2 + attempt * 2,
-        });
-
-        const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport);
-        const autoFixResult = await conn.prompt(autoFixPrompt);
-
-        if (!autoFixResult.success) {
-          log.error('Auto-fix round failed', { attempt: attempt + 1, error: autoFixResult.error });
-          fixHistory.push(`Attempt ${attempt + 1}: auto-fix failed — ${autoFixResult.error ?? 'unknown error'}`);
-          continue;
-        }
-
-        fixHistory.push(`Attempt ${attempt + 1}: ${autoFixResult.text?.slice(0, 200) ?? 'no output'}`);
-
-        // R3: re-verify
-        roundState.type = 're-verify';
-        roundState.index = 3 + attempt * 2;
-
-        log.info('Re-verify round', { attempt: attempt + 1, issueNumber: issue.number });
-
-        this.emitSafe('plan_round_start', {
-          issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-          projectId: this.projectId ?? issue.projectId,
-          roundType: 're-verify',
-          roundLabel: `re-verify-${attempt + 1}`,
-          roundIndex: 3 + attempt * 2,
-        });
-
-        const reVerifyPrompt = buildReVerifyPrompt(issue, changeDir, reviewReport);
-        const reVerifyResult = await conn.prompt(reVerifyPrompt);
-
-        if (!reVerifyResult.success) {
-          log.error('Re-verify round failed', { attempt: attempt + 1, error: reVerifyResult.error });
-          fixHistory.push(`Attempt ${attempt + 1}: re-verify failed — ${reVerifyResult.error ?? 'unknown error'}`);
-          continue;
-        }
-
-        reviewReport = readReportFile(changeDir, 'review.md') ?? reviewReport;
-        const reVerifyVerdict = parseVerdict(reviewReport);
-
-        if (reVerifyVerdict === 'PASS') {
-          log.info('Auto-fix succeeded, verdict PASS', { attempt: attempt + 1, issueNumber: issue.number });
-          await conn.close();
-
-          if (this.commentRepo && this.issueRepo) {
-            try {
-              const fixSuggestions = extractFixSuggestions(reviewReport);
-              const commentBody = [
-                `**Auto-fix applied (attempt ${attempt + 1})**`,
-                '',
-                '**Original Fix Suggestions:**',
-                fixSuggestions || '(none extracted)',
-                '',
-                '**Fix History:**',
-                fixHistory.join('\n\n'),
-                '',
-                'Verdict changed from FAIL to PASS.',
-              ].join('\n');
-              this.commentRepo.create({
-                issueId: issue.id,
-                body: commentBody,
-              });
-            } catch (commentErr) {
-              log.warn('Failed to add auto-fix comment', {
-                issueNumber: issue.number,
-                error: commentErr instanceof Error ? commentErr.message : String(commentErr),
-              });
-            }
-          }
-
-          return {
-            success: true,
-            requiresApproval: true,
-            output: {
-              stage: Stage.Review,
-              issueNumber: issue.number,
-              reviewReport,
-            },
-            message: `Review completed (auto-fix attempt ${attempt + 1} succeeded), awaiting user approval`,
-          };
-        }
-
-        log.info('Re-verify verdict still FAIL', { attempt: attempt + 1, issueNumber: issue.number });
-      }
-
-      log.info('Auto-fix attempts exhausted, escalating to build', { issueNumber: issue.number });
-      await conn.close();
-
-      this.checkpointRepo?.upsert(issue.number, 'review', ['no-auto-fix'], null);
-
       return {
         success: true,
-        requiresApproval: false,
+        requiresApproval: true,
         output: {
           stage: Stage.Review,
           issueNumber: issue.number,
           reviewReport,
         },
-        escalateToStage: Stage.Build,
-        message: 'Auto-fix attempts exhausted, escalating to build stage',
+        message: 'Review completed, awaiting user approval',
       };
     } catch (err) {
       if (conn) {
@@ -1257,20 +866,6 @@ function cleanChangeDir(changeDir: string): void {
     const entryPath = path.join(changeDir, entry);
     fs.rmSync(entryPath, { recursive: true, force: true });
   }
-}
-
-const VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
-
-export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
-  const match = VERDICT_RE.exec(content);
-  if (!match) return null;
-  return match[1].toUpperCase() as 'PASS' | 'FAIL';
-}
-
-function extractFixSuggestions(content: string): string | null {
-  const match = content.match(/##\s*Fix\s*Suggestions\s*\n([\s\S]*?)(?=\n##\s|$)/i);
-  if (!match) return null;
-  return match[1].trim() || null;
 }
 
 export function createWorkflowController(options: WorkflowControllerOptions): WorkflowController {

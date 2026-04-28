@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
 import { IssueService } from '../src/services/issue-service';
 import { EventBus } from '../src/services/event-bus';
-import { MergeQueue } from '../src/git/merge-queue';
-import { MergeState } from '../src/types';
+import { MergeQueue, MergeEntry } from '../src/git/merge-queue';
 import { WorktreeManager } from '../src/git/worktree-manager';
+import { MergeState } from '../src/types';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -21,24 +23,32 @@ import { execFile } from 'child_process';
 
 const execFileMock = vi.mocked(execFile);
 
+const WORKTREE_PATH = '/tmp/test-project/worktrees/issue-1';
+
 function createMockWorktreeManager() {
   return {
-    rebaseOntoMaster: vi.fn().mockResolvedValue({ success: true }),
+    canFastForward: vi.fn().mockResolvedValue(true),
+    rebaseOntoMaster: vi.fn().mockResolvedValue({ success: true, conflicts: [] }),
+    rebaseContinue: vi.fn().mockResolvedValue({ success: true, conflicts: [] }),
+    abortRebase: vi.fn().mockResolvedValue(undefined),
     mergeBack: vi.fn().mockResolvedValue({ success: true, message: 'Merged' }),
     remove: vi.fn().mockResolvedValue(undefined),
     exists: vi.fn().mockReturnValue(true),
-    create: vi.fn().mockResolvedValue('/tmp/worktree'),
-    getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+    create: vi.fn().mockResolvedValue(WORKTREE_PATH),
+    getPath: vi.fn().mockReturnValue(WORKTREE_PATH),
   } as unknown as WorktreeManager;
 }
 
-function createMergeQueue(deps: {
+const resolveConflictsMock = vi.fn().mockResolvedValue({ success: true });
+
+function createMergeQueueDeps(overrides?: Partial<{
   worktreeManager: WorktreeManager;
   eventBus: EventBus;
   issueRepo: IssueRepo;
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
-}) {
-  return new MergeQueue(deps);
+  resolveConflicts: typeof resolveConflictsMock;
+}>) {
+  return overrides as any;
 }
 
 describe('MergeQueue', () => {
@@ -61,11 +71,16 @@ describe('MergeQueue', () => {
     issueService = new IssueService(issueRepo);
     eventBus = new EventBus();
     worktreeManager = createMockWorktreeManager();
+    resolveConflictsMock.mockReset().mockResolvedValue({ success: true });
     execFileMock.mockReset();
+    const gitDir = path.join(PROJECT_PATH, '.git');
+    fs.mkdirSync(gitDir, { recursive: true });
+    fs.writeFileSync(path.join(gitDir, 'mohist-last-fetch'), Date.now().toString(), 'utf-8');
   });
 
   afterEach(() => {
     db.close();
+    fs.rmSync(PROJECT_PATH, { recursive: true, force: true });
   });
 
   function setupProject() {
@@ -73,7 +88,7 @@ describe('MergeQueue', () => {
   }
 
   function createQueue(projectId: string) {
-    return createMergeQueue({
+    return new MergeQueue({
       worktreeManager,
       eventBus,
       issueRepo,
@@ -81,6 +96,7 @@ describe('MergeQueue', () => {
         if (pid !== projectId) return null;
         return { path: PROJECT_PATH, name: PROJECT_NAME, baseBranch: BASE_BRANCH };
       },
+      resolveConflicts: resolveConflictsMock,
     });
   }
 
@@ -115,32 +131,22 @@ describe('MergeQueue', () => {
       eventBus.on('merge_queued', (data) => events.push(data));
 
       queue.enqueue(project.id, issue.number);
-
       await waitForQueueToSettle(queue);
 
       expect(events).toHaveLength(1);
       expect(events[0].issueId).toBe(issue.id);
       expect(events[0].issueNumber).toBe(issue.number);
       expect(events[0].position).toBe(1);
-
-      const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.Pending);
     });
 
     it('should ignore duplicate enqueue for same issue', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
 
-      worktreeManager.rebaseOntoMaster = vi.fn().mockImplementation(async () => {
+      worktreeManager.canFastForward = vi.fn().mockImplementation(async () => {
         await new Promise((r) => setTimeout(r, 100));
-        return { success: true };
+        return true;
       });
-      worktreeManager.mergeBack = vi.fn().mockImplementation(async () => {
-        await new Promise((r) => setTimeout(r, 100));
-        return { success: true, message: 'Merged' };
-      });
-
-      setupMockExecFile();
 
       const queue = createQueue(project.id);
       const events: any[] = [];
@@ -169,12 +175,45 @@ describe('MergeQueue', () => {
   });
 
   describe('processNext → merged lifecycle', () => {
-    it('should call rebaseOntoMaster, mergeBack and set mergeState=merged on success', async () => {
+    it('should FF merge when canFastForward is true, skipping rebase', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
 
-      setupMockExecFile();
+      worktreeManager.canFastForward = vi.fn().mockResolvedValue(true);
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
+
+      const completedEvents: any[] = [];
+      eventBus.on('merge_completed', (data) => completedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(worktreeManager.canFastForward).toHaveBeenCalledWith(
+        PROJECT_PATH, PROJECT_NAME, issue.number, BASE_BRANCH,
+      );
+      expect(worktreeManager.rebaseOntoMaster).not.toHaveBeenCalled();
+      expect(worktreeManager.mergeBack).toHaveBeenCalledWith(
+        PROJECT_PATH, PROJECT_NAME, issue.number, BASE_BRANCH,
+      );
+      expect(completedEvents).toHaveLength(1);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
+    });
+
+    it('should rebase then FF merge when canFastForward is false', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      worktreeManager.canFastForward = vi.fn().mockResolvedValue(false);
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({ success: true, conflicts: [] });
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       const completedEvents: any[] = [];
       eventBus.on('merge_completed', (data) => completedEvents.push(data));
@@ -183,27 +222,12 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledWith(
-        '/tmp/worktree',
-        BASE_BRANCH,
+        PROJECT_PATH, PROJECT_NAME, issue.number, BASE_BRANCH,
+        { abortOnConflict: false },
       );
-      expect(worktreeManager.mergeBack).toHaveBeenCalledWith(
-        PROJECT_PATH,
-        PROJECT_NAME,
-        issue.number,
-        BASE_BRANCH,
-      );
-
+      expect(worktreeManager.mergeBack).toHaveBeenCalled();
       expect(completedEvents).toHaveLength(1);
-      expect(completedEvents[0].issueNumber).toBe(issue.number);
-
-      const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.Merged);
-
-      expect(worktreeManager.remove).toHaveBeenCalledWith(
-        PROJECT_PATH,
-        PROJECT_NAME,
-        issue.number,
-      );
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
     });
 
     it('should process items serially in FIFO order', async () => {
@@ -212,10 +236,6 @@ describe('MergeQueue', () => {
       const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
 
       const order: number[] = [];
-      worktreeManager.rebaseOntoMaster = vi.fn().mockImplementation(async () => {
-        await new Promise((r) => setTimeout(r, 10));
-        return { success: true };
-      });
       worktreeManager.mergeBack = vi.fn().mockImplementation(async (_p: string, _n: string, num: number) => {
         order.push(num);
         await new Promise((r) => setTimeout(r, 20));
@@ -235,8 +255,120 @@ describe('MergeQueue', () => {
 
       const u1 = issueRepo.findById(issue1.id);
       const u2 = issueRepo.findById(issue2.id);
-      expect(u1?.mergeState).toBe(MergeState.Merged);
-      expect(u2?.mergeState).toBe(MergeState.Merged);
+      expect(u1?.mergeState).toBe('merged');
+      expect(u2?.mergeState).toBe('merged');
+    });
+  });
+
+  describe('rebase conflict → retry → success', () => {
+    it('should retry with fresh master on first rebase conflict', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      let rebaseCallCount = 0;
+      worktreeManager.canFastForward = vi.fn().mockResolvedValue(false);
+      worktreeManager.rebaseOntoMaster = vi.fn().mockImplementation(async () => {
+        rebaseCallCount++;
+        if (rebaseCallCount === 1) {
+          return { success: false, conflicts: ['src/foo.ts'] };
+        }
+        return { success: true, conflicts: [] };
+      });
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(worktreeManager.abortRebase).toHaveBeenCalled();
+      expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledTimes(2);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
+    });
+  });
+
+  describe('rebase conflict → retry → agent resolution', () => {
+    it('should call resolveConflicts and rebaseContinue when retry still conflicts', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      worktreeManager.canFastForward = vi.fn().mockResolvedValue(false);
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+        success: false,
+        conflicts: ['src/foo.ts', 'src/bar.ts'],
+      });
+      worktreeManager.rebaseContinue = vi.fn().mockResolvedValue({ success: true, conflicts: [] });
+      resolveConflictsMock.mockResolvedValue({ success: true });
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
+
+      const startedEvents: any[] = [];
+      const completedEvents: any[] = [];
+      eventBus.on('agent_conflict_resolution_started', (data) => startedEvents.push(data));
+      eventBus.on('agent_conflict_resolution_completed', (data) => completedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(resolveConflictsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ issueNumber: issue.number }),
+        WORKTREE_PATH,
+        ['src/foo.ts', 'src/bar.ts'],
+      );
+      expect(worktreeManager.rebaseContinue).toHaveBeenCalledWith(PROJECT_NAME, issue.number);
+      expect(startedEvents).toHaveLength(1);
+      expect(completedEvents).toHaveLength(1);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
+    });
+
+    it('should set Blocked when resolveConflicts fails', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      worktreeManager.canFastForward = vi.fn().mockResolvedValue(false);
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+        success: false,
+        conflicts: ['src/foo.ts'],
+      });
+      resolveConflictsMock.mockResolvedValue({ success: false, error: 'Agent timeout' });
+
+      const failedEvents: any[] = [];
+      eventBus.on('agent_conflict_resolution_failed', (data) => failedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(failedEvents).toHaveLength(1);
+      expect(failedEvents[0].error).toBe('Agent timeout');
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('blocked');
+    });
+
+    it('should set Blocked when rebaseContinue fails after resolveConflicts', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      worktreeManager.canFastForward = vi.fn().mockResolvedValue(false);
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+        success: false,
+        conflicts: ['src/foo.ts'],
+      });
+      worktreeManager.rebaseContinue = vi.fn().mockResolvedValue({
+        success: false,
+        conflicts: ['src/foo.ts'],
+      });
+      resolveConflictsMock.mockResolvedValue({ success: true });
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('blocked');
     });
   });
 
@@ -246,7 +378,10 @@ describe('MergeQueue', () => {
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
@@ -258,7 +393,7 @@ describe('MergeQueue', () => {
       expect(buildCalls[0][2]?.cwd).toBe(PROJECT_PATH);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.Merged);
+      expect(updated?.mergeState).toBe('merged');
     });
 
     it('should rollback and set build-failed when build fails', async () => {
@@ -267,13 +402,14 @@ describe('MergeQueue', () => {
       const queue = createQueue(project.id);
 
       let buildCalled = false;
-      setupMockExecFile((cmd, args, opts, cb) => {
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
         if (cmd === 'npm' && args?.[1] === 'build') {
           buildCalled = true;
-          cb?.(new Error('Build failed') as any);
-          return;
+          cb?.(new Error('Build failed') as any, '', 'error output');
+          return undefined as any;
         }
-        cb?.(null, { stdout: '', stderr: '' });
+        cb?.(null, '', '');
+        return undefined as any;
       });
 
       const failedEvents: any[] = [];
@@ -291,57 +427,53 @@ describe('MergeQueue', () => {
       expect(resetCalls[0][1]).toEqual(['reset', '--hard', 'HEAD~1']);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.BuildFailed);
+      expect(updated?.mergeState).toBe('build-failed');
 
       expect(failedEvents).toHaveLength(1);
-      expect(failedEvents[0].reason).toBe(MergeState.BuildFailed);
+      expect(failedEvents[0].reason).toBe('build-failed');
       expect(failedEvents[0].issueNumber).toBe(issue.number);
     });
   });
 
   describe('merge conflict', () => {
-    it('should set build-failed when mergeBack fails after successful rebase', async () => {
+    it('should set conflict state when mergeBack fails with conflict', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
 
-      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({ success: true });
       worktreeManager.mergeBack = vi.fn().mockResolvedValue({
         success: false,
-        message: 'Fast-forward merge failed for issue #1: some error',
+        message: 'Merge conflict for issue #1: CONFLICT (content): Merge conflict in src/foo.ts',
       });
 
       const failedEvents: any[] = [];
       eventBus.on('merge_failed', (data) => failedEvents.push(data));
 
-      setupMockExecFile();
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.BuildFailed);
+      expect(updated?.mergeState).toBe('conflict');
 
       expect(failedEvents).toHaveLength(1);
-      expect(failedEvents[0].reason).toBe(MergeState.BuildFailed);
+      expect(failedEvents[0].reason).toBe('conflict');
     });
 
-    it('should set conflict state when rebase fails', async () => {
+    it('should set build-failed when mergeBack fails without conflict', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
 
-      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+      worktreeManager.mergeBack = vi.fn().mockResolvedValue({
         success: false,
-        message: 'Rebase conflict: CONFLICT in file.ts',
-        conflictingFiles: ['file.ts'],
+        message: 'Failed to checkout main: some error',
       });
 
-      setupMockExecFile();
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.Conflict);
+      expect(updated?.mergeState).toBe('build-failed');
     });
   });
 
@@ -352,7 +484,6 @@ describe('MergeQueue', () => {
       const queue = createQueue(project.id);
 
       let callCount = 0;
-      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({ success: true });
       worktreeManager.mergeBack = vi.fn().mockImplementation(async () => {
         callCount++;
         if (callCount === 1) {
@@ -361,13 +492,16 @@ describe('MergeQueue', () => {
         return { success: true, message: 'Merged' };
       });
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
       const afterFirst = issueRepo.findById(issue.id);
-      expect(afterFirst?.mergeState).toBe(MergeState.BuildFailed);
+      expect(afterFirst?.mergeState).toBe('build-failed');
 
       const retried = queue.retry(issue.number);
       expect(retried).toBe(true);
@@ -375,7 +509,7 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const afterRetry = issueRepo.findById(issue.id);
-      expect(afterRetry?.mergeState).toBe(MergeState.Merged);
+      expect(afterRetry?.mergeState).toBe('merged');
 
       expect(worktreeManager.mergeBack).toHaveBeenCalledTimes(2);
     });
@@ -385,36 +519,34 @@ describe('MergeQueue', () => {
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
 
-      let rebased = false;
-      worktreeManager.rebaseOntoMaster = vi.fn().mockImplementation(async () => {
-        if (!rebased) {
-          rebased = true;
-          return {
-            success: false,
-            message: 'Rebase conflict: CONFLICT in file.ts',
-            conflictingFiles: ['file.ts'],
-          };
+      let callCount = 0;
+      worktreeManager.mergeBack = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return { success: false, message: 'Merge conflict: CONFLICT in file.ts' };
         }
-        return { success: true };
+        return { success: true, message: 'Merged' };
       });
-      worktreeManager.mergeBack = vi.fn().mockResolvedValue({ success: true, message: 'Merged' });
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
-      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.Conflict);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('conflict');
 
       const retried = queue.retry(issue.number);
       expect(retried).toBe(true);
 
       await waitForQueueToSettle(queue);
 
-      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.Merged);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
     });
 
-    it('should return false for non-retryable states', async () => {
+    it('should return false for non-retryable states', () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
@@ -438,16 +570,15 @@ describe('MergeQueue', () => {
       const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
       const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
 
-      worktreeManager.rebaseOntoMaster = vi.fn().mockImplementation(async () => {
-        await new Promise((r) => setTimeout(r, 50));
-        return { success: true };
-      });
       worktreeManager.mergeBack = vi.fn().mockImplementation(async () => {
         await new Promise((r) => setTimeout(r, 50));
         return { success: true, message: 'Merged' };
       });
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       const queue = createQueue(project.id);
 
@@ -466,9 +597,12 @@ describe('MergeQueue', () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
 
-      issueRepo.setMergeState(issue.id, MergeState.Pending);
+      issueRepo.setMergeState(issue.id, 'pending');
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       const queue = createQueue(project.id);
 
@@ -477,16 +611,19 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.Merged);
+      expect(updated?.mergeState).toBe('merged');
     });
 
     it('should re-enqueue issues with merging state (reset to pending)', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
 
-      issueRepo.setMergeState(issue.id, MergeState.Merging);
+      issueRepo.setMergeState(issue.id, 'merging');
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       const queue = createQueue(project.id);
 
@@ -495,10 +632,30 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.Merged);
+      expect(updated?.mergeState).toBe('merged');
 
-      expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledTimes(1);
       expect(worktreeManager.mergeBack).toHaveBeenCalledTimes(1);
+    });
+
+    it('should re-enqueue issues with resolving state (reset to pending)', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+
+      issueRepo.setMergeState(issue.id, 'resolving');
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
+
+      const queue = createQueue(project.id);
+
+      queue.recoverFromDB();
+
+      await waitForQueueToSettle(queue);
+
+      const updated = issueRepo.findById(issue.id);
+      expect(updated?.mergeState).toBe('merged');
     });
 
     it('should recover multiple issues and process them serially', async () => {
@@ -506,10 +663,13 @@ describe('MergeQueue', () => {
       const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
       const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
 
-      issueRepo.setMergeState(issue1.id, MergeState.Pending);
-      issueRepo.setMergeState(issue2.id, MergeState.Merging);
+      issueRepo.setMergeState(issue1.id, 'pending');
+      issueRepo.setMergeState(issue2.id, 'merging');
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       const queue = createQueue(project.id);
 
@@ -517,9 +677,8 @@ describe('MergeQueue', () => {
 
       await waitForQueueToSettle(queue);
 
-      expect(issueRepo.findById(issue1.id)?.mergeState).toBe(MergeState.Merged);
-      expect(issueRepo.findById(issue2.id)?.mergeState).toBe(MergeState.Merged);
-      expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledTimes(2);
+      expect(issueRepo.findById(issue1.id)?.mergeState).toBe('merged');
+      expect(issueRepo.findById(issue2.id)?.mergeState).toBe('merged');
       expect(worktreeManager.mergeBack).toHaveBeenCalledTimes(2);
     });
 
@@ -527,16 +686,15 @@ describe('MergeQueue', () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
 
-      worktreeManager.rebaseOntoMaster = vi.fn().mockImplementation(async () => {
-        await new Promise((r) => setTimeout(r, 200));
-        return { success: true };
-      });
       worktreeManager.mergeBack = vi.fn().mockImplementation(async () => {
         await new Promise((r) => setTimeout(r, 200));
         return { success: true, message: 'Merged' };
       });
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       const queue = createQueue(project.id);
       queue.enqueue(project.id, issue.number);
@@ -545,7 +703,6 @@ describe('MergeQueue', () => {
 
       await waitForQueueToSettle(queue);
 
-      expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledTimes(1);
       expect(worktreeManager.mergeBack).toHaveBeenCalledTimes(1);
     });
 
@@ -559,15 +716,16 @@ describe('MergeQueue', () => {
   });
 
   describe('project not found', () => {
-    it('should fail with conflict when project path not found', async () => {
+    it('should fail with build-failed when project path not found', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
 
-      const queue = createMergeQueue({
+      const queue = new MergeQueue({
         worktreeManager,
         eventBus,
         issueRepo,
         getProjectPath: () => null,
+        resolveConflicts: resolveConflictsMock,
       });
 
       const failedEvents: any[] = [];
@@ -577,7 +735,7 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe(MergeState.Conflict);
+      expect(updated?.mergeState).toBe('build-failed');
       expect(failedEvents).toHaveLength(1);
     });
   });
@@ -588,16 +746,15 @@ describe('MergeQueue', () => {
       const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
       const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
 
-      worktreeManager.rebaseOntoMaster = vi.fn().mockImplementation(async () => {
-        await new Promise((r) => setTimeout(r, 100));
-        return { success: true };
-      });
       worktreeManager.mergeBack = vi.fn().mockImplementation(async () => {
         await new Promise((r) => setTimeout(r, 100));
         return { success: true, message: 'Merged' };
       });
 
-      setupMockExecFile();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
 
       const queue = createQueue(project.id);
       const positions: number[] = [];
@@ -611,7 +768,7 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       expect(positions[0]).toBe(1);
-      expect(positions[1]).toBeLessThanOrEqual(2);
+      expect(positions[1]).toBe(1);
     });
   });
 });

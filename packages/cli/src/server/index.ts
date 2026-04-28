@@ -17,14 +17,14 @@ import { createLogRoutes } from '../api/logs';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
+import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { Log } from '../util/log';
 
-import { Stage, IssueStatus, MergeState } from '../types';
 import { load as loadConfig, getServerConfig, getLogConfig, resolveOpencodeBinPath } from '../config/config-loader';
 import { RateLimiter } from '../utils/rate-limiter';
-import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
+import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, opencodeBinPath, stateManager.getCommentRepo());
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, opencodeBinPath);
 
   agentRunner.setLlmConfig(fileConfig);
 
@@ -128,10 +128,45 @@ async function main(): Promise<void> {
       if (!project) return null;
       return { path: project.path, name: project.name, baseBranch: project.baseBranch };
     },
+    resolveConflicts: async (entry, worktreePath, conflictFiles) => {
+      log.info('resolveConflicts callback invoked', { issueNumber: entry.issueNumber, conflictFiles });
+
+      const refreshedIssue = issueRepo.findById(entry.issueId);
+      if (!refreshedIssue) {
+        return { success: false, error: 'Issue not found for conflict resolution' };
+      }
+
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: refreshedIssue.id,
+        projectId: entry.projectId,
+        workflowLogRepo,
+        coderSessionRepo,
+        eventBus,
+        issueNumber: refreshedIssue.number,
+        opencodeBinPath,
+      };
+
+      try {
+        const prompt = buildConflictResolutionPrompt(refreshedIssue, worktreePath, conflictFiles);
+
+        const connection = await createAcpConnection(acpOptions);
+        try {
+          const result = await connection.prompt(prompt);
+          if (!result.success) {
+            return { success: false, error: result.error || 'Agent ACP session failed' };
+          }
+          return { success: true };
+        } finally {
+          await connection.close().catch(() => {});
+        }
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
   });
 
   mergeQueue.recoverFromDB();
-  mergeQueue.startAutoRetry();
 
   const rateLimiter = new RateLimiter(60 * 1000, 30);
   const server = new HttpServer(config, rateLimiter);
@@ -159,85 +194,15 @@ async function main(): Promise<void> {
   const issueRepo = stateManager.getIssueRepo();
   const coderSessionRepo = stateManager.getCoderSessionRepo();
 
-  eventBus.on('agent_completed', async ({ issueId, issueNumber, projectId }) => {
+  eventBus.on('agent_completed', ({ issueNumber, projectId }) => {
     try {
       const project = projectService.getById(projectId);
       if (!project || !worktreeManager) return;
 
       if (!worktreeManager.exists(project.name, issueNumber)) return;
 
-      log.info('Auto-merging completed issue back to base branch', { issueNumber, projectId, baseBranch: project.baseBranch });
-      const result = await worktreeManager.mergeBack(project.path, project.name, issueNumber, project.baseBranch);
-
-      if (result.success) {
-        issueRepo.setMergeState(issueId, MergeState.Merged);
-        log.info('Auto-merge succeeded', { issueNumber, message: result.message });
-        return;
-      }
-
-      log.warn('Auto-merge failed, initiating conflict resolution', { issueNumber, message: result.message });
-
-      const reverseResult = await worktreeManager.mergeMasterInWorktree(project.name, issueNumber, project.baseBranch);
-      if (!reverseResult.success && !reverseResult.conflictFiles) {
-        log.error('Failed to reverse-merge master into worktree', { issueNumber, message: reverseResult.message });
-        issueRepo.setMergeState(issueId, MergeState.Blocked);
-        eventBus.emit('merge_blocked', { issueId, projectId, issueNumber, reason: reverseResult.message || 'Reverse merge failed', conflictingFiles: [], retryCount: 0 });
-        return;
-      }
-
-      const issue = issueRepo.findById(issueId);
-      if (!issue) {
-        log.error('Issue not found for conflict resolution', { issueId });
-        return;
-      }
-
-      const currentRetryCount = (issue.conflictRetryCount ?? 0) + 1;
-      issueRepo.updateConflictRetryCount(issueId, currentRetryCount);
-
-      if (currentRetryCount >= 3) {
-        issueRepo.setMergeState(issueId, MergeState.Blocked);
-        eventBus.emit('merge_blocked', { issueId, projectId, issueNumber: issue.number, reason: 'Max retries reached', conflictingFiles: reverseResult.conflictFiles ?? [], retryCount: currentRetryCount });
-        log.warn('Conflict resolution max retries reached, marking as blocked', { issueNumber, retryCount: currentRetryCount });
-        return;
-      }
-
-      issueRepo.update(issueId, { stage: Stage.Build, status: IssueStatus.Active });
-      issueRepo.setMergeState(issueId, MergeState.Resolving);
-      issueRepo.clearApprovalState(issueId);
-
-      const worktreePath = worktreeManager.getPath(project.name, issueNumber);
-      if (!worktreePath) {
-        log.error('Worktree path not found after reverse-merge', { issueNumber });
-        return;
-      }
-
-      const conflictFiles = reverseResult.conflictFiles ?? [];
-
-      eventBus.emit('merge_conflict_requiring_resolution', { issueId, projectId, conflictFiles });
-      log.info('Conflict resolution initiated', { issueNumber, conflictFiles, retryCount: currentRetryCount });
-
-      const refreshedIssue = issueRepo.findById(issueId);
-      if (!refreshedIssue) return;
-
-      const acpOptions: AcpConnectionOptions = {
-        cwd: worktreePath,
-        issueId: refreshedIssue.id,
-        projectId,
-        workflowLogRepo,
-        coderSessionRepo,
-        eventBus,
-        issueNumber: refreshedIssue.number,
-        opencodeBinPath,
-      };
-
-      agentRunner.startPipeline(
-        refreshedIssue,
-        projectId,
-        issueRepo,
-        worktreePath,
-        acpOptions,
-        (id, status) => issueService.setStatus(id, status),
-      );
+      log.info('Enqueueing completed issue for merge', { issueNumber, projectId });
+      mergeQueue.enqueue(projectId, issueNumber);
     } catch (err) {
       log.error('Merge enqueue error', { issueNumber, error: err instanceof Error ? err.message : String(err) });
     }
@@ -248,14 +213,12 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', async () => {
     log.info('Received SIGTERM, shutting down gracefully...');
-    mergeQueue.stopAutoRetry();
     agentRunner.shutdown();
     await server.stop();
   });
 
   process.on('SIGINT', async () => {
     log.info('Received SIGINT, shutting down gracefully...');
-    mergeQueue.stopAutoRetry();
     agentRunner.shutdown();
     await server.stop();
   });

@@ -101,85 +101,10 @@ async function branchExists(projectPath: string, branch: string): Promise<boolea
 
 export interface RebaseResult {
   success: boolean;
-  message?: string;
-  conflictingFiles?: string[];
+  conflicts: string[];
 }
 
 export class WorktreeManager {
-
-  async rebaseOntoMaster(
-    worktreePath: string,
-    baseBranch: string
-  ): Promise<RebaseResult> {
-    try {
-      const { stdout: statusOut } = await execFileAsync(
-        'git', ['status', '--porcelain', '--ignore-submodules'],
-        { cwd: worktreePath }
-      );
-      if (statusOut.trim()) {
-        try {
-          await execFileAsync('git', ['add', '--', ':!openspec/changes/', ':!.opencode/'], { cwd: worktreePath });
-          const remaining = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd: worktreePath });
-          if (remaining.stdout.trim()) {
-            await execFileAsync('git', ['commit', '-m', 'chore: auto-commit before rebase', '--no-verify'], { cwd: worktreePath });
-          }
-        } catch (err) {
-          log.warn('Failed to commit uncommitted changes before rebase', {
-            worktreePath,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    } catch (err) {
-      log.warn('Failed to check worktree status before rebase', {
-        worktreePath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    try {
-      await execFileAsync('git', ['fetch', 'origin', baseBranch], {
-        cwd: worktreePath,
-        timeout: 60000,
-      });
-    } catch (err) {
-      log.warn('Failed to fetch origin before rebase, continuing with local refs', {
-        worktreePath,
-        baseBranch,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    try {
-      await execFileAsync('git', ['rebase', `origin/${baseBranch}`], {
-        cwd: worktreePath,
-        timeout: 300000,
-      });
-      log.info('Rebase succeeded', { worktreePath, baseBranch });
-      return { success: true };
-    } catch (err: any) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      log.warn('Rebase failed, aborting', { worktreePath, baseBranch, error: errMsg });
-
-      let conflictingFiles: string[] = [];
-      try {
-        const { stdout } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], {
-          cwd: worktreePath,
-        });
-        conflictingFiles = stdout.trim().split('\n').filter((l: string) => l.trim());
-      } catch {
-        // no conflicts listed
-      }
-
-      await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath }).catch(() => {});
-
-      return {
-        success: false,
-        message: `Rebase conflict: ${errMsg}`,
-        conflictingFiles,
-      };
-    }
-  }
 
   async create(
     projectPath: string,
@@ -269,41 +194,19 @@ export class WorktreeManager {
       return { success: true, message: `No commits to merge for issue #${issueNumber}, worktree cleaned up` };
     }
 
-    let stashed = false;
     try {
-      const { stdout: dirtyCheck } = await execFileAsync(
-        'git', ['status', '--porcelain', '--ignore-submodules'],
-        { cwd: projectPath }
-      );
-      if (dirtyCheck.trim()) {
-        await execFileAsync('git', ['stash', '--include-untracked'], { cwd: projectPath });
-        stashed = true;
-      }
-
       await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
     } catch (err) {
-      if (stashed) {
-        await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch(() => {});
-      }
       return { success: false, message: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}` };
     }
 
     try {
       await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
     } catch (err) {
-      if (stashed) {
-        await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch(() => {});
-      }
-      return { success: false, message: `Fast-forward merge failed for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}` };
+      return { success: false, message: `Fast-forward not possible, rebase required: ${err instanceof Error ? err.message : String(err)}` };
     }
 
-    if (stashed) {
-      await execFileAsync('git', ['stash', 'pop'], { cwd: projectPath }).catch((err) => {
-        log.warn('Failed to pop stash after merge', { issueNumber, error: err instanceof Error ? err.message : String(err) });
-      });
-    }
-
-    log.info('Merged worktree branch back to base (fast-forward)', { issueNumber, branch, baseBranch });
+    log.info('Fast-forward merge succeeded', { issueNumber, branch, baseBranch });
     return { success: true, message: `Merged ${branch} into ${baseBranch} (fast-forward)` };
   }
 
@@ -313,6 +216,132 @@ export class WorktreeManager {
       return stdout.trim().length > 0;
     } catch {
       return false;
+    }
+  }
+
+  async canFastForward(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<boolean> {
+    const branch = getBranchName(issueNumber);
+
+    if (!this.exists(projectName, issueNumber)) {
+      return false;
+    }
+
+    try {
+      await execFileAsync(
+        'git',
+        ['merge-base', '--is-ancestor', `origin/${baseBranch}`, branch],
+        { cwd: projectPath }
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async rebaseOntoMaster(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main',
+    options?: { abortOnConflict?: boolean }
+  ): Promise<RebaseResult> {
+    const abortOnConflict = options?.abortOnConflict !== false;
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+    const branch = getBranchName(issueNumber);
+
+    if (!this.exists(projectName, issueNumber)) {
+      throw new Error(`Worktree for issue #${issueNumber} not found`);
+    }
+
+    await smartFetch(projectPath);
+
+    const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
+    if (!hasCommits) {
+      log.info('No commits to rebase', { issueNumber, branch, baseBranch });
+      return { success: true, conflicts: [] };
+    }
+
+    try {
+      const { stdout: statusOut } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath }
+      );
+      const uncommitted = statusOut.trim().split('\n').filter(l => l.trim());
+      if (uncommitted.length > 0) {
+        await execFileAsync('git', ['add', '--', ':!.opencode/'], { cwd: worktreePath });
+        const remaining = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd: worktreePath });
+        if (remaining.stdout.trim()) {
+          await execFileAsync('git', ['commit', '-m', `chore: commit remaining changes for issue #${issueNumber}`, '--no-verify'], { cwd: worktreePath });
+        }
+      }
+    } catch (err) {
+      log.warn('Failed to commit uncommitted changes before rebase', { issueNumber, error: err instanceof Error ? err.message : String(err) });
+    }
+
+    try {
+      await execFileAsync('git', ['rebase', `origin/${baseBranch}`], { cwd: worktreePath });
+      log.info('Rebase succeeded', { issueNumber, branch, baseBranch });
+      return { success: true, conflicts: [] };
+    } catch (err: any) {
+      const conflicts = await this.getConflictingFiles(worktreePath);
+      log.warn('Rebase conflicts detected', { issueNumber, conflicts, abortOnConflict });
+
+      if (abortOnConflict) {
+        try {
+          await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
+          log.info('Rebase aborted due to conflicts', { issueNumber });
+        } catch (abortErr) {
+          log.warn('Failed to abort rebase', { issueNumber, error: abortErr instanceof Error ? abortErr.message : String(abortErr) });
+        }
+      }
+
+      return { success: false, conflicts };
+    }
+  }
+
+  async abortRebase(
+    projectName: string,
+    issueNumber: number
+  ): Promise<void> {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+    await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
+    log.info('Rebase aborted', { issueNumber });
+  }
+
+  async rebaseContinue(
+    projectName: string,
+    issueNumber: number
+  ): Promise<RebaseResult> {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+
+    try {
+      await execFileAsync('git', ['rebase', '--continue'], {
+        cwd: worktreePath,
+        env: { ...process.env, GIT_EDITOR: 'true' },
+      });
+      log.info('Rebase continued successfully', { issueNumber });
+      return { success: true, conflicts: [] };
+    } catch (err: any) {
+      const conflicts = await this.getConflictingFiles(worktreePath);
+      log.warn('Rebase still has conflicts after continue', { issueNumber, conflicts });
+      return { success: false, conflicts };
+    }
+  }
+
+  private async getConflictingFiles(worktreePath: string): Promise<string[]> {
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['diff', '--name-only', '--diff-filter=U'],
+        { cwd: worktreePath }
+      );
+      return stdout.trim().split('\n').filter(l => l.trim());
+    } catch {
+      return [];
     }
   }
 
@@ -394,16 +423,6 @@ export class WorktreeManager {
     }
 
     return worktrees;
-  }
-
-  getPath(projectName: string, issueNumber: number): string | null {
-    const worktreePath = getWorktreePath(projectName, issueNumber);
-    return fs.existsSync(worktreePath) ? worktreePath : null;
-  }
-
-  exists(projectName: string, issueNumber: number): boolean {
-    const worktreePath = getWorktreePath(projectName, issueNumber);
-    return fs.existsSync(worktreePath);
   }
 
   async createWipCommit(
@@ -496,42 +515,14 @@ export class WorktreeManager {
     return wip.diffStat;
   }
 
-  async mergeMasterInWorktree(
-    projectName: string,
-    issueNumber: number,
-    baseBranch: string = 'main'
-  ): Promise<{ success: boolean; conflictFiles?: string[]; message?: string }> {
+  getPath(projectName: string, issueNumber: number): string | null {
     const worktreePath = getWorktreePath(projectName, issueNumber);
+    return fs.existsSync(worktreePath) ? worktreePath : null;
+  }
 
-    if (!fs.existsSync(worktreePath)) {
-      return { success: false, message: 'Worktree not found' };
-    }
-
-    try {
-      await execFileAsync('git', ['merge', baseBranch, '--no-edit'], {
-        cwd: worktreePath,
-      });
-
-      return { success: true };
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      if (!msg.includes('Merge conflict') && !msg.includes('CONFLICT') && !msg.includes('merge conflict')) {
-        await execFileAsync('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {});
-        return { success: false, message: `Merge failed: ${msg}` };
-      }
-
-      try {
-        const { stdout } = await execFileAsync(
-          'git', ['diff', '--name-only', '--diff-filter=U'],
-          { cwd: worktreePath }
-        );
-        const conflictFiles = stdout.trim().split('\n').filter((f: string) => f.trim());
-        return { success: false, conflictFiles };
-      } catch {
-        await execFileAsync('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {});
-        return { success: false, message: 'Merge conflict but failed to list conflict files' };
-      }
-    }
+  exists(projectName: string, issueNumber: number): boolean {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+    return fs.existsSync(worktreePath);
   }
 
   async prune(projectPath: string): Promise<void> {
