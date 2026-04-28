@@ -45,9 +45,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Key locations: checkpoint read at line 490-491, consistency verification before executor call at line 598, zero_work guard at line 617. The completedTaskIds variable is already available — add verification between lines 530-596.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
