@@ -12,6 +12,8 @@ export enum IssueStatus {
   Paused = 'paused',
   Blocked = 'blocked',
   Interrupted = 'interrupted',
+  Closed = 'closed',
+  Completed = 'completed',
 }
 
 export interface ApprovalState {
@@ -38,6 +40,7 @@ export interface Issue {
   comments?: Comment[]
   approvalState?: ApprovalState
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
+  priority?: string | null
 }
 
 export interface Project {
