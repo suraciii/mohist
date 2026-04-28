@@ -78,9 +78,9 @@
       ],
       "passes": false,
       "notes": "These events are emitted by the resolveConflicts callback (T-004), not by MergeQueue itself. MergeQueue emits merge_started/merge_completed/merge_blocked/merge_failed as before.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": "Auto-skipped (no onAskUser): Timed out after 900s"
     },
     {
       "id": "T-004",
