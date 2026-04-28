@@ -130,11 +130,11 @@
         "T-001",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Fixes 断层 3 UI component. The data layer is in T-004, this task adds the visual rendering.",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
-      "error": "Auto-skipped (no onAskUser): Timed out after 300s"
+      "error": null
     },
     {
       "id": "T-006",
