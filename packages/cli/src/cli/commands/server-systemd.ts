@@ -240,3 +240,58 @@ export async function uninstallSystemdService(): Promise<void> {
 
   console.log(chalk.green(`\nMohist service uninstalled successfully`));
 }
+
+export async function restartServer(
+  fallbackStop: () => Promise<void>,
+  fallbackStart: () => Promise<void>,
+): Promise<void> {
+  if (isSystemdServiceInstalled()) {
+    runSystemctlUser(`restart ${SERVICE_NAME}`);
+    console.log(chalk.green('Server restarted (systemd)'));
+    return;
+  }
+
+  await fallbackStop();
+  await fallbackStart();
+  console.log(chalk.green('Server restarted'));
+}
+
+export async function updateServer(): Promise<void> {
+  const mode = detectInstallMode();
+  if (!mode.workingDir) {
+    console.error(chalk.red('mo server update is only available in source mode'));
+    console.log(chalk.gray('In npm global mode, update via: npm update -g mohist'));
+    process.exit(1);
+  }
+
+  if (!isSystemdServiceInstalled()) {
+    console.error(chalk.red('No systemd service installed'));
+    console.log(chalk.gray('Run: mo server install'));
+    process.exit(1);
+  }
+
+  const cliDir = path.resolve(mode.workingDir, 'packages', 'cli');
+  const webDir = path.resolve(cliDir, 'web');
+
+  console.log(chalk.blue('Building CLI...'));
+  try {
+    execSync('npm run build', { cwd: cliDir, encoding: 'utf-8', stdio: 'inherit' });
+  } catch {
+    console.error(chalk.red('CLI build failed — aborting update'));
+    process.exit(1);
+  }
+  console.log(chalk.green('CLI build succeeded'));
+
+  console.log(chalk.blue('Building web...'));
+  try {
+    execSync('npm run build', { cwd: webDir, encoding: 'utf-8', stdio: 'inherit' });
+  } catch {
+    console.error(chalk.red('Web build failed — aborting update'));
+    process.exit(1);
+  }
+  console.log(chalk.green('Web build succeeded'));
+
+  runSystemctlUser(`restart ${SERVICE_NAME}`);
+  console.log(chalk.green('Server restarted (systemd)'));
+  console.log(chalk.green('\nUpdate complete'));
+}
