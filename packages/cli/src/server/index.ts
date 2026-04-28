@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, opencodeBinPath);
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, opencodeBinPath, stateManager.getCommentRepo());
 
   agentRunner.setLlmConfig(fileConfig);
 

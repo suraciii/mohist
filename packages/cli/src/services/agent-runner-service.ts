@@ -2,6 +2,7 @@ import type { IssueRepo } from '../db/issue-repo';
 import type { ProjectRepo } from '../db/project-repo';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
+import type { CommentRepo } from '../db/comment-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowController, type PipelineResult } from '../workflow/workflow-controller';
@@ -75,6 +76,7 @@ export class AgentRunnerService {
     private readonly projectRepo?: ProjectRepo,
     private readonly worktreeManager?: WorktreeManager,
     private readonly opencodeBinPath?: string,
+    private readonly commentRepo?: CommentRepo,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -426,6 +428,7 @@ export class AgentRunnerService {
           eventBus: this.eventBus,
           projectId,
           checkpointRepo: this.checkpointRepo,
+          commentRepo: this.commentRepo,
         });
 
         const result: PipelineResult = await pipeline.run(issue, acpOptions);
