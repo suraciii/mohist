@@ -242,6 +242,9 @@ export interface CoderSessionItem {
   status: string
   createdAt: string
   completedAt: string | null
+  model: string | null
+  coderType: string | null
+  stage: string | null
   workflowLogs: WorkflowLogItem[]
 }
 

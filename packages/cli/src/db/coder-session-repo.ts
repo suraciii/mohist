@@ -10,6 +10,9 @@ export interface CoderSession {
   status: string;
   createdAt: string;
   completedAt: string | null;
+  model: string | null;
+  coderType: string | null;
+  stage: string | null;
 }
 
 interface CoderSessionRow {
@@ -21,6 +24,9 @@ interface CoderSessionRow {
   status: string;
   created_at: string;
   completed_at: string | null;
+  model: string | null;
+  coder_type: string | null;
+  stage: string | null;
 }
 
 function rowToCoderSession(row: CoderSessionRow): CoderSession {
@@ -33,6 +39,9 @@ function rowToCoderSession(row: CoderSessionRow): CoderSession {
     status: row.status,
     createdAt: row.created_at,
     completedAt: row.completed_at,
+    model: row.model,
+    coderType: row.coder_type,
+    stage: row.stage,
   };
 }
 
@@ -41,6 +50,9 @@ export interface CreateCoderSessionData {
   acpSessionId: string;
   executionId?: string | null;
   taskDescription?: string | null;
+  model?: string;
+  coderType?: string;
+  stage?: string;
 }
 
 export class CoderSessionRepo {
@@ -51,9 +63,9 @@ export class CoderSessionRepo {
     const now = new Date().toISOString();
 
     this.db.run(
-      `INSERT INTO coder_session (id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at)
-       VALUES (?, ?, ?, ?, ?, 'running', ?, NULL)`,
-      [id, data.issueId, data.acpSessionId, data.executionId ?? null, data.taskDescription ?? null, now]
+      `INSERT INTO coder_session (id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at, model, coder_type, stage)
+       VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?)`,
+      [id, data.issueId, data.acpSessionId, data.executionId ?? null, data.taskDescription ?? null, now, data.model ?? null, data.coderType ?? null, data.stage ?? null]
     );
 
     const row = this.db.get<CoderSessionRow>(

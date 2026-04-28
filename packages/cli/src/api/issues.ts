@@ -1486,6 +1486,9 @@ export function createIssueRoutes(
           status: session.status,
           createdAt: session.createdAt,
           completedAt: session.completedAt,
+          model: session.model,
+          coderType: session.coderType,
+          stage: session.stage,
           workflowLogs: logs.map(l => ({
             id: l.id,
             eventType: l.eventType,
