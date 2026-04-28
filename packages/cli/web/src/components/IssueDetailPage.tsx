@@ -30,6 +30,17 @@ const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Review, Stage.Done])
 
 const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Review, Stage.Done])
 
+function formatRelativeTime(iso: string): string {
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime())
+  const seconds = Math.floor(diff / 1000)
+  if (seconds < 5) return 'just now'
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
+}
+
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
   const navigate = useNavigate()
