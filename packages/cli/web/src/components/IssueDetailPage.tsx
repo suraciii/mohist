@@ -2,16 +2,16 @@ import { Fragment, useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
-import type { DiffFile } from '../lib/types'
+import type { DiffFile, CommitEntry } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
 import { TaskList } from './TaskList'
-import { formatTime } from '../lib/format-time'
+import { formatTime, formatTimeAgo } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 
 const STAGES = [Stage.Backlog, Stage.Explore, Stage.Plan, Stage.Build, Stage.Review, Stage.Done]
@@ -40,6 +40,85 @@ function formatRelativeTime(iso: string): string {
   return `${hours}h ago`
 }
 
+function CommitDiffView({ diff }: { diff: string }) {
+  const lines = diff.split('\n')
+  return (
+    <div className="mt-2 rounded-md bg-gray-50 border border-gray-100 overflow-x-auto">
+      <pre className="text-xs font-mono leading-5 p-3">
+        {lines.map((line, i) => {
+          let bg = ''
+          let color = 'text-gray-500'
+          if (line.startsWith('+')) {
+            bg = 'bg-green-50'
+            color = 'text-green-700'
+          } else if (line.startsWith('-')) {
+            bg = 'bg-red-50'
+            color = 'text-red-700'
+          } else if (line.startsWith('@@')) {
+            color = 'text-blue-600'
+          }
+          return (
+            <div key={i} className={`${bg} ${color}`}>
+              {line}
+            </div>
+          )
+        })}
+      </pre>
+    </div>
+  )
+}
+
+function CommitRow({
+  issueNumber,
+  commit,
+  expanded,
+  onToggle,
+}: {
+  issueNumber: number
+  commit: CommitEntry
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const { data: diffData, isLoading, isError } = useCommitDiff(issueNumber, commit.hash, expanded)
+
+  return (
+    <div>
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 text-sm py-1.5 px-2 rounded hover:bg-gray-50 transition-colors text-left"
+      >
+        <svg
+          className={`h-3 w-3 text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+            clipRule="evenodd"
+          />
+        </svg>
+        <span className="font-mono text-xs text-blue-600 flex-shrink-0">{commit.hash}</span>
+        <span className="text-gray-700 truncate flex-1">{commit.message}</span>
+        <span className="text-gray-400 text-xs flex-shrink-0">{formatTimeAgo(new Date(commit.date))}</span>
+        <span className="text-green-600 text-xs font-medium flex-shrink-0">+{commit.additions}</span>
+        <span className="text-red-500 text-xs font-medium flex-shrink-0">-{commit.deletions}</span>
+      </button>
+      {expanded && (
+        <div className="ml-5">
+          {isLoading && (
+            <div className="text-xs text-gray-400 py-2">Loading diff...</div>
+          )}
+          {isError && (
+            <div className="text-xs text-red-500 py-2">Failed to load diff</div>
+          )}
+          {diffData?.diff && <CommitDiffView diff={diffData.diff} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
   const navigate = useNavigate()
@@ -50,6 +129,8 @@ export function IssueDetailPage() {
   const [messageText, setMessageText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
+  const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
+  const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!forceStopConfirming) return
@@ -87,6 +168,8 @@ export function IssueDetailPage() {
       return status ? { ...t, ...status } : t
     })
   })()
+
+  const { data: commitsData } = useIssueCommits(issueNumber)
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveIssue(issueNumber),
@@ -359,22 +442,83 @@ export function IssueDetailPage() {
                 </div>
               </div>
 
-              {showDiff && diffData && diffData.files.length > 0 && (
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <h2 className="text-sm font-semibold text-gray-700 mb-3">Changed Files</h2>
-                  <div className="space-y-1">
-                    {diffData.files.map((f: DiffFile, i: number) => (
-                      <div key={i} className="flex items-center gap-2 text-sm">
-                        <span className="text-gray-700 font-mono text-xs truncate flex-1">
-                          {f.file}
-                        </span>
-                        <span className="text-green-600 text-xs font-medium">+{f.additions}</span>
-                        <span className="text-red-500 text-xs font-medium">-{f.deletions}</span>
+              {showDiff && (() => {
+                const files = diffData?.files ?? []
+                const commits = commitsData?.commits ?? []
+                if (files.length === 0 && commits.length === 0) return null
+                return (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <div className="flex items-center gap-1 mb-3 border-b border-gray-100">
+                      <button
+                        onClick={() => setDiffTab('files')}
+                        className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                          diffTab === 'files'
+                            ? 'border-blue-600 text-blue-600'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        Files{files.length > 0 ? ` (${files.length})` : ''}
+                      </button>
+                      <button
+                        onClick={() => setDiffTab('commits')}
+                        className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                          diffTab === 'commits'
+                            ? 'border-blue-600 text-blue-600'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        Commits{commits.length > 0 ? ` (${commits.length})` : ''}
+                      </button>
+                    </div>
+
+                    {diffTab === 'files' && (
+                      <div className="space-y-1">
+                        {files.length === 0 ? (
+                          <p className="text-sm text-gray-400">No file changes yet.</p>
+                        ) : (
+                          files.map((f: DiffFile, i: number) => (
+                            <div key={i} className="flex items-center gap-2 text-sm">
+                              <span className="text-gray-700 font-mono text-xs truncate flex-1">
+                                {f.file}
+                              </span>
+                              <span className="text-green-600 text-xs font-medium">+{f.additions}</span>
+                              <span className="text-red-500 text-xs font-medium">-{f.deletions}</span>
+                            </div>
+                          ))
+                        )}
                       </div>
-                    ))}
+                    )}
+
+                    {diffTab === 'commits' && (
+                      <div className="space-y-1">
+                        {commits.length === 0 ? (
+                          <p className="text-sm text-gray-400">No commits yet.</p>
+                        ) : (
+                          commits.map((c: CommitEntry) => (
+                            <CommitRow
+                              key={c.hash}
+                              issueNumber={issueNumber}
+                              commit={c}
+                              expanded={expandedCommits.has(c.hash)}
+                              onToggle={() => {
+                                setExpandedCommits((prev) => {
+                                  const next = new Set(prev)
+                                  if (next.has(c.hash)) {
+                                    next.delete(c.hash)
+                                  } else {
+                                    next.add(c.hash)
+                                  }
+                                  return next
+                                })
+                              }}
+                            />
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                )
+              })()}
             </div>
 
             <div className="space-y-4">
