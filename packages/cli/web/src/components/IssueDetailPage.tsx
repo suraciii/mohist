@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
@@ -28,6 +28,17 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleString()
 }
 
+function formatRelativeTime(iso: string): string {
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime())
+  const seconds = Math.floor(diff / 1000)
+  if (seconds < 5) return 'just now'
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
+}
+
 function statusBadge(status: IssueStatus): string {
   switch (status) {
     case IssueStatus.Active:
@@ -51,6 +62,13 @@ export function IssueDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [messageText, setMessageText] = useState('')
+  const [forceStopConfirming, setForceStopConfirming] = useState(false)
+
+  useEffect(() => {
+    if (!forceStopConfirming) return
+    const timer = setTimeout(() => setForceStopConfirming(false), 5000)
+    return () => clearTimeout(timer)
+  }, [forceStopConfirming])
 
   const { data: issue, isLoading } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
@@ -81,6 +99,15 @@ export function IssueDetailPage() {
     mutationFn: () => api.closeIssue(issueNumber),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
+    },
+  })
+
+  const forceStopMutation = useMutation({
+    mutationFn: () => api.forceStopIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      setForceStopConfirming(false)
     },
   })
 
@@ -136,6 +163,8 @@ export function IssueDetailPage() {
   const activeAgents = agentStatus?.activeAgents ?? []
   const maxConcurrent = agentStatus?.maxConcurrentAgents ?? Infinity
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
+  const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
+  const agentProgress = thisAgent?.progress
   const isCapacityFull = activeAgents.length >= maxConcurrent
   const isApprovalGate =
     issue.approvalState?.status === 'awaiting' &&
@@ -401,7 +430,7 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {issue.status === IssueStatus.Active && !isDraft && (
+                  {issue.status === IssueStatus.Active && !isDraft && !isAgentRunningOnThis && (
                     <button
                       onClick={() => closeMutation.mutate()}
                       disabled={closeMutation.isPending}
@@ -409,6 +438,60 @@ export function IssueDetailPage() {
                     >
                       {closeMutation.isPending ? 'Closing...' : 'Close'}
                     </button>
+                  )}
+
+                  {isAgentRunningOnThis && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                        <span className="text-xs font-semibold text-blue-800">
+                          {agentProgress
+                            ? `${agentProgress.stage.charAt(0).toUpperCase() + agentProgress.stage.slice(1)} Stage`
+                            : 'Running...'}
+                        </span>
+                      </div>
+                      {agentProgress?.roundType && (
+                        <div className="text-xs text-blue-700">
+                          Round: {agentProgress.roundType} #{(agentProgress.roundIndex ?? 0) + 1}
+                        </div>
+                      )}
+                      {agentProgress?.taskProgress && (
+                        <div className="text-xs text-blue-700">
+                          Tasks: {agentProgress.taskProgress.completed}/{agentProgress.taskProgress.total}
+                        </div>
+                      )}
+                      {agentProgress?.lastActivityAt && (
+                        <div className="text-xs text-blue-600">
+                          Last activity: {formatRelativeTime(agentProgress.lastActivityAt)}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => {
+                          if (forceStopConfirming) {
+                            forceStopMutation.mutate()
+                          } else {
+                            setForceStopConfirming(true)
+                          }
+                        }}
+                        disabled={forceStopMutation.isPending}
+                        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          forceStopConfirming
+                            ? 'bg-red-600 text-white hover:bg-red-700'
+                            : 'border border-red-300 bg-white text-red-600 hover:bg-red-50'
+                        } disabled:opacity-50`}
+                      >
+                        {forceStopMutation.isPending
+                          ? 'Stopping...'
+                          : forceStopConfirming
+                            ? 'Confirm Force Stop'
+                            : 'Force Stop'}
+                      </button>
+                      {forceStopMutation.error && (
+                        <div className="text-xs text-red-600">
+                          {forceStopMutation.error.message}
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {issue.status === IssueStatus.Blocked && (
