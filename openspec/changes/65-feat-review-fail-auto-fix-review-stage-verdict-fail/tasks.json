@@ -48,9 +48,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Soft dependency on T-001 for execution ordering. Prompt files have no code dependency on T-001's interface changes.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
