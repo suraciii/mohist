@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Rename Stage enum and update all source code",
+      "spec": "specs/pipeline-model/spec.md",
+      "description": "Rename `Draft = 'draft'` to `Backlog = 'backlog'` in `types/index.ts`. Update STAGE_TRANSITIONS key from `[Stage.Draft]` to `[Stage.Backlog]`. Then fix all downstream references across source files: db/issue-repo.ts (default stage), api/status.ts (issuesByStage key), api/issues.ts (error messages, rollback), cli/commands/issue.ts (color map key), workflow/workflow-controller.ts (case label), services/agent-runner-service.ts (Stage.Draft references), agents/explore-agent.ts (prompt strings), tools/create-issue-tool.ts and tools/update-issue-tool.ts (descriptions). Do NOT touch test files or migrations.ts.",
+      "acceptanceCriteria": [
+        "grep -r 'Draft' packages/cli/src/ returns zero hits (excluding comments and non-stage contexts)",
+        "grep -r \"'draft'\" packages/cli/src/ returns zero hits in stage-related contexts",
+        "grep -r 'Stage.Backlog' packages/cli/src/types/index.ts finds the enum member",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types/index.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Stage.Draft is the anchor — renaming it causes compile errors at every usage site, making it impossible to miss. Also update web UI files: KanbanBoard.tsx column label, IssueDetailPage.tsx (STAGES array, label map, isDraft→isBacklog variable), SessionTimeline.tsx stageOrder array.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Add DB migration v15 and update DDL default",
+      "spec": "specs/local-issue-store/spec.md",
+      "description": "Bump SCHEMA_VERSION to 15 in migrations.ts. Update CREATE_ISSUES_TABLE DDL default from `'draft'` to `'backlog'`. Add migrateToVersion15() that runs `UPDATE issues SET stage = 'backlog' WHERE stage = 'draft'`. Wire it into initializeDatabase().",
+      "acceptanceCriteria": [
+        "SCHEMA_VERSION is 15",
+        "CREATE_ISSUES_TABLE has DEFAULT 'backlog'",
+        "migrateToVersion15() exists and updates existing draft rows",
+        "initializeDatabase() calls migrateToVersion15() when currentVersion < 15",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/migrations.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Update all test expectations from Draft/draft to Backlog/backlog",
+      "spec": "specs/pipeline-model/spec.md",
+      "description": "Update all test files that reference Stage.Draft or string 'draft' in stage-related assertions. Files: tests/services.test.ts, tests/database.test.ts, tests/e2e.test.ts, tests/spawn-failure-e2e.test.ts, tests/start-handler-resilience.test.ts, tests/priority.test.ts, tests/agent-runner-service.test.ts, tests/pipeline-controller.test.ts, tests/sse-client.test.ts. Replace Stage.Draft → Stage.Backlog, 'draft' → 'backlog' in stage contexts, and update test descriptions mentioning 'draft'.",
+      "acceptanceCriteria": [
+        "grep -r 'Stage.Draft' packages/cli/tests/ returns zero hits",
+        "grep -r \"'draft'\" packages/cli/tests/ returns zero hits in stage-related contexts",
+        "All tests pass: cd packages/cli && npm test",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "The priority.test.ts file has raw SQL seed data with 'draft' strings — those must also be updated to 'backlog'.",
+      "attempts": 1,
+      "order": 999999,
+      "error": "Auto-skipped (no onAskUser): Timed out after 900s"
+    },
+    {
+      "id": "T-004",
+      "title": "Build and full test suite verification",
+      "description": "Run `npm run build && npm test` in packages/cli. Verify zero type errors, zero test failures. Also verify the web frontend builds if a build script exists.",
+      "acceptanceCriteria": [
+        "npm run build exits with code 0",
+        "npm test exits with code 0",
+        "No references to 'draft' in stage-related source or test code remain"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "REVIEW",
+      "output": "Verification report (stdout)",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
