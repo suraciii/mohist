@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { Stage, IssueStatus, type Issue } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
@@ -10,6 +11,7 @@ import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } fr
 import { loadWorkflow } from './workflow-loader';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
+import type { CommentRepo } from '../db/comment-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
@@ -43,6 +45,9 @@ export interface WorkflowControllerOptions {
   eventBus?: EventBus;
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
+  commentRepo?: CommentRepo;
+  onProgress?: (update: { stage?: string; roundType?: string; roundIndex?: number; taskProgress?: { completed: number; total: number } | null }) => void;
+  onChildProcess?: (proc: ChildProcess) => void;
 }
 
 export interface PipelineResult {
@@ -59,6 +64,9 @@ export class WorkflowController {
   private eventBus?: EventBus;
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
+  private commentRepo?: CommentRepo;
+  private _onProgress?: WorkflowControllerOptions['onProgress'];
+  private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -67,10 +75,21 @@ export class WorkflowController {
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
+    this.commentRepo = options.commentRepo;
+    this._onProgress = options.onProgress;
+    this._onChildProcess = options.onChildProcess;
+  }
+
+  protected emitProgress(update: Parameters<NonNullable<WorkflowControllerOptions['onProgress']>>[0]): void {
+    this._onProgress?.(update);
   }
 
   getCheckpointRepo(): PipelineCheckpointRepo | undefined {
     return this.checkpointRepo;
+  }
+
+  getCommentRepo(): CommentRepo | undefined {
+    return this.commentRepo;
   }
 
   async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
@@ -110,6 +129,7 @@ export class WorkflowController {
     const planAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `plan-${issue.number}`,
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -309,7 +329,7 @@ export class WorkflowController {
 
     while (currentIssue.stage !== Stage.Done) {
       switch (currentIssue.stage) {
-        case Stage.Draft:
+        case Stage.Backlog:
         case Stage.Plan: {
           const planResult = await this.runPlanStage(currentIssue, acpOptions);
           if (!planResult.success) {
@@ -581,6 +601,7 @@ export class WorkflowController {
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
@@ -707,6 +728,7 @@ export class WorkflowController {
     const reviewAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `review-${issue.number}`,
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -866,6 +888,14 @@ function cleanChangeDir(changeDir: string): void {
     const entryPath = path.join(changeDir, entry);
     fs.rmSync(entryPath, { recursive: true, force: true });
   }
+}
+
+const VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
+
+export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
+  const match = VERDICT_RE.exec(content);
+  if (!match) return null;
+  return match[1].toUpperCase() as 'PASS' | 'FAIL';
 }
 
 export function createWorkflowController(options: WorkflowControllerOptions): WorkflowController {
