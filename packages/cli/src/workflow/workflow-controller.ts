@@ -8,7 +8,7 @@ import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { loadWorkflow } from './workflow-loader';
-import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildConflictResolutionPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildConflictResolutionPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
 import type { CommentRepo } from '../db/comment-repo';
 import type { EventBus } from '../services/event-bus';
@@ -375,6 +375,15 @@ export class WorkflowController {
               gateRequired: false,
               message: reviewResult.message,
             };
+          }
+
+          if (reviewResult.escalateToStage) {
+            log.info('Review stage escalating', {
+              issueNumber: currentIssue.number,
+              escalateTo: reviewResult.escalateToStage,
+            });
+            currentIssue = this.issueRepo.updateStage(currentIssue.id, reviewResult.escalateToStage)!;
+            break;
           }
 
           if (currentIssue.mergeState === MergeState.Resolving) {
@@ -975,11 +984,10 @@ export class WorkflowController {
         };
       }
 
-      await conn.close();
-
-      const reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
+      let reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
 
       if (!reviewReport || reviewReport.trim().length === 0) {
+        await conn.close();
         return {
           success: false,
           requiresApproval: false,
@@ -988,15 +996,155 @@ export class WorkflowController {
         };
       }
 
+      const verdict = parseVerdict(reviewReport);
+
+      if (verdict === 'PASS') {
+        await conn.close();
+        return {
+          success: true,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Review,
+            issueNumber: issue.number,
+            reviewReport,
+          },
+          message: 'Review completed, awaiting user approval',
+        };
+      }
+
+      const hasNoAutoFixCheckpoint = this.checkpointRepo?.get(issue.number, 'no-auto-fix') != null;
+
+      if (verdict !== 'FAIL' || hasNoAutoFixCheckpoint) {
+        await conn.close();
+        return {
+          success: true,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Review,
+            issueNumber: issue.number,
+            reviewReport,
+          },
+          message: hasNoAutoFixCheckpoint
+            ? 'Review failed (auto-fix already attempted), awaiting user decision'
+            : 'Review completed (verdict unclear), awaiting user decision',
+        };
+      }
+
+      log.info('Review verdict FAIL, entering auto-fix loop', { issueNumber: issue.number });
+
+      const MAX_AUTO_FIX_ATTEMPTS = 2;
+      const fixHistory: string[] = [];
+
+      for (let attempt = 0; attempt < MAX_AUTO_FIX_ATTEMPTS; attempt++) {
+        // R2: auto-fix
+        roundState.type = 'auto-fix';
+        roundState.index = 2 + attempt * 2;
+
+        log.info('Auto-fix attempt', { attempt: attempt + 1, maxAttempts: MAX_AUTO_FIX_ATTEMPTS, issueNumber: issue.number });
+
+        this.emitSafe('plan_round_start', {
+          issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+          projectId: this.projectId ?? issue.projectId,
+          roundType: 'auto-fix',
+          roundLabel: `auto-fix-${attempt + 1}`,
+          roundIndex: 2 + attempt * 2,
+        });
+
+        const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport);
+        const autoFixResult = await conn.prompt(autoFixPrompt);
+
+        if (!autoFixResult.success) {
+          log.error('Auto-fix round failed', { attempt: attempt + 1, error: autoFixResult.error });
+          await conn.close();
+          return {
+            success: false,
+            requiresApproval: false,
+            output: null,
+            message: `Auto-fix attempt ${attempt + 1} failed: ${autoFixResult.error ?? 'unknown error'}`,
+          };
+        }
+
+        fixHistory.push(`Attempt ${attempt + 1}: ${autoFixResult.text?.slice(0, 200) ?? 'no output'}`);
+
+        // R3: re-verify
+        roundState.type = 're-verify';
+        roundState.index = 3 + attempt * 2;
+
+        log.info('Re-verify round', { attempt: attempt + 1, issueNumber: issue.number });
+
+        this.emitSafe('plan_round_start', {
+          issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+          projectId: this.projectId ?? issue.projectId,
+          roundType: 're-verify',
+          roundLabel: `re-verify-${attempt + 1}`,
+          roundIndex: 3 + attempt * 2,
+        });
+
+        const reVerifyPrompt = buildReVerifyPrompt(issue, changeDir, reviewReport);
+        const reVerifyResult = await conn.prompt(reVerifyPrompt);
+
+        if (!reVerifyResult.success) {
+          log.error('Re-verify round failed', { attempt: attempt + 1, error: reVerifyResult.error });
+          await conn.close();
+          return {
+            success: false,
+            requiresApproval: false,
+            output: null,
+            message: `Re-verify attempt ${attempt + 1} failed: ${reVerifyResult.error ?? 'unknown error'}`,
+          };
+        }
+
+        reviewReport = readReportFile(changeDir, 'review.md') ?? reviewReport;
+        const reVerifyVerdict = parseVerdict(reviewReport);
+
+        if (reVerifyVerdict === 'PASS') {
+          log.info('Auto-fix succeeded, verdict PASS', { attempt: attempt + 1, issueNumber: issue.number });
+          await conn.close();
+
+          if (this.commentRepo && this.issueRepo) {
+            try {
+              this.commentRepo.create({
+                issueId: issue.id,
+                body: `**Auto-fix applied (attempt ${attempt + 1})**\n\n${fixHistory.join('\n\n')}\n\nVerdict changed from FAIL to PASS.`,
+              });
+            } catch (commentErr) {
+              log.warn('Failed to add auto-fix comment', {
+                issueNumber: issue.number,
+                error: commentErr instanceof Error ? commentErr.message : String(commentErr),
+              });
+            }
+          }
+
+          return {
+            success: true,
+            requiresApproval: true,
+            output: {
+              stage: Stage.Review,
+              issueNumber: issue.number,
+              reviewReport,
+            },
+            message: `Review completed (auto-fix attempt ${attempt + 1} succeeded), awaiting user approval`,
+          };
+        }
+
+        log.info('Re-verify verdict still FAIL', { attempt: attempt + 1, issueNumber: issue.number });
+      }
+
+      log.info('Auto-fix attempts exhausted, escalating to build', { issueNumber: issue.number });
+      await conn.close();
+
+      this.checkpointRepo?.upsert(issue.number, 'no-auto-fix', ['exhausted'], null);
+
       return {
         success: true,
-        requiresApproval: true,
+        requiresApproval: false,
         output: {
           stage: Stage.Review,
           issueNumber: issue.number,
           reviewReport,
         },
-        message: 'Review completed, awaiting user approval',
+        escalateToStage: Stage.Build,
+        message: 'Auto-fix attempts exhausted, escalating to build stage',
       };
     } catch (err) {
       if (conn) {
