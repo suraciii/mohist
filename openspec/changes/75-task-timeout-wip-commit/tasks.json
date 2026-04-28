@@ -200,9 +200,9 @@
       "dependsOn": [
         "T-08A"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "新建组件。如果存在 zustand store 用于 task 状态，在那里添加 durations 字段；否则通过 props 或 context 传递",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
