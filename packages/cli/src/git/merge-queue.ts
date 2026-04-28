@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { WorktreeManager } from './worktree-manager';
+import { WorktreeManager, smartFetch } from './worktree-manager';
 import { EventBus } from '../services/event-bus';
 import { IssueRepo } from '../db/issue-repo';
 import { MergeState } from '../types';
@@ -27,6 +27,7 @@ interface MergeQueueDeps {
   eventBus: EventBus;
   issueRepo: IssueRepo;
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
+  resolveConflicts: (entry: MergeEntry, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>;
 }
 
 export class MergeQueue {
@@ -105,14 +106,18 @@ export class MergeQueue {
   }
 
   recoverFromDB(): void {
-    const issues = this.deps.issueRepo.findByMergeStates([MergeState.Pending, MergeState.Merging, MergeState.Rebasing, MergeState.Blocked]);
+    const issues = this.deps.issueRepo.findByMergeStates([
+      MergeState.Pending,
+      MergeState.Merging,
+      MergeState.Rebasing,
+      MergeState.Resolving,
+      MergeState.Blocked,
+    ]);
 
     for (const issue of issues) {
       if (this.queue.has(issue.number)) continue;
 
-      const mergeState: MergeState = issue.mergeState === MergeState.Merging ? MergeState.Pending : MergeState.Pending;
-
-      this.deps.issueRepo.setMergeState(issue.id, mergeState);
+      this.deps.issueRepo.setMergeState(issue.id, MergeState.Pending);
 
       const entry: MergeEntry = {
         issueNumber: issue.number,
@@ -177,8 +182,8 @@ export class MergeQueue {
   }
 
   private async processItem(entry: MergeEntry): Promise<void> {
-    entry.mergeState = MergeState.Merging;
-    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
+    entry.mergeState = MergeState.Rebasing;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Rebasing);
 
     this.deps.eventBus.emit('merge_started', {
       issueId: entry.issueId,
@@ -194,51 +199,61 @@ export class MergeQueue {
       return;
     }
 
-    const rebaseResult = await this.deps.worktreeManager.rebaseOntoMaster(
+    const canFF = await this.deps.worktreeManager.canFastForward(
       project.path,
       project.name,
       entry.issueNumber,
       project.baseBranch,
     );
 
-    if (!rebaseResult.success) {
-      log.warn('Rebase conflicts detected, aborting rebase and blocking', {
-        issueNumber: entry.issueNumber,
-        conflicts: rebaseResult.conflicts,
-      });
+    if (!canFF) {
+      const rebaseResult = await this.deps.worktreeManager.rebaseOntoMaster(
+        project.path,
+        project.name,
+        entry.issueNumber,
+        project.baseBranch,
+        { abortOnConflict: false },
+      );
 
-      try {
-        await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
-      } catch (err) {
-        log.warn('Failed to abort rebase, continuing to blocked state', {
+      if (!rebaseResult.success) {
+        log.info('First rebase had conflicts, retrying with fresh master', {
           issueNumber: entry.issueNumber,
-          error: err instanceof Error ? err.message : String(err),
+          conflicts: rebaseResult.conflicts,
         });
+
+        try {
+          await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
+        } catch (err) {
+          log.warn('Failed to abort rebase before retry', {
+            issueNumber: entry.issueNumber,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        await smartFetch(project.path);
+
+        const retryResult = await this.deps.worktreeManager.rebaseOntoMaster(
+          project.path,
+          project.name,
+          entry.issueNumber,
+          project.baseBranch,
+          { abortOnConflict: false },
+        );
+
+        if (!retryResult.success) {
+          const resolved = await this.handleConflictResolution(entry, project, retryResult.conflicts);
+          if (!resolved) return;
+        }
       }
-
-      entry.mergeState = MergeState.Blocked;
-      entry.conflictingFiles = rebaseResult.conflicts;
-      entry.message = `Rebase conflicts: ${rebaseResult.conflicts.join(', ')}`;
-      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Blocked);
-
-      this.deps.eventBus.emit('merge_blocked', {
-        issueId: entry.issueId,
-        projectId: entry.projectId,
-        issueNumber: entry.issueNumber,
-        conflictingFiles: rebaseResult.conflicts,
-        retryCount: 0,
-      });
-
-      log.info('Issue blocked due to rebase conflicts', {
-        issueNumber: entry.issueNumber,
-        conflictingFiles: rebaseResult.conflicts,
-      });
-      return;
     }
 
-    log.info('Rebase succeeded, performing fast-forward merge', {
+    log.info('Branch ready, performing fast-forward merge', {
       issueNumber: entry.issueNumber,
+      canFF,
     });
+
+    entry.mergeState = MergeState.Merging;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
 
     const mergeResult = await this.deps.worktreeManager.mergeBack(
       project.path,
@@ -291,6 +306,106 @@ export class MergeQueue {
     });
 
     log.info('Merge completed successfully', { issueNumber: entry.issueNumber });
+  }
+
+  private async handleConflictResolution(
+    entry: MergeEntry,
+    project: { path: string; name: string; baseBranch: string },
+    conflictFiles: string[],
+  ): Promise<boolean> {
+    const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
+    if (!worktreePath) {
+      this.blockWithConflict(entry, conflictFiles, 'Worktree not found for conflict resolution');
+      return false;
+    }
+
+    entry.mergeState = MergeState.Resolving;
+    entry.conflictingFiles = conflictFiles;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Resolving);
+
+    this.deps.eventBus.emit('agent_conflict_resolution_started', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
+      issueNumber: entry.issueNumber,
+      conflictingFiles: conflictFiles,
+    });
+
+    log.info('Delegating conflict resolution to agent', {
+      issueNumber: entry.issueNumber,
+      conflictFiles,
+    });
+
+    const result = await this.deps.resolveConflicts(entry, worktreePath, conflictFiles);
+
+    if (!result.success) {
+      this.blockWithConflict(entry, conflictFiles, result.error || 'Agent conflict resolution failed');
+      return false;
+    }
+
+    const continueResult = await this.deps.worktreeManager.rebaseContinue(
+      project.name,
+      entry.issueNumber,
+    );
+
+    if (!continueResult.success) {
+      this.blockWithConflict(entry, continueResult.conflicts, 'Rebase continue failed after agent resolution');
+      return false;
+    }
+
+    this.deps.eventBus.emit('agent_conflict_resolution_completed', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
+      issueNumber: entry.issueNumber,
+    });
+
+    log.info('Agent conflict resolution succeeded, rebase continued', {
+      issueNumber: entry.issueNumber,
+    });
+
+    return true;
+  }
+
+  private blockWithConflict(entry: MergeEntry, conflictFiles: string[], message: string): void {
+    try {
+      this.deps.worktreeManager.abortRebase(
+        (this.deps.getProjectPath(entry.projectId))!.name,
+        entry.issueNumber,
+      ).catch((err) => {
+        log.warn('Failed to abort rebase on block', {
+          issueNumber: entry.issueNumber,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    } catch {
+      // synchronous wrapper, ignore
+    }
+
+    entry.mergeState = MergeState.Blocked;
+    entry.conflictingFiles = conflictFiles;
+    entry.message = message;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Blocked);
+
+    this.deps.eventBus.emit('agent_conflict_resolution_failed', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
+      issueNumber: entry.issueNumber,
+      conflictingFiles: conflictFiles,
+      error: message,
+    });
+
+    this.deps.eventBus.emit('merge_blocked', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
+      issueNumber: entry.issueNumber,
+      conflictingFiles: conflictFiles,
+      retryCount: 0,
+    });
+
+    log.info('Issue blocked due to conflict resolution failure', {
+      issueNumber: entry.issueNumber,
+      conflictFiles,
+      message,
+    });
   }
 
   private handleFailure(
