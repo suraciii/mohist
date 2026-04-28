@@ -110,11 +110,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "checkpointRepo is already injected into createIssueRoutes",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        122832
+      ]
     },
     {
       "id": "T-005",
