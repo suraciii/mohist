@@ -260,6 +260,13 @@ export class WorktreeManager {
 
     await smartFetch(projectPath);
 
+    try {
+      await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
+      log.info('Aborted stale rebase before starting new one', { issueNumber });
+    } catch {
+      // no rebase in progress, that's fine
+    }
+
     const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
     if (!hasCommits) {
       log.info('No commits to rebase', { issueNumber, branch, baseBranch });
@@ -311,6 +318,20 @@ export class WorktreeManager {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
     log.info('Rebase aborted', { issueNumber });
+  }
+
+  async isRebaseInProgress(
+    projectName: string,
+    issueNumber: number
+  ): Promise<boolean> {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: worktreePath });
+      const gitDir = stdout.trim();
+      return fs.existsSync(path.resolve(gitDir, 'rebase-merge')) || fs.existsSync(path.resolve(gitDir, 'rebase-apply'));
+    } catch {
+      return false;
+    }
   }
 
   async rebaseContinue(
