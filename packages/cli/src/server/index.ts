@@ -21,6 +21,7 @@ import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
 import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
+import type { MergeEntry } from '../git/merge-queue';
 import { Log } from '../util/log';
 
 import { load as loadConfig, getServerConfig, getLogConfig, resolveOpencodeBinPath } from '../config/config-loader';
@@ -158,6 +159,65 @@ async function main(): Promise<void> {
           const result = await connection.prompt(prompt);
           if (!result.success) {
             return { success: false, error: result.error || 'Agent ACP session failed' };
+          }
+          return { success: true };
+        } finally {
+          await connection.close().catch(() => {});
+        }
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    fixBuildErrors: async (entry: MergeEntry, worktreePath: string, buildOutput: string) => {
+      log.info('fixBuildErrors callback invoked', { issueNumber: entry.issueNumber });
+
+      const refreshedIssue = issueRepo.findById(entry.issueId);
+      if (!refreshedIssue) {
+        return { success: false, error: 'Issue not found for build fix' };
+      }
+
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: refreshedIssue.id,
+        projectId: entry.projectId,
+        workflowLogRepo,
+        coderSessionRepo,
+        eventBus,
+        issueNumber: refreshedIssue.number,
+        opencodeBinPath,
+      };
+
+      const truncatedOutput = buildOutput.length > 8000 ? buildOutput.slice(-8000) : buildOutput;
+
+      const prompt = [
+        `## Build Fix Required`,
+        '',
+        `Issue #${refreshedIssue.number}: ${refreshedIssue.title}`,
+        '',
+        `The build failed after rebase. Fix all build errors and ensure the build passes.`,
+        '',
+        `## Build Error Output`,
+        '',
+        '```',
+        truncatedOutput,
+        '```',
+        '',
+        `## Instructions`,
+        '',
+        `1. Read the build error output above carefully`,
+        `2. Fix each error in the relevant source files`,
+        `3. Do NOT modify unrelated code — make minimal targeted fixes`,
+        `4. Run \`npm run build\` in \`packages/cli\` to verify your fixes`,
+        `5. If tests exist and are affected, run \`npm test\` to verify`,
+        `6. Commit your fixes with a descriptive message`,
+      ].join('\n');
+
+      try {
+        const connection = await createAcpConnection(acpOptions);
+        try {
+          const result = await connection.prompt(prompt);
+          if (!result.success) {
+            return { success: false, error: result.error || 'Agent build fix session failed' };
           }
           return { success: true };
         } finally {

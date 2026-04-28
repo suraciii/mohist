@@ -40,6 +40,7 @@ function createMockWorktreeManager() {
 }
 
 const resolveConflictsMock = vi.fn().mockResolvedValue({ success: true });
+const fixBuildErrorsMock = vi.fn().mockResolvedValue({ success: true });
 
 function createMergeQueueDeps(overrides?: Partial<{
   worktreeManager: WorktreeManager;
@@ -47,6 +48,7 @@ function createMergeQueueDeps(overrides?: Partial<{
   issueRepo: IssueRepo;
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
   resolveConflicts: typeof resolveConflictsMock;
+  fixBuildErrors: typeof fixBuildErrorsMock;
 }>) {
   return overrides as any;
 }
@@ -72,6 +74,7 @@ describe('MergeQueue', () => {
     eventBus = new EventBus();
     worktreeManager = createMockWorktreeManager();
     resolveConflictsMock.mockReset().mockResolvedValue({ success: true });
+    fixBuildErrorsMock.mockReset().mockResolvedValue({ success: true });
     execFileMock.mockReset();
     const gitDir = path.join(PROJECT_PATH, '.git');
     fs.mkdirSync(gitDir, { recursive: true });
@@ -97,6 +100,7 @@ describe('MergeQueue', () => {
         return { path: PROJECT_PATH, name: PROJECT_NAME, baseBranch: BASE_BRANCH };
       },
       resolveConflicts: resolveConflictsMock,
+      fixBuildErrors: fixBuildErrorsMock,
     });
   }
 
@@ -401,7 +405,7 @@ describe('MergeQueue', () => {
       expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
     });
 
-    it('should set build-failed when build fails after rebase', async () => {
+    it('should set build-failed when build fails after rebase and agent fix fails', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
@@ -423,6 +427,7 @@ describe('MergeQueue', () => {
         cb?.(null, '', '');
         return undefined as any;
       });
+      fixBuildErrorsMock.mockResolvedValue({ success: false, error: 'Agent could not fix build' });
 
       const failedEvents: any[] = [];
       eventBus.on('merge_failed', (data) => failedEvents.push(data));
@@ -431,9 +436,52 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       expect(buildCalled).toBe(true);
+      expect(fixBuildErrorsMock).toHaveBeenCalled();
       expect(issueRepo.findById(issue.id)?.mergeState).toBe('build-failed');
       expect(failedEvents).toHaveLength(1);
       expect(failedEvents[0].reason).toBe('build-failed');
+    });
+
+    it('should fix build errors via agent then succeed', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      let ffCallCount = 0;
+      worktreeManager.canFastForward = vi.fn().mockImplementation(async () => {
+        ffCallCount++;
+        return ffCallCount > 1;
+      });
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({ success: true, conflicts: [] });
+
+      let buildCallCount = 0;
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'npm' && args?.[1] === 'build') {
+          buildCallCount++;
+          if (buildCallCount === 1) {
+            cb?.(new Error('Build failed') as any, '', 'error output');
+            return undefined as any;
+          }
+        }
+        cb?.(null, '', '');
+        return undefined as any;
+      });
+      fixBuildErrorsMock.mockResolvedValue({ success: true });
+
+      const completedEvents: any[] = [];
+      eventBus.on('merge_completed', (data) => completedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(fixBuildErrorsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ issueNumber: issue.number }),
+        WORKTREE_PATH,
+        expect.any(String),
+      );
+      expect(buildCallCount).toBe(2);
+      expect(completedEvents).toHaveLength(1);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
     });
   });
 
@@ -732,6 +780,7 @@ describe('MergeQueue', () => {
         issueRepo,
         getProjectPath: () => null,
         resolveConflicts: resolveConflictsMock,
+        fixBuildErrors: fixBuildErrorsMock,
       });
 
       const failedEvents: any[] = [];
