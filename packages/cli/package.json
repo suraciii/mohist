@@ -9,7 +9,9 @@
     "mo-server": "./bin/mo-server"
   },
   "scripts": {
-    "build": "node script/build-models-snapshot.js && tsc && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/",
+    "build": "node script/build-models-snapshot.js && tsc && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/ && npm run build:web",
+    "build:web": "npm --prefix web run build",
+    "build:backend": "node script/build-models-snapshot.js && tsc && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/",
     "dev": "tsc --watch",
     "start:server": "node bin/mo-server",
     "start:cli": "node bin/mo",
@@ -18,7 +20,6 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
-    "build:web": "cd web && npm install && npm run build",
     "dev:web": "cd web && npm install && npm run dev"
   },
   "keywords": [

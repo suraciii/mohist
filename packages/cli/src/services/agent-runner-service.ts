@@ -1,5 +1,8 @@
 import type { IssueRepo } from '../db/issue-repo';
 import type { ProjectRepo } from '../db/project-repo';
+import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { CoderSessionRepo } from '../db/coder-session-repo';
+import type { CommentRepo } from '../db/comment-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { ChildProcess } from 'child_process';
@@ -75,14 +78,16 @@ export class AgentRunnerService {
 
   constructor(
     private readonly eventBus: EventBus,
-    _workflowLogRepo?: unknown,
+    private readonly workflowLogRepo?: WorkflowLogRepo,
     private readonly issueRepo?: IssueRepo,
     maxConcurrentAgents: number = 8,
     _agentSessionMessageRepo?: unknown,
-    _coderSessionRepo?: unknown,
+    private readonly coderSessionRepo?: CoderSessionRepo,
     private readonly checkpointRepo?: PipelineCheckpointRepo,
     private readonly projectRepo?: ProjectRepo,
     private readonly worktreeManager?: WorktreeManager,
+    private readonly opencodeBinPath?: string,
+    private readonly commentRepo?: CommentRepo,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -244,11 +249,52 @@ export class AgentRunnerService {
     const allPass = tasksFile.tasks.every(t => t.passes === true);
     if (allPass) {
       this.issueRepo!.updateStage(issue.id, Stage.Review);
-      log.info('Recovered build-stage orphan — all tasks pass, auto-advanced to review', {
-        issueNumber: issue.number,
-        totalTasks: tasksFile.tasks.length,
-        action: 'stage=review, status remains active',
-      });
+      const updatedIssue = this.issueRepo!.findById(issue.id);
+      if (!updatedIssue) {
+        this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+        this.issueRepo!.clearApprovalState(issue.id);
+        log.info('Recovered build-stage orphan — failed to re-fetch after stage update', {
+          issueNumber: issue.number,
+          action: 'status=blocked, re-fetch returned null',
+        });
+        return;
+      }
+
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: updatedIssue.id,
+        projectId: issue.projectId,
+        workflowLogRepo: this.workflowLogRepo,
+        coderSessionRepo: this.coderSessionRepo,
+        eventBus: this.eventBus,
+        issueNumber: updatedIssue.number,
+        opencodeBinPath: this.opencodeBinPath,
+      };
+
+      const startResult = this.startPipeline(
+        updatedIssue,
+        issue.projectId,
+        this.issueRepo!,
+        worktreePath,
+        acpOptions,
+      );
+
+      if (startResult.started) {
+        log.info('Recovered build-stage orphan — all tasks pass, review pipeline started', {
+          issueNumber: issue.number,
+          totalTasks: tasksFile.tasks.length,
+          action: 'stage=review, pipeline started',
+        });
+      } else {
+        this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+        this.issueRepo!.clearApprovalState(issue.id);
+        log.info('Recovered build-stage orphan — all tasks pass but pipeline start failed', {
+          issueNumber: issue.number,
+          totalTasks: tasksFile.tasks.length,
+          error: startResult.error,
+          action: 'status=blocked, pipeline could not start',
+        });
+      }
     } else {
       const passed = tasksFile.tasks.filter(t => t.passes === true).length;
       const pending = tasksFile.tasks.filter(t => t.passes !== true);
@@ -451,6 +497,7 @@ export class AgentRunnerService {
             const agent = this.activeAgents.get(issue.id);
             if (agent) agent.childProcess = proc;
           },
+          commentRepo: this.commentRepo,
         });
 
         const result: PipelineResult = await pipeline.run(issue, acpOptions);

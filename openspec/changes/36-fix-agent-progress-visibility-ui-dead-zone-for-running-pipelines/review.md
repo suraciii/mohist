@@ -6,15 +6,14 @@
 
 ### Correctness: PASS
 
-- **acp-session.ts (T-001)**: The `Promise.race` timeout pattern is correctly implemented in both `runAcpSession` and `createAcpConnection`. `ensureKill()` is always called after the race. The timeout timer is never cleared on the success path, which creates a dangling timer — but it's benign (resolves an already-resolved promise). No logic errors.
+- **acp-session.ts (T-001)**: The `Promise.race` timeout pattern is correctly implemented in both `runAcpSession` and `createAcpConnection`. `ensureKill()` is always called after the race. The timeout timer is properly cleared via `clearTimeout(timeoutId)` on the success path.
 - **agent-runner-service.ts (T-002, T-004)**: `forceStop()` is idempotent — returns `{ stopped: false }` for missing agents without error. The `onProgress` callback correctly uses `!== undefined` guards. The `onChildProcess` callback re-fetches from `activeAgents` (defensive against stale closures). The `finally` block clears `childProcess` before `activeAgents.delete()`, which is correct ordering.
 - **workflow-controller.ts (T-003)**: `emitProgress()` uses optional chaining (`this._onProgress?.()`), safe when undefined. `onProcessSpawned` callbacks wired at all three ACP spawn sites (plan, build, review).
 - **issues.ts (T-005)**: Route handles all three spec cases: 404 (not found), 409 (no agent running), 200 (success). `issueService.setStatus` called after `forceStop` — correct order.
-- **IssueDetailPage.tsx (T-007)**: The `forceStopConfirming` state machine is correct: first click sets confirming, second click fires mutation. The `useEffect` timeout for auto-reset is properly cleaned up. The Close button is correctly hidden when `isAgentRunningOnThis` is true.
+- **IssueDetailPage.tsx (T-007)**: The `forceStopConfirming` state machine is correct: first click sets confirming, second click fires mutation. The `useEffect` timeout for auto-reset is properly cleaned up. Click-outside handler resets confirmation state. The Close button is correctly hidden when `isAgentRunningOnThis` is true.
 
 **Warnings:**
 1. `agent-runner-service.ts:451` — `onChildProcess` reads `this.activeAgents.get(issue.id)` inside the callback. If `forceStop` already deleted the agent entry, `agent` is `undefined` and the child process ref is silently dropped. This is harmless (process will be GC'd), but worth noting.
-2. Uncommitted fix: `AgentProgress.stage` changed from optional (`stage?: string`) to required (`stage: string`) — this is an improvement and should be committed. The current committed code has `stage?` but it's always initialized in `executePipeline`, so no runtime issue.
 
 ### Complexity: PASS
 
@@ -44,10 +43,12 @@
 - [PASS] ensureKill() is always called regardless of timeout
 - [PASS] Warning log emitted when cleanup times out (`log.warn('Cleanup timed out after 5s, forcing kill')`)
 - [PASS] Normal cleanup (settles within 5s) works unchanged
+- [PASS] Timeout timer cleared on success path (`clearTimeout(timeoutId)`)
 - [PASS] Typecheck passes
 
 **T-002: RunningAgent progress fields**
 - [PASS] RunningAgent has progress field with stage, roundType, roundIndex, taskProgress, lastActivityAt
+- [PASS] AgentProgress.stage is required (`stage: string`)
 - [PASS] AgentStatus.activeAgents entries include progress field
 - [PASS] getStatus() returns progress snapshot from RunningAgent (`{ ...a.progress }`)
 - [PASS] WorkflowControllerOptions has optional onProgress callback
@@ -83,8 +84,8 @@
 
 **T-006: Frontend types and API client**
 - [PASS] AgentStatus.activeAgents entries have progress field in types.ts
-- [PASS] api.ts has forceStopIssue(number) method that POSTs to /issues/:number/force-stop
-- [PASS] Typecheck passes (uncommitted fix corrects the return type to `{ ok: boolean; issueNumber: number }`)
+- [PASS] api.ts has forceStopIssue(number) with correct return type `{ ok: boolean; issueNumber: number }`
+- [PASS] Typecheck passes
 
 **T-007: Progress panel and Force Stop UI**
 - [PASS] When agent is running, sidebar shows progress panel instead of Close button
@@ -94,6 +95,7 @@
 - [PASS] Clicking Force Stop shows inline confirmation, no API call on first click
 - [PASS] Clicking confirmation calls api.forceStopIssue and updates UI
 - [PASS] Confirmation auto-resets after 5 seconds
+- [PASS] Click-outside handler resets confirmation state (via `useRef` + `mousedown` listener)
 - [PASS] After successful force stop, issue shows as interrupted with Resume button
 - [PASS] Typecheck passes
 
@@ -103,16 +105,6 @@
 - [PASS] No regressions — 32 test failures are pre-existing
 
 **Minor spec deviations (non-blocking):**
-1. **Web UI spec**: "The display SHALL update periodically (every 10 seconds) to stay current." — The relative time display does NOT have a 10-second refresh timer. It updates only when the `agentStatus` query refetches every 5 seconds (which re-renders the component). This is functionally equivalent since the 5s poll already causes re-render, but strictly the spec called for a dedicated 10s timer. Since the 5s polling causes more frequent updates than the spec's 10s requirement, this is a net improvement over spec.
+1. **Web UI spec**: "The display SHALL update periodically (every 10 seconds) to stay current." — The relative time display does NOT have a dedicated 10-second refresh timer. It updates only when the `agentStatus` query refetches every 5 seconds (which re-renders the component). Since the 5s polling causes more frequent updates than the spec's 10s requirement, this is a net improvement over spec.
 
-2. **Web UI spec**: "Activity 5 seconds ago → shows 'just now'" — The `formatRelativeTime` function uses `< 5` threshold, meaning exactly 5 seconds shows "5s ago" not "just now". The spec scenario says "WHEN lastActivityAt was 5 seconds ago, THEN the display shows 'just now'". This is an off-by-one boundary: should be `<= 5` or `< 10` to match the spec scenario. Very minor.
-
-## Fix Suggestions
-
-1. **packages/cli/web/src/components/IssueDetailPage.tsx:32** — Change `if (seconds < 5)` to `if (seconds <= 5)` to match spec scenario "5 seconds ago → just now".
-
-2. **packages/cli/web/src/lib/api.ts:174** — Commit the uncommitted fix that corrects `forceStopIssue` return type from `{ issue: Issue; message: string }` to `{ ok: boolean; issueNumber: number }`.
-
-3. **packages/cli/src/services/agent-runner-service.ts:21** — Commit the uncommitted fix that makes `AgentProgress.stage` required (`stage: string`) instead of optional.
-
-4. **No new tests** — Consider adding test coverage for `forceStop()` idempotency, the force-stop API route (404/409/200), and cleanup timeout behavior in a follow-up.
+2. **Web UI spec**: "Activity 5 seconds ago → shows 'just now'" — The `formatRelativeTime` function uses `< 5` threshold, meaning exactly 5 seconds shows "5s ago" not "just now". Should be `<= 5` to match the spec scenario. Very minor boundary issue.

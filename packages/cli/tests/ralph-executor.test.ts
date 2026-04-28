@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { runRalphLoop, sortTasksByOrder, getOrderValue, readTasks, findNextPendingTask, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS, setAcpSessionRunner, resetAcpSessionRunner } from '../src/openspec/ralph-executor';
+import { runRalphLoop, sortTasksByOrder, getOrderValue, readTasks, findNextPendingTask, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS, setAcpSessionRunner, resetAcpSessionRunner, validateTaskDependencies } from '../src/openspec/ralph-executor';
 import { truncateAgentText } from '../src/agent-runtime/acp-session';
 import type { OpenSpecChange } from '../src/openspec/detector';
 
@@ -597,7 +597,7 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
     };
   }
 
-  it('auto-skipped task does not increment failed counter', async () => {
+  it('auto-skipped task increments failed and skipped counters', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({
       success: false,
       error: 'Timed out after 1800000ms',
@@ -611,8 +611,9 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
 
     const result = await runRalphLoop(change, context, { maxRetries: 0 });
 
-    expect(result.failed).toBe(0);
-    expect(result.success).toBe(true);
+    expect(result.failed).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.success).toBe(false);
     expect(result.taskResults).toHaveLength(1);
     expect(result.taskResults[0].status).toBe('skipped');
   });
@@ -764,5 +765,308 @@ describe('v4 bug fix: stage timeout calculation', () => {
     for (const t of capturedTimeouts) {
       expect(t).toBe(30 * 60 * 1000);
     }
+  });
+});
+
+describe('validateTaskDependencies', () => {
+  it('valid dependency graph passes validation', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: [] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+      { id: 'T-003', order: 3, title: 'C', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+    ];
+    const result = validateTaskDependencies(tasks);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('unknown task ID in dependsOn fails validation', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-999'] },
+    ];
+    const result = validateTaskDependencies(tasks);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('T-999') && e.includes('does not exist'))).toBe(true);
+  });
+
+  it('circular dependency detected', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+    ];
+    const result = validateTaskDependencies(tasks);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.toLowerCase().includes('circular'))).toBe(true);
+  });
+
+  it('forward dependency detected (dependsOn references higher-order task)', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: [] },
+    ];
+    const result = validateTaskDependencies(tasks);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('strictly lower order'))).toBe(true);
+  });
+
+  it('empty dependsOn is valid', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: [] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0 },
+    ];
+    const result = validateTaskDependencies(tasks);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('multi-level dependency chain passes', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: [] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+      { id: 'T-003', order: 3, title: 'C', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001', 'T-002'] },
+      { id: 'T-004', order: 4, title: 'D', description: 'd', passes: false, attempts: 0, dependsOn: ['T-003'] },
+    ];
+    const result = validateTaskDependencies(tasks);
+    expect(result.valid).toBe(true);
+  });
+
+  it('multiple errors are all reported', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-999'] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+      { id: 'T-003', order: 3, title: 'C', description: 'd', passes: false, attempts: 0, dependsOn: ['T-004'] },
+    ];
+    const result = validateTaskDependencies(tasks);
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('findNextPendingTask with dependencies', () => {
+  it('skips task whose dependsOn has not passed', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: [] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+    ];
+    const next = findNextPendingTask(tasks);
+    expect(next?.id).toBe('T-001');
+  });
+
+  it('picks task whose dependsOn has all passed', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: true, attempts: 1, dependsOn: [] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+      { id: 'T-003', order: 3, title: 'C', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001', 'T-002'] },
+    ];
+    const next = findNextPendingTask(tasks);
+    expect(next?.id).toBe('T-002');
+  });
+
+  it('among multiple ready tasks, picks lowest order', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: true, attempts: 1, dependsOn: [] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: [] },
+      { id: 'T-003', order: 3, title: 'C', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+    ];
+    const next = findNextPendingTask(tasks);
+    expect(next?.id).toBe('T-002');
+  });
+
+  it('returns null when all pending tasks are blocked (deadlock)', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+    ];
+    const next = findNextPendingTask(tasks);
+    expect(next).toBeNull();
+  });
+
+  it('task with empty dependsOn is always ready', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0 },
+    ];
+    const next = findNextPendingTask(tasks);
+    expect(next?.id).toBe('T-001');
+  });
+
+  it('skips task with partially met dependsOn', () => {
+    const tasks = [
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: true, attempts: 1 },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0 },
+      { id: 'T-003', order: 3, title: 'C', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001', 'T-002'] },
+    ];
+    const next = findNextPendingTask(tasks);
+    expect(next?.id).toBe('T-002');
+  });
+});
+
+describe('runRalphLoop dependency integration', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dep-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    resetAcpSessionRunner();
+  });
+
+  function createChangeWithTasks(tasks: any[]): OpenSpecChange {
+    const changeDir = path.join(tempDir, 'openspec', 'changes', '42-test');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.mkdirSync(path.join(changeDir, 'session-memories'), { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks }));
+    fs.writeFileSync(path.join(changeDir, 'proposal.md'), '# Test');
+    fs.writeFileSync(path.join(changeDir, 'design.md'), '# Design');
+    return {
+      changePath: changeDir,
+      tasksPath: path.join(changeDir, 'tasks.json'),
+      sessionMemoriesPath: path.join(changeDir, 'session-memories'),
+      proposalPath: path.join(changeDir, 'proposal.md'),
+      designPath: path.join(changeDir, 'design.md'),
+      specsPath: path.join(changeDir, 'specs'),
+    };
+  }
+
+  it('rejects invalid graph on load with failed result', async () => {
+    setAcpSessionRunner(vi.fn().mockResolvedValue({ success: true, text: 'done' }));
+
+    const change = createChangeWithTasks([
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-999'] },
+    ]);
+    const context = { worktreePath: tempDir, projectPath: tempDir };
+
+    const result = await runRalphLoop(change, context);
+
+    expect(result.success).toBe(false);
+    expect(result.failed).toBe(1);
+    expect(result.completed).toBe(0);
+    expect(result.pauseReason).toContain('validation failed');
+  });
+
+  it('executes tasks respecting dependency order', async () => {
+    const executionOrder: string[] = [];
+    setAcpSessionRunner(vi.fn().mockImplementation((opts: any) => {
+      executionOrder.push(opts.taskId);
+      return Promise.resolve({ success: true, text: 'done' });
+    }));
+
+    const change = createChangeWithTasks([
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: [] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+      { id: 'T-003', order: 3, title: 'C', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+    ]);
+    const context = { worktreePath: tempDir, projectPath: tempDir };
+
+    const result = await runRalphLoop(change, context, { maxRetries: 0 });
+
+    expect(result.success).toBe(true);
+    expect(executionOrder).toEqual(['T-001', 'T-002', 'T-003']);
+  });
+
+  it('circular dependency rejected at validation, never enters loop', async () => {
+    const sessionRunner = vi.fn().mockResolvedValue({ success: true, text: 'done' });
+    setAcpSessionRunner(sessionRunner);
+
+    const change = createChangeWithTasks([
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+    ]);
+    const context = { worktreePath: tempDir, projectPath: tempDir };
+
+    const result = await runRalphLoop(change, context);
+
+    expect(result.success).toBe(false);
+    expect(result.failed).toBe(2);
+    expect(result.pauseReason).toContain('validation failed');
+    expect(sessionRunner).not.toHaveBeenCalled();
+  });
+
+  it('handles valid tasks with no dependencies (backward compatible)', async () => {
+    const executionOrder: string[] = [];
+    setAcpSessionRunner(vi.fn().mockImplementation((opts: any) => {
+      executionOrder.push(opts.taskId);
+      return Promise.resolve({ success: true, text: 'done' });
+    }));
+
+    const change = createChangeWithTasks([
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0 },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0 },
+    ]);
+    const context = { worktreePath: tempDir, projectPath: tempDir };
+
+    const result = await runRalphLoop(change, context, { maxRetries: 0 });
+
+    expect(result.success).toBe(true);
+    expect(executionOrder).toEqual(['T-001', 'T-002']);
+  });
+
+  it('skips already-passed task and picks next ready by dependency', async () => {
+    const executionOrder: string[] = [];
+    setAcpSessionRunner(vi.fn().mockImplementation((opts: any) => {
+      executionOrder.push(opts.taskId);
+      return Promise.resolve({ success: true, text: 'done' });
+    }));
+
+    const change = createChangeWithTasks([
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: true, attempts: 1, dependsOn: [] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+      { id: 'T-003', order: 3, title: 'C', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+    ]);
+    const context = { worktreePath: tempDir, projectPath: tempDir };
+
+    const result = await runRalphLoop(change, context, { maxRetries: 0 });
+
+    expect(result.success).toBe(true);
+    expect(executionOrder).toEqual(['T-002', 'T-003']);
+    expect(result.completed).toBe(2);
+  });
+
+  it('onLoopComplete is called on validation failure', async () => {
+    setAcpSessionRunner(vi.fn().mockResolvedValue({ success: true, text: 'done' }));
+
+    const change = createChangeWithTasks([
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-999'] },
+    ]);
+    const onLoopComplete = vi.fn();
+    const context = { worktreePath: tempDir, projectPath: tempDir, onLoopComplete };
+
+    await runRalphLoop(change, context);
+
+    expect(onLoopComplete).toHaveBeenCalledTimes(1);
+    const loopResult = onLoopComplete.mock.calls[0][0];
+    expect(loopResult.success).toBe(false);
+    expect(loopResult.pauseReason).toContain('validation failed');
+  });
+
+  it('circular dependency in tasks.json causes validation failure', async () => {
+    setAcpSessionRunner(vi.fn().mockResolvedValue({ success: true, text: 'done' }));
+
+    const change = createChangeWithTasks([
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: ['T-001'] },
+    ]);
+    const context = { worktreePath: tempDir, projectPath: tempDir };
+
+    const result = await runRalphLoop(change, context);
+
+    expect(result.success).toBe(false);
+    expect(result.pauseReason).toContain('validation failed');
+  });
+
+  it('forward dependency in tasks.json causes validation failure', async () => {
+    setAcpSessionRunner(vi.fn().mockResolvedValue({ success: true, text: 'done' }));
+
+    const change = createChangeWithTasks([
+      { id: 'T-001', order: 1, title: 'A', description: 'd', passes: false, attempts: 0, dependsOn: ['T-002'] },
+      { id: 'T-002', order: 2, title: 'B', description: 'd', passes: false, attempts: 0, dependsOn: [] },
+    ]);
+    const context = { worktreePath: tempDir, projectPath: tempDir };
+
+    const result = await runRalphLoop(change, context);
+
+    expect(result.success).toBe(false);
+    expect(result.pauseReason).toContain('validation failed');
   });
 });

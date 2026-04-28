@@ -18,7 +18,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "Self-contained change, no dependencies. Touches only the cleanup() closure inside createAcpConnection/runAcpSession.",
       "attempts": 1,
       "order": 999999,
@@ -42,7 +42,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "Backend types and plumbing only. WorkflowController update sites are in T-003.",
       "attempts": 1,
       "order": 999999,
@@ -68,7 +68,7 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Depends on T-002 for the onProgress callback type in WorkflowControllerOptions.",
       "attempts": 1,
       "order": 999999,
@@ -97,7 +97,7 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Depends on T-002 for RunningAgent interface. Key challenge: acp-session.ts creates the ChildProcess internally and doesn't expose it. Need to add a callback (onProcessSpawned) to AcpConnectionOptions or modify createAcpConnection/runAcpSession to return the proc ref. This touches acp-session.ts, workflow-controller.ts, and agent-runner-service.ts.",
       "attempts": 3,
       "order": 999999,
@@ -123,7 +123,7 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Depends on T-004 for forceStop method on AgentRunnerService.",
       "attempts": 1,
       "order": 999999,
@@ -147,7 +147,7 @@
         "T-002",
         "T-004"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Frontend type changes only. Depends on T-002 for progress type shape and T-004 for forceStop return type. UI component is T-007.",
       "attempts": 1,
       "order": 999999,
@@ -176,7 +176,7 @@
       "dependsOn": [
         "T-006"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "useAgentStatus already polls at 5s so no polling change needed. Relative time helper can be a simple function, no library needed.",
       "attempts": 1,
       "order": 999999,
@@ -199,7 +199,7 @@
       "dependsOn": [
         "T-007"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Final verification task. Run from packages/cli directory.",
       "attempts": 1,
       "order": 999999,
