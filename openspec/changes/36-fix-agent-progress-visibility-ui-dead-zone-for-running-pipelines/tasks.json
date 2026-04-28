@@ -199,9 +199,9 @@
       "dependsOn": [
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Final verification task. Run from packages/cli directory.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
