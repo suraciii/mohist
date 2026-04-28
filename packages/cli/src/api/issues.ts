@@ -1919,6 +1919,74 @@ export function createIssueRoutes(
 
   const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Review, Stage.Done];
 
+  async function handleReviewRebase(issue: Issue, project: { name: string; baseBranch: string }, projectId: string, number: number): Promise<boolean | undefined> {
+    eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'verifying' });
+    try {
+      const worktreePath = worktreeManager!.getPath(project.name, issue.number);
+      if (worktreePath) {
+        await execFileAsync('npm', ['run', 'build'], {
+          cwd: worktreePath,
+          timeout: 5 * 60 * 1000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  function handlePlanRebase(issue: Issue, project: { name: string }, projectId: string, number: number): void {
+    if (!agentRunner) return;
+    if (!agentRunner.hasPendingGate(number)) {
+      log.info('Skipping re-self-review injection: no pending gate for issue', { issueNumber: number });
+      return;
+    }
+    const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
+    const worktreePath = worktreeManager!.getPath(project.name, issue.number) || process.cwd();
+    issueService.createComment(issue.id, rebaseMessage);
+    const acpOptions: AcpConnectionOptions = {
+      cwd: worktreePath,
+      issueId: issue.id,
+      projectId,
+      workflowLogRepo,
+      coderSessionRepo,
+      eventBus,
+      issueNumber: issue.number,
+      opencodeBinPath,
+    };
+    agentRunner.resumePipeline(
+      issue,
+      projectId,
+      stateManager.getIssueRepo(),
+      worktreePath,
+      acpOptions,
+      (issueId, status) => issueService.setStatus(issueId, status),
+    );
+  }
+
+  function handleBuildRebase(issue: Issue, project: { name: string }, number: number): void {
+    if (!checkpointRepo) return;
+    const changeDir = findChangeDir(
+      worktreeManager!.getPath(project.name, issue.number) || process.cwd(),
+      issue.number,
+    );
+    if (!changeDir) return;
+    try {
+      const tasksPath = path.join(changeDir, 'tasks.json');
+      const tasksContent = fs.readFileSync(tasksPath, 'utf-8');
+      const tasksFile = JSON.parse(tasksContent);
+      for (const task of tasksFile.tasks) {
+        task.passes = false;
+        task.error = null;
+        task.attempts = 0;
+      }
+      fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
+      checkpointRepo.delete(issue.number, 'build');
+    } catch (err) {
+      log.warn('Failed to clear build checkpoint after rebase', { issueNumber: number, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   app.post('/:number/rebase', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
@@ -2003,76 +2071,17 @@ export function createIssueRoutes(
 
       let buildPassed: boolean | undefined;
       if (issue.stage === Stage.Review) {
-        eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'verifying' });
-        try {
-          const worktreePath = worktreeManager.getPath(project.name, issue.number);
-          if (worktreePath) {
-            await execFileAsync('npm', ['run', 'build'], {
-              cwd: worktreePath,
-              timeout: 5 * 60 * 1000,
-              maxBuffer: 10 * 1024 * 1024,
-            });
-            buildPassed = true;
-          }
-        } catch {
-          buildPassed = false;
-        }
+        buildPassed = await handleReviewRebase(issue, project, projectId, number);
       }
 
       eventBus.emit('rebase_completed', { issueId: issue.id, projectId, issueNumber: number, rebased: true });
 
-      if (issue.stage === Stage.Plan && agentRunner) {
-        if (agentRunner.hasPendingGate(number)) {
-          const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
-          const worktreePath = worktreeManager.getPath(project.name, issue.number) || process.cwd();
-
-          issueService.createComment(issue.id, rebaseMessage);
-
-          const acpOptions: AcpConnectionOptions = {
-            cwd: worktreePath,
-            issueId: issue.id,
-            projectId,
-            workflowLogRepo,
-            coderSessionRepo,
-            eventBus,
-            issueNumber: issue.number,
-            opencodeBinPath,
-          };
-
-          agentRunner.resumePipeline(
-            issue,
-            projectId,
-            stateManager.getIssueRepo(),
-            worktreePath,
-            acpOptions,
-            (issueId, status) => issueService.setStatus(issueId, status),
-          );
-        } else {
-          log.info('Skipping re-self-review injection: no pending gate for issue', { issueNumber: number });
-        }
+      if (issue.stage === Stage.Plan) {
+        handlePlanRebase(issue, project, projectId, number);
       }
 
-      if (issue.stage === Stage.Build && checkpointRepo) {
-        const changeDir = findChangeDir(
-          worktreeManager.getPath(project.name, issue.number) || process.cwd(),
-          issue.number,
-        );
-        if (changeDir) {
-          try {
-            const tasksPath = path.join(changeDir, 'tasks.json');
-            const tasksContent = fs.readFileSync(tasksPath, 'utf-8');
-            const tasksFile = JSON.parse(tasksContent);
-            for (const task of tasksFile.tasks) {
-              task.passes = false;
-              task.error = null;
-              task.attempts = 0;
-            }
-            fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
-            checkpointRepo.delete(issue.number, 'build');
-          } catch (err) {
-            log.warn('Failed to clear build checkpoint after rebase', { issueNumber: number, error: err instanceof Error ? err.message : String(err) });
-          }
-        }
+      if (issue.stage === Stage.Build) {
+        handleBuildRebase(issue, project, number);
       }
 
       const response: ApiResponse = {
