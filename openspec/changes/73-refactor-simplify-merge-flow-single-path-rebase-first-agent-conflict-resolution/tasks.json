@@ -134,9 +134,9 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "After this task, the only merge path is MergeQueue with rebase-first. The WorkflowController should have no knowledge of MergeState.Resolving — conflict resolution happens entirely within MergeQueue + resolveConflicts callback.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
