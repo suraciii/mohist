@@ -227,7 +227,7 @@ describe('MergeQueue', () => {
 
       expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledWith(
         PROJECT_PATH, PROJECT_NAME, issue.number, BASE_BRANCH,
-        { abortOnConflict: true },
+        { abortOnConflict: false },
       );
       expect(worktreeManager.mergeBack).toHaveBeenCalled();
       expect(completedEvents).toHaveLength(1);
@@ -264,14 +264,79 @@ describe('MergeQueue', () => {
     });
   });
 
-  describe('rebase conflict → conflict state', () => {
-    it('should set conflict state when rebase has conflicts', async () => {
+  describe('rebase conflict → agent resolution', () => {
+    it('should resolve conflicts via agent then continue rebase', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      let ffCallCount = 0;
+      worktreeManager.canFastForward = vi.fn().mockImplementation(async () => {
+        ffCallCount++;
+        return ffCallCount > 1;
+      });
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+        success: false,
+        conflicts: ['src/foo.ts', 'src/bar.ts'],
+      });
+      resolveConflictsMock.mockResolvedValue({ success: true });
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
+
+      const completedEvents: any[] = [];
+      eventBus.on('merge_completed', (data) => completedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(resolveConflictsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ issueNumber: issue.number }),
+        WORKTREE_PATH,
+        ['src/foo.ts', 'src/bar.ts'],
+      );
+      expect(worktreeManager.rebaseContinue).toHaveBeenCalled();
+      expect(completedEvents).toHaveLength(1);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
+    });
+
+    it('should set conflict state when agent resolution fails', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
 
       worktreeManager.canFastForward = vi.fn().mockResolvedValue(false);
       worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+        success: false,
+        conflicts: ['src/foo.ts'],
+      });
+      resolveConflictsMock.mockResolvedValue({ success: false, error: 'Agent failed' });
+
+      const failedEvents: any[] = [];
+      eventBus.on('merge_failed', (data) => failedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(resolveConflictsMock).toHaveBeenCalled();
+      expect(worktreeManager.abortRebase).toHaveBeenCalled();
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('conflict');
+      expect(failedEvents).toHaveLength(1);
+    });
+
+    it('should set conflict state when rebase continue fails after agent resolution', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      worktreeManager.canFastForward = vi.fn().mockResolvedValue(false);
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+        success: false,
+        conflicts: ['src/foo.ts'],
+      });
+      resolveConflictsMock.mockResolvedValue({ success: true });
+      worktreeManager.rebaseContinue = vi.fn().mockResolvedValue({
         success: false,
         conflicts: ['src/foo.ts', 'src/bar.ts'],
       });
@@ -282,7 +347,8 @@ describe('MergeQueue', () => {
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
-      expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledTimes(1);
+      expect(worktreeManager.rebaseContinue).toHaveBeenCalled();
+      expect(worktreeManager.abortRebase).toHaveBeenCalled();
       expect(issueRepo.findById(issue.id)?.mergeState).toBe('conflict');
       expect(failedEvents).toHaveLength(1);
     });

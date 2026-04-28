@@ -28,6 +28,7 @@ interface MergeQueueDeps {
   eventBus: EventBus;
   issueRepo: IssueRepo;
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
+  resolveConflicts: (entry: MergeEntry, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>;
 }
 
 export class MergeQueue {
@@ -214,12 +215,12 @@ export class MergeQueue {
         project.name,
         entry.issueNumber,
         project.baseBranch,
-        { abortOnConflict: true },
+        { abortOnConflict: false },
       );
 
       if (!rebaseResult.success) {
-        this.handleFailure(entry, `Rebase conflicts: ${rebaseResult.conflicts.join(', ')}`, MergeState.Conflict);
-        return;
+        const resolved = await this.handleConflictResolution(entry, project, rebaseResult.conflicts);
+        if (!resolved) return;
       }
 
       rebased = true;
@@ -311,6 +312,79 @@ export class MergeQueue {
     });
 
     log.info('Merge completed successfully', { issueNumber: entry.issueNumber });
+  }
+
+  private async handleConflictResolution(
+    entry: MergeEntry,
+    project: { path: string; name: string; baseBranch: string },
+    conflictFiles: string[],
+  ): Promise<boolean> {
+    const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
+    if (!worktreePath) {
+      this.handleFailure(entry, 'Worktree not found for conflict resolution', MergeState.Conflict);
+      return false;
+    }
+
+    entry.mergeState = MergeState.Resolving;
+    entry.conflictingFiles = conflictFiles;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Resolving);
+
+    this.deps.eventBus.emit('agent_conflict_resolution_started', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
+      issueNumber: entry.issueNumber,
+      conflictFiles,
+    });
+
+    log.info('Delegating conflict resolution to agent', {
+      issueNumber: entry.issueNumber,
+      conflictFiles,
+    });
+
+    const result = await this.deps.resolveConflicts(entry, worktreePath, conflictFiles);
+
+    if (!result.success) {
+      this.handleFailure(entry, result.error || 'Agent conflict resolution failed', MergeState.Conflict);
+      try {
+        await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
+      } catch (err) {
+        log.warn('Failed to abort rebase after failed resolution', {
+          issueNumber: entry.issueNumber,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return false;
+    }
+
+    const continueResult = await this.deps.worktreeManager.rebaseContinue(
+      project.name,
+      entry.issueNumber,
+    );
+
+    if (!continueResult.success) {
+      this.handleFailure(entry, 'Rebase continue failed after agent resolution', MergeState.Conflict);
+      try {
+        await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
+      } catch (err) {
+        log.warn('Failed to abort rebase after failed continue', {
+          issueNumber: entry.issueNumber,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return false;
+    }
+
+    this.deps.eventBus.emit('agent_conflict_resolution_completed', {
+      issueId: entry.issueId,
+      projectId: entry.projectId,
+      issueNumber: entry.issueNumber,
+    });
+
+    log.info('Agent conflict resolution succeeded, rebase continued', {
+      issueNumber: entry.issueNumber,
+    });
+
+    return true;
   }
 
   private handleFailure(
