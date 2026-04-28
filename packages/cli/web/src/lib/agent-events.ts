@@ -31,4 +31,6 @@ export const AGENT_DETAIL_EVENTS: AgentEventName[] = [
   'ralph_loop_progress',
   'plan_round_start',
   'plan_session_update',
+  'coder_session_started',
+  'coder_session_completed',
 ]
