@@ -104,9 +104,9 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "updateTaskInList 签名需改为接受 durations: number[] | undefined，逻辑为 task.durations = [...(task.durations ?? []), ...(durations ?? [])]",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
