@@ -31,6 +31,7 @@ const ALL_EVENT_TYPES: EventName[] = [
   'agent_conflict_resolution_started',
   'agent_conflict_resolution_completed',
   'agent_conflict_resolution_failed',
+  'coder_recovery_status',
   'coder_session_started',
   'coder_session_completed',
 ];
