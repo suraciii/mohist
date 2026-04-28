@@ -147,9 +147,9 @@
         "T-002",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Frontend type changes only. Depends on T-002 for progress type shape and T-004 for forceStop return type. UI component is T-007.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
