@@ -219,12 +219,38 @@ export class WorktreeManager {
     }
   }
 
-  async rebaseOntoMaster(
+  async canFastForward(
     projectPath: string,
     projectName: string,
     issueNumber: number,
     baseBranch: string = 'main'
+  ): Promise<boolean> {
+    const branch = getBranchName(issueNumber);
+
+    if (!this.exists(projectName, issueNumber)) {
+      return false;
+    }
+
+    try {
+      await execFileAsync(
+        'git',
+        ['merge-base', '--is-ancestor', `origin/${baseBranch}`, branch],
+        { cwd: projectPath }
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async rebaseOntoMaster(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main',
+    options?: { abortOnConflict?: boolean }
   ): Promise<RebaseResult> {
+    const abortOnConflict = options?.abortOnConflict !== false;
     const worktreePath = getWorktreePath(projectName, issueNumber);
     const branch = getBranchName(issueNumber);
 
@@ -263,7 +289,17 @@ export class WorktreeManager {
       return { success: true, conflicts: [] };
     } catch (err: any) {
       const conflicts = await this.getConflictingFiles(worktreePath);
-      log.warn('Rebase conflicts detected', { issueNumber, conflicts });
+      log.warn('Rebase conflicts detected', { issueNumber, conflicts, abortOnConflict });
+
+      if (abortOnConflict) {
+        try {
+          await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
+          log.info('Rebase aborted due to conflicts', { issueNumber });
+        } catch (abortErr) {
+          log.warn('Failed to abort rebase', { issueNumber, error: abortErr instanceof Error ? abortErr.message : String(abortErr) });
+        }
+      }
+
       return { success: false, conflicts };
     }
   }
@@ -277,7 +313,7 @@ export class WorktreeManager {
     log.info('Rebase aborted', { issueNumber });
   }
 
-  async continueRebase(
+  async rebaseContinue(
     projectName: string,
     issueNumber: number
   ): Promise<RebaseResult> {
