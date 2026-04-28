@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add task list panel with real-time SSE progress to Issue Detail page",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,11 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow existing patterns in api.ts (request<T> helper) and useQueries.ts (useQuery with enabled guard)."
+      "passes": true,
+      "notes": "Follow existing patterns in api.ts (request<T> helper) and useQueries.ts (useQuery with enabled guard).",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -43,9 +45,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useTaskProgress.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Follow the onAgentEvent + useEffect cleanup pattern from useSessionTimeline.ts. Import AgentDetailEventMap from types for event payload types."
+      "notes": "Follow the onAgentEvent + useEffect cleanup pattern from useSessionTimeline.ts. Import AgentDetailEventMap from types for event payload types.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -68,9 +75,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/TaskList.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Pure presentational component, no hooks or data fetching. Props interface should accept Task[] with dependsOn field."
+      "notes": "Pure presentational component, no hooks or data fetching. Props interface should accept Task[] with dependsOn field.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -92,9 +104,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-002", "T-003"],
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Insert TaskList after the Description card (around line 259) and before the Comments card. Merge tasks by ID: build-status provides id/title/passes/attempts/error, tasks endpoint adds dependsOn."
+      "notes": "Insert TaskList after the Description card (around line 259) and before the Comments card. Merge tasks by ID: build-status provides id/title/passes/attempts/error, tasks endpoint adds dependsOn.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
