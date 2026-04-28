@@ -144,11 +144,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-001 for the event type registration. Use the existing onAgentEvent pattern from useSessionTimeline for coder_text_chunk as a template. The recovery status indicator should appear above the round-based conversation display.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        377244
+      ]
     },
     {
       "id": "T-006",
