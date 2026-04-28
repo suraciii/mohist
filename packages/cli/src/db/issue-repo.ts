@@ -40,7 +40,7 @@ function rowToIssue(row: IssueRow): Issue {
     id: row.id,
     number: row.number,
     title: row.title,
-    body: row.body || undefined,
+    body: row.body ? (typeof row.body === 'string' ? row.body : Buffer.from(row.body).toString('utf-8')) : undefined,
     stage: row.stage as Stage,
     status: row.status as IssueStatus,
     projectId: row.project_id,

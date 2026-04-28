@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import * as path from 'path';
 import { promisify } from 'util';
 import { WorktreeManager, smartFetch } from './worktree-manager';
 import { EventBus } from '../services/event-bus';
@@ -247,9 +248,29 @@ export class MergeQueue {
       }
     }
 
-    log.info('Branch ready, performing fast-forward merge', {
+    log.info('Branch ready, running build verification before merge', {
       issueNumber: entry.issueNumber,
       canFF,
+    });
+
+    const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
+    if (!worktreePath) {
+      this.handleFailure(entry, 'Worktree not found for build verification');
+      return;
+    }
+
+    const buildOk = await this.runBuildVerification(worktreePath);
+    if (!buildOk) {
+      log.warn('Build verification failed before merge', {
+        issueNumber: entry.issueNumber,
+        worktreePath,
+      });
+      this.handleFailure(entry, 'Build verification failed (npm run build)', MergeState.BuildFailed);
+      return;
+    }
+
+    log.info('Build verification passed, performing fast-forward merge', {
+      issueNumber: entry.issueNumber,
     });
 
     entry.mergeState = MergeState.Merging;
@@ -268,22 +289,7 @@ export class MergeQueue {
       return;
     }
 
-    log.info('Fast-forward merge succeeded, running build verification', {
-      issueNumber: entry.issueNumber,
-      projectPath: project.path,
-    });
-
-    const buildOk = await this.runBuildVerification(project.path);
-    if (!buildOk) {
-      log.warn('Build verification failed, rolling back merge', {
-        issueNumber: entry.issueNumber,
-      });
-      await this.rollbackMerge(project.path);
-      this.handleFailure(entry, 'Build verification failed (npm run build)');
-      return;
-    }
-
-    log.info('Build verification passed, cleaning up worktree', {
+    log.info('Fast-forward merge succeeded, cleaning up worktree', {
       issueNumber: entry.issueNumber,
     });
 
@@ -430,10 +436,11 @@ export class MergeQueue {
     });
   }
 
-  private async runBuildVerification(projectPath: string): Promise<boolean> {
+  private async runBuildVerification(worktreePath: string): Promise<boolean> {
+    const buildPath = path.join(worktreePath, 'packages', 'cli');
     try {
       const { stdout, stderr } = await execFileAsync('npm', ['run', 'build'], {
-        cwd: projectPath,
+        cwd: buildPath,
         timeout: BUILD_TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,
       });
@@ -452,18 +459,4 @@ export class MergeQueue {
     }
   }
 
-  private async rollbackMerge(projectPath: string): Promise<void> {
-    try {
-      await execFileAsync('git', ['reset', '--hard', 'HEAD~1'], {
-        cwd: projectPath,
-        timeout: 30000,
-      });
-      log.info('Rolled back merge commit', { projectPath });
-    } catch (err) {
-      log.error('Failed to rollback merge', {
-        projectPath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
 }
