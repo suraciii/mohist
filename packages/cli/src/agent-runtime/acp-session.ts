@@ -237,6 +237,10 @@ async function runPromptWithHangRecovery(
       }
 
       if (result !== 'hang') {
+        if (recoveryAttemptCount > 0) {
+          writeSessionLog(workflowLogRepo, issueId, 'acp_session_recovery_succeeded', { sessionId, attempt: recoveryAttemptCount });
+          emitRecoveryStatus('recovered', recoveryAttemptCount);
+        }
         return {
           text: '',
           success: true,
@@ -244,7 +248,7 @@ async function runPromptWithHangRecovery(
         };
       }
 
-      const idleMs = Date.now() - getLastEventTime() + hangIdleMs;
+      const idleMs = Date.now() - getLastEventTime();
       const attempt = recoveryAttemptCount + 1;
 
       log.warn('ACP session hang detected, starting recovery', { sessionId, idleMs, attempt });
@@ -720,7 +724,9 @@ export async function runAcpSession(
           log.error('Failed to update coder_session status', { error: err instanceof Error ? err.message : String(err) });
         }
       }
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration: Date.now() - sessionStartTime, timestamp: new Date().toISOString() });
+      if (!promptResult.error?.includes('[HANG_UNRECOVERABLE]')) {
+        writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration: Date.now() - sessionStartTime, timestamp: new Date().toISOString() });
+      }
       return { text: agentText, success: false, error: promptResult.error, wipCommitted: promptResult.wipCommitted };
     }
 
@@ -1243,6 +1249,10 @@ export async function createAcpConnection(
           } catch {
             // ignore
           }
+        }
+        if (result.error?.includes('Timed out')) {
+          const duration = Date.now() - connectionStartTime;
+          writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
         }
         return {
           text: agentText.slice(roundStartIndex),

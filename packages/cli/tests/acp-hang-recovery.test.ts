@@ -201,4 +201,31 @@ describe('ACP hang recovery', () => {
     expect(getRecoveryEvents()).toHaveLength(0);
     expect(getWorkflowLogEvents('acp_session_hang_detected')).toHaveLength(0);
   });
+
+  it('should emit recovered SSE and write recovery_succeeded log when recovery succeeds', async () => {
+    let callIdx = 0;
+    mockPromptFn.mockImplementation(() => {
+      callIdx++;
+      if (callIdx === 1) return new Promise(() => {});
+      return Promise.resolve(undefined);
+    });
+    mockCancelFn.mockResolvedValue(undefined);
+
+    const sessionPromise = runAcpSession(makeSessionOptions());
+
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(HANG_CHECK_INTERVAL_MS + 5_000);
+
+    const result = await sessionPromise;
+    expect(result.success).toBe(true);
+
+    const recoveredSse = getRecoveryEvents('recovered');
+    expect(recoveredSse.length).toBe(1);
+    expect(recoveredSse[0][1]).toMatchObject({ status: 'recovered', attempt: 1 });
+
+    const succeededLogs = getWorkflowLogEvents('acp_session_recovery_succeeded');
+    expect(succeededLogs.length).toBe(1);
+    const logData = (succeededLogs[0] as any[])[3] as Record<string, unknown>;
+    expect(logData.attempt).toBe(1);
+  });
 });
