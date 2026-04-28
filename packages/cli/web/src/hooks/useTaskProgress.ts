@@ -14,17 +14,20 @@ export function useTaskProgress(issueNumber: number) {
       onAgentEvent('ralph_task_update', (event) => {
         if (event.issueId !== issueId) return
 
-        queryClient.setQueryData<Task[]>(['issues', issueNumber, 'tasks'], (old) => {
+        queryClient.setQueryData<{ version: number; tasks: Task[] }>(['issues', issueNumber, 'tasks'], (old) => {
           if (!old) return old
-          return old.map((task) => {
-            if (task.id !== event.taskId) return task
-            return {
-              ...task,
-              passes: event.status === 'completed',
-              error: event.status === 'failed' ? event.error ?? null : null,
-              attempts: event.attempt ?? task.attempts,
-            }
-          })
+          return {
+            ...old,
+            tasks: old.tasks.map((task) => {
+              if (task.id !== event.taskId) return task
+              return {
+                ...task,
+                passes: event.status === 'completed',
+                error: event.status === 'failed' ? event.error ?? null : task.error,
+                attempts: event.attempt ?? task.attempts,
+              }
+            }),
+          }
         })
 
         queryClient.setQueryData<BuildStatus>(['issues', issueNumber, 'build-status'], (old) => {
@@ -34,7 +37,7 @@ export function useTaskProgress(issueNumber: number) {
             return {
               ...task,
               passes: event.status === 'completed',
-              error: event.status === 'failed' ? event.error ?? null : null,
+              error: event.status === 'failed' ? event.error ?? null : task.error,
               attempts: event.attempt ?? task.attempts,
             }
           })

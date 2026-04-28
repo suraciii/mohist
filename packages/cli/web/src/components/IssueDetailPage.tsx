@@ -64,16 +64,17 @@ export function IssueDetailPage() {
   useTaskProgress(issueNumber)
 
   const mergedTasks = (() => {
-    if (!buildStatus?.tasks) return []
-    const depMap = new Map<string, string[]>()
-    if (tasksData?.tasks) {
-      for (const t of tasksData.tasks) {
-        if (t.dependsOn && t.dependsOn.length > 0) depMap.set(t.id, t.dependsOn)
+    const baseTasks = tasksData?.tasks ?? buildStatus?.tasks
+    if (!baseTasks) return []
+    const statusMap = new Map<string, { passes?: boolean; error?: string | null; attempts?: number }>()
+    if (buildStatus?.tasks) {
+      for (const t of buildStatus.tasks) {
+        statusMap.set(t.id, { passes: t.passes, error: t.error, attempts: t.attempts })
       }
     }
-    return buildStatus.tasks.map((t) => {
-      const deps = depMap.get(t.id)
-      return deps ? { ...t, dependsOn: deps } : t
+    return baseTasks.map((t) => {
+      const status = statusMap.get(t.id)
+      return status ? { ...t, ...status } : t
     })
   })()
 
