@@ -176,11 +176,14 @@
         "T-002",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-002 for the failure category code and T-004 for the integrated acp-session code. Add hang_unrecoverable tests to existing ralph-executor.test.ts. Create new acp-hang-recovery.test.ts for the core recovery function tests. Mock ClientSideConnection to simulate hang (no sessionUpdate events for N ms) and recovery (emit events after cancel+prompt).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        767900
+      ]
     }
   ]
 }
