@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Expose rebase capability on issue detail page across workflow stages — API endpoint, SSE events, UI button, and MergeStatePanel rename",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        56163
+      ]
     },
     {
       "id": "T-002",
@@ -46,9 +51,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -67,9 +77,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Follow the same build verify pattern as MergeQueue.processItem()"
+      "notes": "Follow the same build verify pattern as MergeQueue.processItem()",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -86,9 +101,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "checkpointRepo is already injected into createIssueRoutes"
+      "notes": "checkpointRepo is already injected into createIssueRoutes",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -106,9 +126,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "agentRunner and agentSessionMessageRepo are already injected into createIssueRoutes"
+      "notes": "agentRunner and agentSessionMessageRepo are already injected into createIssueRoutes",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -125,9 +150,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useSSE.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -147,7 +177,10 @@
       "output": "packages/cli/web/src/components/MergeStatePanel.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "P0 priority — pure UI label change, no backend dependency"
+      "notes": "P0 priority — pure UI label change, no backend dependency",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -170,9 +203,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-006", "T-007"],
+      "dependsOn": [
+        "T-006",
+        "T-007"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
