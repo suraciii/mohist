@@ -18,6 +18,7 @@ export interface MergeEntry {
   issueId: string;
   mergeState: MergeState;
   message?: string;
+  conflictingFiles?: string[];
   enqueuedAt: number;
 }
 
@@ -53,12 +54,12 @@ export class MergeQueue {
       issueNumber,
       projectId,
       issueId: issue.id,
-      mergeState: 'pending' as MergeState,
+      mergeState: MergeState.Pending,
       enqueuedAt: Date.now(),
     };
 
     this.queue.set(issueNumber, entry);
-    this.deps.issueRepo.setMergeState(issue.id, 'pending');
+    this.deps.issueRepo.setMergeState(issue.id, MergeState.Pending);
 
     const position = this.getPendingCount();
     this.deps.eventBus.emit('merge_queued', {
@@ -80,16 +81,16 @@ export class MergeQueue {
       return false;
     }
 
-    if (entry.mergeState !== 'build-failed' && entry.mergeState !== 'conflict') {
+    if (entry.mergeState !== MergeState.BuildFailed && entry.mergeState !== MergeState.Conflict && entry.mergeState !== MergeState.Blocked) {
       log.warn('retry: invalid state', { issueNumber, mergeState: entry.mergeState });
       return false;
     }
 
-    entry.mergeState = 'pending';
+    entry.mergeState = MergeState.Pending;
     entry.message = undefined;
     entry.enqueuedAt = Date.now();
 
-    this.deps.issueRepo.setMergeState(entry.issueId, 'pending');
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Pending);
 
     log.info('Issue re-enqueued for retry', { issueNumber, projectId: entry.projectId });
 
@@ -104,12 +105,12 @@ export class MergeQueue {
   }
 
   recoverFromDB(): void {
-    const issues = this.deps.issueRepo.findByMergeStates(['pending', 'merging']);
+    const issues = this.deps.issueRepo.findByMergeStates([MergeState.Pending, MergeState.Merging, MergeState.Rebasing, MergeState.Blocked]);
 
     for (const issue of issues) {
       if (this.queue.has(issue.number)) continue;
 
-      const mergeState: MergeState = issue.mergeState === 'merging' ? 'pending' : 'pending';
+      const mergeState: MergeState = issue.mergeState === MergeState.Merging ? MergeState.Pending : MergeState.Pending;
 
       this.deps.issueRepo.setMergeState(issue.id, mergeState);
 
@@ -117,7 +118,7 @@ export class MergeQueue {
         issueNumber: issue.number,
         projectId: issue.projectId,
         issueId: issue.id,
-        mergeState: 'pending',
+        mergeState: MergeState.Pending,
         enqueuedAt: Date.now(),
       };
 
@@ -138,7 +139,7 @@ export class MergeQueue {
   private getPendingCount(): number {
     let count = 0;
     for (const entry of this.queue.values()) {
-      if (entry.mergeState === 'pending') count++;
+      if (entry.mergeState === MergeState.Pending) count++;
     }
     return count;
   }
@@ -167,7 +168,7 @@ export class MergeQueue {
   private pickNext(): MergeEntry | null {
     let earliest: MergeEntry | null = null;
     for (const entry of this.queue.values()) {
-      if (entry.mergeState !== 'pending') continue;
+      if (entry.mergeState !== MergeState.Pending) continue;
       if (!earliest || entry.enqueuedAt < earliest.enqueuedAt) {
         earliest = entry;
       }
@@ -176,8 +177,8 @@ export class MergeQueue {
   }
 
   private async processItem(entry: MergeEntry): Promise<void> {
-    entry.mergeState = 'merging';
-    this.deps.issueRepo.setMergeState(entry.issueId, 'merging');
+    entry.mergeState = MergeState.Merging;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
 
     this.deps.eventBus.emit('merge_started', {
       issueId: entry.issueId,
@@ -185,7 +186,7 @@ export class MergeQueue {
       issueNumber: entry.issueNumber,
     });
 
-    log.info('Processing merge', { issueNumber: entry.issueNumber, projectId: entry.projectId });
+    log.info('Processing merge (rebase-first)', { issueNumber: entry.issueNumber, projectId: entry.projectId });
 
     const project = this.deps.getProjectPath(entry.projectId);
     if (!project) {
@@ -193,9 +194,51 @@ export class MergeQueue {
       return;
     }
 
-    try {
-      await execFileAsync('git', ['merge', '--abort'], { cwd: project.path, timeout: 10000 }).catch(() => {});
-    } catch {}
+    const rebaseResult = await this.deps.worktreeManager.rebaseOntoMaster(
+      project.path,
+      project.name,
+      entry.issueNumber,
+      project.baseBranch,
+    );
+
+    if (!rebaseResult.success) {
+      log.warn('Rebase conflicts detected, aborting rebase and blocking', {
+        issueNumber: entry.issueNumber,
+        conflicts: rebaseResult.conflicts,
+      });
+
+      try {
+        await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
+      } catch (err) {
+        log.warn('Failed to abort rebase, continuing to blocked state', {
+          issueNumber: entry.issueNumber,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      entry.mergeState = MergeState.Blocked;
+      entry.conflictingFiles = rebaseResult.conflicts;
+      entry.message = `Rebase conflicts: ${rebaseResult.conflicts.join(', ')}`;
+      this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Blocked);
+
+      this.deps.eventBus.emit('merge_blocked', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
+        issueNumber: entry.issueNumber,
+        conflictingFiles: rebaseResult.conflicts,
+        retryCount: 0,
+      });
+
+      log.info('Issue blocked due to rebase conflicts', {
+        issueNumber: entry.issueNumber,
+        conflictingFiles: rebaseResult.conflicts,
+      });
+      return;
+    }
+
+    log.info('Rebase succeeded, performing fast-forward merge', {
+      issueNumber: entry.issueNumber,
+    });
 
     const mergeResult = await this.deps.worktreeManager.mergeBack(
       project.path,
@@ -206,11 +249,11 @@ export class MergeQueue {
 
     if (!mergeResult.success) {
       const isConflict = mergeResult.message.toLowerCase().includes('conflict');
-      this.handleFailure(entry, mergeResult.message, isConflict ? 'conflict' : 'build-failed');
+      this.handleFailure(entry, mergeResult.message, isConflict ? MergeState.Conflict : MergeState.BuildFailed);
       return;
     }
 
-    log.info('Merge succeeded, running build verification', {
+    log.info('Fast-forward merge succeeded, running build verification', {
       issueNumber: entry.issueNumber,
       projectPath: project.path,
     });
@@ -238,8 +281,8 @@ export class MergeQueue {
       });
     }
 
-    entry.mergeState = 'merged';
-    this.deps.issueRepo.setMergeState(entry.issueId, 'merged');
+    entry.mergeState = MergeState.Merged;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
 
     this.deps.eventBus.emit('merge_completed', {
       issueId: entry.issueId,
@@ -253,7 +296,7 @@ export class MergeQueue {
   private handleFailure(
     entry: MergeEntry,
     message: string,
-    state: MergeState = 'build-failed',
+    state: MergeState = MergeState.BuildFailed,
   ): void {
     entry.mergeState = state;
     entry.message = message;
@@ -263,7 +306,7 @@ export class MergeQueue {
       issueId: entry.issueId,
       projectId: entry.projectId,
       issueNumber: entry.issueNumber,
-      reason: state === 'conflict' ? 'conflict' : 'build-failed',
+      reason: state === MergeState.Conflict ? MergeState.Conflict : MergeState.BuildFailed,
     });
 
     log.warn('Merge failed', {
