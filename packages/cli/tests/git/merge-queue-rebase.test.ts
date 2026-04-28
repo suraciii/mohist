@@ -211,7 +211,7 @@ describe('MergeQueue rebase-first flow', () => {
       await (queue as any).checkBlockedIssues();
 
       expect(events).toHaveLength(1);
-      expect(events[0].payload.retryCount).toBe(1);
+      expect(events[0].payload.attempt).toBe(1);
       expect(events[0].payload.issueNumber).toBe(issue.number);
 
       const entry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
@@ -339,7 +339,7 @@ describe('MergeQueue rebase-first flow', () => {
   });
 
   describe('conflict-aware ordering with file overlap in pickNext', () => {
-    it('should prioritize non-overlapping later entry when FIFO candidate overlaps', async () => {
+    it('should process FIFO candidate first when file overlap detected', async () => {
       const project = setupProject();
       const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
       const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
@@ -360,7 +360,7 @@ describe('MergeQueue rebase-first flow', () => {
 
       const picked = await (queue as any).pickNext();
 
-      expect(picked.issueNumber).toBe(issue2.number);
+      expect(picked.issueNumber).toBe(issue1.number);
     });
 
     it('should return FIFO candidate when no overlap exists', async () => {

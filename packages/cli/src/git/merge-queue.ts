@@ -140,6 +140,8 @@ export class MergeQueue {
             projectId: entry.projectId,
             issueNumber: entry.issueNumber,
             reason: `Auto-retry limit reached (${MAX_RETRY_COUNT} attempts)`,
+            retryCount: entry.retryCount,
+            lastConflict: entry.message,
           });
           log.warn('Auto-retry: max retries reached, marking blocked', {
             issueNumber: entry.issueNumber,
@@ -160,7 +162,7 @@ export class MergeQueue {
         issueId: entry.issueId,
         projectId: entry.projectId,
         issueNumber: entry.issueNumber,
-        retryCount: entry.retryCount,
+        attempt: entry.retryCount,
       });
 
       log.info('Auto-retry: re-enqueued issue', {
@@ -295,10 +297,13 @@ export class MergeQueue {
   private async processNext(): Promise<void> {
     if (this.processing) return;
 
-    const entry = await this.pickNext();
-    if (!entry) return;
-
     this.processing = true;
+
+    const entry = await this.pickNext();
+    if (!entry) {
+      this.processing = false;
+      return;
+    }
 
     try {
       await this.processItem(entry);
@@ -348,7 +353,7 @@ export class MergeQueue {
       const overlap = candidate.changedFiles.some((f) =>
         sorted[i].changedFiles!.includes(f),
       );
-      if (overlap) return sorted[i];
+      if (overlap) return candidate;
     }
 
     return candidate;
@@ -381,7 +386,7 @@ export class MergeQueue {
   private async processItem(entry: MergeEntry): Promise<void> {
     const project = this.deps.getProjectPath(entry.projectId);
     if (!project) {
-      this.handleFailure(entry, 'Project not found');
+      this.handleFailure(entry, 'Project not found', 'conflict');
       return;
     }
 
@@ -422,7 +427,7 @@ export class MergeQueue {
 
     const worktreePath = this.deps.worktreeManager.getPath(project.name, entry.issueNumber);
     if (!worktreePath) {
-      this.handleFailure(entry, `Worktree not found for issue #${entry.issueNumber}`);
+      this.handleFailure(entry, `Worktree not found for issue #${entry.issueNumber}`, 'conflict');
       return;
     }
 
@@ -539,6 +544,8 @@ export class MergeQueue {
         projectId: entry.projectId,
         issueNumber: entry.issueNumber,
         reason: message,
+        retryCount: entry.retryCount,
+        lastConflict: entry.message,
       });
     }
 
