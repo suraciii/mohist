@@ -82,11 +82,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Appends to server-systemd.ts. Uses runSystemctlUser and runLinger from T-002.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        167194
+      ]
     },
     {
       "id": "T-004",
