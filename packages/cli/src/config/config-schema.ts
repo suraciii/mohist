@@ -30,6 +30,8 @@ export const ConfigInfoSchema = z.object({
   }).strip().optional(),
   opencode: z.object({
     binPath: z.string().optional(),
+    model: z.string().optional(),
+    stageModels: z.record(z.string(), z.string()).optional(),
   }).strip().optional(),
 }).strip();
 

@@ -108,6 +108,7 @@ export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
+  details?: string;
 }
 
 export interface Comment {
