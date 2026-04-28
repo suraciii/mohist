@@ -485,6 +485,61 @@ export function createIssueRoutes(
     }
   });
 
+  app.post('/:number/force-stop', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (!agentRunner) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'AgentRunnerService not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const result = agentRunner.forceStop(issue.id);
+      if (!result.stopped) {
+        const response: ApiResponse = {
+          success: false,
+          error: `No agent running for issue #${number}`
+        };
+        return c.json(response, 409);
+      }
+
+      issueService.setStatus(issue.id, IssueStatus.Interrupted);
+
+      const response: ApiResponse = {
+        success: true,
+        data: { ok: true as const, issueNumber: number }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
   app.post('/:number/close', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
