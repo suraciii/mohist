@@ -57,7 +57,7 @@ function inferRoundLabel(roundIndex: number, totalRounds: number): string {
   return `Round ${roundIndex + 1}`
 }
 
-function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
+export function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
   if (logs.length === 0) return []
 
   const rounds: Round[] = []
