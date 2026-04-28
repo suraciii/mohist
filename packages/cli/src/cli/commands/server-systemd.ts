@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -5,6 +6,14 @@ import * as path from 'path';
 const SERVICE_NAME = 'mohist.service';
 const SYSTEMD_USER_DIR = path.join(os.homedir(), '.config', 'systemd', 'user');
 const SERVICE_FILE_PATH = path.join(SYSTEMD_USER_DIR, SERVICE_NAME);
+
+const DBUS_ERROR_PATTERNS = [
+  'No session for user',
+  'Failed to connect to bus',
+  'Could not connect to D-Bus',
+  'Cannot autolaunch D-Bus',
+  'Not connected to D-Bus',
+];
 
 export function isSystemdServiceInstalled(): boolean {
   return fs.existsSync(SERVICE_FILE_PATH);
@@ -98,4 +107,76 @@ export function generateServiceFile(options: ServiceFileOptions): string {
   );
 
   return lines.join('\n') + '\n';
+}
+
+export interface SystemdStatus {
+  activeState: string;
+  mainPID: number;
+}
+
+export function runSystemctlUser(args: string): string {
+  try {
+    return execSync(`systemctl --user ${args}`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err: any) {
+    const stderr: string = err.stderr?.toString() || '';
+    const isDbusError = DBUS_ERROR_PATTERNS.some(p => stderr.includes(p));
+
+    if (!isDbusError) {
+      throw err;
+    }
+
+    const username = os.userInfo().username;
+    try {
+      return execSync(`systemctl --machine ${username}@ --user ${args}`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (retryErr: any) {
+      if (process.env.SSH_CONNECTION) {
+        const retryStderr: string = retryErr.stderr?.toString() || '';
+        console.log(
+          `[headless SSH detected] systemctl --user failed:\n${stderr.trim()}\n--machine retry also failed:\n${retryStderr.trim()}`,
+        );
+      }
+      throw retryErr;
+    }
+  }
+}
+
+export function runLinger(): void {
+  const username = os.userInfo().username;
+  try {
+    execSync(`loginctl enable-linger ${username}`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err: any) {
+    const stderr: string = err.stderr?.toString() || '';
+    if (!stderr.includes('already') && !stderr.includes('Failed to enable linger')) {
+      return;
+    }
+  }
+}
+
+export function getSystemdStatus(): SystemdStatus | null {
+  try {
+    const output = runSystemctlUser(`show ${SERVICE_NAME}`);
+    const activeStateMatch = output.match(/^ActiveState=(.+)$/m);
+    const mainPIDMatch = output.match(/^MainPID=(\d+)$/m);
+
+    const loadedMatch = output.match(/^Loaded=(.+)$/m);
+    if (loadedMatch && loadedMatch[1].trim() === '') {
+      return null;
+    }
+
+    return {
+      activeState: activeStateMatch ? activeStateMatch[1].trim() : 'unknown',
+      mainPID: mainPIDMatch ? parseInt(mainPIDMatch[1], 10) : 0,
+    };
+  } catch {
+    return null;
+  }
 }
