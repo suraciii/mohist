@@ -159,11 +159,11 @@
         "T-001",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Fixes 断层 4 (text unclassified) and completes the UI rendering for 断层 2 (tool call context display).",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
-      "error": "Auto-skipped (no onAskUser): Timed out after 300s"
+      "error": null
     },
     {
       "id": "T-007",
