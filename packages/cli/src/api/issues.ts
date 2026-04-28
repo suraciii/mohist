@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import * as fs from 'fs';
 import * as path from 'path';
 import { StateManager } from '../server/state-manager';
-import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORITIES } from '../types';
+import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORITIES, MergeState } from '../types';
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
@@ -142,6 +142,37 @@ export function createIssueRoutes(
         error: error instanceof Error ? error.message : 'Unknown error'
       };
       return c.json(response, 500);
+    }
+  });
+
+  app.get('/merge-blocked', async (c) => {
+    try {
+      const projectId = c.req.query('projectId') || getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issueRepo = stateManager.getIssueRepo();
+      if (!issueRepo) {
+        return c.json({ success: false, error: 'IssueRepo not configured' } satisfies ApiResponse, 500);
+      }
+
+      const blockedIssues = issueRepo.findByMergeStates([MergeState.Blocked])
+        .filter(issue => issue.projectId === projectId);
+
+      const blockedEntries = blockedIssues.map(issue => {
+        const queueEntry = mergeQueue?.getStatus().find(e => e.issueNumber === issue.number);
+        return {
+          issueNumber: issue.number,
+          title: issue.title,
+          conflictingFiles: queueEntry?.conflictingFiles ?? [],
+          blockedAt: issue.updatedAt,
+        };
+      });
+
+      return c.json({ success: true, data: blockedEntries } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
   });
 
@@ -1677,7 +1708,9 @@ export function createIssueRoutes(
 
       const retried = mergeQueue.retry(number);
       if (!retried) {
-        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (build-failed or conflict)` } satisfies ApiResponse, 409);
+        const queueEntry = mergeQueue.getStatus().find(e => e.issueNumber === number);
+        const currentState = queueEntry?.mergeState ?? 'unknown';
+        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (current state: ${currentState}; retryable: build-failed, conflict, blocked)` } satisfies ApiResponse, 409);
       }
 
       return c.json({ success: true, data: { message: `Issue #${number} re-enqueued for merge` } } satisfies ApiResponse);

@@ -47,6 +47,7 @@ export interface AcpSessionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
+  onBeforeKill?: (cwd: string) => Promise<boolean>;
 }
 
 export interface AcpSessionResult {
@@ -54,6 +55,7 @@ export interface AcpSessionResult {
   success: boolean;
   error?: string;
   acpSessionId?: string;
+  wipCommitted?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
@@ -96,6 +98,7 @@ export async function runAcpSession(
     coderSessionRepo,
     issueNumber,
     opencodeBinPath,
+    onBeforeKill,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -378,13 +381,21 @@ export async function runAcpSession(
           log.error('Failed to update coder_session status', { error: err instanceof Error ? err.message : String(err) });
         }
       }
+      let wipCommitted = false;
+      if (onBeforeKill) {
+        try {
+          wipCommitted = await onBeforeKill(cwd);
+        } catch (err) {
+          log.warn('onBeforeKill callback failed during timeout handling', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
       try {
         await connection.cancel({ sessionId });
       } catch {
         // cancel may fail if session already ended
       }
       await cleanup();
-      return { text: agentText, success: false, error: `Timed out after ${timeout / 1000}s` };
+      return { text: agentText, success: false, error: `Timed out after ${timeout / 1000}s`, wipCommitted };
     }
 
     if (coderSessionRepo && coderSessionId) {
@@ -431,6 +442,7 @@ export interface AcpConnectionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
+  onBeforeKill?: (cwd: string) => Promise<boolean>;
 }
 
 export interface AcpConnection {
@@ -460,6 +472,7 @@ export async function createAcpConnection(
     issueNumber,
     onSessionUpdate,
     opencodeBinPath,
+    onBeforeKill,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -762,6 +775,14 @@ export async function createAcpConnection(
             // ignore
           }
         }
+        let wipCommitted = false;
+        if (onBeforeKill) {
+          try {
+            wipCommitted = await onBeforeKill(cwd);
+          } catch (err) {
+            log.warn('onBeforeKill callback failed during timeout handling', { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
         try {
           await connection.cancel({ sessionId });
         } catch {
@@ -772,6 +793,7 @@ export async function createAcpConnection(
           success: false,
           error: `Timed out after ${timeout / 1000}s`,
           acpSessionId: sessionId,
+          wipCommitted,
         };
       }
 
