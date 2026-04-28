@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Agent session auto-recovery: LLM stream hang detection (3min idle) and graceful retry via ACP cancel+prompt",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts, packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/agent-events.ts, packages/cli/web/src/hooks/useSSE.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This is a pure addition — no existing code changes. Follow the pattern of existing events like ralph_task_update."
+      "passes": true,
+      "notes": "This is a pure addition — no existing code changes. Follow the pattern of existing events like ralph_task_update.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        144625
+      ]
     },
     {
       "id": "T-002",
@@ -43,7 +48,10 @@
       "output": "packages/cli/src/openspec/ralph-executor.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Independent of T-001 — failure category is consumed by ralph-executor loop, not SSE. Place the [HANG_UNRECOVERABLE] check before the timeout check in categorizeFailure to avoid misclassification."
+      "notes": "Independent of T-001 — failure category is consumed by ralph-executor loop, not SSE. Place the [HANG_UNRECOVERABLE] check before the timeout check in categorizeFailure to avoid misclassification.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -67,9 +75,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "This is the largest task. The function uses getter/setter callbacks for mutable state (lastEventTime, hasRecovered, recoveryAttemptCount) to integrate with the existing closure pattern. See design.md D2 for the interface signature. Emit SSE events via eventBus.emit('coder_recovery_status', ...) — the event type is registered in T-001."
+      "notes": "This is the largest task. The function uses getter/setter callbacks for mutable state (lastEventTime, hasRecovered, recoveryAttemptCount) to integrate with the existing closure pattern. See design.md D2 for the interface signature. Emit SSE events via eventBus.emit('coder_recovery_status', ...) — the event type is registered in T-001.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -91,9 +104,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "This task modifies the existing runAcpSession and createAcpConnection functions to call the shared recovery function from T-003. The key challenge is wiring up the mutable state (lastEventTime, hasRecovered) that is shared between the sessionUpdate callback closure and the recovery function."
+      "notes": "This task modifies the existing runAcpSession and createAcpConnection functions to call the shared recovery function from T-003. The key challenge is wiring up the mutable state (lastEventTime, hasRecovered) that is shared between the sessionUpdate callback closure and the recovery function.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -114,9 +132,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SessionTimeline.tsx, packages/cli/web/src/hooks/useSessionTimeline.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Depends on T-001 for the event type registration. Use the existing onAgentEvent pattern from useSessionTimeline for coder_text_chunk as a template. The recovery status indicator should appear above the round-based conversation display."
+      "notes": "Depends on T-001 for the event type registration. Use the existing onAgentEvent pattern from useSessionTimeline for coder_text_chunk as a template. The recovery status indicator should appear above the round-based conversation display.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -137,9 +160,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/acp-hang-recovery.test.ts, packages/cli/tests/ralph-executor.test.ts (updated)",
-      "dependsOn": ["T-002", "T-004"],
+      "dependsOn": [
+        "T-002",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Depends on T-002 for the failure category code and T-004 for the integrated acp-session code. Add hang_unrecoverable tests to existing ralph-executor.test.ts. Create new acp-hang-recovery.test.ts for the core recovery function tests. Mock ClientSideConnection to simulate hang (no sessionUpdate events for N ms) and recovery (emit events after cancel+prompt)."
+      "notes": "Depends on T-002 for the failure category code and T-004 for the integrated acp-session code. Add hang_unrecoverable tests to existing ralph-executor.test.ts. Create new acp-hang-recovery.test.ts for the core recovery function tests. Mock ClientSideConnection to simulate hang (no sessionUpdate events for N ms) and recovery (emit events after cancel+prompt).",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
