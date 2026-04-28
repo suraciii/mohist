@@ -1,0 +1,100 @@
+{
+  "project": "mohist",
+  "description": "Add task list panel with real-time SSE progress to Issue Detail page",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add Task and BuildStatus types, API methods, and React Query hooks",
+      "spec": "specs/task-list-ui/spec.md",
+      "description": "Add `Task` and `BuildStatus` interfaces to `web/src/lib/types.ts`. Add `getTasks(number)` and `getBuildStatus(number)` methods to `web/src/lib/api.ts` using the existing `request<T>()` helper. Add `useTasks(number)` and `useBuildStatus(number)` React Query hooks to `web/src/hooks/useQueries.ts` with query keys `['issues', number, 'tasks']` and `['issues', number, 'build-status']`, enabled only when `number > 0`.",
+      "acceptanceCriteria": [
+        "Task interface has id, title, description?, acceptanceCriteria?, dependsOn?, passes, attempts, error?",
+        "BuildStatus interface has stage, status, progress { completed, failed, total, currentTask }, tasks",
+        "api.getTasks(5) sends GET /api/issues/5/tasks",
+        "api.getBuildStatus(5) sends GET /api/issues/5/build-status",
+        "useTasks(5) registers query with key ['issues', 5, 'tasks']",
+        "useBuildStatus(5) registers query with key ['issues', 5, 'build-status']",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follow existing patterns in api.ts (request<T> helper) and useQueries.ts (useQuery with enabled guard)."
+    },
+    {
+      "id": "T-002",
+      "title": "Create useTaskProgress hook for SSE real-time cache updates",
+      "spec": "specs/task-progress-sse/spec.md#useTaskProgress hook listens to SSE events for real-time updates",
+      "description": "Create `web/src/hooks/useTaskProgress.ts`. Subscribe to `ralph_task_update` and `ralph_loop_progress` via `onAgentEvent` from `agent-events.ts`. Filter events by `event.issueId === String(issueNumber)`. On ralph_task_update, update the matching task in both `['issues', number, 'tasks']` and `['issues', number, 'build-status']` caches via `queryClient.setQueryData`. On ralph_loop_progress, update the progress object in `['issues', number, 'build-status']`. Return early (skip) if cache is undefined. Clean up listeners on unmount.",
+      "acceptanceCriteria": [
+        "ralph_task_update with status 'completed' sets task passes=true in cache",
+        "ralph_task_update with status 'failed' sets task error in cache",
+        "ralph_task_update with status 'started' clears task error and sets currentTask in build-status cache",
+        "ralph_loop_progress updates completed/failed/total in build-status cache",
+        "Events with non-matching issueId are ignored",
+        "Listeners are cleaned up on component unmount",
+        "Undefined cache is handled gracefully without errors",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useTaskProgress.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Follow the onAgentEvent + useEffect cleanup pattern from useSessionTimeline.ts. Import AgentDetailEventMap from types for event payload types."
+    },
+    {
+      "id": "T-003",
+      "title": "Create TaskList component with status indicators, blocked hints, and progress summary",
+      "spec": "specs/task-list-ui/spec.md",
+      "description": "Create `web/src/components/TaskList.tsx` as a pure presentational component. Accept props: `tasks` (Task[]), `currentTask` (string|null), `progress` ({ completed, failed, total }). Return null if tasks is empty. Show a header with 'Tasks' and progress summary (e.g. '5/8 completed'). Render each task with a status icon: green check for passes=true, red X with inline error text for passes=false&&error, blue pulsing dot for the current running task, gray circle for pending. For tasks with dependsOn referencing uncompleted tasks, show 'blocked by T-xxx' hint.",
+      "acceptanceCriteria": [
+        "Returns null when tasks array is empty",
+        "Shows 'Tasks' header with 'X/Y completed' progress summary",
+        "Completed tasks (passes=true) show green check icon",
+        "Failed tasks (passes=false && error) show red X icon with inline error text below title",
+        "Running task (matches currentTask) shows blue pulsing dot",
+        "Pending tasks (passes=false, no error, not current) show gray circle",
+        "Tasks with unmet dependsOn show 'blocked by T-xxx' hint",
+        "Tasks with all dependsOn met or no dependsOn show no hint",
+        "Uses existing Tailwind card styling pattern (rounded-lg border border-gray-200 bg-white p-4)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/TaskList.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Pure presentational component, no hooks or data fetching. Props interface should accept Task[] with dependsOn field."
+    },
+    {
+      "id": "T-004",
+      "title": "Wire TaskList and useTaskProgress into IssueDetailPage",
+      "spec": "specs/task-list-ui/spec.md",
+      "description": "Modify `web/src/components/IssueDetailPage.tsx` to: (1) Import TaskList, useBuildStatus, useTasks, useTaskProgress. (2) Call useBuildStatus(issueNumber) and useTasks(issueNumber). (3) Call useTaskProgress(issueNumber) for SSE-driven cache updates. (4) Merge build-status tasks with tasks endpoint data by task ID to supplement dependsOn. (5) Render TaskList between the Description card and Comments card, only when issue stage is plan, build, review, or done.",
+      "acceptanceCriteria": [
+        "TaskList appears between Description and Comments sections",
+        "TaskList is visible when issue stage is plan, build, review, or done",
+        "TaskList is hidden when issue stage is draft or explore",
+        "useTaskProgress(issueNumber) is called for SSE real-time updates",
+        "Tasks from build-status are merged with tasks endpoint data (dependsOn supplemented)",
+        "Progress summary reflects correct completed/total counts",
+        "No existing functionality is broken (stage bar, comments, actions all still work)",
+        "Web UI builds without errors (npm run build in packages/cli/web)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Insert TaskList after the Description card (around line 259) and before the Comments card. Merge tasks by ID: build-status provides id/title/passes/attempts/error, tasks endpoint adds dependsOn."
+    }
+  ]
+}
