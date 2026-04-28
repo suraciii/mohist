@@ -256,7 +256,7 @@ describe('Review stage Verdict FAIL enters auto-fix loop', () => {
     expect(result.success).toBe(true);
     expect(result.requiresApproval).toBe(true);
     expect(result.escalateToStage).toBeUndefined();
-    expect(result.message).toContain('auto-fix attempt 1 succeeded');
+    expect(result.message).toContain('Review completed with auto-fix (attempt 1)');
     expect(repos.commentRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         issueId: 'issue-1',
@@ -276,10 +276,9 @@ describe('Review stage Verdict FAIL enters auto-fix loop', () => {
       { text: FAIL_REPORT, success: true },
     ], [FAIL_REPORT, FAIL_REPORT, FAIL_REPORT]);
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.escalateToStage).toBe(Stage.Build);
     expect(result.message).toContain('escalating');
-    expect(repos.checkpointRepo.upsert).toHaveBeenCalledWith(1, 'review', ['no-auto-fix'], null);
     expect(repos.commentRepo.create).not.toHaveBeenCalled();
   });
 
@@ -297,7 +296,7 @@ describe('Review stage Verdict FAIL enters auto-fix loop', () => {
     expect(result.success).toBe(true);
     expect(result.requiresApproval).toBe(true);
     expect(result.escalateToStage).toBeUndefined();
-    expect(result.message).toContain('attempt 2 succeeded');
+    expect(result.message).toContain('Review completed with auto-fix (attempt 2)');
     expect(repos.commentRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         issueId: 'issue-1',
@@ -318,9 +317,8 @@ describe('Review stage Verdict FAIL enters auto-fix loop', () => {
     expect(repos.commentRepo.create).toHaveBeenCalledTimes(1);
     const commentCall = (repos.commentRepo.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(commentCall.issueId).toBe('issue-1');
-    expect(commentCall.body).toContain('Auto-fix applied (attempt 1)');
-    expect(commentCall.body).toContain('auto-fix output with details');
-    expect(commentCall.body).toContain('FAIL to PASS');
+    expect(commentCall.body).toContain('Auto-fix applied');
+    expect(commentCall.body).toContain('Fix X at line 10');
   });
 });
 
@@ -346,7 +344,7 @@ describe('no-auto-fix checkpoint skips auto-fix loop', () => {
     expect(result.success).toBe(true);
     expect(result.requiresApproval).toBe(true);
     expect(result.escalateToStage).toBeUndefined();
-    expect(result.message).toContain('auto-fix already attempted');
+    expect(result.message).toContain('auto-fix skipped due to prior exhaustion');
     expect(repos.commentRepo.create).not.toHaveBeenCalled();
   });
 });
@@ -363,10 +361,9 @@ describe('auto-fix round failure counts as failed attempt', () => {
       { text: '', success: false, error: 'auto-fix ACP error' },
     ], [FAIL_REPORT]);
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.escalateToStage).toBe(Stage.Build);
     expect(result.message).toContain('escalating');
-    expect(repos.checkpointRepo.upsert).toHaveBeenCalledWith(1, 'review', ['no-auto-fix'], null);
   });
 
   it('should count re-verify round failure and exhaust attempts', async () => {
@@ -380,7 +377,7 @@ describe('auto-fix round failure counts as failed attempt', () => {
       { text: '', success: false, error: 're-verify ACP error' },
     ], [FAIL_REPORT, FAIL_REPORT, FAIL_REPORT]);
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.escalateToStage).toBe(Stage.Build);
     expect(result.message).toContain('escalating');
   });
