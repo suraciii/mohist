@@ -1,121 +1,124 @@
 # Review Report
 
-## Verdict: FAIL
+## Verdict: PASS
 
 ## Dimensions
 
-### Correctness: FAIL
+### Correctness: PASS
 
-- **Bug: `deriveToolCallTitle` non-JSON fallback returns `toolName` instead of `rawInput`** — `useSessionTimeline.ts:47`. When `rawInput` is a plain string like `'npm test'` (not valid JSON), `JSON.parse` throws, the catch block returns `toolName` (e.g., `'bash'`), but the spec and acceptance criteria require returning the raw string directly. Verified: `deriveToolCallTitle('bash', 'bash', 'npm test')` returns `'bash'` instead of `'npm test'`.
-- Build passes with no TypeScript errors.
-- Pre-existing test failures (6 files, 32 tests in `recover-issues`, `merge-queue`, `pipeline-checkpoint`, `agent-runner-service`) are unrelated to this change.
+- `deriveToolCallTitle` correctly handles all tool types: read/read_file/write/write_file/edit (file path extraction with basename), bash (command extraction with 60-char truncation), glob/search_files/grep/search (pattern extraction). Non-JSON rawInput falls back to the raw string. Empty/null rawInput falls back to toolName. Title already meaningful (differs from toolName) short-circuits derivation.
+- `reconstructRoundsFromLogs` correctly propagates `title` and `rawInput` from completed/failed `tool_call_update` events (lines 130-137), fixing gap 2. Initial `tool_call` entries derive title via `deriveToolCallTitle` when title equals the tool kind (line 147).
+- `flushPlanBuffer` correctly handles all 4 `sessionUpdate` types: `agent_message_chunk`, `agent_thought_chunk`, `tool_call` (creates entry with derived title), and `tool_call_update` (propagates title/rawInput/rawOutput), fixing gap 1.
+- `ralph_task_update` and `ralph_loop_progress` subscriptions correctly filter by `issueId` and map statuses (`started`→`running`, `completed`→`passed`), fixing gap 3.
+- `coder_tool_call` handler propagates `title` and `rawInput` on state change (lines 391-409).
+- `thoughtText` accumulation is correctly separated from `agentText` in both historical reconstruction (lines 112-118) and live streaming (lines 219-224), fixing gap 4.
+- `Round` interface includes `thoughtText: string` field.
+
+**Warning:** `deriveToolCallTitle` catch block at line 47 returns `rawInput || toolName`. If `rawInput` is an empty string `""`, this correctly returns `toolName` via the `||` operator. This is acceptable behavior.
 
 ### Complexity: PASS
 
-- `useSessionTimeline.ts` is 472 lines — large but each function is focused and under 50 lines.
-- `SessionTimeline.tsx` is 419 lines — `TaskProgressPanel`, `TaskStatusIcon`, and `RoundSection` are well-decomposed.
-- No duplicated logic. `deriveToolCallTitle` is reused in both `reconstructRoundsFromLogs` and `flushPlanBuffer`.
+- `deriveToolCallTitle`: 23 lines, cyclomatic complexity ~8. Acceptable.
+- `reconstructRoundsFromLogs`: 107 lines, cyclomatic complexity ~10. At the upper boundary but structurally simple (linear scan with if/else dispatch). Acceptable for a reconstruction function.
+- `flushPlanBuffer`: 75 lines, cyclomatic complexity ~8. Batching pattern with rAF/throttling is well-implemented.
+- All other functions are under 50 lines.
+- No copy-pasted code. StatusIcon component is used in both `ToolCallTimelineEntry` and `TaskProgressPanel` with different status values but shares the same SVG patterns — this is acceptable for inline React components.
 
-### Test Coverage: FAIL
+### Test Coverage: PASS
 
-- No unit tests for `deriveToolCallTitle` despite it being a pure, exported function with clearly specified acceptance criteria.
-- No tests for `reconstructRoundsFromLogs` title derivation behavior.
-- No tests for new SSE event subscriptions (`ralph_task_update`, `ralph_loop_progress`).
-- T-007 (verification task) confirmed build passes but did not add any test coverage.
+- `useSessionTimeline.test.ts` covers all `deriveToolCallTitle` acceptance criteria (9 tests, all passing).
+- Pre-existing test failures (32 across 6 test files: `recover-issues`, `agent-runner-service`, `merge-queue`, `pipeline-checkpoint`, `pipeline-controller`, `priority`) are **not related** to this change — verified by checking `git diff` confirms zero changes to those test files or their source modules.
+- No tests exist for `reconstructRoundsFromLogs`, `flushPlanBuffer`, or `TaskProgressPanel`. These are frontend rendering/data-layer functions that are typically tested via integration or E2E tests rather than unit tests. The `deriveToolCallTitle` utility (the most logic-heavy function) is well-covered.
+
+**Warning:** Integration tests for the SSE event subscription pipeline would be valuable but are out of scope for this change.
 
 ### Security: PASS
 
-- `JSON.parse` is properly wrapped in try-catch.
-- React handles rendering (no XSS risk).
-- No secrets or credentials exposed.
-- SSE event data is filtered by `issueId`.
+- `deriveToolCallTitle` uses `JSON.parse` with try/catch — safe.
+- `rawInput` and `rawOutput` are stringified via `JSON.stringify` when not already strings — safe.
+- No SQL, command injection, or secrets exposure risks in frontend code.
+- SSE event data is typed via `AgentDetailEventMap` and filtered by `issueId`.
 
-### Spec Compliance: FAIL
+### Spec Compliance: PASS
 
-#### T-001: Add deriveToolCallTitle utility and new types
+#### T-001: deriveToolCallTitle utility and new types
 
 | Criterion | Result | Notes |
 |-----------|--------|-------|
-| `deriveToolCallTitle('read', 'read', '{"file_path":"packages/cli/src/server.ts"}')` returns `'server.ts'` | PASS | |
-| `deriveToolCallTitle('bash', 'bash', '{"command":"npm run build"}')` returns `'npm run build'` | PASS | |
-| `deriveToolCallTitle('read', 'packages/cli/src/main.ts', '...')` returns `'packages/cli/src/main.ts'` | PASS | |
-| `deriveToolCallTitle('bash', 'bash', 'npm test')` returns `'npm test'` | **FAIL** | Returns `'bash'` — catch block returns `toolName` instead of `rawInput` |
-| `deriveToolCallTitle('unknown', 'unknown', null)` returns `'unknown'` | PASS | |
-| `TaskProgressEntry` and `LoopProgress` types exist in `types.ts` | PASS | |
-| `Round` interface has `thoughtText: string` field | PASS | |
+| `deriveToolCallTitle('read', 'read', '{"file_path":"packages/cli/src/server.ts"}')` returns `'server.ts'` | PASS | Verified via test and manual execution |
+| `deriveToolCallTitle('bash', 'bash', '{"command":"npm run build"}')` returns `'npm run build'` | PASS | Verified via test |
+| `deriveToolCallTitle('read', 'packages/cli/src/main.ts', '...')` returns `'packages/cli/src/main.ts'` | PASS | Title differs from toolName, short-circuit |
+| `deriveToolCallTitle('bash', 'bash', 'npm test')` returns `'npm test'` | PASS | Non-JSON fallback via catch block |
+| `deriveToolCallTitle('unknown', 'unknown', null)` returns `'unknown'` | PASS | No rawInput → returns toolName |
+| `TaskProgressEntry` and `LoopProgress` types exist in types.ts | PASS | Lines 247-263 |
+| `Round` interface has `thoughtText: string` field | PASS | Line 22 |
+| Typecheck passes | PASS | `tsc` succeeds in build |
+
+#### T-002: Completed event title/rawInput propagation + historical title derivation
+
+| Criterion | Result | Notes |
+|-----------|--------|-------|
+| `reconstructRoundsFromLogs`: tool_call_update completed copies title and rawInput | PASS | Lines 130-137: `if (title !== undefined) existing.title = title` |
+| `reconstructRoundsFromLogs`: tool_call with title==='read' derives from rawInput | PASS | Line 147: `deriveToolCallTitle(toolName, title, rawInputStr)` |
+| `reconstructRoundsFromLogs`: tool_call_update title overrides derived title | PASS | Lines 134-135 update existing entry |
+| Live `coder_tool_call` completed propagates title and rawInput | PASS | Lines 395-396: `title: detail.title ?? existing.title`, `rawInput: detail.rawInput != null ? ...` |
+| Historical page shows 'server.ts' instead of 'read' | PASS | Derivation logic confirmed |
 | Typecheck passes | PASS | |
-
-#### T-002: Fix completed event title/rawInput propagation
-
-| Criterion | Result | Notes |
-|-----------|--------|-------|
-| `reconstructRoundsFromLogs`: tool_call_update completed copies title and rawInput | PASS | Lines 134-135 |
-| `reconstructRoundsFromLogs`: tool_call with title==='read' derives title from rawInput | PASS | Line 147 |
-| `reconstructRoundsFromLogs`: tool_call_update title overrides derived title | PASS | Line 134 |
-| Live coder_tool_call completed propagates detail.title and detail.rawInput | PASS | Lines 395-396 |
-| Historical page load shows 'server.ts' instead of 'read' | PASS | (Verified via code) |
 
 #### T-003: Handle plan_session_update tool_call, tool_call_update, agent_thought_chunk
 
 | Criterion | Result | Notes |
 |-----------|--------|-------|
-| `flushPlanBuffer` handles `sessionUpdate==='tool_call'` | PASS | Lines 225-244 |
-| `flushPlanBuffer` handles `sessionUpdate==='tool_call_update'` | PASS | Lines 245-263 |
-| `flushPlanBuffer` handles `sessionUpdate==='agent_thought_chunk'` | PASS | Lines 219-224 |
-| `reconstructRoundsFromLogs` handles `agent_thought_chunk` → thoughtText | PASS | Lines 112-118 |
+| `flushPlanBuffer` handles `tool_call` | PASS | Lines 225-244: creates `ToolCallEntry` with derived title |
+| `flushPlanBuffer` handles `tool_call_update` | PASS | Lines 245-264: updates existing entry with title/rawInput/rawOutput |
+| `flushPlanBuffer` handles `agent_thought_chunk` | PASS | Lines 219-224: appends to `lastRound.thoughtText` |
+| `reconstructRoundsFromLogs` handles `agent_thought_chunk` | PASS | Lines 112-118: accumulates into `thoughtText`, not `agentText` |
+| Typecheck passes | PASS | |
 
 #### T-004: ralph_task_update and ralph_loop_progress subscriptions
 
 | Criterion | Result | Notes |
 |-----------|--------|-------|
-| `onAgentEvent('ralph_task_update')` subscription added | PASS | Lines 414-438 |
-| `onAgentEvent('ralph_loop_progress')` subscription added | PASS | Lines 440-449 |
-| status 'started' → 'running' | PASS | |
-| status 'completed' → 'passed' | PASS | |
-| status 'failed' stores error and attempt | PASS | |
-| loopProgress state updates | PASS | |
-| taskProgress and loopProgress exposed in return | PASS | |
+| `ralph_task_update` subscription with issueId filter | PASS | Lines 414-438 |
+| `ralph_loop_progress` subscription with issueId filter | PASS | Lines 440-449 |
+| `started` maps to `running` | PASS | Line 421 |
+| `completed` maps to `passed` | PASS | Line 422 |
+| `failed` stores error and attempt | PASS | Lines 432-433 |
+| `loopProgress` state updates correctly | PASS | Lines 443-447 |
+| `taskProgress` and `loopProgress` exposed in return | PASS | Lines 469-470 |
 
 #### T-005: TaskProgressPanel component
 
 | Criterion | Result | Notes |
 |-----------|--------|-------|
-| Renders when currentStage is 'build' and taskProgress non-empty | PASS | Line 404 |
-| Hidden when currentStage is not 'build' | PASS | |
-| Summary line shows 'X/Y passed' format | PASS | Line 333 |
-| Each task shows task ID with correct status icon | PASS | Green/blue/red/orange verified |
-| Failed tasks display error message | PASS | Lines 343-353 |
-| SessionTimelineProps includes taskProgress and loopProgress | PASS | |
-| Parent passes new props from useSessionTimeline | PASS | IssueDetailPage.tsx lines 551-552 |
+| Renders when `currentStage === 'build'` and non-empty taskProgress | PASS | SessionTimeline.tsx line 408 |
+| Hidden when not build stage | PASS | Conditional at line 408 |
+| Summary line shows 'X/Y passed' format | PASS | Line 337: `{passed}/{total} passed` |
+| Each task shows colored status icon | PASS | TaskStatusIcon: green (passed), blue spinner (running), red X (failed), orange retry |
+| Failed tasks display error message | PASS | Lines 347-357 |
+| `SessionTimelineProps` includes taskProgress and loopProgress | PASS | Lines 12-13 |
+| Parent passes new props from useSessionTimeline | PASS | IssueDetailPage.tsx lines 63-64, 551-552 |
 
-#### T-006: Thought text collapsible section
+#### T-006: Thought text collapsible and tool call context display
 
 | Criterion | Result | Notes |
 |-----------|--------|-------|
-| thoughtText in `<details>` collapsed by default | PASS | |
-| **Summary label shows "Thinking..."** | **FAIL** | Shows `"Thinking (0.0KB)"` — missing ellipsis `"..."` and always shows size |
-| **Size indicator only when > 500 chars** | **FAIL** | Size indicator always shown, spec requires it only when > 500 chars |
-| Clicking toggle expands thought content | PASS | |
-| Message text renders normally above | PASS | |
-| ToolCallTimelineEntry uses deriveToolCallTitle for display label | **FAIL** | `ToolCallTimelineEntry` at line 79 renders `entry.title` directly — does NOT call `deriveToolCallTitle`. The hook sets title via deriveToolCallTitle at insertion time, which is functionally equivalent for most cases, but if title is set to toolName by deriveToolCallTitle (e.g., unknown tool), the component doesn't re-derive it |
+| Thought text in `<details>` collapsed by default | PASS | SessionTimeline.tsx line 260: `<details>` |
+| Summary label 'Thinking...' with KB size > 500 chars | PASS | Line 262: `Thinking...{size > 500 ? ' (X.XKB)' : ''}` |
+| Clicking toggle expands | PASS | Native `<details>/<summary>` behavior |
+| Message text renders above thought section | PASS | Lines 250-257 render `agentText` before `<details>` |
+| `ToolCallTimelineEntry` uses `deriveToolCallTitle` | PASS | Line 64 |
+| Tool calls show 'server.ts' not 'read' | PASS | Verified via deriveToolCallTitle logic |
+| Tool calls show 'npm run build' not 'bash' | PASS | Verified via deriveToolCallTitle logic |
+
+#### T-007: Verify all changes
+
+| Criterion | Result | Notes |
+|-----------|--------|-------|
+| `npm run build` succeeds | PASS | tsc compiles cleanly |
+| `npm test` no regressions | PASS | All 9 useSessionTimeline tests pass. 32 failures in 6 unrelated test files are pre-existing (verified: zero diff on those files since branch point) |
+| All 5 pipeline gaps addressed | PASS | Gap 1: plan_session_update handles tool_call/tool_call_update. Gap 2: completed title/rawInput propagated. Gap 3: ralph_task_update/ralph_loop_progress subscribed. Gap 4: thoughtText separated, collapsed. Gap 5: reconstructRoundsFromLogs derives titles from rawInput |
 
 ## Fix Suggestions
 
-1. **`packages/cli/web/src/hooks/useSessionTimeline.ts:47`** — Change catch block from `return toolName` to `return rawInput || toolName` to handle non-JSON rawInput strings (e.g., `'npm test'`).
-
-2. **`packages/cli/web/src/components/SessionTimeline.tsx:257-258`** — Change `"Thinking"` to `"Thinking..."` and conditionally show size indicator only when `thoughtText.length > 500`:
-   ```tsx
-   <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
-     Thinking...{round.thoughtText.length > 500 ? ` (${(round.thoughtText.length / 1024).toFixed(1)}KB)` : ''}
-   </summary>
-   ```
-
-3. **`packages/cli/web/src/components/SessionTimeline.tsx:79`** — Add `deriveToolCallTitle` import and use it to compute display title instead of raw `entry.title`, ensuring consistent derivation even for entries where title was set to toolName:
-   ```tsx
-   {entry.title && (
-     <span className="text-xs text-gray-500 truncate">
-       {deriveToolCallTitle(entry.toolName, entry.title, entry.rawInput)}
-     </span>
-   )}
-   ```
-   Or alternatively, remove the title check and always render the derived title.
+None — all acceptance criteria pass, build succeeds, and no regressions introduced.
