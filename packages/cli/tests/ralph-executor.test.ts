@@ -551,8 +551,8 @@ describe('Failure categorization', () => {
     expect(FAILURE_CATEGORY_CONFIGS.environment.retryable).toBe(true);
     expect(FAILURE_CATEGORY_CONFIGS.dependency.maxAttempts).toBe(1);
     expect(FAILURE_CATEGORY_CONFIGS.dependency.retryable).toBe(false);
-    expect(FAILURE_CATEGORY_CONFIGS.timeout.maxAttempts).toBe(1);
-    expect(FAILURE_CATEGORY_CONFIGS.timeout.retryable).toBe(false);
+    expect(FAILURE_CATEGORY_CONFIGS.timeout.maxAttempts).toBe(3);
+    expect(FAILURE_CATEGORY_CONFIGS.timeout.retryable).toBe(true);
   });
 });
 
