@@ -18,6 +18,16 @@ export interface WorktreeInfo {
   issueNumber: number;
 }
 
+export interface WipCommitInfo {
+  hash: string;
+  message: string;
+  changedFiles: string[];
+  diffStat: string;
+}
+
+const WIP_AUTHOR_NAME = 'mohist-wip';
+const WIP_AUTHOR_EMAIL = 'mohist@wip';
+
 function getWorktreeBaseDir(projectName: string): string {
   const home = process.env.HOME || '';
   const slug = slugify(projectName);
@@ -377,6 +387,96 @@ export class WorktreeManager {
     }
 
     return worktrees;
+  }
+
+  async createWipCommit(
+    worktreePath: string,
+    taskId: string,
+    attemptNumber: number
+  ): Promise<string | null> {
+    try {
+      const { stdout: statusOut } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath }
+      );
+      if (!statusOut.trim()) {
+        return null;
+      }
+
+      await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
+
+      const { stdout: remaining } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath }
+      );
+      if (!remaining.trim()) {
+        return null;
+      }
+
+      const message = `WIP: ${taskId} timeout (attempt ${attemptNumber})`;
+      await execFileAsync(
+        'git',
+        ['commit', '-m', message, '--no-verify', '--author', `${WIP_AUTHOR_NAME} <${WIP_AUTHOR_EMAIL}>`],
+        { cwd: worktreePath }
+      );
+
+      const { stdout: hash } = await execFileAsync(
+        'git', ['rev-parse', 'HEAD'],
+        { cwd: worktreePath }
+      );
+
+      log.info('WIP commit created', { worktreePath, taskId, attemptNumber, hash: hash.trim() });
+      return hash.trim();
+    } catch (err) {
+      log.warn('Failed to create WIP commit', {
+        worktreePath,
+        taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  async findWipCommit(worktreePath: string, taskId: string): Promise<WipCommitInfo | null> {
+    try {
+      const pattern = `WIP: ${taskId} timeout*`;
+      const { stdout } = await execFileAsync(
+        'git',
+        ['log', `--author=${WIP_AUTHOR_EMAIL}`, '--grep', pattern, '-1', '--pretty=format:%H%n%s'],
+        { cwd: worktreePath }
+      );
+
+      if (!stdout.trim()) {
+        return null;
+      }
+
+      const lines = stdout.trim().split('\n');
+      const hash = lines[0];
+      const message = lines.slice(1).join('\n');
+
+      const { stdout: nameOnlyOut } = await execFileAsync(
+        'git', ['diff-tree', '--no-commit-id', '--name-only', '-r', hash],
+        { cwd: worktreePath }
+      );
+      const changedFiles = nameOnlyOut.trim().split('\n').filter(l => l.trim());
+
+      const { stdout: diffStatOut } = await execFileAsync(
+        'git', ['diff', '--stat', `${hash}^..${hash}`],
+        { cwd: worktreePath }
+      );
+
+      return { hash, message, changedFiles, diffStat: diffStatOut.trim() };
+    } catch {
+      return null;
+    }
+  }
+
+  async getWipDiffSummary(worktreePath: string, taskId: string): Promise<string | null> {
+    const wip = await this.findWipCommit(worktreePath, taskId);
+    if (!wip) {
+      return null;
+    }
+    return wip.diffStat;
   }
 
   getPath(projectName: string, issueNumber: number): string | null {
