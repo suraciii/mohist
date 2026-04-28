@@ -152,10 +152,13 @@
         "T-004"
       ],
       "notes": "Design decision D5: optional filter parameter rather than separate hook. The acpSessionId lookup comes from the CoderSessionItem in useCoderSessions. RoundSection and ToolCallTimelineEntry can be extracted from SessionTimeline.tsx as shared sub-components, or SessionDetail can import from the existing file.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        588999
+      ]
     },
     {
       "id": "T-006",
