@@ -221,6 +221,141 @@ describe('runRalphLoop', () => {
     expect(updated.tasks.every((t: any) => t.passes === true)).toBe(true);
   });
 
+  describe('full checkpoint recovery', () => {
+    it('short-circuits when skipTaskIds covers all tasks, returns completed=total', async () => {
+      change = createMinimalChange();
+
+      const tasksFile = {
+        version: 1,
+        tasks: [
+          { id: 'T-001', order: 1, title: 'First Task', description: 'desc', passes: false, attempts: 1 },
+          { id: 'T-002', order: 2, title: 'Second Task', description: 'desc', passes: false, attempts: 1 },
+        ],
+      };
+      fs.writeFileSync(change.tasksPath, JSON.stringify(tasksFile));
+
+      const onTaskStart = vi.fn();
+      const onLoopComplete = vi.fn();
+      const context = {
+        worktreePath: tempDir,
+        projectPath: tempDir,
+        onTaskStart,
+        onLoopComplete,
+      };
+
+      const result = await runRalphLoop(change, context, {
+        skipTaskIds: ['T-001', 'T-002'],
+        maxRetries: 0,
+      });
+
+      expect(result.completed).toBe(2);
+      expect(result.failed).toBe(0);
+      expect(result.skipped).toBe(0);
+      expect(result.total).toBe(2);
+      expect(result.success).toBe(true);
+      expect(result.taskResults).toHaveLength(0);
+      expect(onTaskStart).not.toHaveBeenCalled();
+      expect(onLoopComplete).toHaveBeenCalledTimes(1);
+      expect(onLoopComplete.mock.calls[0][0].success).toBe(true);
+
+      const updated = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
+      expect(updated.tasks.every((t: any) => t.passes === true)).toBe(true);
+    });
+
+    it('does NOT reset all-pass tasks when skipTaskIds is non-empty', async () => {
+      change = createMinimalChange();
+
+      const tasksFile = {
+        version: 1,
+        tasks: [
+          { id: 'T-001', order: 1, title: 'First Task', description: 'desc', passes: true, attempts: 1 },
+          { id: 'T-002', order: 2, title: 'Second Task', description: 'desc', passes: true, attempts: 1 },
+        ],
+      };
+      fs.writeFileSync(change.tasksPath, JSON.stringify(tasksFile));
+
+      const onTaskStart = vi.fn();
+      const context = {
+        worktreePath: tempDir,
+        projectPath: tempDir,
+        onTaskStart,
+      };
+
+      const result = await runRalphLoop(change, context, {
+        skipTaskIds: ['T-001', 'T-002'],
+        maxRetries: 0,
+      });
+
+      expect(result.completed).toBe(2);
+      expect(result.success).toBe(true);
+      expect(onTaskStart).not.toHaveBeenCalled();
+
+      const updated = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
+      expect(updated.tasks.every((t: any) => t.passes === true)).toBe(true);
+    });
+
+    it('still resets corrupted all-pass when skipTaskIds is empty', async () => {
+      change = createMinimalChange();
+
+      const tasksFile = {
+        version: 1,
+        tasks: [
+          { id: 'T-001', order: 1, title: 'First Task', description: 'desc', passes: true, attempts: 0 },
+          { id: 'T-002', order: 2, title: 'Second Task', description: 'desc', passes: true, attempts: 0 },
+        ],
+      };
+      fs.writeFileSync(change.tasksPath, JSON.stringify(tasksFile));
+
+      const onTaskStart = vi.fn();
+      const context = {
+        worktreePath: tempDir,
+        projectPath: tempDir,
+        onTaskStart,
+      };
+
+      const result = await runRalphLoop(change, context, { maxRetries: 0 });
+
+      expect(onTaskStart).toHaveBeenCalled();
+      expect(result.completed).toBe(2);
+      expect(result.success).toBe(true);
+    });
+
+    it('partial skipTaskIds still enters main loop for remaining tasks', async () => {
+      setAcpSessionRunner(vi.fn().mockResolvedValue({
+        text: 'done',
+        success: true,
+      }));
+
+      change = createMinimalChange();
+
+      const tasksFile = {
+        version: 1,
+        tasks: [
+          { id: 'T-001', order: 1, title: 'First Task', description: 'desc', passes: false, attempts: 1 },
+          { id: 'T-002', order: 2, title: 'Second Task', description: 'desc', passes: false, attempts: 0 },
+        ],
+      };
+      fs.writeFileSync(change.tasksPath, JSON.stringify(tasksFile));
+
+      const onTaskStart = vi.fn();
+      const context = {
+        worktreePath: tempDir,
+        projectPath: tempDir,
+        onTaskStart,
+      };
+
+      const result = await runRalphLoop(change, context, {
+        skipTaskIds: ['T-001'],
+        maxRetries: 0,
+      });
+
+      expect(result.completed).toBe(1);
+      expect(result.total).toBe(2);
+      expect(result.success).toBe(true);
+      expect(onTaskStart).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('should not reset passes when tasks have mixed passes values', async () => {
     change = createMinimalChange();
 
