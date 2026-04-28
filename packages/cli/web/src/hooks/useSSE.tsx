@@ -1,6 +1,6 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, createContext, useContext } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { EventName, EventMap } from '../lib/types'
+import type { EventName, EventMap, LiveTaskState } from '../lib/types'
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../lib/agent-events'
 import type { AgentDetailEventMap } from '../lib/types'
 
@@ -13,12 +13,16 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
 }
 
-interface LiveTaskState {
-  activeTaskId: string | null
-  activeTaskElapsedMs: number | null
+const LiveTaskContext = createContext<LiveTaskState>({
+  activeTaskId: null,
+  activeTaskElapsedMs: null,
+})
+
+export function useLiveTask(): LiveTaskState {
+  return useContext(LiveTaskContext)
 }
 
-function useSSE(projectId: string | null): LiveTaskState {
+function useSSEInner(projectId: string | null): LiveTaskState {
   const queryClient = useQueryClient()
   const eventSourceRef = useRef<EventSource | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
@@ -188,4 +192,11 @@ function useSSE(projectId: string | null): LiveTaskState {
   return { activeTaskId, activeTaskElapsedMs }
 }
 
-export default useSSE
+export default function useSSE(projectId: string | null) {
+  const liveState = useSSEInner(projectId)
+  return {
+    LiveTaskProvider: ({ children }: { children: React.ReactNode }) => (
+      <LiveTaskContext.Provider value={liveState}>{children}</LiveTaskContext.Provider>
+    ),
+  }
+}

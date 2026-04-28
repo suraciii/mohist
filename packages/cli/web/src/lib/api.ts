@@ -173,6 +173,12 @@ export const api = {
   forceStopIssue: (number: number) =>
     request<{ ok: boolean; issueNumber: number }>(`/issues/${number}/force-stop`, { method: 'POST' }),
 
+  getBuildStatus: (number: number) =>
+    request<import('./types').BuildStatus>(`/issues/${number}/build-status`),
+
+  getTasks: (number: number) =>
+    request<{ version: number; tasks: import('./types').Task[] }>(`/issues/${number}/tasks`),
+
   getLogTail: (cursor?: number, limit?: number, maxBytes?: number) => {
     const search = new URLSearchParams()
     if (cursor != null) search.set('cursor', String(cursor))
@@ -182,9 +188,4 @@ export const api = {
     return request<import('./types').LogTailResult>(`/logs/tail${qs ? `?${qs}` : ''}`)
   },
 
-  getTasks: (number: number) =>
-    request<{ version: number; tasks: import('./types').Task[] }>(`/issues/${number}/tasks`),
-
-  getBuildStatus: (number: number) =>
-    request<import('./types').BuildStatus>(`/issues/${number}/build-status`),
 }
