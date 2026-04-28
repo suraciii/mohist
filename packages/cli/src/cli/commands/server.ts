@@ -3,6 +3,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import http from 'http';
+import {
+  isSystemdServiceInstalled,
+  getSystemdStatus,
+  runSystemctlUser,
+} from './server-systemd';
 
 const PID_FILE = path.join(process.env.HOME || '', '.mohist', 'server.pid');
 const LOGS_DIR = path.join(process.env.HOME || '', '.mohist', 'logs');
@@ -61,6 +66,30 @@ function getServerStatus(): ServerStatus {
 }
 
 export async function startServer(): Promise<void> {
+  if (isSystemdServiceInstalled()) {
+    runSystemctlUser('start mohist.service');
+
+    console.log(chalk.blue('Starting server (systemd)...'));
+
+    let retries = 10;
+    while (retries > 0) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (await checkServerHealth()) {
+        const sdStatus = getSystemdStatus();
+        const pid = sdStatus?.mainPID || 0;
+        console.log(chalk.green('Server started (systemd)'));
+        console.log(chalk.gray(`PID: ${pid}`));
+        console.log(chalk.gray('Port: 3456'));
+        return;
+      }
+      retries--;
+    }
+
+    console.error(chalk.red('Server failed to start within timeout'));
+    console.log(chalk.gray('Check: systemctl --user status mohist.service'));
+    process.exit(1);
+  }
+
   const status = getServerStatus();
   
   if (status.running) {
@@ -122,6 +151,12 @@ export async function startServer(): Promise<void> {
 }
 
 export async function stopServer(): Promise<void> {
+  if (isSystemdServiceInstalled()) {
+    runSystemctlUser('stop mohist.service');
+    console.log(chalk.green('Server stopped (systemd)'));
+    return;
+  }
+
   const status = getServerStatus();
   
   if (!status.running || !status.pid) {
@@ -168,6 +203,31 @@ export async function stopServer(): Promise<void> {
 }
 
 export async function serverStatus(): Promise<void> {
+  if (isSystemdServiceInstalled()) {
+    const sdStatus = getSystemdStatus();
+    if (!sdStatus) {
+      console.log(chalk.red('Server is not running'));
+      console.log(chalk.yellow('Start with: mo server start'));
+      return;
+    }
+
+    const stateLabel = sdStatus.activeState === 'active'
+      ? chalk.green(sdStatus.activeState)
+      : sdStatus.activeState === 'failed'
+        ? chalk.red(sdStatus.activeState)
+        : chalk.yellow(sdStatus.activeState);
+
+    console.log(`Server state (systemd): ${stateLabel}`);
+
+    if (sdStatus.mainPID > 0 && sdStatus.activeState === 'active') {
+      console.log(chalk.gray(`PID: ${sdStatus.mainPID}`));
+      console.log(chalk.gray('Port: 3456'));
+    }
+
+    console.log(chalk.gray('Service: systemctl --user status mohist.service'));
+    return;
+  }
+
   const status = getServerStatus();
   
   if (status.running) {
