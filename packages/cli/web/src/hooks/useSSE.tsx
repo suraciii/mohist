@@ -106,6 +106,11 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
+          case 'rebase_completed':
+          case 'rebase_conflict': {
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            break
+          }
         }
       } catch {
         // ignore malformed events
@@ -152,6 +157,10 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'merge_completed',
       'merge_failed',
       'coder_recovery_status',
+      'rebase_started',
+      'rebase_progress',
+      'rebase_completed',
+      'rebase_conflict',
     ]
 
     for (const type of eventTypes) {

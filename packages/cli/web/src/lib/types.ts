@@ -171,6 +171,10 @@ export type EventMap = {
   merge_started: { issueId: string; projectId: string; issueNumber: number }
   merge_completed: { issueId: string; projectId: string; issueNumber: number }
   merge_failed: { issueId: string; projectId: string; issueNumber: number; reason: string }
+  rebase_started: { issueId: string; projectId: string; issueNumber: number }
+  rebase_progress: { issueId: string; projectId: string; issueNumber: number; step: 'fetching' | 'checking' | 'rebasing' | 'verifying' }
+  rebase_completed: { issueId: string; projectId: string; issueNumber: number; rebased: boolean }
+  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[] }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap
