@@ -530,7 +530,38 @@ describe('Failure categorization', () => {
     });
   });
 
+  describe('hang_unrecoverable category', () => {
+    it('should categorize [HANG_UNRECOVERABLE] errors', () => {
+      expect(categorizeFailure('[HANG_UNRECOVERABLE] max recovery attempts exceeded')).toBe('hang_unrecoverable');
+      expect(categorizeFailure('[HANG_UNRECOVERABLE] cancel timed out')).toBe('hang_unrecoverable');
+    });
+
+    it('should match [HANG_UNRECOVERABLE] anywhere in error string', () => {
+      expect(categorizeFailure('Error: [HANG_UNRECOVERABLE] something went wrong')).toBe('hang_unrecoverable');
+      expect(categorizeFailure('prefix [HANG_UNRECOVERABLE] suffix')).toBe('hang_unrecoverable');
+    });
+  });
+
+  describe('timeout_with_wip category', () => {
+    it('should categorize timeout errors with wipCommitted=true as timeout_with_wip', () => {
+      expect(categorizeFailure('Timed out after 1800s', { wipCommitted: true })).toBe('timeout_with_wip');
+      expect(categorizeFailure('Request timeout', { wipCommitted: true })).toBe('timeout_with_wip');
+    });
+
+    it('should categorize timeout errors with wipCommitted=false as timeout', () => {
+      expect(categorizeFailure('Timed out after 1800s', { wipCommitted: false })).toBe('timeout');
+    });
+
+    it('should default to timeout without wipCommitted', () => {
+      expect(categorizeFailure('Timed out after 1800s')).toBe('timeout');
+    });
+  });
+
   describe('precedence rules', () => {
+    it('should classify hang_unrecoverable before timeout', () => {
+      expect(categorizeFailure('[HANG_UNRECOVERABLE] Timed out after 1800s')).toBe('hang_unrecoverable');
+    });
+
     it('should classify timeout before dependency', () => {
       expect(categorizeFailure('Timeout: cannot find module')).toBe('timeout');
     });
@@ -553,6 +584,10 @@ describe('Failure categorization', () => {
     expect(FAILURE_CATEGORY_CONFIGS.dependency.retryable).toBe(false);
     expect(FAILURE_CATEGORY_CONFIGS.timeout.maxAttempts).toBe(3);
     expect(FAILURE_CATEGORY_CONFIGS.timeout.retryable).toBe(true);
+    expect(FAILURE_CATEGORY_CONFIGS.timeout_with_wip.maxAttempts).toBe(2);
+    expect(FAILURE_CATEGORY_CONFIGS.timeout_with_wip.retryable).toBe(true);
+    expect(FAILURE_CATEGORY_CONFIGS.hang_unrecoverable.maxAttempts).toBe(1);
+    expect(FAILURE_CATEGORY_CONFIGS.hang_unrecoverable.retryable).toBe(false);
   });
 });
 
