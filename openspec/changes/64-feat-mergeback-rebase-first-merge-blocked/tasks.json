@@ -154,9 +154,9 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Small integration task",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
