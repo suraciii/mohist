@@ -277,6 +277,7 @@ async function main(): Promise<void> {
     log.info('Received SIGTERM, shutting down gracefully...');
     agentRunner.shutdown();
     await server.stop();
+    process.exit(143);
   });
 
   process.on('SIGINT', async () => {
