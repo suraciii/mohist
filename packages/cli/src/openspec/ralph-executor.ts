@@ -24,7 +24,7 @@ export function resetAcpSessionRunner(): void {
 }
 import type { EventBus } from '../services/event-bus';
 
-export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip';
+export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip' | 'hang_unrecoverable';
 
 export interface FailureCategoryConfig {
   maxAttempts: number;
@@ -37,10 +37,15 @@ export const FAILURE_CATEGORY_CONFIGS: Record<FailureCategory, FailureCategoryCo
   dependency: { maxAttempts: 1, retryable: false },
   timeout: { maxAttempts: 3, retryable: true },
   timeout_with_wip: { maxAttempts: 2, retryable: true },
+  hang_unrecoverable: { maxAttempts: 1, retryable: false },
 };
 
 export function categorizeFailure(error: string, options?: { wipCommitted?: boolean }): FailureCategory {
   const lowerError = error.toLowerCase();
+
+  if (error.includes('[HANG_UNRECOVERABLE]')) {
+    return 'hang_unrecoverable';
+  }
 
   if (lowerError.includes('timeout') || lowerError.includes('timed out')) {
     return options?.wipCommitted ? 'timeout_with_wip' : 'timeout';
@@ -272,6 +277,10 @@ function generateAdjustmentsFromCategory(category: FailureCategory, _error: stri
     case 'timeout_with_wip':
       adjustments.push('Previous progress was saved in a WIP commit');
       adjustments.push('Continue from where the previous attempt left off');
+      break;
+    case 'hang_unrecoverable':
+      adjustments.push('LLM provider stream connection was lost and could not be recovered');
+      adjustments.push('Consider checking provider status or switching to a different model');
       break;
   }
 
