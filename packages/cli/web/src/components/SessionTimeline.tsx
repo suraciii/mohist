@@ -61,6 +61,7 @@ function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
 
   const displayInput = entry.rawInput ?? entry.args
   const displayOutput = entry.rawOutput ?? entry.result
+  const displayTitle = deriveToolCallTitle(entry.toolName, entry.title, entry.rawInput)
 
   return (
     <div className="flex gap-2">
@@ -76,9 +77,9 @@ function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
           <span className="font-mono text-xs text-gray-700">
             {entry.toolName}
           </span>
-          {entry.title && (
+          {displayTitle !== entry.toolName && (
             <span className="text-xs text-gray-500 truncate">
-              {deriveToolCallTitle(entry.toolName, entry.title, entry.rawInput)}
+              {displayTitle}
             </span>
           )}
           {entry.state === 'started' && (
