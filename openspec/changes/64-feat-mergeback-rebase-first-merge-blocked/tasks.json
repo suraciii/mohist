@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Replace mergeBack's direct git merge with rebase-first strategy to resolve concurrent merge blocked issues",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/types/index.ts, packages/cli/src/services/event-bus.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Foundation task — all other tasks depend on these types being available"
+      "passes": true,
+      "notes": "Foundation task — all other tasks depend on these types being available",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-002",
@@ -40,9 +42,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/git/worktree-manager.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "D1: rebase runs in worktree for full file context. D6: mergeBack simplified to ff-only after rebase"
+      "notes": "D1: rebase runs in worktree for full file context. D6: mergeBack simplified to ff-only after rebase",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +69,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/git/merge-queue.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "This is the core flow change. retryCount starts at 0, incremented in auto-retry (T-005)"
+      "notes": "This is the core flow change. retryCount starts at 0, incremented in auto-retry (T-005)",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -84,9 +97,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/git/merge-queue.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "D4: use git diff --name-only with caching. Degrades to FIFO on failure"
+      "notes": "D4: use git diff --name-only with caching. Degrades to FIFO on failure",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -108,9 +126,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/git/merge-queue.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "D3: setInterval + master HEAD comparison. retryCount is memory-only (resets on restart)"
+      "notes": "D3: setInterval + master HEAD comparison. retryCount is memory-only (resets on restart)",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -128,9 +151,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/server/index.ts",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Small integration task"
+      "notes": "Small integration task",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -152,9 +180,16 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/git/merge-queue-rebase.test.ts",
-      "dependsOn": ["T-004", "T-005", "T-006"],
+      "dependsOn": [
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
       "passes": false,
-      "notes": "Mock git commands via child_process stubs. Focus on state transitions and event emissions"
+      "notes": "Mock git commands via child_process stubs. Focus on state transitions and event emissions",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
