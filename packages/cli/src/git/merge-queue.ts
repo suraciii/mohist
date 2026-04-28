@@ -11,6 +11,8 @@ const log = Log.create({ service: 'merge-queue' });
 const execFileAsync = promisify(execFile);
 
 const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_AUTO_RETRY_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_RETRY_COUNT = 5;
 
 export interface MergeEntry {
   issueNumber: number;
@@ -35,6 +37,7 @@ export class MergeQueue {
   private queue = new Map<number, MergeEntry>();
   private processing = false;
   private deps: MergeQueueDeps;
+  private autoRetryTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps: MergeQueueDeps) {
     this.deps = deps;
@@ -77,6 +80,115 @@ export class MergeQueue {
     this.processNext();
   }
 
+  startAutoRetry(intervalMs: number = DEFAULT_AUTO_RETRY_INTERVAL_MS): void {
+    if (this.autoRetryTimer) {
+      log.warn('Auto-retry already running');
+      return;
+    }
+
+    this.autoRetryTimer = setInterval(() => {
+      this.checkBlockedIssues().catch((err) => {
+        log.error('Auto-retry check failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }, intervalMs);
+
+    log.info('Auto-retry scheduler started', { intervalMs });
+  }
+
+  stopAutoRetry(): void {
+    if (this.autoRetryTimer) {
+      clearInterval(this.autoRetryTimer);
+      this.autoRetryTimer = null;
+      log.info('Auto-retry scheduler stopped');
+    }
+  }
+
+  private async checkBlockedIssues(): Promise<void> {
+    const retryableStates: MergeState[] = ['conflict', 'blocked'];
+
+    for (const entry of this.queue.values()) {
+      if (!retryableStates.includes(entry.mergeState)) continue;
+
+      const project = this.deps.getProjectPath(entry.projectId);
+      if (!project) {
+        log.warn('Auto-retry: project not found', {
+          issueNumber: entry.issueNumber,
+          projectId: entry.projectId,
+        });
+        continue;
+      }
+
+      const currentHead = await this.getMasterHead(project.path, project.baseBranch);
+      if (!currentHead) continue;
+
+      if (entry.lastAttemptHead && currentHead === entry.lastAttemptHead) {
+        log.debug('Auto-retry: master unchanged, skipping', {
+          issueNumber: entry.issueNumber,
+          head: currentHead,
+        });
+        continue;
+      }
+
+      if (entry.retryCount >= MAX_RETRY_COUNT) {
+        if (entry.mergeState !== 'blocked') {
+          entry.mergeState = 'blocked';
+          this.deps.issueRepo.setMergeState(entry.issueId, 'blocked');
+          this.deps.eventBus.emit('merge_blocked', {
+            issueId: entry.issueId,
+            projectId: entry.projectId,
+            issueNumber: entry.issueNumber,
+            reason: `Auto-retry limit reached (${MAX_RETRY_COUNT} attempts)`,
+          });
+          log.warn('Auto-retry: max retries reached, marking blocked', {
+            issueNumber: entry.issueNumber,
+            retryCount: entry.retryCount,
+          });
+        }
+        continue;
+      }
+
+      entry.retryCount++;
+      entry.lastAttemptHead = currentHead;
+      entry.mergeState = 'pending';
+      entry.message = undefined;
+      entry.enqueuedAt = Date.now();
+
+      this.deps.issueRepo.setMergeState(entry.issueId, 'pending');
+      this.deps.eventBus.emit('rebase_retry', {
+        issueId: entry.issueId,
+        projectId: entry.projectId,
+        issueNumber: entry.issueNumber,
+        retryCount: entry.retryCount,
+      });
+
+      log.info('Auto-retry: re-enqueued issue', {
+        issueNumber: entry.issueNumber,
+        retryCount: entry.retryCount,
+        newHead: currentHead,
+      });
+
+      this.processNext();
+    }
+  }
+
+  private async getMasterHead(projectPath: string, baseBranch: string): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', baseBranch], {
+        cwd: projectPath,
+      });
+      return stdout.trim();
+    } catch (err) {
+      log.warn('getMasterHead failed', {
+        projectPath,
+        baseBranch,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
   retry(issueNumber: number): boolean {
     const entry = this.queue.get(issueNumber);
     if (!entry) {
@@ -113,9 +225,12 @@ export class MergeQueue {
   }
 
   recoverFromDB(): void {
-    const issues = this.deps.issueRepo.findByMergeStates(['pending', 'merging', 'rebasing']);
+    const activeStates: MergeState[] = ['pending', 'merging', 'rebasing'];
+    const retryableStates: MergeState[] = ['conflict', 'blocked'];
 
-    for (const issue of issues) {
+    const activeIssues = this.deps.issueRepo.findByMergeStates(activeStates);
+
+    for (const issue of activeIssues) {
       if (this.queue.has(issue.number)) continue;
 
       this.deps.issueRepo.setMergeState(issue.id, 'pending');
@@ -137,8 +252,34 @@ export class MergeQueue {
       });
     }
 
+    const retryableIssues = this.deps.issueRepo.findByMergeStates(retryableStates);
+
+    for (const issue of retryableIssues) {
+      if (this.queue.has(issue.number)) continue;
+
+      const entry: MergeEntry = {
+        issueNumber: issue.number,
+        projectId: issue.projectId,
+        issueId: issue.id,
+        mergeState: (issue.mergeState as MergeState) || 'conflict',
+        enqueuedAt: Date.now(),
+        retryCount: 0,
+      };
+
+      this.queue.set(issue.number, entry);
+      log.info('Recovered retryable issue from DB', {
+        issueNumber: issue.number,
+        projectId: issue.projectId,
+        mergeState: issue.mergeState,
+      });
+    }
+
     if (this.queue.size > 0) {
-      log.info('Merge queue recovery complete', { recoveredCount: this.queue.size });
+      log.info('Merge queue recovery complete', {
+        recoveredCount: this.queue.size,
+        activeCount: activeIssues.length,
+        retryableCount: retryableIssues.length,
+      });
       this.processNext();
     }
   }
