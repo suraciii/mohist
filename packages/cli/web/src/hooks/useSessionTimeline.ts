@@ -6,6 +6,8 @@ import type {
   ToolCallEntry,
   WorkflowLogItem,
   AgentDetailEventMap,
+  TaskProgressMap,
+  LoopProgress,
 } from '../lib/types'
 
 const FLUSH_INTERVAL = 100
@@ -17,7 +19,33 @@ export interface Round {
   completedAt: string | null
   userText: string
   agentText: string
+  thoughtText: string
   toolCalls: ToolCallEntry[]
+}
+
+export function deriveToolCallTitle(toolName: string, title: string | undefined, rawInput: string | undefined): string {
+  if (title && title !== toolName) return title
+  if (!rawInput) return toolName
+  try {
+    const parsed = JSON.parse(rawInput)
+    if (typeof parsed !== 'object' || parsed === null) return toolName
+    const lower = toolName.toLowerCase()
+    if (['read', 'read_file', 'write', 'write_file', 'edit'].includes(lower)) {
+      const fp = parsed.file_path ?? parsed.filePath ?? parsed.path
+      if (typeof fp === 'string' && fp) return fp.split('/').pop() ?? fp
+    }
+    if (lower === 'bash') {
+      const cmd = parsed.command ?? parsed.script
+      if (typeof cmd === 'string' && cmd) return cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd
+    }
+    if (['glob', 'search_files', 'grep', 'search'].includes(lower)) {
+      const pat = parsed.pattern ?? parsed.query ?? parsed.search
+      if (typeof pat === 'string' && pat) return pat
+    }
+    return toolName
+  } catch {
+    return rawInput || toolName
+  }
 }
 
 const PLAN_ROUND_LABELS = ['proposal.md', 'specs/', 'design.md', 'tasks.json', 'self-review']
@@ -52,6 +80,7 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
         completedAt: null,
         userText,
         agentText: '',
+        thoughtText: '',
         toolCalls: [],
       }
       rounds.push(currentRound)
@@ -66,6 +95,7 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
         completedAt: null,
         userText: '',
         agentText: '',
+        thoughtText: '',
         toolCalls: [],
       }
       rounds.push(currentRound)
@@ -76,6 +106,14 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
       const text = d?.content?.text ?? (d as Record<string, unknown>)?.text as string ?? ''
       if (text) {
         currentRound.agentText += text
+      }
+    }
+
+    if (log.eventType === 'agent_thought_chunk') {
+      const d = log.data as { content?: { text?: string } }
+      const text = d?.content?.text ?? (d as Record<string, unknown>)?.text as string ?? ''
+      if (text) {
+        currentRound.thoughtText += text
       }
     }
 
@@ -93,17 +131,21 @@ function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
         const existing = toolCallMap.get(toolCallId)
         if (existing) {
           existing.state = status === 'completed' ? 'completed' : 'failed'
+          if (title !== undefined) existing.title = title
+          if (rawInput !== undefined) existing.rawInput = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? '')
           if (rawOutput !== undefined) existing.rawOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput ?? '')
         }
       } else {
+        const toolName = title ?? kind ?? ''
+        const rawInputStr = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? '')
         toolCallMap.set(toolCallId, {
           executionId: '',
-          toolName: title ?? kind ?? '',
+          toolName,
           state: ((status ?? 'pending') === 'pending' || (status ?? 'pending') === 'in_progress') ? 'started' : status as 'completed' | 'failed',
           timestamp: new Date(log.createdAt).getTime(),
           toolCallId,
-          title,
-          rawInput: typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? ''),
+          title: deriveToolCallTitle(toolName, title, rawInputStr),
+          rawInput: rawInputStr,
         })
       }
     }
@@ -138,6 +180,8 @@ export function useSessionTimeline(issueNumber: number) {
 
   const [rounds, setRounds] = useState<Round[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
+  const [taskProgress, setTaskProgress] = useState<TaskProgressMap>(new Map())
+  const [loopProgress, setLoopProgress] = useState<LoopProgress | null>(null)
 
   const planBufferRef = useRef<Array<AgentDetailEventMap['plan_session_update']>>([])
   const rafRef = useRef<number | null>(null)
@@ -171,6 +215,51 @@ export function useSessionTimeline(issueNumber: number) {
           if (textData?.text) {
             lastRound.agentText += textData.text
             changed = true
+          }
+        } else if (event.sessionUpdate === 'agent_thought_chunk') {
+          const textData = event.data as { text?: string }
+          if (textData?.text) {
+            lastRound.thoughtText += textData.text
+            changed = true
+          }
+        } else if (event.sessionUpdate === 'tool_call') {
+          const d = event.data as Record<string, unknown>
+          const toolCallId = d.toolCallId as string | undefined
+          const toolName = (d.title ?? d.kind ?? '') as string
+          const rawInput = d.rawInput
+          const rawInputStr = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? '')
+          if (toolCallId) {
+            const entry: ToolCallEntry = {
+              executionId: '',
+              toolName,
+              state: 'started',
+              timestamp: Date.now(),
+              toolCallId,
+              title: deriveToolCallTitle(toolName, d.title as string | undefined, rawInputStr),
+              rawInput: rawInputStr,
+            }
+            liveToolCallMapRef.current.set(toolCallId, entry)
+            lastRound.toolCalls = [...lastRound.toolCalls, entry]
+            changed = true
+          }
+        } else if (event.sessionUpdate === 'tool_call_update') {
+          const d = event.data as Record<string, unknown>
+          const toolCallId = d.toolCallId as string | undefined
+          const status = d.status as string | undefined
+          if (toolCallId) {
+            const existing = liveToolCallMapRef.current.get(toolCallId)
+            if (existing) {
+              if (status === 'completed' || status === 'failed') {
+                existing.state = status === 'completed' ? 'completed' : 'failed'
+              }
+              if (d.title !== undefined) existing.title = d.title as string
+              if (d.rawInput !== undefined) existing.rawInput = typeof d.rawInput === 'string' ? d.rawInput : JSON.stringify(d.rawInput ?? '')
+              if (d.rawOutput !== undefined) existing.rawOutput = typeof d.rawOutput === 'string' ? d.rawOutput : JSON.stringify(d.rawOutput ?? '')
+              lastRound.toolCalls = lastRound.toolCalls.map((tc) =>
+                tc.toolCallId === toolCallId ? { ...existing } : tc,
+              )
+              changed = true
+            }
           }
         }
       }
@@ -243,6 +332,7 @@ export function useSessionTimeline(issueNumber: number) {
             completedAt: null,
             userText: '',
             agentText: '',
+            thoughtText: '',
             toolCalls: [],
           }
           return [...prev, newRound]
@@ -302,6 +392,8 @@ export function useSessionTimeline(issueNumber: number) {
           const updated: ToolCallEntry = {
             ...existing,
             state: detail.state,
+            title: detail.title ?? existing.title,
+            rawInput: detail.rawInput != null ? (typeof detail.rawInput === 'string' ? detail.rawInput : JSON.stringify(detail.rawInput)) : existing.rawInput,
             rawOutput: typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? ''),
           }
           map.set(detail.toolCallId, updated)
@@ -316,6 +408,43 @@ export function useSessionTimeline(issueNumber: number) {
             return next
           })
         }
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('ralph_task_update', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        setTaskProgress((prev) => {
+          const next = new Map(prev)
+          const existing = next.get(detail.taskId)
+          const statusMap: Record<string, 'running' | 'passed' | 'failed' | 'retrying' | 'pending'> = {
+            started: 'running',
+            completed: 'passed',
+            failed: 'failed',
+            retrying: 'retrying',
+          }
+          next.set(detail.taskId, {
+            taskId: detail.taskId,
+            taskIndex: detail.taskIndex,
+            totalTasks: detail.totalTasks,
+            status: statusMap[detail.status] ?? 'pending',
+            executionId: detail.executionId,
+            attempt: detail.attempt ?? existing?.attempt,
+            error: detail.error ?? existing?.error,
+          })
+          return next
+        })
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('ralph_loop_progress', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        setLoopProgress({
+          completed: detail.completed,
+          failed: detail.failed,
+          total: detail.total,
+        })
       }),
     )
 
@@ -337,5 +466,7 @@ export function useSessionTimeline(issueNumber: number) {
     rounds,
     isLoading: loadingLogs,
     isStreaming,
+    taskProgress,
+    loopProgress,
   }
 }

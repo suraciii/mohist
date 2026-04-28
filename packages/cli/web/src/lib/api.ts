@@ -181,4 +181,10 @@ export const api = {
     const qs = search.toString()
     return request<import('./types').LogTailResult>(`/logs/tail${qs ? `?${qs}` : ''}`)
   },
+
+  getTasks: (number: number) =>
+    request<{ version: number; tasks: import('./types').Task[] }>(`/issues/${number}/tasks`),
+
+  getBuildStatus: (number: number) =>
+    request<import('./types').BuildStatus>(`/issues/${number}/build-status`),
 }

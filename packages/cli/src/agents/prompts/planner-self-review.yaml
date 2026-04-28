@@ -29,6 +29,16 @@ criteria:
       - No circular dependencies
       - Implementation steps are clear
 
+  dependency_completeness:
+    check: Are task dependencies correctly declared?
+    severity: error if incomplete
+    details: |
+      - Every non-first task has at least one dependsOn entry
+      - All dependsOn references point to existing task IDs
+      - All dependsOn references point to tasks with lower priority numbers
+      - The dependency graph is a valid DAG (no cycles)
+      - Dependencies reflect actual input/output relationships
+
   risks:
     check: Are risks identified?
     severity: warning if missing

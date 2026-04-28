@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix relative-time.ts: add months format",
+      "spec": "specs/kanban-issue-card/spec.md#相对时间格式化工具模块",
+      "description": "Add months branch to formatRelativeTime in packages/cli/web/src/lib/relative-time.ts. When days >= 30, return Math.floor(days / 30) + 'mo ago' instead of days + 'd ago'. Keep existing branches for seconds/minutes/hours/days unchanged.",
+      "acceptanceCriteria": [
+        "formatRelativeTime(60 days ago) returns '2mo ago'",
+        "formatRelativeTime(30 days ago) returns '1mo ago'",
+        "formatRelativeTime(29 days ago) returns '29d ago' (unchanged)",
+        "formatRelativeTime(45 minutes ago) returns '45m ago' (unchanged)",
+        "formatRelativeTime(null) returns '' (unchanged)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/relative-time.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Use Math.floor(days / 30) per D1 in design.md. Insert months check before the existing days check.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Fix label-colors.ts: color values + area labels + getTypeColor",
+      "spec": "specs/kanban-issue-card/spec.md#label-颜色映射工具模块",
+      "description": "Fix three color value mismatches in label-colors.ts (both TYPE_LABEL_COLORS and TYPE_STRIP_COLORS): feature #16a34a→#22c55e, enhancement #2563eb→#3b82f6, performance #ca8a04→#eab308. Replace AREA_LABEL_COLORS keys from [cli,db,infra] to [frontend,logging,data-model,recovery,explore]. Add exported getTypeColor function that returns { bg, text } from TYPE_LABEL_COLORS.",
+      "acceptanceCriteria": [
+        "getLabelStyle('feature') returns { bg: '#dcfce7', text: '#22c55e', size: 'md' }",
+        "getLabelStyle('enhancement') returns { bg: '#dbeafe', text: '#3b82f6', size: 'md' }",
+        "getLabelStyle('performance') returns { bg: '#fef9c3', text: '#eab308', size: 'md' }",
+        "getStripColor(['feature']) returns '#22c55e'",
+        "getStripColor(['enhancement']) returns '#3b82f6'",
+        "getStripColor(['performance']) returns '#eab308'",
+        "getTypeColor('feature') returns { bg: '#dcfce7', text: '#22c55e' }",
+        "getTypeColor('enhancement') returns { bg: '#dbeafe', text: '#3b82f6' }",
+        "getTypeColor('performance') returns { bg: '#fef9c3', text: '#eab308' }",
+        "isAreaLabel('frontend') returns true",
+        "isAreaLabel('logging') returns true",
+        "isAreaLabel('data-model') returns true",
+        "isAreaLabel('recovery') returns true",
+        "isAreaLabel('explore') returns true",
+        "isAreaLabel('cli') returns false",
+        "isAreaLabel('db') returns false",
+        "getTypeColor('unknown') returns { bg: '#f3f4f6', text: '#6b7280' }",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/label-colors.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "getTypeColor derives from TYPE_LABEL_COLORS per D2. Area labels full replacement per D3. Color values use Tailwind-500 per D4.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Update change-30 tasks.json T-004 metadata",
+      "spec": "",
+      "description": "Update openspec/changes/30-feat-kanban-issuecard-priority/tasks.json: set T-004 passes=true and attempts=1, since the Done column folding feature was already implemented in the codebase.",
+      "acceptanceCriteria": [
+        "T-004 passes is true",
+        "T-004 attempts is 1",
+        "All other task fields unchanged"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "openspec/changes/30-feat-kanban-issuecard-priority/tasks.json",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Metadata-only fix. The actual implementation already exists in StageColumn.tsx.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
