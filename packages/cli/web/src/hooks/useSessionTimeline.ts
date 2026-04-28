@@ -13,6 +13,13 @@ import type {
 
 const FLUSH_INTERVAL = 100
 
+export interface RecoveryEvent {
+  status: 'detected' | 'recovering' | 'recovered' | 'failed'
+  attempt: number
+  reason?: string
+  timestamp: number
+}
+
 export interface Round {
   roundIndex: number
   label: string
@@ -22,6 +29,20 @@ export interface Round {
   agentText: string
   thoughtText: string
   toolCalls: ToolCallEntry[]
+  recoveryEvents: RecoveryEvent[]
+}
+
+export interface RecoveryStatus {
+  status: 'detected' | 'recovering' | 'recovered' | 'failed'
+  attempt: number
+  reason?: string
+}
+
+const RECOVERY_LOG_EVENT_MAP: Record<string, RecoveryEvent['status']> = {
+  acp_session_hang_detected: 'detected',
+  acp_session_recovery_started: 'recovering',
+  acp_session_recovery_succeeded: 'recovered',
+  acp_session_recovery_failed: 'failed',
 }
 
 export function deriveToolCallTitle(toolName: string, title: string | undefined, rawInput: string | undefined): string {
@@ -83,6 +104,7 @@ export function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
         agentText: '',
         thoughtText: '',
         toolCalls: [],
+        recoveryEvents: [],
       }
       rounds.push(currentRound)
       continue
@@ -98,6 +120,7 @@ export function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
         agentText: '',
         thoughtText: '',
         toolCalls: [],
+        recoveryEvents: [],
       }
       rounds.push(currentRound)
     }
@@ -150,6 +173,17 @@ export function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
         })
       }
     }
+
+    const recoveryStatus = RECOVERY_LOG_EVENT_MAP[log.eventType]
+    if (recoveryStatus && currentRound) {
+      const d = log.data as Record<string, unknown>
+      currentRound.recoveryEvents.push({
+        status: recoveryStatus,
+        attempt: (d.attempt as number) ?? 1,
+        reason: d.reason as string | undefined,
+        timestamp: new Date(log.createdAt).getTime(),
+      })
+    }
   }
 
   if (currentRound) {
@@ -188,6 +222,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
   const [isStreaming, setIsStreaming] = useState(false)
   const [taskProgress, setTaskProgress] = useState<TaskProgressMap>(new Map())
   const [loopProgress, setLoopProgress] = useState<LoopProgress | null>(null)
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null)
 
   const planBufferRef = useRef<Array<AgentDetailEventMap['plan_session_update']>>([])
   const rafRef = useRef<number | null>(null)
@@ -351,6 +386,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
             agentText: '',
             thoughtText: '',
             toolCalls: [],
+            recoveryEvents: [],
           }
           return [...prev, newRound]
         })
@@ -477,6 +513,48 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
       }),
     )
 
+    unsubs.push(
+      onAgentEvent('coder_recovery_status', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        setRecoveryStatus({
+          status: detail.status,
+          attempt: detail.attempt,
+          reason: detail.reason,
+        })
+        if (detail.status === 'detected' || detail.status === 'recovering') {
+          setRoundsRef.current((prev) => {
+            if (prev.length === 0) return prev
+            const next = [...prev]
+            const lastRound = { ...next[next.length - 1] }
+            lastRound.recoveryEvents = [...lastRound.recoveryEvents, {
+              status: detail.status,
+              attempt: detail.attempt,
+              reason: detail.reason,
+              timestamp: Date.now(),
+            }]
+            next[next.length - 1] = lastRound
+            return next
+          })
+        }
+        if (detail.status === 'recovered' || detail.status === 'failed') {
+          setRecoveryStatus(null)
+          setRoundsRef.current((prev) => {
+            if (prev.length === 0) return prev
+            const next = [...prev]
+            const lastRound = { ...next[next.length - 1] }
+            lastRound.recoveryEvents = [...lastRound.recoveryEvents, {
+              status: detail.status,
+              attempt: detail.attempt,
+              reason: detail.reason,
+              timestamp: Date.now(),
+            }]
+            next[next.length - 1] = lastRound
+            return next
+          })
+        }
+      }),
+    )
+
     return () => {
       mountedRef.current = false
       for (const unsub of unsubs) unsub()
@@ -497,5 +575,6 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     isStreaming,
     taskProgress,
     loopProgress,
+    recoveryStatus,
   }
 }
