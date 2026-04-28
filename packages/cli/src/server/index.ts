@@ -129,6 +129,7 @@ async function main(): Promise<void> {
   });
 
   mergeQueue.recoverFromDB();
+  mergeQueue.startAutoRetry();
 
   const rateLimiter = new RateLimiter(60 * 1000, 30);
   const server = new HttpServer(config, rateLimiter);
@@ -172,12 +173,14 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', async () => {
     log.info('Received SIGTERM, shutting down gracefully...');
+    mergeQueue.stopAutoRetry();
     agentRunner.shutdown();
     await server.stop();
   });
 
   process.on('SIGINT', async () => {
     log.info('Received SIGINT, shutting down gracefully...');
+    mergeQueue.stopAutoRetry();
     agentRunner.shutdown();
     await server.stop();
   });
