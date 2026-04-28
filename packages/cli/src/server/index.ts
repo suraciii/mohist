@@ -17,6 +17,7 @@ import { createLogRoutes } from '../api/logs';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
+import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { Log } from '../util/log';
@@ -147,7 +148,7 @@ async function main(): Promise<void> {
       };
 
       try {
-        const prompt = `Resolve the following git rebase conflicts in the worktree. The conflicting files are:\n${conflictFiles.map((f: string) => `- ${f}`).join('\n')}\n\nFix all conflict markers (<<<<<<<, =======, >>>>>>>), then stage and commit the resolved files. Do NOT run git rebase --continue — that will be handled automatically.`;
+        const prompt = buildConflictResolutionPrompt(refreshedIssue, worktreePath, conflictFiles);
 
         const connection = await createAcpConnection(acpOptions);
         try {
