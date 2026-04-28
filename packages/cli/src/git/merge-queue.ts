@@ -353,17 +353,13 @@ export class MergeQueue {
       return false;
     }
 
-    const continueResult = await this.deps.worktreeManager.rebaseContinue(
-      project.name,
-      entry.issueNumber,
-    );
-
-    if (!continueResult.success) {
-      this.handleFailure(entry, 'Rebase continue failed after agent resolution', MergeState.Conflict);
+    const rebaseDone = !(await this.deps.worktreeManager.isRebaseInProgress(project.name, entry.issueNumber));
+    if (!rebaseDone) {
+      this.handleFailure(entry, 'Agent returned success but rebase is still in progress', MergeState.Conflict);
       try {
         await this.deps.worktreeManager.abortRebase(project.name, entry.issueNumber);
       } catch (err) {
-        log.warn('Failed to abort rebase after failed continue', {
+        log.warn('Failed to abort rebase after incomplete resolution', {
           issueNumber: entry.issueNumber,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -377,7 +373,7 @@ export class MergeQueue {
       issueNumber: entry.issueNumber,
     });
 
-    log.info('Agent conflict resolution succeeded, rebase continued', {
+    log.info('Agent conflict resolution succeeded, rebase completed', {
       issueNumber: entry.issueNumber,
     });
 
