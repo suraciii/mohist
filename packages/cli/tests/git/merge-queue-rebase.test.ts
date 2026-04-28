@@ -8,15 +8,28 @@ import { DatabaseManager } from '../../src/db/database';
 import { initializeDatabase } from '../../src/db/migrations';
 import { IssueService } from '../../src/services/issue-service';
 
+function createMockWorktreeManager() {
+  return {
+    rebaseOntoMaster: vi.fn().mockResolvedValue({ success: true }),
+    mergeBack: vi.fn().mockResolvedValue({ success: true, message: 'Merged' }),
+    remove: vi.fn().mockResolvedValue(undefined),
+    getPath: vi.fn().mockReturnValue('/test/worktree'),
+    exists: vi.fn().mockReturnValue(true),
+    create: vi.fn().mockResolvedValue('/test/worktree'),
+  } as unknown as WorktreeManager;
+}
+
 describe('MergeQueue rebase-first flow', () => {
   let db: DatabaseManager;
   let projectRepo: ProjectRepo;
   let issueRepo: IssueRepo;
   let issueService: IssueService;
   let eventBus: EventBus;
-  let worktreeManager: WorktreeManager;
-  let queue: MergeQueue;
-  let events: Array<{ type: string; payload: any }> = [];
+  let worktreeManager: ReturnType<typeof createMockWorktreeManager>;
+
+  const PROJECT_PATH = '/test/project';
+  const PROJECT_NAME = 'test-project';
+  const BASE_BRANCH = 'main';
 
   beforeEach(() => {
     db = new DatabaseManager({ inMemory: true });
@@ -25,225 +38,427 @@ describe('MergeQueue rebase-first flow', () => {
     issueRepo = new IssueRepo(db);
     issueService = new IssueService(issueRepo);
     eventBus = new EventBus();
-    worktreeManager = new WorktreeManager();
-    events = [];
-
-    // Capture all events
-    const origEmit = eventBus.emit.bind(eventBus);
-    eventBus.emit = (type: string, payload: any) => {
-      events.push({ type, payload });
-      return origEmit(type, payload);
-    };
-
-    queue = new MergeQueue({
-      worktreeManager,
-      eventBus,
-      issueRepo,
-      getProjectPath: () => ({ path: '/test/project', name: 'test-project', baseBranch: 'main' }),
-    });
+    worktreeManager = createMockWorktreeManager();
   });
 
   afterEach(() => {
     db.close();
   });
 
-  describe('T-001: rebase success → ff-merge → merged', () => {
-    it('should transition through rebasing → merging → merged on success', async () => {
-      const project = projectRepo.create({ name: 'Test', path: '/test' });
-      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-      issueRepo.setMergeState(issue.id, 'pending');
+  function setupProject() {
+    return projectRepo.create({ name: PROJECT_NAME, path: PROJECT_PATH, baseBranch: BASE_BRANCH });
+  }
 
-      vi.spyOn(worktreeManager, 'rebaseOntoMaster').mockResolvedValue({ success: true });
-      vi.spyOn(worktreeManager, 'mergeBack').mockResolvedValue({ success: true, message: 'Merged' });
-      vi.spyOn(queue as any, 'runBuildVerification').mockResolvedValue(true);
-      vi.spyOn(worktreeManager, 'remove').mockResolvedValue(undefined);
-      vi.spyOn(worktreeManager, 'getPath').mockReturnValue('/test/worktree');
+  function createQueue(projectId: string) {
+    return new MergeQueue({
+      worktreeManager,
+      eventBus,
+      issueRepo,
+      getProjectPath: (pid: string) => {
+        if (pid !== projectId) return null;
+        return { path: PROJECT_PATH, name: PROJECT_NAME, baseBranch: BASE_BRANCH };
+      },
+    });
+  }
+
+  async function waitForSettle(ms = 100): Promise<void> {
+    await new Promise((r) => setTimeout(r, ms));
+  }
+
+  function captureEvents(eventBus: EventBus, ...types: string[]) {
+    const captured: Array<{ type: string; payload: any }> = [];
+    for (const t of types) {
+      eventBus.on(t as any, ((payload: any) => {
+        captured.push({ type: t, payload });
+      }) as any);
+    }
+    return captured;
+  }
+
+  describe('rebase success → ff-merge → merged state transition', () => {
+    it('should transition pending → rebasing → merging → merged', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
       vi.spyOn(queue as any, 'branchHasCommits').mockResolvedValue(true);
+      vi.spyOn(queue as any, 'runBuildVerification').mockResolvedValue(true);
+
+      const events = captureEvents(eventBus,
+        'rebase_started', 'rebase_completed', 'merge_started', 'merge_completed');
 
       queue.enqueue(project.id, issue.number);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await waitForSettle();
+
+      expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledWith(
+        '/test/worktree', BASE_BRANCH,
+      );
+      expect(worktreeManager.mergeBack).toHaveBeenCalledWith(
+        PROJECT_PATH, PROJECT_NAME, issue.number, BASE_BRANCH,
+      );
 
       const updated = issueRepo.findById(issue.id);
       expect(updated?.mergeState).toBe('merged');
 
-      const mergeCompletedEvent = events.find((e) => e.type === 'merge_completed');
-      expect(mergeCompletedEvent).toBeDefined();
-      expect(mergeCompletedEvent?.payload.issueNumber).toBe(issue.number);
+      const types = events.map((e) => e.type);
+      expect(types).toContain('rebase_started');
+      expect(types).toContain('rebase_completed');
+      expect(types).toContain('merge_started');
+      expect(types).toContain('merge_completed');
+
+      expect(worktreeManager.remove).toHaveBeenCalledWith(
+        PROJECT_PATH, PROJECT_NAME, issue.number,
+      );
     });
   });
 
-  describe('T-002: rebase conflict → abort → conflict state', () => {
-    it('should detect conflict, abort rebase, and set conflict state with files', async () => {
-      const project = projectRepo.create({ name: 'Test', path: '/test' });
+  describe('rebase conflict → abort → conflict state with conflictingFiles', () => {
+    it('should set conflict state and emit rebase_conflict with file list', async () => {
+      const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-      issueRepo.setMergeState(issue.id, 'pending');
+      const queue = createQueue(project.id);
 
-      vi.spyOn(worktreeManager, 'rebaseOntoMaster').mockResolvedValue({
-        success: false,
-        message: 'Rebase conflict',
-        conflictingFiles: ['src/conflict.ts'],
-      });
-      vi.spyOn(worktreeManager, 'getPath').mockReturnValue('/test/worktree');
       vi.spyOn(queue as any, 'branchHasCommits').mockResolvedValue(true);
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+        success: false,
+        message: 'Rebase conflict: CONFLICT (content): Merge conflict in src/foo.ts',
+        conflictingFiles: ['src/foo.ts', 'src/bar.ts'],
+      });
+
+      const events = captureEvents(eventBus, 'rebase_conflict', 'rebase_completed', 'merge_completed');
 
       queue.enqueue(project.id, issue.number);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await waitForSettle();
 
       const updated = issueRepo.findById(issue.id);
       expect(updated?.mergeState).toBe('conflict');
 
+      expect(events.filter((e) => e.type === 'rebase_conflict')).toHaveLength(1);
       const conflictEvent = events.find((e) => e.type === 'rebase_conflict');
-      expect(conflictEvent).toBeDefined();
-      expect(conflictEvent?.payload.conflictingFiles).toContain('src/conflict.ts');
+      expect(conflictEvent?.payload.conflictingFiles).toEqual(['src/foo.ts', 'src/bar.ts']);
+      expect(conflictEvent?.payload.issueNumber).toBe(issue.number);
+
+      expect(events.filter((e) => e.type === 'rebase_completed')).toHaveLength(0);
+      expect(events.filter((e) => e.type === 'merge_completed')).toHaveLength(0);
+    });
+
+    it('should NOT call mergeBack when rebase conflicts', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      vi.spyOn(queue as any, 'branchHasCommits').mockResolvedValue(true);
+      worktreeManager.rebaseOntoMaster = vi.fn().mockResolvedValue({
+        success: false,
+        message: 'Conflict',
+        conflictingFiles: [],
+      });
+
+      queue.enqueue(project.id, issue.number);
+      await waitForSettle();
+
+      expect(worktreeManager.mergeBack).not.toHaveBeenCalled();
     });
   });
 
-  describe('T-003: no-commits → skip merge → merged', () => {
-    it('should skip rebase/merge when branch has no commits', async () => {
-      const project = projectRepo.create({ name: 'Test', path: '/test' });
+  describe('no-commits → skip merge → merged state', () => {
+    it('should skip rebase and merge when branch has no commits', async () => {
+      const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-      issueRepo.setMergeState(issue.id, 'pending');
+      const queue = createQueue(project.id);
 
       vi.spyOn(queue as any, 'branchHasCommits').mockResolvedValue(false);
-      vi.spyOn(worktreeManager, 'remove').mockResolvedValue(undefined);
+
+      const events = captureEvents(eventBus, 'merge_completed', 'rebase_started');
 
       queue.enqueue(project.id, issue.number);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await waitForSettle();
+
+      expect(worktreeManager.rebaseOntoMaster).not.toHaveBeenCalled();
+      expect(worktreeManager.mergeBack).not.toHaveBeenCalled();
+      expect(worktreeManager.remove).toHaveBeenCalledWith(
+        PROJECT_PATH, PROJECT_NAME, issue.number,
+      );
 
       const updated = issueRepo.findById(issue.id);
       expect(updated?.mergeState).toBe('merged');
 
-      const mergeCompletedEvent = events.find((e) => e.type === 'merge_completed');
-      expect(mergeCompletedEvent).toBeDefined();
+      expect(events.filter((e) => e.type === 'merge_completed')).toHaveLength(1);
+      expect(events.filter((e) => e.type === 'rebase_started')).toHaveLength(0);
     });
   });
 
-  describe('T-004: auto-retry triggers when master HEAD changed', () => {
+  describe('auto-retry triggers when master HEAD changed', () => {
     it('should re-enqueue conflict issue when master HEAD changes', async () => {
-      const project = projectRepo.create({ name: 'Test', path: '/test' });
+      const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       issueRepo.setMergeState(issue.id, 'conflict');
 
-      let headCallCount = 0;
+      let headSeq = 0;
+      const queue = createQueue(project.id);
       vi.spyOn(queue as any, 'getMasterHead').mockImplementation(async () => {
-        headCallCount++;
-        return headCallCount === 1 ? 'old-head' : 'new-head';
+        headSeq++;
+        return `sha-${headSeq}`;
       });
+      vi.spyOn(queue as any, 'processNext').mockImplementation(async () => {});
 
-      // Prevent processNext from running during recovery
       (queue as any).processing = true;
       queue.recoverFromDB();
+      (queue as any).processing = false;
 
-      // Verify issue is in queue
-      const queueStatus = queue.getStatus();
-      expect(queueStatus.length).toBe(1);
-      expect(queueStatus[0].mergeState).toBe('conflict');
+      const events = captureEvents(eventBus, 'rebase_retry');
 
-      // First check: sets lastAttemptHead to 'old-head', increments retryCount to 1, changes state to pending
       await (queue as any).checkBlockedIssues();
-      let updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('pending');
 
-      // Manually set back to conflict to test HEAD change detection
+      expect(events).toHaveLength(1);
+      expect(events[0].payload.retryCount).toBe(1);
+      expect(events[0].payload.issueNumber).toBe(issue.number);
+
       const entry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
-      entry!.mergeState = 'conflict';
-      entry!.lastAttemptHead = 'old-head';
+      expect(entry?.mergeState).toBe('pending');
+      expect(entry?.lastAttemptHead).toBe('sha-1');
+    });
+
+    it('should NOT retry when master HEAD unchanged', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       issueRepo.setMergeState(issue.id, 'conflict');
 
-      // Second check: new head detected, should retry again
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'getMasterHead').mockResolvedValue('same-sha');
+
+      (queue as any).processing = true;
+      queue.recoverFromDB();
+      (queue as any).processing = false;
+
+      const entry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
+      entry!.lastAttemptHead = 'same-sha';
+
+      const events = captureEvents(eventBus, 'rebase_retry');
+
       await (queue as any).checkBlockedIssues();
 
-      updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('pending');
-
-      const retryEvents = events.filter((e) => e.type === 'rebase_retry');
-      expect(retryEvents.length).toBeGreaterThanOrEqual(1);
+      expect(events).toHaveLength(0);
+      expect(entry?.mergeState).toBe('conflict');
     });
   });
 
-  describe('T-005: retry count limit (5) → blocked state', () => {
-    it('should mark blocked after 5 retries', async () => {
-      const project = projectRepo.create({ name: 'Test', path: '/test' });
+  describe('retry count limit (5) → blocked state', () => {
+    it('should mark blocked after retryCount reaches MAX (5)', async () => {
+      const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       issueRepo.setMergeState(issue.id, 'conflict');
 
-      let headCallCount = 0;
-      vi.spyOn(queue as any, 'getMasterHead').mockImplementation(async () => {
-        headCallCount++;
-        return `head-${headCallCount}`;
-      });
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'getMasterHead').mockResolvedValue('new-sha');
 
-      // Prevent processNext from running during recovery
       (queue as any).processing = true;
       queue.recoverFromDB();
+      (queue as any).processing = false;
 
-      // Manually set retryCount to 5 (at the limit)
       const entry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
+      expect(entry).toBeDefined();
       entry!.retryCount = 5;
 
-      // At retry limit, should trigger blocked state
+      const events = captureEvents(eventBus, 'merge_blocked');
+
       await (queue as any).checkBlockedIssues();
 
       const updated = issueRepo.findById(issue.id);
       expect(updated?.mergeState).toBe('blocked');
 
-      const blockedEvent = events.find((e) => e.type === 'merge_blocked');
-      expect(blockedEvent).toBeDefined();
-      expect(blockedEvent?.payload.issueNumber).toBe(issue.number);
+      expect(events).toHaveLength(1);
+      expect(events[0].payload.issueNumber).toBe(issue.number);
+      expect(events[0].payload.reason).toContain('5');
     });
-  });
 
-  describe('T-006: manual retry resets retryCount to 0', () => {
-    it('should reset retry count on manual retry', async () => {
-      const project = projectRepo.create({ name: 'Test', path: '/test' });
+    it('should NOT re-mark blocked if already blocked', async () => {
+      const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       issueRepo.setMergeState(issue.id, 'blocked');
 
-      // Prevent processNext from running during recovery
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'getMasterHead').mockResolvedValue('new-sha');
+
       (queue as any).processing = true;
       queue.recoverFromDB();
+      (queue as any).processing = false;
 
-      // Verify retry count is 0 after recovery
-      let entry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
-      expect(entry).toBeDefined();
-      expect(entry?.retryCount).toBe(0);
+      const entry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
+      entry!.retryCount = 5;
 
-      // Simulate some retries
-      entry!.retryCount = 3;
+      const events = captureEvents(eventBus, 'merge_blocked');
 
-      // Manually retry
-      const result = queue.retry(issue.number);
-      expect(result).toBe(true);
+      await (queue as any).checkBlockedIssues();
 
-      const retried = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
-      expect(retried?.mergeState).toBe('pending');
-      expect(retried?.retryCount).toBe(0);
+      expect(events).toHaveLength(0);
     });
   });
 
-  describe('T-007: file overlap detection in pickNext ordering', () => {
-    it('should process non-overlapping issue first when overlapping exists', async () => {
-      const project = projectRepo.create({ name: 'Test', path: '/test' });
+  describe('manual retry resets retryCount to 0', () => {
+    it('should reset retryCount and set state to pending', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      issueRepo.setMergeState(issue.id, 'blocked');
+
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'processNext').mockImplementation(async () => {});
+
+      (queue as any).processing = true;
+      queue.recoverFromDB();
+      (queue as any).processing = false;
+
+      const entry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
+      entry!.retryCount = 4;
+
+      const result = queue.retry(issue.number);
+      expect(result).toBe(true);
+
+      const afterRetry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
+      expect(afterRetry?.retryCount).toBe(0);
+      expect(afterRetry?.mergeState).toBe('pending');
+
+      const dbIssue = issueRepo.findById(issue.id);
+      expect(dbIssue?.mergeState).toBe('pending');
+    });
+
+    it('should reject retry from non-retryable states', () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id);
+
+      queue.enqueue(project.id, issue.number);
+
+      expect(queue.retry(issue.number)).toBe(false);
+    });
+
+    it('should reject retry for unknown issue', () => {
+      const queue = createQueue('nonexistent');
+      expect(queue.retry(9999)).toBe(false);
+    });
+  });
+
+  describe('conflict-aware ordering with file overlap in pickNext', () => {
+    it('should prioritize non-overlapping later entry when FIFO candidate overlaps', async () => {
+      const project = setupProject();
       const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
       const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
 
-      issueRepo.setMergeState(issue1.id, 'pending');
-      issueRepo.setMergeState(issue2.id, 'pending');
-
-      let callIndex = 0;
-      vi.spyOn(queue as any, 'getChangedFiles').mockImplementation(async () => {
-        callIndex++;
-        return callIndex === 1 ? ['src/shared.ts'] : ['src/other.ts'];
-      });
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'processNext').mockImplementation(async () => {});
 
       queue.enqueue(project.id, issue1.number);
       queue.enqueue(project.id, issue2.number);
 
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      vi.spyOn(queue as any, 'getChangedFiles').mockImplementation(
+        async (_path: string, branch: string) => {
+          if (branch === 'mo/issue-1') return ['src/shared.ts', 'src/a.ts'];
+          if (branch === 'mo/issue-2') return ['src/shared.ts', 'src/b.ts'];
+          return [];
+        },
+      );
 
-      const status = queue.getStatus();
-      const firstProcessed = status.find((e: MergeEntry) => e.issueNumber === issue2.number);
-      expect(firstProcessed?.mergeState).not.toBe('pending');
+      const picked = await (queue as any).pickNext();
+
+      expect(picked.issueNumber).toBe(issue2.number);
+    });
+
+    it('should return FIFO candidate when no overlap exists', async () => {
+      const project = setupProject();
+      const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
+      const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
+
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'processNext').mockImplementation(async () => {});
+
+      queue.enqueue(project.id, issue1.number);
+      queue.enqueue(project.id, issue2.number);
+
+      vi.spyOn(queue as any, 'getChangedFiles').mockImplementation(
+        async (_path: string, branch: string) => {
+          if (branch === 'mo/issue-1') return ['src/a.ts'];
+          if (branch === 'mo/issue-2') return ['src/b.ts'];
+          return [];
+        },
+      );
+
+      const picked = await (queue as any).pickNext();
+
+      expect(picked.issueNumber).toBe(issue1.number);
+    });
+
+    it('should fall back to FIFO when getChangedFiles fails', async () => {
+      const project = setupProject();
+      const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
+      const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
+
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'processNext').mockImplementation(async () => {});
+
+      queue.enqueue(project.id, issue1.number);
+      queue.enqueue(project.id, issue2.number);
+
+      vi.spyOn(queue as any, 'getChangedFiles').mockResolvedValue(undefined);
+
+      const picked = await (queue as any).pickNext();
+
+      expect(picked.issueNumber).toBe(issue1.number);
+    });
+
+    it('should return only pending entry when single entry in queue', async () => {
+      const project = setupProject();
+      const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
+
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'processNext').mockImplementation(async () => {});
+
+      queue.enqueue(project.id, issue1.number);
+
+      const picked = await (queue as any).pickNext();
+
+      expect(picked.issueNumber).toBe(issue1.number);
+    });
+  });
+
+  describe('startAutoRetry / stopAutoRetry', () => {
+    it('should start and stop auto-retry timer', () => {
+      const queue = createQueue('proj');
+
+      queue.startAutoRetry(100);
+      expect((queue as any).autoRetryTimer).not.toBeNull();
+
+      queue.stopAutoRetry();
+      expect((queue as any).autoRetryTimer).toBeNull();
+    });
+
+    it('should not start duplicate timer', () => {
+      const queue = createQueue('proj');
+
+      queue.startAutoRetry(100);
+      const firstTimer = (queue as any).autoRetryTimer;
+
+      queue.startAutoRetry(100);
+      expect((queue as any).autoRetryTimer).toBe(firstTimer);
+
+      queue.stopAutoRetry();
+    });
+  });
+
+  describe('recoverFromDB with rebase states', () => {
+    it('should recover rebasing state as pending', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test' });
+      issueRepo.setMergeState(issue.id, 'rebasing');
+
+      const queue = createQueue(project.id);
+      vi.spyOn(queue as any, 'branchHasCommits').mockResolvedValue(true);
+      vi.spyOn(queue as any, 'runBuildVerification').mockResolvedValue(true);
+
+      queue.recoverFromDB();
+      await waitForSettle();
+
+      const updated = issueRepo.findById(issue.id);
+      expect(updated?.mergeState).toBe('merged');
     });
   });
 });
