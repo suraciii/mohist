@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
@@ -71,10 +73,14 @@ describe('MergeQueue', () => {
     worktreeManager = createMockWorktreeManager();
     resolveConflictsMock.mockReset().mockResolvedValue({ success: true });
     execFileMock.mockReset();
+    const gitDir = path.join(PROJECT_PATH, '.git');
+    fs.mkdirSync(gitDir, { recursive: true });
+    fs.writeFileSync(path.join(gitDir, 'mohist-last-fetch'), Date.now().toString(), 'utf-8');
   });
 
   afterEach(() => {
     db.close();
+    fs.rmSync(PROJECT_PATH, { recursive: true, force: true });
   });
 
   function setupProject() {
@@ -98,6 +104,21 @@ describe('MergeQueue', () => {
     for (let i = 0; i < 50; i++) {
       await new Promise((r) => setTimeout(r, 10));
     }
+  }
+
+  function setupMockExecFile(overrides?: (cmd: string, args: string[], opts: any, cb: any) => void) {
+    execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+      if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+        cb?.(null, { stdout: 'abc123 commit message\n', stderr: '' });
+        return undefined as any;
+      }
+      if (overrides) {
+        overrides(cmd, args, opts, cb);
+        return undefined as any;
+      }
+      cb?.(null, { stdout: '', stderr: '' });
+      return undefined as any;
+    });
   }
 
   describe('enqueue', () => {
@@ -222,6 +243,8 @@ describe('MergeQueue', () => {
       });
 
       const queue = createQueue(project.id);
+
+      setupMockExecFile();
 
       queue.enqueue(project.id, issue1.number);
       queue.enqueue(project.id, issue2.number);

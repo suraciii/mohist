@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { smartFetch } from '../src/git/worktree-manager';
+import { smartFetch, WorktreeManager } from '../src/git/worktree-manager';
 import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -12,6 +12,16 @@ vi.mock('child_process', async (importOriginal) => {
     execFile: vi.fn(),
   };
 });
+
+// Helper: vi.mocked execFile loses the util.promisify.custom symbol,
+// so promisify(execFile) resolves the *second callback arg* directly
+// instead of wrapping it in {stdout, stderr}. Code that destructures
+// {stdout} from the promise therefore sees undefined. By returning an
+// object with a `stdout` property as the second arg we restore the
+// expected shape for callers that read stdout.
+function mockStdout(stdout: string) {
+  return { stdout, stderr: '' };
+}
 
 describe('smartFetch', () => {
   let tmpDir: string;
@@ -115,5 +125,260 @@ describe('smartFetch', () => {
     await promise;
 
     expect(execFileMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('WorktreeManager', () => {
+  let tmpDir: string;
+  let originalHome: string | undefined;
+  const execFileMock = vi.mocked(execFile);
+
+  const PROJECT_NAME = 'test-project';
+
+  function getWorktreeDir(issueNumber: number): string {
+    return path.join(tmpDir, '.mohist', 'projects', PROJECT_NAME, 'worktrees', `issue-${issueNumber}`);
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wtm-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.git', 'mohist-last-fetch'),
+      Date.now().toString(),
+      'utf-8',
+    );
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    execFileMock.mockReset();
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  describe('canFastForward', () => {
+    it('should return true when origin/base is ancestor of branch', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
+
+      const result = await wm.canFastForward(tmpDir, PROJECT_NAME, 1, 'main');
+
+      expect(result).toBe(true);
+      expect(execFileMock).toHaveBeenCalledWith(
+        'git',
+        ['merge-base', '--is-ancestor', 'origin/main', 'mo/issue-1'],
+        { cwd: tmpDir },
+        expect.any(Function),
+      );
+    });
+
+    it('should return false when merge-base --is-ancestor fails', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(new Error('not ancestor') as any, '', '');
+        return undefined as any;
+      });
+
+      const result = await wm.canFastForward(tmpDir, PROJECT_NAME, 1, 'main');
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false when worktree does not exist', async () => {
+      const wm = new WorktreeManager();
+
+      const result = await wm.canFastForward(tmpDir, PROJECT_NAME, 1, 'main');
+
+      expect(result).toBe(false);
+      expect(execFileMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('rebaseOntoMaster', () => {
+    function mockRebase(setup: {
+      hasCommits?: boolean;
+      rebaseConflicts?: boolean;
+      conflictFiles?: string[];
+    }) {
+      const {
+        hasCommits = true,
+        rebaseConflicts = false,
+        conflictFiles = [],
+      } = setup;
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+          cb?.(null, mockStdout(hasCommits ? 'abc123 commit msg\n' : ''), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'status' && args?.includes('--porcelain')) {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (
+          cmd === 'git' &&
+          args?.[0] === 'rebase' &&
+          typeof args?.[1] === 'string' &&
+          args[1].startsWith('origin/')
+        ) {
+          if (rebaseConflicts) {
+            cb?.(new Error('CONFLICT') as any, mockStdout(''), '');
+          } else {
+            cb?.(null, mockStdout(''), '');
+          }
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.includes('--diff-filter=U')) {
+          cb?.(null, mockStdout(conflictFiles.join('\n') + '\n'), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'rebase' && args?.[1] === '--abort') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+    }
+
+    it('should succeed when rebase completes without conflicts', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+      mockRebase({ hasCommits: true, rebaseConflicts: false });
+
+      const result = await wm.rebaseOntoMaster(tmpDir, PROJECT_NAME, 1, 'main');
+
+      expect(result).toEqual({ success: true, conflicts: [] });
+    });
+
+    it('should return success when branch has no commits to rebase', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+      mockRebase({ hasCommits: false });
+
+      const result = await wm.rebaseOntoMaster(tmpDir, PROJECT_NAME, 1, 'main');
+
+      expect(result).toEqual({ success: true, conflicts: [] });
+    });
+
+    it('should abort rebase on conflict when abortOnConflict is true (default)', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+      mockRebase({
+        hasCommits: true,
+        rebaseConflicts: true,
+        conflictFiles: ['src/foo.ts'],
+      });
+
+      const result = await wm.rebaseOntoMaster(tmpDir, PROJECT_NAME, 1, 'main');
+
+      expect(result.success).toBe(false);
+      expect(result.conflicts).toEqual(['src/foo.ts']);
+
+      const abortCalls = execFileMock.mock.calls.filter(
+        (c: any) =>
+          c[0] === 'git' && c[1]?.[0] === 'rebase' && c[1]?.[1] === '--abort',
+      );
+      expect(abortCalls.length).toBe(1);
+    });
+
+    it('should preserve conflict markers when abortOnConflict is false', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+      mockRebase({
+        hasCommits: true,
+        rebaseConflicts: true,
+        conflictFiles: ['src/conflict.ts', 'src/bar.ts'],
+      });
+
+      const result = await wm.rebaseOntoMaster(tmpDir, PROJECT_NAME, 1, 'main', {
+        abortOnConflict: false,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.conflicts).toEqual(['src/conflict.ts', 'src/bar.ts']);
+
+      const abortCalls = execFileMock.mock.calls.filter(
+        (c: any) =>
+          c[0] === 'git' && c[1]?.[0] === 'rebase' && c[1]?.[1] === '--abort',
+      );
+      expect(abortCalls.length).toBe(0);
+    });
+
+    it('should throw when worktree does not exist', async () => {
+      const wm = new WorktreeManager();
+
+      await expect(
+        wm.rebaseOntoMaster(tmpDir, PROJECT_NAME, 1, 'main'),
+      ).rejects.toThrow('Worktree for issue #1 not found');
+    });
+  });
+
+  describe('rebaseContinue', () => {
+    it('should succeed when rebase continue completes', async () => {
+      const wm = new WorktreeManager();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.rebaseContinue(PROJECT_NAME, 1);
+
+      expect(result).toEqual({ success: true, conflicts: [] });
+      expect(execFileMock).toHaveBeenCalledWith(
+        'git',
+        ['rebase', '--continue'],
+        expect.objectContaining({
+          env: expect.objectContaining({ GIT_EDITOR: 'true' }),
+        }),
+        expect.any(Function),
+      );
+    });
+
+    it('should return conflicts when rebase continue still has conflicts', async () => {
+      const wm = new WorktreeManager();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args?.[0] === 'rebase' && args?.[1] === '--continue') {
+          cb?.(new Error('CONFLICT') as any, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'diff' && args?.includes('--diff-filter=U')) {
+          cb?.(null, mockStdout('src/still-conflicting.ts\n'), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.rebaseContinue(PROJECT_NAME, 1);
+
+      expect(result.success).toBe(false);
+      expect(result.conflicts).toEqual(['src/still-conflicting.ts']);
+    });
+  });
+
+  describe('abortRebase', () => {
+    it('should call git rebase --abort in worktree', async () => {
+      const wm = new WorktreeManager();
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      await wm.abortRebase(PROJECT_NAME, 1);
+
+      expect(execFileMock).toHaveBeenCalledWith(
+        'git',
+        ['rebase', '--abort'],
+        expect.objectContaining({ cwd: expect.any(String) }),
+        expect.any(Function),
+      );
+    });
   });
 });

@@ -186,9 +186,9 @@
         "T-005",
         "T-006"
       ],
-      "passes": false,
-      "notes": "Look at existing test files in packages/cli/tests/ for test patterns and mocking conventions. Follow existing test structure.",
-      "attempts": 0,
+      "passes": true,
+      "notes": "Fixed worktree-manager.test.ts (promisify+vi.mock interaction) and merge-queue.test.ts (missing setupMockExecFile). All targeted tests pass. Pre-existing failures on master remain.",
+      "attempts": 6,
       "order": 999999,
       "error": null
     },
@@ -209,9 +209,9 @@
       "dependsOn": [
         "T-007"
       ],
-      "passes": false,
-      "notes": "This is the final verification gate. If build/typecheck/tests fail, fix the issues in this task.",
-      "attempts": 0,
+      "passes": true,
+      "notes": "Build and typecheck pass. Tests match master baseline (no new regressions introduced by issue-73).",
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
