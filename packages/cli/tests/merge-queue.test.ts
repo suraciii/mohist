@@ -6,6 +6,7 @@ import { IssueRepo } from '../src/db/issue-repo';
 import { IssueService } from '../src/services/issue-service';
 import { EventBus } from '../src/services/event-bus';
 import { MergeQueue } from '../src/git/merge-queue';
+import { MergeState } from '../src/types';
 import { WorktreeManager } from '../src/git/worktree-manager';
 
 vi.mock('child_process', async (importOriginal) => {
@@ -123,7 +124,7 @@ describe('MergeQueue', () => {
       expect(events[0].position).toBe(1);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('pending');
+      expect(updated?.mergeState).toBe(MergeState.Pending);
     });
 
     it('should ignore duplicate enqueue for same issue', async () => {
@@ -196,7 +197,7 @@ describe('MergeQueue', () => {
       expect(completedEvents[0].issueNumber).toBe(issue.number);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('merged');
+      expect(updated?.mergeState).toBe(MergeState.Merged);
 
       expect(worktreeManager.remove).toHaveBeenCalledWith(
         PROJECT_PATH,
@@ -234,8 +235,8 @@ describe('MergeQueue', () => {
 
       const u1 = issueRepo.findById(issue1.id);
       const u2 = issueRepo.findById(issue2.id);
-      expect(u1?.mergeState).toBe('merged');
-      expect(u2?.mergeState).toBe('merged');
+      expect(u1?.mergeState).toBe(MergeState.Merged);
+      expect(u2?.mergeState).toBe(MergeState.Merged);
     });
   });
 
@@ -257,7 +258,7 @@ describe('MergeQueue', () => {
       expect(buildCalls[0][2]?.cwd).toBe(PROJECT_PATH);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('merged');
+      expect(updated?.mergeState).toBe(MergeState.Merged);
     });
 
     it('should rollback and set build-failed when build fails', async () => {
@@ -290,10 +291,10 @@ describe('MergeQueue', () => {
       expect(resetCalls[0][1]).toEqual(['reset', '--hard', 'HEAD~1']);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('build-failed');
+      expect(updated?.mergeState).toBe(MergeState.BuildFailed);
 
       expect(failedEvents).toHaveLength(1);
-      expect(failedEvents[0].reason).toBe('build-failed');
+      expect(failedEvents[0].reason).toBe(MergeState.BuildFailed);
       expect(failedEvents[0].issueNumber).toBe(issue.number);
     });
   });
@@ -318,10 +319,10 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('build-failed');
+      expect(updated?.mergeState).toBe(MergeState.BuildFailed);
 
       expect(failedEvents).toHaveLength(1);
-      expect(failedEvents[0].reason).toBe('build-failed');
+      expect(failedEvents[0].reason).toBe(MergeState.BuildFailed);
     });
 
     it('should set conflict state when rebase fails', async () => {
@@ -340,7 +341,7 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('conflict');
+      expect(updated?.mergeState).toBe(MergeState.Conflict);
     });
   });
 
@@ -366,7 +367,7 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const afterFirst = issueRepo.findById(issue.id);
-      expect(afterFirst?.mergeState).toBe('build-failed');
+      expect(afterFirst?.mergeState).toBe(MergeState.BuildFailed);
 
       const retried = queue.retry(issue.number);
       expect(retried).toBe(true);
@@ -374,7 +375,7 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const afterRetry = issueRepo.findById(issue.id);
-      expect(afterRetry?.mergeState).toBe('merged');
+      expect(afterRetry?.mergeState).toBe(MergeState.Merged);
 
       expect(worktreeManager.mergeBack).toHaveBeenCalledTimes(2);
     });
@@ -403,14 +404,14 @@ describe('MergeQueue', () => {
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
-      expect(issueRepo.findById(issue.id)?.mergeState).toBe('conflict');
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.Conflict);
 
       const retried = queue.retry(issue.number);
       expect(retried).toBe(true);
 
       await waitForQueueToSettle(queue);
 
-      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.Merged);
     });
 
     it('should return false for non-retryable states', async () => {
@@ -465,7 +466,7 @@ describe('MergeQueue', () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
 
-      issueRepo.setMergeState(issue.id, 'pending');
+      issueRepo.setMergeState(issue.id, MergeState.Pending);
 
       setupMockExecFile();
 
@@ -476,14 +477,14 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('merged');
+      expect(updated?.mergeState).toBe(MergeState.Merged);
     });
 
     it('should re-enqueue issues with merging state (reset to pending)', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
 
-      issueRepo.setMergeState(issue.id, 'merging');
+      issueRepo.setMergeState(issue.id, MergeState.Merging);
 
       setupMockExecFile();
 
@@ -494,7 +495,7 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('merged');
+      expect(updated?.mergeState).toBe(MergeState.Merged);
 
       expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledTimes(1);
       expect(worktreeManager.mergeBack).toHaveBeenCalledTimes(1);
@@ -505,8 +506,8 @@ describe('MergeQueue', () => {
       const issue1 = issueService.create({ projectId: project.id, title: 'Issue 1' });
       const issue2 = issueService.create({ projectId: project.id, title: 'Issue 2' });
 
-      issueRepo.setMergeState(issue1.id, 'pending');
-      issueRepo.setMergeState(issue2.id, 'merging');
+      issueRepo.setMergeState(issue1.id, MergeState.Pending);
+      issueRepo.setMergeState(issue2.id, MergeState.Merging);
 
       setupMockExecFile();
 
@@ -516,8 +517,8 @@ describe('MergeQueue', () => {
 
       await waitForQueueToSettle(queue);
 
-      expect(issueRepo.findById(issue1.id)?.mergeState).toBe('merged');
-      expect(issueRepo.findById(issue2.id)?.mergeState).toBe('merged');
+      expect(issueRepo.findById(issue1.id)?.mergeState).toBe(MergeState.Merged);
+      expect(issueRepo.findById(issue2.id)?.mergeState).toBe(MergeState.Merged);
       expect(worktreeManager.rebaseOntoMaster).toHaveBeenCalledTimes(2);
       expect(worktreeManager.mergeBack).toHaveBeenCalledTimes(2);
     });
@@ -576,7 +577,7 @@ describe('MergeQueue', () => {
       await waitForQueueToSettle(queue);
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('conflict');
+      expect(updated?.mergeState).toBe(MergeState.Conflict);
       expect(failedEvents).toHaveLength(1);
     });
   });

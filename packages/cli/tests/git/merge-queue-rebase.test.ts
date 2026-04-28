@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MergeQueue, MergeEntry } from '../../src/git/merge-queue';
+import { MergeState } from '../../src/types';
 import { WorktreeManager } from '../../src/git/worktree-manager';
 import { EventBus } from '../../src/services/event-bus';
 import { IssueRepo } from '../../src/db/issue-repo';
@@ -98,7 +99,7 @@ describe('MergeQueue rebase-first flow', () => {
       );
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('merged');
+      expect(updated?.mergeState).toBe(MergeState.Merged);
 
       const types = events.map((e) => e.type);
       expect(types).toContain('rebase_started');
@@ -131,7 +132,7 @@ describe('MergeQueue rebase-first flow', () => {
       await waitForSettle();
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('conflict');
+      expect(updated?.mergeState).toBe(MergeState.Conflict);
 
       expect(events.filter((e) => e.type === 'rebase_conflict')).toHaveLength(1);
       const conflictEvent = events.find((e) => e.type === 'rebase_conflict');
@@ -181,7 +182,7 @@ describe('MergeQueue rebase-first flow', () => {
       );
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('merged');
+      expect(updated?.mergeState).toBe(MergeState.Merged);
 
       expect(events.filter((e) => e.type === 'merge_completed')).toHaveLength(1);
       expect(events.filter((e) => e.type === 'rebase_started')).toHaveLength(0);
@@ -192,7 +193,7 @@ describe('MergeQueue rebase-first flow', () => {
     it('should re-enqueue conflict issue when master HEAD changes', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-      issueRepo.setMergeState(issue.id, 'conflict');
+      issueRepo.setMergeState(issue.id, MergeState.Conflict);
 
       let headSeq = 0;
       const queue = createQueue(project.id);
@@ -215,14 +216,14 @@ describe('MergeQueue rebase-first flow', () => {
       expect(events[0].payload.issueNumber).toBe(issue.number);
 
       const entry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
-      expect(entry?.mergeState).toBe('pending');
+      expect(entry?.mergeState).toBe(MergeState.Pending);
       expect(entry?.lastAttemptHead).toBe('sha-1');
     });
 
     it('should NOT retry when master HEAD unchanged', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-      issueRepo.setMergeState(issue.id, 'conflict');
+      issueRepo.setMergeState(issue.id, MergeState.Conflict);
 
       const queue = createQueue(project.id);
       vi.spyOn(queue as any, 'getMasterHead').mockResolvedValue('same-sha');
@@ -239,7 +240,7 @@ describe('MergeQueue rebase-first flow', () => {
       await (queue as any).checkBlockedIssues();
 
       expect(events).toHaveLength(0);
-      expect(entry?.mergeState).toBe('conflict');
+      expect(entry?.mergeState).toBe(MergeState.Conflict);
     });
   });
 
@@ -247,7 +248,7 @@ describe('MergeQueue rebase-first flow', () => {
     it('should mark blocked after retryCount reaches MAX (5)', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-      issueRepo.setMergeState(issue.id, 'conflict');
+      issueRepo.setMergeState(issue.id, MergeState.Conflict);
 
       const queue = createQueue(project.id);
       vi.spyOn(queue as any, 'getMasterHead').mockResolvedValue('new-sha');
@@ -265,7 +266,7 @@ describe('MergeQueue rebase-first flow', () => {
       await (queue as any).checkBlockedIssues();
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('blocked');
+      expect(updated?.mergeState).toBe(MergeState.Blocked);
 
       expect(events).toHaveLength(1);
       expect(events[0].payload.issueNumber).toBe(issue.number);
@@ -275,7 +276,7 @@ describe('MergeQueue rebase-first flow', () => {
     it('should NOT re-mark blocked if already blocked', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-      issueRepo.setMergeState(issue.id, 'blocked');
+      issueRepo.setMergeState(issue.id, MergeState.Blocked);
 
       const queue = createQueue(project.id);
       vi.spyOn(queue as any, 'getMasterHead').mockResolvedValue('new-sha');
@@ -299,7 +300,7 @@ describe('MergeQueue rebase-first flow', () => {
     it('should reset retryCount and set state to pending', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-      issueRepo.setMergeState(issue.id, 'blocked');
+      issueRepo.setMergeState(issue.id, MergeState.Blocked);
 
       const queue = createQueue(project.id);
       vi.spyOn(queue as any, 'processNext').mockImplementation(async () => {});
@@ -316,10 +317,10 @@ describe('MergeQueue rebase-first flow', () => {
 
       const afterRetry = queue.getStatus().find((e: MergeEntry) => e.issueNumber === issue.number);
       expect(afterRetry?.retryCount).toBe(0);
-      expect(afterRetry?.mergeState).toBe('pending');
+      expect(afterRetry?.mergeState).toBe(MergeState.Pending);
 
       const dbIssue = issueRepo.findById(issue.id);
-      expect(dbIssue?.mergeState).toBe('pending');
+      expect(dbIssue?.mergeState).toBe(MergeState.Pending);
     });
 
     it('should reject retry from non-retryable states', () => {
@@ -448,7 +449,7 @@ describe('MergeQueue rebase-first flow', () => {
     it('should recover rebasing state as pending', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test' });
-      issueRepo.setMergeState(issue.id, 'rebasing');
+      issueRepo.setMergeState(issue.id, MergeState.Rebasing);
 
       const queue = createQueue(project.id);
       vi.spyOn(queue as any, 'branchHasCommits').mockResolvedValue(true);
@@ -458,7 +459,7 @@ describe('MergeQueue rebase-first flow', () => {
       await waitForSettle();
 
       const updated = issueRepo.findById(issue.id);
-      expect(updated?.mergeState).toBe('merged');
+      expect(updated?.mergeState).toBe(MergeState.Merged);
     });
   });
 });
