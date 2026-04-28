@@ -224,10 +224,10 @@ async function runReviewStage(
   );
 }
 
-describe('Review stage Verdict PASS skips auto-fix', () => {
+describe('Review stage Result PASS skips auto-fix', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('should return requiresApproval without auto-fix when verdict is PASS', async () => {
+  it('should return requiresApproval without auto-fix when result is PASS', async () => {
     const repos = createMockRepos();
     const result = await runReviewStage(repos, [
       { text: 'review output', success: true },
@@ -241,7 +241,7 @@ describe('Review stage Verdict PASS skips auto-fix', () => {
   });
 });
 
-describe('Review stage Verdict FAIL enters auto-fix loop', () => {
+describe('Review stage Result FAIL enters auto-fix loop', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('should enter auto-fix loop on FAIL and succeed on first attempt', async () => {
@@ -319,6 +319,25 @@ describe('Review stage Verdict FAIL enters auto-fix loop', () => {
     expect(commentCall.issueId).toBe('issue-1');
     expect(commentCall.body).toContain('Auto-fix applied');
     expect(commentCall.body).toContain('Fix X at line 10');
+  });
+});
+
+describe('FAIL report without Fix Suggestions skips auto-fix loop', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('should return requiresApproval without entering auto-fix loop when no Fix Suggestions', async () => {
+    const repos = createMockRepos();
+    const FAIL_NO_SUGGESTIONS = '# Review\n\n## Result: FAIL\n\n## Dimensions\n\n### Correctness: FAIL\n- Something wrong\n';
+    const result = await runReviewStage(repos, [
+      { text: 'review output', success: true },
+      { text: FAIL_NO_SUGGESTIONS, success: true },
+    ], [FAIL_NO_SUGGESTIONS]);
+
+    expect(result.success).toBe(true);
+    expect(result.requiresApproval).toBe(true);
+    expect(result.escalateToStage).toBeUndefined();
+    expect(result.message).toContain('no auto-fixable suggestions');
+    expect(repos.commentRepo.create).not.toHaveBeenCalled();
   });
 });
 

@@ -317,7 +317,7 @@ export function buildReVerifyPrompt(
     '',
     `## Change Directory\n\n${changeDir}`,
     '',
-    '## Goal\n\nRe-verify specific issues from the review after auto-fix.',
+    '## Goal\n\nPerform a full re-review of all code changes after auto-fix.',
     '',
     '## Review Report\n',
     reviewContent,
