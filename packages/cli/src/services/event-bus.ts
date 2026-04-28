@@ -27,6 +27,7 @@ export type EventMap = {
   merge_started: { issueId: string; projectId: string; issueNumber: number };
   merge_completed: { issueId: string; projectId: string; issueNumber: number };
   merge_failed: { issueId: string; projectId: string; issueNumber: number; reason: string };
+  agent_stopped: { issueId: string; projectId: string; issueNumber: number; reason: string };
   rebase_started: { issueId: string; projectId: string; issueNumber: number };
   rebase_completed: { issueId: string; projectId: string; issueNumber: number };
   rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflictingFiles: string[] };

@@ -74,11 +74,26 @@ export interface ApiResponse<T = unknown> {
   error?: string
 }
 
+export interface AgentProgress {
+  stage: string
+  roundType?: string
+  roundIndex?: number
+  taskProgress?: { completed: number; total: number } | null
+  lastActivityAt: string
+}
+
+export interface ActiveAgentInfo {
+  issueId: string
+  issueNumber: number
+  projectId: string
+  progress?: AgentProgress
+}
+
 export interface AgentStatus {
   running: boolean
   issueId: string | null
   issueNumber: number | null
-  activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>
+  activeAgents: ActiveAgentInfo[]
   maxConcurrentAgents: number
   queueDepth: number
   waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>
