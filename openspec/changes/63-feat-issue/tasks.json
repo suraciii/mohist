@@ -108,9 +108,9 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Insert TaskList after the Description card (around line 259) and before the Comments card. Merge tasks by ID: build-status provides id/title/passes/attempts/error, tasks endpoint adds dependsOn.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     }
