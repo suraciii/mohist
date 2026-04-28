@@ -75,9 +75,9 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing patterns: DiffFile type at types.ts:88-92, api.getIssueDiff at api.ts:56-57, useIssueDiff at useQueries.ts:43-49.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
