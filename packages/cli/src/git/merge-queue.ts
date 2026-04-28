@@ -327,7 +327,7 @@ export class MergeQueue {
       issueId: entry.issueId,
       projectId: entry.projectId,
       issueNumber: entry.issueNumber,
-      conflictingFiles: conflictFiles,
+      conflictFiles: conflictFiles,
     });
 
     log.info('Delegating conflict resolution to agent', {
@@ -389,7 +389,6 @@ export class MergeQueue {
       issueId: entry.issueId,
       projectId: entry.projectId,
       issueNumber: entry.issueNumber,
-      conflictingFiles: conflictFiles,
       error: message,
     });
 
