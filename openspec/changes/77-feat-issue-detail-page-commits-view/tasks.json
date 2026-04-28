@@ -47,9 +47,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Place after the GET /:number/commits handler. Hash validation uses `git branch --contains` check — if output is empty, hash does not belong to the branch.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
