@@ -114,6 +114,7 @@ export interface RalphExecutorContext {
   coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
   issueNumber?: number;
   stageTimeoutMs?: number;
+  onProcessSpawned?: (proc: import('child_process').ChildProcess) => void;
 }
 
 export interface RalphLoopResult {
@@ -464,6 +465,7 @@ export async function runRalphLoop(
         workflowLogRepo: context.workflowLogRepo,
         coderSessionRepo: context.coderSessionRepo,
         issueNumber: context.issueNumber,
+        onProcessSpawned: context.onProcessSpawned,
       });
 
       attemptsUsed = attempt;

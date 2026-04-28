@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { Writable, Readable } from 'stream';
 import {
   ClientSideConnection,
@@ -47,6 +47,7 @@ export interface AcpSessionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
+  onProcessSpawned?: (proc: ChildProcess) => void;
 }
 
 export interface AcpSessionResult {
@@ -118,6 +119,8 @@ export async function runAcpSession(
       )
     ),
   });
+
+  options.onProcessSpawned?.(proc);
 
   let initialized = false;
   let rejectOnSpawn: ((err: Error) => void) | undefined;
@@ -440,6 +443,7 @@ export interface AcpConnectionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
+  onProcessSpawned?: (proc: ChildProcess) => void;
 }
 
 export interface AcpConnection {
@@ -505,6 +509,8 @@ export async function createAcpConnection(
       )
     ),
   });
+
+  options.onProcessSpawned?.(proc);
 
   let rejectOnInit: ((err: Error) => void) | undefined;
   const spawnFailure = new Promise<never>((_, reject) => {

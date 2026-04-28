@@ -3,6 +3,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Stage, IssueStatus, type Issue } from '../types';
+import type { ChildProcess } from 'child_process';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
@@ -44,6 +45,7 @@ export interface WorkflowControllerOptions {
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
   onProgress?: (update: { stage?: string; roundType?: string; roundIndex?: number; taskProgress?: { completed: number; total: number } | null }) => void;
+  onChildProcess?: (proc: ChildProcess) => void;
 }
 
 export interface PipelineResult {
@@ -61,6 +63,7 @@ export class WorkflowController {
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
   private _onProgress?: WorkflowControllerOptions['onProgress'];
+  private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -70,6 +73,7 @@ export class WorkflowController {
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
     this._onProgress = options.onProgress;
+    this._onChildProcess = options.onChildProcess;
   }
 
   protected emitProgress(update: Parameters<NonNullable<WorkflowControllerOptions['onProgress']>>[0]): void {
@@ -117,6 +121,7 @@ export class WorkflowController {
     const planAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `plan-${issue.number}`,
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -593,6 +598,7 @@ export class WorkflowController {
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
@@ -720,6 +726,7 @@ export class WorkflowController {
     const reviewAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `review-${issue.number}`,
+      onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
