@@ -843,22 +843,13 @@ export class WorkflowController {
     };
   }
 
-  private async runPipelineReviewStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
-    const changeDir = this.artifactManager.getChangeDir(issue.number);
-    if (!changeDir) {
-      return {
-        success: false,
-        requiresApproval: false,
-        output: null,
-        message: `Change directory not found for issue #${issue.number}`,
-      };
-    }
-
-    const roundState = { type: '', index: 0 };
-
-    let conn: AcpConnection | undefined;
-
-    const reviewAcpOptions: AcpConnectionOptions = {
+  private buildReviewAcpOptions(
+    issue: Issue,
+    acpOptions: AcpConnectionOptions,
+    roundState: { type: string; index: number },
+    connRef: { current: AcpConnection | undefined },
+  ): AcpConnectionOptions {
+    return {
       ...acpOptions,
       stage: Stage.Review,
       executionId: `review-${issue.number}`,
@@ -873,8 +864,8 @@ export class WorkflowController {
             roundIndex: roundState.index,
             sessionUpdate: _notification.update.sessionUpdate,
             data: _notification.update as unknown,
-            acpSessionId: conn?.acpSessionId,
-            coderSessionId: conn?.coderSessionId,
+            acpSessionId: connRef.current?.acpSessionId,
+            coderSessionId: connRef.current?.coderSessionId,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_session_update', { roundType: roundState.type, error: e instanceof Error ? e.message : String(e) });
@@ -933,6 +924,7 @@ export class WorkflowController {
     roundState: { type: string; index: number },
   ): Promise<StageResult> {
     const MAX_ATTEMPTS = 2;
+    const connRef = { current: undefined as AcpConnection | undefined };
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const autoFixRoundIndex = 2 + attempt * 2;
@@ -941,8 +933,8 @@ export class WorkflowController {
       roundState.type = 'auto-fix';
       roundState.index = autoFixRoundIndex;
 
-      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport);
-      const autoFixAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState);
+      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport, 'review.md');
+      const autoFixAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
       const autoFixResult = await this.runReviewRound(issue, autoFixAcpOptions, 'auto-fix', autoFixRoundIndex, autoFixPrompt);
 
       if (!autoFixResult.success) {
@@ -958,7 +950,7 @@ export class WorkflowController {
       roundState.index = reVerifyRoundIndex;
 
       const reVerifyPrompt = buildReVerifyPrompt(issue, changeDir, reviewReport);
-      const reVerifyAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState);
+      const reVerifyAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
       const reVerifyResult = await this.runReviewRound(issue, reVerifyAcpOptions, 're-verify', reVerifyRoundIndex, reVerifyPrompt);
 
       if (!reVerifyResult.success) {
@@ -971,7 +963,7 @@ export class WorkflowController {
       }
 
       const updatedReport = readReportFile(changeDir, 'review.md') ?? reVerifyResult.text ?? '';
-      const result = parseResult(updatedReport);
+      const result = parseVerdict(updatedReport);
 
       if (result === 'PASS') {
         log.info('Auto-fix succeeded', { attempt: attempt + 1, issueNumber: issue.number });
@@ -1033,17 +1025,18 @@ export class WorkflowController {
     const hasNoAutoFix = this.checkpointRepo?.get(issue.number, 'review')?.completedSteps.includes('no-auto-fix') ?? false;
 
     const roundState = { type: '', index: 0 };
-    const reviewAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState);
+    const connRef = { current: undefined as AcpConnection | undefined };
+    const reviewAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
+
+    let conn: AcpConnection | undefined;
 
     try {
       conn = await createAcpConnection(reviewAcpOptions);
+      connRef.current = conn;
 
       // Round 0: review
       roundState.type = 'review';
       roundState.index = 0;
-
-      const issueId = String(acpOptions.issueNumber ?? acpOptions.issueId ?? '');
-      const projectId = this.projectId ?? issue.projectId;
 
       if (this.eventBus) {
         try {
@@ -1103,6 +1096,7 @@ export class WorkflowController {
 
       await conn.close();
       conn = undefined;
+      connRef.current = undefined;
 
       const reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
 
@@ -1110,7 +1104,7 @@ export class WorkflowController {
         return { success: false, requiresApproval: false, output: null, message: 'Review stage failed: review.md is empty after self-check' };
       }
 
-      const parsedResult = parseResult(reviewReport);
+      const parsedResult = parseVerdict(reviewReport);
 
       if (parsedResult === 'PASS') {
         return {
@@ -1191,7 +1185,7 @@ function cleanChangeDir(changeDir: string): void {
 const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
 const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
 
-export function parseResult(content: string): 'PASS' | 'FAIL' | null {
+export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
   const match = RESULT_RE.exec(content);
   if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
   const legacyMatch = LEGACY_VERDICT_RE.exec(content);
