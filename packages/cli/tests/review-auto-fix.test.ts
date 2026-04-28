@@ -256,7 +256,7 @@ describe('Review stage Verdict FAIL enters auto-fix loop', () => {
     expect(result.success).toBe(true);
     expect(result.escalateToStage).toBe(Stage.Build);
     expect(result.message).toContain('escalating');
-    expect(repos.checkpointRepo.upsert).toHaveBeenCalledWith(1, 'no-auto-fix', ['exhausted'], null);
+    expect(repos.checkpointRepo.upsert).toHaveBeenCalledWith(1, 'review', ['no-auto-fix'], null);
     expect(repos.commentRepo.create).not.toHaveBeenCalled();
   });
 
@@ -308,8 +308,8 @@ describe('no-auto-fix checkpoint skips auto-fix loop', () => {
     const repos = createMockRepos();
     (repos.checkpointRepo.get as ReturnType<typeof vi.fn>).mockImplementation(
       (_issueNumber: number, stage: string) => {
-        if (stage === 'no-auto-fix') {
-          return { issueNumber: 1, stage: 'no-auto-fix', completedSteps: ['exhausted'], nextStep: null };
+        if (stage === 'review') {
+          return { issueNumber: 1, stage: 'review', completedSteps: ['no-auto-fix'], nextStep: null };
         }
         return null;
       },
@@ -328,32 +328,38 @@ describe('no-auto-fix checkpoint skips auto-fix loop', () => {
   });
 });
 
-describe('auto-fix round failure', () => {
+describe('auto-fix round failure counts as failed attempt', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('should return error when auto-fix round fails', async () => {
+  it('should count auto-fix round failure and exhaust attempts', async () => {
     const repos = createMockRepos();
     const result = await runReviewStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
       { text: '', success: false, error: 'auto-fix ACP error' },
+      { text: '', success: false, error: 'auto-fix ACP error' },
     ], [FAIL_REPORT]);
 
-    expect(result.success).toBe(false);
-    expect(result.message).toContain('Auto-fix attempt 1 failed');
+    expect(result.success).toBe(true);
+    expect(result.escalateToStage).toBe(Stage.Build);
+    expect(result.message).toContain('escalating');
+    expect(repos.checkpointRepo.upsert).toHaveBeenCalledWith(1, 'review', ['no-auto-fix'], null);
   });
 
-  it('should return error when re-verify round fails', async () => {
+  it('should count re-verify round failure and exhaust attempts', async () => {
     const repos = createMockRepos();
     const result = await runReviewStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
       { text: 'auto-fix output', success: true },
       { text: '', success: false, error: 're-verify ACP error' },
-    ], [FAIL_REPORT, FAIL_REPORT]);
+      { text: 'auto-fix output', success: true },
+      { text: '', success: false, error: 're-verify ACP error' },
+    ], [FAIL_REPORT, FAIL_REPORT, FAIL_REPORT]);
 
-    expect(result.success).toBe(false);
-    expect(result.message).toContain('Re-verify attempt 1 failed');
+    expect(result.success).toBe(true);
+    expect(result.escalateToStage).toBe(Stage.Build);
+    expect(result.message).toContain('escalating');
   });
 });
 
@@ -419,5 +425,58 @@ describe('auto-fix SSE events', () => {
       'plan_round_start',
       expect.objectContaining({ roundType: 're-verify', roundIndex: 3 }),
     );
+  });
+
+  it('should emit plan_session_update with correct roundType for auto-fix and re-verify rounds', async () => {
+    const repos = createMockRepos();
+
+    let capturedOnSessionUpdate: ((notification: { update: { sessionUpdate: string } }) => void) | undefined;
+    const mockConn = {
+      prompt: vi.fn()
+        .mockResolvedValueOnce({ text: 'review output', success: true, acpSessionId: 's1' })
+        .mockResolvedValueOnce({ text: FAIL_REPORT, success: true, acpSessionId: 's2' })
+        .mockResolvedValueOnce({ text: 'auto-fix output', success: true, acpSessionId: 's3' })
+        .mockResolvedValueOnce({ text: PASS_REPORT, success: true, acpSessionId: 's4' }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    (createAcpConnection as ReturnType<typeof vi.fn>).mockImplementation(async (options: any) => {
+      if (options.onSessionUpdate) {
+        capturedOnSessionUpdate = options.onSessionUpdate;
+      }
+      return mockConn;
+    });
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      return FAIL_REPORT;
+    });
+
+    const ctrl = new WorkflowController({
+      artifactManager: createMockArtifactManager(),
+      worktreePath: '/tmp/worktree',
+      issueRepo: repos.issueRepo,
+      eventBus: repos.eventBus,
+      projectId: 'proj-1',
+      commentRepo: repos.commentRepo,
+      checkpointRepo: repos.checkpointRepo,
+    });
+
+    await (ctrl as any).runPipelineReviewStage(
+      createMockIssue(Stage.Review),
+      { cwd: '/tmp/worktree' },
+    );
+
+    // roundState is mutated before each round; when createAcpConnection is called
+    // for the auto-fix round, roundState.type is already 'auto-fix'.
+    expect(capturedOnSessionUpdate).toBeDefined();
+    capturedOnSessionUpdate!({ update: { sessionUpdate: 'test-update' } });
+
+    const sessionUpdateCalls = (repos.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call: any[]) => call[0] === 'plan_session_update',
+    );
+    expect(sessionUpdateCalls.length).toBeGreaterThan(0);
+    const lastCall = sessionUpdateCalls[sessionUpdateCalls.length - 1];
+    expect(lastCall[1]).toMatchObject({
+      roundType: 'auto-fix',
+      sessionUpdate: 'test-update',
+    });
   });
 });
