@@ -58,7 +58,7 @@ Write a self-review summary to `{changeDir}/self-review.md` with:
 ```markdown
 # Self-Review Report
 
-## Verdict: PASS / FAIL
+## Result: PASS / FAIL
 
 ## Completeness: PASS / FAIL
 - [findings]

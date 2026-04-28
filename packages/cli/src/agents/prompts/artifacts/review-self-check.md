@@ -8,7 +8,7 @@ Read `{changeDir}/review.md` and check:
 
 ### Format
 - Starts with `# Review Report` heading
-- Has a `## Verdict: PASS` or `## Verdict: FAIL` section
+- Has a `## Result: PASS` or `## Result: FAIL` section
 - Has `## Dimensions` section with sub-sections for Correctness, Complexity, Test Coverage, Security, and Spec Compliance
 - Each dimension has a PASS/FAIL verdict
 - If any dimension FAILS, the overall verdict is FAIL

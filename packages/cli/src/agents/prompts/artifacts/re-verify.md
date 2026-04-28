@@ -1,33 +1,34 @@
 # Re-Verify
 
-You are re-verifying specific issues that were previously flagged in a code review. Auto-fixes have been applied and you must confirm whether each Fix Suggestion is now resolved.
+You are performing a full re-review of code changes after auto-fixes have been applied. The previous review found issues, auto-fixes were attempted, and you must now produce a fresh, complete review.
 
 ## Input
 
-You are given a review report (`review.md` in the change directory) with a `## Verdict: FAIL` and a `## Fix Suggestions` section. Auto-fixes have been applied to the codebase since this report was written.
+You are given a review report (`review.md` in the change directory) with a `## Result: FAIL` and a `## Fix Suggestions` section. Auto-fixes have been applied to the codebase since this report was written.
 
 ## Process
 
-1. Read `{changeDir}/review.md` and extract all Fix Suggestions
-2. For each Fix Suggestion:
-   a. Read the referenced file at the specified line
-   b. Determine if the issue has been resolved by the auto-fix
-   c. If resolved: mark as FIXED
-   d. If not resolved or partially resolved: describe what remains
+1. Identify all changed files (git diff or file system scan)
+2. Review each file against all standard review dimensions:
+   - **Correctness**: logic errors, bugs, TypeScript types, lint violations
+   - **Complexity**: function length, cyclomatic complexity, code duplication
+   - **Test Coverage**: tests exist, tests pass, coverage is adequate
+   - **Security**: input validation, injection risks, exposed secrets
+   - **Spec Compliance**: verify each acceptance criterion is satisfied with concrete evidence
 3. Run the project's build command (e.g. `npm run build`) and check the result
 4. Run the project's test command (e.g. `npm test`) and check the result
 5. Update `{changeDir}/review.md`:
-   - If ALL suggestions are resolved AND build passes AND tests pass:
-     Set `## Verdict: PASS` and remove or annotate the Fix Suggestions section
-   - If any suggestion remains unresolved OR build/tests fail:
-     Keep `## Verdict: FAIL` and update Fix Suggestions with remaining issues
+   - If ALL dimensions pass AND build passes AND tests pass:
+     Set `## Result: PASS` and note any remaining observations
+   - If any dimension fails OR build/tests fail:
+     Set `## Result: FAIL` and include Fix Suggestions for all issues found
 
 ## Rules
 
-- Verify ONLY the specific Fix Suggestions — do not perform a full re-review
+- Perform a **full re-review** — auto-fixes can introduce new issues, so review the entire change set
 - Be strict: a fix is FIXED only if the original issue is completely resolved
 - Build and test failures count as unresolved issues
-- Do NOT introduce new review dimensions or findings beyond the original suggestions
+- Include new findings beyond the original Fix Suggestions if present
 
 ## Output
 
@@ -36,7 +37,7 @@ Produce the updated `review.md` file. The file must follow the same format as th
 ```markdown
 # Review Report
 
-## Verdict: PASS / FAIL
+## Result: PASS / FAIL
 
 ## Dimensions
 
@@ -52,8 +53,11 @@ Produce the updated `review.md` file. The file must follow the same format as th
 ### Security: PASS / FAIL
 - [findings]
 
+### Spec Compliance: PASS / FAIL
+- [per-criterion findings with pass/fail and specific deviations]
+
 ## Fix Suggestions
-1. [file:line] description of remaining fix (only if verdict is FAIL)
+1. [file:line] description of remaining fix (only if result is FAIL)
 ```
 
-Output ONLY the final review report. Do NOT include thinking process, reasoning, or meta-commentary.
+Output ONLY the final review report. Do NOT include any thinking process, reasoning, or meta-commentary.

@@ -45,7 +45,7 @@ Write a review report to `{changeDir}/review.md` with:
 ```markdown
 # Review Report
 
-## Verdict: PASS / FAIL
+## Result: PASS / FAIL
 
 ## Dimensions
 
