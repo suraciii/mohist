@@ -141,11 +141,11 @@ export function buildExploreSystemPrompt(context: ExploreAgentContext): string {
 
 ## Current Session Status
 This session is not linked to any issue yet. You can use \`create_issue\` to create a new draft issue from this exploration when requirements have converged.`;
-  } else if (context.issueStage === 'draft') {
+  } else if (context.issueStage === 'backlog') {
     prompt += `
 
 ## Current Session Status
-This session is linked to a **Draft** issue (ID: ${context.issueId}). You can:
+This session is linked to a **Backlog** issue (ID: ${context.issueId}). You can:
 - Continue exploring and refining requirements
 - Use \`update_issue\` to update the issue's title, body, or labels at any time
 - The issue will remain in Draft stage until it is promoted through the workflow`;

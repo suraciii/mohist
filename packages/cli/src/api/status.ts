@@ -81,7 +81,7 @@ export function createStatusRoutes(
         issues: issues.length,
         activeIssues: activeIssues.length,
         issuesByStage: {
-          draft: issues.filter(i => i.stage === 'draft').length,
+          backlog: issues.filter(i => i.stage === 'backlog').length,
           plan: issues.filter(i => i.stage === 'plan').length,
           build: issues.filter(i => i.stage === 'build').length,
           review: issues.filter(i => i.stage === 'review').length,

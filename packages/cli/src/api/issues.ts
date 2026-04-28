@@ -403,10 +403,10 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (issue.stage !== Stage.Draft) {
+      if (issue.stage !== Stage.Backlog) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is not in draft stage (current: ${issue.stage}). Only draft issues can be started.`
+          error: `Issue #${number} is not in backlog stage (current: ${issue.stage}). Only backlog issues can be started.`
         };
         return c.json(response, 400);
       }
@@ -492,10 +492,10 @@ export function createIssueRoutes(
         try {
           const issue = projectId ? issueService.getByNumber(projectId, number) : null;
           if (issue && issue.stage === Stage.Plan) {
-            issueService.transitionToStage(issue.id, Stage.Draft);
+            issueService.transitionToStage(issue.id, Stage.Backlog);
           }
         } catch (rollbackError) {
-          log.error('Failed to rollback stage to Draft', { error: rollbackError instanceof Error ? rollbackError.message : rollbackError });
+          log.error('Failed to rollback stage to Backlog', { error: rollbackError instanceof Error ? rollbackError.message : rollbackError });
         }
       } else if (worktreeManager && project) {
         try {

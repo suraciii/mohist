@@ -15,10 +15,10 @@ import { TaskList } from './TaskList'
 import { formatTime } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 
-const STAGES = [Stage.Draft, Stage.Explore, Stage.Plan, Stage.Build, Stage.Review, Stage.Done]
+const STAGES = [Stage.Backlog, Stage.Explore, Stage.Plan, Stage.Build, Stage.Review, Stage.Done]
 
 const STAGE_LABELS: Record<string, string> = {
-  [Stage.Draft]: 'Draft',
+  [Stage.Backlog]: 'Backlog',
   [Stage.Explore]: 'Explore',
   [Stage.Plan]: 'Plan',
   [Stage.Build]: 'Build',
@@ -188,7 +188,7 @@ export function IssueDetailPage() {
     issue.approvalState?.status === 'awaiting' &&
     (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked) &&
     !isAgentRunningOnThis
-  const isDraft = issue.stage === Stage.Draft
+  const isBacklog = issue.stage === Stage.Backlog
   const showDiff = DIFF_STAGES.has(issue.stage)
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -434,7 +434,7 @@ export function IssueDetailPage() {
               <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">Actions</h2>
                 <div className="space-y-2">
-                  {isDraft && (
+                  {isBacklog && (
                     <button
                       onClick={() => startMutation.mutate()}
                       disabled={isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
@@ -450,7 +450,7 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {isDraft && (
+                  {isBacklog && (
                     <button
                       onClick={handleExplore}
                       disabled={createExploreMutation.isPending}
@@ -460,7 +460,7 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {issue.status === IssueStatus.Active && !isDraft && !isAgentRunningOnThis && (
+                  {issue.status === IssueStatus.Active && !isBacklog && !isAgentRunningOnThis && (
                     <button
                       onClick={() => closeMutation.mutate()}
                       disabled={closeMutation.isPending}
@@ -558,7 +558,7 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {!isAgentRunningOnThis && activeAgents.length > 0 && !isDraft && (
+                  {!isAgentRunningOnThis && activeAgents.length > 0 && !isBacklog && (
                     <div className="text-xs text-gray-400 text-center">
                       {activeAgents.length} agent{activeAgents.length > 1 ? 's' : ''} running on other issues
                     </div>
@@ -652,7 +652,7 @@ export function IssueDetailPage() {
                 <QuestionPanel issueId={issue.id} />
               )}
 
-              {(isAgentRunningOnThis || (!isDraft && rounds.length > 0)) && (
+              {(isAgentRunningOnThis || (!isBacklog && rounds.length > 0)) && (
                 <SessionTimeline
                   rounds={rounds}
                   isStreaming={isStreaming}
