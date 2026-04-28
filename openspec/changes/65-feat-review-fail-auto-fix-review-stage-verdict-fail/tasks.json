@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extend interfaces and add verdict parser",
+      "spec": "specs/review-auto-fix/spec.md#Checkpoint no-auto-fix marker",
+      "description": "Add `escalateToStage?: Stage` to StageResult interface. Add `commentRepo?: CommentRepo` to WorkflowControllerOptions and wire it in the constructor. Add `parseVerdict(content: string): 'PASS' | 'FAIL' | null` utility that regex-parses `## Verdict: PASS|FAIL` from review.md content. Export parseVerdict from the module.",
+      "acceptanceCriteria": [
+        "StageResult interface has optional escalateToStage field of type Stage",
+        "WorkflowControllerOptions has optional commentRepo field",
+        "WorkflowController constructor stores commentRepo",
+        "parseVerdict('## Verdict: PASS') returns 'PASS'",
+        "parseVerdict('## Verdict: FAIL') returns 'FAIL'",
+        "parseVerdict('no verdict here') returns null",
+        "parseVerdict is case-insensitive and handles whitespace variations",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Don't change the run() loop or agent-runner-service.ts wiring in this task — T-003 handles those integration points.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-002",
+      "title": "Create auto-fix and re-verify prompt templates with builders",
+      "spec": "specs/review-auto-fix/spec.md#Auto-fix round applies Fix Suggestions",
+      "description": "Create `packages/cli/src/agents/prompts/auto-fix.md` instructing the agent to read review.md Fix Suggestions, apply each fix, add supplementary tests, and run build. Create `packages/cli/src/agents/prompts/artifacts/re-verify.md` instructing the agent to targeted-verify specific issues from review.md, run build, and update review.md with new verdict. Add `buildAutoFixPrompt(issue, changeDir, reviewContent)` and `buildReVerifyPrompt(issue, changeDir, reviewContent)` functions to `artifact-prompt.ts` following the existing pattern (loadFile → formatIssueInfo → return joined string).",
+      "acceptanceCriteria": [
+        "auto-fix.md exists and instructs: read review.md, apply each Fix Suggestion, add tests, run build",
+        "re-verify.md exists and instructs: targeted verification of specific issues, run build, update review.md verdict",
+        "buildAutoFixPrompt function exists and includes reviewContent in the prompt",
+        "buildReVerifyPrompt function exists and includes reviewContent in the prompt",
+        "Both functions follow the same pattern as buildReviewerPrompt (formatIssueInfo + instruction)",
+        "File path constants AUTO_FIX_PROMPT_PATH and RE_VERIFY_PATH are defined",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agents/artifact-prompt.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Soft dependency on T-001 for execution ordering. Prompt files have no code dependency on T-001's interface changes.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Implement auto-fix loop, escalation, and SSE events",
+      "spec": "specs/review-auto-fix/spec.md#Auto-fix loop on Verdict FAIL",
+      "description": "In `runPipelineReviewStage`, after self-check round (R1) and reading review.md: parse verdict. If PASS, return as-is. If FAIL and checkpoint has `no-auto-fix`, skip to awaiting-user. Otherwise enter auto-fix loop (max 2 attempts): emit `plan_round_start` with roundType `auto-fix`/`re-verify`, call conn.prompt with auto-fix then re-verify prompts, parse verdict after re-verify. On PASS: add issue comment via commentRepo, return awaiting-user. On exhaustion: write `no-auto-fix` checkpoint, return `StageResult { escalateToStage: Stage.Build }`. In `run()` loop Review case: if reviewResult has escalateToStage, transition issue to that stage and break (continue loop) instead of setting approval state. Wire commentRepo in `agent-runner-service.ts` WorkflowController construction.",
+      "acceptanceCriteria": [
+        "After R1 self-check, review.md is parsed for Verdict PASS/FAIL",
+        "Verdict PASS returns requiresApproval:true without auto-fix loop",
+        "Verdict FAIL with no-auto-fix checkpoint skips auto-fix, returns awaiting-user",
+        "Verdict FAIL without checkpoint enters auto-fix loop (max 2 attempts)",
+        "Each auto-fix round emits plan_round_start with roundType 'auto-fix'",
+        "Each re-verify round emits plan_round_start with roundType 're-verify'",
+        "plan_session_update events use correct roundType for auto-fix/re-verify rounds",
+        "Successful auto-fix adds comment to issue via commentRepo",
+        "Failed auto-fix (2 attempts exhausted) writes no-auto-fix checkpoint and returns escalateToStage: Stage.Build",
+        "run() loop Review case handles escalateToStage: transitions to Build stage and continues loop",
+        "commentRepo is passed when constructing WorkflowController in agent-runner-service.ts",
+        "conn.close() is called in all exit paths (success, failure, catch)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Import buildAutoFixPrompt and buildReVerifyPrompt from artifact-prompt.ts. Reuse existing emitSafe helper for SSE events. Round index: R2=2 (auto-fix attempt 1), R3=3 (re-verify attempt 1), R4=4 (auto-fix attempt 2), R5=5 (re-verify attempt 2).",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "Add tests for verdict parsing and auto-fix loop",
+      "spec": "specs/review-auto-fix/spec.md#Auto-fix loop on Verdict FAIL",
+      "description": "Write unit tests for parseVerdict covering: PASS, FAIL, case variations, whitespace, no verdict, multiple verdicts. Write integration-style tests for the auto-fix loop in runPipelineReviewStage: mock ACP connection with multi-round prompt responses, test PASS skips loop, test FAIL triggers loop, test max 2 attempts, test escalation returns escalateToStage, test no-auto-fix checkpoint skips loop, test comment added on success.",
+      "acceptanceCriteria": [
+        "parseVerdict tests cover: exact PASS, exact FAIL, case-insensitive, whitespace variations, null on no match",
+        "Test: review stage with Verdict PASS returns requiresApproval without auto-fix",
+        "Test: review stage with Verdict FAIL enters auto-fix loop",
+        "Test: auto-fix loop stops after 2 failed attempts and returns escalateToStage: Stage.Build",
+        "Test: no-auto-fix checkpoint causes Verdict FAIL to skip auto-fix loop",
+        "Test: successful auto-fix (re-verify returns PASS) adds issue comment",
+        "Test: run() loop handles escalateToStage by transitioning to Build stage",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/workflow/review-auto-fix.test.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Follow existing test patterns in packages/cli/tests/. Use mocks for ACP connection (conn.prompt), IssueRepo, EventBus, PipelineCheckpointRepo, CommentRepo.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
