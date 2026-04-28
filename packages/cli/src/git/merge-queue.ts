@@ -24,6 +24,7 @@ export interface MergeEntry {
   retryCount: number;
   lastAttemptHead?: string;
   changedFiles?: string[];
+  conflictingFiles?: string[];
 }
 
 interface MergeQueueDeps {

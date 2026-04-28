@@ -31,7 +31,8 @@ export type EventMap = {
   rebase_completed: { issueId: string; projectId: string; issueNumber: number };
   rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflictingFiles: string[] };
   rebase_retry: { issueId: string; projectId: string; issueNumber: number; attempt: number };
-  merge_blocked: { issueId: string; projectId: string; issueNumber: number; reason: string; retryCount: number; lastConflict?: string };
+  merge_blocked: { issueId: string; projectId: string; issueNumber: number; reason: string; retryCount: number; lastConflict?: string; conflictingFiles?: string[] };
+  merge_conflict_requiring_resolution: { issueId: string; projectId: string; conflictFiles: string[] };
 };
 
 export type EventName = keyof EventMap;

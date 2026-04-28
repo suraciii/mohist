@@ -18,6 +18,16 @@ export interface WorktreeInfo {
   issueNumber: number;
 }
 
+export interface WipCommitInfo {
+  hash: string;
+  message: string;
+  changedFiles: string[];
+  diffStat: string;
+}
+
+const WIP_AUTHOR_NAME = 'mohist-wip';
+const WIP_AUTHOR_EMAIL = 'mohist@wip';
+
 function getWorktreeBaseDir(projectName: string): string {
   const home = process.env.HOME || '';
   const slug = slugify(projectName);
@@ -394,6 +404,134 @@ export class WorktreeManager {
   exists(projectName: string, issueNumber: number): boolean {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     return fs.existsSync(worktreePath);
+  }
+
+  async createWipCommit(
+    worktreePath: string,
+    taskId: string,
+    attemptNumber: number
+  ): Promise<string | null> {
+    try {
+      const { stdout: statusOut } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath }
+      );
+      if (!statusOut.trim()) {
+        return null;
+      }
+
+      await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
+
+      const { stdout: remaining } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath }
+      );
+      if (!remaining.trim()) {
+        return null;
+      }
+
+      const message = `WIP: ${taskId} timeout (attempt ${attemptNumber})`;
+      await execFileAsync(
+        'git',
+        ['commit', '-m', message, '--no-verify', '--author', `${WIP_AUTHOR_NAME} <${WIP_AUTHOR_EMAIL}>`],
+        { cwd: worktreePath }
+      );
+
+      const { stdout: hash } = await execFileAsync(
+        'git', ['rev-parse', 'HEAD'],
+        { cwd: worktreePath }
+      );
+
+      log.info('WIP commit created', { worktreePath, taskId, attemptNumber, hash: hash.trim() });
+      return hash.trim();
+    } catch (err) {
+      log.warn('Failed to create WIP commit', {
+        worktreePath,
+        taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  async findWipCommit(worktreePath: string, taskId: string): Promise<WipCommitInfo | null> {
+    try {
+      const pattern = `WIP: ${taskId} timeout*`;
+      const { stdout } = await execFileAsync(
+        'git',
+        ['log', `--author=${WIP_AUTHOR_EMAIL}`, '--grep', pattern, '-1', '--pretty=format:%H%n%s'],
+        { cwd: worktreePath }
+      );
+
+      if (!stdout.trim()) {
+        return null;
+      }
+
+      const lines = stdout.trim().split('\n');
+      const hash = lines[0];
+      const message = lines.slice(1).join('\n');
+
+      const { stdout: nameOnlyOut } = await execFileAsync(
+        'git', ['diff-tree', '--no-commit-id', '--name-only', '-r', hash],
+        { cwd: worktreePath }
+      );
+      const changedFiles = nameOnlyOut.trim().split('\n').filter(l => l.trim());
+
+      const { stdout: diffStatOut } = await execFileAsync(
+        'git', ['diff', '--stat', `${hash}^..${hash}`],
+        { cwd: worktreePath }
+      );
+
+      return { hash, message, changedFiles, diffStat: diffStatOut.trim() };
+    } catch {
+      return null;
+    }
+  }
+
+  async getWipDiffSummary(worktreePath: string, taskId: string): Promise<string | null> {
+    const wip = await this.findWipCommit(worktreePath, taskId);
+    if (!wip) {
+      return null;
+    }
+    return wip.diffStat;
+  }
+
+  async mergeMasterInWorktree(
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<{ success: boolean; conflictFiles?: string[]; message?: string }> {
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+
+    if (!fs.existsSync(worktreePath)) {
+      return { success: false, message: 'Worktree not found' };
+    }
+
+    try {
+      await execFileAsync('git', ['merge', baseBranch, '--no-edit'], {
+        cwd: worktreePath,
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (!msg.includes('Merge conflict') && !msg.includes('CONFLICT') && !msg.includes('merge conflict')) {
+        await execFileAsync('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {});
+        return { success: false, message: `Merge failed: ${msg}` };
+      }
+
+      try {
+        const { stdout } = await execFileAsync(
+          'git', ['diff', '--name-only', '--diff-filter=U'],
+          { cwd: worktreePath }
+        );
+        const conflictFiles = stdout.trim().split('\n').filter((f: string) => f.trim());
+        return { success: false, conflictFiles };
+      } catch {
+        await execFileAsync('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {});
+        return { success: false, message: 'Merge conflict but failed to list conflict files' };
+      }
+    }
   }
 
   async prune(projectPath: string): Promise<void> {
