@@ -76,6 +76,9 @@ export class HttpServer {
         return c.notFound();
       }
       const content = fs.readFileSync(indexPath, 'utf-8');
+      c.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      c.header('Pragma', 'no-cache');
+      c.header('Expires', '0');
       return c.html(content);
     });
   }
