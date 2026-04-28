@@ -173,6 +173,9 @@ export const api = {
   getWorkflowLogs: (number: number) =>
     request<import('./types').WorkflowLogItem[]>(`/issues/${number}/logs`),
 
+  rebaseIssue: (number: number) =>
+    request<{ rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }>(`/issues/${number}/rebase`, { method: 'POST' }),
+
   retryMerge: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/retry-merge`, { method: 'POST' }),
 
