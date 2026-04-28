@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import type { ToolCallEntry, Stage } from '../lib/types'
+import type { ToolCallEntry, Stage, TaskProgressMap, LoopProgress } from '../lib/types'
 import type { Round } from '../hooks/useSessionTimeline'
+import { deriveToolCallTitle } from '../hooks/useSessionTimeline'
 
 interface SessionTimelineProps {
   rounds: Round[]
@@ -8,6 +9,8 @@ interface SessionTimelineProps {
   isLoading: boolean
   currentStage: Stage | string
   isLive: boolean
+  taskProgress: TaskProgressMap
+  loopProgress: LoopProgress | null
 }
 
 function formatDuration(ms: number): string {
@@ -58,6 +61,7 @@ function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
 
   const displayInput = entry.rawInput ?? entry.args
   const displayOutput = entry.rawOutput ?? entry.result
+  const displayTitle = deriveToolCallTitle(entry.toolName, entry.title, entry.rawInput)
 
   return (
     <div className="flex gap-2">
@@ -73,8 +77,10 @@ function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
           <span className="font-mono text-xs text-gray-700">
             {entry.toolName}
           </span>
-          {entry.title && (
-            <span className="text-xs text-gray-500 truncate">{entry.title}</span>
+          {displayTitle !== entry.toolName && (
+            <span className="text-xs text-gray-500 truncate">
+              {displayTitle}
+            </span>
           )}
           {entry.state === 'started' && (
             <span className="text-xs text-blue-500">running...</span>
@@ -250,6 +256,19 @@ function RoundSection({
             </div>
           )}
 
+          {round.thoughtText && (
+            <details className="pt-1">
+              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
+                Thinking...{round.thoughtText.length > 500 ? ` (${(round.thoughtText.length / 1024).toFixed(1)}KB)` : ''}
+              </summary>
+              <pre className="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-48 overflow-auto bg-gray-50 rounded p-2">
+                {round.thoughtText.length > 20000
+                  ? round.thoughtText.slice(0, 20000) + '\n... (truncated)'
+                  : round.thoughtText}
+              </pre>
+            </details>
+          )}
+
           {round.toolCalls.length > 0 && (
             <div className="space-y-0">
               {round.toolCalls.map((tc) => (
@@ -258,9 +277,82 @@ function RoundSection({
             </div>
           )}
 
-          {!hasContent && !isLiveRound && (
+          {!hasContent && !round.thoughtText && !isLiveRound && (
             <div className="text-xs text-gray-400 pt-2">No output recorded</div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TaskStatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case 'passed':
+      return (
+        <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+        </svg>
+      )
+    case 'running':
+      return (
+        <svg className="h-3.5 w-3.5 text-blue-500 animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      )
+    case 'failed':
+      return (
+        <svg className="h-3.5 w-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+        </svg>
+      )
+    case 'retrying':
+      return (
+        <svg className="h-3.5 w-3.5 text-orange-500" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H4.598a.75.75 0 00-.75.75v3.634a.75.75 0 001.5 0v-2.233l.312.311a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm-10.624-2.85a5.5 5.5 0 019.2-2.464l.311.311h-2.432a.75.75 0 000 1.5h3.634a.75.75 0 00.75-.75V3.538a.75.75 0 00-1.5 0v2.234l-.311-.312a7 7 0 00-11.712 3.138.75.75 0 001.449.39z" clipRule="evenodd" />
+        </svg>
+      )
+    default:
+      return (
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-300" />
+      )
+  }
+}
+
+function TaskProgressPanel({
+  tasks,
+  loopProgress,
+}: {
+  tasks: Array<{ taskId: string; status: string; error?: string }>
+  loopProgress: LoopProgress | null
+}) {
+  const passed = tasks.filter((t) => t.status === 'passed').length
+  const total = loopProgress?.total ?? tasks.length
+
+  return (
+    <div className="rounded-lg border border-purple-200 bg-purple-50/30 p-3 mb-2">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-purple-800">Task Progress</span>
+        <span className="text-xs text-purple-600">{passed}/{total} passed</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {tasks.map((task) => (
+          <div key={task.taskId} className="flex items-center gap-1" title={task.error ?? task.status}>
+            <TaskStatusIcon status={task.status} />
+            <span className="text-xs font-mono text-gray-700">{task.taskId}</span>
+          </div>
+        ))}
+      </div>
+      {tasks.some((t) => t.status === 'failed' && t.error) && (
+        <div className="mt-2 space-y-1">
+          {tasks
+            .filter((t) => t.status === 'failed' && t.error)
+            .map((t) => (
+              <div key={t.taskId} className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">
+                <span className="font-mono">{t.taskId}:</span> {t.error}
+              </div>
+            ))}
         </div>
       )}
     </div>
@@ -273,6 +365,8 @@ export function SessionTimeline({
   isLoading,
   currentStage,
   isLive,
+  taskProgress,
+  loopProgress,
 }: SessionTimelineProps) {
   if (isLoading) {
     return (
@@ -289,6 +383,8 @@ export function SessionTimeline({
       </div>
     )
   }
+
+  const taskEntries = Array.from(taskProgress.values())
 
   return (
     <div className="rounded-lg border border-blue-200 bg-blue-50/30">
@@ -308,6 +404,10 @@ export function SessionTimeline({
 
       <div className="px-3 py-3 space-y-2 max-h-[600px] overflow-y-auto">
         <PipelineStatusTimeline currentStage={currentStage} />
+
+        {currentStage === 'build' && taskEntries.length > 0 && (
+          <TaskProgressPanel tasks={taskEntries} loopProgress={loopProgress} />
+        )}
 
         {rounds.map((round) => (
           <RoundSection
