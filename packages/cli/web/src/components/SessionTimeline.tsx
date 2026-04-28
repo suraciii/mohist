@@ -56,7 +56,7 @@ function StatusIcon({ state }: { state: ToolCallEntry['state'] }) {
   )
 }
 
-function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
+export function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
   const [expanded, setExpanded] = useState(false)
 
   const displayInput = entry.rawInput ?? entry.args
@@ -134,7 +134,7 @@ const PIPELINE_STAGES = [
   { key: 'done', label: 'Done' },
 ]
 
-function PipelineStatusTimeline({ currentStage }: { currentStage: string }) {
+export function PipelineStatusTimeline({ currentStage }: { currentStage: string }) {
   const stageOrder = ['backlog', 'explore', 'plan', 'build', 'review', 'done']
   const currentIndex = stageOrder.indexOf(currentStage)
 
@@ -203,7 +203,7 @@ function getRoundColor(round: Round, isLive: boolean) {
   }
 }
 
-function RoundSection({
+export function RoundSection({
   round,
   isLive,
   isStreaming,
@@ -320,7 +320,7 @@ function TaskStatusIcon({ status }: { status: string }) {
   }
 }
 
-function TaskProgressPanel({
+export function TaskProgressPanel({
   tasks,
   loopProgress,
 }: {
