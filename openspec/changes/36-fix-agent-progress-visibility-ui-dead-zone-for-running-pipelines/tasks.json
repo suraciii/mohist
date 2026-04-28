@@ -176,9 +176,9 @@
       "dependsOn": [
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "useAgentStatus already polls at 5s so no polling change needed. Relative time helper can be a simple function, no library needed.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
