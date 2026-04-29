@@ -71,7 +71,7 @@ export const api = {
     request<{ issue: import('./types').Issue; context: string | null; message: string }>(`/issues/${number}/approve`, { method: 'POST' }),
 
   getIssueDiff: (number: number) =>
-    request<{ files: import('./types').DiffFile[] }>(`/issues/${number}/diff`),
+    request<import('./types').DiffResponse>(`/issues/${number}/diff`),
 
   getIssueCommits: (number: number) =>
     request<{ commits: import('./types').CommitEntry[] }>(`/issues/${number}/commits`),
