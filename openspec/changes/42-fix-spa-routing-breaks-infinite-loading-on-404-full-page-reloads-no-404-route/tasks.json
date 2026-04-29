@@ -1,0 +1,103 @@
+{
+  "project": "mohist",
+  "description": "Fix three SPA routing bugs: infinite loading on 404, full page reloads on IssueCard clicks, and missing catch-all 404 route",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create NotFoundPage component",
+      "spec": "specs/not-found-page/spec.md",
+      "description": "Create a reusable NotFoundPage component in packages/cli/web/src/components/NotFoundPage.tsx. It renders a centered 404 message with a React Router <Link to=\"/\"> back to the board. Style consistently with existing page layouts.",
+      "acceptanceCriteria": [
+        "NotFoundPage component exists and exports correctly",
+        "Displays 'Page not found' text",
+        "Contains a <Link to='/'> with 'Back to board' text",
+        "Uses React Router Link (not <a>) for navigation",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/NotFoundPage.tsx",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-002",
+      "title": "Fix IssueDetailPage infinite loading on API error",
+      "spec": "specs/web-ui/spec.md",
+      "description": "In IssueDetailPage.tsx, destructure isError from useIssue and add an early return rendering NotFoundPage before the existing isLoading guard. This fixes the infinite 'Loading...' spinner when the API returns 404 or any error.",
+      "acceptanceCriteria": [
+        "useIssue destructures isError in addition to data and isLoading",
+        "isError guard renders NotFoundPage before the isLoading guard",
+        "isLoading guard still shows 'Loading...' for legitimate slow loads",
+        "No infinite spinner on 404 or 500 API errors",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Replace IssueCard <a> with React Router <Link>",
+      "spec": "specs/web-ui/spec.md",
+      "description": "In IssueCard.tsx, replace the <a href> element with React Router's <Link to> component. Add the Link import from react-router-dom. All existing className, style, and nested content remain unchanged.",
+      "acceptanceCriteria": [
+        "IssueCard imports Link from react-router-dom",
+        "<a href={...}> replaced with <Link to={...}>",
+        "Card click navigates without full page reload",
+        "Nested buttons (Resume, etc.) still work via stopPropagation",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueCard.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-004",
+      "title": "Add catch-all 404 route in App.tsx",
+      "spec": "specs/web-ui/spec.md",
+      "description": "In App.tsx, add <Route path=\"*\" element={<NotFoundPage />} /> as the last child of the ProjectGuard layout route. Import NotFoundPage. This ensures unmatched paths render the 404 page with Header visible.",
+      "acceptanceCriteria": [
+        "App.tsx imports NotFoundPage",
+        "Catch-all * route added as last child of ProjectGuard layout route",
+        "Navigating to /unknown-path renders NotFoundPage",
+        "Existing routes (/, /issue/:number, /settings, /logs, /explore) unaffected",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/App.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-005",
+      "title": "Build and typecheck verification",
+      "description": "Run the web build and typecheck to verify all changes compile correctly with no regressions.",
+      "acceptanceCriteria": [
+        "npm run build succeeds in packages/cli",
+        "npm test passes (no regressions)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Build and test output",
+      "dependsOn": ["T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

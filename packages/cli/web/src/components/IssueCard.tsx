@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import type { Issue, AgentStatus } from '../lib/types'
 import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
@@ -100,8 +101,8 @@ export function IssueCard({ issue, agentStatus }: Props) {
   const relativeTime = formatRelativeTime(issue.updatedAt || issue.createdAt)
 
   return (
-    <a
-      href={`/issue/${issue.number}`}
+    <Link
+      to={`/issue/${issue.number}`}
       className="block rounded-lg border border-gray-200 border-l-4 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors relative overflow-hidden"
       style={{ borderLeftColor: getStripColor(issue.labels) }}
     >
@@ -210,6 +211,6 @@ export function IssueCard({ issue, agentStatus }: Props) {
           </div>
         )}
       </div>
-    </a>
+    </Link>
   )
 }
