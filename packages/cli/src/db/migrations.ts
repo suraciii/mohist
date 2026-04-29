@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -154,6 +154,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 15) {
     migrateToVersion15(db);
+  }
+
+  if (currentVersion < 16) {
+    migrateToVersion16(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -598,5 +602,24 @@ function migrateToVersion15(db: DatabaseManager): void {
     }
 
     setSchemaVersion(db, 15);
+  });
+}
+
+function migrateToVersion16(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(issues)"
+    );
+    const hasBlockedReason = tableInfo.some(col => col.name === 'blocked_reason');
+    const hasRetryCount = tableInfo.some(col => col.name === 'retry_count');
+
+    if (!hasBlockedReason) {
+      db.exec('ALTER TABLE issues ADD COLUMN blocked_reason TEXT DEFAULT NULL');
+    }
+    if (!hasRetryCount) {
+      db.exec('ALTER TABLE issues ADD COLUMN retry_count INTEGER DEFAULT 0');
+    }
+
+    setSchemaVersion(db, 16);
   });
 }
