@@ -51,11 +51,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use fuzzysort (already installed, used in ModelSelector.tsx). Each group in the returned array has: { id: string, label: string, count: number, providers: Provider[], expanded: boolean }.",
       "error": null,
-      "attempts": 0,
-      "order": 999999
+      "attempts": 1,
+      "order": 999999,
+      "durations": [
+        154972
+      ]
     },
     {
       "id": "T-003",
