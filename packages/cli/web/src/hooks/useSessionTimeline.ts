@@ -38,6 +38,29 @@ export interface RecoveryStatus {
   reason?: string
 }
 
+const BASE_PLAN_STEPS: Array<{ roundType: string; roundLabel: string }> = [
+  { roundType: 'proposal', roundLabel: 'Proposal' },
+  { roundType: 'specs', roundLabel: 'Specs' },
+  { roundType: 'design', roundLabel: 'Design' },
+  { roundType: 'tasks', roundLabel: 'Tasks' },
+  { roundType: 'self-review', roundLabel: 'Self Review' },
+]
+
+export interface PlanStep {
+  roundType: string
+  roundLabel: string
+  roundIndex: number
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  duration?: number
+  verdict?: 'PASS' | 'FAIL'
+}
+
+export interface PlanProgress {
+  steps: PlanStep[]
+  completedCount: number
+  totalSteps: number
+}
+
 const RECOVERY_LOG_EVENT_MAP: Record<string, RecoveryEvent['status']> = {
   acp_session_hang_detected: 'detected',
   acp_session_recovery_started: 'recovering',
@@ -223,6 +246,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
   const [taskProgress, setTaskProgress] = useState<TaskProgressMap>(new Map())
   const [loopProgress, setLoopProgress] = useState<LoopProgress | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null)
+  const [planProgress, setPlanProgress] = useState<PlanProgress | null>(null)
 
   const planBufferRef = useRef<Array<AgentDetailEventMap['plan_session_update']>>([])
   const rafRef = useRef<number | null>(null)
@@ -353,11 +377,32 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     const wasRunningOnThis = lastAgentRunningRef.current
     if (isRunningOnThis && !wasRunningOnThis) {
       liveToolCallMapRef.current = new Map()
+      setPlanProgress(null)
     }
     if (agentStatus?.running === false) {
       setIsStreaming(false)
     } else if (isRunningOnThis) {
       setIsStreaming(true)
+      if (!session) {
+        setPlanProgress((prev) => {
+          if (prev) return prev
+          const activeAgent = agentStatus?.activeAgents?.find((a) => a.issueNumber === issueNumber)
+          const progress = activeAgent?.progress
+          if (progress?.stage !== 'plan' || !progress.taskProgress) return prev
+          const { completed, total } = progress.taskProgress
+          const roundIndex = progress.roundIndex ?? 0
+          return {
+            steps: BASE_PLAN_STEPS.map((s, i) => ({
+              roundType: s.roundType,
+              roundLabel: s.roundLabel,
+              roundIndex: i,
+              status: i < completed ? ('completed' as const) : i === roundIndex ? ('running' as const) : ('pending' as const),
+            })),
+            completedCount: completed,
+            totalSteps: total,
+          }
+        })
+      }
     }
     lastAgentRunningRef.current = isRunningOnThis
   }, [agentStatus, issueNumber])
@@ -390,6 +435,30 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
           }
           return [...prev, newRound]
         })
+        setPlanProgress((prev) => {
+          const steps = prev?.steps ? [...prev.steps] : BASE_PLAN_STEPS.map((s, i) => ({
+            roundType: s.roundType,
+            roundLabel: s.roundLabel,
+            roundIndex: i,
+            status: 'pending' as const,
+          }))
+          const idx = steps.findIndex((s) => s.roundType === detail.roundType)
+          if (idx >= 0) {
+            steps[idx] = { ...steps[idx], status: 'running' }
+          } else {
+            steps.push({
+              roundType: detail.roundType,
+              roundLabel: detail.roundLabel ?? detail.roundType,
+              roundIndex: detail.roundIndex,
+              status: 'running',
+            })
+          }
+          return {
+            steps,
+            completedCount: prev?.completedCount ?? 0,
+            totalSteps: prev?.totalSteps ?? 5,
+          }
+        })
       }),
     )
 
@@ -404,6 +473,54 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
         }
         planBufferRef.current.push(detail)
         scheduleFlush()
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('plan_round_complete', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        setPlanProgress((prev) => {
+          const steps = prev?.steps ? [...prev.steps] : BASE_PLAN_STEPS.map((s, i) => ({
+            roundType: s.roundType,
+            roundLabel: s.roundLabel,
+            roundIndex: i,
+            status: i < detail.roundIndex ? ('completed' as const) : ('pending' as const),
+          }))
+          const isFailed = detail.verdict === 'FAIL'
+          const idx = steps.findIndex((s) => s.roundType === detail.roundType)
+          if (idx >= 0) {
+            steps[idx] = {
+              ...steps[idx],
+              status: isFailed ? ('failed' as const) : ('completed' as const),
+              duration: detail.duration,
+              ...(detail.verdict ? { verdict: detail.verdict } : {}),
+            }
+          }
+          if (detail.roundType === 'self-review' && isFailed) {
+            if (!steps.some((s) => s.roundType === 'auto-fix')) {
+              steps.push({
+                roundType: 'auto-fix',
+                roundLabel: 'Auto Fix',
+                roundIndex: steps.length,
+                status: 'pending',
+              })
+            }
+            if (!steps.some((s) => s.roundType === 're-self-review')) {
+              steps.push({
+                roundType: 're-self-review',
+                roundLabel: 'Re Self Review',
+                roundIndex: steps.length,
+                status: 'pending',
+              })
+            }
+          }
+          const completedCount = steps.filter((s) => s.status === 'completed' || s.status === 'failed').length
+          return {
+            steps,
+            completedCount,
+            totalSteps: prev?.totalSteps ?? 5,
+          }
+        })
       }),
     )
 
@@ -576,5 +693,6 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     taskProgress,
     loopProgress,
     recoveryStatus,
+    planProgress,
   }
 }
