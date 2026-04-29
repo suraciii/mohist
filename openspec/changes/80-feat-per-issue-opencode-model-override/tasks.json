@@ -136,11 +136,14 @@
         "T-002",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Also updates packages/cli/src/openspec/ralph-executor.ts and packages/cli/src/api/issues.ts",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        299195
+      ]
     },
     {
       "id": "T-006",
