@@ -18,13 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/provider-categories.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Scan models-snapshot.js to identify all provider IDs and classify them. Unmapped providers default to international.",
       "error": null,
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "durations": [
-        94609
+        94609,
+        33553
       ]
     },
     {
