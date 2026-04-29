@@ -130,11 +130,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Mock WorkflowController to simulate long-running pipeline. Use real EventBus and in-memory DB.",
-      "attempts": 0,
+      "attempts": 4,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        162194
+      ]
     },
     {
       "id": "T-006",
