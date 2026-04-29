@@ -1254,37 +1254,75 @@ export function createIssueRoutes(
       if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
         const response: ApiResponse = {
           success: true,
-          data: { files: [] }
+          data: { files: [], totalAdditions: 0, totalDeletions: 0 }
         };
         return c.json(response);
       }
 
       const branchName = `mo/issue-${number}`;
-      const diffOutput = await execFileAsync(
+      const diffRef = `${project.baseBranch}...${branchName}`;
+
+      const numstatOutput = await execFileAsync(
         'git',
-        ['diff', `${project.baseBranch}...${branchName}`, '--stat'],
+        ['diff', diffRef, '--numstat'],
         { cwd: project.path }
       );
 
-      const files: Array<{ file: string; additions: number; deletions: number }> = [];
-      const lines = diffOutput.stdout.trim().split('\n');
-      for (const line of lines) {
-        const match = line.match(/^(.+?)\s*\|\s*(\d+)\s*([+-]+)$/);
-        if (match) {
-          const diffSymbols = match[3] || '';
-          const additions = diffSymbols.split('+').length - 1;
-          const deletions = diffSymbols.split('-').length - 1;
-          files.push({
-            file: match[1].trim(),
-            additions,
-            deletions,
+      const fileStats = new Map<string, { additions: number; deletions: number; isBinary: boolean }>();
+      const numstatLines = numstatOutput.stdout.trim().split('\n').filter(l => l.trim());
+      for (const line of numstatLines) {
+        const parts = line.split('\t');
+        if (parts.length >= 3) {
+          const [addStr, delStr, filePath] = parts;
+          const isBinary = addStr === '-' && delStr === '-';
+          fileStats.set(filePath, {
+            additions: isBinary ? 0 : parseInt(addStr, 10) || 0,
+            deletions: isBinary ? 0 : parseInt(delStr, 10) || 0,
+            isBinary,
           });
         }
       }
 
+      const patchOutput = await execFileAsync(
+        'git',
+        ['diff', diffRef],
+        { cwd: project.path }
+      );
+
+      const perFileDiffs = new Map<string, string>();
+      const fullPatch = patchOutput.stdout;
+      if (fullPatch.trim()) {
+        const fileBlocks = fullPatch.split(/(?=^diff --git )/m);
+        for (const block of fileBlocks) {
+          if (!block.trim()) continue;
+          const headerMatch = block.match(/^diff --git (?:a\/.*?|\/dev\/null) (?:b\/(.*?)|\/dev\/null)/);
+          if (headerMatch) {
+            const filePath = headerMatch[1];
+            perFileDiffs.set(filePath, block);
+          }
+        }
+      }
+
+      const files: Array<{ file: string; additions: number; deletions: number; diff: string }> = [];
+      let totalAdditions = 0;
+      let totalDeletions = 0;
+
+      for (const [filePath, stats] of fileStats) {
+        totalAdditions += stats.additions;
+        totalDeletions += stats.deletions;
+        files.push({
+          file: filePath,
+          additions: stats.additions,
+          deletions: stats.deletions,
+          diff: stats.isBinary
+            ? 'Binary file, no diff available'
+            : (perFileDiffs.get(filePath) || ''),
+        });
+      }
+
       const response: ApiResponse = {
         success: true,
-        data: { files }
+        data: { files, totalAdditions, totalDeletions }
       };
       return c.json(response);
     } catch (error) {
