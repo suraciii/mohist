@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add user-configurable timeout settings for agent task execution and workflow stages via config.jsonc",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/config/config-schema.ts, packages/cli/src/config/config-loader.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow the pattern of getServerConfig() and getLogConfig() in config-loader.ts for the new accessor."
+      "passes": true,
+      "notes": "Follow the pattern of getServerConfig() and getLogConfig() in config-loader.ts for the new accessor.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        202007
+      ]
     },
     {
       "id": "T-002",
@@ -45,9 +50,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/config-loader.test.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Add tests to the existing config-loader.test.ts file. Follow its beforeEach/afterEach pattern with tmpDir."
+      "notes": "Add tests to the existing config-loader.test.ts file. Follow its beforeEach/afterEach pattern with tmpDir.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -66,9 +76,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "The config load happens inside the executeLoop function body (at issue-start time), not at module level. This ensures running issues are unaffected by config changes."
+      "notes": "The config load happens inside the executeLoop function body (at issue-start time), not at module level. This ensures running issues are unaffected by config changes.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -87,9 +103,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-loader.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Be careful: workflow-controller.ts getBuildStageTimeoutMs() calls loadWorkflow() which will now return config-driven defaults. Verify this doesn't break the stage timeout calculation."
+      "notes": "Be careful: workflow-controller.ts getBuildStageTimeoutMs() calls loadWorkflow() which will now return config-driven defaults. Verify this doesn't break the stage timeout calculation.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -110,9 +132,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/config-service.ts, packages/cli/src/api/config.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "The new timeout keys live in config.jsonc (per design D1), NOT in SQLite. ConfigService.getConfig() should call getAgentTimeoutConfig() from config-loader.ts and merge the result. The Config types in src/types.ts may need updating to include the new fields. The PUT handler should use writeConfig() from config-loader.ts for these keys."
+      "notes": "The new timeout keys live in config.jsonc (per design D1), NOT in SQLite. ConfigService.getConfig() should call getAgentTimeoutConfig() from config-loader.ts and merge the result. The Config types in src/types.ts may need updating to include the new fields. The PUT handler should use writeConfig() from config-loader.ts for these keys.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
