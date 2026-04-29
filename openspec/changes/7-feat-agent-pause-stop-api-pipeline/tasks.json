@@ -164,11 +164,14 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow patterns from existing api-routes.test.ts. Mock AgentRunnerService.stop() to avoid needing real ACP subprocess.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        645617
+      ]
     }
   ]
 }
