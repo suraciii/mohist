@@ -13,7 +13,7 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
 }
 
-const LiveTaskContext = createContext<LiveTaskState>({
+export const LiveTaskContext = createContext<LiveTaskState>({
   activeTaskId: null,
   activeTaskElapsedMs: null,
 })
@@ -205,10 +205,5 @@ function useSSEInner(projectId: string | null): LiveTaskState {
 }
 
 export default function useSSE(projectId: string | null) {
-  const liveState = useSSEInner(projectId)
-  return {
-    LiveTaskProvider: ({ children }: { children: React.ReactNode }) => (
-      <LiveTaskContext.Provider value={liveState}>{children}</LiveTaskContext.Provider>
-    ),
-  }
+  return useSSEInner(projectId)
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { useIssues, useProjects, useCurrentProject, useAgentStatus } from './hooks/useQueries'
-import useSSE from './hooks/useSSE'
+import useSSE, { LiveTaskContext } from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
 import { Header } from './components/Header'
@@ -64,7 +64,7 @@ function KanbanView() {
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
-  const { LiveTaskProvider } = useSSE(projectId)
+  const liveState = useSSE(projectId)
   const location = useLocation()
 
   const { data: projects } = useProjects()
@@ -86,7 +86,7 @@ function AppContent() {
   }, [currentProject, projects, projectId, setProjectId])
 
   return (
-    <LiveTaskProvider>
+    <LiveTaskContext.Provider value={liveState}>
     <div className="min-h-screen bg-gray-50 flex flex-col pb-14 md:pb-0">
       <Header onCreateIssue={() => setCreateIssueOpen(true)} />
       <MobileBottomNav />
@@ -103,7 +103,7 @@ function AppContent() {
       {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
       <CreateIssueDialog open={createIssueOpen} onClose={() => setCreateIssueOpen(false)} />
     </div>
-    </LiveTaskProvider>
+    </LiveTaskContext.Provider>
   )
 }
 
