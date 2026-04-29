@@ -1955,7 +1955,7 @@ export function createIssueRoutes(
       return;
     }
     const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
-    const worktreePath = worktreeManager!.getPath(project.name, issue.number) || process.cwd();
+    const worktreePath = worktreeManager!.getPath(project.name, issue.number) || project.path;
     issueService.createComment(issue.id, rebaseMessage);
     const acpOptions: AcpConnectionOptions = {
       cwd: worktreePath,
@@ -1977,10 +1977,10 @@ export function createIssueRoutes(
     );
   }
 
-  function handleBuildRebase(issue: Issue, project: { name: string }, number: number): void {
+  function handleBuildRebase(issue: Issue, project: { name: string; path: string }, number: number): void {
     if (!checkpointRepo) return;
     const changeDir = findChangeDir(
-      worktreeManager!.getPath(project.name, issue.number) || process.cwd(),
+      worktreeManager!.getPath(project.name, issue.number) || project.path,
       issue.number,
     );
     if (!changeDir) return;
