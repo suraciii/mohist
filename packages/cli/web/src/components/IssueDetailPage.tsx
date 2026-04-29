@@ -7,6 +7,7 @@ import { api, ApiError } from '../lib/api'
 import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
+import { IssueModelSelector } from './IssueModelSelector'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
@@ -768,6 +769,10 @@ export function IssueDetailPage() {
                       {activeAgents.length} agent{activeAgents.length > 1 ? 's' : ''} running on other issues
                     </div>
                   )}
+
+                  <div className="pt-2 border-t border-gray-100">
+                    <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} />
+                  </div>
                 </div>
               </div>
 
