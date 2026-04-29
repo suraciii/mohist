@@ -18,6 +18,7 @@ import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
+import { Stage, IssueStatus } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
@@ -229,6 +230,12 @@ async function main(): Promise<void> {
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    onMergeSuccess: (entry) => {
+      issueRepo.updateStage(entry.issueId, Stage.Done);
+      issueRepo.updateStatus(entry.issueId, IssueStatus.Completed);
+      issueRepo.clearApprovalState(entry.issueId);
+      log.info('onMergeSuccess: stage advanced to done', { issueNumber: entry.issueNumber });
     },
   });
 
