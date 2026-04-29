@@ -1,0 +1,176 @@
+{
+  "project": "mohist",
+  "description": "Per-issue opencode model override — DB migration, repo, API, ACP passthrough, frontend ModelSelector",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add schema v15 migration for issues.model column",
+      "spec": "specs/local-issue-store/spec.md#Issues table model column",
+      "description": "Add `migrateToVersion15` in `packages/cli/src/db/migrations.ts` that adds `model TEXT` column to the `issues` table. Increment `SCHEMA_VERSION` to 15. Add the version check in `initializeDatabase`.",
+      "acceptanceCriteria": [
+        "SCHEMA_VERSION is 15",
+        "migrateToVersion15 adds `model TEXT` column if not present",
+        "initializeDatabase calls migrateToVersion15 when currentVersion < 15",
+        "Existing rows have model = NULL after migration",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/migrations.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-002",
+      "title": "Add model field to Issue type and IssueRepo",
+      "spec": "specs/per-issue-model-override/spec.md#Per-issue model override storage",
+      "description": "Add `model?: string` to the `Issue` interface in `packages/cli/src/types/index.ts`. Update `IssueRow` interface and `rowToIssue` in `packages/cli/src/db/issue-repo.ts` to include `model`. Add `model` to the `update()` method's data type so `updateModel` works through the generic update. Add a dedicated `updateModel(id, model: string | null)` method.",
+      "acceptanceCriteria": [
+        "Issue interface has `model?: string` field",
+        "rowToIssue maps `row.model` to `issue.model` (null → undefined)",
+        "update() accepts `{ model: string | null }` in its data param",
+        "updateModel(id, null) sets model column to NULL and refreshes updated_at",
+        "updateModel(id, 'openai/gpt-4o') sets model column and refreshes updated_at",
+        "findById and findAll return model field",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types/index.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Also updates packages/cli/src/db/issue-repo.ts"
+    },
+    {
+      "id": "T-003",
+      "title": "Extend PATCH /api/issues/:number with model support",
+      "spec": "specs/http-api/spec.md#API 提供操作接口",
+      "description": "Update the PATCH handler in `packages/cli/src/api/issues.ts` to accept `model` in the request body. Validate that model (when present and not null) contains a `/` character. Pass model through to IssueService.update. Return updated issue with model field.",
+      "acceptanceCriteria": [
+        "PATCH with { model: 'openai/gpt-4o' } sets issue.model and returns 200",
+        "PATCH with { model: null } clears issue.model (sets to NULL) and returns 200",
+        "PATCH without model field leaves model unchanged",
+        "PATCH with { model: 'invalid' } returns 400 with 'Invalid model format'",
+        "Response includes model field",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-004",
+      "title": "Add model passthrough to AcpSessionOptions and AcpConnectionOptions",
+      "spec": "specs/agent-runtime/spec.md#AcpSessionOptions accepts model override",
+      "description": "Add `model?: string` to `AcpSessionOptions` and `AcpConnectionOptions` interfaces in `packages/cli/src/agent-runtime/acp-session.ts`. Destructure `model` from options in both `runAcpSession` and `createAcpConnection`. After `newSession`, if `model` is set, call `connection.setSessionConfigOption('model', model)` before prompting. Log the resolved model for debugging.",
+      "acceptanceCriteria": [
+        "AcpSessionOptions has model?: string field",
+        "AcpConnectionOptions has model?: string field",
+        "runAcpSession passes model to setSessionConfigOption when provided",
+        "createAcpConnection passes model to setSessionConfigOption when provided",
+        "When model is undefined, no setSessionConfigOption call is made for model",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 for sequential execution ordering; no code-level dependency on DB schema"
+    },
+    {
+      "id": "T-005",
+      "title": "Wire issue.model through workflow-controller and ralph-executor",
+      "spec": "specs/per-issue-model-override/spec.md#Model is passed through the call chain without DB coupling",
+      "description": "In `packages/cli/src/workflow/workflow-controller.ts`, read `issue.model` and pass it as `model` in all `AcpConnectionOptions` constructions (plan stage, review stage). In `packages/cli/src/openspec/ralph-executor.ts`, add `model?: string` to `RalphExecutorContext` and pass `context.model` to the `_acpSessionRunner` call. In `packages/cli/src/api/issues.ts`, pass `model: issue.model` in all `AcpConnectionOptions` constructions (start, reopen, approve, reject, messages).",
+      "acceptanceCriteria": [
+        "RalphExecutorContext has model?: string field",
+        "_acpSessionRunner call in runRalphLoop includes model: context.model",
+        "WorkflowController passes issue.model in plan and review AcpConnectionOptions",
+        "All AcpConnectionOptions in api/issues.ts (start, reopen, approve, reject, messages, skip-to-review) include model: issue.model",
+        "Explore sessions do NOT receive per-issue model",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": ["T-002", "T-004"],
+      "passes": false,
+      "notes": "Also updates packages/cli/src/openspec/ralph-executor.ts and packages/cli/src/api/issues.ts"
+    },
+    {
+      "id": "T-006",
+      "title": "Add model to frontend Issue type and API client",
+      "spec": "specs/web-ui/spec.md#Issue Detail Page 提供 ModelSelector",
+      "description": "Add `model?: string` to the `Issue` interface in `packages/cli/web/src/lib/types.ts`. Add `model` support to the `updateIssue` function in `packages/cli/web/src/lib/api.ts` so it sends `{ model }` in the PATCH body.",
+      "acceptanceCriteria": [
+        "Issue type in web/src/lib/types.ts has model?: string field",
+        "updateIssue function accepts and sends model parameter in PATCH request body",
+        "Sending model: null in the PATCH body works (clears override)",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 for sequential execution ordering; frontend types have no code-level dependency on backend DB"
+    },
+    {
+      "id": "T-007",
+      "title": "Add IssueModelSelector to Issue Detail Page",
+      "spec": "specs/web-ui/spec.md#Issue Detail Page 提供 ModelSelector",
+      "description": "Create an `IssueModelSelector` component in `packages/cli/web/src/components/` that wraps the visual UI from the existing `ModelSelector` but calls `PATCH /api/issues/:number` with `{ model }` instead of `api.updateSessionModel`. Include a 'Use default' option to clear override. Add it to the Actions area of `IssueDetailPage.tsx`.",
+      "acceptanceCriteria": [
+        "IssueModelSelector renders in IssueDetailPage Actions area",
+        "Selecting a model calls PATCH /api/issues/:number with { model: 'provider/model-id' }",
+        "Selecting 'Use default' calls PATCH with { model: null }",
+        "Current model override is displayed when issue has model set",
+        "Unset state is displayed when issue.model is null/undefined",
+        "ModelSelector does NOT affect Explore page",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-003", "T-006"],
+      "passes": false,
+      "notes": "Also creates packages/cli/web/src/components/IssueModelSelector.tsx"
+    },
+    {
+      "id": "T-008",
+      "title": "Write backend tests for per-issue model override",
+      "spec": "specs/per-issue-model-override/spec.md#Per-issue model override storage",
+      "description": "Write tests covering: DB migration adds model column, IssueRepo.updateModel set/clear, IssueRepo.findById returns model, PATCH API set/clear/validate model. Place tests alongside existing test files following project conventions.",
+      "acceptanceCriteria": [
+        "Test: migration adds model column, default NULL",
+        "Test: updateModel sets model and refreshes updated_at",
+        "Test: updateModel(id, null) clears model",
+        "Test: findById returns model field",
+        "Test: PATCH sets model with valid format",
+        "Test: PATCH clears model with null",
+        "Test: PATCH rejects model without / character",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": ["T-003", "T-005"],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

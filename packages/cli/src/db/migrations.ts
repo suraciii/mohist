@@ -574,18 +574,27 @@ function migrateToVersion15(db: DatabaseManager): void {
     const tableInfo = db.all<{ name: string }>(
       "PRAGMA table_info(coder_session)"
     );
-    const hasModel = tableInfo.some(col => col.name === 'model');
+    const hasCoderModel = tableInfo.some(col => col.name === 'model');
     const hasCoderType = tableInfo.some(col => col.name === 'coder_type');
-    const hasStage = tableInfo.some(col => col.name === 'stage');
+    const hasCoderStage = tableInfo.some(col => col.name === 'stage');
 
-    if (!hasModel) {
+    if (!hasCoderModel) {
       db.exec("ALTER TABLE coder_session ADD COLUMN model TEXT");
     }
     if (!hasCoderType) {
       db.exec("ALTER TABLE coder_session ADD COLUMN coder_type TEXT");
     }
-    if (!hasStage) {
+    if (!hasCoderStage) {
       db.exec("ALTER TABLE coder_session ADD COLUMN stage TEXT");
+    }
+
+    const issueTableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(issues)"
+    );
+    const hasIssueModel = issueTableInfo.some(col => col.name === 'model');
+
+    if (!hasIssueModel) {
+      db.exec("ALTER TABLE issues ADD COLUMN model TEXT");
     }
 
     setSchemaVersion(db, 15);
