@@ -129,6 +129,7 @@ async function main(): Promise<void> {
     worktreeManager,
     eventBus,
     issueRepo,
+    isAgentRunning: (issueNumber: number) => agentRunner?.isRunningByNumber(issueNumber) ?? false,
     getProjectPath: (projectId: string) => {
       const project = projectService.getById(projectId);
       if (!project) return null;

@@ -190,8 +190,7 @@ export class WorktreeManager {
     const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
     if (!hasCommits) {
       log.info('No commits to merge back', { issueNumber, branch, baseBranch });
-      await this.remove(projectPath, projectName, issueNumber);
-      return { success: true, message: `No commits to merge for issue #${issueNumber}, worktree cleaned up` };
+      return { success: true, message: `No commits to merge for issue #${issueNumber}` };
     }
 
     try {
@@ -202,12 +201,65 @@ export class WorktreeManager {
 
     try {
       await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
-    } catch (err) {
-      return { success: false, message: `Fast-forward not possible, rebase required: ${err instanceof Error ? err.message : String(err)}` };
+      log.info('Fast-forward merge succeeded', { issueNumber, branch, baseBranch });
+      return { success: true, message: `Merged ${branch} into ${baseBranch} (fast-forward)` };
+    } catch {
+      log.info('Fast-forward not possible, attempting rebase then merge', { issueNumber, branch, baseBranch });
     }
 
-    log.info('Fast-forward merge succeeded', { issueNumber, branch, baseBranch });
-    return { success: true, message: `Merged ${branch} into ${baseBranch} (fast-forward)` };
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+    if (!worktreePath) {
+      return { success: false, message: `Worktree not found for issue #${issueNumber}` };
+    }
+
+    await smartFetch(projectPath);
+
+    try {
+      await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
+    } catch { /* no rebase in progress */ }
+
+    try {
+      await execFileAsync('git', ['rebase', baseBranch], { cwd: worktreePath });
+      log.info('Rebase succeeded cleanly', { issueNumber, branch, baseBranch });
+    } catch {
+      log.info('Rebase has conflicts, auto-resolving with theirs', { issueNumber });
+
+      for (let attempt = 0; attempt < 50; attempt++) {
+        try {
+          await execFileAsync('git', ['checkout', '--theirs', '.'], { cwd: worktreePath });
+          await execFileAsync('git', ['add', '.'], { cwd: worktreePath });
+          await execFileAsync('git', ['rebase', '--continue'], {
+            cwd: worktreePath,
+            env: { ...process.env, GIT_EDITOR: 'true' },
+          });
+          log.info('Rebase continued after auto-resolve', { issueNumber, attempt });
+          break;
+        } catch (continueErr) {
+          const stillRebasing = await this.isRebaseInProgress(projectName, issueNumber).catch(() => false);
+          if (!stillRebasing) {
+            log.warn('Rebase aborted during auto-resolve', { issueNumber, attempt });
+            try { await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath }); } catch { /* */ }
+            return { success: false, message: `Rebase failed during auto-resolve: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}` };
+          }
+          log.info('More conflicts after continue, retrying', { issueNumber, attempt });
+        }
+      }
+
+      const stillRebasing = await this.isRebaseInProgress(projectName, issueNumber).catch(() => false);
+      if (stillRebasing) {
+        try { await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath }); } catch { /* */ }
+        return { success: false, message: `Rebase auto-resolve exceeded max attempts for issue #${issueNumber}` };
+      }
+    }
+
+    try {
+      await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
+      await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
+      log.info('Merge succeeded after rebase', { issueNumber, branch, baseBranch });
+      return { success: true, message: `Merged ${branch} into ${baseBranch} (rebase + fast-forward)` };
+    } catch (err) {
+      return { success: false, message: `Merge failed after rebase: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }
 
   private async branchHasCommits(projectPath: string, branch: string, baseBranch: string): Promise<boolean> {
@@ -395,7 +447,7 @@ export class WorktreeManager {
       );
     } catch (error: any) {
       const msg = error.message || String(error);
-      if (!msg.includes("not found") && !msg.includes("no such branch")) {
+      if (!msg.includes("not found") && !msg.includes("no such branch") && !msg.includes("Cannot delete branch")) {
         throw new Error(`Failed to delete branch: ${msg}`);
       }
     }

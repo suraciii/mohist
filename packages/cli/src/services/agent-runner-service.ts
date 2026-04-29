@@ -332,6 +332,13 @@ export class AgentRunnerService {
     return this.activeAgents.size > 0;
   }
 
+  isRunningByNumber(issueNumber: number): boolean {
+    for (const agent of this.activeAgents.values()) {
+      if (agent.issueNumber === issueNumber) return true;
+    }
+    return false;
+  }
+
   getStatus(): AgentStatus {
     const agents = Array.from(this.activeAgents.values()).map((a) => ({
       issueId: a.issueId,
