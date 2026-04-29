@@ -52,7 +52,7 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  updateIssue: (number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[] }) =>
+  updateIssue: (number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; model?: string | null }) =>
     request<import('./types').Issue>(`/issues/${number}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
