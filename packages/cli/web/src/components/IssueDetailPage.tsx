@@ -4,12 +4,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile, CommitEntry, ApprovalOutput } from '../lib/types'
 import { api, ApiError } from '../lib/api'
-import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
 import { IssueModelSelector } from './IssueModelSelector'
 import { MergeStatePanel } from './MergeStatePanel'
+import { PlanApprovalPanel } from './PlanApprovalPanel'
 import { QuestionPanel } from './QuestionPanel'
+import { ReviewApprovalPanel } from './ReviewApprovalPanel'
 import { SessionList } from './SessionList'
 import { TaskList } from './TaskList'
 import { formatTime, formatTimeAgo } from '../lib/format-time'
@@ -127,7 +129,6 @@ export function IssueDetailPage() {
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
-  const [messageText, setMessageText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
   const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
@@ -219,8 +220,6 @@ export function IssueDetailPage() {
     },
   })
 
-  const sendMessageMutation = useSendMessage(issueNumber)
-
   const [rebaseResult, setRebaseResult] = useState<{
     type: 'success' | 'info' | 'error'
     message: string
@@ -300,18 +299,6 @@ export function IssueDetailPage() {
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
   const approvalOutput: ApprovalOutput | undefined = issue.approvalState?.output
-  const reviewOutput = (() => {
-    if (approvalOutput) {
-      const extracted = approvalOutput.selfReviewNotes || approvalOutput.reviewReport
-      if (typeof extracted === 'string' && extracted.trim()) return extracted
-      const json = JSON.stringify(approvalOutput, null, 2)
-      if (json !== '{}') return json
-    }
-    const lastComment = [...(issue.comments ?? [])].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    )[0]
-    return lastComment?.body || ''
-  })()
 
   return (
     <>
@@ -479,7 +466,7 @@ export function IssueDetailPage() {
                 const commits = commitsData?.commits ?? []
                 if (files.length === 0 && commits.length === 0) return null
                 return (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div id="diff-section" className="rounded-lg border border-gray-200 bg-white p-4">
                     <div className="flex items-center gap-1 mb-3 border-b border-gray-100">
                       <button
                         onClick={() => setDiffTab('files')}
@@ -637,7 +624,7 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {issue.stage === Stage.Build && issue.status !== IssueStatus.Closed && (
+                  {[Stage.Build, Stage.Plan, Stage.Review].includes(issue.stage) && issue.status !== IssueStatus.Closed && (
                     <div>
                       <button
                         onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
@@ -741,7 +728,7 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {rebaseResult && issue.stage !== Stage.Plan && issue.stage !== Stage.Review && (
+                  {rebaseResult && (
                     <div className={`rounded-md px-3 py-2 text-xs ${
                       rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
                       rebaseResult.type === 'info' ? 'bg-blue-50 text-blue-700' :
@@ -778,67 +765,40 @@ export function IssueDetailPage() {
 
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
 
-              {isApprovalGate && reviewOutput && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <h2 className="text-sm font-semibold text-amber-800 mb-2">
-                    Review Report
-                  </h2>
-                  <div className="rounded bg-white p-3 max-h-64 overflow-y-auto">
-                    <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                      {reviewOutput}
+              {isApprovalGate && approvalOutput && (() => {
+                const outputStage = approvalOutput.stage
+                if (outputStage === 'plan') {
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                      <h2 className="text-sm font-semibold text-amber-800 mb-3">Plan Review</h2>
+                      <PlanApprovalPanel issueNumber={issueNumber} output={approvalOutput} />
                     </div>
-                  </div>
-                </div>
-              )}
-
-              {isApprovalGate && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <h2 className="text-sm font-semibold text-amber-800 mb-2">
-                    Approval Required
-                  </h2>
-                  <p className="text-xs text-amber-600 mb-3">
-                    The agent completed the previous stage. Review the output above and approve
-                    to continue.
-                  </p>
-                  {issue.stage === Stage.Review && (
-                    <div className="mb-3 pb-3 border-b border-amber-200">
-                      <p className="text-xs text-amber-500 mb-2">Rebase before review for latest diff</p>
-                      <button
-                        onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
-                        disabled={rebaseMutation.isPending}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
-                      >
-                        {rebaseMutation.isPending && (
-                          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                        )}
-                        {rebaseMutation.isPending ? 'Rebasing...' : 'Rebase onto master'}
-                      </button>
-                      {rebaseResult && (
-                        <div className={`mt-2 rounded-md px-3 py-2 text-xs ${
-                          rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
-                          rebaseResult.type === 'info' ? 'bg-blue-50 text-blue-700' :
-                          'bg-red-50 text-red-600'
-                        }`}>
-                          {rebaseResult.message}
-                          {rebaseResult.conflicts && rebaseResult.conflicts.length > 0 && (
-                            <ul className="mt-1 ml-3 list-disc">
-                              {rebaseResult.conflicts.map((f) => (
-                                <li key={f} className="font-mono text-xs">{f}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      )}
+                  )
+                }
+                if (outputStage === 'review') {
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                      <h2 className="text-sm font-semibold text-amber-800 mb-3">Code Review</h2>
+                      <ReviewApprovalPanel
+                        issueNumber={issueNumber}
+                        output={approvalOutput}
+                        onViewCodeChanges={() => {
+                          document.getElementById('diff-section')?.scrollIntoView({ behavior: 'smooth' })
+                        }}
+                      />
                     </div>
-                  )}
-                  <div className="flex gap-2">
+                  )
+                }
+                return (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <h2 className="text-sm font-semibold text-amber-800 mb-2">Approval Required</h2>
+                    <p className="text-xs text-amber-600 mb-3">
+                      The agent completed the previous stage. Approve to continue.
+                    </p>
                     <button
                       onClick={() => approveMutation.mutate()}
                       disabled={approveMutation.isPending || isAgentRunningOnThis}
-                      className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {approveMutation.isPending
                         ? 'Approving...'
@@ -846,82 +806,37 @@ export function IssueDetailPage() {
                           ? 'Agent running...'
                           : 'Approve & Continue'}
                     </button>
+                    {approveMutation.error && (
+                      <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+                        {approveMutation.error.message}
+                      </div>
+                    )}
                   </div>
+                )
+              })()}
+
+              {isApprovalGate && !approvalOutput && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <h2 className="text-sm font-semibold text-amber-800 mb-2">Approval Required</h2>
+                  <p className="text-xs text-amber-600 mb-3">
+                    The agent completed the previous stage. Approve to continue.
+                  </p>
+                  <button
+                    onClick={() => approveMutation.mutate()}
+                    disabled={approveMutation.isPending || isAgentRunningOnThis}
+                    className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {approveMutation.isPending
+                      ? 'Approving...'
+                      : isAgentRunningOnThis
+                        ? 'Agent running...'
+                        : 'Approve & Continue'}
+                  </button>
                   {approveMutation.error && (
                     <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
                       {approveMutation.error.message}
                     </div>
                   )}
-                  {issue.stage === Stage.Plan && (
-                    <div className="mt-3 pt-3 border-t border-amber-200">
-                      <button
-                        onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
-                        disabled={rebaseMutation.isPending}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
-                      >
-                        {rebaseMutation.isPending && (
-                          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                        )}
-                        {rebaseMutation.isPending ? 'Rebasing...' : 'Rebase onto master'}
-                      </button>
-                      {rebaseResult && (
-                        <div className={`mt-2 rounded-md px-3 py-2 text-xs ${
-                          rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
-                          rebaseResult.type === 'info' ? 'bg-blue-50 text-blue-700' :
-                          'bg-red-50 text-red-600'
-                        }`}>
-                          {rebaseResult.message}
-                          {rebaseResult.conflicts && rebaseResult.conflicts.length > 0 && (
-                            <ul className="mt-1 ml-3 list-disc">
-                              {rebaseResult.conflicts.map((f) => (
-                                <li key={f} className="font-mono text-xs">{f}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {isApprovalGate && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                  <h2 className="text-sm font-semibold text-blue-800 mb-2">Send Message</h2>
-                  <p className="text-xs text-blue-600 mb-3">
-                    Send a free-text message to the agent. The agent will decide the next step
-                    based on your message.
-                  </p>
-                  <textarea
-                    value={messageText}
-                    onChange={(e) => setMessageText(e.target.value)}
-                    placeholder="Type a message to the agent..."
-                    rows={3}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                  />
-                  <div className="flex items-center justify-between mt-2">
-                    {sendMessageMutation.error && (
-                      <span className="text-xs text-red-500">
-                        {sendMessageMutation.error.message}
-                      </span>
-                    )}
-                    <div className="ml-auto">
-                      <button
-                        onClick={() => {
-                          sendMessageMutation.mutate(messageText, {
-                            onSuccess: () => setMessageText(''),
-                          })
-                        }}
-                        disabled={!messageText.trim() || sendMessageMutation.isPending}
-                        className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                      >
-                        {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
-                      </button>
-                    </div>
-                  </div>
                 </div>
               )}
 
