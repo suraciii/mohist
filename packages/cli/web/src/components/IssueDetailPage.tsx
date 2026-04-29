@@ -2,7 +2,7 @@ import { Fragment, useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
-import type { DiffFile, CommitEntry } from '../lib/types'
+import type { CommitEntry } from '../lib/types'
 import { api, ApiError } from '../lib/api'
 import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
@@ -13,6 +13,7 @@ import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
 import { TaskList } from './TaskList'
+import { DiffViewer } from './DiffViewer'
 import { formatTime, formatTimeAgo } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 
@@ -40,34 +41,6 @@ function formatRelativeTime(iso: string): string {
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
   return `${hours}h ago`
-}
-
-function CommitDiffView({ diff }: { diff: string }) {
-  const lines = diff.split('\n')
-  return (
-    <div className="mt-2 rounded-md bg-gray-50 border border-gray-100 overflow-x-auto">
-      <pre className="text-xs font-mono leading-5 p-3">
-        {lines.map((line, i) => {
-          let bg = ''
-          let color = 'text-gray-500'
-          if (line.startsWith('+')) {
-            bg = 'bg-green-50'
-            color = 'text-green-700'
-          } else if (line.startsWith('-')) {
-            bg = 'bg-red-50'
-            color = 'text-red-700'
-          } else if (line.startsWith('@@')) {
-            color = 'text-blue-600'
-          }
-          return (
-            <div key={i} className={`${bg} ${color}`}>
-              {line}
-            </div>
-          )
-        })}
-      </pre>
-    </div>
-  )
 }
 
 function CommitRow({
@@ -114,12 +87,14 @@ function CommitRow({
           {isError && (
             <div className="text-xs text-red-500 py-2">Failed to load diff</div>
           )}
-          {diffData?.diff && <CommitDiffView diff={diffData.diff} />}
+          {diffData?.diff && <DiffViewer diff={diffData.diff} />}
         </div>
       )}
     </div>
   )
 }
+
+const NOISE_COMMIT_PATTERN = /^(chore\(tasks\)|WIP|chore: commit remaining)/i
 
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
@@ -131,8 +106,10 @@ export function IssueDetailPage() {
   const [messageText, setMessageText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
-  const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
+  const [changesSubView, setChangesSubView] = useState<'files' | 'commits'>('files')
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
+  const [fileSearch, setFileSearch] = useState('')
+  const [noiseExpanded, setNoiseExpanded] = useState(false)
 
   useEffect(() => {
     if (!forceStopConfirming) return
@@ -482,83 +459,142 @@ export function IssueDetailPage() {
                 </div>
               </div>
 
-              {showDiff && (() => {
-                const files = diffData?.files ?? []
-                const commits = commitsData?.commits ?? []
-                if (files.length === 0 && commits.length === 0) return null
-                return (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
-                    <div className="flex items-center gap-1 mb-3 border-b border-gray-100">
-                      <button
-                        onClick={() => setDiffTab('files')}
-                        className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                          diffTab === 'files'
-                            ? 'border-blue-600 text-blue-600'
-                            : 'border-transparent text-gray-500 hover:text-gray-700'
-                        }`}
-                      >
-                        Files{files.length > 0 ? ` (${files.length})` : ''}
-                      </button>
-                      <button
-                        onClick={() => setDiffTab('commits')}
-                        className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                          diffTab === 'commits'
-                            ? 'border-blue-600 text-blue-600'
-                            : 'border-transparent text-gray-500 hover:text-gray-700'
-                        }`}
-                      >
-                        Commits{commits.length > 0 ? ` (${commits.length})` : ''}
-                      </button>
-                    </div>
-
-                    {diffTab === 'files' && (
-                      <div className="space-y-1">
-                        {files.length === 0 ? (
-                          <p className="text-sm text-gray-400">No file changes yet.</p>
-                        ) : (
-                          files.map((f: DiffFile, i: number) => (
-                            <div key={i} className="flex items-center gap-2 text-sm">
-                              <span className="text-gray-700 font-mono text-xs truncate flex-1">
-                                {f.file}
-                              </span>
-                              <span className="text-green-600 text-xs font-medium">+{f.additions}</span>
-                              <span className="text-red-500 text-xs font-medium">-{f.deletions}</span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-
-                    {diffTab === 'commits' && (
-                      <div className="space-y-1">
-                        {commits.length === 0 ? (
-                          <p className="text-sm text-gray-400">No commits yet.</p>
-                        ) : (
-                          commits.map((c: CommitEntry) => (
-                            <CommitRow
-                              key={c.hash}
-                              issueNumber={issueNumber}
-                              commit={c}
-                              expanded={expandedCommits.has(c.hash)}
-                              onToggle={() => {
-                                setExpandedCommits((prev) => {
-                                  const next = new Set(prev)
-                                  if (next.has(c.hash)) {
-                                    next.delete(c.hash)
-                                  } else {
-                                    next.add(c.hash)
-                                  }
-                                  return next
-                                })
-                              }}
-                            />
-                          ))
-                        )}
-                      </div>
-                    )}
+              {showDiff && (
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="flex items-center gap-1 mb-4 border-b border-gray-100">
+                    <button
+                      onClick={() => setChangesSubView('files')}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                        changesSubView === 'files'
+                          ? 'border-blue-600 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      Files changed{diffData?.files?.length ? ` (${diffData.files.length})` : ''}
+                    </button>
+                    <button
+                      onClick={() => setChangesSubView('commits')}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                        changesSubView === 'commits'
+                          ? 'border-blue-600 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      Commits{commitsData?.commits?.length ? ` (${commitsData.commits.length})` : ''}
+                    </button>
                   </div>
-                )
-              })()}
+
+                  {changesSubView === 'files' && (() => {
+                    const files = diffData?.files ?? []
+                    const totalAdditions = diffData?.totalAdditions ?? 0
+                    const totalDeletions = diffData?.totalDeletions ?? 0
+
+                    if (files.length === 0) {
+                      return <p className="text-sm text-gray-400">No changes yet</p>
+                    }
+
+                    const filteredFiles = fileSearch
+                      ? files.filter(f => f.file.toLowerCase().includes(fileSearch.toLowerCase()))
+                      : files
+                    const combinedDiff = filteredFiles.map(f => f.diff).filter(Boolean).join('\n')
+
+                    return (
+                      <>
+                        <div className="text-sm text-gray-500 mb-3">
+                          {files.length} file{files.length !== 1 ? 's' : ''} changed ·{' '}
+                          <span className="text-green-600 font-medium">+{totalAdditions}</span>{' '}
+                          <span className="text-red-500 font-medium">-{totalDeletions}</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={fileSearch}
+                          onChange={(e) => setFileSearch(e.target.value)}
+                          placeholder="Filter files..."
+                          className="w-full mb-3 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        {combinedDiff ? (
+                          <DiffViewer diff={combinedDiff} />
+                        ) : (
+                          <p className="text-sm text-gray-400">No files match your search.</p>
+                        )}
+                      </>
+                    )
+                  })()}
+
+                  {changesSubView === 'commits' && (() => {
+                    const commits = commitsData?.commits ?? []
+
+                    if (commits.length === 0) {
+                      return <p className="text-sm text-gray-400">No commits yet</p>
+                    }
+
+                    const noiseCommits = commits.filter(c => NOISE_COMMIT_PATTERN.test(c.message))
+                    const regularCommits = commits.filter(c => !NOISE_COMMIT_PATTERN.test(c.message))
+
+                    return (
+                      <div className="space-y-1">
+                        {regularCommits.map((c: CommitEntry) => (
+                          <CommitRow
+                            key={c.hash}
+                            issueNumber={issueNumber}
+                            commit={c}
+                            expanded={expandedCommits.has(c.hash)}
+                            onToggle={() => {
+                              setExpandedCommits((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(c.hash)) next.delete(c.hash)
+                                else next.add(c.hash)
+                                return next
+                              })
+                            }}
+                          />
+                        ))}
+                        {noiseCommits.length > 0 && (
+                          <div>
+                            <button
+                              onClick={() => setNoiseExpanded(!noiseExpanded)}
+                              className="w-full flex items-center gap-3 text-sm py-1.5 px-2 rounded hover:bg-gray-50 transition-colors text-left text-gray-400 italic"
+                            >
+                              <svg
+                                className={`h-3 w-3 transition-transform flex-shrink-0 ${noiseExpanded ? 'rotate-90' : ''}`}
+                                viewBox="0 0 20 20"
+                                fill="currentColor"
+                              >
+                                <path
+                                  fillRule="evenodd"
+                                  d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                              Auto commits ({noiseCommits.length})
+                            </button>
+                            {noiseExpanded && (
+                              <div className="ml-5 space-y-1">
+                                {noiseCommits.map((c: CommitEntry) => (
+                                  <CommitRow
+                                    key={c.hash}
+                                    issueNumber={issueNumber}
+                                    commit={c}
+                                    expanded={expandedCommits.has(c.hash)}
+                                    onToggle={() => {
+                                      setExpandedCommits((prev) => {
+                                        const next = new Set(prev)
+                                        if (next.has(c.hash)) next.delete(c.hash)
+                                        else next.add(c.hash)
+                                        return next
+                                      })
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
