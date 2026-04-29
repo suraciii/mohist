@@ -83,11 +83,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow the StageColumn.tsx pattern: useState(false) + slice(0, expanded ? all : 5) + toggle button. Reuse existing provider card styles from SettingsPage.tsx.",
       "error": null,
-      "attempts": 0,
-      "order": 999999
+      "attempts": 1,
+      "order": 999999,
+      "durations": [
+        78660
+      ]
     },
     {
       "id": "T-004",
