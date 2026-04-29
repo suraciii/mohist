@@ -177,13 +177,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "See reject-and-fix spec for message formats. Use existing useSendMessage hook pattern from IssueDetailPage.",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        181771
+        181771,
+        101540
       ]
     },
     {
