@@ -1,0 +1,88 @@
+{
+  "project": "mohist",
+  "description": "Redesign review approval panel as a decision-oriented UI with result banner, issue summary, result-dependent actions, full report modal, and optimized send-back logic",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create ReviewSummary component with Result Banner and Issue Summary",
+      "spec": "specs/review-decision-panel/spec.md",
+      "description": "Create `packages/cli/web/src/components/ReviewSummary.tsx` containing: (1) `parseReviewOutput` helper that extracts result, dimensions, reviewReport, selfReviewNotes from `Record<string, unknown>` with safe defaults; (2) `ReviewSummary` component that renders a Result Banner (PASS=green/checkmark, FAIL=red/X, unknown=gray) and Issue Summary (FAIL dimensions as expanded cards with bullet issues, PASS dimensions collapsed to one line). No side effects — pure display component receiving `output` prop.",
+      "acceptanceCriteria": [
+        "parseReviewOutput extracts result, dimensions, reviewReport, selfReviewNotes from untyped output with safe defaults",
+        "PASS result renders green banner with checkmark icon, 'All checks passed', and dimension pass ratio",
+        "FAIL result renders red banner with X icon, 'N issues found', and FAIL dimension names joined by ' · '",
+        "Unknown/null result renders gray banner with 'Review required'",
+        "FAIL dimensions render as expanded cards with red dot + dimension name + bullet-point issues",
+        "PASS dimensions render as collapsed single line with checkmark + names joined by ' · '",
+        "Missing dimensions with FAIL result shows 'Issues found. View full report for details.'",
+        "Missing dimensions with PASS result shows 'All checks passed'",
+        "Component is pure display — no mutations, no API calls",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/ReviewSummary.tsx",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-002",
+      "title": "Create ReviewApprovalPanel component with Action Area and Full Report Modal",
+      "spec": "specs/review-decision-panel/spec.md",
+      "description": "Create `packages/cli/web/src/components/ReviewApprovalPanel.tsx` that renders: (1) `<ReviewSummary>` for display; (2) result-dependent Action Area — PASS: single green 'Approve & Done' button + 'View Report →' and 'View Files →' links; FAIL: 'Send back for fixes' (red, sends structured issue summary via sendMessage), 'Add instructions...' (expandable textarea + send), 'Approve anyway' (gray, single-click approve, no confirmation); unknown: 'Approve & Continue' (blue) + 'Send back with notes...' textarea; (3) Full Report Modal (fixed overlay, 80% width, react-markdown rendered, Escape/backdrop/close close). Send-back uses fallback chain: dimensions → Fix Suggestions extraction from reviewReport → generic message. Props: output, issueNumber, onViewFiles, rebaseResult, onRebase, rebasePending. Uses `useSendMessage` and `useMutation({ mutationFn: () => api.approveIssue(issueNumber) })` internally.",
+      "acceptanceCriteria": [
+        "Imports and renders ReviewSummary component",
+        "PASS action area: single green 'Approve & Done' button calling approve API, 'View Report →' link, 'View Files →' link calling onViewFiles",
+        "FAIL action area: 'Send back for fixes' red button, 'Add instructions...' expandable textarea with 'Send with instructions', 'Approve anyway' gray button",
+        "'Send back for fixes' extracts FAIL dimensions and sends 'Please fix the following issues:\\n\\n' + formatted summary via sendMessage",
+        "'Send back for fixes' falls back to Fix Suggestions extraction from reviewReport when dimensions unavailable",
+        "'Send back for fixes' falls back to generic message when neither dimensions nor reviewReport available",
+        "'Send back for fixes' shows loading state during API call, restores on error",
+        "'Approve anyway' executes approve on single click with no confirmation dialog",
+        "'Add instructions...' toggle expands/collapses textarea; send button disabled when textarea empty",
+        "'Add instructions' send includes user text + FAIL dimension issues summary",
+        "Unknown result action area: 'Approve & Continue' blue button + 'Send back with notes...' expandable textarea",
+        "Full Report Modal opens on 'View Report →' click: fixed overlay, 80% width, backdrop click/Escape/close button closes it",
+        "Modal renders reviewReport via react-markdown, shows 'No detailed report available' if missing",
+        "Modal shows selfReviewNotes as fallback when reviewReport is empty",
+        "Modal close preserves panel state (textarea content, expand states)",
+        "Rebase section renders when rebaseResult or rebasePending props provided",
+        "API errors display in panel without clearing state",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/ReviewApprovalPanel.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Integrate ReviewApprovalPanel into IssueDetailPage",
+      "spec": "specs/review-decision-panel/spec.md",
+      "description": "Edit `packages/cli/web/src/components/IssueDetailPage.tsx` to conditionally render `<ReviewApprovalPanel>` when issue is in Review stage approval gate (`isApprovalGate && issue.stage === Stage.Review`). Replace the three old sections (Review Report L781-791, Approval Required L794-889, Send Message L891-926) for Review stage only. Pass required props: output, issueNumber, onViewFiles (sets diffTab to 'files'), rebaseResult, onRebase, rebasePending. Plan stage and other stages keep existing approval UI unchanged. Remove the `reviewOutput` computed variable and `messageText`/`setMessageText` state if they become unused after refactor.",
+      "acceptanceCriteria": [
+        "ReviewApprovalPanel renders when isApprovalGate && stage === Stage.Review",
+        "Old Review Report div (L781-791) does NOT render for Review stage approval gate",
+        "Old Approval Required div (L794-889) does NOT render for Review stage approval gate",
+        "Old Send Message div (L891-926) does NOT render for Review stage approval gate",
+        "Plan stage approval gate still renders original 'Approve & Continue' button and Send Message textarea",
+        "ReviewApprovalPanel receives correct props: output, issueNumber, onViewFiles, rebaseResult, onRebase, rebasePending",
+        "onViewFiles callback sets diffTab to 'files' to switch to Files tab",
+        "Build and typecheck pass with no errors",
+        "No unused imports or state variables remain after refactor"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
