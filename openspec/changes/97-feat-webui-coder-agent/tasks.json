@@ -77,11 +77,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The useOpencodeModels hook fetches from the existing /opencode/models endpoint (already registered in server). This is separate from the existing useModels hook which fetches /providers/models.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        309752
+      ]
     },
     {
       "id": "T-004",
