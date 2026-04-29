@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { ToolCallEntry, Stage, TaskProgressMap, LoopProgress } from '../lib/types'
-import type { Round, RecoveryEvent, RecoveryStatus } from '../hooks/useSessionTimeline'
+import type { Round, RecoveryEvent, RecoveryStatus, PlanProgress } from '../hooks/useSessionTimeline'
 import { deriveToolCallTitle } from '../hooks/useSessionTimeline'
+import { PlanProgressPanel } from './PlanProgressPanel'
 
 interface SessionTimelineProps {
   rounds: Round[]
@@ -12,6 +13,7 @@ interface SessionTimelineProps {
   taskProgress: TaskProgressMap
   loopProgress: LoopProgress | null
   recoveryStatus: RecoveryStatus | null
+  planProgress: PlanProgress | null
 }
 
 function formatDuration(ms: number): string {
@@ -463,6 +465,7 @@ export function SessionTimeline({
   taskProgress,
   loopProgress,
   recoveryStatus,
+  planProgress,
 }: SessionTimelineProps) {
   if (isLoading) {
     return (
@@ -500,6 +503,10 @@ export function SessionTimeline({
 
       <div className="px-3 py-3 space-y-2 max-h-[600px] overflow-y-auto">
         <PipelineStatusTimeline currentStage={currentStage} />
+
+        {currentStage === 'plan' && planProgress && planProgress.steps.length > 0 && (
+          <PlanProgressPanel planProgress={planProgress} />
+        )}
 
         {currentStage === 'build' && taskEntries.length > 0 && (
           <TaskProgressPanel tasks={taskEntries} loopProgress={loopProgress} />
