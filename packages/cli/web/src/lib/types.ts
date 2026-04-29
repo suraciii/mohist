@@ -16,10 +16,32 @@ export enum IssueStatus {
   Completed = 'completed',
 }
 
+export interface ApprovalDimension {
+  name: string
+  status: 'PASS' | 'FAIL'
+  issues?: string[]
+}
+
+export interface ApprovalArtifact {
+  name: string
+  path: string
+  content?: string
+}
+
+export interface ApprovalOutput {
+  stage: string
+  issueNumber: number
+  selfReviewNotes?: string
+  reviewReport?: string
+  verdict?: 'PASS' | 'FAIL' | null
+  dimensions?: ApprovalDimension[]
+  artifacts?: ApprovalArtifact[]
+}
+
 export interface ApprovalState {
   status: 'awaiting' | 'approved' | 'rejected'
   stage?: string
-  output?: Record<string, unknown>
+  output?: ApprovalOutput
   requestedAt: string
   approvedAt?: string
 }
