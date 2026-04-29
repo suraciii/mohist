@@ -31,6 +31,13 @@ interface ServerStatus {
   uptime?: number;
 }
 
+interface HealthResponse {
+  status: string;
+  timestamp: string;
+  version: string | null;
+  gitHash: string | null;
+}
+
 async function checkServerHealth(): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.get('http://localhost:3456/api/health', (res) => {
@@ -41,6 +48,35 @@ async function checkServerHealth(): Promise<boolean> {
     req.setTimeout(2000, () => {
       req.destroy();
       resolve(false);
+    });
+  });
+}
+
+async function fetchVersionFromHealth(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const req = http.get('http://localhost:3456/api/health', (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          const data: HealthResponse = JSON.parse(body);
+          if (data.version && data.gitHash) {
+            resolve(`${data.version} (${data.gitHash})`);
+          } else if (data.version) {
+            resolve(data.version);
+          } else {
+            resolve(null);
+          }
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', () => resolve(null));
+    req.setTimeout(2000, () => {
+      req.destroy();
+      resolve(null);
     });
   });
 }
@@ -224,6 +260,11 @@ export async function serverStatus(): Promise<void> {
     if (sdStatus.mainPID > 0 && sdStatus.activeState === 'active') {
       console.log(chalk.gray(`PID: ${sdStatus.mainPID}`));
       console.log(chalk.gray('Port: 3456'));
+
+      const versionStr = await fetchVersionFromHealth();
+      if (versionStr) {
+        console.log(chalk.gray(`Version: ${versionStr}`));
+      }
     }
 
     console.log(chalk.gray('Service: systemctl --user status mohist.service'));
@@ -249,6 +290,11 @@ export async function serverStatus(): Promise<void> {
       } else {
         console.log(chalk.gray(`Uptime: ${seconds}s`));
       }
+    }
+
+    const versionStr = await fetchVersionFromHealth();
+    if (versionStr) {
+      console.log(chalk.gray(`Version: ${versionStr}`));
     }
 
     console.log(chalk.gray(`Logs: ${getLatestLogFile() || LOGS_DIR}`));
