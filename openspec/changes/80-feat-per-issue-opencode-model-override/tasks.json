@@ -48,11 +48,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Also updates packages/cli/src/db/issue-repo.ts",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        92472
+      ]
     },
     {
       "id": "T-003",
