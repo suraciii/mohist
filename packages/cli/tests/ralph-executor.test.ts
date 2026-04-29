@@ -894,7 +894,7 @@ describe('v4 bug fix: stage timeout calculation', () => {
     expect(capturedTimeouts[1]).toBe(900000);
   });
 
-  it('enforces 10-minute floor for per-task timeout', async () => {
+  it('enforces 60-second floor for per-task timeout', async () => {
     const capturedTimeouts: number[] = [];
     setAcpSessionRunner(vi.fn().mockImplementation((opts: any) => {
       capturedTimeouts.push(opts.timeout);
@@ -905,18 +905,18 @@ describe('v4 bug fix: stage timeout calculation', () => {
     const context = {
       worktreePath: tempDir,
       projectPath: tempDir,
-      stageTimeoutMs: 1800 * 1000,
+      stageTimeoutMs: 60 * 1000,
     };
 
     await runRalphLoop(change, context, { maxRetries: 0 });
 
     expect(capturedTimeouts).toHaveLength(10);
     for (const t of capturedTimeouts) {
-      expect(t).toBe(600000);
+      expect(t).toBe(60000);
     }
   });
 
-  it('uses default 30min when no stage timeout configured', async () => {
+  it('uses config taskTimeout when no stage timeout configured', async () => {
     const capturedTimeouts: number[] = [];
     setAcpSessionRunner(vi.fn().mockImplementation((opts: any) => {
       capturedTimeouts.push(opts.timeout);
@@ -933,7 +933,7 @@ describe('v4 bug fix: stage timeout calculation', () => {
 
     expect(capturedTimeouts).toHaveLength(2);
     for (const t of capturedTimeouts) {
-      expect(t).toBe(30 * 60 * 1000);
+      expect(t).toBe(600 * 1000);
     }
   });
 });

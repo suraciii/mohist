@@ -7,6 +7,7 @@ import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
 import { runAcpSession as _runAcpSession } from '../agent-runtime/acp-session';
 import { WorktreeManager } from '../git/worktree-manager';
+import { load as loadConfig, getAgentTimeoutConfig } from '../config/config-loader';
 import { Log } from '../util/log';
 
 const execFileAsync = promisify(execFile);
@@ -428,12 +429,13 @@ export async function runRalphLoop(
   }
 
   const sortedTasks = sortTasksByOrder(tasks);
-  const DEFAULT_TASK_TIMEOUT_MS = 30 * 60 * 1000;
-  const MIN_TASK_TIMEOUT_MS = 10 * 60 * 1000;
+  const timeoutConfig = getAgentTimeoutConfig(loadConfig());
+  const taskTimeoutMs = timeoutConfig.taskTimeout * 1000;
+  const MIN_TASK_TIMEOUT_MS = 60 * 1000;
 
   const perTaskTimeout = context.stageTimeoutMs != null && sortedTasks.length > 0
     ? Math.max(Math.floor(context.stageTimeoutMs / sortedTasks.length), MIN_TASK_TIMEOUT_MS)
-    : DEFAULT_TASK_TIMEOUT_MS;
+    : taskTimeoutMs;
 
   const skipTaskIds = new Set(options.skipTaskIds ?? []);
 
