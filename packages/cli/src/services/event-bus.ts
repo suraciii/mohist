@@ -40,7 +40,9 @@ export type EventMap = {
   rebase_started: { issueId: string; projectId: string; issueNumber: number };
   rebase_progress: { issueId: string; projectId: string; issueNumber: number; step: string };
   rebase_completed: { issueId: string; projectId: string; issueNumber: number; rebased: boolean };
-  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[] };
+  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[]; status?: string };
+  agent_blocked: { issueId: string; projectId: string; issueNumber: number; blockedReason: string; retryCount: number };
+  plan_round_complete: { issueId: string; projectId: string; roundType: string; roundLabel: string; roundIndex: number; duration: number; verdict?: 'PASS' | 'FAIL' };
   skill_started: { skillName: string; runId: string; projectId: string };
   skill_completed: { skillName: string; runId: string; projectId: string; issueId?: string };
   skill_failed: { skillName: string; runId: string; projectId: string; error: string };
