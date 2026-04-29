@@ -143,10 +143,13 @@
         "T-004"
       ],
       "notes": "Look at how SessionTimeline receives taskProgress/loopProgress as props (line 463-464) and how TaskProgressPanel is conditionally rendered (line 504-506). Follow the same pattern: add planProgress prop, conditionally render PlanProgressPanel for plan stage. The parent component that passes props needs to also get planProgress from useSessionTimeline and forward it.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        326418
+      ]
     }
   ]
 }
