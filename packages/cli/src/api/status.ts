@@ -3,11 +3,13 @@ import { ProjectService } from '../services/project-service';
 import { IssueService } from '../services/issue-service';
 import { ApiResponse } from '../types';
 import { resolveModel, type LlmConfig } from '../agent-runtime';
+import type { VersionInfo } from '../version';
 
 export function createStatusRoutes(
   projectService: ProjectService,
   issueService: IssueService,
-  llmConfig?: LlmConfig
+  llmConfig?: LlmConfig,
+  versionInfo?: VersionInfo
 ): Hono {
   const app = new Hono();
 
@@ -88,6 +90,8 @@ export function createStatusRoutes(
           done: issues.filter(i => i.stage === 'done').length,
         },
         llm,
+        version: versionInfo?.version ?? null,
+        gitHash: versionInfo?.gitHash ?? null,
       };
 
       const response: ApiResponse = {
@@ -105,7 +109,12 @@ export function createStatusRoutes(
   });
 
   app.get('/health', async (c) => {
-    return c.json({ status: 'ok', timestamp: new Date().toISOString() });
+    return c.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      version: versionInfo?.version ?? null,
+      gitHash: versionInfo?.gitHash ?? null,
+    });
   });
 
   return app;
