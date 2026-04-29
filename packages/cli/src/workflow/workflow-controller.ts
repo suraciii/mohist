@@ -3,7 +3,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import type { ChildProcess } from 'child_process';
 import { promisify } from 'util';
-import { Stage, IssueStatus, type Issue } from '../types';
+import { Stage, IssueStatus, MergeState, type Issue } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
@@ -39,6 +39,11 @@ export interface StageResult {
   escalateToStage?: Stage;
 }
 
+export interface MergeBackResult {
+  success: boolean;
+  message: string;
+}
+
 export interface WorkflowControllerOptions {
   artifactManager: ChangeArtifactsManager;
   worktreePath: string;
@@ -49,6 +54,8 @@ export interface WorkflowControllerOptions {
   commentRepo?: CommentRepo;
   onProgress?: (update: { stage?: string; roundType?: string; roundIndex?: number; taskProgress?: { completed: number; total: number } | null }) => void;
   onChildProcess?: (proc: ChildProcess) => void;
+  mergeBackFn?: (issueNumber: number) => Promise<MergeBackResult>;
+  onMergeConflictFn?: (issueNumber: number) => Promise<void>;
 }
 
 export interface PipelineResult {
@@ -68,6 +75,8 @@ export class WorkflowController {
   private commentRepo?: CommentRepo;
   private _onProgress?: WorkflowControllerOptions['onProgress'];
   private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
+  private mergeBackFn?: (issueNumber: number) => Promise<MergeBackResult>;
+  private onMergeConflictFn?: (issueNumber: number) => Promise<void>;
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -79,6 +88,8 @@ export class WorkflowController {
     this.commentRepo = options.commentRepo;
     this._onProgress = options.onProgress;
     this._onChildProcess = options.onChildProcess;
+    this.mergeBackFn = options.mergeBackFn;
+    this.onMergeConflictFn = options.onMergeConflictFn;
   }
 
   protected emitProgress(update: Parameters<NonNullable<WorkflowControllerOptions['onProgress']>>[0]): void {
@@ -499,6 +510,105 @@ export class WorkflowController {
         }
 
         case Stage.Review: {
+          const isApproved = currentIssue.approvalState?.status === 'approved';
+          const isResolving = currentIssue.mergeState === MergeState.Resolving;
+
+          if (isApproved || isResolving) {
+            if (!this.mergeBackFn) {
+              if (isResolving) {
+                log.info('Skipping approval gate during conflict resolution (no mergeBackFn)', { issueNumber: currentIssue.number });
+                currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Done)!;
+                break;
+              }
+              const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
+              if (!reviewResult.success) {
+                return {
+                  completed: false,
+                  stage: Stage.Review,
+                  gateRequired: false,
+                  message: reviewResult.message,
+                };
+              }
+              this.issueRepo.setApprovalState(currentIssue.id, {
+                stage: Stage.Review,
+                status: 'awaiting',
+                output: reviewResult.output,
+                requestedAt: new Date().toISOString(),
+              });
+              this.eventBus.emit('approval_requested', {
+                issueId: currentIssue.id,
+                projectId: this.projectId ?? currentIssue.projectId,
+                stage: Stage.Review,
+              });
+              return {
+                completed: false,
+                stage: Stage.Review,
+                gateRequired: true,
+                message: 'Review completed, awaiting approval',
+              };
+            }
+
+            const label = isResolving ? 'Resolving' : 'Approved';
+            log.info(`${label}: executing mergeBack`, { issueNumber: currentIssue.number });
+
+            try {
+              const mergeResult = await this.mergeBackFn(currentIssue.number);
+
+              if (mergeResult.success) {
+                log.info(`${label}: mergeBack succeeded`, { issueNumber: currentIssue.number });
+                this.issueRepo.setMergeState(currentIssue.id, MergeState.Merged);
+                currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Done)!;
+                break;
+              }
+
+              log.warn(`${label}: mergeBack failed`, {
+                issueNumber: currentIssue.number,
+                message: mergeResult.message,
+              });
+
+              if (this.onMergeConflictFn) {
+                await this.onMergeConflictFn(currentIssue.number);
+                return {
+                  completed: false,
+                  stage: Stage.Review,
+                  gateRequired: false,
+                  message: `Merge failed: ${mergeResult.message}. Conflict resolution triggered.`,
+                };
+              }
+
+              this.issueRepo.setMergeState(currentIssue.id, MergeState.Blocked);
+              return {
+                completed: false,
+                stage: Stage.Review,
+                gateRequired: false,
+                message: `Merge failed: ${mergeResult.message}`,
+              };
+            } catch (err) {
+              log.error(`${label}: mergeBack threw`, {
+                issueNumber: currentIssue.number,
+                error: err instanceof Error ? err.message : String(err),
+              });
+
+              if (this.onMergeConflictFn) {
+                await this.onMergeConflictFn(currentIssue.number);
+                return {
+                  completed: false,
+                  stage: Stage.Review,
+                  gateRequired: false,
+                  message: `Merge error: ${err instanceof Error ? err.message : String(err)}. Conflict resolution triggered.`,
+                };
+              }
+
+              this.issueRepo.setMergeState(currentIssue.id, MergeState.Blocked);
+              return {
+                completed: false,
+                stage: Stage.Review,
+                gateRequired: false,
+                message: `Merge error: ${err instanceof Error ? err.message : String(err)}`,
+              };
+            }
+          }
+
           const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
           if (!reviewResult.success) {
             if (reviewResult.escalateToStage !== undefined) {
