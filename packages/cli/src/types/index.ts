@@ -98,6 +98,9 @@ export interface Config {
   pollInterval: number;
   maxConcurrentAgents: number;
   agentTimeout: number;
+  taskTimeout: number;
+  stageTimeout: number;
+  maxGracePeriods: number;
 }
 
 export interface ServerState {
