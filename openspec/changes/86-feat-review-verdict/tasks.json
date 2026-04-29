@@ -207,11 +207,14 @@
         "T-005",
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep the rebase functionality — it should remain accessible but not dominate the approval panel. Move it into the panel components or keep as a separate section below.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        440447
+      ]
     },
     {
       "id": "T-008",
