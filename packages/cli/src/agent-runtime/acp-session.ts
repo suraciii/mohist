@@ -330,6 +330,7 @@ export async function runAcpSession(
     onBeforeKill,
     stage,
     hangIdleMs = DEFAULT_HANG_IDLE_MS,
+    model,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -601,6 +602,15 @@ export async function runAcpSession(
 
     let resolvedModel: string | undefined;
 
+    if (model) {
+      log.info('Setting per-issue model override', { sessionId, model });
+      await connection.setSessionConfigOption({
+        configId: 'model',
+        sessionId,
+        value: model,
+      });
+    }
+
     if (coderSessionRepo && issueId) {
       try {
         resolvedModel = options.model ?? load().model ?? undefined;
@@ -834,6 +844,7 @@ export async function createAcpConnection(
     onBeforeKill,
     stage,
     hangIdleMs = DEFAULT_HANG_IDLE_MS,
+    model,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -1109,6 +1120,15 @@ export async function createAcpConnection(
 
   sessionId = sessionResult.sessionId;
   log.info('ACP session created', { sessionId });
+
+  if (model) {
+    log.info('Setting per-issue model override', { sessionId, model });
+    await connection.setSessionConfigOption({
+      configId: 'model',
+      sessionId,
+      value: model,
+    });
+  }
 
   if (coderSessionRepo && issueId) {
     try {
