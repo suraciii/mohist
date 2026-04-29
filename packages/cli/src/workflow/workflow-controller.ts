@@ -128,7 +128,21 @@ export class WorkflowController {
         completedSteps,
         nextStep: checkpoint?.nextStep,
       });
+
+      const resumeRoundTypes = ['proposal', 'specs', 'design', 'tasks', 'self-review'];
+      const resumeCompleted = completedSteps.filter(s => resumeRoundTypes.includes(s)).length;
+      const lastCompletedRoundType = [...completedSteps].reverse().find(s => resumeRoundTypes.includes(s));
+      const lastCompletedIndex = lastCompletedRoundType ? resumeRoundTypes.indexOf(lastCompletedRoundType) : -1;
+      this.emitProgress({
+        stage: 'plan',
+        roundType: lastCompletedRoundType ?? 'proposal',
+        roundIndex: lastCompletedIndex >= 0 ? lastCompletedIndex : 0,
+        taskProgress: { completed: resumeCompleted, total: 5 },
+      });
     }
+
+    const issueId = String(acpOptions.issueNumber ?? acpOptions.issueId ?? '');
+    const projectId = this.projectId ?? issue.projectId;
 
     const rounds: PlanRoundConfig[] = [
       { type: 'proposal', verify: () => fs.existsSync(path.join(changeDir, 'proposal.md')), label: 'proposal.md', outputPath: path.join(changeDir, 'proposal.md') },
@@ -193,8 +207,8 @@ export class WorkflowController {
         if (this.eventBus) {
           try {
             this.eventBus.emit('plan_round_start', {
-              issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-              projectId: this.projectId ?? issue.projectId,
+              issueId,
+              projectId,
               roundType: round.type,
               roundLabel: round.label,
               roundIndex: index,
@@ -206,6 +220,9 @@ export class WorkflowController {
           }
         }
 
+        this.emitProgress({ stage: 'plan', roundType: round.type, roundIndex: index, taskProgress: { completed: completedSteps.filter(s => ['proposal', 'specs', 'design', 'tasks', 'self-review'].includes(s)).length, total: 5 } });
+
+        const roundStartTime = Date.now();
         const prompt = buildArtifactPrompt(round.type as ArtifactType, issue, changeDir);
         const result = await conn.prompt(prompt);
 
@@ -264,6 +281,18 @@ export class WorkflowController {
         completedSteps.push(round.type);
         const nextRound = rounds[index + 1];
         this.checkpointRepo?.upsert(issue.number, 'plan', [...completedSteps], nextRound?.type ?? 'self-review');
+
+        this.emitPlanRoundComplete({
+          issueId,
+          projectId,
+          roundType: round.type,
+          roundLabel: round.label,
+          roundIndex: index,
+          startTime: roundStartTime,
+        });
+
+        const completedCount = completedSteps.filter(s => ['proposal', 'specs', 'design', 'tasks', 'self-review'].includes(s)).length;
+        this.emitProgress({ stage: 'plan', roundType: round.type, roundIndex: index, taskProgress: { completed: completedCount, total: 5 } });
       }
 
       // self-review round
@@ -275,8 +304,8 @@ export class WorkflowController {
       if (this.eventBus) {
         try {
           this.eventBus.emit('plan_round_start', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: this.projectId ?? issue.projectId,
+            issueId,
+            projectId,
             roundType: 'self-review',
             roundLabel: 'self-review',
             roundIndex: rounds.length,
@@ -288,6 +317,9 @@ export class WorkflowController {
         }
       }
 
+      this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length, taskProgress: { completed: completedSteps.filter(s => ['proposal', 'specs', 'design', 'tasks', 'self-review'].includes(s)).length, total: 5 } });
+
+      const selfReviewStartTime = Date.now();
       const selfReviewPrompt = buildSelfReviewPrompt(issue, changeDir);
       const selfReviewResult = await conn.prompt(selfReviewPrompt);
 
@@ -306,7 +338,18 @@ export class WorkflowController {
 
       const verdict = selfReviewReport ? parseVerdict(selfReviewReport) : 'FAIL';
 
+      this.emitPlanRoundComplete({
+        issueId,
+        projectId,
+        roundType: 'self-review',
+        roundLabel: 'self-review',
+        roundIndex: rounds.length,
+        startTime: selfReviewStartTime,
+        verdict: verdict === 'PASS' || verdict === 'FAIL' ? verdict : undefined,
+      });
+
       if (verdict === 'PASS') {
+        this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length, taskProgress: { completed: 5, total: 5 } });
         await conn.close();
         this.checkpointRepo?.delete(issue.number, 'plan');
         return {
@@ -321,6 +364,8 @@ export class WorkflowController {
         };
       }
 
+      this.emitProgress({ stage: 'plan', roundType: 'self-review', roundIndex: rounds.length, taskProgress: { completed: 4, total: 5 } });
+
       // Verdict FAIL → auto-fix on same connection
       roundState.type = 'auto-fix';
       roundState.index = rounds.length + 1;
@@ -329,8 +374,8 @@ export class WorkflowController {
       if (this.eventBus) {
         try {
           this.eventBus.emit('plan_round_start', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: this.projectId ?? issue.projectId,
+            issueId,
+            projectId,
             roundType: 'auto-fix',
             roundLabel: 'auto-fix',
             roundIndex: rounds.length + 1,
@@ -340,6 +385,7 @@ export class WorkflowController {
         }
       }
 
+      const autoFixStartTime = Date.now();
       const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, selfReviewReport ?? '', 'self-review.md');
       const autoFixResult = await conn.prompt(autoFixPrompt);
 
@@ -359,6 +405,15 @@ export class WorkflowController {
         };
       }
 
+      this.emitPlanRoundComplete({
+        issueId,
+        projectId,
+        roundType: 'auto-fix',
+        roundLabel: 'auto-fix',
+        roundIndex: rounds.length + 1,
+        startTime: autoFixStartTime,
+      });
+
       // Close old connection, open new one for full re-self-review
       await conn.close();
 
@@ -371,8 +426,8 @@ export class WorkflowController {
       if (this.eventBus) {
         try {
           this.eventBus.emit('plan_round_start', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: this.projectId ?? issue.projectId,
+            issueId,
+            projectId,
             roundType: 're-self-review',
             roundLabel: 're-self-review',
             roundIndex: rounds.length + 2,
@@ -382,6 +437,7 @@ export class WorkflowController {
         }
       }
 
+      const reSelfReviewStartTime = Date.now();
       const reSelfReviewPrompt = buildSelfReviewPrompt(issue, changeDir);
       const reSelfReviewResult = await conn.prompt(reSelfReviewPrompt);
 
@@ -406,6 +462,18 @@ export class WorkflowController {
 
       const recheckReport = readReportFile(changeDir, 'self-review.md') ?? reSelfReviewResult.text;
       const recheckVerdict = recheckReport ? parseVerdict(recheckReport) : 'FAIL';
+
+      this.emitPlanRoundComplete({
+        issueId,
+        projectId,
+        roundType: 're-self-review',
+        roundLabel: 're-self-review',
+        roundIndex: rounds.length + 2,
+        startTime: reSelfReviewStartTime,
+        verdict: recheckVerdict === 'PASS' || recheckVerdict === 'FAIL' ? recheckVerdict : undefined,
+      });
+
+      this.emitProgress({ stage: 'plan', roundType: 're-self-review', roundIndex: rounds.length + 2, taskProgress: { completed: 5, total: 5 } });
 
       if (recheckVerdict === 'PASS') {
         return {
@@ -687,6 +755,26 @@ export class WorkflowController {
     } catch (e) {
       log.warn('eventBus.emit failed', { event: String(event), error: e instanceof Error ? e.message : String(e) });
     }
+  }
+
+  private emitPlanRoundComplete(opts: {
+    issueId: string;
+    projectId: string;
+    roundType: string;
+    roundLabel: string;
+    roundIndex: number;
+    startTime: number;
+    verdict?: 'PASS' | 'FAIL';
+  }): void {
+    this.emitSafe('plan_round_complete', {
+      issueId: opts.issueId,
+      projectId: opts.projectId,
+      roundType: opts.roundType,
+      roundLabel: opts.roundLabel,
+      roundIndex: opts.roundIndex,
+      duration: Math.round((Date.now() - opts.startTime) / 1000),
+      ...(opts.verdict !== undefined ? { verdict: opts.verdict } : {}),
+    });
   }
 
   private getBuildStageTimeoutMs(): number | undefined {
