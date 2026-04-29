@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Report git commit hash across CLI version, server status, API responses, and WebUI Settings",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/version.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        105852
+      ]
     },
     {
       "id": "T-002",
@@ -34,9 +39,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/index.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -53,9 +63,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/status.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Also touches packages/cli/src/server/index.ts"
+      "notes": "Also touches packages/cli/src/server/index.ts",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -71,9 +86,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/server.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -90,9 +110,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/GeneralSettingsSection.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
