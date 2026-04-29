@@ -527,6 +527,302 @@ describe('API Routes', () => {
     });
   });
 
+  describe('Issue Retry/Restart Routes', () => {
+    let server: http.Server;
+    let projectId: string;
+
+    function createBlockedIssue(title: string) {
+      const issue = issueService.create({ projectId, title });
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.updateStage(issue.id, Stage.Build);
+      issueRepo.blockIssue(issue.id, `Build 中断 — ${title}`);
+      issueRepo.updateRetryCount(issue.id, 3);
+      return issue;
+    }
+
+    function createRetryServer(agentRunner: AgentRunnerService) {
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner));
+      return createTestServer(app);
+    }
+
+    beforeEach(async () => {
+      const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
+      projectId = project.id;
+      projectService.setCurrent(project);
+    });
+
+    describe('POST /api/issues/:number/retry', () => {
+      it('should retry a blocked issue — no checkpoint falls back to draft reset', async () => {
+        const issue = createBlockedIssue('Retry Test');
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/retry`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.message).toContain('no checkpoint found');
+
+        const issueRepo = stateManager.getIssueRepo();
+        const updated = issueRepo.findById(issue.id);
+        expect(updated?.status).toBe(IssueStatus.Active);
+        expect(updated?.stage).toBe(Stage.Backlog);
+        expect(updated?.blockedReason).toBeUndefined();
+        expect(updated?.retryCount).toBe(0);
+      });
+
+      it('should retry from checkpoint when worktree has tasks.json', async () => {
+        const tmpRetryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-retry-test-'));
+
+        try {
+          const retryProject = await projectService.create({ name: 'RetryCheckpoint', path: tmpRetryDir });
+          projectService.setCurrent(retryProject);
+
+          const issue = issueService.create({ projectId: retryProject.id, title: 'Retry Checkpoint' });
+          const issueRepo = stateManager.getIssueRepo();
+          issueRepo.updateStage(issue.id, Stage.Build);
+          issueRepo.blockIssue(issue.id, 'Build interrupted');
+          issueRepo.updateRetryCount(issue.id, 2);
+
+          const changeDir = path.join(tmpRetryDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
+          const resumeSpy = vi.spyOn(agentRunner, 'resumePipeline').mockImplementation(() => {});
+
+          const mockWm = {
+            getPath: () => tmpRetryDir,
+            exists: () => true,
+          } as any;
+
+          const retryApp = new Hono();
+          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, undefined, agentRunner));
+          const retryServer = createTestServer(retryApp);
+
+          const response = await request(retryServer).post(`/api/issues/${issue.number}/retry`);
+
+          expect(response.status).toBe(200);
+          expect(response.body.success).toBe(true);
+          expect(response.body.data.message).toContain('retrying from checkpoint');
+
+          const updated = issueRepo.findById(issue.id);
+          expect(updated?.status).toBe(IssueStatus.Active);
+          expect(updated?.blockedReason).toBeUndefined();
+          expect(updated?.retryCount).toBe(0);
+
+          expect(resumeSpy).toHaveBeenCalledTimes(1);
+        } finally {
+          fs.rmSync(tmpRetryDir, { recursive: true, force: true });
+        }
+      });
+
+      it('should return 409 when issue is not blocked', async () => {
+        await issueService.create({ projectId, title: 'Active Issue' });
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post('/api/issues/1/retry');
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('not blocked');
+      });
+
+      it('should return 409 when agent is already running', async () => {
+        const issue = createBlockedIssue('Running Agent');
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
+        (agentRunner as any).activeAgents.set(issue.id, { issueId: issue.id });
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/retry`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('already running');
+      });
+
+      it('should return 404 when issue not found', async () => {
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post('/api/issues/999/retry');
+
+        expect(response.status).toBe(404);
+      });
+
+      it('should reset to backlog when no checkpoint found', async () => {
+        const issue = createBlockedIssue('No Checkpoint');
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/retry`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.message).toContain('no checkpoint found');
+        expect(response.body.data.message).toContain('reset to draft');
+
+        const issueRepo = stateManager.getIssueRepo();
+        const updated = issueRepo.findById(issue.id);
+        expect(updated?.stage).toBe(Stage.Backlog);
+        expect(updated?.status).toBe(IssueStatus.Active);
+      });
+    });
+
+    describe('POST /api/issues/:number/restart', () => {
+      it('should restart a blocked issue to backlog and return 200', async () => {
+        const issue = createBlockedIssue('Restart Test');
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/restart`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.message).toContain('reset to draft');
+        expect(response.body.data.message).toContain('start to begin again');
+
+        const issueRepo = stateManager.getIssueRepo();
+        const updated = issueRepo.findById(issue.id);
+        expect(updated?.stage).toBe(Stage.Backlog);
+        expect(updated?.status).toBe(IssueStatus.Active);
+        expect(updated?.blockedReason).toBeUndefined();
+        expect(updated?.retryCount).toBe(0);
+        expect(updated?.approvalState).toBeUndefined();
+      });
+
+      it('should return 409 when issue is not blocked', async () => {
+        await issueService.create({ projectId, title: 'Active Issue' });
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post('/api/issues/1/restart');
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('not blocked');
+      });
+
+      it('should return 409 when agent is already running', async () => {
+        const issue = createBlockedIssue('Running Restart');
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        (agentRunner as any).activeAgents.set(issue.id, { issueId: issue.id });
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/restart`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('already running');
+      });
+
+      it('should return 404 when issue not found', async () => {
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post('/api/issues/999/restart');
+
+        expect(response.status).toBe(404);
+      });
+    });
+
+    describe('POST /api/issues/:number/start rejects blocked', () => {
+      it('should return 400 when trying to start a blocked issue', async () => {
+        const issue = createBlockedIssue('Blocked Start');
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/start`);
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('blocked');
+        expect(response.body.error).toContain('retry');
+      });
+    });
+
+    describe('GET /api/issues/:number returns blockedReason', () => {
+      it('should return blockedReason for blocked issue', async () => {
+        const issue = createBlockedIssue('Show Reason');
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).get(`/api/issues/${issue.number}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.blockedReason).toContain('Build 中断');
+        expect(response.body.data.retryCount).toBe(3);
+      });
+
+      it('should return undefined blockedReason for non-blocked issue', async () => {
+        await issueService.create({ projectId, title: 'Normal Issue' });
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).get('/api/issues/1');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.blockedReason).toBeUndefined();
+      });
+    });
+  });
+
+  describe('Agent Status Routes', () => {
+    let server: http.Server;
+
+    beforeEach(async () => {
+      const app = new Hono();
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
+      const { createAgentRoutes } = await import('../src/api/agent');
+      app.route('/api/agent', createAgentRoutes(agentRunner));
+      server = createTestServer(app);
+    });
+
+    it('should return blockedIssues array in agent status', async () => {
+      const response = await request(server).get('/api/agent/status');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.blockedIssues).toBeDefined();
+      expect(Array.isArray(response.body.data.blockedIssues)).toBe(true);
+    });
+
+    it('should return blocked issues with reason and retryCount', async () => {
+      const project = await projectService.create({ name: 'AgentTest', path: '/test/path' });
+      const issue = issueService.create({ projectId: project.id, title: 'Blocked' });
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.blockIssue(issue.id, 'Test blocked reason');
+      issueRepo.updateRetryCount(issue.id, 2);
+
+      const response = await request(server).get('/api/agent/status');
+
+      expect(response.status).toBe(200);
+      const blocked = response.body.data.blockedIssues;
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0].issueNumber).toBe(issue.number);
+      expect(blocked[0].blockedReason).toBe('Test blocked reason');
+      expect(blocked[0].retryCount).toBe(2);
+      expect(blocked[0].stage).toBeDefined();
+    });
+
+    it('should return empty blockedIssues when none blocked', async () => {
+      const response = await request(server).get('/api/agent/status');
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.blockedIssues).toEqual([]);
+    });
+  });
+
   describe('Issue Commits Routes', () => {
     let server: http.Server;
     let projectId: string;
