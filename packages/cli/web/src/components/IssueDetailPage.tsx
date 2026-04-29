@@ -2,18 +2,17 @@ import { Fragment, useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
-import type { DiffFile, CommitEntry, ApprovalOutput } from '../lib/types'
+import type { DiffFile, CommitEntry } from '../lib/types'
 import { api, ApiError } from '../lib/api'
-import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
 import { IssueModelSelector } from './IssueModelSelector'
 import { MergeStatePanel } from './MergeStatePanel'
-import { PlanApprovalPanel } from './PlanApprovalPanel'
 import { QuestionPanel } from './QuestionPanel'
-import { ReviewApprovalPanel } from './ReviewApprovalPanel'
 import { SessionList } from './SessionList'
 import { TaskList } from './TaskList'
+import { ReviewApprovalPanel } from './ReviewApprovalPanel'
 import { formatTime, formatTimeAgo } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 
@@ -129,11 +128,9 @@ export function IssueDetailPage() {
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
+  const [messageText, setMessageText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
-  const [restartConfirming, setRestartConfirming] = useState(false)
-  const restartPanelRef = useRef<HTMLDivElement>(null)
-  const [blockedError, setBlockedError] = useState<string | null>(null)
   const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
 
@@ -151,21 +148,6 @@ export function IssueDetailPage() {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [forceStopConfirming])
-
-  useEffect(() => {
-    if (!restartConfirming) return
-    const timer = setTimeout(() => setRestartConfirming(false), 5000)
-    const handleClickOutside = (e: MouseEvent) => {
-      if (restartPanelRef.current && !restartPanelRef.current.contains(e.target as Node)) {
-        setRestartConfirming(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      clearTimeout(timer)
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [restartConfirming])
 
   const { data: issue, isLoading } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
@@ -230,34 +212,6 @@ export function IssueDetailPage() {
     },
   })
 
-  const retryMutation = useMutation({
-    mutationFn: () => api.retryIssue(issueNumber),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      setBlockedError(null)
-    },
-    onError: (error: Error) => {
-      setBlockedError(error.message)
-    },
-  })
-
-  const restartMutation = useMutation({
-    mutationFn: () => api.restartIssue(issueNumber),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      setBlockedError(null)
-      setRestartConfirming(false)
-    },
-    onError: (error: Error) => {
-      setBlockedError(error.message)
-      setRestartConfirming(false)
-    },
-  })
-
   const addCommentMutation = useMutation({
     mutationFn: (body: string) => api.addComment(issueNumber, body),
     onSuccess: () => {
@@ -265,6 +219,8 @@ export function IssueDetailPage() {
       setCommentText('')
     },
   })
+
+  const sendMessageMutation = useSendMessage(issueNumber)
 
   const [rebaseResult, setRebaseResult] = useState<{
     type: 'success' | 'info' | 'error'
@@ -344,7 +300,19 @@ export function IssueDetailPage() {
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
-  const approvalOutput: ApprovalOutput | undefined = issue.approvalState?.output
+  const reviewOutput = (() => {
+    const output = issue.approvalState?.output
+    if (output) {
+      const extracted = output.selfReviewNotes || output.reviewReport
+      if (typeof extracted === 'string' && extracted.trim()) return extracted
+      const json = JSON.stringify(output, null, 2)
+      if (json !== '{}') return json
+    }
+    const lastComment = [...(issue.comments ?? [])].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )[0]
+    return lastComment?.body || ''
+  })()
 
   return (
     <>
@@ -512,7 +480,7 @@ export function IssueDetailPage() {
                 const commits = commitsData?.commits ?? []
                 if (files.length === 0 && commits.length === 0) return null
                 return (
-                  <div id="diff-section" className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
                     <div className="flex items-center gap-1 mb-3 border-b border-gray-100">
                       <button
                         onClick={() => setDiffTab('files')}
@@ -670,7 +638,7 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {[Stage.Build, Stage.Plan, Stage.Review].includes(issue.stage) && issue.status !== IssueStatus.Closed && (
+                  {issue.stage === Stage.Build && issue.status !== IssueStatus.Closed && (
                     <div>
                       <button
                         onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
@@ -747,76 +715,13 @@ export function IssueDetailPage() {
                   )}
 
                   {issue.status === IssueStatus.Blocked && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
-                      <h2 className="text-sm font-semibold text-red-800">
-                        Issue Blocked
-                      </h2>
-                      <p className="text-xs text-red-700">
-                        {issue.blockedReason || 'Issue 已暂停。可以重试或重新开始。'}
-                      </p>
-                      {issue.stage === Stage.Build && mergedTasks.length > 0 && (() => {
-                        const completed = mergedTasks.filter(t => t.passes).length
-                        const total = mergedTasks.length
-                        if (completed > 0 && completed < total) {
-                          return (
-                            <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
-                              已完成 {completed}/{total} 个任务，可从断点恢复
-                            </p>
-                          )
-                        }
-                        return null
-                      })()}
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => retryMutation.mutate()}
-                          disabled={retryMutation.isPending}
-                          className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
-                        >
-                          {retryMutation.isPending && (
-                            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                          )}
-                          {retryMutation.isPending ? 'Retrying...' : '重试'}
-                        </button>
-                        <div ref={restartPanelRef}>
-                          <button
-                            onClick={() => {
-                              if (restartConfirming) {
-                                restartMutation.mutate()
-                              } else {
-                                setRestartConfirming(true)
-                              }
-                            }}
-                            disabled={restartMutation.isPending}
-                            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                              restartConfirming
-                                ? 'bg-red-600 text-white hover:bg-red-700'
-                                : 'border border-red-300 bg-white text-red-600 hover:bg-red-50'
-                            } disabled:opacity-50`}
-                          >
-                            {restartMutation.isPending
-                              ? 'Restarting...'
-                              : restartConfirming
-                                ? '确认重新开始？'
-                                : '重新开始'}
-                          </button>
-                        </div>
-                        <button
-                          onClick={() => reopenMutation.mutate()}
-                          disabled={reopenMutation.isPending}
-                          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                        >
-                          {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
-                        </button>
-                      </div>
-                      {blockedError && (
-                        <div className="text-xs text-red-600">
-                          {blockedError}
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      onClick={() => reopenMutation.mutate()}
+                      disabled={reopenMutation.isPending}
+                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                    >
+                      {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
+                    </button>
                   )}
 
                   {issue.status === IssueStatus.Interrupted && (
@@ -837,7 +742,7 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {rebaseResult && (
+                  {rebaseResult && issue.stage !== Stage.Plan && issue.stage !== Stage.Review && (
                     <div className={`rounded-md px-3 py-2 text-xs ${
                       rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
                       rebaseResult.type === 'info' ? 'bg-blue-50 text-blue-700' :
@@ -874,76 +779,127 @@ export function IssueDetailPage() {
 
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
 
-              {isApprovalGate && approvalOutput && (() => {
-                const outputStage = approvalOutput.stage
-                if (outputStage === 'plan') {
-                  return (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                      <h2 className="text-sm font-semibold text-amber-800 mb-3">Plan Review</h2>
-                      <PlanApprovalPanel issueNumber={issueNumber} output={approvalOutput} />
+              {isApprovalGate && issue.stage === Stage.Review && (
+                <ReviewApprovalPanel
+                  output={issue.approvalState?.output}
+                  issueNumber={issueNumber}
+                  onViewFiles={() => setDiffTab('files')}
+                  rebaseResult={rebaseResult}
+                  onRebase={() => { setRebaseResult(null); rebaseMutation.mutate() }}
+                  rebasePending={rebaseMutation.isPending}
+                />
+              )}
+
+              {isApprovalGate && issue.stage !== Stage.Review && reviewOutput && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <h2 className="text-sm font-semibold text-amber-800 mb-2">
+                    Review Report
+                  </h2>
+                  <div className="rounded bg-white p-3 max-h-64 overflow-y-auto">
+                    <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                      {reviewOutput}
                     </div>
-                  )
-                }
-                if (outputStage === 'review') {
-                  return (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                      <h2 className="text-sm font-semibold text-amber-800 mb-3">Code Review</h2>
-                      <ReviewApprovalPanel
-                        issueNumber={issueNumber}
-                        output={approvalOutput}
-                        onViewCodeChanges={() => {
-                          document.getElementById('diff-section')?.scrollIntoView({ behavior: 'smooth' })
-                        }}
-                      />
-                    </div>
-                  )
-                }
-                return (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                    <p className="text-xs text-amber-600 mb-3">
-                      The agent completed the previous stage and is waiting for approval.
-                    </p>
+                  </div>
+                </div>
+              )}
+
+              {isApprovalGate && issue.stage !== Stage.Review && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <h2 className="text-sm font-semibold text-amber-800 mb-2">
+                    Approval Required
+                  </h2>
+                  <p className="text-xs text-amber-600 mb-3">
+                    The agent completed the previous stage. Review the output above and approve
+                    to continue.
+                  </p>
+                  <div className="flex gap-2">
                     <button
                       onClick={() => approveMutation.mutate()}
                       disabled={approveMutation.isPending || isAgentRunningOnThis}
-                      className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {approveMutation.isPending
                         ? 'Approving...'
                         : isAgentRunningOnThis
                           ? 'Agent running...'
-                          : 'Approve'}
+                          : 'Approve & Continue'}
                     </button>
-                    {approveMutation.error && (
-                      <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-                        {approveMutation.error.message}
-                      </div>
-                    )}
                   </div>
-                )
-              })()}
-
-              {isApprovalGate && !approvalOutput && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <p className="text-xs text-amber-600 mb-3">
-                    The agent completed the previous stage and is waiting for approval.
-                  </p>
-                  <button
-                    onClick={() => approveMutation.mutate()}
-                    disabled={approveMutation.isPending || isAgentRunningOnThis}
-                    className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                  >
-                    {approveMutation.isPending
-                      ? 'Approving...'
-                      : isAgentRunningOnThis
-                        ? 'Agent running...'
-                        : 'Approve'}
-                  </button>
                   {approveMutation.error && (
                     <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
                       {approveMutation.error.message}
                     </div>
                   )}
+                  {issue.stage === Stage.Plan && (
+                    <div className="mt-3 pt-3 border-t border-amber-200">
+                      <button
+                        onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
+                        disabled={rebaseMutation.isPending}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
+                      >
+                        {rebaseMutation.isPending && (
+                          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        )}
+                        {rebaseMutation.isPending ? 'Rebasing...' : 'Rebase onto master'}
+                      </button>
+                      {rebaseResult && (
+                        <div className={`mt-2 rounded-md px-3 py-2 text-xs ${
+                          rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
+                          rebaseResult.type === 'info' ? 'bg-blue-50 text-blue-700' :
+                          'bg-red-50 text-red-600'
+                        }`}>
+                          {rebaseResult.message}
+                          {rebaseResult.conflicts && rebaseResult.conflicts.length > 0 && (
+                            <ul className="mt-1 ml-3 list-disc">
+                              {rebaseResult.conflicts.map((f) => (
+                                <li key={f} className="font-mono text-xs">{f}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isApprovalGate && issue.stage !== Stage.Review && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                  <h2 className="text-sm font-semibold text-blue-800 mb-2">Send Message</h2>
+                  <p className="text-xs text-blue-600 mb-3">
+                    Send a free-text message to the agent. The agent will decide the next step
+                    based on your message.
+                  </p>
+                  <textarea
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    placeholder="Type a message to the agent..."
+                    rows={3}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                  />
+                  <div className="flex items-center justify-between mt-2">
+                    {sendMessageMutation.error && (
+                      <span className="text-xs text-red-500">
+                        {sendMessageMutation.error.message}
+                      </span>
+                    )}
+                    <div className="ml-auto">
+                      <button
+                        onClick={() => {
+                          sendMessageMutation.mutate(messageText, {
+                            onSuccess: () => setMessageText(''),
+                          })
+                        }}
+                        disabled={!messageText.trim() || sendMessageMutation.isPending}
+                        className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
