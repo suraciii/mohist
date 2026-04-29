@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Build/Plan/Review 阶段 rebase 冲突自动解决：复用 ACP agent 冲突解决机制，冲突时自动 spawn coder agent 解决，失败降级为 abort+409",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/event-bus.ts, packages/cli/web/src/lib/types.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Backend file: src/services/event-bus.ts line 43 — change `{ issueId: string; projectId: string; issueNumber: number; conflicts: string[] }` to add `status?: 'resolving' | 'failed'`. Frontend file: web/src/lib/types.ts line 178 — same change."
+      "passes": true,
+      "notes": "Backend file: src/services/event-bus.ts line 43 — change `{ issueId: string; projectId: string; issueNumber: number; conflicts: string[] }` to add `status?: 'resolving' | 'failed'`. Frontend file: web/src/lib/types.ts line 178 — same change.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        121006
+      ]
     },
     {
       "id": "T-002",
@@ -40,8 +45,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
-      "notes": "Key change points: issues.ts:27-41 (add param), issues.ts:2063-2083 (change abortOnConflict and add auto-resolve flow). Use worktreeManager.rebaseContinue() and worktreeManager.abortRebase() for git operations after agent resolution."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "Key change points: issues.ts:27-41 (add param), issues.ts:2063-2083 (change abortOnConflict and add auto-resolve flow). Use worktreeManager.rebaseContinue() and worktreeManager.abortRebase() for git operations after agent resolution.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -60,8 +71,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/server/index.ts",
-      "dependsOn": ["T-002"],
-      "notes": "Follow the exact pattern of the MergeQueue resolveConflicts callback (server/index.ts:137-172) but adapted: the callback receives (issue, worktreePath, conflictFiles) instead of (entry, worktreePath, conflictFiles). Use issue.id/projectId directly instead of entry.issueId/entry.projectId."
+      "dependsOn": [
+        "T-002"
+      ],
+      "notes": "Follow the exact pattern of the MergeQueue resolveConflicts callback (server/index.ts:137-172) but adapted: the callback receives (issue, worktreePath, conflictFiles) instead of (entry, worktreePath, conflictFiles). Use issue.id/projectId directly instead of entry.issueId/entry.projectId.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -81,8 +98,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx, packages/cli/web/src/hooks/useSSE.tsx",
-      "dependsOn": ["T-001"],
-      "notes": "The useSSE hook already handles rebase_conflict and rebase_completed events. Need to pass the full event data (including status field) through to components. The rebaseResult state in IssueDetailPage (line 224-228) may need extending to include a 'resolving' type. Listen to SSE events via the existing useSSE mechanism and update local state accordingly."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "The useSSE hook already handles rebase_conflict and rebase_completed events. Need to pass the full event data (including status field) through to components. The rebaseResult state in IssueDetailPage (line 224-228) may need extending to include a 'resolving' type. Listen to SSE events via the existing useSSE mechanism and update local state accordingly.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     }
   ]
 }
