@@ -50,11 +50,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/components/DiffViewer.tsx",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Design D2: lightweight inline parser (~50 lines). Type: { type: 'hunk'|'add'|'del'|'context', content, oldLine?, newLine? }. Export parseDiff() and DiffViewer component.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        184269
+      ]
     },
     {
       "id": "T-003",
