@@ -49,11 +49,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "改动集中在 api/issues.ts:883-893 区域。Review 分支不再设 nextStage，但仍 resumePipeline。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        45498
+      ]
     },
     {
       "id": "T-003",
