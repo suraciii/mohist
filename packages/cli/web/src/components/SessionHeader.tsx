@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { CoderSessionItem } from '../lib/types'
 
 function formatDuration(ms: number): string {
@@ -53,11 +54,10 @@ function StatusIcon({ status }: { status: string }) {
 
 interface SessionHeaderProps {
   session: CoderSessionItem
-  isExpanded: boolean
-  onClick: () => void
+  issueNumber: number
 }
 
-export function SessionHeader({ session, isExpanded, onClick }: SessionHeaderProps) {
+export function SessionHeader({ session, issueNumber }: SessionHeaderProps) {
   const label = getSessionLabel(session)
   const coderInfo = [session.coderType, session.model].filter(Boolean).join(' · ') || 'unknown'
   const startTime = formatTime(session.createdAt)
@@ -69,8 +69,8 @@ export function SessionHeader({ session, isExpanded, onClick }: SessionHeaderPro
       : 0
 
   return (
-    <button
-      onClick={onClick}
+    <Link
+      to={`/issue/${issueNumber}/session/${session.id}`}
       className="flex items-center gap-2.5 w-full text-left px-3 py-2 hover:bg-gray-50/80 transition-colors rounded-t-lg"
     >
       <StatusIcon status={session.status} />
@@ -84,12 +84,12 @@ export function SessionHeader({ session, isExpanded, onClick }: SessionHeaderPro
         </span>
       </span>
       <svg
-        className={`h-4 w-4 text-gray-400 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+        className="h-4 w-4 text-gray-400 shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
       >
         <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
       </svg>
-    </button>
+    </Link>
   )
 }
