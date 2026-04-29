@@ -180,11 +180,14 @@
         "T-002",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "设计决策 D5：BlockedPanel 为 IssueDetailPage 内联组件，不新建弹窗/页面。原有 Reopen 按钮保留但降级为次要操作。参考现有 IssueDetailPage ~line 716 的 blocked 按钮区域和 IssueCard ~line 32 的 blocked 判断。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        305359
+      ]
     }
   ]
 }
