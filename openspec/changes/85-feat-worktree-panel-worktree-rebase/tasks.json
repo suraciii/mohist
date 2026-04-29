@@ -80,10 +80,13 @@
         "T-002"
       ],
       "notes": "Design D5: no polling for useWorktreeStatus, SSE-driven refresh only. The hook follows existing useIssue pattern in useQueries.ts.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        146704
+      ]
     },
     {
       "id": "T-004",
