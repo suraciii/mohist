@@ -64,7 +64,7 @@ export function useProviderGroups(
       if (items && items.length > 0) {
         groups.push({
           key: def.key,
-          label: `${def.label} (${items.length})`,
+          label: def.label,
           providers: items,
         })
       }

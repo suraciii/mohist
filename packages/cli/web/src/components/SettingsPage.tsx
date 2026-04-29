@@ -454,16 +454,27 @@ export function SettingsPage() {
                     label={group.label}
                     count={group.providers.length}
                     expanded={isSearching || undefined}
+                    actions={group.key === 'custom' ? (
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setShowCustomProvider(true)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-600 hover:bg-gray-700 rounded-md transition-colors"
+                        >
+                          <CloudIcon className="h-4 w-4" />
+                          Add Custom Provider
+                        </button>
+                        <span className="text-xs text-gray-500">
+                          Configure a custom OpenAI-compatible provider by providing the API endpoint and credentials.
+                        </span>
+                      </div>
+                    ) : undefined}
                   >
                     {group.providers.map(renderProviderCard)}
                   </ProviderGroup>
                 ))}
 
-                <hr className="border-gray-100" />
-
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-medium text-gray-900">Custom</h3>
+                {!groups.some(g => g.key === 'custom') && !isSearching && (
+                  <div className="flex items-center gap-3">
                     <button
                       onClick={() => setShowCustomProvider(true)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-600 hover:bg-gray-700 rounded-md transition-colors"
@@ -471,11 +482,11 @@ export function SettingsPage() {
                       <CloudIcon className="h-4 w-4" />
                       Add Custom Provider
                     </button>
+                    <span className="text-xs text-gray-500">
+                      Configure a custom OpenAI-compatible provider by providing the API endpoint and credentials.
+                    </span>
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Configure a custom OpenAI-compatible provider by providing the API endpoint and credentials.
-                  </p>
-                </div>
+                )}
               </div>
             </TabPanel>
           </div>

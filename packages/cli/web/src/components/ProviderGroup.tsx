@@ -7,10 +7,11 @@ interface ProviderGroupProps {
   label: string
   count: number
   expanded?: boolean
+  actions?: ReactNode
   children: ReactNode
 }
 
-export function ProviderGroup({ label, count, expanded: forceExpanded, children }: ProviderGroupProps) {
+export function ProviderGroup({ label, count, expanded: forceExpanded, actions, children }: ProviderGroupProps) {
   const [internalExpanded, setInternalExpanded] = useState(false)
 
   if (count === 0) return null
@@ -38,6 +39,8 @@ export function ProviderGroup({ label, count, expanded: forceExpanded, children 
           {isExpanded ? 'Show less' : `Show all (${count})`}
         </button>
       )}
+
+      {actions && <div className="mt-3">{actions}</div>}
     </div>
   )
 }
