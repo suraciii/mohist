@@ -113,11 +113,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Be careful: workflow-controller.ts getBuildStageTimeoutMs() calls loadWorkflow() which will now return config-driven defaults. Verify this doesn't break the stage timeout calculation.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        136831
+      ]
     },
     {
       "id": "T-005",
