@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState, createContext, useContext } f
 import { useQueryClient } from '@tanstack/react-query'
 import type { EventName, EventMap, LiveTaskState } from '../lib/types'
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../lib/agent-events'
+import { dispatchRebaseEvent } from '../lib/rebase-events'
 import type { AgentDetailEventMap } from '../lib/types'
 
 const SSE_URL = '/api/events'
@@ -106,13 +107,32 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
-          case 'rebase_completed':
+          case 'rebase_started': {
+            const { issueNumber: rsNum } = parsed as EventMap['rebase_started']
+            dispatchRebaseEvent({ type: 'rebase_started', issueNumber: rsNum })
+            break
+          }
+          case 'rebase_progress': {
+            const { issueNumber: rpNum, step } = parsed as EventMap['rebase_progress']
+            dispatchRebaseEvent({ type: 'rebase_progress', issueNumber: rpNum, step })
+            break
+          }
+          case 'rebase_completed': {
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            const { issueNumber: rcNum, rebased } = parsed as EventMap['rebase_completed']
+            if (rcNum) {
+              queryClient.invalidateQueries({ queryKey: ['worktree-status', rcNum] })
+            }
+            dispatchRebaseEvent({ type: 'rebase_completed', issueNumber: rcNum, rebased })
+            break
+          }
           case 'rebase_conflict': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
-            const { issueNumber: rn } = parsed as { issueNumber: number }
-            if (rn) {
-              queryClient.invalidateQueries({ queryKey: ['worktree-status', rn] })
+            const { issueNumber: rconfNum, conflicts } = parsed as EventMap['rebase_conflict']
+            if (rconfNum) {
+              queryClient.invalidateQueries({ queryKey: ['worktree-status', rconfNum] })
             }
+            dispatchRebaseEvent({ type: 'rebase_conflict', issueNumber: rconfNum, conflicts })
             break
           }
         }
