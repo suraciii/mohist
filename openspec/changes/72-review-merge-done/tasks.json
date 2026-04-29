@@ -79,11 +79,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "需要从 projectRepo 获取 project 信息来绑定 mergeBackFn。projectRepo 已在 AgentRunnerService 构造函数中注入。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        192391
+      ]
     },
     {
       "id": "T-004",
