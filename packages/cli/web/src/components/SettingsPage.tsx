@@ -437,7 +437,7 @@ export function SettingsPage() {
                 {isSearching && groups.length === 0 && (
                   <div className="text-center py-8 border border-dashed border-gray-300 rounded-lg">
                     <SearchIcon className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                    <p className="text-sm text-gray-500">No providers found matching your search.</p>
+                    <p className="text-sm text-gray-500">No providers found matching your search</p>
                   </div>
                 )}
 
