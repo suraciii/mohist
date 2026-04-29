@@ -113,11 +113,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Design D3: noise regex /^(chore\\(tasks\\)|WIP|chore: commit remaining)/i. Design D4: client-side case-insensitive substring filter. Design D5: useState for sub-view, not URL params. Reuse existing CommitRow for individual commits, replace CommitDiffView with DiffViewer.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        600859
+      ]
     }
   ]
 }
