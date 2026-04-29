@@ -436,7 +436,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
           return [...prev, newRound]
         })
         setPlanProgress((prev) => {
-          const steps = prev?.steps ? [...prev.steps] : BASE_PLAN_STEPS.map((s, i) => ({
+          const steps: PlanStep[] = prev?.steps ? [...prev.steps] : BASE_PLAN_STEPS.map((s, i) => ({
             roundType: s.roundType,
             roundLabel: s.roundLabel,
             roundIndex: i,
@@ -480,7 +480,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
       onAgentEvent('plan_round_complete', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         setPlanProgress((prev) => {
-          const steps = prev?.steps ? [...prev.steps] : BASE_PLAN_STEPS.map((s, i) => ({
+          const steps: PlanStep[] = prev?.steps ? [...prev.steps] : BASE_PLAN_STEPS.map((s, i) => ({
             roundType: s.roundType,
             roundLabel: s.roundLabel,
             roundIndex: i,
@@ -493,7 +493,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
               ...steps[idx],
               status: isFailed ? ('failed' as const) : ('completed' as const),
               duration: detail.duration,
-              ...(detail.verdict ? { verdict: detail.verdict } : {}),
+              ...(detail.verdict ? { verdict: detail.verdict as 'PASS' | 'FAIL' } : {}),
             }
           }
           if (detail.roundType === 'self-review' && isFailed) {

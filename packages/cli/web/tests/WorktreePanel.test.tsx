@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from './test-utils'
 
+type WorktreeStatus = {
+  exists: boolean
+  branch: string
+  ahead: number
+  behind: number
+  canFastForward: boolean
+  isRebaseInProgress: boolean
+}
+
 vi.mock('../src/hooks/useQueries', async () => {
   return {
     useWorktreeStatus: vi.fn(),
@@ -29,25 +38,46 @@ import { WorktreePanel } from '../src/components/WorktreePanel'
 
 const mockedUseWorktreeStatus = vi.mocked(useWorktreeStatus)
 
+function mockWorktreeStatus(data: WorktreeStatus | null | undefined, isLoading: boolean) {
+  mockedUseWorktreeStatus.mockReturnValue({
+    data,
+    isLoading,
+    isPending: isLoading,
+    isError: false,
+    isSuccess: !isLoading && data !== undefined,
+    isFetching: false,
+    isLoadingError: false,
+    isRefetchError: false,
+    isPlaceholderData: false,
+    dataUpdatedAt: Date.now(),
+    error: null,
+    errorUpdatedAt: 0,
+    failureCount: 0,
+    failureReason: null,
+    errorUpdateCount: 0,
+    isFetched: !isLoading,
+    isFetchedAfterMount: !isLoading,
+    isRefetching: false,
+    isLoadingLoading: isLoading,
+    status: isLoading ? 'pending' : 'success',
+    fetchStatus: isLoading ? 'fetching' : 'idle',
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useWorktreeStatus>)
+}
+
 describe('WorktreePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   it('returns null when worktree does not exist', () => {
-    mockedUseWorktreeStatus.mockReturnValue({
-      data: { exists: false, branch: '', ahead: 0, behind: 0, canFastForward: false, isRebaseInProgress: false },
-      isLoading: false,
-    } as ReturnType<typeof useWorktreeStatus>)
+    mockWorktreeStatus({ exists: false, branch: '', ahead: 0, behind: 0, canFastForward: false, isRebaseInProgress: false }, false)
     const { container } = render(<WorktreePanel issueNumber={1} isAgentRunning={false} />)
     expect(container.innerHTML).toBe('')
   })
 
   it('renders panel when worktree exists', () => {
-    mockedUseWorktreeStatus.mockReturnValue({
-      data: { exists: true, branch: 'mo/issue-1', ahead: 0, behind: 0, canFastForward: true, isRebaseInProgress: false },
-      isLoading: false,
-    } as ReturnType<typeof useWorktreeStatus>)
+    mockWorktreeStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 0, canFastForward: true, isRebaseInProgress: false }, false)
     render(<WorktreePanel issueNumber={1} isAgentRunning={false} />)
     expect(screen.getByText('Worktree')).toBeInTheDocument()
     expect(screen.getByText('Up to date')).toBeInTheDocument()
@@ -55,28 +85,19 @@ describe('WorktreePanel', () => {
   })
 
   it('shows "Rebase onto master" when agent is idle', () => {
-    mockedUseWorktreeStatus.mockReturnValue({
-      data: { exists: true, branch: 'mo/issue-1', ahead: 2, behind: 1, canFastForward: false, isRebaseInProgress: false },
-      isLoading: false,
-    } as ReturnType<typeof useWorktreeStatus>)
+    mockWorktreeStatus({ exists: true, branch: 'mo/issue-1', ahead: 2, behind: 1, canFastForward: false, isRebaseInProgress: false }, false)
     render(<WorktreePanel issueNumber={1} isAgentRunning={false} />)
     expect(screen.getByText('Rebase onto master')).toBeInTheDocument()
   })
 
   it('shows "Rebase after completion" when agent is running', () => {
-    mockedUseWorktreeStatus.mockReturnValue({
-      data: { exists: true, branch: 'mo/issue-1', ahead: 2, behind: 1, canFastForward: false, isRebaseInProgress: false },
-      isLoading: false,
-    } as ReturnType<typeof useWorktreeStatus>)
+    mockWorktreeStatus({ exists: true, branch: 'mo/issue-1', ahead: 2, behind: 1, canFastForward: false, isRebaseInProgress: false }, false)
     render(<WorktreePanel issueNumber={1} isAgentRunning={true} />)
     expect(screen.getByText('Rebase after completion')).toBeInTheDocument()
   })
 
   it('shows loading skeleton while loading', () => {
-    mockedUseWorktreeStatus.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-    } as unknown as ReturnType<typeof useWorktreeStatus>)
+    mockWorktreeStatus(undefined, true)
     render(<WorktreePanel issueNumber={1} isAgentRunning={false} />)
     expect(screen.getByText('Worktree')).toBeInTheDocument()
     const skeletons = document.querySelectorAll('.animate-pulse')
@@ -84,10 +105,7 @@ describe('WorktreePanel', () => {
   })
 
   it('shows behind indicator when behind master', () => {
-    mockedUseWorktreeStatus.mockReturnValue({
-      data: { exists: true, branch: 'mo/issue-1', ahead: 0, behind: 3, canFastForward: false, isRebaseInProgress: false },
-      isLoading: false,
-    } as ReturnType<typeof useWorktreeStatus>)
+    mockWorktreeStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 3, canFastForward: false, isRebaseInProgress: false }, false)
     render(<WorktreePanel issueNumber={1} isAgentRunning={false} />)
     expect(screen.getByText(/3 commits behind master/)).toBeInTheDocument()
   })
