@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile, CommitEntry } from '../lib/types'
@@ -149,7 +149,7 @@ export function IssueDetailPage() {
     }
   }, [forceStopConfirming])
 
-  const { data: issue, isLoading } = useIssue(issueNumber)
+  const { data: issue, isLoading, isError } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
   const { data: buildStatus } = useBuildStatus(issueNumber)
@@ -274,6 +274,19 @@ export function IssueDetailPage() {
     } catch (e) {
       setExploreError(e instanceof Error ? e.message : 'Failed to create explore session')
     }
+  }
+
+  if (isError) {
+    return (
+      <div className="flex items-center justify-center flex-1">
+        <div className="text-center">
+          <div className="text-gray-400 text-lg mb-4">Page not found</div>
+          <Link to="/" className="text-blue-600 hover:text-blue-700 text-sm">
+            Back to board
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   if (isLoading || !issue) {
