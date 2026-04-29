@@ -23,7 +23,7 @@ export function ProviderGroup({ label, count, expanded: forceExpanded, children 
   return (
     <div>
       <h3 className="text-sm font-medium text-gray-900 mb-3">
-        {label}
+        {label} ({count})
       </h3>
 
       <div className="space-y-3">
