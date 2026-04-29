@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import type { GeneralConfig } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
@@ -183,6 +184,44 @@ export function useStatus() {
     queryKey: ['status'],
     queryFn: () => api.getStatus(),
     retry: false,
+  })
+}
+
+export function useConfig() {
+  return useQuery<GeneralConfig, Error>({
+    queryKey: ['config'],
+    queryFn: () => api.getConfig(),
+  })
+}
+
+interface UpdateConfigContext {
+  previousConfig?: GeneralConfig
+}
+
+export function useUpdateConfig() {
+  const queryClient = useQueryClient()
+
+  return useMutation<GeneralConfig, Error, { key: string; value: number }, UpdateConfigContext>({
+    mutationFn: ({ key, value }) => api.updateConfig(key, value),
+    onMutate: async ({ key, value }) => {
+      await queryClient.cancelQueries({ queryKey: ['config'] })
+      const previousConfig = queryClient.getQueryData<GeneralConfig>(['config'])
+
+      queryClient.setQueryData<GeneralConfig>(['config'], (old) => {
+        if (!old) return old
+        return { ...old, [key]: value }
+      })
+
+      return { previousConfig }
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previousConfig) {
+        queryClient.setQueryData(['config'], context.previousConfig)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] })
+    },
   })
 }
 

@@ -344,3 +344,9 @@ export interface LiveTaskState {
   activeTaskId: string | null
   activeTaskElapsedMs: number | null
 }
+
+export interface GeneralConfig {
+  agentTimeout: number
+  maxConcurrentAgents: number
+  pollInterval: number
+}
