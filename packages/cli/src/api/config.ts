@@ -47,9 +47,11 @@ export function createConfigRoutes(configService: ConfigService): Hono {
 
       configService.set(key, value);
 
-      const response: ApiResponse = {
+      const config = configService.getConfig();
+
+      const response: ApiResponse<Partial<Config>> = {
         success: true,
-        data: { key, value }
+        data: config
       };
       return c.json(response);
     } catch (error) {
