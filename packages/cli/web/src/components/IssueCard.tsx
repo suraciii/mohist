@@ -19,7 +19,7 @@ interface Props {
   agentStatus: AgentStatus
 }
 
-type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | null
+type BadgeType = 'conflict' | 'blocked' | 'closed' | 'approval' | 'running' | null
 
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (
@@ -30,6 +30,9 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
     return 'conflict'
   }
   if (issue.status === IssueStatus.Blocked) {
+    return 'blocked'
+  }
+  if (issue.status === IssueStatus.Closed) {
     return 'closed'
   }
   if (issue.approvalState?.status === 'awaiting') {
@@ -45,7 +48,7 @@ function Badge({
   type,
   mergeState,
 }: {
-  type: Exclude<BadgeType, 'closed' | null>
+  type: Exclude<BadgeType, null>
   mergeState?: string | null
 }) {
   if (type === 'conflict') {
@@ -53,6 +56,20 @@ function Badge({
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-white bg-red-500 px-1.5 py-0.5 rounded">
         {label}
+      </span>
+    )
+  }
+  if (type === 'blocked') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-white px-1.5 py-0.5 rounded" style={{ backgroundColor: '#ea580c' }}>
+        Blocked
+      </span>
+    )
+  }
+  if (type === 'closed') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 bg-gray-200 px-1.5 py-0.5 rounded">
+        Closed
       </span>
     )
   }
@@ -80,7 +97,6 @@ export function IssueCard({ issue, agentStatus }: Props) {
     (a) => a.issueNumber === issue.number,
   )
   const badge = getBadgeType(issue, isAgentRunning)
-  const isClosed = badge === 'closed'
   const isInterrupted = issue.status === IssueStatus.Interrupted
 
   const reopenMutation = useMutation({
@@ -101,13 +117,7 @@ export function IssueCard({ issue, agentStatus }: Props) {
       className="block rounded-lg border border-gray-200 border-l-4 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors relative overflow-hidden"
       style={{ borderLeftColor: getStripColor(issue.labels) }}
     >
-      {isClosed && (
-        <div className="absolute inset-0 bg-gray-400/50 z-10 flex items-center justify-center">
-          <span className="text-sm font-semibold text-gray-700">Closed</span>
-        </div>
-      )}
-
-      <div className={`p-3 ${isClosed ? 'opacity-50' : ''}`}>
+      <div className="p-3">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono text-gray-400">
@@ -119,7 +129,7 @@ export function IssueCard({ issue, agentStatus }: Props) {
               </span>
             )}
           </div>
-          {badge && badge !== 'closed' && (
+          {badge && (
             <Badge type={badge} mergeState={issue.mergeState} />
           )}
         </div>
