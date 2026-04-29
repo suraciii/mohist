@@ -527,14 +527,13 @@ export class AgentRunnerService {
               return;
             }
 
-            const reverseResult = await this.worktreeManager!.mergeMasterInWorktree(
-              project.name, issueNumber, project.baseBranch,
+            const reverseResult = await this.worktreeManager!.rebaseOntoMaster(
+              project.path, project.name, issueNumber, project.baseBranch,
             );
 
-            if (!reverseResult.success && !reverseResult.conflictFiles) {
-              log.error('onMergeConflict: reverse merge failed with no conflicts', {
+            if (!reverseResult.success && !reverseResult.conflicts.length) {
+              log.error('onMergeConflict: rebase failed with no conflicts', {
                 issueNumber,
-                message: reverseResult.message,
               });
               issueRepo.setMergeState(issue.id, MergeState.Blocked);
               this.eventBus.emit('merge_blocked', {
@@ -562,7 +561,7 @@ export class AgentRunnerService {
                 issueId: issue.id,
                 projectId,
                 issueNumber,
-                conflictingFiles: reverseResult.conflictFiles ?? [],
+                conflictingFiles: reverseResult.conflicts,
                 retryCount: currentRetryCount,
               });
               log.warn('onMergeConflict: max retries reached, blocked', {
@@ -578,15 +577,17 @@ export class AgentRunnerService {
 
             const wtPath = this.worktreeManager!.getPath(project.name, issueNumber);
             if (!wtPath) {
-              log.error('onMergeConflict: worktree path not found after reverse-merge', { issueNumber });
+              log.error('onMergeConflict: worktree path not found after rebase', { issueNumber });
               return;
             }
 
-            const conflictFiles = reverseResult.conflictFiles ?? [];
-            this.eventBus.emit('merge_conflict_requiring_resolution', {
+            const conflictFiles = reverseResult.conflicts;
+            this.eventBus.emit('merge_blocked', {
               issueId: issue.id,
               projectId,
-              conflictFiles,
+              issueNumber,
+              conflictingFiles: conflictFiles,
+              retryCount: currentRetryCount,
             });
             log.info('onMergeConflict: conflict resolution initiated', {
               issueNumber,
