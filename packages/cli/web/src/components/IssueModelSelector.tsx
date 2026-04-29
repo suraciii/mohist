@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { Popover, Transition } from '@headlessui/react'
 import fuzzysort from 'fuzzysort'
 import { useModels } from '../hooks/useModels'
+import { useOpencodeModel } from '../hooks/useQueries'
 import { api } from '../lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Model } from '../lib/types'
@@ -100,6 +101,7 @@ function ModelListItem({ model, isSelected, isHighlighted, onSelect, onMouseEnte
 export function IssueModelSelector({ issueNumber, currentModel }: Props) {
   const queryClient = useQueryClient()
   const { data: providers } = useModels()
+  const { data: opencodeModelData } = useOpencodeModel()
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -187,9 +189,13 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
     setHighlightedIndex(0)
   }, [searchQuery])
 
+  const defaultModelName = opencodeModelData?.model
+    ? opencodeModelData.model.split('/').pop()!
+    : null
+
   const currentModelDisplay = currentModel
     ? flattenedModels.find(m => m.id === currentModel)?.name || currentModel.split('/').pop() || currentModel
-    : 'Use default'
+    : defaultModelName || 'Use default'
 
   return (
     <div className="space-y-1">
@@ -248,7 +254,7 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
                         onClick={handleClear}
                         className="w-full flex items-center px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 transition-colors"
                       >
-                        <span className="font-medium">Use default</span>
+                        <span className="font-medium">Use default{defaultModelName ? ` (${defaultModelName})` : ''}</span>
                       </button>
                       <div className="border-t border-gray-100 my-1" />
                     </div>
