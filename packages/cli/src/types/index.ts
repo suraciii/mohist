@@ -78,6 +78,7 @@ export interface Issue {
   approvalState?: ApprovalState;
   mergeState?: MergeState;
   conflictRetryCount?: number;
+  model?: string;
 }
 
 export interface Project {

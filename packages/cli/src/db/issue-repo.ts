@@ -17,6 +17,7 @@ interface IssueRow {
   approval_state: string | null;
   merge_state: string | null;
   conflict_retry_count: number | null;
+  model: string | null;
 }
 
 function rowToIssue(row: IssueRow): Issue {
@@ -51,6 +52,7 @@ function rowToIssue(row: IssueRow): Issue {
     approvalState,
     mergeState: (row.merge_state as MergeState) || undefined,
     conflictRetryCount: row.conflict_retry_count ?? undefined,
+    model: row.model ?? undefined,
   };
 }
 
@@ -177,7 +179,7 @@ export class IssueRepo {
     return this.findById(issueId);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState; priority: Priority }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState; priority: Priority; model: string | null }>): Issue | null {
     const existing = this.findById(issueId);
     if (!existing) return null;
     
@@ -211,6 +213,10 @@ export class IssueRepo {
     if (data.priority !== undefined) {
       updates.push('priority = ?');
       values.push(data.priority);
+    }
+    if (data.model !== undefined) {
+      updates.push('model = ?');
+      values.push(data.model);
     }
     
     if (updates.length === 0) return existing;
@@ -318,6 +324,17 @@ export class IssueRepo {
     this.db.run(
       'UPDATE issues SET conflict_retry_count = ?, updated_at = ? WHERE id = ?',
       [count, now, issueId]
+    );
+
+    return this.findById(issueId);
+  }
+
+  updateModel(issueId: string, model: string | null): Issue | null {
+    const now = new Date().toISOString();
+
+    this.db.run(
+      'UPDATE issues SET model = ?, updated_at = ? WHERE id = ?',
+      [model, now, issueId]
     );
 
     return this.findById(issueId);
