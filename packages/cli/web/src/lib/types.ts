@@ -105,6 +105,13 @@ export interface DiffFile {
   file: string
   additions: number
   deletions: number
+  diff: string
+}
+
+export interface DiffResponse {
+  files: DiffFile[]
+  totalAdditions: number
+  totalDeletions: number
 }
 
 export interface CommitEntry {
