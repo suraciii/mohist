@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add session independent page with opencode-style conversational timeline view at /issue/:number/session/:sessionId",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ToolCallCard.tsx",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This is a pure presentation component. Import ToolCallEntry type from ../lib/types. No hook dependencies."
+      "passes": true,
+      "notes": "This is a pure presentation component. Import ToolCallEntry type from ../lib/types. No hook dependencies.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        406336
+      ]
     },
     {
       "id": "T-002",
@@ -44,9 +49,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SessionPage.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Reuses existing hooks: useCoderSessions, useSessionTimeline, useIssue. The issue title comes from useIssue(issueNumber). The session stage/model/duration come from CoderSessionItem fields. ConversationRound can be defined inline in this file."
+      "notes": "Reuses existing hooks: useCoderSessions, useSessionTimeline, useIssue. The issue title comes from useIssue(issueNumber). The session stage/model/duration come from CoderSessionItem fields. ConversationRound can be defined inline in this file.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +72,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/App.tsx",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Must add the import for SessionPage. SessionPage component must exist first (T-002), so this task depends on it."
+      "notes": "Must add the import for SessionPage. SessionPage component must exist first (T-002), so this task depends on it.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -84,9 +99,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SessionList.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "This modifies three existing files: SessionHeader.tsx, SessionDetail.tsx, SessionList.tsx. The session page route must exist first (T-003) so the Link targets are valid. SessionDetail's summary computation: iterate session.workflowLogs, count eventType 'tool_call' where data contains edit/write kind for file changes, count all 'tool_call' events for total."
+      "notes": "This modifies three existing files: SessionHeader.tsx, SessionDetail.tsx, SessionList.tsx. The session page route must exist first (T-003) so the Link targets are valid. SessionDetail's summary computation: iterate session.workflowLogs, count eventType 'tool_call' where data contains edit/write kind for file changes, count all 'tool_call' events for total.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
