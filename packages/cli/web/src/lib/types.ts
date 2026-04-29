@@ -41,6 +41,7 @@ export interface Issue {
   approvalState?: ApprovalState
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
   priority?: string | null
+  model?: string
 }
 
 export interface Project {
@@ -351,4 +352,12 @@ export interface WorktreeStatus {
   behind: number
   canFastForward: boolean
   isRebaseInProgress: boolean
+}
+
+export interface GeneralConfig {
+  serverPort: number
+  serverHost: string
+  pollInterval: number
+  maxConcurrentAgents: number
+  agentTimeout: number
 }
