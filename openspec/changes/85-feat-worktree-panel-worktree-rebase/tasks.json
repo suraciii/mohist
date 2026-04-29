@@ -18,7 +18,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/git/worktree-manager.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "Design D4: use git rev-list --left-right --count. The three-dot syntax (baseBranch...issueBranch) gives left=ahead, right=behind.",
       "attempts": 1,
       "order": 999999,
@@ -52,7 +52,7 @@
       ],
       "notes": "Design D3: queue is an in-memory Map<number, {issueNumber, projectId}> in createIssueRoutes closure. The agent_completed listener checks and drains queued entries.",
       "attempts": 1,
-      "passes": true,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -81,7 +81,7 @@
       ],
       "notes": "Design D5: no polling for useWorktreeStatus, SSE-driven refresh only. The hook follows existing useIssue pattern in useQueries.ts.",
       "attempts": 1,
-      "passes": true,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -114,7 +114,7 @@
       ],
       "notes": "Follow existing panel styling (rounded-md border, space-y-4 sidebar layout). The component is self-contained with all hooks internal.",
       "attempts": 1,
-      "passes": true,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -146,7 +146,7 @@
       ],
       "notes": "Design D1: panel order is Details → Pipeline Interrupted → Actions → MergeStatePanel → WorktreePanel → Review Report → Approval Required. Design D2: visibility driven by worktree-status API response { exists }.",
       "attempts": 1,
-      "passes": true,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -173,7 +173,7 @@
       ],
       "notes": "",
       "attempts": 1,
-      "passes": true,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
