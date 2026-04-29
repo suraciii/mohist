@@ -236,4 +236,16 @@ export const api = {
     return request<import('./types').LogTailResult>(`/logs/tail${qs ? `?${qs}` : ''}`)
   },
 
+  getOpencodeModel: () =>
+    request<{ model: string | null }>('/opencode-config/model'),
+
+  updateOpencodeModel: (model: string | null) =>
+    request<{ model: string | null }>('/opencode-config/model', {
+      method: 'PUT',
+      body: JSON.stringify({ model }),
+    }),
+
+  getOpencodeModels: () =>
+    request<{ models: string[] }>('/opencode/models'),
+
 }

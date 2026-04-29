@@ -313,3 +313,30 @@ function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) return '********'
   return apiKey.slice(0, 4) + '*'.repeat(apiKey.length - 8) + apiKey.slice(-4)
 }
+
+export function useOpencodeModel() {
+  return useQuery<{ model: string | null }>({
+    queryKey: ['opencode-model'],
+    queryFn: () => api.getOpencodeModel(),
+  })
+}
+
+export function useUpdateOpencodeModel() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (model: string | null) => api.updateOpencodeModel(model),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['opencode-model'] })
+    },
+  })
+}
+
+export function useOpencodeModels() {
+  return useQuery<string[]>({
+    queryKey: ['opencode-models'],
+    queryFn: async () => {
+      const data = await api.getOpencodeModels()
+      return data.models
+    },
+  })
+}
