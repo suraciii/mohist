@@ -12,7 +12,9 @@ import {
   ExploreMessageRepo,
   AgentSessionMessageRepo,
   CoderSessionRepo,
-  PipelineCheckpointRepo
+  PipelineCheckpointRepo,
+  SkillRepo,
+  SkillRunRepo
 } from '../db';
 import { initializeDefaultConfig } from '../db/config-repo';
 
@@ -29,6 +31,8 @@ export class StateManager {
   private agentSessionMessageRepo: AgentSessionMessageRepo;
   private coderSessionRepo: CoderSessionRepo;
   private pipelineCheckpointRepo: PipelineCheckpointRepo;
+  private skillRepo: SkillRepo;
+  private skillRunRepo: SkillRunRepo;
   private initialized: boolean = false;
 
   constructor(db: DatabaseManager) {
@@ -46,6 +50,8 @@ export class StateManager {
     this.agentSessionMessageRepo = new AgentSessionMessageRepo(db);
     this.coderSessionRepo = new CoderSessionRepo(db);
     this.pipelineCheckpointRepo = new PipelineCheckpointRepo(db);
+    this.skillRepo = new SkillRepo(db);
+    this.skillRunRepo = new SkillRunRepo(db);
     
     initializeDefaultConfig(this.configRepo);
     this.initialized = true;
@@ -101,5 +107,13 @@ export class StateManager {
 
   getPipelineCheckpointRepo(): PipelineCheckpointRepo {
     return this.pipelineCheckpointRepo;
+  }
+
+  getSkillRepo(): SkillRepo {
+    return this.skillRepo;
+  }
+
+  getSkillRunRepo(): SkillRunRepo {
+    return this.skillRunRepo;
   }
 }
