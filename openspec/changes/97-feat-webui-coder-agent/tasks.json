@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix model priority bug and add WebUI config for default coder agent model",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "The fix is a simple guard: wrap the `if (configuredModel) { ... }` block (both paths) with `if (!model) { ... }`. The per-issue model block (`if (model) { ... }`) remains unchanged."
+      "passes": true,
+      "notes": "The fix is a simple guard: wrap the `if (configuredModel) { ... }` block (both paths) with `if (!model) { ... }`. The per-issue model block (`if (model) { ... }`) remains unchanged.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        215715
+      ]
     },
     {
       "id": "T-002",
@@ -44,7 +49,10 @@
       "output": "packages/cli/src/api/opencode-model-config.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Follow the pattern in api/providers.ts for load()/writeConfig() with ConfigConflictError handling. Register as `server.addRouter('/api/opencode-config', createOpencodeModelConfigRoutes())` in server/index.ts — using a separate prefix to avoid collision with the existing `PUT /:key` catch-all in `/api/config` router."
+      "notes": "Follow the pattern in api/providers.ts for load()/writeConfig() with ConfigConflictError handling. Register as `server.addRouter('/api/opencode-config', createOpencodeModelConfigRoutes())` in server/index.ts — using a separate prefix to avoid collision with the existing `PUT /:key` catch-all in `/api/config` router.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -63,9 +71,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "The useOpencodeModels hook fetches from the existing /opencode/models endpoint (already registered in server). This is separate from the existing useModels hook which fetches /providers/models."
+      "notes": "The useOpencodeModels hook fetches from the existing /opencode/models endpoint (already registered in server). This is separate from the existing useModels hook which fetches /providers/models.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -87,9 +100,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/GeneralSettingsSection.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Use Popover from @headlessui/react (already a dependency). The selector is simpler than IssueModelSelector: no recent models, no provider grouping, just a flat searchable list of model strings."
+      "notes": "Use Popover from @headlessui/react (already a dependency). The selector is simpler than IssueModelSelector: no recent models, no provider grouping, just a flat searchable list of model strings.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -107,9 +125,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueModelSelector.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Import useOpencodeModel from hooks/useQueries. Extract display name helper: `const displayName = (id: string) => id.split('/').pop() || id`. Keep the change minimal — only touch the display logic, no structural changes to IssueModelSelector."
+      "notes": "Import useOpencodeModel from hooks/useQueries. Extract display name helper: `const displayName = (id: string) => id.split('/').pop() || id`. Keep the change minimal — only touch the display logic, no structural changes to IssueModelSelector.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
