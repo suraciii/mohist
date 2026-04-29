@@ -515,37 +515,12 @@ export class WorkflowController {
 
           if (isApproved || isResolving) {
             if (!this.mergeBackFn) {
-              if (isResolving) {
-                log.info('Skipping approval gate during conflict resolution (no mergeBackFn)', { issueNumber: currentIssue.number });
-                currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Done)!;
-                break;
-              }
-              const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptions);
-              if (!reviewResult.success) {
-                return {
-                  completed: false,
-                  stage: Stage.Review,
-                  gateRequired: false,
-                  message: reviewResult.message,
-                };
-              }
-              this.issueRepo.setApprovalState(currentIssue.id, {
-                stage: Stage.Review,
-                status: 'awaiting',
-                output: reviewResult.output,
-                requestedAt: new Date().toISOString(),
+              log.info('Skipping to Done (no mergeBackFn)', {
+                issueNumber: currentIssue.number,
+                reason: isResolving ? 'conflict resolution' : 'approved',
               });
-              this.eventBus.emit('approval_requested', {
-                issueId: currentIssue.id,
-                projectId: this.projectId ?? currentIssue.projectId,
-                stage: Stage.Review,
-              });
-              return {
-                completed: false,
-                stage: Stage.Review,
-                gateRequired: true,
-                message: 'Review completed, awaiting approval',
-              };
+              currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Done)!;
+              break;
             }
 
             const label = isResolving ? 'Resolving' : 'Approved';
@@ -659,7 +634,6 @@ export class WorkflowController {
       }
     }
 
-    this.issueRepo.updateStage(currentIssue.id, Stage.Done);
     this.issueRepo.clearApprovalState(currentIssue.id);
     this.issueRepo.updateStatus(currentIssue.id, IssueStatus.Completed);
     this.checkpointRepo?.deleteAll(currentIssue.number);

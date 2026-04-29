@@ -373,7 +373,7 @@ describe('WorkflowController Review merge flow', () => {
   });
 
   describe('no mergeBackFn: backward compatible behavior', () => {
-    it('should execute review agent and gate for approved issue without mergeBackFn', async () => {
+    it('should skip to Done for approved issue without mergeBackFn', async () => {
       const { issueRepo, eventBus } = createMockRepos();
       const mockConn = setupMockAcpConnection();
 
@@ -390,10 +390,10 @@ describe('WorkflowController Review merge flow', () => {
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
-      expect(mockConn.prompt).toHaveBeenCalledTimes(2);
-      expect(result.gateRequired).toBe(true);
-      expect(result.completed).toBe(false);
-      expect(result.stage).toBe(Stage.Review);
+      expect(mockConn.prompt).not.toHaveBeenCalled();
+      expect(issueRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Done);
+      expect(result.completed).toBe(true);
+      expect(result.stage).toBe(Stage.Done);
     });
 
     it('should skip approval gate and go to Done for Resolving issue without mergeBackFn', async () => {
