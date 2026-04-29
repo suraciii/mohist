@@ -83,11 +83,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The config load happens inside the executeLoop function body (at issue-start time), not at module level. This ensures running issues are unaffected by config changes.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        178756
+      ]
     },
     {
       "id": "T-004",
