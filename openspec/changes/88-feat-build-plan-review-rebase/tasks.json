@@ -49,10 +49,13 @@
         "T-001"
       ],
       "notes": "Key change points: issues.ts:27-41 (add param), issues.ts:2063-2083 (change abortOnConflict and add auto-resolve flow). Use worktreeManager.rebaseContinue() and worktreeManager.abortRebase() for git operations after agent resolution.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        215807
+      ]
     },
     {
       "id": "T-003",
