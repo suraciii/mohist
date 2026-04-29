@@ -49,13 +49,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "See D2 in design.md. Use existing readReportFile helper. Add truncate helper for 5000 char cap.",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        252416
+        252416,
+        80908
       ]
     },
     {
