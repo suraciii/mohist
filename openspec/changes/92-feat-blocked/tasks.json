@@ -79,11 +79,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "设计决策 D1：自动重试仅在 recoverBuildStageIssue 中。设计决策 D2：统一使用 blockIssue() 方法。参考现有 recover-issues.test.ts 的测试模式。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        627608
+      ]
     },
     {
       "id": "T-004",
