@@ -153,13 +153,14 @@
         "T-004"
       ],
       "notes": "Design D1: panel order is Details → Pipeline Interrupted → Actions → MergeStatePanel → WorktreePanel → Review Report → Approval Required. Design D2: visibility driven by worktree-status API response { exists }.",
-      "attempts": 2,
-      "passes": false,
+      "attempts": 3,
+      "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
         260423,
-        64521
+        64521,
+        161942
       ]
     },
     {
