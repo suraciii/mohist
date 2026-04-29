@@ -1,0 +1,187 @@
+{
+  "project": "mohist",
+  "description": "Review 审查体验优化：结构化 verdict、阶段差异化审查、修复闭环",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Backend: enrich approvalState.output with verdict and dimensions",
+      "spec": "specs/approval-output-display/spec.md",
+      "description": "Add `parseDimensions()` function to workflow-controller.ts that extracts per-dimension PASS/FAIL from review report markdown using regex `###\\s+(\\w[\\w\\s]*?):\\s*(PASS|FAIL)`. Enrich all review-stage output objects to include `verdict` (from existing parseVerdict) and `dimensions` array with `{ name, status, issues }`. Also enrich plan-stage output to include `verdict` from self-review parseVerdict result.",
+      "acceptanceCriteria": [
+        "parseDimensions('### Correctness: PASS\\n### Security: FAIL\\n- issue1') returns [{name:'Correctness',status:'PASS'},{name:'Security',status:'FAIL',issues:['issue1']}]",
+        "Review stage output includes verdict field matching parseVerdict result",
+        "Review stage output includes dimensions array parsed from reviewReport markdown",
+        "Plan stage output includes verdict field from self-review parseVerdict",
+        "Existing reviewReport/selfReviewNotes fields remain unchanged for backward compat",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "See D1 in design.md. Regex: /###\\s+(\\w[\\w\\s]*?):\\s*(PASS|FAIL)/gim. After each dimension match, collect subsequent bullet lines as issues until next dimension header or section header."
+    },
+    {
+      "id": "T-002",
+      "title": "Backend: store plan-stage artifacts in approvalState.output",
+      "spec": "specs/stage-differentiated-approval/spec.md",
+      "description": "Enrich plan-stage output objects in workflow-controller.ts to include `artifacts` array. Read proposal.md, design.md, tasks.json from the changeDir and store as `{ name, path, content }` entries. Cap each artifact content at 5000 chars. Also include a `specs` entry listing spec file names found under the specs/ directory.",
+      "acceptanceCriteria": [
+        "Plan stage output includes artifacts array with entries for proposal.md, design.md, tasks.json when they exist",
+        "Each artifact has name, path, and content fields (content capped at 5000 chars)",
+        "Specs directory entries list spec file names found",
+        "Missing artifacts are simply omitted from the array (no error)",
+        "Existing selfReviewNotes field remains unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-controller.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "See D2 in design.md. Use existing readReportFile helper. Add truncate helper for 5000 char cap."
+    },
+    {
+      "id": "T-003",
+      "title": "Frontend: update ApprovalState types to match enriched output",
+      "spec": "specs/approval-output-display/spec.md",
+      "description": "Update the ApprovalOutput interface in web/src/lib/types.ts to add typed fields for verdict, dimensions, and artifacts. Update the reviewOutput extraction logic in IssueDetailPage.tsx to parse these structured fields from approvalState.output.",
+      "acceptanceCriteria": [
+        "ApprovalOutput interface includes verdict, dimensions, and artifacts typed fields matching the spec",
+        "Typecheck passes",
+        "Existing functionality unchanged (new fields are optional)"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Type Alignment between backend types/index.ts ApprovalState.output (unknown) and frontend typed interface."
+    },
+    {
+      "id": "T-004",
+      "title": "Frontend: create ReviewSummary component",
+      "spec": "specs/review-summary-ui/spec.md",
+      "description": "Create ReviewSummary component with three layers: (1) Verdict badge — green PASS / red FAIL / grey REVIEW, (2) Dimension status grid — list of dimensions with PASS/FAIL status and FAIL issues, (3) Expandable full report — 'View Full Report' button that toggles markdown-rendered report using react-markdown (already in dependencies).",
+      "acceptanceCriteria": [
+        "Verdict PASS renders green badge with text 'PASS'",
+        "Verdict FAIL renders red badge with text 'FAIL'",
+        "Verdict null/undefined renders grey badge with text 'REVIEW' and hides dimension grid",
+        "Dimensions array renders as status grid with green/red per-dimension indicators",
+        "FAIL dimensions show their issues list from dimensions[i].issues",
+        "Empty/null dimensions skips the grid entirely",
+        "'View Full Report' button toggles expand/collapse of markdown-rendered report",
+        "Button text toggles between 'View Full Report' and 'Hide Full Report'",
+        "No report content means no expand button shown",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/ReviewSummary.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "react-markdown ^10.1.0 is already in web/package.json. Use existing Tailwind utility classes matching the project style."
+    },
+    {
+      "id": "T-005",
+      "title": "Frontend: create PlanApprovalPanel component",
+      "spec": "specs/stage-differentiated-approval/spec.md",
+      "description": "Create PlanApprovalPanel that shows design artifact previews (proposal.md, design.md, specs list, tasks.json) from approvalState.output.artifacts. Each artifact is collapsible. Self-review notes shown as collapsible section below. Action buttons: 'Approve & Build' and 'Send back with notes' (textarea + send via existing messages API, see reject-and-fix spec for message format).",
+      "acceptanceCriteria": [
+        "Displays artifact list from output.artifacts with collapsible content for each",
+        "Missing artifacts shows fallback: self-review notes + 'Design artifacts not available for preview'",
+        "Self-review notes shown as collapsible 'Self-Review Notes' section, collapsed by default",
+        "'Approve & Build' button calls approve API",
+        "'Send back with notes' textarea + send button calls POST /messages with prefix 'User feedback on plan:\\n'",
+        "Empty textarea disables send button",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/PlanApprovalPanel.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Follow component patterns from MergeStatePanel.tsx / QuestionPanel.tsx for props style."
+    },
+    {
+      "id": "T-006",
+      "title": "Frontend: create ReviewApprovalPanel component",
+      "spec": "specs/stage-differentiated-approval/spec.md",
+      "description": "Create ReviewApprovalPanel that embeds ReviewSummary component, shows 'View Code Changes' link to Files/Commits tab, and renders verdict-differentiated action buttons (see reject-and-fix spec for API call details): PASS → 'Approve & Done' only; FAIL → 'Send back for fixes' + 'Send back with instructions' textarea + 'Force Approve' (double-click confirm with 3s timeout); unknown verdict → 'Approve & Continue' + 'Send back with notes'.",
+      "acceptanceCriteria": [
+        "Embeds ReviewSummary component for verdict/dimension/report display",
+        "'View Code Changes' button switches to Files/Commits tab on click",
+        "PASS verdict: shows only 'Approve & Done' button",
+        "FAIL verdict: shows 'Send back for fixes', 'Send back with instructions' (textarea), and 'Force Approve'",
+        "'Send back for fixes' calls POST /messages with review report prefix, shows loading state",
+        "'Send back for fixes' with no reviewReport sends generic fallback message",
+        "'Send back with instructions' textarea empty → send disabled; non-empty → sends user msg + report ref",
+        "'Force Approve' first click changes to 'Confirm Force Approve' with warning style, no approve yet",
+        "'Force Approve' second click within 3s executes approve; timeout resets to initial state",
+        "API errors show error message in panel, restore button states",
+        "Unknown verdict: shows 'Approve & Continue' + 'Send back with notes' textarea",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/ReviewApprovalPanel.tsx",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "See reject-and-fix spec for message formats. Use existing useSendMessage hook pattern from IssueDetailPage."
+    },
+    {
+      "id": "T-007",
+      "title": "Frontend: wire ApprovalPanel components into IssueDetailPage",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Replace the monolithic inline approval section in IssueDetailPage.tsx with the new stage-differentiated components. Remove the old 'Review Report' panel (max-h-64 pre-wrap), old 'Approval Required' panel with single 'Approve & Continue', and old 'Send Message' panel. Add ApprovalPanel wrapper that switches between PlanApprovalPanel and ReviewApprovalPanel based on issue.stage and approvalState.output.stage. Remove rebase logic from approval section (keep it elsewhere if needed).",
+      "acceptanceCriteria": [
+        "Plan stage approval renders PlanApprovalPanel instead of old inline review report + approve button",
+        "Review stage approval renders ReviewApprovalPanel instead of old inline review report + approve button",
+        "Old 'Review Report' div (max-h-64 whitespace-pre-wrap) is removed",
+        "Old 'Approval Required' div with single 'Approve & Continue' is removed",
+        "Old 'Send Message' div is removed (replaced by panel-embedded send-back)",
+        "Generic 'Approve & Continue' no longer appears (replaced by stage-specific buttons)",
+        "Fallback: if output.stage doesn't match any panel, show minimal approve button",
+        "No Skip button present anywhere in approval flow",
+        "SSE auto-refresh still works (agent_paused event triggers panel display)",
+        "IssueCard 'Needs Approval' indicator unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-005", "T-006"],
+      "passes": false,
+      "notes": "Keep the rebase functionality — it should remain accessible but not dominate the approval panel. Move it into the panel components or keep as a separate section below."
+    },
+    {
+      "id": "T-008",
+      "title": "Tests: parseDimensions and backend output enrichment",
+      "spec": "specs/approval-output-display/spec.md",
+      "description": "Write unit tests for parseDimensions function covering: all PASS, mixed PASS/FAIL, FAIL with issues, no dimensions in content, legacy format, empty content. Also test that workflow-controller output objects include verdict and dimensions fields correctly.",
+      "acceptanceCriteria": [
+        "parseDimensions extracts all 5 dimensions from standard review report format",
+        "parseDimensions returns empty array for content with no dimension headers",
+        "parseDimensions associates bullet-point issues with their FAIL dimension",
+        "parseDimensions handles mixed PASS/FAIL dimensions correctly",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/parse-dimensions.test.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Follow test patterns from self-review.test.ts and review-auto-fix.test.ts."
+    }
+  ]
+}

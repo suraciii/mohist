@@ -359,6 +359,7 @@ export class WorkflowController {
             stage: Stage.Plan,
             issueNumber: issue.number,
             selfReviewNotes: selfReviewReport,
+            verdict,
           },
           message: 'Plan completed, awaiting user approval',
         };
@@ -400,6 +401,7 @@ export class WorkflowController {
             stage: Stage.Plan,
             issueNumber: issue.number,
             selfReviewNotes: selfReviewReport,
+            verdict,
           },
           message: `Auto-fix failed: ${autoFixResult.error ?? 'unknown error'}. Awaiting user approval`,
         };
@@ -452,6 +454,7 @@ export class WorkflowController {
             stage: Stage.Plan,
             issueNumber: issue.number,
             selfReviewNotes: selfReviewReport,
+            verdict,
           },
           message: `Auto-fix succeeded but re-self-review failed: ${reSelfReviewResult.error ?? 'unknown error'}. Awaiting user approval`,
         };
@@ -483,6 +486,7 @@ export class WorkflowController {
             stage: Stage.Plan,
             issueNumber: issue.number,
             selfReviewNotes: recheckReport,
+            verdict: recheckVerdict,
           },
           message: 'Auto-fix succeeded, re-self-review passed. Awaiting user approval',
         };
@@ -495,6 +499,7 @@ export class WorkflowController {
           stage: Stage.Plan,
           issueNumber: issue.number,
           selfReviewNotes: recheckReport ?? selfReviewReport,
+          verdict: recheckVerdict,
         },
         message: 'Auto-fix attempted but re-self-review still FAIL. Awaiting user approval',
       };
@@ -1139,6 +1144,7 @@ export class WorkflowController {
 
       const updatedReport = readReportFile(changeDir, 'review.md') ?? reVerifyResult.text ?? '';
       const result = parseVerdict(updatedReport);
+      const updatedDimensions = parseDimensions(updatedReport);
 
       if (result === 'PASS') {
         log.info('Auto-fix succeeded', { attempt: attempt + 1, issueNumber: issue.number });
@@ -1161,6 +1167,8 @@ export class WorkflowController {
             stage: Stage.Review,
             issueNumber: issue.number,
             reviewReport: updatedReport,
+            verdict: result,
+            dimensions: updatedDimensions,
           },
           message: `Review completed with auto-fix (attempt ${attempt + 1}), awaiting user approval`,
         };
@@ -1281,11 +1289,13 @@ export class WorkflowController {
 
       const parsedResult = parseVerdict(reviewReport);
 
+      const parsedDimensions = parseDimensions(reviewReport);
+
       if (parsedResult === 'PASS') {
         return {
           success: true,
           requiresApproval: true,
-          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport },
+          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport, verdict: parsedResult, dimensions: parsedDimensions },
           message: 'Review completed, awaiting user approval',
         };
       }
@@ -1300,7 +1310,7 @@ export class WorkflowController {
         return {
           success: true,
           requiresApproval: true,
-          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport },
+          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport, verdict: parsedResult, dimensions: parsedDimensions },
           message: 'Review completed (auto-fix skipped due to prior exhaustion), awaiting user approval',
         };
       }
@@ -1311,7 +1321,7 @@ export class WorkflowController {
         return {
           success: true,
           requiresApproval: true,
-          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport },
+          output: { stage: Stage.Review, issueNumber: issue.number, reviewReport, verdict: parsedResult, dimensions: parsedDimensions },
           message: 'Review completed (no auto-fixable suggestions), awaiting user approval',
         };
       }
@@ -1369,6 +1379,48 @@ export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
     return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
   }
   return null;
+}
+
+export interface ParsedDimension {
+  name: string;
+  status: 'PASS' | 'FAIL';
+  issues?: string[];
+}
+
+const DIMENSION_RE = /^###\s+(\w[\w\s]*?):\s*(PASS|FAIL)\s*$/gim;
+
+export function parseDimensions(content: string): ParsedDimension[] {
+  const dimensions: ParsedDimension[] = [];
+  const matches: Array<{ name: string; status: 'PASS' | 'FAIL'; index: number; endIndex: number }> = [];
+
+  let m: RegExpExecArray | null;
+  while ((m = DIMENSION_RE.exec(content)) !== null) {
+    matches.push({
+      name: m[1].trim(),
+      status: m[2].toUpperCase() as 'PASS' | 'FAIL',
+      index: m.index + m[0].length,
+      endIndex: -1,
+    });
+  }
+
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index;
+    const end = i + 1 < matches.length ? matches[i + 1].index - matches[i + 1].name.length - matches[i + 1].status.length - 6 : content.length;
+    const section = content.slice(start, end);
+
+    const issues = section
+      .split('\n')
+      .filter(line => /^[-*]\s+/.test(line.trim()))
+      .map(line => line.trim().replace(/^[-*]\s+/, ''));
+
+    dimensions.push({
+      name: matches[i].name,
+      status: matches[i].status,
+      ...(issues.length > 0 ? { issues } : {}),
+    });
+  }
+
+  return dimensions;
 }
 
 export function extractFixSuggestions(content: string): string {
