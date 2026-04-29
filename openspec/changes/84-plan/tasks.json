@@ -82,10 +82,13 @@
         "T-001"
       ],
       "notes": "BASE_STEPS = ['proposal', 'specs', 'design', 'tasks', 'self-review']. PLAN_ROUND_LABELS already exists at line 73 as ['proposal.md', 'specs/', 'design.md', 'tasks.json', 'self-review']. The agentStatus query is already set up at line 215 with 5s polling. Initialization: when agentStatus has stage='plan' and taskProgress, build initial steps. The plan_round_complete handler should also increment completedCount.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        452097
+      ]
     },
     {
       "id": "T-004",
