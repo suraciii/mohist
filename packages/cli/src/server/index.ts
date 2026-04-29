@@ -260,7 +260,6 @@ async function main(): Promise<void> {
   eventBus.on('agent_completed', async ({ issueNumber }) => {
     log.info('Agent completed', { issueNumber });
   });
-  });
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
   server.serveStaticFiles(webDistDir);

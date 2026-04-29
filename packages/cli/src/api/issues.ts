@@ -429,7 +429,7 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = project?.path || process.cwd();
+      let worktreePath = process.cwd();
       if (worktreeManager && project) {
         worktreePath = await worktreeManager.create(project.path, project.name, issue.number, project.baseBranch);
       }
@@ -677,10 +677,10 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = project?.path || process.cwd();
+      let worktreePath = process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || project.path;
+        worktreePath = existingPath || process.cwd();
       }
 
       let isReviewRecovery = false;
@@ -958,10 +958,10 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = project?.path || process.cwd();
+      let worktreePath = process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || project.path;
+        worktreePath = existingPath || process.cwd();
       }
 
       const acpOptions: AcpConnectionOptions = {
@@ -1079,10 +1079,10 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = project?.path || process.cwd();
+      let worktreePath = process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || project.path;
+        worktreePath = existingPath || process.cwd();
       }
 
       const acpOptions: AcpConnectionOptions = {
@@ -1171,10 +1171,10 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = project?.path || process.cwd();
+      let worktreePath = process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || project.path;
+        worktreePath = existingPath || process.cwd();
       }
 
       issueService.createComment(issue.id, message);
@@ -1955,7 +1955,7 @@ export function createIssueRoutes(
       return;
     }
     const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
-    const worktreePath = worktreeManager!.getPath(project.name, issue.number) || project.path;
+    const worktreePath = worktreeManager!.getPath(project.name, issue.number) || process.cwd();
     issueService.createComment(issue.id, rebaseMessage);
     const acpOptions: AcpConnectionOptions = {
       cwd: worktreePath,
@@ -1977,10 +1977,10 @@ export function createIssueRoutes(
     );
   }
 
-  function handleBuildRebase(issue: Issue, project: { name: string; path: string }, number: number): void {
+  function handleBuildRebase(issue: Issue, project: { name: string }, number: number): void {
     if (!checkpointRepo) return;
     const changeDir = findChangeDir(
-      worktreeManager!.getPath(project.name, issue.number) || project.path,
+      worktreeManager!.getPath(project.name, issue.number) || process.cwd(),
       issue.number,
     );
     if (!changeDir) return;
