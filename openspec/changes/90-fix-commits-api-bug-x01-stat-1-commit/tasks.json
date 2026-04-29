@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix commits API parsing bug where \\x01 delimiter conflicts with --stat, causing only 1 commit with +0/-0 stats to be returned",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Only lines 1336-1346 need changes (format string and split delimiter). Lines 1348-1371 (stat parsing) stay the same."
+      "passes": true,
+      "notes": "Only lines 1336-1346 need changes (format string and split delimiter). Lines 1348-1371 (stat parsing) stay the same.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        84873
+      ]
     },
     {
       "id": "T-002",
@@ -35,9 +40,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "Test run output (no new test files expected unless existing tests exist for this endpoint)",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "The commits endpoint hits live git, so unit tests may be limited. The primary verification is that existing tests still pass and the build succeeds."
+      "notes": "The commits endpoint hits live git, so unit tests may be limited. The primary verification is that existing tests still pass and the build succeeds.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
