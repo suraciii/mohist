@@ -42,6 +42,13 @@ export interface RecoverableIssue {
   stage: string;
 }
 
+export interface BlockedIssueEntry {
+  issueNumber: number;
+  stage: string;
+  blockedReason: string | null;
+  retryCount: number;
+}
+
 export interface AgentStatus {
   running: boolean;
   issueId: string | null;
@@ -49,6 +56,7 @@ export interface AgentStatus {
   activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string; progress: AgentProgress }>;
   waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>;
   recoverableIssues: RecoverableIssue[];
+  blockedIssues: BlockedIssueEntry[];
   queueDepth: number;
   maxConcurrentAgents: number;
 }
@@ -458,11 +466,15 @@ export class AgentRunnerService {
     return this.activeAgents.size > 0;
   }
 
-  isRunningByNumber(issueNumber: number): boolean {
-    for (const agent of this.activeAgents.values()) {
-      if (agent.issueNumber === issueNumber) return true;
-    }
-    return false;
+  getBlockedIssues(): BlockedIssueEntry[] {
+    if (!this.issueRepo) return [];
+    return this.issueRepo.findAll({ status: IssueStatus.Blocked })
+      .map(issue => ({
+        issueNumber: issue.number,
+        stage: issue.stage,
+        blockedReason: issue.blockedReason ?? null,
+        retryCount: issue.retryCount ?? 0,
+      }));
   }
 
   getStatus(): AgentStatus {
@@ -493,6 +505,7 @@ export class AgentRunnerService {
       activeAgents: agents,
       waitingQuestions: waiting,
       recoverableIssues: this.recoverableIssues,
+      blockedIssues: this.getBlockedIssues(),
       queueDepth: 0,
       maxConcurrentAgents: this.maxConcurrentAgents,
     };

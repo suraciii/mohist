@@ -394,7 +394,7 @@ export function createIssueRoutes(
       if (issue.status === IssueStatus.Blocked) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is blocked. Run: mo issue reopen ${number}`
+          error: `Issue #${number} is blocked. Use retry to resume from checkpoint or restart to start over.`
         };
         return c.json(response, 400);
       }
@@ -671,6 +671,12 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
+      const issueRepo = stateManager.getIssueRepo();
+      if (issueRepo) {
+        issueRepo.updateBlockedReason(issue.id, null);
+        issueRepo.updateRetryCount(issue.id, 0);
+      }
+
       if (agentRunner && agentRunner.isRunning(issue.id)) {
         const response: ApiResponse = {
           success: false,
@@ -742,6 +748,169 @@ export function createIssueRoutes(
           message: isReviewRecovery
             ? `Issue #${number} reopened at review stage, use start to continue`
             : `Issue #${number} reopened`,
+        }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/retry', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (issue.status !== IssueStatus.Blocked) {
+        return c.json({ success: false, error: 'Issue is not blocked' } satisfies ApiResponse, 409);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        return c.json({ success: false, error: 'Agent is already running for this issue' } satisfies ApiResponse, 409);
+      }
+
+      const issueRepo = stateManager.getIssueRepo();
+      if (!issueRepo) {
+        return c.json({ success: false, error: 'IssueRepo not configured' } satisfies ApiResponse, 500);
+      }
+
+      issueRepo.updateBlockedReason(issue.id, null);
+      issueRepo.updateRetryCount(issue.id, 0);
+
+      const project = projectService.getById(projectId);
+      let worktreePath = process.cwd();
+      let hasCheckpoint = false;
+
+      if (worktreeManager && project) {
+        const existingPath = worktreeManager.getPath(project.name, issue.number);
+        if (existingPath) {
+          worktreePath = existingPath;
+          const changeDir = findChangeDir(worktreePath, issue.number);
+          if (changeDir) {
+            const tasksPath = path.join(changeDir, 'tasks.json');
+            if (fs.existsSync(tasksPath)) {
+              hasCheckpoint = true;
+            }
+          }
+        }
+      }
+
+      if (!hasCheckpoint) {
+        issueRepo.updateStage(issue.id, Stage.Backlog);
+        issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        issueRepo.clearApprovalState(issue.id);
+
+        const response: ApiResponse = {
+          success: true,
+          data: {
+            issue: issueRepo.findById(issue.id),
+            message: 'no checkpoint found, reset to draft',
+          }
+        };
+        return c.json(response);
+      }
+
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+      const updatedIssue = issueRepo.findById(issue.id);
+      if (!updatedIssue) {
+        return c.json({ success: false, error: 'Failed to refresh issue after retry' } satisfies ApiResponse, 500);
+      }
+
+      if (agentRunner) {
+        const acpOptions: AcpConnectionOptions = {
+          cwd: worktreePath,
+          issueId: updatedIssue.id,
+          projectId,
+          workflowLogRepo,
+          coderSessionRepo,
+          eventBus,
+          issueNumber: updatedIssue.number,
+          opencodeBinPath,
+          model: updatedIssue.model ?? undefined,
+          stage: updatedIssue.stage,
+        };
+
+        agentRunner.resumePipeline(
+          updatedIssue,
+          projectId,
+          issueRepo,
+          worktreePath,
+          acpOptions,
+          (issueId, status) => issueService.setStatus(issueId, status),
+        );
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          issue: updatedIssue,
+          message: 'retrying from checkpoint',
+        }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/restart', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (issue.status !== IssueStatus.Blocked) {
+        return c.json({ success: false, error: 'Issue is not blocked' } satisfies ApiResponse, 409);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        return c.json({ success: false, error: 'Agent is already running for this issue' } satisfies ApiResponse, 409);
+      }
+
+      const issueRepo = stateManager.getIssueRepo();
+      if (!issueRepo) {
+        return c.json({ success: false, error: 'IssueRepo not configured' } satisfies ApiResponse, 500);
+      }
+
+      issueRepo.updateStage(issue.id, Stage.Backlog);
+      issueRepo.updateBlockedReason(issue.id, null);
+      issueRepo.updateRetryCount(issue.id, 0);
+      issueRepo.clearApprovalState(issue.id);
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+      const updatedIssue = issueRepo.findById(issue.id);
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          issue: updatedIssue,
+          message: 'reset to draft, use start to begin again',
         }
       };
       return c.json(response);
