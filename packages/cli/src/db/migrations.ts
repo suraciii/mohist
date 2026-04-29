@@ -605,21 +605,44 @@ function migrateToVersion15(db: DatabaseManager): void {
   });
 }
 
+const CREATE_SKILLS_TABLE = `
+CREATE TABLE IF NOT EXISTS skills (
+  id          TEXT PRIMARY KEY,
+  name        TEXT UNIQUE NOT NULL,
+  project_id  TEXT NOT NULL REFERENCES projects(id),
+  description TEXT NOT NULL DEFAULT '',
+  prompt      TEXT NOT NULL DEFAULT '',
+  dir_path    TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+`;
+
+const CREATE_SKILL_RUNS_TABLE = `
+CREATE TABLE IF NOT EXISTS skill_runs (
+  id            TEXT PRIMARY KEY,
+  skill_id      TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  project_id    TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'running',
+  output        TEXT,
+  error         TEXT,
+  issue_id      TEXT REFERENCES issues(id),
+  started_at    TEXT NOT NULL,
+  completed_at  TEXT
+);
+`;
+
+const CREATE_SKILL_RUNS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_skill_runs_skill_id ON skill_runs(skill_id);',
+];
+
 function migrateToVersion16(db: DatabaseManager): void {
   db.transaction(() => {
-    const tableInfo = db.all<{ name: string }>(
-      "PRAGMA table_info(issues)"
-    );
-    const hasBlockedReason = tableInfo.some(col => col.name === 'blocked_reason');
-    const hasRetryCount = tableInfo.some(col => col.name === 'retry_count');
-
-    if (!hasBlockedReason) {
-      db.exec('ALTER TABLE issues ADD COLUMN blocked_reason TEXT DEFAULT NULL');
+    db.exec(CREATE_SKILLS_TABLE);
+    db.exec(CREATE_SKILL_RUNS_TABLE);
+    for (const indexSql of CREATE_SKILL_RUNS_INDEXES) {
+      db.exec(indexSql);
     }
-    if (!hasRetryCount) {
-      db.exec('ALTER TABLE issues ADD COLUMN retry_count INTEGER DEFAULT 0');
-    }
-
     setSchemaVersion(db, 16);
   });
 }
