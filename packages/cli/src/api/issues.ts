@@ -1338,7 +1338,7 @@ export function createIssueRoutes(
       const branchName = `mo/issue-${number}`;
       const logOutput = await execFileAsync(
         'git',
-        ['log', `${project.baseBranch}..${branchName}`, '--format=%h%x00%s%x00%an%x00%aI%x01', '--stat'],
+        ['log', `${project.baseBranch}..${branchName}`, '--format=----COMMIT----%h%x00%s%x00%an%x00%aI', '--stat'],
         { cwd: project.path }
       );
 
@@ -1346,7 +1346,7 @@ export function createIssueRoutes(
       const rawOutput = logOutput.stdout.trim();
 
       if (rawOutput) {
-        const entries = rawOutput.split('\x01').filter(e => e.trim());
+        const entries = rawOutput.split('----COMMIT----').filter(e => e.trim());
         for (const entry of entries) {
           const [headerLine, ...statLines] = entry.trim().split('\n');
           const parts = headerLine.split('\x00');
