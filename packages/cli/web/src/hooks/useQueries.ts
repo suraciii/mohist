@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { GeneralConfig } from '../lib/types'
+import type { WorktreeStatus } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
@@ -187,53 +187,6 @@ export function useStatus() {
   })
 }
 
-export function useConfig() {
-  return useQuery<GeneralConfig, Error>({
-    queryKey: ['config'],
-    queryFn: () => api.getConfig(),
-  })
-}
-
-interface UpdateConfigContext {
-  previousConfig?: GeneralConfig
-}
-
-const CONFIG_KEY_TO_PROPERTY: Record<string, keyof GeneralConfig> = {
-  'agent.timeout': 'agentTimeout',
-  'agent.maxConcurrent': 'maxConcurrentAgents',
-  'poll.interval': 'pollInterval',
-}
-
-export function useUpdateConfig() {
-  const queryClient = useQueryClient()
-
-  return useMutation<GeneralConfig, Error, { key: string; value: number }, UpdateConfigContext>({
-    mutationFn: ({ key, value }) => api.updateConfig(key, value),
-    onMutate: async ({ key, value }) => {
-      await queryClient.cancelQueries({ queryKey: ['config'] })
-      const previousConfig = queryClient.getQueryData<GeneralConfig>(['config'])
-
-      const prop = CONFIG_KEY_TO_PROPERTY[key]
-      if (prop) {
-        queryClient.setQueryData<GeneralConfig>(['config'], (old) => {
-          if (!old) return old
-          return { ...old, [prop]: value }
-        })
-      }
-
-      return { previousConfig }
-    },
-    onError: (_err, _variables, context) => {
-      if (context?.previousConfig) {
-        queryClient.setQueryData(['config'], context.previousConfig)
-      }
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['config'] })
-    },
-  })
-}
-
 export function useProviders() {
   return useQuery<Provider[], Error>({
     queryKey: ['providers'],
@@ -321,6 +274,14 @@ export interface TestProviderVariables {
 export function useTestProvider() {
   return useMutation<{ success: boolean }, Error, TestProviderVariables>({
     mutationFn: ({ data }) => providerApi.testProvider(data),
+  })
+}
+
+export function useWorktreeStatus(issueNumber: number) {
+  return useQuery<WorktreeStatus>({
+    queryKey: ['worktree-status', issueNumber],
+    queryFn: () => api.getWorktreeStatus(issueNumber),
+    enabled: issueNumber > 0,
   })
 }
 
