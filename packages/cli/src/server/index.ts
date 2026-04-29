@@ -25,6 +25,7 @@ import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime
 import type { MergeEntry } from '../git/merge-queue';
 import { Log } from '../util/log';
 
+
 import { load as loadConfig, getServerConfig, getLogConfig, resolveOpencodeBinPath } from '../config/config-loader';
 import { RateLimiter } from '../utils/rate-limiter';
 import * as fs from 'fs';
@@ -256,18 +257,9 @@ async function main(): Promise<void> {
   }));
   server.addRouter('/api/logs', createLogRoutes());
 
-  eventBus.on('agent_completed', ({ issueNumber, projectId }) => {
-    try {
-      const project = projectService.getById(projectId);
-      if (!project || !worktreeManager) return;
-
-      if (!worktreeManager.exists(project.name, issueNumber)) return;
-
-      log.info('Enqueueing completed issue for merge', { issueNumber, projectId });
-      mergeQueue.enqueue(projectId, issueNumber);
-    } catch (err) {
-      log.error('Merge enqueue error', { issueNumber, error: err instanceof Error ? err.message : String(err) });
-    }
+  eventBus.on('agent_completed', async ({ issueNumber }) => {
+    log.info('Agent completed', { issueNumber });
+  });
   });
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
