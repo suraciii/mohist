@@ -52,11 +52,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Reuses existing hooks: useCoderSessions, useSessionTimeline, useIssue. The issue title comes from useIssue(issueNumber). The session stage/model/duration come from CoderSessionItem fields. ConversationRound can be defined inline in this file.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        327917
+      ]
     },
     {
       "id": "T-003",
