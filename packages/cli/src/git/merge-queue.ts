@@ -28,6 +28,7 @@ interface MergeQueueDeps {
   worktreeManager: WorktreeManager;
   eventBus: EventBus;
   issueRepo: IssueRepo;
+  isAgentRunning?: (issueNumber: number) => boolean;
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
   resolveConflicts: (entry: MergeEntry, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>;
   fixBuildErrors: (entry: MergeEntry, worktreePath: string, buildOutput: string) => Promise<{ success: boolean; error?: string }>;
@@ -119,6 +120,11 @@ export class MergeQueue {
 
     for (const issue of issues) {
       if (this.queue.has(issue.number)) continue;
+
+      if (this.deps.isAgentRunning?.(issue.number)) {
+        log.info('Skipping recovery: agent is running for issue', { issueNumber: issue.number });
+        continue;
+      }
 
       this.deps.issueRepo.setMergeState(issue.id, MergeState.Pending);
 

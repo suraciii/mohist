@@ -952,7 +952,7 @@ export function createIssueRoutes(
         nextStage = Stage.Build;
       }
 
-      let resumedIssue = issue;
+      let resumedIssue = issueRepo.findById(issue.id) ?? issue;
       if (nextStage) {
         resumedIssue = issueRepo.updateStage(issue.id, nextStage)!;
       }
