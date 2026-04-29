@@ -8,7 +8,7 @@ import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { ChildProcess } from 'child_process';
 import { WorkflowController, type PipelineResult } from '../workflow/workflow-controller';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
-import { IssueStatus, type Issue } from '../types';
+import { IssueStatus, MergeState, type Issue } from '../types';
 import { EventBus } from './event-bus';
 import { Stage } from '../types';
 import { load } from '../config/config-loader';
@@ -480,7 +480,8 @@ export class AgentRunnerService {
     const promise = (async () => {
       try {
         const artifactManager = new ChangeArtifactsManager(worktreePath);
-        const pipeline = new WorkflowController({
+
+        const controllerOptions: import('../workflow/workflow-controller').WorkflowControllerOptions = {
           artifactManager,
           worktreePath,
           issueRepo,
@@ -499,7 +500,116 @@ export class AgentRunnerService {
             if (agent) agent.childProcess = proc;
           },
           commentRepo: this.commentRepo,
-        });
+        };
+
+        if (this.worktreeManager && this.projectRepo) {
+          controllerOptions.mergeBackFn = async (issueNumber: number) => {
+            const project = this.projectRepo!.findById(projectId);
+            if (!project) {
+              return { success: false, message: `Project not found: ${projectId}` };
+            }
+            return this.worktreeManager!.mergeBack(project.path, project.name, issueNumber, project.baseBranch);
+          };
+
+          controllerOptions.onMergeConflictFn = async (issueNumber: number) => {
+            const project = this.projectRepo!.findById(projectId);
+            if (!project) {
+              log.error('onMergeConflict: project not found', { projectId });
+              issueRepo.setMergeState(issue.id, MergeState.Blocked);
+              return;
+            }
+
+            if (!this.worktreeManager!.exists(project.name, issueNumber)) {
+              log.error('onMergeConflict: worktree not found', { issueNumber, projectName: project.name });
+              issueRepo.setMergeState(issue.id, MergeState.Blocked);
+              return;
+            }
+
+            const reverseResult = await this.worktreeManager!.mergeMasterInWorktree(
+              project.name, issueNumber, project.baseBranch,
+            );
+
+            if (!reverseResult.success && !reverseResult.conflictFiles) {
+              log.error('onMergeConflict: reverse merge failed with no conflicts', {
+                issueNumber,
+                message: reverseResult.message,
+              });
+              issueRepo.setMergeState(issue.id, MergeState.Blocked);
+              this.eventBus.emit('merge_blocked', {
+                issueId: issue.id,
+                projectId,
+                issueNumber,
+                conflictingFiles: [],
+                retryCount: 0,
+              });
+              return;
+            }
+
+            const currentIssue = issueRepo.findById(issue.id);
+            if (!currentIssue) {
+              log.error('onMergeConflict: issue not found', { issueId: issue.id });
+              return;
+            }
+
+            const currentRetryCount = (currentIssue.conflictRetryCount ?? 0) + 1;
+            issueRepo.updateConflictRetryCount(issue.id, currentRetryCount);
+
+            if (currentRetryCount >= 3) {
+              issueRepo.setMergeState(issue.id, MergeState.Blocked);
+              this.eventBus.emit('merge_blocked', {
+                issueId: issue.id,
+                projectId,
+                issueNumber,
+                conflictingFiles: reverseResult.conflictFiles ?? [],
+                retryCount: currentRetryCount,
+              });
+              log.warn('onMergeConflict: max retries reached, blocked', {
+                issueNumber,
+                retryCount: currentRetryCount,
+              });
+              return;
+            }
+
+            issueRepo.update(issue.id, { stage: Stage.Build, status: IssueStatus.Active });
+            issueRepo.setMergeState(issue.id, MergeState.Resolving);
+            issueRepo.clearApprovalState(issue.id);
+
+            const wtPath = this.worktreeManager!.getPath(project.name, issueNumber);
+            if (!wtPath) {
+              log.error('onMergeConflict: worktree path not found after reverse-merge', { issueNumber });
+              return;
+            }
+
+            const conflictFiles = reverseResult.conflictFiles ?? [];
+            this.eventBus.emit('merge_conflict_requiring_resolution', {
+              issueId: issue.id,
+              projectId,
+              conflictFiles,
+            });
+            log.info('onMergeConflict: conflict resolution initiated', {
+              issueNumber,
+              conflictFiles,
+              retryCount: currentRetryCount,
+            });
+
+            const refreshedIssue = issueRepo.findById(issue.id);
+            if (!refreshedIssue) return;
+
+            this.startPipeline(
+              refreshedIssue,
+              projectId,
+              issueRepo,
+              wtPath,
+              {
+                ...acpOptions,
+                cwd: wtPath,
+              },
+              updateIssueStatus,
+            );
+          };
+        }
+
+        const pipeline = new WorkflowController(controllerOptions);
 
         const result: PipelineResult = await pipeline.run(issue, acpOptions);
 
