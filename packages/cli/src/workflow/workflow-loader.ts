@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { findChangeDir } from '../openspec/detector';
+import { load as loadConfig, getAgentTimeoutConfig } from '../config/config-loader';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'workflow' });
@@ -36,32 +37,27 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
       prompt:
         '探索 issue #{issue.number}: {issue.title}，分析问题背景和 codebase',
       approval: false,
-      timeout: 600,
     },
     {
       stage: 'plan',
       prompt:
         '基于探索结果，为 issue #{issue.number}: {issue.title} 制定实现计划',
       approval: true,
-      timeout: 600,
     },
     {
       stage: 'build',
       prompt: '实现 {issue.title}，按 plan 阶段的计划进行',
       approval: false,
-      timeout: 7200,
     },
     {
       stage: 'review',
       prompt: '审查实现成果，检查功能正确性和代码质量',
       approval: true,
-      timeout: 600,
     },
     {
       stage: 'done',
       prompt: '标记 issue #{issue.number} 为已完成',
       approval: false,
-      timeout: 300,
     },
   ],
   source: 'builtin',
@@ -108,17 +104,31 @@ export function loadWorkflow(cwd: string): WorkflowConfig | string {
     path.join(cwd, '.mohist', 'workflow.yaml'),
   ];
 
+  let workflow: WorkflowConfig | undefined;
+
   for (const candidate of candidates) {
     const result = parseWorkflowFile(candidate);
     if (result === 'ENOENT') continue;
     if (typeof result === 'string') {
       log.warn('Workflow file error, falling back to default', { error: result });
-      return DEFAULT_WORKFLOW;
+      workflow = DEFAULT_WORKFLOW;
+      break;
     }
-    return result;
+    workflow = result;
+    break;
   }
 
-  return DEFAULT_WORKFLOW;
+  if (!workflow) {
+    workflow = DEFAULT_WORKFLOW;
+  }
+
+  const { stageTimeout } = getAgentTimeoutConfig(loadConfig());
+  workflow.stages = workflow.stages.map((s) => ({
+    ...s,
+    timeout: s.timeout ?? stageTimeout,
+  }));
+
+  return workflow;
 }
 
 export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSpecDetection {
