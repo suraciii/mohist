@@ -110,11 +110,14 @@
         "T-001",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "这是最后一步——确保 T-001 和 T-003 的 pipeline 内 merge 逻辑已完整替代此处功能后再移除。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        80691
+      ]
     },
     {
       "id": "T-005",
