@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Review 审查体验优化：结构化 verdict、阶段差异化审查、修复闭环",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "See D1 in design.md. Regex: /###\\s+(\\w[\\w\\s]*?):\\s*(PASS|FAIL)/gim. After each dimension match, collect subsequent bullet lines as issues until next dimension header or section header."
+      "passes": true,
+      "notes": "See D1 in design.md. Regex: /###\\s+(\\w[\\w\\s]*?):\\s*(PASS|FAIL)/gim. After each dimension match, collect subsequent bullet lines as issues until next dimension header or section header.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        486623
+      ]
     },
     {
       "id": "T-002",
@@ -40,9 +45,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "See D2 in design.md. Use existing readReportFile helper. Add truncate helper for 5000 char cap."
+      "notes": "See D2 in design.md. Use existing readReportFile helper. Add truncate helper for 5000 char cap.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -58,9 +68,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Type Alignment between backend types/index.ts ApprovalState.output (unknown) and frontend typed interface."
+      "notes": "Type Alignment between backend types/index.ts ApprovalState.output (unknown) and frontend typed interface.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -83,9 +98,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ReviewSummary.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "react-markdown ^10.1.0 is already in web/package.json. Use existing Tailwind utility classes matching the project style."
+      "notes": "react-markdown ^10.1.0 is already in web/package.json. Use existing Tailwind utility classes matching the project style.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -105,9 +125,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/PlanApprovalPanel.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Follow component patterns from MergeStatePanel.tsx / QuestionPanel.tsx for props style."
+      "notes": "Follow component patterns from MergeStatePanel.tsx / QuestionPanel.tsx for props style.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -132,9 +157,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ReviewApprovalPanel.tsx",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "See reject-and-fix spec for message formats. Use existing useSendMessage hook pattern from IssueDetailPage."
+      "notes": "See reject-and-fix spec for message formats. Use existing useSendMessage hook pattern from IssueDetailPage.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -158,9 +188,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-005", "T-006"],
+      "dependsOn": [
+        "T-005",
+        "T-006"
+      ],
       "passes": false,
-      "notes": "Keep the rebase functionality — it should remain accessible but not dominate the approval panel. Move it into the panel components or keep as a separate section below."
+      "notes": "Keep the rebase functionality — it should remain accessible but not dominate the approval panel. Move it into the panel components or keep as a separate section below.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -179,9 +215,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/parse-dimensions.test.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Follow test patterns from self-review.test.ts and review-auto-fix.test.ts."
+      "notes": "Follow test patterns from self-review.test.ts and review-auto-fix.test.ts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
