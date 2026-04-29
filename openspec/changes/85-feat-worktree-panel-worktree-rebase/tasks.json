@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add getWorktreeStatus() to WorktreeManager",
+      "spec": "specs/worktree-manager/spec.md#WorktreeManager-支持-worktree-状态查询",
+      "description": "Add a `getWorktreeStatus(projectPath, projectName, issueNumber, baseBranch)` method to WorktreeManager that uses `git rev-list --left-right --count <baseBranch>...<issueBranch>` to compute ahead/behind counts. Returns `{ exists, branch, ahead, behind, canFastForward, isRebaseInProgress }`. Reuse existing `isRebaseInProgress()` and `exists()` methods. Export a `WorktreeStatus` interface.",
+      "acceptanceCriteria": [
+        "getWorktreeStatus returns { exists: true, branch, ahead, behind, canFastForward, isRebaseInProgress } for existing worktree",
+        "getWorktreeStatus returns { exists: false, branch: '', ahead: 0, behind: 0, canFastForward: false, isRebaseInProgress: false } when worktree does not exist",
+        "canFastForward is derived as behind === 0",
+        "WorktreeStatus interface is exported",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Design D4: use git rev-list --left-right --count. The three-dot syntax (baseBranch...issueBranch) gives left=ahead, right=behind.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        108629
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Add GET worktree-status endpoint and rebase queue to API",
+      "spec": "specs/http-api/spec.md#API-提供-worktree-状态查询端点",
+      "description": "Add `GET /:number/worktree-status` route in createIssueRoutes that calls worktreeManager.getWorktreeStatus(). Then modify the existing `POST /:number/rebase` route to accept a `queue` query param: when agent is running and queue=true, store entry in an in-memory Map and return `{ queued: true }`. Register an `agent_completed` EventBus listener in createIssueRoutes that checks the queue map and triggers the existing rebase logic for queued entries. When queue=true but agent is not running, execute rebase directly.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/worktree-status returns 200 with { exists, branch, ahead, behind, canFastForward, isRebaseInProgress } when worktree exists",
+        "GET /api/issues/:number/worktree-status returns 200 with { exists: false, ... } when worktree does not exist",
+        "GET /api/issues/:number/worktree-status returns 404 when issue does not exist",
+        "POST /rebase?queue=true returns { queued: true } when agent is running and stage supports rebase",
+        "POST /rebase?queue=true executes rebase directly when agent is not running",
+        "POST /rebase?queue=true returns 400 when stage is backlog/explore",
+        "POST /rebase (no queue) returns 409 when agent is running (existing behavior preserved)",
+        "Queued rebase auto-executes after agent_completed event fires",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "Design D3: queue is an in-memory Map<number, {issueNumber, projectId}> in createIssueRoutes closure. The agent_completed listener checks and drains queued entries.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "Add frontend API methods and useWorktreeStatus hook",
+      "spec": "specs/web-ui/spec.md#前端提供-useWorktreeStatus-hook",
+      "description": "Add `getWorktreeStatus(number)` method to api.ts calling `GET /api/issues/:number/worktree-status`. Extend `rebaseIssue(number)` to accept optional `{ queue: boolean }` param, appending `?queue=true` query param when set. Add `useWorktreeStatus(issueNumber)` hook in useQueries.ts with queryKey `['worktree-status', issueNumber]`, enabled only when issueNumber > 0. Add `['worktree-status', issueNumber]` invalidation to SSE rebase_completed and rebase_conflict handlers in useSSE.tsx.",
+      "acceptanceCriteria": [
+        "api.getWorktreeStatus(number) sends GET /api/issues/:number/worktree-status and returns WorktreeStatus",
+        "api.rebaseIssue(number, { queue: true }) sends POST /api/issues/:number/rebase?queue=true",
+        "api.rebaseIssue(number) without options works as before (backward compatible)",
+        "useWorktreeStatus(issueNumber) uses queryKey ['worktree-status', issueNumber]",
+        "SSE rebase_completed/rebase_conflict events invalidate ['worktree-status'] queries",
+        "Typecheck passes: cd packages/cli/web && npx tsc --noEmit"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts, packages/cli/web/src/hooks/useSSE.tsx",
+      "dependsOn": [
+        "T-002"
+      ],
+      "notes": "Design D5: no polling for useWorktreeStatus, SSE-driven refresh only. The hook follows existing useIssue pattern in useQueries.ts.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "Create WorktreePanel component",
+      "spec": "specs/worktree-panel/spec.md#WorktreePanel-显示-worktree-git-状态",
+      "description": "Create WorktreePanel.tsx component that displays branch name, ahead/behind status (Up to date in green, behind in amber, ahead count), and a rebase button. Button shows 'Rebase onto master' when agent is idle, 'Rebase after completion' when agent is running (passing queue=true). Display rebase result feedback (success/info/error/queued). Show SSE rebase progress (rebase_started, rebase_progress, rebase_completed, rebase_conflict). Props: issueNumber, isAgentRunning. Uses useWorktreeStatus hook.",
+      "acceptanceCriteria": [
+        "Panel shows branch name from useWorktreeStatus",
+        "ahead=0, behind=0 shows green 'Up to date' indicator",
+        "behind>0 shows amber 'N commits behind master' with highlighted rebase button",
+        "ahead>0 shows 'N commits ahead of master'",
+        "Combined ahead+behind shows 'N ahead, M behind master'",
+        "Agent idle: button says 'Rebase onto master', calls rebaseIssue without queue",
+        "Agent running: button says 'Rebase after completion', calls rebaseIssue with { queue: true }",
+        "Rebase result feedback: success (green), info/up-to-date (blue), error/conflicts (red with file list), queued (blue)",
+        "SSE rebase events update panel progress state",
+        "Typecheck passes: cd packages/cli/web && npx tsc --noEmit"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/WorktreePanel.tsx",
+      "dependsOn": [
+        "T-003"
+      ],
+      "notes": "Follow existing panel styling (rounded-md border, space-y-4 sidebar layout). The component is self-contained with all hooks internal.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-005",
+      "title": "Integrate WorktreePanel and remove stage-specific rebase buttons",
+      "spec": "specs/worktree-panel/spec.md#移除-stage-specific-rebase-按钮",
+      "description": "In IssueDetailPage.tsx: (1) Import and render WorktreePanel after MergeStatePanel, before Review Report. Pass issueNumber and isAgentRunning props. (2) Remove the Build stage rebase button block (~line 639-659). (3) Remove the Review approval gate rebase button block (~line 798-831). (4) Remove the Plan approval gate rebase button block (~line 850-882). (5) Remove the standalone rebaseResult display in Actions panel (~line 743-758). (6) Remove rebaseResult state and rebaseMutation (now handled inside WorktreePanel). Do NOT touch MergeStatePanel.",
+      "acceptanceCriteria": [
+        "WorktreePanel renders in sidebar after MergeStatePanel, before Review Report section",
+        "No 'Rebase onto master' button exists in Actions panel for Build stage",
+        "No rebase button exists inside Plan approval gate section",
+        "No rebase button exists inside Review approval gate section",
+        "No rebaseResult state or rebaseMutation in IssueDetailPage",
+        "MergeStatePanel 'Rebase and Retry' button is unchanged",
+        "WorktreePanel is visible for all stages with worktrees (plan/build/review/done, including interrupted)",
+        "WorktreePanel is hidden for backlog/explore stages",
+        "Typecheck passes: cd packages/cli/web && npx tsc --noEmit"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": [
+        "T-004"
+      ],
+      "notes": "Design D1: panel order is Details → Pipeline Interrupted → Actions → MergeStatePanel → WorktreePanel → Review Report → Approval Required. Design D2: visibility driven by worktree-status API response { exists }.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-006",
+      "title": "Build and verify all changes compile",
+      "spec": "",
+      "description": "Run full typecheck on both backend and frontend to verify no type errors. Run backend build to verify compilation. Check that the existing test suite still passes.",
+      "acceptanceCriteria": [
+        "cd packages/cli && npx tsc --noEmit passes (backend)",
+        "cd packages/cli/web && npx tsc --noEmit passes (frontend)",
+        "cd packages/cli && npm run build succeeds",
+        "cd packages/cli && npm test passes (existing tests not broken)"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Build verification output",
+      "dependsOn": [
+        "T-005"
+      ],
+      "notes": "",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
