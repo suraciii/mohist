@@ -19,7 +19,7 @@
       "id": "T-001",
       "title": "Rewrite detectBaseBranch with multi-level probe (async and sync versions)",
       "spec": "specs/base-branch-resolution/spec.md",
-      "description": "Rewrite detectBaseBranch() in src/git/detect-base-branch.ts and detectBaseBranchSync() in src/db/migrations.ts to use multi-level probe: origin/HEAD → origin/main → origin/master → HEAD branch → 'main'. Each level checks existence before returning.",
+      "description": "Rewrite detectBaseBranch() in src/git/detect-base-branch.ts and detectBaseBranchSync() in src/db/migrations.ts to use multi-level probe: origin/HEAD \u2192 origin/main \u2192 origin/master \u2192 HEAD branch \u2192 'main'. Each level checks existence before returning.",
       "acceptanceCriteria": [
         "detectBaseBranch returns 'master' when origin/HEAD points to master",
         "detectBaseBranch returns 'main' when origin/HEAD fails but origin/main exists",
