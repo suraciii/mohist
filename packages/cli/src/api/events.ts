@@ -23,6 +23,7 @@ const ALL_EVENT_TYPES: EventName[] = [
   'ralph_loop_progress',
   'plan_round_start',
   'plan_session_update',
+  'plan_round_complete',
   'merge_queued',
   'merge_started',
   'merge_completed',
