@@ -104,6 +104,15 @@ export interface RebaseResult {
   conflicts: string[];
 }
 
+export interface WorktreeStatus {
+  exists: boolean;
+  branch: string;
+  ahead: number;
+  behind: number;
+  canFastForward: boolean;
+  isRebaseInProgress: boolean;
+}
+
 export class WorktreeManager {
 
   async create(
@@ -383,6 +392,58 @@ export class WorktreeManager {
       return fs.existsSync(path.resolve(gitDir, 'rebase-merge')) || fs.existsSync(path.resolve(gitDir, 'rebase-apply'));
     } catch {
       return false;
+    }
+  }
+
+  async getWorktreeStatus(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<WorktreeStatus> {
+    const empty: WorktreeStatus = {
+      exists: false,
+      branch: '',
+      ahead: 0,
+      behind: 0,
+      canFastForward: false,
+      isRebaseInProgress: false,
+    };
+
+    if (!this.exists(projectName, issueNumber)) {
+      return empty;
+    }
+
+    const branch = getBranchName(issueNumber);
+    const rebaseInProgress = await this.isRebaseInProgress(projectName, issueNumber);
+
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['rev-list', '--left-right', '--count', `${baseBranch}...${branch}`],
+        { cwd: projectPath }
+      );
+      const parts = stdout.trim().split('\t');
+      const behind = parseInt(parts[0], 10) || 0;
+      const ahead = parseInt(parts[1], 10) || 0;
+
+      return {
+        exists: true,
+        branch,
+        ahead,
+        behind,
+        canFastForward: behind === 0,
+        isRebaseInProgress: rebaseInProgress,
+      };
+    } catch {
+      return {
+        exists: true,
+        branch,
+        ahead: 0,
+        behind: 0,
+        canFastForward: false,
+        isRebaseInProgress: rebaseInProgress,
+      };
     }
   }
 
