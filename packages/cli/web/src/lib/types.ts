@@ -41,6 +41,7 @@ export interface Issue {
   approvalState?: ApprovalState
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
   priority?: string | null
+  model?: string | null
 }
 
 export interface Project {
