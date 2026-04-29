@@ -2140,8 +2140,8 @@ export function createIssueRoutes(
 
       const retried = mergeQueue.retry(number);
       if (!retried) {
-        const queueEntry = mergeQueue.getStatus().find(e => e.issueNumber === number);
-        const currentState = queueEntry?.mergeState ?? 'unknown';
+        const dbIssue = issueService.getByNumber(projectId, number);
+        const currentState = dbIssue?.mergeState ?? 'none';
         return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (current state: ${currentState}; retryable: build-failed, conflict, blocked)` } satisfies ApiResponse, 409);
       }
 

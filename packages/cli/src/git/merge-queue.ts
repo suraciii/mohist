@@ -80,10 +80,30 @@ export class MergeQueue {
   }
 
   retry(issueNumber: number): boolean {
-    const entry = this.queue.get(issueNumber);
+    let entry = this.queue.get(issueNumber);
+
     if (!entry) {
-      log.warn('retry: entry not found in queue', { issueNumber });
-      return false;
+      const dbIssue = this.deps.issueRepo.findByMergeStates([
+        MergeState.BuildFailed,
+        MergeState.Conflict,
+        MergeState.Blocked,
+      ]).find(i => i.number === issueNumber);
+
+      if (!dbIssue) {
+        log.warn('retry: issue not found in queue or DB', { issueNumber });
+        return false;
+      }
+
+      entry = {
+        issueNumber: dbIssue.number,
+        projectId: dbIssue.projectId,
+        issueId: dbIssue.id,
+        mergeState: dbIssue.mergeState as MergeState,
+        enqueuedAt: Date.now(),
+      };
+
+      this.queue.set(issueNumber, entry);
+      log.info('retry: recovered entry from DB', { issueNumber, previousState: dbIssue.mergeState });
     }
 
     if (entry.mergeState !== MergeState.BuildFailed && entry.mergeState !== MergeState.Conflict && entry.mergeState !== MergeState.Blocked) {
@@ -307,6 +327,8 @@ export class MergeQueue {
 
     entry.mergeState = MergeState.Merged;
     this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
+
+    this.queue.delete(entry.issueNumber);
 
     this.deps.eventBus.emit('merge_completed', {
       issueId: entry.issueId,
