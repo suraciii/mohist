@@ -43,11 +43,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The commits endpoint hits live git, so unit tests may be limited. The primary verification is that existing tests still pass and the build succeeds.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        101001
+      ]
     }
   ]
 }
