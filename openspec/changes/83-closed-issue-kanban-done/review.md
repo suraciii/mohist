@@ -6,33 +6,38 @@
 
 ### Correctness: PASS
 
-- `groupIssuesByStage` correctly routes `status=Closed` to Done without mutating backend `stage`. `filterClosedFromDone` returns the original array reference when `showClosed=true` (identity — good for re-render avoidance).
+- `groupIssuesByStage` correctly routes `status=Closed` to Done via display-only redirect. Backend `stage` field is never mutated.
+- `filterClosedFromDone` returns the original array reference when `showClosed=true` — identity check avoids unnecessary re-renders.
 - TypeScript types are correct. Typecheck passes with zero errors.
 - `getDoneColumnCounts` safely handles missing Done column with `?? []`.
-- Mobile tab bar uses `columns` (unfiltered) for counts — correct per spec.
+- Mobile tab bar uses `columns` (unfiltered) for counts — correct per spec requirement.
 - Desktop `StageColumn` receives `displayCount` for Done column showing total count (including closed) while rendering filtered issues.
-- No off-by-one errors.
+- `getBadgeType` priority ordering is correct: conflict → blocked → closed → approval → running. Each status maps to exactly one badge type.
+- Overlay logic properly removed from IssueCard — no `isClosed` variable, no `opacity-50`, no `absolute inset-0` overlay div.
+
+**Warning:** `APPROVAL_STAGES` constant at `IssueCard.tsx:8` is exported but never imported by any other file — dead code. Not an error but should be cleaned up.
 
 ### Complexity: PASS
 
-- `kanban-grouping.ts`: 3 functions, all under 15 lines, cyclomatic complexity ≤ 3.
-- `KanbanBoard.tsx`: grouping logic extracted to module — simpler and testable.
-- `StageColumn.tsx`: `displayCount` prop is a 1-line addition.
-- `IssueCard.tsx`: badge logic has clear priority ordering in `getBadgeType`.
+- `kanban-grouping.ts`: 3 exported functions, all under 15 lines, cyclomatic complexity ≤ 3 per function.
+- `KanbanBoard.tsx`: grouping logic cleanly extracted to `kanban-grouping` module — component is focused on UI rendering.
+- `StageColumn.tsx`: `displayCount` prop is a minimal addition (1 line at line 36).
+- `IssueCard.tsx`: badge logic is a simple priority chain in `getBadgeType` — clear and maintainable.
 - No duplicated code.
 
 ### Test Coverage: PASS
 
 - 11 tests covering all three exported functions in `kanban-grouping.ts`:
-  - `groupIssuesByStage`: 4 tests (empty, active grouping, closed routing, mixed)
-  - `filterClosedFromDone`: 3 tests (show=true identity, show=false filtering, non-Done unaffected)
+  - `groupIssuesByStage`: 5 tests (empty, active grouping, closed routing from multiple stages, non-closed unaffected, mixed)
+  - `filterClosedFromDone`: 3 tests (show=true identity, show=false filtering, non-Done columns unaffected)
   - `getDoneColumnCounts`: 3 tests (empty, mixed counts, all completed)
-- All tests pass.
-- IssueCard visual changes are UI-only (badge rendering) — no untested logic branches.
+- All 11 tests pass.
+- IssueCard visual changes are UI-only (badge rendering, overlay removal) — no untested logic branches.
+- Pre-existing failures (9 in `SettingsPage.test.tsx`) are unrelated — caused by missing Router context, not introduced by this change.
 
 ### Security: PASS
 
-- Pure frontend UI changes. No external inputs, no injection risks, no secrets.
+- Pure frontend UI changes. No external inputs, no injection risks, no secrets exposed.
 
 ### Spec Compliance: PASS
 
@@ -56,10 +61,10 @@
 | Show closed toggle 默认关闭，Done 列不显示 closed issue | PASS — `useState(false)` at `KanbanBoard.tsx:14` |
 | 开启 toggle 后 Done 列显示 closed issue | PASS — `filterClosedFromDone` returns unfiltered columns when `showClosed=true` |
 | Done 列中 Completed 等 non-Closed issue 不受 toggle 影响 | PASS — filter only removes `status === Closed`; test confirms Completed remains |
-| Toggle 状态不持久化 | PASS — `useState(false)` with no persistence |
+| Toggle 状态不持久化 | PASS — `useState(false)` with no localStorage/sessionStorage |
 | 移动端 tab bar 和桌面端列头 count 包含 closed issue | PASS — mobile uses `columns` (unfiltered) at line 62/85; desktop uses `displayCount` override at line 112 |
 | Typecheck passes | PASS |
 
 ## Fix Suggestions
 
-None.
+1. `packages/cli/web/src/components/IssueCard.tsx:8` — Remove dead `APPROVAL_STAGES` export (imported nowhere). Low priority, no functional impact.
