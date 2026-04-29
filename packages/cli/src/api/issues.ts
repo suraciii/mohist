@@ -950,8 +950,6 @@ export function createIssueRoutes(
       let nextStage: Stage | undefined;
       if (approvalStage === Stage.Plan) {
         nextStage = Stage.Build;
-      } else if (approvalStage === Stage.Review) {
-        nextStage = Stage.Done;
       }
 
       let resumedIssue = issue;
