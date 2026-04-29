@@ -791,9 +791,8 @@ export function IssueDetailPage() {
                 }
                 return (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                    <h2 className="text-sm font-semibold text-amber-800 mb-2">Approval Required</h2>
                     <p className="text-xs text-amber-600 mb-3">
-                      The agent completed the previous stage. Approve to continue.
+                      The agent completed the previous stage and is waiting for approval.
                     </p>
                     <button
                       onClick={() => approveMutation.mutate()}
@@ -804,7 +803,7 @@ export function IssueDetailPage() {
                         ? 'Approving...'
                         : isAgentRunningOnThis
                           ? 'Agent running...'
-                          : 'Approve & Continue'}
+                          : 'Approve'}
                     </button>
                     {approveMutation.error && (
                       <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
@@ -817,9 +816,8 @@ export function IssueDetailPage() {
 
               {isApprovalGate && !approvalOutput && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <h2 className="text-sm font-semibold text-amber-800 mb-2">Approval Required</h2>
                   <p className="text-xs text-amber-600 mb-3">
-                    The agent completed the previous stage. Approve to continue.
+                    The agent completed the previous stage and is waiting for approval.
                   </p>
                   <button
                     onClick={() => approveMutation.mutate()}
@@ -830,7 +828,7 @@ export function IssueDetailPage() {
                       ? 'Approving...'
                       : isAgentRunningOnThis
                         ? 'Agent running...'
-                        : 'Approve & Continue'}
+                        : 'Approve'}
                   </button>
                   {approveMutation.error && (
                     <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
