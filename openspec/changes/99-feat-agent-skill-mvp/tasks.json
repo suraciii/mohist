@@ -51,11 +51,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow IssueRepo patterns: rowToX mapping function, CreateXData interface, DatabaseManager injection.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        296113
+      ]
     },
     {
       "id": "T-003",
