@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Unify Files/Commits tabs into Changes tab with GitHub PR-style inline diff review",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Design D1: server-side patch splitting. Use git diff --numstat + git diff (two commands). Split on /^diff --git/ boundary."
+      "passes": true,
+      "notes": "Design D1: server-side patch splitting. Use git diff --numstat + git diff (two commands). Split on /^diff --git/ boundary.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        224436
+      ]
     },
     {
       "id": "T-002",
@@ -46,7 +51,10 @@
       "output": "packages/cli/web/src/components/DiffViewer.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "Design D2: lightweight inline parser (~50 lines). Type: { type: 'hunk'|'add'|'del'|'context', content, oldLine?, newLine? }. Export parseDiff() and DiffViewer component."
+      "notes": "Design D2: lightweight inline parser (~50 lines). Type: { type: 'hunk'|'add'|'del'|'context', content, oldLine?, newLine? }. Export parseDiff() and DiffViewer component.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -64,9 +72,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Backend response shape must be known first (T-001). Files: types.ts, api.ts, useQueries.ts."
+      "notes": "Backend response shape must be known first (T-001). Files: types.ts, api.ts, useQueries.ts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -90,9 +103,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-002", "T-003"],
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Design D3: noise regex /^(chore\\(tasks\\)|WIP|chore: commit remaining)/i. Design D4: client-side case-insensitive substring filter. Design D5: useState for sub-view, not URL params. Reuse existing CommitRow for individual commits, replace CommitDiffView with DiffViewer."
+      "notes": "Design D3: noise regex /^(chore\\(tasks\\)|WIP|chore: commit remaining)/i. Design D4: client-side case-insensitive substring filter. Design D5: useState for sub-view, not URL params. Reuse existing CommitRow for individual commits, replace CommitDiffView with DiffViewer.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
