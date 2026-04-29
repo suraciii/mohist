@@ -23,7 +23,6 @@ const ALL_EVENT_TYPES: EventName[] = [
   'ralph_loop_progress',
   'plan_round_start',
   'plan_session_update',
-  'plan_round_complete',
   'merge_queued',
   'merge_started',
   'merge_completed',
@@ -39,7 +38,9 @@ const ALL_EVENT_TYPES: EventName[] = [
   'rebase_progress',
   'rebase_completed',
   'rebase_conflict',
-  'agent_blocked',
+  'skill_started',
+  'skill_completed',
+  'skill_failed',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {
