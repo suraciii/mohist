@@ -1,12 +1,12 @@
 import { useMemo, useState, useEffect } from 'react'
 import type { Issue, AgentStatus } from '../lib/types'
-import { Stage } from '../lib/types'
+import { Stage, IssueStatus } from '../lib/types'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 
 const STAGES: { key: Stage; label: string }[] = [
   { key: Stage.Backlog, label: 'Backlog' },
- { key: Stage.Plan, label: 'Plan' },
+  { key: Stage.Plan, label: 'Plan' },
   { key: Stage.Build, label: 'Build' },
   { key: Stage.Review, label: 'Review' },
   { key: Stage.Done, label: 'Done' },
@@ -18,11 +18,15 @@ interface Props {
 }
 
 export function KanbanBoard({ issues, agentStatus }: Props) {
+  const [showClosed, setShowClosed] = useState(false)
+
   const columns = useMemo(() => {
     const map = new Map<Stage, Issue[]>()
     for (const s of STAGES) map.set(s.key, [])
     for (const issue of issues) {
-      const list = map.get(issue.stage)
+      const targetStage =
+        issue.status === IssueStatus.Closed ? Stage.Done : issue.stage
+      const list = map.get(targetStage)
       if (list) list.push(issue)
     }
     return STAGES.map((s) => ({
@@ -30,6 +34,20 @@ export function KanbanBoard({ issues, agentStatus }: Props) {
       issues: map.get(s.key) ?? [],
     }))
   }, [issues])
+
+  const displayedColumns = useMemo(() => {
+    if (showClosed) return columns
+    return columns.map((col) =>
+      col.key === Stage.Done
+        ? {
+            ...col,
+            issues: col.issues.filter(
+              (i) => i.status !== IssueStatus.Closed,
+            ),
+          }
+        : col,
+    )
+  }, [columns, showClosed])
 
   const defaultStage = useMemo(() => {
     const withIssues = columns.find((c) => c.issues.length > 0)
@@ -42,10 +60,28 @@ export function KanbanBoard({ issues, agentStatus }: Props) {
     setSelectedStage(defaultStage)
   }, [defaultStage])
 
-  const selectedColumn = columns.find((c) => c.key === selectedStage) ?? columns[0]
+  const selectedColumn = displayedColumns.find((c) => c.key === selectedStage) ?? displayedColumns[0]
+  const doneColumn = columns.find((c) => c.key === Stage.Done)
 
   return (
     <>
+      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white">
+        <span className="text-xs text-gray-400">
+          {doneColumn && doneColumn.issues.length > 0
+            ? `${doneColumn.issues.filter((i) => i.status === IssueStatus.Closed).length} closed issue${doneColumn.issues.filter((i) => i.status === IssueStatus.Closed).length !== 1 ? 's' : ''} in Done`
+            : ''}
+        </span>
+        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showClosed}
+            onChange={(e) => setShowClosed(e.target.checked)}
+            className="rounded border-gray-300 text-gray-600 focus:ring-gray-400"
+          />
+          Show closed
+        </label>
+      </div>
+
       <div className="md:hidden flex flex-col h-[calc(100vh-4rem)]">
         <div className="flex overflow-x-auto snap-x snap-mandatory border-b border-gray-200 bg-white px-2 shrink-0">
           {columns.map((col) => (
@@ -91,7 +127,7 @@ export function KanbanBoard({ issues, agentStatus }: Props) {
       </div>
 
       <div className="hidden md:flex gap-4 overflow-x-auto p-4 h-[calc(100vh-4rem)]">
-        {columns.map((col) => (
+        {displayedColumns.map((col) => (
           <StageColumn
             key={col.key}
             label={col.label}
