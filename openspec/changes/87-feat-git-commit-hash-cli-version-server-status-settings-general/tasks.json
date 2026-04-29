@@ -69,11 +69,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Also touches packages/cli/src/server/index.ts",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        137495
+      ]
     },
     {
       "id": "T-004",
