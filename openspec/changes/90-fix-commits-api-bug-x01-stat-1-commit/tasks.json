@@ -1,0 +1,43 @@
+{
+  "project": "mohist",
+  "description": "Fix commits API parsing bug where \\x01 delimiter conflicts with --stat, causing only 1 commit with +0/-0 stats to be returned",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix git log delimiter and parsing in commits endpoint",
+      "spec": "specs/http-api/spec.md#requirement-commits-api-返回完整的-commit-列表及正确的统计信息",
+      "description": "In packages/cli/src/api/issues.ts, change the git log format string from `--format=%h%x00%s%x00%an%x00%aI\\x01` to `--format=----COMMIT----%h%x00%s%x00%an%x00%aI`. Update the split from `\\x01` to `----COMMIT----`, keeping the existing `.filter(e => e.trim())` to skip the empty leading entry. The stat parsing regex logic stays the same.",
+      "acceptanceCriteria": [
+        "git log format uses ----COMMIT---- delimiter instead of \\x01",
+        "Split uses '----COMMIT----' instead of '\\x01'",
+        "Build passes: cd packages/cli && npm run build",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Only lines 1336-1346 need changes (format string and split delimiter). Lines 1348-1371 (stat parsing) stay the same."
+    },
+    {
+      "id": "T-002",
+      "title": "Verify fix with existing and edge-case tests",
+      "spec": "specs/http-api/spec.md#requirement-commits-api-返回完整的-commit-列表及正确的统计信息",
+      "description": "Run the existing test suite to verify the fix doesn't break anything. Check if there are existing tests for the commits endpoint; if not, note that manual verification is needed against a real repo with known commits.",
+      "acceptanceCriteria": [
+        "cd packages/cli && npm test passes",
+        "All existing tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Test run output (no new test files expected unless existing tests exist for this endpoint)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The commits endpoint hits live git, so unit tests may be limited. The primary verification is that existing tests still pass and the build succeeds."
+    }
+  ]
+}
