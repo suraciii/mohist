@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile, CommitEntry } from '../lib/types'
@@ -7,6 +7,7 @@ import { api, ApiError } from '../lib/api'
 import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
+import { NotFoundPage } from './NotFoundPage'
 import { IssueModelSelector } from './IssueModelSelector'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
@@ -277,16 +278,7 @@ export function IssueDetailPage() {
   }
 
   if (isError) {
-    return (
-      <div className="flex items-center justify-center flex-1">
-        <div className="text-center">
-          <div className="text-gray-400 text-lg mb-4">Page not found</div>
-          <Link to="/" className="text-blue-600 hover:text-blue-700 text-sm">
-            Back to board
-          </Link>
-        </div>
-      </div>
-    )
+    return <NotFoundPage />
   }
 
   if (isLoading || !issue) {
