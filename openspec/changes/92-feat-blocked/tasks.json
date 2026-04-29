@@ -48,11 +48,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "EventBus EventMap 和前端 EventMap 都需要添加。参考 merge_blocked 事件的模式。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        47834
+      ]
     },
     {
       "id": "T-003",
