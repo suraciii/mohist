@@ -20,14 +20,15 @@
       "dependsOn": [],
       "passes": true,
       "notes": "当前 Bug: getBadgeType() 对 IssueStatus.Blocked 返回 'closed'，导致 Blocked 和 Closed 视觉混淆。需要修改 BadgeType union、getBadgeType()、Badge 组件、以及移除 overlay 逻辑。",
-      "attempts": 4,
+      "attempts": 5,
       "order": 999999,
       "error": null,
       "durations": [
         228184,
         89093,
         61086,
-        93808
+        93808,
+        84889
       ]
     },
     {
@@ -53,7 +54,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "T-001 先完成是因为 KanbanBoard 过滤依赖 IssueCard 正确渲染 Blocked/Closed 状态。分组逻辑在 useMemo 中通过检查 issue.status === IssueStatus.Closed 实现。过滤后的 issue 数组传给 StageColumn。按 design.md D4，tab/column count 反映包含 closed 的总数。",
       "attempts": 4,
       "order": 999999,
