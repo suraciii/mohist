@@ -18,6 +18,7 @@ export type EventMap = {
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number };
   plan_round_start: { issueId: string; projectId: string; roundType: string; roundLabel: string; roundIndex: number; acpSessionId?: string; coderSessionId?: string };
   plan_session_update: { issueId: string; projectId: string; roundType: string; roundIndex: number; sessionUpdate: string; data: unknown; acpSessionId?: string; coderSessionId?: string };
+  plan_round_complete: { issueId: string; projectId: string; roundType: string; roundIndex: number; roundLabel?: string; verdict?: string; duration?: number };
   'config:providers:changed': { providers: Array<{ id: string; name?: string; apiKey?: string; baseURL?: string; sdk?: string; models?: string[] }> };
   build_stage_started: { issueId: string; projectId: string; stage: 'build'; changePath: string; tasksCount: number; timestamp: string };
   build_tasks_snapshot: { issueId: string; projectId: string; total: number; pending: number; passed: number };
@@ -40,7 +41,7 @@ export type EventMap = {
   rebase_started: { issueId: string; projectId: string; issueNumber: number };
   rebase_progress: { issueId: string; projectId: string; issueNumber: number; step: string };
   rebase_completed: { issueId: string; projectId: string; issueNumber: number; rebased: boolean };
-  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[] };
+  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[]; status?: string };
   agent_blocked: { issueId: string; projectId: string; issueNumber: number; blockedReason: string; retryCount: number };
 };
 

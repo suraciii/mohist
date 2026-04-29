@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { WorktreeStatus, GeneralConfig } from '../lib/types'
+import type { GeneralConfig } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
@@ -278,10 +278,17 @@ export function useTestProvider() {
 }
 
 export function useWorktreeStatus(issueNumber: number) {
-  return useQuery<WorktreeStatus>({
+  return useQuery<{
+    exists: boolean
+    branch: string
+    ahead: number
+    behind: number
+    canFastForward: boolean
+    isRebaseInProgress: boolean
+  } | null>({
     queryKey: ['worktree-status', issueNumber],
-    queryFn: () => api.getWorktreeStatus(issueNumber),
-    enabled: issueNumber > 0,
+    queryFn: async () => null,
+    enabled: false,
   })
 }
 
