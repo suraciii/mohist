@@ -145,11 +145,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The new timeout keys live in config.jsonc (per design D1), NOT in SQLite. ConfigService.getConfig() should call getAgentTimeoutConfig() from config-loader.ts and merge the result. The Config types in src/types.ts may need updating to include the new fields. The PUT handler should use writeConfig() from config-loader.ts for these keys.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        247293
+      ]
     }
   ]
 }
