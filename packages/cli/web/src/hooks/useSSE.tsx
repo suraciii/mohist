@@ -109,6 +109,10 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           case 'rebase_completed':
           case 'rebase_conflict': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
+            const { issueNumber: rn } = parsed as { issueNumber: number }
+            if (rn) {
+              queryClient.invalidateQueries({ queryKey: ['worktree-status', rn] })
+            }
             break
           }
         }
