@@ -108,11 +108,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This modifies three existing files: SessionHeader.tsx, SessionDetail.tsx, SessionList.tsx. The session page route must exist first (T-003) so the Link targets are valid. SessionDetail's summary computation: iterate session.workflowLogs, count eventType 'tool_call' where data contains edit/write kind for file changes, count all 'tool_call' events for total.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        184776
+      ]
     }
   ]
 }
