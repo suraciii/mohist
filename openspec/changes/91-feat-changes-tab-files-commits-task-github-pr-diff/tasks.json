@@ -78,11 +78,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Backend response shape must be known first (T-001). Files: types.ts, api.ts, useQueries.ts.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        53912
+      ]
     },
     {
       "id": "T-004",
