@@ -51,10 +51,13 @@
         "T-001"
       ],
       "notes": "Design D3: queue is an in-memory Map<number, {issueNumber, projectId}> in createIssueRoutes closure. The agent_completed listener checks and drains queued entries.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        235673
+      ]
     },
     {
       "id": "T-003",
