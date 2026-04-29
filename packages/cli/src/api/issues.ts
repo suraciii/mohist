@@ -262,7 +262,7 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const { title, body, addLabels, removeLabels, priority } = await c.req.json();
+      const { title, body, addLabels, removeLabels, priority, model } = await c.req.json();
 
       if (priority !== undefined && !VALID_PRIORITIES.includes(priority as Priority)) {
         const response: ApiResponse = {
@@ -272,11 +272,20 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const updateData: Partial<{ title: string; body: string; labels: string[]; priority: Priority }> = {};
+      if (model !== undefined && model !== null && typeof model === 'string' && !model.includes('/')) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Invalid model format'
+        };
+        return c.json(response, 400);
+      }
+
+      const updateData: Partial<{ title: string; body: string; labels: string[]; priority: Priority; model: string | null }> = {};
       
       if (title !== undefined) updateData.title = title;
       if (body !== undefined) updateData.body = body;
       if (priority !== undefined) updateData.priority = priority;
+      if (model !== undefined) updateData.model = model;
       
       if (addLabels || removeLabels) {
         let currentLabels = [...issue.labels];

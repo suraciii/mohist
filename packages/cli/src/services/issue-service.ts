@@ -129,7 +129,7 @@ export class IssueService {
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Closed);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; priority: Priority }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; priority: Priority; model: string | null }>): Issue | null {
     return this.issueRepo.update(issueId, data);
   }
 
