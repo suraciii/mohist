@@ -1,6 +1,7 @@
 import type { CoderSessionItem } from '../lib/types'
 import { useSessionTimeline } from '../hooks/useSessionTimeline'
 import { RoundSection } from './SessionTimeline'
+import { PlanProgressPanel } from './PlanProgressPanel'
 
 interface SessionDetailProps {
   session: CoderSessionItem
@@ -9,7 +10,7 @@ interface SessionDetailProps {
 }
 
 export function SessionDetail({ session, issueNumber, isLive }: SessionDetailProps) {
-  const { rounds, isStreaming, isLoading } = useSessionTimeline(issueNumber, session)
+  const { rounds, isStreaming, isLoading, planProgress } = useSessionTimeline(issueNumber, session)
 
   if (isLoading) {
     return (
@@ -31,6 +32,9 @@ export function SessionDetail({ session, issueNumber, isLive }: SessionDetailPro
 
   return (
     <div className="px-3 py-3 space-y-2 border-t border-gray-100 max-h-[400px] overflow-y-auto">
+      {planProgress && planProgress.steps.length > 0 && (
+        <PlanProgressPanel planProgress={planProgress} />
+      )}
       {rounds.map((round) => (
         <RoundSection
           key={`${round.roundIndex}-${round.label}`}
