@@ -172,6 +172,20 @@ export function getLogConfig(config: ConfigInfo): LogConfig {
   };
 }
 
+export interface AgentTimeoutConfig {
+  taskTimeout: number;
+  stageTimeout: number;
+  maxGracePeriods: number;
+}
+
+export function getAgentTimeoutConfig(config: ConfigInfo): AgentTimeoutConfig {
+  return {
+    taskTimeout: config.agent?.taskTimeout ?? 600,
+    stageTimeout: config.agent?.stageTimeout ?? 3600,
+    maxGracePeriods: config.agent?.maxGracePeriods ?? 2,
+  };
+}
+
 export function resolveOpencodeBinPath(config?: ConfigInfo): string | undefined {
   const envPath = process.env['OPENCODE_BIN_PATH'];
   if (envPath) {

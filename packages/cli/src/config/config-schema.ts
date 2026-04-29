@@ -24,7 +24,59 @@ export const ConfigInfoSchema = z.object({
   agent: z.object({
     timeout: z.number().optional(),
     maxConcurrent: z.number().optional(),
-  }).strip().optional(),
+    taskTimeout: z.number().optional(),
+    stageTimeout: z.number().optional(),
+    maxGracePeriods: z.number().optional(),
+  }).superRefine((agent, ctx) => {
+    if (agent.taskTimeout !== undefined) {
+      if (agent.taskTimeout < 60) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['taskTimeout'],
+          message: 'taskTimeout must be at least 60 seconds',
+        });
+      }
+      if (agent.taskTimeout > 7200) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['taskTimeout'],
+          message: 'taskTimeout must be at most 7200 seconds (2 hours)',
+        });
+      }
+    }
+    if (agent.stageTimeout !== undefined) {
+      if (agent.stageTimeout < 300) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['stageTimeout'],
+          message: 'stageTimeout must be at least 300 seconds (5 minutes)',
+        });
+      }
+      if (agent.stageTimeout > 86400) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['stageTimeout'],
+          message: 'stageTimeout must be at most 86400 seconds (24 hours)',
+        });
+      }
+    }
+    if (agent.maxGracePeriods !== undefined) {
+      if (agent.maxGracePeriods < 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['maxGracePeriods'],
+          message: 'maxGracePeriods must be at least 0',
+        });
+      }
+      if (agent.maxGracePeriods > 10) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['maxGracePeriods'],
+          message: 'maxGracePeriods must be at most 10',
+        });
+      }
+    }
+  }).optional(),
   log: z.object({
     level: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR']).optional(),
   }).strip().optional(),
