@@ -73,15 +73,8 @@ export namespace Log {
   export async function init(options: Options) {
     if (options.level) level = options.level
     await cleanup()
-    if (options.print) {
-      printMode = true
-      write = (msg: any) => {
-        process.stderr.write(msg)
-        return msg.length
-      }
-      return
-    }
-    printMode = false
+    printMode = options.print
+
     logpath = path.join(
       LOG_DIR,
       options.dev ? "dev.log" : `${LOG_PREFIX}-${formatLocalDate()}${LOG_SUFFIX}`,
@@ -91,6 +84,16 @@ export namespace Log {
       await fs.truncate(logpath).catch(() => {})
     }
     const stream = createWriteStream(logpath, { flags: "a" })
+
+    if (options.print) {
+      write = (msg: any) => {
+        process.stderr.write(msg)
+        stream.write(msg)
+        return msg.length
+      }
+      return
+    }
+
     write = async (msg: any) => {
       return new Promise((resolve, reject) => {
         stream.write(msg, (err) => {
