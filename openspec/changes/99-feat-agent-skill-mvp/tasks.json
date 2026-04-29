@@ -76,11 +76,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Independent of DB tasks — can run in parallel with T-001/T-002.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        68248
+      ]
     },
     {
       "id": "T-004",
