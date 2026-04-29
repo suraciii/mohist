@@ -51,10 +51,13 @@
         "T-001"
       ],
       "notes": "The emitProgress method already exists at workflow-controller.ts:95 but is never called from runPlanStage. Key call sites: after line 266 (artifact round success), after line 321 (self-review PASS), after line 322 (self-review FAIL), after line 360 (auto-fix complete), after line 421 (re-self-review complete), around line 125 (checkpoint resume). Duration tracking: store Date.now() before each round's prompt(), compute diff after.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        504691
+      ]
     },
     {
       "id": "T-003",
