@@ -109,11 +109,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use Popover from @headlessui/react (already a dependency). The selector is simpler than IssueModelSelector: no recent models, no provider grouping, just a flat searchable list of model strings.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        338111
+      ]
     },
     {
       "id": "T-005",
