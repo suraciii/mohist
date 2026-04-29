@@ -18,14 +18,15 @@
       "type": "WRITE",
       "output": "packages/cli/src/git/worktree-manager.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Design D4: use git rev-list --left-right --count. The three-dot syntax (baseBranch...issueBranch) gives left=ahead, right=behind.",
-      "attempts": 2,
+      "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
         108629,
-        153646
+        153646,
+        109482
       ]
     },
     {
