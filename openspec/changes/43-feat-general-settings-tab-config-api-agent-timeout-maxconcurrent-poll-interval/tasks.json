@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Wire the General Settings tab to the backend config API, adding frontend types, API client, hooks, and form UI for agent.timeout / maxConcurrent / poll.interval",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,14 @@
       "type": "WRITE",
       "output": "src/api/config.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow design D1: replace { key, value } response with configService.getConfig() result"
+      "passes": true,
+      "notes": "Follow design D1: replace { key, value } response with configService.getConfig() result",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        55600
+      ]
     },
     {
       "id": "T-002",
@@ -39,9 +44,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "web/src/lib/types.ts, web/src/lib/api.ts, web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Query key: ['config']. Follow useSaveProvider pattern for optimistic updates."
+      "notes": "Query key: ['config']. Follow useSaveProvider pattern for optimistic updates.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +72,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "web/src/components/GeneralSettingsSection.tsx, web/src/components/SettingsPage.tsx",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Follow design D2 (extract standalone component), D4 (per-field save), D5 (display units in state). Match existing SettingsPage styling (Tailwind classes, gray-50 backgrounds)."
+      "notes": "Follow design D2 (extract standalone component), D4 (per-field save), D5 (display units in state). Match existing SettingsPage styling (Tailwind classes, gray-50 backgrounds).",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -83,9 +98,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "web/tests/SettingsPage.test.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Mock the useConfig and useUpdateConfig hooks in tests. Follow existing test patterns in SettingsPage.test.tsx."
+      "notes": "Mock the useConfig and useUpdateConfig hooks in tests. Follow existing test patterns in SettingsPage.test.tsx.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
