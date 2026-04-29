@@ -360,6 +360,7 @@ export class WorkflowController {
             issueNumber: issue.number,
             selfReviewNotes: selfReviewReport,
             verdict,
+            artifacts: readPlanArtifacts(changeDir),
           },
           message: 'Plan completed, awaiting user approval',
         };
@@ -402,6 +403,7 @@ export class WorkflowController {
             issueNumber: issue.number,
             selfReviewNotes: selfReviewReport,
             verdict,
+            artifacts: readPlanArtifacts(changeDir),
           },
           message: `Auto-fix failed: ${autoFixResult.error ?? 'unknown error'}. Awaiting user approval`,
         };
@@ -455,6 +457,7 @@ export class WorkflowController {
             issueNumber: issue.number,
             selfReviewNotes: selfReviewReport,
             verdict,
+            artifacts: readPlanArtifacts(changeDir),
           },
           message: `Auto-fix succeeded but re-self-review failed: ${reSelfReviewResult.error ?? 'unknown error'}. Awaiting user approval`,
         };
@@ -487,6 +490,7 @@ export class WorkflowController {
             issueNumber: issue.number,
             selfReviewNotes: recheckReport,
             verdict: recheckVerdict,
+            artifacts: readPlanArtifacts(changeDir),
           },
           message: 'Auto-fix succeeded, re-self-review passed. Awaiting user approval',
         };
@@ -500,6 +504,7 @@ export class WorkflowController {
           issueNumber: issue.number,
           selfReviewNotes: recheckReport ?? selfReviewReport,
           verdict: recheckVerdict,
+          artifacts: readPlanArtifacts(changeDir),
         },
         message: 'Auto-fix attempted but re-self-review still FAIL. Awaiting user approval',
       };
@@ -1421,6 +1426,60 @@ export function parseDimensions(content: string): ParsedDimension[] {
   }
 
   return dimensions;
+}
+
+const ARTIFACT_CONTENT_CAP = 5000;
+
+export interface PlanArtifact {
+  name: string;
+  path: string;
+  content: string;
+}
+
+function readPlanArtifacts(changeDir: string): PlanArtifact[] {
+  const artifacts: PlanArtifact[] = [];
+
+  const files = [
+    { name: 'proposal.md', filePath: path.join(changeDir, 'proposal.md') },
+    { name: 'design.md', filePath: path.join(changeDir, 'design.md') },
+    { name: 'tasks.json', filePath: path.join(changeDir, 'tasks.json') },
+  ];
+
+  for (const { name, filePath } of files) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const content = raw.length > ARTIFACT_CONTENT_CAP
+        ? raw.slice(0, ARTIFACT_CONTENT_CAP) + '\n... (truncated)'
+        : raw;
+      artifacts.push({ name, path: path.relative(changeDir, filePath), content });
+    } catch {
+      // omit missing artifacts
+    }
+  }
+
+  const specsDir = path.join(changeDir, 'specs');
+  try {
+    if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
+      const entries = fs.readdirSync(specsDir).filter(f => f.endsWith('.md') || f.endsWith('.json'));
+      for (const entry of entries) {
+        const filePath = path.join(specsDir, entry);
+        try {
+          const raw = fs.readFileSync(filePath, 'utf-8');
+          const content = raw.length > ARTIFACT_CONTENT_CAP
+            ? raw.slice(0, ARTIFACT_CONTENT_CAP) + '\n... (truncated)'
+            : raw;
+          artifacts.push({ name: entry, path: path.relative(changeDir, filePath), content });
+        } catch {
+          // omit unreadable spec files
+        }
+      }
+    }
+  } catch {
+    // specs dir not readable
+  }
+
+  return artifacts;
 }
 
 export function extractFixSuggestions(content: string): string {
