@@ -213,6 +213,14 @@ export const api = {
   getTasks: (number: number) =>
     request<{ version: number; tasks: import('./types').Task[] }>(`/issues/${number}/tasks`),
 
+  getConfig: () => request<import('./types').GeneralConfig>('/config'),
+
+  updateConfig: (key: string, value: number) =>
+    request<import('./types').GeneralConfig>(`/config/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    }),
+
   getLogTail: (cursor?: number, limit?: number, maxBytes?: number) => {
     const search = new URLSearchParams()
     if (cursor != null) search.set('cursor', String(cursor))
