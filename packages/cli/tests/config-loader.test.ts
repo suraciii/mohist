@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { load, getProviderConfig, writeConfig, clearConfigCache } from '../src/config/config-loader';
-import type { ConfigInfo } from '../src/config/config-schema';
+import { load, getProviderConfig, writeConfig, clearConfigCache, getAgentTimeoutConfig } from '../src/config/config-loader';
+import { ConfigInfoSchema, type ConfigInfo } from '../src/config/config-schema';
 import { clearBuiltinProvidersCache } from '../src/config/builtin-providers';
 
 describe('ConfigLoader', () => {
@@ -287,6 +287,107 @@ describe('ConfigLoader', () => {
       const secondLoad = load(configPath);
       expect(secondLoad.model).toBe('second/model');
       expect(secondLoad._version).toBeGreaterThan(version!);
+    });
+  });
+
+  describe('getAgentTimeoutConfig', () => {
+    it('should return explicit values when all fields are set', () => {
+      const config: ConfigInfo = {
+        agent: { taskTimeout: 900, stageTimeout: 7200, maxGracePeriods: 5 },
+      };
+      const result = getAgentTimeoutConfig(config);
+      expect(result).toEqual({ taskTimeout: 900, stageTimeout: 7200, maxGracePeriods: 5 });
+    });
+
+    it('should return partial value with defaults for unset fields', () => {
+      const config: ConfigInfo = {
+        agent: { taskTimeout: 1200 },
+      };
+      const result = getAgentTimeoutConfig(config);
+      expect(result).toEqual({ taskTimeout: 1200, stageTimeout: 3600, maxGracePeriods: 2 });
+    });
+
+    it('should return all defaults when agent section is missing', () => {
+      const config: ConfigInfo = {};
+      const result = getAgentTimeoutConfig(config);
+      expect(result).toEqual({ taskTimeout: 600, stageTimeout: 3600, maxGracePeriods: 2 });
+    });
+
+    it('should return all defaults when config file does not exist', () => {
+      const config = load(path.join(tmpDir, 'nonexistent.jsonc'));
+      const result = getAgentTimeoutConfig(config);
+      expect(result).toEqual({ taskTimeout: 600, stageTimeout: 3600, maxGracePeriods: 2 });
+    });
+
+    it('should return all defaults when agent is empty object', () => {
+      const config: ConfigInfo = { agent: {} };
+      const result = getAgentTimeoutConfig(config);
+      expect(result).toEqual({ taskTimeout: 600, stageTimeout: 3600, maxGracePeriods: 2 });
+    });
+  });
+
+  describe('agent timeout schema validation', () => {
+    it('should reject negative taskTimeout', () => {
+      const result = ConfigInfoSchema.safeParse({
+        agent: { taskTimeout: -100 },
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('agent.taskTimeout');
+      }
+    });
+
+    it('should reject taskTimeout exceeding maximum', () => {
+      const result = ConfigInfoSchema.safeParse({
+        agent: { taskTimeout: 99999 },
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('agent.taskTimeout');
+      }
+    });
+
+    it('should reject stageTimeout exceeding maximum', () => {
+      const result = ConfigInfoSchema.safeParse({
+        agent: { stageTimeout: 200000 },
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('agent.stageTimeout');
+      }
+    });
+
+    it('should reject negative maxGracePeriods', () => {
+      const result = ConfigInfoSchema.safeParse({
+        agent: { maxGracePeriods: -1 },
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const paths = result.error.issues.map((i) => i.path.join('.'));
+        expect(paths).toContain('agent.maxGracePeriods');
+      }
+    });
+
+    it('should reject taskTimeout below minimum via file load', () => {
+      fs.writeFileSync(configPath, `{ "agent": { "taskTimeout": 30 } }`);
+      expect(() => load(configPath)).toThrow('taskTimeout');
+    });
+
+    it('should accept valid timeout values at boundary', () => {
+      const result = ConfigInfoSchema.safeParse({
+        agent: { taskTimeout: 60, stageTimeout: 300, maxGracePeriods: 0 },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept valid timeout values at upper boundary', () => {
+      const result = ConfigInfoSchema.safeParse({
+        agent: { taskTimeout: 7200, stageTimeout: 86400, maxGracePeriods: 10 },
+      });
+      expect(result.success).toBe(true);
     });
   });
 });
