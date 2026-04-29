@@ -29,23 +29,20 @@ export interface InstallMode {
 export function detectInstallMode(): InstallMode {
   const nodePath = process.execPath;
 
-  const distCliCommandsDir = __dirname;
-  const distDir = path.resolve(distCliCommandsDir, '..');
-  const srcCliDir = path.resolve(distDir, '..');
-  const cliDir = path.resolve(srcCliDir, '..');
-  const packagesCliDir = path.resolve(cliDir, '..');
+  const commandsDir = __dirname;
+  const cliPkgDir = path.resolve(commandsDir, '..', '..', '..');
 
-  const binMoServer = path.join(packagesCliDir, 'bin', 'mo-server');
+  const binMoServer = path.join(cliPkgDir, 'bin', 'mo-server');
   if (fs.existsSync(binMoServer)) {
-    const repoRoot = path.resolve(packagesCliDir, '..');
+    const repoRoot = path.resolve(cliPkgDir, '..', '..');
     return {
       nodePath,
-      scriptPath: path.join(packagesCliDir, 'bin', 'mo-server'),
+      scriptPath: binMoServer,
       workingDir: repoRoot,
     };
   }
 
-  const globalScriptPath = path.resolve(distCliCommandsDir, '..', '..', 'bin', 'mo-server');
+  const globalScriptPath = path.join(cliPkgDir, 'bin', 'mo-server');
   return {
     nodePath,
     scriptPath: globalScriptPath,
@@ -156,9 +153,10 @@ export function runLinger(): void {
     });
   } catch (err: any) {
     const stderr: string = err.stderr?.toString() || '';
-    if (!stderr.includes('already') && !stderr.includes('Failed to enable linger')) {
+    if (stderr.includes('already enabled') || stderr.includes('Already enabled')) {
       return;
     }
+    console.log(chalk.yellow(`Warning: could not enable linger: ${stderr.trim()}`));
   }
 }
 
@@ -169,7 +167,7 @@ export function getSystemdStatus(): SystemdStatus | null {
     const mainPIDMatch = output.match(/^MainPID=(\d+)$/m);
 
     const loadedMatch = output.match(/^Loaded=(.+)$/m);
-    if (loadedMatch && loadedMatch[1].trim() === '') {
+    if (!loadedMatch || loadedMatch[1].startsWith('not-loaded') || loadedMatch[1].trim() === '') {
       return null;
     }
 
