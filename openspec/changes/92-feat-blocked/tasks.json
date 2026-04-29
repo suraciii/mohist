@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "DB migration + Issue 类型 + IssueRepo 扩展",
+      "spec": "specs/local-issue-store/spec.md",
+      "description": "Schema v16 migration 增加 blocked_reason TEXT 和 retry_count INTEGER 列到 issues 表。Issue interface 增加 blockedReason?: string 和 retryCount?: number 字段。IssueRepo 增加 blockIssue(id, reason)、updateBlockedReason(id, reason)、updateRetryCount(id, count) 方法。rowToIssue 映射新列。通用 update() 方法支持新字段。",
+      "acceptanceCriteria": [
+        "Schema version 升级到 16，issues 表新增 blocked_reason 和 retry_count 列",
+        "Issue interface 包含 blockedReason?: string 和 retryCount?: number",
+        "IssueRepo.blockIssue(id, reason) 同时设置 status=Blocked 和 blocked_reason",
+        "IssueRepo.updateBlockedReason(id, null) 清除 reason",
+        "IssueRepo.updateRetryCount(id, count) 更新重试计数",
+        "rowToIssue 正确映射新列（null → undefined）",
+        "npm run typecheck passes",
+        "npm run build passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/migrations.ts, packages/cli/src/types/index.ts, packages/cli/src/db/issue-repo.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "参考现有 migrateToVersion15 模式新增 migrateToVersion16。IssueRepo.update() 的 data 类型也需要扩展以支持 blockedReason 和 retryCount。",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        194155
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "EventBus 增加 agent_blocked 事件 + SSE 注册",
+      "spec": "specs/blocked-recovery-api/spec.md#agent_blocked",
+      "description": "EventBus EventMap 增加 agent_blocked 事件类型，payload 包含 { issueId, projectId, issueNumber, blockedReason, retryCount }。SSE events.ts 的 ALL_EVENT_TYPES 数组增加 'agent_blocked'。前端 types.ts 的 EventMap 也增加对应类型。",
+      "acceptanceCriteria": [
+        "EventMap 包含 agent_blocked 事件，payload 有 issueId/projectId/issueNumber/blockedReason/retryCount",
+        "ALL_EVENT_TYPES 包含 'agent_blocked'",
+        "前端 EventMap 包含 agent_blocked 类型",
+        "npm run typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts, packages/cli/web/src/lib/types.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "EventBus EventMap 和前端 EventMap 都需要添加。参考 merge_blocked 事件的模式。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-003",
+      "title": "agent-runner-service recover 逻辑增加 blockedReason + 自动重试",
+      "spec": "specs/blocked-auto-retry/spec.md",
+      "description": "修改 recoverBuildStageIssue() 中所有 updateStatus(Blocked) 调用改为 blockIssue(id, reason)，reason 使用人话格式。对部分 task 完成的场景，当 retryCount < 3 时自动重试（恢复 pipeline 而非 blocked），retryCount >= 3 时标记 blocked 并 emit agent_blocked。不可重试故障（project/worktree/tasks.json 缺失）直接 blocked。pipeline 执行失败路径（runPipeline catch 块）也改为 blockIssue + emit agent_blocked。pipeline stage 推进成功时重置 retryCount 为 0。",
+      "acceptanceCriteria": [
+        "recoverBuildStageIssue 中所有 blocked 路径写入人话 blockedReason",
+        "部分 task 完成且 retryCount < 3 时恢复 pipeline（而非 blocked）",
+        "部分 task 完成且 retryCount >= 3 时 blocked + emit agent_blocked",
+        "不可重试故障直接 blocked + 写入人话 reason",
+        "runPipeline catch 块中 blockIssue + emit agent_blocked",
+        "pipeline stage 成功推进时 retryCount 重置为 0",
+        "npm run typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "设计决策 D1：自动重试仅在 recoverBuildStageIssue 中。设计决策 D2：统一使用 blockIssue() 方法。参考现有 recover-issues.test.ts 的测试模式。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-004",
+      "title": "API retry/restart 端点 + agent status blockedIssues",
+      "spec": "specs/blocked-recovery-api/spec.md",
+      "description": "新增 POST /api/issues/:number/retry 端点：校验 status=blocked → 清除 blockedReason → 重置 retryCount → status=active → resumePipeline。新增 POST /api/issues/:number/restart 端点：校验 status=blocked → 重置 stage=Draft → 清除所有状态 → status=active。修改 GET /api/agent/status 增加 blockedIssues 数组。修改 start handler 错误信息提示 retry/restart。修改 reopen handler 清除 blockedReason 和 retryCount。",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/retry 对 blocked issue 返回 200，status 变 active，retryCount 重置",
+        "POST /api/issues/:number/retry 对非 blocked issue 返回 409",
+        "POST /api/issues/:number/retry 对已有 agent 运行的 issue 返回 409",
+        "POST /api/issues/:number/restart 重置 stage=Draft、清除 blockedReason/retryCount/approvalState",
+        "POST /api/issues/:number/restart 对非 blocked issue 返回 409",
+        "GET /api/agent/status 返回 blockedIssues 数组",
+        "POST /api/issues/:number/start 对 blocked issue 返回 400 含 'retry/restart' 提示",
+        "reopen 时清除 blockedReason 和 retryCount",
+        "npm run typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "设计决策 D3：retry 复用 resumePipeline，不重置 stage。参考现有 reopen handler 模式（~line 648）。GET /api/issues/:number 已自动返回所有 Issue 字段（含新字段），无需额外修改。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-005",
+      "title": "后端测试：migration + issue-repo + recover + API 端点",
+      "spec": "specs/blocked-reason-storage/spec.md, specs/blocked-auto-retry/spec.md, specs/blocked-recovery-api/spec.md",
+      "description": "为 T-001 到 T-004 的实现编写测试。覆盖：migration v16 正确执行、IssueRepo 新方法、recoverBuildStageIssue 写入 blockedReason 和自动重试逻辑、retry/restart API 端点、agent status blockedIssues。",
+      "acceptanceCriteria": [
+        "migration v16 测试：新增列存在、默认值正确",
+        "IssueRepo.blockIssue 测试：同时设置 status 和 blocked_reason",
+        "recover 测试：部分 task 完成 + retryCount<3 自动重试",
+        "recover 测试：retryCount>=3 标记 blocked + 人话 reason",
+        "API 测试：retry 端点 200/409 场景",
+        "API 测试：restart 端点 200/409 场景",
+        "API 测试：agent status 返回 blockedIssues",
+        "npm test passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/recover-issues.test.ts, packages/cli/tests/api-routes.test.ts",
+      "dependsOn": [
+        "T-001",
+        "T-003",
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "扩展现有 recover-issues.test.ts 和 api-routes.test.ts。参考现有测试模式（inMemory DB + mock worktree）。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    },
+    {
+      "id": "T-006",
+      "title": "前端类型 + API client + BlockedPanel + IssueCard 摘要",
+      "spec": "specs/blocked-state-ui/spec.md",
+      "description": "前端 Issue 类型增加 blockedReason/retryCount。API client 增加 retryIssue/restartIssue 方法。IssueDetailPage 的 blocked 状态区域替换为 BlockedPanel 组件（reason 展示 + Retry/Restart 按钮 + 进度提示）。IssueCard 增加 blockedReason 单行摘要。注册 agent_blocked SSE 事件触发数据 refetch。",
+      "acceptanceCriteria": [
+        "前端 Issue 类型包含 blockedReason?: string 和 retryCount?: number",
+        "API client 有 retryIssue(number) 和 restartIssue(number) 方法",
+        "IssueDetailPage blocked 状态显示 reason 面板（红色/橙色警告样式）",
+        "blocked reason 为空时显示默认提示",
+        "Retry 按钮调用 retry API，loading 状态，成功后面板消失",
+        "Restart 按钮弹出确认对话框后调用 restart API",
+        "IssueCard blocked 时底部显示 reason 单行摘要（>60 字符截断）",
+        "收到 agent_blocked SSE 事件后自动 refetch issue 数据",
+        "npm run build passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/api.ts, packages/cli/web/src/components/IssueDetailPage.tsx, packages/cli/web/src/components/IssueCard.tsx",
+      "dependsOn": [
+        "T-002",
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "设计决策 D5：BlockedPanel 为 IssueDetailPage 内联组件，不新建弹窗/页面。原有 Reopen 按钮保留但降级为次要操作。参考现有 IssueDetailPage ~line 716 的 blocked 按钮区域和 IssueCard ~line 32 的 blocked 判断。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
+    }
+  ]
+}
