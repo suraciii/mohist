@@ -198,6 +198,12 @@ interface UpdateConfigContext {
   previousConfig?: GeneralConfig
 }
 
+const CONFIG_KEY_TO_PROPERTY: Record<string, keyof GeneralConfig> = {
+  'agent.timeout': 'agentTimeout',
+  'agent.maxConcurrent': 'maxConcurrentAgents',
+  'poll.interval': 'pollInterval',
+}
+
 export function useUpdateConfig() {
   const queryClient = useQueryClient()
 
@@ -207,10 +213,13 @@ export function useUpdateConfig() {
       await queryClient.cancelQueries({ queryKey: ['config'] })
       const previousConfig = queryClient.getQueryData<GeneralConfig>(['config'])
 
-      queryClient.setQueryData<GeneralConfig>(['config'], (old) => {
-        if (!old) return old
-        return { ...old, [key]: value }
-      })
+      const prop = CONFIG_KEY_TO_PROPERTY[key]
+      if (prop) {
+        queryClient.setQueryData<GeneralConfig>(['config'], (old) => {
+          if (!old) return old
+          return { ...old, [prop]: value }
+        })
+      }
 
       return { previousConfig }
     },

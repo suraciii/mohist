@@ -4,6 +4,7 @@ import { useProviders, useDeleteProvider } from '../hooks/useQueries'
 import type { Provider } from '../lib/provider-api'
 import { ProviderConnectDialog } from './ProviderConnectDialog'
 import { CustomProviderDialog } from './CustomProviderDialog'
+import { GeneralSettingsSection } from './GeneralSettingsSection'
 
 interface TabProps {
   active?: boolean
@@ -420,7 +421,7 @@ export function SettingsPage() {
 
             {activeTab === 'general' && (
               <TabPanel>
-                <p className="text-sm text-gray-500">General settings coming soon.</p>
+                <GeneralSettingsSection />
               </TabPanel>
             )}
           </div>

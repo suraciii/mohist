@@ -429,7 +429,7 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = process.cwd();
+      let worktreePath = project?.path || process.cwd();
       if (worktreeManager && project) {
         worktreePath = await worktreeManager.create(project.path, project.name, issue.number, project.baseBranch);
       }
@@ -677,10 +677,10 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = process.cwd();
+      let worktreePath = project?.path || process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || process.cwd();
+        worktreePath = existingPath || project.path;
       }
 
       let isReviewRecovery = false;
@@ -958,10 +958,10 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = process.cwd();
+      let worktreePath = project?.path || process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || process.cwd();
+        worktreePath = existingPath || project.path;
       }
 
       const acpOptions: AcpConnectionOptions = {
@@ -1079,10 +1079,10 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = process.cwd();
+      let worktreePath = project?.path || process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || process.cwd();
+        worktreePath = existingPath || project.path;
       }
 
       const acpOptions: AcpConnectionOptions = {
@@ -1171,10 +1171,10 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      let worktreePath = process.cwd();
+      let worktreePath = project?.path || process.cwd();
       if (worktreeManager && project) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || process.cwd();
+        worktreePath = existingPath || project.path;
       }
 
       issueService.createComment(issue.id, message);
