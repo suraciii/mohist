@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Settings Provider 列表优化：搜索、分组、折叠",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,10 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/provider-categories.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Scan models-snapshot.js to identify all provider IDs and classify them. Unmapped providers default to international.",
       "error": null,
-      "attempts": 0
+      "attempts": 1,
+      "order": 999999,
+      "durations": [
+        94609
+      ]
     },
     {
       "id": "T-002",
@@ -51,7 +54,8 @@
       "passes": false,
       "notes": "Use fuzzysort (already installed, used in ModelSelector.tsx). Each group in the returned array has: { id: string, label: string, count: number, providers: Provider[], expanded: boolean }.",
       "error": null,
-      "attempts": 0
+      "attempts": 0,
+      "order": 999999
     },
     {
       "id": "T-003",
@@ -79,7 +83,8 @@
       "passes": false,
       "notes": "Follow the StageColumn.tsx pattern: useState(false) + slice(0, expanded ? all : 5) + toggle button. Reuse existing provider card styles from SettingsPage.tsx.",
       "error": null,
-      "attempts": 0
+      "attempts": 0,
+      "order": 999999
     },
     {
       "id": "T-004",
@@ -113,7 +118,8 @@
       "passes": false,
       "notes": "Preserve all existing functionality: connect dialog, remove confirmation modal, custom provider dialog. The refactor is purely structural — same data, same actions, new layout.",
       "error": null,
-      "attempts": 0
+      "attempts": 0,
+      "order": 999999
     }
   ]
 }
