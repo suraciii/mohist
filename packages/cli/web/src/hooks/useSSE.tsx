@@ -1,8 +1,7 @@
 import { useEffect, useRef, useCallback, useState, createContext, useContext } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { EventName, EventMap, LiveTaskState } from '../lib/types'
+import type { EventName, EventMap, LiveTaskState, RebaseConflictState } from '../lib/types'
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../lib/agent-events'
-import { dispatchRebaseEvent } from '../lib/rebase-events'
 import type { AgentDetailEventMap } from '../lib/types'
 
 const SSE_URL = '/api/events'
@@ -14,9 +13,10 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
 }
 
-export const LiveTaskContext = createContext<LiveTaskState>({
+const LiveTaskContext = createContext<LiveTaskState>({
   activeTaskId: null,
   activeTaskElapsedMs: null,
+  rebaseConflict: null,
 })
 
 export function useLiveTask(): LiveTaskState {
@@ -28,6 +28,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
   const eventSourceRef = useRef<EventSource | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [activeTaskElapsedMs, setActiveTaskElapsedMs] = useState<number | null>(null)
+  const [rebaseConflict, setRebaseConflict] = useState<RebaseConflictState | null>(null)
   const taskStartRef = useRef<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -107,32 +108,19 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
-          case 'rebase_started': {
-            const { issueNumber: rsNum } = parsed as EventMap['rebase_started']
-            dispatchRebaseEvent({ type: 'rebase_started', issueNumber: rsNum })
-            break
-          }
-          case 'rebase_progress': {
-            const { issueNumber: rpNum, step } = parsed as EventMap['rebase_progress']
-            dispatchRebaseEvent({ type: 'rebase_progress', issueNumber: rpNum, step })
-            break
-          }
           case 'rebase_completed': {
+            setRebaseConflict(null)
             queryClient.invalidateQueries({ queryKey: ['issues'] })
-            const { issueNumber: rcNum, rebased } = parsed as EventMap['rebase_completed']
-            if (rcNum) {
-              queryClient.invalidateQueries({ queryKey: ['worktree-status', rcNum] })
-            }
-            dispatchRebaseEvent({ type: 'rebase_completed', issueNumber: rcNum, rebased })
             break
           }
           case 'rebase_conflict': {
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            const { issueNumber: rconfNum, conflicts } = parsed as EventMap['rebase_conflict']
-            if (rconfNum) {
-              queryClient.invalidateQueries({ queryKey: ['worktree-status', rconfNum] })
+            const d = parsed as EventMap['rebase_conflict']
+            if (d.status === 'resolving' || d.status === 'failed') {
+              setRebaseConflict({ issueNumber: d.issueNumber, conflicts: d.conflicts, status: d.status })
+            } else {
+              setRebaseConflict(null)
             }
-            dispatchRebaseEvent({ type: 'rebase_conflict', issueNumber: rconfNum, conflicts })
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
         }
@@ -174,7 +162,6 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'ralph_loop_progress',
       'plan_round_start',
       'plan_session_update',
-      'plan_round_complete',
       'coder_session_started',
       'coder_session_completed',
       'merge_queued',
@@ -226,9 +213,14 @@ function useSSEInner(projectId: string | null): LiveTaskState {
     }
   }, [clearLiveTimer])
 
-  return { activeTaskId, activeTaskElapsedMs }
+  return { activeTaskId, activeTaskElapsedMs, rebaseConflict }
 }
 
 export default function useSSE(projectId: string | null) {
-  return useSSEInner(projectId)
+  const liveState = useSSEInner(projectId)
+  return {
+    LiveTaskProvider: ({ children }: { children: React.ReactNode }) => (
+      <LiveTaskContext.Provider value={liveState}>{children}</LiveTaskContext.Provider>
+    ),
+  }
 }
