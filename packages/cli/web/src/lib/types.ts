@@ -351,9 +351,16 @@ export interface BuildStatus {
   tasks: Task[]
 }
 
+export interface RebaseConflictState {
+  issueNumber: number
+  conflicts: string[]
+  status: 'resolving' | 'failed'
+}
+
 export interface LiveTaskState {
   activeTaskId: string | null
   activeTaskElapsedMs: number | null
+  rebaseConflict: RebaseConflictState | null
 }
 
 export interface WorktreeStatus {

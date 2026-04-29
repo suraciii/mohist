@@ -190,16 +190,12 @@ export const api = {
   getWorkflowLogs: (number: number) =>
     request<import('./types').WorkflowLogItem[]>(`/issues/${number}/logs`),
 
-  getWorktreeStatus: (number: number) =>
-    request<import('./types').WorktreeStatus>(`/issues/${number}/worktree-status`),
-
-  rebaseIssue: async (number: number, options?: { queue?: boolean }) => {
-    const qs = options?.queue ? '?queue=true' : ''
+  rebaseIssue: async (number: number) => {
     try {
-      return await request<{ rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; queued?: boolean }>(`/issues/${number}/rebase${qs}`, { method: 'POST' })
+      return await request<{ rebased: boolean; autoResolved?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }>(`/issues/${number}/rebase`, { method: 'POST' })
     } catch (err) {
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
-        return err.data as { rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; queued?: boolean }
+        return err.data as { rebased: boolean; autoResolved?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }
       }
       throw err
     }
