@@ -464,6 +464,7 @@ export function createIssueRoutes(
         eventBus,
         issueNumber: updatedIssue.number,
         opencodeBinPath,
+        model: updatedIssue.model ?? undefined,
       };
 
       const startResult = agentRunner.startPipeline(
@@ -707,6 +708,7 @@ export function createIssueRoutes(
           eventBus,
           issueNumber: issue.number,
           opencodeBinPath,
+          model: issue.model ?? undefined,
         };
 
         agentRunner.resumePipeline(
@@ -846,6 +848,7 @@ export function createIssueRoutes(
           eventBus,
           issueNumber: issue.number,
           opencodeBinPath,
+          model: issue.model ?? undefined,
         };
 
         agentRunner.resumePipeline(
@@ -972,6 +975,7 @@ export function createIssueRoutes(
         eventBus,
         issueNumber: issue.number,
         opencodeBinPath,
+        model: issue.model ?? undefined,
       };
 
       agentRunner.resumePipeline(
@@ -1092,6 +1096,7 @@ export function createIssueRoutes(
         eventBus,
         issueNumber: issue.number,
         opencodeBinPath,
+        model: issue.model ?? undefined,
       };
 
       agentRunner.resumePipeline(
@@ -1185,6 +1190,7 @@ export function createIssueRoutes(
         eventBus,
         issueNumber: issue.number,
         opencodeBinPath,
+        model: issue.model ?? undefined,
       };
 
       agentRunner.resumePipeline(

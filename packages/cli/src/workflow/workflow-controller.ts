@@ -133,6 +133,7 @@ export class WorkflowController {
       ...acpOptions,
       stage: Stage.Plan,
       executionId: `plan-${issue.number}`,
+      model: issue.model ?? undefined,
       onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
@@ -733,6 +734,7 @@ export class WorkflowController {
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
       onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       stage: Stage.Build,
+      model: issue.model ?? undefined,
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
@@ -853,6 +855,7 @@ export class WorkflowController {
       ...acpOptions,
       stage: Stage.Review,
       executionId: `review-${issue.number}`,
+      model: issue.model ?? undefined,
       onProcessSpawned: (proc) => { this._onChildProcess?.(proc); },
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
