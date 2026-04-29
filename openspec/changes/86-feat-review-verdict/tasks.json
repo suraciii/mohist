@@ -48,7 +48,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "See D2 in design.md. Use existing readReportFile helper. Add truncate helper for 5000 char cap.",
       "attempts": 1,
       "order": 999999,
@@ -74,7 +74,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Type Alignment between backend types/index.ts ApprovalState.output (unknown) and frontend typed interface.",
       "attempts": 1,
       "order": 999999,
@@ -107,7 +107,7 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "react-markdown ^10.1.0 is already in web/package.json. Use existing Tailwind utility classes matching the project style.",
       "attempts": 1,
       "order": 999999,
@@ -137,7 +137,7 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Follow component patterns from MergeStatePanel.tsx / QuestionPanel.tsx for props style.",
       "attempts": 1,
       "order": 999999,
@@ -172,7 +172,7 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "See reject-and-fix spec for message formats. Use existing useSendMessage hook pattern from IssueDetailPage.",
       "attempts": 1,
       "order": 999999,
@@ -207,7 +207,7 @@
         "T-005",
         "T-006"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Keep the rebase functionality — it should remain accessible but not dominate the approval panel. Move it into the panel components or keep as a separate section below.",
       "attempts": 1,
       "order": 999999,
@@ -236,7 +236,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Follow test patterns from self-review.test.ts and review-auto-fix.test.ts.",
       "attempts": 1,
       "order": 999999,
