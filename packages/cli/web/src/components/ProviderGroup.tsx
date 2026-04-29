@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Children } from 'react'
 import type { ReactNode } from 'react'
 
 const DEFAULT_VISIBLE_COUNT = 5
@@ -17,15 +17,17 @@ export function ProviderGroup({ label, count, expanded: forceExpanded, children 
 
   const isExpanded = forceExpanded ?? internalExpanded
   const showToggle = count > DEFAULT_VISIBLE_COUNT
+  const childArray = Children.toArray(children)
+  const visible = isExpanded ? childArray : childArray.slice(0, DEFAULT_VISIBLE_COUNT)
 
   return (
     <div>
       <h3 className="text-sm font-medium text-gray-900 mb-3">
-        {label} ({count})
+        {label}
       </h3>
 
       <div className="space-y-3">
-        {children}
+        {visible}
       </div>
 
       {showToggle && (
