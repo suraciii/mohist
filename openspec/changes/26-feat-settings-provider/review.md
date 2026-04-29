@@ -1,113 +1,101 @@
 # Review Report
 
-## Result: PASS (with warnings)
+## Result: FAIL
 
 ## Dimensions
 
-### Correctness: PASS
+### Correctness: FAIL
 
-- Build succeeds (`tsc` + `vite build` clean, no errors)
-- TypeScript types are correct and well-defined
-- `useProviderGroups` hook correctly uses `useMemo` with proper deps (`providers`, `trimmed`, `isSearching`)
-- `useDebouncedValue` hook correctly implements 300ms debounce with cleanup
-- Provider group assignment logic follows correct priority: `configured` > `custom` (isBuiltin===false) > category-based
-- Empty groups are filtered out (`items && items.length > 0`)
-- Search fallback (`isSearching && groups.length === 0`) correctly shows empty state
-- `ProviderGroup` component correctly uses `forceExpanded ?? internalExpanded` pattern, preserving user's manual expand/collapse state when search is cleared
-- No lint violations detected (build includes tsc)
+**ERROR: Duplicate label rendering in ProviderGroup**
+
+- `packages/cli/web/src/components/ProviderGroup.tsx:26` — The `label` is already rendered with count inside `ProviderGroup` (`{label} ({count})`), but `useProviderGroups.ts:67` already embeds the count into the label string (`label: \`${def.label} (${items.length})\``). This causes the group title to render as **"Recommended (6) (6)"** — the count is duplicated.
+- `packages/cli/web/src/components/SettingsPage.tsx:462-478` — There is a hardcoded "Custom" section with an "Add Custom Provider" button that exists **outside** the grouped provider rendering loop. If a user has custom providers (isBuiltin=false), they will appear in the `ProviderGroup` for "Custom" via `useProviderGroups`, but the "Add Custom Provider" button and description text are hardcoded separately. The two Custom sections are disconnected — the grouped custom providers render above the `<hr>`, while the "Add Custom Provider" button is below it, breaking the visual grouping.
+
+**WARNING: Tests are broken**
+
+- `packages/cli/web/tests/SettingsPage.test.tsx:94,99,104,125` — All 9 tests fail because: (1) the test wrapper doesn't include a `<Router>` context (the component now uses `useNavigate`), and (2) the tests assert for old section names (`"Connected Providers"`, `"Available Providers"`, `"Custom Providers"`) that no longer exist in the refactored component. The new grouped view renders `"Connected (N)"`, `"Recommended (N)"`, etc.
 
 ### Complexity: PASS
 
-- All functions are concise and focused:
-  - `provider-categories.ts`: 116 lines total, pure data + 2 small utility functions
-  - `useProviderGroups.ts`: 75 lines, single hook with clear flow (filter → bucket → sort → assemble)
-  - `ProviderGroup.tsx`: 43 lines, simple presentational component
-  - `useDebouncedValue`: 10 lines, clean debounce implementation
-  - `assignGroupKey`: 6 lines, clear priority chain
-- No function exceeds 50 lines
-- No copy-pasted code
-- Cyclomatic complexity is low throughout
+- All functions are concise and focused. `assignGroupKey` (6 lines), `useProviderGroups` hook (44 lines), `ProviderGroup` component (43 lines), `useDebouncedValue` (9 lines).
+- No function exceeds 50 lines. Cyclomatic complexity is low throughout.
+- `SettingsPage.tsx` at 505 lines is large but mostly JSX templates for loading/error/tab states. The main render logic is clean.
 
-### Test Coverage: PASS (with warnings)
+### Test Coverage: FAIL
 
-- Pre-existing test suite has 65 failures in 13 test files — all are backend/server tests (e2e, pipeline, database, agent-runner, merge-queue) unrelated to the web UI changes. No test files were modified by this change.
-- No new tests were added for the 4 new files (`provider-categories.ts`, `useProviderGroups.ts`, `ProviderGroup.tsx`, refactored `SettingsPage.tsx`). This is a gap — unit tests for `useProviderGroups` logic and `provider-categories` mapping would strengthen confidence.
+- No new tests were added for the new modules (`provider-categories.ts`, `useProviderGroups.ts`, `ProviderGroup.tsx`).
+- Existing `SettingsPage.test.tsx` is broken (all 9 tests fail) and was not updated to match the refactored component.
+- No test coverage for: search functionality, debounce, Escape key, group ordering, group collapsing/expanding, category assignment logic, fuzzysort filtering, empty state messages.
 
 ### Security: PASS
 
-- No user input is passed to `eval`, `innerHTML`, or dangerously set
-- Provider IDs are used as React keys and display text only
-- Search input is handled as plain string with fuzzysort (no injection risk)
-- API calls reuse existing `providerApi` abstraction with proper encoding (`encodeURIComponent`)
-- No secrets or credentials exposed
+- No security concerns. Search input is purely client-side string filtering. No SQL injection, XSS, or credential exposure risks.
+- Fuzzysort operates on in-memory data only.
 
-### Spec Compliance: PASS
+### Spec Compliance: FAIL
 
-#### T-001 Acceptance Criteria
+#### T-001: Create provider category mapping and types
 
-| Criterion | Status | Notes |
-|---|---|---|
-| PROVIDER_CATEGORIES maps at least 30 provider IDs | **PASS** | Maps 85 providers (lines 16-101) |
-| Recommended providers (openai, anthropic, deepseek, google, groq, mistral) have category='recommended' | **PASS** | Lines 17-22 |
-| Coding plan providers have category='coding-plan' | **PASS** | Lines 24-35, maps 12 coding-plan providers using actual codebase IDs |
+| Criterion | Result | Notes |
+|-----------|--------|-------|
+| PROVIDER_CATEGORIES maps at least 30 provider IDs | **PASS** | 84 providers mapped |
+| Recommended providers have category='recommended' | **PASS** | openai, anthropic, deepseek, google, groq, mistral |
+| Coding plan providers have category='coding-plan' | **PARTIAL** | Spec lists `minimax-for-coding`, implementation uses `minimax-coding-plan`. Also spec lists `kimi-for-coding` — implementation uses `kimi-for-coding` which is correct. The spec's provider IDs may not match actual provider IDs in the snapshot, but `minimax-for-coding` from spec is mapped as `minimax-coding-plan` in code — this appears intentional to match actual IDs. |
 | TypeScript types exported | **PASS** | `ProviderCategory`, `ProviderRegion`, `ProviderCategoryInfo`, `GroupedProvider` |
-| Typecheck passes | **PASS** | Build clean |
+| Typecheck passes | **PASS** | Confirmed |
 
-#### T-002 Acceptance Criteria
+#### T-002: Create useProviderGroups hook
 
-| Criterion | Status | Notes |
-|---|---|---|
-| Groups in correct order (connected, recommended, coding-plan, china, international, custom) | **PASS** | `GROUP_ORDER` at `useProviderGroups.ts:14` |
-| Each provider appears in exactly one group | **PASS** | Single assignment via `assignGroupKey` |
-| configured providers → connected group | **PASS** | `useProviderGroups.ts:24` |
-| isBuiltin===false → custom group | **PASS** | `useProviderGroups.ts:25` |
-| Unmapped builtin → international | **PASS** | `getProviderCategory` defaults to international (`provider-categories.ts:111`) |
-| Empty groups excluded | **PASS** | `useProviderGroups.ts:64` filter |
-| Search filtering via fuzzysort on name+id | **PASS** | `useProviderGroups.ts:39-41` |
-| Search auto-expands groups | **PASS** | `SettingsPage.tsx:456`: `expanded={isSearching || undefined}` |
-| Clear search restores collapsed | **PASS** | `expanded` becomes `undefined`, falls back to `internalExpanded` (false) |
-| Typecheck passes | **PASS** | |
+| Criterion | Result | Notes |
+|-----------|--------|-------|
+| Groups in correct order | **PASS** | connected, recommended, coding-plan, china, international, custom |
+| Each provider in exactly one group | **PASS** | `assignGroupKey` returns single key by priority |
+| configured → connected | **PASS** | Line 24 |
+| isBuiltin===false → custom | **PASS** | Line 25 |
+| Unmapped builtin → international | **PASS** | `getProviderCategory` defaults to international |
+| Empty groups excluded | **PASS** | Line 64: `if (items && items.length > 0)` |
+| Search filtering via fuzzysort | **PASS** | Lines 38-42 |
+| Searching auto-expands groups | **PASS** | `expanded={isSearching \|\| undefined}` in SettingsPage:456 |
+| Clearing search restores collapsed | **PASS** | When `isSearching` is false, `expanded` is `undefined` so internal state controls |
+| Typecheck passes | **PASS** | Confirmed |
 
-#### T-003 Acceptance Criteria
+#### T-003: Create ProviderGroup collapsible component
 
-| Criterion | Status | Notes |
-|---|---|---|
-| Group title shows 'Label (count)' | **PASS** | Label constructed in hook as `${def.label} (${items.length})` |
-| Default shows max 5 providers | **PASS** | `DEFAULT_VISIBLE_COUNT = 5`, `ProviderGroup.tsx:4` |
-| 'Show all (N)' when >5 | **PASS** | `ProviderGroup.tsx:38` |
-| Click expands all, button → 'Show less' | **PASS** | `ProviderGroup.tsx:35` toggle |
-| Click 'Show less' collapses to 5 | **PASS** | Same toggle |
-| ≤5 providers: no toggle button | **PASS** | `showToggle = count > DEFAULT_VISIBLE_COUNT` at line 19 |
-| expanded prop forces show all | **PASS** | `ProviderGroup.tsx:18`: `forceExpanded ?? internalExpanded` |
-| Empty groups render nothing | **PASS** | `ProviderGroup.tsx:16`: `if (count === 0) return null` |
-| Typecheck passes | **PASS** | |
+| Criterion | Result | Notes |
+|-----------|--------|-------|
+| Group title shows 'Label (count)' | **FAIL** | Title renders as `{label} ({count})` but `label` already contains `(${items.length})` from useProviderGroups. Results in double count: "Recommended (6) (6)" |
+| Default shows max 5 providers | **PASS** | `DEFAULT_VISIBLE_COUNT = 5` |
+| 'Show all (N)' when >5 | **PASS** | Line 38 |
+| Click toggles expand/collapse | **PASS** | Lines 35-39 |
+| Groups with ≤5 show all, no toggle | **PASS** | Line 19: `showToggle = count > DEFAULT_VISIBLE_COUNT` |
+| expanded prop forces show all | **PASS** | Line 18: `isExpanded = forceExpanded ?? internalExpanded` |
+| Empty groups render nothing | **PASS** | Line 16 |
+| Typecheck passes | **PASS** | Confirmed |
 
-#### T-004 Acceptance Criteria
+#### T-004: Refactor SettingsPage with search and grouped provider list
 
-| Criterion | Status | Notes |
-|---|---|---|
-| Search input at top of providers tab | **PASS** | `SettingsPage.tsx:414-435` |
-| Real-time filtering across all groups | **PASS** | Fuzzysort in `useProviderGroups` hook |
-| 300ms debounce | **PASS** | `useDebouncedValue(searchInput, 300)` at `SettingsPage.tsx:233` |
-| Escape key clears search | **PASS** | `handleSearchKeyDown` at `SettingsPage.tsx:251-256` |
-| Empty results show message | **PASS** | `SettingsPage.tsx:440`: `"No providers found matching your search"` — matches spec exactly |
-| Search auto-expands matching groups, hides empty | **PASS** | Hook filters + `expanded={isSearching}` |
-| Clear search restores default collapsed | **PASS** | `expanded` becomes `undefined`, falls back to `internalExpanded` |
-| Provider connect/remove/test actions work | **PASS** | `renderProviderCard` preserves `ConnectedProviderCard` and `AvailableProviderCard` |
-| ProviderConnectDialog opens on connect click | **PASS** | `SettingsPage.tsx:370` |
-| CustomProviderDialog accessible | **PASS** | `SettingsPage.tsx:467-473` "Add Custom Provider" button |
-| Connected providers in top group with remove | **PASS** | Connected group is first in `GROUP_ORDER` |
-| Typecheck passes | **PASS** | |
-| Build passes | **PASS** | `npm run build` succeeds |
+| Criterion | Result | Notes |
+|-----------|--------|-------|
+| Search input at top of providers tab | **PASS** | Lines 414-435 |
+| Real-time filtering across all groups | **PASS** | Via useProviderGroups with debouncedSearch |
+| 300ms debounce | **PASS** | `useDebouncedValue(searchInput, 300)` |
+| Escape key clears search | **PASS** | Lines 251-256 |
+| Empty results show 'No providers found matching your search' | **PASS** | Lines 437-442 |
+| Searching auto-expands matching groups | **PASS** | `expanded={isSearching \|\| undefined}` |
+| Clearing search restores collapsed state | **PASS** | isSearching becomes false |
+| Provider connect/remove/test actions work | **PASS** | renderProviderCard preserves card components |
+| ProviderConnectDialog opens on connect | **PASS** | Lines 493-497 |
+| CustomProviderDialog opens from Custom group's add button | **FAIL** | The "Add Custom Provider" button is in a separate hardcoded section below the groups loop, not inside any ProviderGroup. Spec says "from the Custom group's add button" — the button is not inside the Custom group. |
+| Connected providers appear in top group with remove | **PASS** | Connected group is first in GROUP_ORDER |
+| Typecheck passes | **PASS** | Confirmed |
+| Build passes | **PASS** | Confirmed |
 
-## Previous Fix Suggestion Status
+## Fix Suggestions
 
-1. **`SettingsPage.tsx:440` trailing period** — **FIXED**. The empty search message now reads `"No providers found matching your search"` without a trailing period, matching the spec exactly at `SettingsPage.tsx:440`.
+1. **`packages/cli/web/src/components/ProviderGroup.tsx:26`** — Remove the duplicate count from the label rendering. Change `{label} ({count})` to just `{label}` since the count is already embedded in the label string by `useProviderGroups`.
 
-## Warnings
+2. **`packages/cli/web/src/components/SettingsPage.tsx:462-478`** — Move the "Add Custom Provider" button inside the Custom `ProviderGroup` rendering, or integrate it into the ProviderGroup component. The hardcoded Custom section should not exist separately from the grouped Custom providers.
 
-1. **`provider-categories.ts`** — Spec examples mention IDs like `minimax-for-coding`, `glm`, `qwen`, `moonshot`, `doubao`, `spark`, `yi`, `baichuan`, `together`, `fireworks` that differ from actual codebase IDs (e.g., `minimax-coding-plan`, `moonshotai`, `togetherai`, `fireworks-ai`). The implementation correctly maps the real IDs. This is a spec-vs-codebase naming mismatch, not a bug.
+3. **`packages/cli/web/tests/SettingsPage.test.tsx`** — Update test wrapper to include `<MemoryRouter>` from react-router. Update assertions to match new group label format (e.g., `"Connected (1)"` instead of `"Connected Providers"`). Add tests for search, debounce, group ordering, and collapse/expand behavior.
 
-2. **`SettingsPage.tsx:462-478`** — The "Custom" group has dual personality: existing custom providers appear in the grouped list via `ProviderGroup`, while the "Add Custom Provider" action is a separate static section below. Functionally correct but architecturally could be unified.
-
-3. **No unit tests** — The new files (`provider-categories.ts`, `useProviderGroups.ts`, `ProviderGroup.tsx`) have no test coverage. The `useProviderGroups` hook's grouping logic and `provider-categories` mapping are good candidates for unit tests.
+4. **`packages/cli/web/tests/SettingsPage.test.tsx` or new test files** — Add unit tests for `provider-categories.ts`, `useProviderGroups.ts`, and `ProviderGroup.tsx` to cover category assignment, search filtering, and expand/collapse behavior.
