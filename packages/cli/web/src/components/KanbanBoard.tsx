@@ -1,16 +1,9 @@
 import { useMemo, useState, useEffect } from 'react'
 import type { Issue, AgentStatus } from '../lib/types'
-import { Stage, IssueStatus } from '../lib/types'
+import { Stage } from '../lib/types'
+import { groupIssuesByStage, filterClosedFromDone, getDoneColumnCounts, STAGES } from '../lib/kanban-grouping'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
-
-const STAGES: { key: Stage; label: string }[] = [
-  { key: Stage.Backlog, label: 'Backlog' },
-  { key: Stage.Plan, label: 'Plan' },
-  { key: Stage.Build, label: 'Build' },
-  { key: Stage.Review, label: 'Review' },
-  { key: Stage.Done, label: 'Done' },
-]
 
 interface Props {
   issues: Issue[]
@@ -20,34 +13,17 @@ interface Props {
 export function KanbanBoard({ issues, agentStatus }: Props) {
   const [showClosed, setShowClosed] = useState(false)
 
-  const columns = useMemo(() => {
-    const map = new Map<Stage, Issue[]>()
-    for (const s of STAGES) map.set(s.key, [])
-    for (const issue of issues) {
-      const targetStage =
-        issue.status === IssueStatus.Closed ? Stage.Done : issue.stage
-      const list = map.get(targetStage)
-      if (list) list.push(issue)
-    }
-    return STAGES.map((s) => ({
-      ...s,
-      issues: map.get(s.key) ?? [],
-    }))
-  }, [issues])
+  const columns = useMemo(() => groupIssuesByStage(issues), [issues])
 
-  const displayedColumns = useMemo(() => {
-    if (showClosed) return columns
-    return columns.map((col) =>
-      col.key === Stage.Done
-        ? {
-            ...col,
-            issues: col.issues.filter(
-              (i) => i.status !== IssueStatus.Closed,
-            ),
-          }
-        : col,
-    )
-  }, [columns, showClosed])
+  const displayedColumns = useMemo(
+    () => filterClosedFromDone(columns, showClosed),
+    [columns, showClosed],
+  )
+
+  const { closedCount, doneTotalCount } = useMemo(
+    () => getDoneColumnCounts(columns),
+    [columns],
+  )
 
   const defaultStage = useMemo(() => {
     const withIssues = columns.find((c) => c.issues.length > 0)
@@ -61,14 +37,13 @@ export function KanbanBoard({ issues, agentStatus }: Props) {
   }, [defaultStage])
 
   const selectedColumn = displayedColumns.find((c) => c.key === selectedStage) ?? displayedColumns[0]
-  const doneColumn = columns.find((c) => c.key === Stage.Done)
 
   return (
     <>
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white">
         <span className="text-xs text-gray-400">
-          {doneColumn && doneColumn.issues.length > 0
-            ? `${doneColumn.issues.filter((i) => i.status === IssueStatus.Closed).length} closed issue${doneColumn.issues.filter((i) => i.status === IssueStatus.Closed).length !== 1 ? 's' : ''} in Done`
+          {closedCount > 0
+            ? `${closedCount} closed issue${closedCount !== 1 ? 's' : ''} in Done`
             : ''}
         </span>
         <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none">
@@ -134,6 +109,7 @@ export function KanbanBoard({ issues, agentStatus }: Props) {
             issues={col.issues}
             agentStatus={agentStatus}
             isDone={col.key === Stage.Done}
+            displayCount={col.key === Stage.Done ? doneTotalCount : undefined}
           />
         ))}
       </div>
