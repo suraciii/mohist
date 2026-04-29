@@ -7,6 +7,7 @@ import { setupQuickCommands } from './commands/quick';
 import { setupAttachCommand } from './commands/attach';
 import { setupProvidersCommands } from './commands/providers';
 import { setupProposeCommands } from './commands/propose';
+import { getVersionInfo } from '../version';
 export { requireServer, formatError } from './server-check';
 
 const program = new Command();
@@ -14,7 +15,7 @@ const program = new Command();
 program
   .name('mo')
   .description('AI-powered issue workflow automation tool')
-  .version('0.1.0');
+  .version(getVersionInfo().versionString);
 
 const serverCmd = program
   .command('server')
