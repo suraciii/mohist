@@ -14,7 +14,43 @@ const DBUS_ERROR_PATTERNS = [
   'Could not connect to D-Bus',
   'Cannot autolaunch D-Bus',
   'Not connected to D-Bus',
+  'No medium found',
 ];
+
+function buildSystemctlEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (uid === null) {
+    return env;
+  }
+
+  const runtimeDir = `/run/user/${uid}`;
+  const busSocket = `${runtimeDir}/bus`;
+
+  if (!env.DBUS_SESSION_BUS_ADDRESS && fs.existsSync(busSocket)) {
+    env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${busSocket}`;
+  }
+
+  if (!env.XDG_RUNTIME_DIR && fs.existsSync(runtimeDir)) {
+    env.XDG_RUNTIME_DIR = runtimeDir;
+  }
+
+  return env;
+}
+
+function printHeadlessDbusHint(): void {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  const socketPath = uid !== null ? `/run/user/${uid}/bus` : null;
+
+  if (socketPath && fs.existsSync(socketPath)) {
+    console.log(chalk.yellow('\nD-Bus session bus is unavailable but the socket exists.'));
+    console.log(chalk.gray('  export DBUS_SESSION_BUS_ADDRESS=unix:path=') + socketPath);
+    console.log(chalk.gray('  export XDG_RUNTIME_DIR=/run/user/') + uid);
+  } else {
+    console.log(chalk.yellow('\nD-Bus session bus is unavailable. Ensure systemd --user is running.'));
+  }
+}
 
 export function isSystemdServiceInstalled(): boolean {
   return fs.existsSync(SERVICE_FILE_PATH);
@@ -112,35 +148,62 @@ export interface SystemdStatus {
   mainPID: number;
 }
 
+export interface SystemctlResult {
+  success: boolean;
+  output: string;
+  error?: string;
+}
+
+function isDbusUnavailableError(stderr: string): boolean {
+  return DBUS_ERROR_PATTERNS.some(p => stderr.includes(p));
+}
+
 export function runSystemctlUser(args: string): string {
+  const env = buildSystemctlEnv();
+
   try {
     return execSync(`systemctl --user ${args}`, {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      env,
     });
   } catch (err: any) {
     const stderr: string = err.stderr?.toString() || '';
-    const isDbusError = DBUS_ERROR_PATTERNS.some(p => stderr.includes(p));
 
-    if (!isDbusError) {
+    if (!isDbusUnavailableError(stderr)) {
       throw err;
     }
 
+    // Fallback: try --machine user@ --user (works in some sudo/headless setups)
     const username = os.userInfo().username;
     try {
       return execSync(`systemctl --machine ${username}@ --user ${args}`, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
+        env,
       });
     } catch (retryErr: any) {
-      if (process.env.SSH_CONNECTION) {
-        const retryStderr: string = retryErr.stderr?.toString() || '';
-        console.log(
-          `[headless SSH detected] systemctl --user failed:\n${stderr.trim()}\n--machine retry also failed:\n${retryStderr.trim()}`,
+      const retryStderr: string = retryErr.stderr?.toString() || '';
+
+      if (isDbusUnavailableError(retryStderr)) {
+        printHeadlessDbusHint();
+        throw new Error(
+          `systemctl --user unavailable: D-Bus session bus not found. ` +
+          `Set DBUS_SESSION_BUS_ADDRESS or ensure systemd --user is running.`,
         );
       }
+
       throw retryErr;
     }
+  }
+}
+
+export function runSystemctlUserSafe(args: string): SystemctlResult {
+  try {
+    const output = runSystemctlUser(args);
+    return { success: true, output };
+  } catch (err: any) {
+    return { success: false, output: '', error: err.message || String(err) };
   }
 }
 
@@ -161,23 +224,24 @@ export function runLinger(): void {
 }
 
 export function getSystemdStatus(): SystemdStatus | null {
-  try {
-    const output = runSystemctlUser(`show ${SERVICE_NAME}`);
-    const activeStateMatch = output.match(/^ActiveState=(.+)$/m);
-    const mainPIDMatch = output.match(/^MainPID=(\d+)$/m);
-
-    const loadedMatch = output.match(/^Loaded=(.+)$/m);
-    if (!loadedMatch || loadedMatch[1].startsWith('not-loaded') || loadedMatch[1].trim() === '') {
-      return null;
-    }
-
-    return {
-      activeState: activeStateMatch ? activeStateMatch[1].trim() : 'unknown',
-      mainPID: mainPIDMatch ? parseInt(mainPIDMatch[1], 10) : 0,
-    };
-  } catch {
+  const result = runSystemctlUserSafe(`show ${SERVICE_NAME}`);
+  if (!result.success) {
     return null;
   }
+
+  const output = result.output;
+  const activeStateMatch = output.match(/^ActiveState=(.+)$/m);
+  const mainPIDMatch = output.match(/^MainPID=(\d+)$/m);
+
+  const loadStateMatch = output.match(/^LoadState=(.+)$/m);
+  if (!loadStateMatch || loadStateMatch[1].trim() !== 'loaded') {
+    return null;
+  }
+
+  return {
+    activeState: activeStateMatch ? activeStateMatch[1].trim() : 'unknown',
+    mainPID: mainPIDMatch ? parseInt(mainPIDMatch[1], 10) : 0,
+  };
 }
 
 export async function installSystemdService(): Promise<void> {
@@ -195,16 +259,34 @@ export async function installSystemdService(): Promise<void> {
   fs.writeFileSync(SERVICE_FILE_PATH, serviceContent, 'utf-8');
   console.log(chalk.gray(`Service file written to ${SERVICE_FILE_PATH}`));
 
-  runSystemctlUser('daemon-reload');
+  let reload = runSystemctlUserSafe('daemon-reload');
+  if (!reload.success) {
+    console.error(chalk.red(`daemon-reload failed: ${reload.error}`));
+    throw new Error('Install aborted: systemd daemon-reload failed');
+  }
   console.log(chalk.gray('Daemon reloaded'));
 
   if (isReinstall) {
-    runSystemctlUser(`restart ${SERVICE_NAME}`);
+    const restart = runSystemctlUserSafe(`restart ${SERVICE_NAME}`);
+    if (!restart.success) {
+      console.error(chalk.red(`restart failed: ${restart.error}`));
+      throw new Error('Install aborted: service restart failed');
+    }
     console.log(chalk.gray('Service restarted'));
   } else {
-    runSystemctlUser(`enable ${SERVICE_NAME}`);
-    runSystemctlUser(`start ${SERVICE_NAME}`);
-    console.log(chalk.gray('Service enabled and started'));
+    const enable = runSystemctlUserSafe(`enable ${SERVICE_NAME}`);
+    if (!enable.success) {
+      console.error(chalk.red(`enable failed: ${enable.error}`));
+      throw new Error('Install aborted: service enable failed');
+    }
+    console.log(chalk.gray('Service enabled'));
+
+    const start = runSystemctlUserSafe(`start ${SERVICE_NAME}`);
+    if (!start.success) {
+      console.error(chalk.red(`start failed: ${start.error}`));
+      throw new Error('Install aborted: service start failed');
+    }
+    console.log(chalk.gray('Service started'));
   }
 
   runLinger();
@@ -222,19 +304,20 @@ export async function uninstallSystemdService(): Promise<void> {
     return;
   }
 
-  try {
-    runSystemctlUser(`disable --now ${SERVICE_NAME}`);
-  } catch {
-    runSystemctlUser(`stop ${SERVICE_NAME}`);
-    runSystemctlUser(`disable ${SERVICE_NAME}`);
+  const disableNow = runSystemctlUserSafe(`disable --now ${SERVICE_NAME}`);
+  if (!disableNow.success) {
+    runSystemctlUserSafe(`stop ${SERVICE_NAME}`);
+    runSystemctlUserSafe(`disable ${SERVICE_NAME}`);
   }
   console.log(chalk.gray('Service stopped and disabled'));
 
   fs.unlinkSync(SERVICE_FILE_PATH);
   console.log(chalk.gray('Service file removed'));
 
-  runSystemctlUser('daemon-reload');
-  console.log(chalk.gray('Daemon reloaded'));
+  const reload = runSystemctlUserSafe('daemon-reload');
+  if (reload.success) {
+    console.log(chalk.gray('Daemon reloaded'));
+  }
 
   console.log(chalk.green(`\nMohist service uninstalled successfully`));
 }
@@ -244,7 +327,15 @@ export async function restartServer(
   fallbackStart: () => Promise<void>,
 ): Promise<void> {
   if (isSystemdServiceInstalled()) {
-    runSystemctlUser(`restart ${SERVICE_NAME}`);
+    const res = runSystemctlUserSafe(`restart ${SERVICE_NAME}`);
+    if (!res.success) {
+      console.error(chalk.red(`systemd restart failed: ${res.error}`));
+      console.log(chalk.gray('Falling back to manual restart...'));
+      await fallbackStop();
+      await fallbackStart();
+      console.log(chalk.green('Server restarted (fallback)'));
+      return;
+    }
     console.log(chalk.green('Server restarted (systemd)'));
     return;
   }
@@ -289,7 +380,11 @@ export async function updateServer(): Promise<void> {
   }
   console.log(chalk.green('Web build succeeded'));
 
-  runSystemctlUser(`restart ${SERVICE_NAME}`);
+  const res = runSystemctlUserSafe(`restart ${SERVICE_NAME}`);
+  if (!res.success) {
+    console.error(chalk.red(`systemd restart failed: ${res.error}`));
+    process.exit(1);
+  }
   console.log(chalk.green('Server restarted (systemd)'));
   console.log(chalk.green('\nUpdate complete'));
 }

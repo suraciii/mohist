@@ -208,8 +208,8 @@ export async function serverStatus(): Promise<void> {
   if (isSystemdServiceInstalled()) {
     const sdStatus = getSystemdStatus();
     if (!sdStatus) {
-      console.log(chalk.red('Server is not running'));
-      console.log(chalk.yellow('Start with: mo server start'));
+      console.log(chalk.yellow('Service is installed but status query failed'));
+      console.log(chalk.gray('Run: systemctl --user status mohist.service'));
       return;
     }
 
