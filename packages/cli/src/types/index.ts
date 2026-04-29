@@ -79,6 +79,8 @@ export interface Issue {
   mergeState?: MergeState;
   conflictRetryCount?: number;
   model?: string;
+  blockedReason?: string;
+  retryCount?: number;
 }
 
 export interface Project {
