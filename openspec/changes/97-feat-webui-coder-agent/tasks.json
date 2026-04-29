@@ -48,11 +48,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/opencode-model-config.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Follow the pattern in api/providers.ts for load()/writeConfig() with ConfigConflictError handling. Register as `server.addRouter('/api/opencode-config', createOpencodeModelConfigRoutes())` in server/index.ts — using a separate prefix to avoid collision with the existing `PUT /:key` catch-all in `/api/config` router.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        335281
+      ]
     },
     {
       "id": "T-003",
