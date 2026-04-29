@@ -113,11 +113,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "设计决策 D3：retry 复用 resumePipeline，不重置 stage。参考现有 reopen handler 模式（~line 648）。GET /api/issues/:number 已自动返回所有 Issue 字段（含新字段），无需额外修改。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        265421
+      ]
     },
     {
       "id": "T-005",
