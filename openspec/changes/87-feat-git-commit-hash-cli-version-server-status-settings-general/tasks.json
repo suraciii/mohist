@@ -1,0 +1,98 @@
+{
+  "project": "mohist",
+  "description": "Report git commit hash across CLI version, server status, API responses, and WebUI Settings",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create version.ts module with getVersionInfo()",
+      "spec": "specs/version-reporting/spec.md",
+      "description": "Create `packages/cli/src/version.ts` exporting `getVersionInfo()` that returns `{ version, gitHash, versionString }`. Version reads from package.json. Git hash via `execSync('git rev-parse --short HEAD')` relative to the module's directory, with null fallback on failure. Result cached in module-level variable.",
+      "acceptanceCriteria": [
+        "getVersionInfo() returns { version: string, gitHash: string|null, versionString: string }",
+        "versionString is '{version} ({gitHash})' when gitHash available, else '{version}'",
+        "Result is cached — second call returns same object without spawning git again",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/version.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-002",
+      "title": "Wire CLI --version to getVersionInfo()",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "In `packages/cli/src/cli/index.ts`, import `getVersionInfo` from `../version` and replace `.version('0.1.0')` with `.version(getVersionInfo().versionString)`. Commander prints this on `mo --version`.",
+      "acceptanceCriteria": [
+        "`mo --version` outputs format like `0.1.0 (abc1234)` instead of bare `0.1.0`",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/index.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Add version to server startup log and status/health API",
+      "spec": "specs/http-api/spec.md",
+      "description": "Three changes: (1) In `server/index.ts`, import getVersionInfo and add `log.info('Mohist v{versionString} starting...')` as first log after Log.init. (2) Pass versionInfo to createStatusRoutes as a new parameter. (3) In `api/status.ts`, add `version` and `gitHash` fields to both `/status` response data and `/health` response JSON. Update createStatusRoutes signature to accept versionInfo.",
+      "acceptanceCriteria": [
+        "Server startup first log line contains 'Mohist v' and version+hash",
+        "GET /api/health returns { status, timestamp, version, gitHash }",
+        "GET /api/status response data includes version and gitHash fields",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/status.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Also touches packages/cli/src/server/index.ts"
+    },
+    {
+      "id": "T-004",
+      "title": "Add version line to mo server status output",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "In `packages/cli/src/cli/commands/server.ts` serverStatus(), when server is running, call GET /api/health to fetch version info and print a `Version: {versionString}` line (gray). If health fetch fails, skip the version line. For systemd path, call GET /api/health similarly when active.",
+      "acceptanceCriteria": [
+        "`mo server status` shows `Version: 0.1.0 (abc1234)` line when server is running",
+        "No version line shown when server is not running",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/server.ts",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-005",
+      "title": "Add version info block to WebUI Settings General",
+      "spec": "specs/web-ui/spec.md",
+      "description": "In `GeneralSettingsSection.tsx`, add a version info block at the bottom (after Reset button). Fetch from GET /api/health via useEffect+useState. Display version and gitHash in gray text. Show '--' while loading or on fetch failure.",
+      "acceptanceCriteria": [
+        "Settings > General shows version number and git hash at bottom",
+        "Version block uses low visual weight (gray text)",
+        "Shows '--' or loading state while fetching or on failure",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/GeneralSettingsSection.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
