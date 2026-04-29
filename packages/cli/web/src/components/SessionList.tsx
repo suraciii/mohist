@@ -1,26 +1,15 @@
-import { useState, useEffect } from 'react'
-import type { Stage } from '../lib/types'
 import { useCoderSessions } from '../hooks/useCoderSessions'
 import { SessionHeader } from './SessionHeader'
 import { SessionDetail } from './SessionDetail'
 
 interface SessionListProps {
   issueNumber: number
-  currentStage: Stage | string
+  currentStage: string
   isLive: boolean
 }
 
-export function SessionList({ issueNumber, isLive }: SessionListProps) {
+export function SessionList({ issueNumber }: SessionListProps) {
   const { sessions, isLoading } = useCoderSessions(issueNumber)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (sessions.length === 0) return
-    const running = sessions.find((s) => s.status === 'running')
-    if (running) {
-      setExpandedId(running.id)
-    }
-  }, [sessions])
 
   if (isLoading) {
     return (
@@ -42,10 +31,6 @@ export function SessionList({ issueNumber, isLive }: SessionListProps) {
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
 
-  const handleToggle = (id: string) => {
-    setExpandedId((prev) => (prev === id ? null : id))
-  }
-
   return (
     <div className="rounded-lg border border-gray-200 bg-white">
       <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2">
@@ -54,15 +39,9 @@ export function SessionList({ issueNumber, isLive }: SessionListProps) {
       </div>
       <div className="divide-y divide-gray-100">
         {sorted.map((session) => (
-          <div key={session.id} className="rounded-lg">
-            <SessionHeader
-              session={session}
-              isExpanded={expandedId === session.id}
-              onClick={() => handleToggle(session.id)}
-            />
-            {expandedId === session.id && (
-              <SessionDetail session={session} issueNumber={issueNumber} isLive={isLive} />
-            )}
+          <div key={session.id}>
+            <SessionHeader session={session} issueNumber={issueNumber} />
+            <SessionDetail session={session} />
           </div>
         ))}
       </div>
