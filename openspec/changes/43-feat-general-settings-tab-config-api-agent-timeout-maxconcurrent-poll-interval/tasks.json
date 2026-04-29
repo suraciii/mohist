@@ -78,11 +78,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow design D2 (extract standalone component), D4 (per-field save), D5 (display units in state). Match existing SettingsPage styling (Tailwind classes, gray-50 backgrounds).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        430407
+      ]
     },
     {
       "id": "T-004",
