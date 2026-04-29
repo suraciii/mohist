@@ -124,13 +124,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Preserve all existing functionality: connect dialog, remove confirmation modal, custom provider dialog. The refactor is purely structural — same data, same actions, new layout.",
       "error": null,
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "durations": [
-        309543
+        309543,
+        149597
       ]
     }
   ]
