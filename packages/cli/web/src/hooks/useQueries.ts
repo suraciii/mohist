@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { WorktreeStatus } from '../lib/types'
+import type { WorktreeStatus, GeneralConfig } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
@@ -282,6 +282,23 @@ export function useWorktreeStatus(issueNumber: number) {
     queryKey: ['worktree-status', issueNumber],
     queryFn: () => api.getWorktreeStatus(issueNumber),
     enabled: issueNumber > 0,
+  })
+}
+
+export function useConfig() {
+  return useQuery<GeneralConfig>({
+    queryKey: ['config'],
+    queryFn: () => api.getConfig(),
+  })
+}
+
+export function useUpdateConfig() {
+  const queryClient = useQueryClient()
+  return useMutation<GeneralConfig, Error, { key: string; value: number }>({
+    mutationFn: ({ key, value }) => api.updateConfig(key, value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] })
+    },
   })
 }
 
