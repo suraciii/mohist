@@ -107,11 +107,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "react-markdown ^10.1.0 is already in web/package.json. Use existing Tailwind utility classes matching the project style.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        152340
+      ]
     },
     {
       "id": "T-005",
