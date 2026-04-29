@@ -41,7 +41,7 @@ export type EventMap = {
   rebase_started: { issueId: string; projectId: string; issueNumber: number };
   rebase_progress: { issueId: string; projectId: string; issueNumber: number; step: string };
   rebase_completed: { issueId: string; projectId: string; issueNumber: number; rebased: boolean };
-  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[] };
+  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[]; status?: 'resolving' | 'failed' };
 };
 
 export type EventName = keyof EventMap;

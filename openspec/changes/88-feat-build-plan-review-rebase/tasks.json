@@ -1,0 +1,88 @@
+{
+  "project": "mohist",
+  "description": "Build/Plan/Review 阶段 rebase 冲突自动解决：复用 ACP agent 冲突解决机制，冲突时自动 spawn coder agent 解决，失败降级为 abort+409",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Update event-bus and SSE types for rebase_conflict status field",
+      "spec": "specs/rebase-auto-resolve/spec.md#rebase-conflict-resolve-sse",
+      "description": "Add optional `status?: 'resolving' | 'failed'` field to the `rebase_conflict` event type in both backend event-bus.ts and frontend types.ts. This enables SSE consumers to distinguish between conflict detection, active resolution, and resolution failure.",
+      "acceptanceCriteria": [
+        "event-bus.ts rebase_conflict type includes `status?: 'resolving' | 'failed'`",
+        "types.ts rebase_conflict type includes `status?: 'resolving' | 'failed'`",
+        "Typecheck passes (cd packages/cli && npx tsc --noEmit)",
+        "Build passes (cd packages/cli && npm run build)"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/event-bus.ts, packages/cli/web/src/lib/types.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Backend file: src/services/event-bus.ts line 43 — change `{ issueId: string; projectId: string; issueNumber: number; conflicts: string[] }` to add `status?: 'resolving' | 'failed'`. Frontend file: web/src/lib/types.ts line 178 — same change."
+    },
+    {
+      "id": "T-002",
+      "title": "Add resolveConflicts callback parameter to createIssueRoutes and wire into rebase handler",
+      "spec": "specs/rebase-auto-resolve/spec.md, specs/http-api/spec.md",
+      "description": "Add an optional `resolveConflicts` callback parameter to `createIssueRoutes` signature. In the rebase handler (POST /:number/rebase), change `abortOnConflict` from true to false. When conflicts are detected and `resolveConflicts` is provided, emit `rebase_conflict` with status:'resolving', call the callback, then on success call `worktreeManager.rebaseContinue()`. On failure, call `worktreeManager.abortRebase()`, emit `rebase_conflict` with status:'failed', return 409. If `resolveConflicts` is not provided, keep current abort+409 behavior. After successful rebaseContinue, proceed with existing stage post-processing (handleReviewRebase/handlePlanRebase/handleBuildRebase).",
+      "acceptanceCriteria": [
+        "createIssueRoutes accepts optional resolveConflicts callback: `(issue: Issue, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>`",
+        "rebase handler uses abortOnConflict: false",
+        "Conflict detected + resolveConflicts provided: emit rebase_conflict status:'resolving', call resolveConflicts, on success rebaseContinue then stage post-processing, return 200 with autoResolved:true",
+        "Conflict detected + resolveConflicts provided + agent fails: abortRebase, emit rebase_conflict status:'failed', return 409",
+        "Conflict detected + no resolveConflicts: abortRebase, emit rebase_conflict, return 409 (current behavior preserved)",
+        "Successful rebase response includes autoResolved:true when agent resolved conflicts",
+        "Typecheck passes (cd packages/cli && npx tsc --noEmit)",
+        "Build passes (cd packages/cli && npm run build)"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-001"],
+      "notes": "Key change points: issues.ts:27-41 (add param), issues.ts:2063-2083 (change abortOnConflict and add auto-resolve flow). Use worktreeManager.rebaseContinue() and worktreeManager.abortRebase() for git operations after agent resolution."
+    },
+    {
+      "id": "T-003",
+      "title": "Wire resolveConflicts callback in server/index.ts",
+      "spec": "specs/rebase-auto-resolve/spec.md#resolve-conflicts-callback",
+      "description": "In server/index.ts, create a resolveConflicts callback matching the pattern of the existing MergeQueue resolveConflicts callback (lines 137-172). Use `buildConflictResolutionPrompt` + `createAcpConnection`. Pass it as the new parameter to `createIssueRoutes` at line 240.",
+      "acceptanceCriteria": [
+        "server/index.ts passes resolveConflicts callback to createIssueRoutes",
+        "Callback uses buildConflictResolutionPrompt to generate prompt",
+        "Callback uses createAcpConnection for ACP session",
+        "Callback returns { success: boolean, error?: string }",
+        "Typecheck passes (cd packages/cli && npx tsc --noEmit)",
+        "Build passes (cd packages/cli && npm run build)"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/server/index.ts",
+      "dependsOn": ["T-002"],
+      "notes": "Follow the exact pattern of the MergeQueue resolveConflicts callback (server/index.ts:137-172) but adapted: the callback receives (issue, worktreePath, conflictFiles) instead of (entry, worktreePath, conflictFiles). Use issue.id/projectId directly instead of entry.issueId/entry.projectId."
+    },
+    {
+      "id": "T-004",
+      "title": "Update IssueDetailPage UI for rebase conflict resolution progress",
+      "spec": "specs/web-ui/spec.md#rebase-conflict-progress",
+      "description": "Update IssueDetailPage.tsx to track rebase conflict resolution state via SSE events. Add state for `rebaseResolving` that tracks whether the rebase is in auto-resolution mode. When `rebase_conflict` event with status:'resolving' is received, show 'Resolving conflicts...' spinner with conflict file list and disable rebase button. When `rebase_completed` is received after resolving, show success with 'Auto-resolved' label. When `rebase_conflict` with status:'failed' is received, show error with file list and re-enable rebase button.",
+      "acceptanceCriteria": [
+        "rebase_conflict SSE event with status:'resolving' shows 'Resolving conflicts...' with spinner and conflict file list",
+        "Rebase button is disabled while resolving",
+        "rebase_completed after resolving shows 'Auto-resolved' success message",
+        "rebase_conflict with status:'failed' shows red error 'Agent failed to resolve conflicts' with file list",
+        "Rebase button is re-enabled after failure",
+        "Web build passes (cd packages/cli/web && npm run build)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx, packages/cli/web/src/hooks/useSSE.tsx",
+      "dependsOn": ["T-001"],
+      "notes": "The useSSE hook already handles rebase_conflict and rebase_completed events. Need to pass the full event data (including status field) through to components. The rebaseResult state in IssueDetailPage (line 224-228) may need extending to include a 'resolving' type. Listen to SSE events via the existing useSSE mechanism and update local state accordingly."
+    }
+  ]
+}
