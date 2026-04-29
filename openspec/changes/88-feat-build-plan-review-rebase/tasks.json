@@ -108,10 +108,13 @@
         "T-001"
       ],
       "notes": "The useSSE hook already handles rebase_conflict and rebase_completed events. Need to pass the full event data (including status field) through to components. The rebaseResult state in IssueDetailPage (line 224-228) may need extending to include a 'resolving' type. Listen to SSE events via the existing useSSE mechanism and update local state accordingly.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        569790
+      ]
     }
   ]
 }
