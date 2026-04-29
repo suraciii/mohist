@@ -1,0 +1,92 @@
+{
+  "project": "mohist",
+  "description": "Add session independent page with opencode-style conversational timeline view at /issue/:number/session/:sessionId",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create ToolCallCard component with tool-specific rendering",
+      "spec": "specs/session-page/spec.md#edit-tool-calls-render-inline-diff-view",
+      "description": "Create a new ToolCallCard component in packages/cli/web/src/components/ToolCallCard.tsx that renders tool calls with tool-specific display: edit/write show inline diff (red -/green + lines from rawInput oldString/newString), bash shows terminal block with dark bg and auto-collapse at 10 lines, read/glob/grep/todowrite/webfetch/memread/membrowse/memsearch show collapsed single-line summaries, unknown tools show generic expandable summary. Export helper functions: parseEditInput(rawInput) returning {filePath, oldString, newString}, parseBashInput(rawInput) returning {command}, and a TOOL_DISPLAY_TYPE map categorizing tools.",
+      "acceptanceCriteria": [
+        "Edit tool call with oldString/newString in rawInput renders red/green diff lines with file path header",
+        "Write tool call with content but no oldString renders all-green lines (new file)",
+        "Bash tool call renders $ command header with monospace dark-bg output, auto-collapses at >10 lines",
+        "Read/glob/grep/todowrite tools render as single-line collapsed summary with expand toggle",
+        "Unknown tool names render as generic summary with expandable raw input/output",
+        "Tool call with state 'started' shows spinning indicator instead of result",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/ToolCallCard.tsx",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is a pure presentation component. Import ToolCallEntry type from ../lib/types. No hook dependencies."
+    },
+    {
+      "id": "T-002",
+      "title": "Create SessionPage component with breadcrumb and round timeline",
+      "spec": "specs/session-page/spec.md#sessionpage-route-renders-full-page-session-detail",
+      "description": "Create SessionPage.tsx in packages/cli/web/src/components/. Extract number and sessionId from URL params. Fetch session list via useCoderSessions(issueNumber), find matching session by id. Pass session to useSessionTimeline(issueNumber, session) to get rounds/isStreaming. Render: breadcrumb header (back arrow Link to /issue/:number, issue number, issue title fetched via useIssue), session metadata (stage, model, duration), live indicator when running. Below header, render rounds as conversation cards using a ConversationRound sub-component that shows agent text as prose + tool calls via ToolCallCard. Include 404 state when session not found. Include auto-scroll (scroll container to bottom on round changes, only when within 200px of bottom).",
+      "acceptanceCriteria": [
+        "Navigating to /issue/:number/session/:sessionId renders the session page with breadcrumb linking back to issue",
+        "Session metadata (stage label, model, duration) displays in the header",
+        "Running session shows pulsing blue dot with Live label",
+        "Rounds render as conversation cards with agent text as prose paragraphs",
+        "Tool calls within rounds render via ToolCallCard (edit shows diff, bash shows terminal, read shows summary)",
+        "404 state shown when sessionId doesn't match any session in the list",
+        "Auto-scrolls to bottom on new content when user is near bottom",
+        "Live SSE streaming works: new text/tool calls/rounds appear in real-time",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/SessionPage.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuses existing hooks: useCoderSessions, useSessionTimeline, useIssue. The issue title comes from useIssue(issueNumber). The session stage/model/duration come from CoderSessionItem fields. ConversationRound can be defined inline in this file."
+    },
+    {
+      "id": "T-003",
+      "title": "Add session page route to App.tsx router",
+      "spec": "specs/web-ui/spec.md#router-includes-session-detail-route",
+      "description": "Add a new route in App.tsx: <Route path=\"/issue/:number/session/:sessionId\" element={<SessionPage />} /> nested under ProjectGuard, directly after the /issue/:number route. Import SessionPage from ./components/SessionPage.",
+      "acceptanceCriteria": [
+        "Route /issue/:number/session/:sessionId is registered under ProjectGuard",
+        "Route /issue/:number still renders IssueDetailPage unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/App.tsx",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Must add the import for SessionPage. SessionPage component must exist first (T-002), so this task depends on it."
+    },
+    {
+      "id": "T-004",
+      "title": "Convert SessionHeader to Link and SessionDetail to summary-only",
+      "spec": "specs/session-timeline-ui/spec.md#sessionheader-navigates-to-session-page",
+      "description": "Modify SessionHeader.tsx: change the outer element from <button> to react-router-dom <Link to={/issue/:number/session/:sessionId}>. Add an issueNumber prop. Remove isExpanded and onClick props (no longer needed). Keep existing visual styling (status icon, label, duration). Modify SessionDetail.tsx: replace the full timeline (RoundSection rendering) with a one-line summary derived from session.workflowLogs — count edit/write events for 'files changed' and all tool_call events for 'tool calls', display as 'N files changed · M tool calls'. Modify SessionList.tsx: pass issueNumber to SessionHeader, remove expandedId state and handleToggle, remove conditional SessionDetail rendering — always show the summary line below each header.",
+      "acceptanceCriteria": [
+        "Clicking a session header in SessionList navigates to /issue/:number/session/:sessionId",
+        "No inline expansion occurs when clicking session header",
+        "Each session in SessionList shows a one-line summary like '3 files changed · 5 tool calls'",
+        "SessionList no longer has expandedId state or toggle logic",
+        "SessionDetail no longer renders full RoundSection timeline",
+        "SessionHeader accepts issueNumber prop and renders as <Link>",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/SessionList.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "This modifies three existing files: SessionHeader.tsx, SessionDetail.tsx, SessionList.tsx. The session page route must exist first (T-003) so the Link targets are valid. SessionDetail's summary computation: iterate session.workflowLogs, count eventType 'tool_call' where data contains edit/write kind for file changes, count all 'tool_call' events for total."
+    }
+  ]
+}
