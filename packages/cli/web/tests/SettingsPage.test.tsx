@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from './test-utils'
 import { SettingsPage } from '../src/components/SettingsPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { BrowserRouter } from 'react-router-dom'
 import React from 'react'
 
 const mockProviders = [
@@ -37,10 +38,12 @@ vi.mock('../src/hooks/useQueries', async () => {
     useDeleteProvider: vi.fn(),
     useSaveProvider: vi.fn(),
     useTestProvider: vi.fn(),
+    useConfig: vi.fn(),
+    useUpdateConfig: vi.fn(),
   }
 })
 
-const { useProviders, useDeleteProvider, useSaveProvider, useTestProvider } = await import('../src/hooks/useQueries')
+const { useProviders, useDeleteProvider, useSaveProvider, useTestProvider, useConfig, useUpdateConfig } = await import('../src/hooks/useQueries')
 
 function createMockQueryClient() {
   return new QueryClient({
@@ -54,7 +57,9 @@ function createMockQueryClient() {
 function renderWithQueryClient(ui: React.ReactElement) {
   const queryClient = createMockQueryClient()
   return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>{ui}</BrowserRouter>
+    </QueryClientProvider>
   )
 }
 
@@ -74,6 +79,17 @@ beforeEach(() => {
     isPending: false,
   })
   ;(useTestProvider as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  })
+  ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { agentTimeout: 1800000, maxConcurrentAgents: 8, pollInterval: 30000 },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })
+  ;(useUpdateConfig as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutateAsync: vi.fn(),
     mutate: vi.fn(),
     isPending: false,
   })
@@ -112,14 +128,17 @@ describe('SettingsPage', () => {
 
       fireEvent.click(screen.getByText('General'))
 
-      expect(screen.getByText('General settings coming soon.')).toBeInTheDocument()
+      expect(screen.getByText('General Settings')).toBeInTheDocument()
+      expect(screen.getByText('Agent Timeout')).toBeInTheDocument()
+      expect(screen.getByText('Max Concurrent Agents')).toBeInTheDocument()
+      expect(screen.getByText('Poll Interval')).toBeInTheDocument()
     })
 
     it('should switch back to Providers tab when clicked', () => {
       renderWithQueryClient(<SettingsPage />)
 
       fireEvent.click(screen.getByText('General'))
-      expect(screen.getByText('General settings coming soon.')).toBeInTheDocument()
+      expect(screen.getByText('General Settings')).toBeInTheDocument()
 
       fireEvent.click(screen.getByText('Providers'))
       expect(screen.getByText('Connected Providers')).toBeInTheDocument()
