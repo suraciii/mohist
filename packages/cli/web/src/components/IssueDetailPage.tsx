@@ -131,6 +131,9 @@ export function IssueDetailPage() {
   const [commentText, setCommentText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
+  const [restartConfirming, setRestartConfirming] = useState(false)
+  const restartPanelRef = useRef<HTMLDivElement>(null)
+  const [blockedError, setBlockedError] = useState<string | null>(null)
   const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
 
@@ -148,6 +151,21 @@ export function IssueDetailPage() {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [forceStopConfirming])
+
+  useEffect(() => {
+    if (!restartConfirming) return
+    const timer = setTimeout(() => setRestartConfirming(false), 5000)
+    const handleClickOutside = (e: MouseEvent) => {
+      if (restartPanelRef.current && !restartPanelRef.current.contains(e.target as Node)) {
+        setRestartConfirming(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [restartConfirming])
 
   const { data: issue, isLoading } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
@@ -209,6 +227,34 @@ export function IssueDetailPage() {
     mutationFn: () => api.reopenIssue(issueNumber),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
+    },
+  })
+
+  const retryMutation = useMutation({
+    mutationFn: () => api.retryIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      setBlockedError(null)
+    },
+    onError: (error: Error) => {
+      setBlockedError(error.message)
+    },
+  })
+
+  const restartMutation = useMutation({
+    mutationFn: () => api.restartIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      setBlockedError(null)
+      setRestartConfirming(false)
+    },
+    onError: (error: Error) => {
+      setBlockedError(error.message)
+      setRestartConfirming(false)
     },
   })
 
@@ -701,13 +747,76 @@ export function IssueDetailPage() {
                   )}
 
                   {issue.status === IssueStatus.Blocked && (
-                    <button
-                      onClick={() => reopenMutation.mutate()}
-                      disabled={reopenMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                    >
-                      {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
-                    </button>
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
+                      <h2 className="text-sm font-semibold text-red-800">
+                        Issue Blocked
+                      </h2>
+                      <p className="text-xs text-red-700">
+                        {issue.blockedReason || 'Issue 已暂停。可以重试或重新开始。'}
+                      </p>
+                      {issue.stage === Stage.Build && mergedTasks.length > 0 && (() => {
+                        const completed = mergedTasks.filter(t => t.passes).length
+                        const total = mergedTasks.length
+                        if (completed > 0 && completed < total) {
+                          return (
+                            <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
+                              已完成 {completed}/{total} 个任务，可从断点恢复
+                            </p>
+                          )
+                        }
+                        return null
+                      })()}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => retryMutation.mutate()}
+                          disabled={retryMutation.isPending}
+                          className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          {retryMutation.isPending && (
+                            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                          )}
+                          {retryMutation.isPending ? 'Retrying...' : '重试'}
+                        </button>
+                        <div ref={restartPanelRef}>
+                          <button
+                            onClick={() => {
+                              if (restartConfirming) {
+                                restartMutation.mutate()
+                              } else {
+                                setRestartConfirming(true)
+                              }
+                            }}
+                            disabled={restartMutation.isPending}
+                            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                              restartConfirming
+                                ? 'bg-red-600 text-white hover:bg-red-700'
+                                : 'border border-red-300 bg-white text-red-600 hover:bg-red-50'
+                            } disabled:opacity-50`}
+                          >
+                            {restartMutation.isPending
+                              ? 'Restarting...'
+                              : restartConfirming
+                                ? '确认重新开始？'
+                                : '重新开始'}
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => reopenMutation.mutate()}
+                          disabled={reopenMutation.isPending}
+                          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                        >
+                          {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
+                        </button>
+                      </div>
+                      {blockedError && (
+                        <div className="text-xs text-red-600">
+                          {blockedError}
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {issue.status === IssueStatus.Interrupted && (

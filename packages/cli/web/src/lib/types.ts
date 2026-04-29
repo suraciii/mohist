@@ -42,6 +42,8 @@ export interface Issue {
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
   priority?: string | null
   model?: string | null
+  blockedReason?: string
+  retryCount?: number
 }
 
 export interface Project {

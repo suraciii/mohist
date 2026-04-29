@@ -89,6 +89,11 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
+          case 'agent_blocked': {
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+            break
+          }
           case 'approval_requested': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
@@ -173,6 +178,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'rebase_progress',
       'rebase_completed',
       'rebase_conflict',
+      'agent_blocked',
     ]
 
     for (const type of eventTypes) {
