@@ -1,7 +1,5 @@
 {
   "version": 1,
-  "project": "mohist",
-  "description": "Review 阶段审批后先 merge 再进 Done，使 Done 成为真正的终端状态",
   "tasks": [
     {
       "id": "T-001",
@@ -22,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "这是核心改动。mergeBackFn 签名: (issueNumber: number) => Promise<{success: boolean, message: string}>。onMergeConflictFn 签名: (issueId: string, issueNumber: number) => Promise<void>。"
+      "passes": true,
+      "notes": "这是核心改动。mergeBackFn 签名: (issueNumber: number) => Promise<{success: boolean, message: string}>。onMergeConflictFn 签名: (issueId: string, issueNumber: number) => Promise<void>。",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        189470
+      ]
     },
     {
       "id": "T-002",
@@ -42,9 +46,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "改动集中在 api/issues.ts:883-893 区域。Review 分支不再设 nextStage，但仍 resumePipeline。"
+      "notes": "改动集中在 api/issues.ts:883-893 区域。Review 分支不再设 nextStage，但仍 resumePipeline。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -64,9 +73,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "需要从 projectRepo 获取 project 信息来绑定 mergeBackFn。projectRepo 已在 AgentRunnerService 构造函数中注入。"
+      "notes": "需要从 projectRepo 获取 project 信息来绑定 mergeBackFn。projectRepo 已在 AgentRunnerService 构造函数中注入。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -86,9 +100,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/server/index.ts",
-      "dependsOn": ["T-001", "T-003"],
+      "dependsOn": [
+        "T-001",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "这是最后一步——确保 T-001 和 T-003 的 pipeline 内 merge 逻辑已完整替代此处功能后再移除。"
+      "notes": "这是最后一步——确保 T-001 和 T-003 的 pipeline 内 merge 逻辑已完整替代此处功能后再移除。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -108,9 +128,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/review-merge-flow.test.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -125,9 +151,18 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/",
-      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
       "passes": false,
-      "notes": "如有现有测试因行为变更而失败，更新测试以匹配新行为。"
+      "notes": "如有现有测试因行为变更而失败，更新测试以匹配新行为。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
