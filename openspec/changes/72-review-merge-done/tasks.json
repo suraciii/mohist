@@ -170,11 +170,14 @@
         "T-004",
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "如有现有测试因行为变更而失败，更新测试以匹配新行为。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        305351
+      ]
     }
   ]
 }
