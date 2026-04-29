@@ -78,10 +78,13 @@
         "T-002"
       ],
       "notes": "Follow the exact pattern of the MergeQueue resolveConflicts callback (server/index.ts:137-172) but adapted: the callback receives (issue, worktreePath, conflictFiles) instead of (entry, worktreePath, conflictFiles). Use issue.id/projectId directly instead of entry.issueId/entry.projectId.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        102395
+      ]
     },
     {
       "id": "T-004",
