@@ -53,11 +53,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Add tests to the existing config-loader.test.ts file. Follow its beforeEach/afterEach pattern with tmpDir.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        164770
+      ]
     },
     {
       "id": "T-003",
