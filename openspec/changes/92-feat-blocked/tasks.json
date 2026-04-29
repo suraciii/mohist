@@ -150,7 +150,10 @@
       "notes": "扩展现有 recover-issues.test.ts 和 api-routes.test.ts。参考现有测试模式（inMemory DB + mock worktree）。",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1307047
+      ]
     },
     {
       "id": "T-006",
