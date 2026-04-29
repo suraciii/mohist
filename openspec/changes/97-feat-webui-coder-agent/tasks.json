@@ -137,11 +137,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Import useOpencodeModel from hooks/useQueries. Extract display name helper: `const displayName = (id: string) => id.split('/').pop() || id`. Keep the change minimal — only touch the display logic, no structural changes to IssueModelSelector.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        148299
+      ]
     }
   ]
 }
