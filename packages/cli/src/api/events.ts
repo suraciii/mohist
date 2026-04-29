@@ -39,6 +39,7 @@ const ALL_EVENT_TYPES: EventName[] = [
   'rebase_progress',
   'rebase_completed',
   'rebase_conflict',
+  'agent_blocked',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {

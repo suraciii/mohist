@@ -16,32 +16,10 @@ export enum IssueStatus {
   Completed = 'completed',
 }
 
-export interface ApprovalDimension {
-  name: string
-  status: 'PASS' | 'FAIL'
-  issues?: string[]
-}
-
-export interface ApprovalArtifact {
-  name: string
-  path: string
-  content?: string
-}
-
-export interface ApprovalOutput {
-  stage: string
-  issueNumber: number
-  selfReviewNotes?: string
-  reviewReport?: string
-  verdict?: 'PASS' | 'FAIL' | null
-  dimensions?: ApprovalDimension[]
-  artifacts?: ApprovalArtifact[]
-}
-
 export interface ApprovalState {
   status: 'awaiting' | 'approved' | 'rejected'
   stage?: string
-  output?: ApprovalOutput
+  output?: Record<string, unknown>
   requestedAt: string
   approvedAt?: string
 }
@@ -63,7 +41,7 @@ export interface Issue {
   approvalState?: ApprovalState
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
   priority?: string | null
-  model?: string
+  model?: string | null
 }
 
 export interface Project {
@@ -127,13 +105,6 @@ export interface DiffFile {
   file: string
   additions: number
   deletions: number
-  diff: string
-}
-
-export interface DiffResponse {
-  files: DiffFile[]
-  totalAdditions: number
-  totalDeletions: number
 }
 
 export interface CommitEntry {
@@ -172,16 +143,6 @@ export type PlanSessionUpdateEvent = {
   coderSessionId?: string
 }
 
-export type PlanRoundCompleteEvent = {
-  issueId: string
-  projectId: string
-  roundType: string
-  roundLabel: string
-  roundIndex: number
-  duration: number
-  verdict?: 'PASS' | 'FAIL'
-}
-
 export type AgentDetailEventMap = {
   agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number }
   main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number }
@@ -191,7 +152,6 @@ export type AgentDetailEventMap = {
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number }
   plan_round_start: PlanRoundStartEvent
   plan_session_update: PlanSessionUpdateEvent
-  plan_round_complete: PlanRoundCompleteEvent
   coder_recovery_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
   coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string }
   coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number }
@@ -215,7 +175,8 @@ export type EventMap = {
   rebase_started: { issueId: string; projectId: string; issueNumber: number }
   rebase_progress: { issueId: string; projectId: string; issueNumber: number; step: 'fetching' | 'checking' | 'rebasing' | 'verifying' }
   rebase_completed: { issueId: string; projectId: string; issueNumber: number; rebased: boolean }
-  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[]; status?: 'resolving' | 'failed' }
+  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[] }
+  agent_blocked: { issueId: string; projectId: string; issueNumber: number; blockedReason: string; retryCount: number }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap
@@ -380,31 +341,13 @@ export interface BuildStatus {
   tasks: Task[]
 }
 
-export interface RebaseConflictState {
-  issueNumber: number
-  conflicts: string[]
-  status: 'resolving' | 'failed'
-}
-
 export interface LiveTaskState {
   activeTaskId: string | null
   activeTaskElapsedMs: number | null
-  rebaseConflict: RebaseConflictState | null
-}
-
-export interface WorktreeStatus {
-  exists: boolean
-  branch: string | null
-  ahead: number
-  behind: number
-  canFastForward: boolean
-  isRebaseInProgress: boolean
 }
 
 export interface GeneralConfig {
-  serverPort: number
-  serverHost: string
-  pollInterval: number
-  maxConcurrentAgents: number
   agentTimeout: number
+  maxConcurrentAgents: number
+  pollInterval: number
 }
