@@ -477,6 +477,8 @@ export class AgentRunnerService {
     };
 
     const startTime = Date.now();
+    let conflictResolutionInitiated = false;
+    let deferredRestartWorktreePath: string | null = null;
     const promise = (async () => {
       try {
         const artifactManager = new ChangeArtifactsManager(worktreePath);
@@ -592,20 +594,8 @@ export class AgentRunnerService {
               retryCount: currentRetryCount,
             });
 
-            const refreshedIssue = issueRepo.findById(issue.id);
-            if (!refreshedIssue) return;
-
-            this.startPipeline(
-              refreshedIssue,
-              projectId,
-              issueRepo,
-              wtPath,
-              {
-                ...acpOptions,
-                cwd: wtPath,
-              },
-              updateIssueStatus,
-            );
+            conflictResolutionInitiated = true;
+            deferredRestartWorktreePath = wtPath;
           };
         }
 
@@ -635,6 +625,10 @@ export class AgentRunnerService {
         log.info('Pipeline run completed', { issueNumber: issue.number, duration, completed: result.completed });
         if (result.completed) {
           this.eventBus.emit('agent_completed', { issueId: issue.id, projectId, issueNumber: issue.number });
+        } else if (conflictResolutionInitiated) {
+          log.info('Conflict resolution initiated, pipeline restart deferred', {
+            issueNumber: issue.number,
+          });
         } else if (!result.gateRequired) {
           try {
             issueRepo.setApprovalState(issue.id, {
@@ -716,6 +710,26 @@ export class AgentRunnerService {
         if (agent) agent.childProcess = undefined;
         this.activeAgents.delete(issue.id);
         this.clearWaiting(issue.id);
+
+        if (conflictResolutionInitiated && deferredRestartWorktreePath) {
+          const refreshedIssue = issueRepo.findById(issue.id);
+          if (refreshedIssue) {
+            log.info('Executing deferred pipeline restart for conflict resolution', {
+              issueNumber: issue.number,
+            });
+            this.startPipeline(
+              refreshedIssue,
+              projectId,
+              issueRepo,
+              deferredRestartWorktreePath,
+              {
+                ...acpOptions,
+                cwd: deferredRestartWorktreePath,
+              },
+              updateIssueStatus,
+            );
+          }
+        }
       }
     })();
 

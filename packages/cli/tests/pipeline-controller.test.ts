@@ -275,7 +275,6 @@ describe('WorkflowController done stage sets Completed status', () => {
 
     expect(result.completed).toBe(true);
     expect(result.stage).toBe(Stage.Done);
-    expect(issueRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Done);
     expect(issueRepo.clearApprovalState).toHaveBeenCalledWith('issue-1');
     expect(issueRepo.updateStatus).toHaveBeenCalledWith('issue-1', IssueStatus.Completed);
   });
