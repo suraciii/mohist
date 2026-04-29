@@ -145,11 +145,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing route patterns (createAgentRoutes, createExploreRoutes). Project context via projectService.getCurrentId().",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        305363
+      ]
     },
     {
       "id": "T-006",
