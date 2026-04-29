@@ -112,11 +112,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Key design decisions: D1 (hand-written frontmatter parser), D3 (direct runAcpSession not AgentRunnerService), D4 (fire-and-forget async), D5 (title from first line).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        338620
+      ]
     },
     {
       "id": "T-005",
