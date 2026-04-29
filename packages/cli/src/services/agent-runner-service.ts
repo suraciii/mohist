@@ -298,6 +298,7 @@ export class AgentRunnerService {
     if (this.issueRepo) {
       try {
         this.issueRepo.updateStatus(issueId, IssueStatus.Blocked);
+        console.log("[DEBUG] clearApprovalState called for", issueId);
         this.issueRepo.clearApprovalState(issueId);
       } catch (err) {
         log.error('Failed to update issue status after stop', {
