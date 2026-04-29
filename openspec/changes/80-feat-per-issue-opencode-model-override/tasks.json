@@ -106,11 +106,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-001 for sequential execution ordering; no code-level dependency on DB schema",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        173448
+      ]
     },
     {
       "id": "T-005",
