@@ -113,10 +113,13 @@
         "T-003"
       ],
       "notes": "Follow the visual pattern of TaskProgressPanel at SessionTimeline.tsx:332-368. A formatDuration function already exists at SessionTimeline.tsx:17 but takes ms — we need a version that takes seconds. Consider extracting a shared util or adapting. Use the same rounded-lg border panel style.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        273721
+      ]
     },
     {
       "id": "T-005",
