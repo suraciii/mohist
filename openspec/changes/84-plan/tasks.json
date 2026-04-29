@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Plan 阶段步骤进度可视化：后端 emitProgress + plan_round_complete SSE 事件 + 前端 PlanProgressPanel 组件",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "CONFIG",
       "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts, packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/agent-events.ts, packages/cli/web/src/hooks/useSSE.tsx",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow the exact same pattern as plan_round_start which already exists in all 4 locations. The verdict field is optional and only present for self-review/re-self-review rounds."
+      "passes": true,
+      "notes": "Follow the exact same pattern as plan_round_start which already exists in all 4 locations. The verdict field is optional and only present for self-review/re-self-review rounds.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        258212
+      ]
     },
     {
       "id": "T-002",
@@ -42,8 +47,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-001"],
-      "notes": "The emitProgress method already exists at workflow-controller.ts:95 but is never called from runPlanStage. Key call sites: after line 266 (artifact round success), after line 321 (self-review PASS), after line 322 (self-review FAIL), after line 360 (auto-fix complete), after line 421 (re-self-review complete), around line 125 (checkpoint resume). Duration tracking: store Date.now() before each round's prompt(), compute diff after."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "The emitProgress method already exists at workflow-controller.ts:95 but is never called from runPlanStage. Key call sites: after line 266 (artifact round success), after line 321 (self-review PASS), after line 322 (self-review FAIL), after line 360 (auto-fix complete), after line 421 (re-self-review complete), around line 125 (checkpoint resume). Duration tracking: store Date.now() before each round's prompt(), compute diff after.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -64,8 +75,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useSessionTimeline.ts",
-      "dependsOn": ["T-001"],
-      "notes": "BASE_STEPS = ['proposal', 'specs', 'design', 'tasks', 'self-review']. PLAN_ROUND_LABELS already exists at line 73 as ['proposal.md', 'specs/', 'design.md', 'tasks.json', 'self-review']. The agentStatus query is already set up at line 215 with 5s polling. Initialization: when agentStatus has stage='plan' and taskProgress, build initial steps. The plan_round_complete handler should also increment completedCount."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "BASE_STEPS = ['proposal', 'specs', 'design', 'tasks', 'self-review']. PLAN_ROUND_LABELS already exists at line 73 as ['proposal.md', 'specs/', 'design.md', 'tasks.json', 'self-review']. The agentStatus query is already set up at line 215 with 5s polling. Initialization: when agentStatus has stage='plan' and taskProgress, build initial steps. The plan_round_complete handler should also increment completedCount.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -86,8 +103,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/PlanProgressPanel.tsx",
-      "dependsOn": ["T-003"],
-      "notes": "Follow the visual pattern of TaskProgressPanel at SessionTimeline.tsx:332-368. A formatDuration function already exists at SessionTimeline.tsx:17 but takes ms — we need a version that takes seconds. Consider extracting a shared util or adapting. Use the same rounded-lg border panel style."
+      "dependsOn": [
+        "T-003"
+      ],
+      "notes": "Follow the visual pattern of TaskProgressPanel at SessionTimeline.tsx:332-368. A formatDuration function already exists at SessionTimeline.tsx:17 but takes ms — we need a version that takes seconds. Consider extracting a shared util or adapting. Use the same rounded-lg border panel style.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -106,8 +129,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SessionTimeline.tsx",
-      "dependsOn": ["T-003", "T-004"],
-      "notes": "Look at how SessionTimeline receives taskProgress/loopProgress as props (line 463-464) and how TaskProgressPanel is conditionally rendered (line 504-506). Follow the same pattern: add planProgress prop, conditionally render PlanProgressPanel for plan stage. The parent component that passes props needs to also get planProgress from useSessionTimeline and forward it."
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
+      "notes": "Look at how SessionTimeline receives taskProgress/loopProgress as props (line 463-464) and how TaskProgressPanel is conditionally rendered (line 504-506). Follow the same pattern: add planProgress prop, conditionally render PlanProgressPanel for plan stage. The parent component that passes props needs to also get planProgress from useSessionTimeline and forward it.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     }
   ]
 }
