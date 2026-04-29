@@ -47,11 +47,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Query key: ['config']. Follow useSaveProvider pattern for optimistic updates.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        186996
+      ]
     },
     {
       "id": "T-003",
