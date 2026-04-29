@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useConfig, useUpdateConfig } from '../hooks/useQueries'
 
 const DEFAULTS = {
@@ -237,6 +237,46 @@ export function GeneralSettingsSection() {
       >
         Reset to Defaults
       </button>
+
+      <hr className="border-gray-100" />
+
+      <VersionInfoBlock />
+    </div>
+  )
+}
+
+interface HealthResponse {
+  version?: string | null
+  gitHash?: string | null
+}
+
+function VersionInfoBlock() {
+  const [version, setVersion] = useState<string | null>(null)
+  const [gitHash, setGitHash] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  const fetchHealth = useCallback(() => {
+    fetch('/api/health')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: HealthResponse | null) => {
+        if (data) {
+          setVersion(data.version ?? null)
+          setGitHash(data.gitHash ?? null)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true))
+  }, [])
+
+  useEffect(() => {
+    fetchHealth()
+  }, [fetchHealth])
+
+  const display = (val: string | null) => (loaded ? (val ?? '--') : '--')
+
+  return (
+    <div className="text-xs text-gray-400 space-y-0.5">
+      <p>mohist {display(version)}{gitHash ? ` (${gitHash})` : ''}</p>
     </div>
   )
 }
