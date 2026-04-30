@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Restore kanban-grouping.ts usage in KanbanBoard.tsx — fix closed issue routing to Done column and restore Show closed toggle",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -26,8 +25,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/components/KanbanBoard.tsx",
       "dependsOn": [],
-      "passes": false,
-      "notes": "kanban-grouping.ts and its tests are already correct — only KanbanBoard.tsx needs modification. StageColumn.tsx should not need changes; toggle UI renders at KanbanBoard level per design D2."
+      "passes": true,
+      "notes": "kanban-grouping.ts and its tests are already correct — only KanbanBoard.tsx needs modification. StageColumn.tsx should not need changes; toggle UI renders at KanbanBoard level per design D2.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        132696
+      ]
     }
   ]
 }
