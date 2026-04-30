@@ -655,31 +655,89 @@ const CREATE_AGENT_SKILL_SCHEDULES_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_agent_skill_schedules_enabled_next_run ON agent_skill_schedules(enabled, next_run_at);',
 ];
 
+const CREATE_SKILLS_TABLE_V16 = `
+CREATE TABLE IF NOT EXISTS skills (
+  id          TEXT PRIMARY KEY,
+  name        TEXT UNIQUE NOT NULL,
+  project_id  TEXT NOT NULL REFERENCES projects(id),
+  description TEXT NOT NULL DEFAULT '',
+  prompt      TEXT NOT NULL DEFAULT '',
+  dir_path    TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+`;
+
+const CREATE_SKILLS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_skills_project_id ON skills(project_id);',
+];
+
+const CREATE_SKILL_RUNS_TABLE_V16 = `
+CREATE TABLE IF NOT EXISTS skill_runs (
+  id            TEXT PRIMARY KEY,
+  skill_id      TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  project_id    TEXT NOT NULL REFERENCES projects(id),
+  status        TEXT NOT NULL DEFAULT 'running',
+  output        TEXT,
+  error         TEXT,
+  issue_id      TEXT REFERENCES issues(id),
+  started_at    TEXT NOT NULL,
+  completed_at  TEXT
+);
+`;
+
+const CREATE_SKILL_RUNS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_skill_runs_skill_id ON skill_runs(skill_id);',
+  'CREATE INDEX IF NOT EXISTS idx_skill_runs_project_id ON skill_runs(project_id);',
+];
+
+const CREATE_AGENT_SKILLS_TABLE = `
+CREATE TABLE IF NOT EXISTS agent_skills (
+  id          TEXT PRIMARY KEY,
+  name        TEXT UNIQUE NOT NULL,
+  project_id  TEXT NOT NULL REFERENCES projects(id),
+  description TEXT NOT NULL DEFAULT '',
+  prompt      TEXT NOT NULL DEFAULT '',
+  dir_path    TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+`;
+
 function migrateToVersion16(db: DatabaseManager): void {
   db.transaction(() => {
     db.exec(CREATE_SKILL_RUNS_TABLE);
 
-    const tableInfo = db.all<{ name: string }>(
-      "PRAGMA table_info(issues)"
-    );
+    const tableInfo = db.all<{ name: string }>("PRAGMA table_info(issues)");
 
-    if (!tableInfo.some(col => col.name === 'archived_at')) {
-      db.exec("ALTER TABLE issues ADD COLUMN archived_at TEXT");
-      db.exec('CREATE INDEX IF NOT EXISTS idx_issues_archived ON issues(archived_at)');
+    const hasArchivedAt = tableInfo.some(col => col.name === 'archived_at');
+    if (!hasArchivedAt) {
+      db.exec("ALTER TABLE issues ADD COLUMN archived_at TEXT DEFAULT NULL");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_issues_archived ON issues(archived_at)");
+    }
+    const hasBlockedReason = tableInfo.some(col => col.name === 'blocked_reason');
+    if (!hasBlockedReason) {
+      db.exec('ALTER TABLE issues ADD COLUMN blocked_reason TEXT DEFAULT NULL');
+    }
+    const hasRetryCount = tableInfo.some(col => col.name === 'retry_count');
+    if (!hasRetryCount) {
+      db.exec('ALTER TABLE issues ADD COLUMN retry_count INTEGER DEFAULT 0');
     }
 
-    if (!tableInfo.some(col => col.name === 'blocked_reason')) {
-      db.exec("ALTER TABLE issues ADD COLUMN blocked_reason TEXT DEFAULT NULL");
-    }
-
-    if (!tableInfo.some(col => col.name === 'retry_count')) {
-      db.exec("ALTER TABLE issues ADD COLUMN retry_count INTEGER DEFAULT 0");
-    }
-
+    db.exec(CREATE_AGENT_SKILLS_TABLE);
     db.exec(CREATE_AGENT_SKILL_SCHEDULES_TABLE);
     for (const indexSql of CREATE_AGENT_SKILL_SCHEDULES_INDEXES) {
       db.exec(indexSql);
     }
+    db.exec(CREATE_SKILLS_TABLE_V16);
+    for (const indexSql of CREATE_SKILLS_INDEXES) {
+      db.exec(indexSql);
+    }
+    db.exec(CREATE_SKILL_RUNS_TABLE_V16);
+    for (const indexSql of CREATE_SKILL_RUNS_INDEXES) {
+      db.exec(indexSql);
+    }
+
     setSchemaVersion(db, 16);
   });
 }
