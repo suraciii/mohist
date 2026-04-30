@@ -1434,7 +1434,7 @@ function truncateLog(log: string, maxLength: number): string {
 const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
 const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
 
-export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
+export function parseResult(content: string): 'PASS' | 'FAIL' {
   const match = RESULT_RE.exec(content);
   if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
   const legacyMatch = LEGACY_VERDICT_RE.exec(content);
@@ -1442,7 +1442,11 @@ export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
     log.warn('parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
     return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
   }
-  return null;
+  return 'FAIL';
+}
+
+export function parseVerdict(content: string): 'PASS' | 'FAIL' {
+  return parseResult(content);
 }
 
 export function extractFixSuggestions(content: string): string {
