@@ -42,7 +42,7 @@ vi.mock('../src/agents/artifact-prompt', () => ({
 }));
 
 import * as fs from 'fs';
-import { WorkflowEngine, type ChangeArtifactsManager, createCheckpointManager, PlanStageRunner, BuildStageRunner, CheckStageRunner, BuildTestCheck, MergeReadyCheck, AiReviewCheck, type StageRunner } from '../src/workflow';
+import { PlanStageRunner, type StageContext, createCheckpointManager, type ChangeArtifactsManager } from '../src/workflow';
 import { createAcpConnection } from '../src/agent-runtime/acp-session';
 import { buildArtifactPrompt } from '../src/agents/artifact-prompt';
 
@@ -194,7 +194,7 @@ describe('PipelineCheckpointRepo', () => {
   });
 });
 
-describe('WorkflowController runPlanStage checkpoint resume', () => {
+describe('PlanStageRunner runPlanStage checkpoint resume', () => {
   let db: DatabaseManager;
   let checkpointRepo: PipelineCheckpointRepo;
 
@@ -220,6 +220,22 @@ describe('WorkflowController runPlanStage checkpoint resume', () => {
     return mockConn;
   }
 
+  async function runPlanStage(issue: Issue, artifactManager: ChangeArtifactsManager) {
+    const runner = new PlanStageRunner();
+    const checkpointManager = createCheckpointManager(checkpointRepo);
+    const ctx: StageContext = {
+      issue,
+      acpOptions: { cwd: '/tmp/worktree' },
+      artifactManager,
+      worktreeManager: {} as any,
+      projectRepo: {} as any,
+      eventBus: {} as any,
+      checkpointManager,
+      issueRepo: {} as any,
+    };
+    return runner.run(ctx);
+  }
+
   it('should skip proposal round when checkpoint has completedSteps=["proposal"]', async () => {
     checkpointRepo.upsert(1, 'plan', ['proposal'], 'specs');
 
@@ -233,13 +249,7 @@ describe('WorkflowController runPlanStage checkpoint resume', () => {
     const mockConn = setupMockConn();
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
-    const ctrl = new WorkflowController({
-      artifactManager,
-      worktreePath: '/tmp/worktree',
-      checkpointRepo,
-    });
-
-    const result = await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+    const result = await runPlanStage(createMockIssue(), artifactManager);
 
     expect(result.success).toBe(true);
     expect(mockConn.prompt).toHaveBeenCalledTimes(4);
@@ -261,13 +271,7 @@ describe('WorkflowController runPlanStage checkpoint resume', () => {
     const mockConn = setupMockConn();
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
-    const ctrl = new WorkflowController({
-      artifactManager,
-      worktreePath: '/tmp/worktree',
-      checkpointRepo,
-    });
-
-    const result = await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+    const result = await runPlanStage(createMockIssue(), artifactManager);
 
     expect(result.success).toBe(true);
     const roundTypes = (buildArtifactPrompt as ReturnType<typeof vi.fn>).mock.calls.map(
@@ -290,13 +294,7 @@ describe('WorkflowController runPlanStage checkpoint resume', () => {
     setupMockConn();
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
-    const ctrl = new WorkflowController({
-      artifactManager,
-      worktreePath: '/tmp/worktree',
-      checkpointRepo,
-    });
-
-    await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+    await runPlanStage(createMockIssue(), artifactManager);
 
     expect(fs.readdirSync).not.toHaveBeenCalledWith(CHANGE_DIR);
     expect(fs.rmSync).not.toHaveBeenCalled();
@@ -311,13 +309,7 @@ describe('WorkflowController runPlanStage checkpoint resume', () => {
     setupMockConn();
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
-    const ctrl = new WorkflowController({
-      artifactManager,
-      worktreePath: '/tmp/worktree',
-      checkpointRepo,
-    });
-
-    await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+    await runPlanStage(createMockIssue(), artifactManager);
 
     expect(fs.readdirSync).toHaveBeenCalledWith(CHANGE_DIR);
   });
@@ -328,13 +320,7 @@ describe('WorkflowController runPlanStage checkpoint resume', () => {
     setupMockConn();
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
-    const ctrl = new WorkflowController({
-      artifactManager,
-      worktreePath: '/tmp/worktree',
-      checkpointRepo,
-    });
-
-    const result = await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+    const result = await runPlanStage(createMockIssue(), artifactManager);
 
     expect(result.success).toBe(true);
     expect(checkpointRepo.get(1, 'plan')).toBeNull();
@@ -351,13 +337,7 @@ describe('WorkflowController runPlanStage checkpoint resume', () => {
 
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
-    const ctrl = new WorkflowController({
-      artifactManager,
-      worktreePath: '/tmp/worktree',
-      checkpointRepo,
-    });
-
-    const result = await ctrl.runPlanStage(createMockIssue(), { cwd: '/tmp/worktree' });
+    const result = await runPlanStage(createMockIssue(), artifactManager);
 
     expect(result.success).toBe(false);
     const checkpoint = checkpointRepo.get(1, 'plan');
