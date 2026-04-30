@@ -1,34 +1,30 @@
-import type { PipelineCheckpointRepo, PipelineCheckpoint } from '../db/pipeline-checkpoint-repo';
+import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
+import { Log } from '../util/log';
 
-export interface CheckpointManager {
-  getResumeSteps(issueNumber: number, stage: string): string[];
-  markStepComplete(issueNumber: number, stage: string, step: string, nextStep?: string | null): void;
-  delete(issueNumber: number, stage: string): void;
-  deleteAll(issueNumber: number): void;
-}
+const log = Log.create({ service: 'checkpoint-manager' });
 
-export function createCheckpointManager(repo: PipelineCheckpointRepo): CheckpointManager {
-  return new CheckpointManagerImpl(repo);
-}
-
-class CheckpointManagerImpl implements CheckpointManager {
+export class CheckpointManager {
   constructor(private repo: PipelineCheckpointRepo) {}
 
   getResumeSteps(issueNumber: number, stage: string): string[] {
-    const checkpoint: PipelineCheckpoint | null = this.repo.get(issueNumber, stage);
-    if (!checkpoint) {
-      return [];
+    const checkpoint = this.repo.get(issueNumber, stage);
+    if (!checkpoint) return [];
+    if (checkpoint.completedSteps.length > 0) {
+      log.info('Resuming from checkpoint', {
+        issueNumber,
+        stage,
+        completedSteps: checkpoint.completedSteps,
+        nextStep: checkpoint.nextStep,
+      });
     }
     return [...checkpoint.completedSteps];
   }
 
   markStepComplete(issueNumber: number, stage: string, step: string, nextStep?: string | null): void {
-    const existing: PipelineCheckpoint | null = this.repo.get(issueNumber, stage);
-    const completedSteps: string[] = existing ? [...existing.completedSteps] : [];
-    if (!completedSteps.includes(step)) {
-      completedSteps.push(step);
-    }
-    this.repo.upsert(issueNumber, stage, completedSteps, nextStep ?? null);
+    const current = this.getResumeSteps(issueNumber, stage);
+    if (current.includes(step)) return;
+    current.push(step);
+    this.repo.upsert(issueNumber, stage, current, nextStep ?? null);
   }
 
   delete(issueNumber: number, stage: string): void {
@@ -38,6 +34,16 @@ class CheckpointManagerImpl implements CheckpointManager {
   deleteAll(issueNumber: number): void {
     this.repo.deleteAll(issueNumber);
   }
+
+  hasStep(issueNumber: number, stage: string, step: string): boolean {
+    return this.getResumeSteps(issueNumber, stage).includes(step);
+  }
+
+  upsert(issueNumber: number, stage: string, completedSteps: string[], nextStep: string | null): void {
+    this.repo.upsert(issueNumber, stage, completedSteps, nextStep);
+  }
 }
 
-export { CheckpointManagerImpl };
+export function createCheckpointManager(repo: PipelineCheckpointRepo): CheckpointManager {
+  return new CheckpointManager(repo);
+}
