@@ -16,6 +16,7 @@ import { createExploreRoutes } from '../api/explore';
 import { createLogRoutes } from '../api/logs';
 import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
+import { createSettingsConfigRoutes } from '../api/settings-config';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
@@ -248,6 +249,7 @@ async function main(): Promise<void> {
   }));
   server.addRouter('/api/logs', createLogRoutes());
   server.addRouter('/api/agent/schedules', createScheduleRoutes(stateManager.getScheduleRepo(), scheduler));
+  server.addRouter('/api', createSettingsConfigRoutes({ host: config.serverHost, port: config.serverPort }));
 
   eventBus.on('agent_completed', async ({ issueId, issueNumber, projectId }) => {
     log.info('Agent completed', { issueNumber });
