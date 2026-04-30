@@ -2,7 +2,7 @@ export type RebaseEvent =
   | { type: 'rebase_started'; issueNumber: number }
   | { type: 'rebase_progress'; issueNumber: number; step: 'fetching' | 'checking' | 'rebasing' | 'verifying' }
   | { type: 'rebase_completed'; issueNumber: number; rebased: boolean }
-  | { type: 'rebase_conflict'; issueNumber: number; conflicts: string[] }
+  | { type: 'rebase_conflict'; issueNumber: number; conflicts: string[]; status?: string; error?: string }
 
 const target = new EventTarget()
 

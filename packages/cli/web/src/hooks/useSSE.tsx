@@ -122,10 +122,40 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           case 'rebase_conflict': {
             const d = parsed as EventMap['rebase_conflict']
             if (d.status === 'resolving' || d.status === 'failed') {
-              setRebaseConflict({ issueNumber: d.issueNumber, conflicts: d.conflicts, status: d.status })
+              setRebaseConflict({ issueNumber: d.issueNumber, conflicts: d.conflicts, status: d.status, error: d.error })
             } else {
               setRebaseConflict(null)
             }
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            break
+          }
+          case 'agent_conflict_resolution_started': {
+            const d = parsed as EventMap['agent_conflict_resolution_started']
+            setRebaseConflict((prev) =>
+              prev && prev.issueNumber === d.issueNumber
+                ? { ...prev, status: 'resolving' }
+                : prev,
+            )
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            break
+          }
+          case 'agent_conflict_resolution_completed': {
+            const d = parsed as EventMap['agent_conflict_resolution_completed']
+            setRebaseConflict((prev) =>
+              prev && prev.issueNumber === d.issueNumber
+                ? { ...prev, status: 'resolving' }
+                : prev,
+            )
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            break
+          }
+          case 'agent_conflict_resolution_failed': {
+            const d = parsed as EventMap['agent_conflict_resolution_failed']
+            setRebaseConflict((prev) =>
+              prev && prev.issueNumber === d.issueNumber
+                ? { ...prev, status: 'failed', error: d.error }
+                : prev,
+            )
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
@@ -180,6 +210,9 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'rebase_completed',
       'rebase_conflict',
       'agent_blocked',
+      'agent_conflict_resolution_started',
+      'agent_conflict_resolution_completed',
+      'agent_conflict_resolution_failed',
     ]
 
     for (const type of eventTypes) {

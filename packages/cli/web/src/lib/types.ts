@@ -189,7 +189,10 @@ export type EventMap = {
   rebase_started: { issueId: string; projectId: string; issueNumber: number }
   rebase_progress: { issueId: string; projectId: string; issueNumber: number; step: 'fetching' | 'checking' | 'rebasing' | 'verifying' }
   rebase_completed: { issueId: string; projectId: string; issueNumber: number; rebased: boolean }
-  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[]; status?: string }
+  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[]; status?: string; error?: string }
+  agent_conflict_resolution_started: { issueId: string; projectId: string; issueNumber: number }
+  agent_conflict_resolution_completed: { issueId: string; projectId: string; issueNumber: number }
+  agent_conflict_resolution_failed: { issueId: string; projectId: string; issueNumber: number; error: string }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap
@@ -358,6 +361,7 @@ export interface RebaseConflictState {
   issueNumber: number
   conflicts: string[]
   status: string
+  error?: string
 }
 
 export interface LiveTaskState {

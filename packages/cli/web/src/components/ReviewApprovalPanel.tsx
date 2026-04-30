@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { useSendMessage } from '../hooks/useQueries'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
+import { useLiveTask } from '../hooks/useSSE'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'
@@ -181,6 +182,7 @@ export function ReviewApprovalPanel({
   const review = parseReviewOutput(output)
   const classified = classifyResult(review.result)
   const queryClient = useQueryClient()
+  const { rebaseConflict } = useLiveTask()
 
   const [reportModalOpen, setReportModalOpen] = useState(false)
   const [instructionsExpanded, setInstructionsExpanded] = useState(false)
@@ -284,10 +286,26 @@ export function ReviewApprovalPanel({
           </div>
         )}
 
+        {rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving' && (
+          <div className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-center gap-2">
+            <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Agent is resolving conflicts...
+          </div>
+        )}
+
+        {rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'failed' && (
+          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            Conflict resolution failed{rebaseConflict.error ? `: ${rebaseConflict.error}` : ''}
+          </div>
+        )}
+
         <div className="pt-2 border-t border-gray-100">
           <button
             onClick={onRebase}
-            disabled={rebasePending}
+            disabled={rebasePending || (rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving')}
             className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
           >
             {rebasePending && (
