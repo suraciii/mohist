@@ -1,9 +1,7 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import type { Issue } from '../types';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { Log } from '../util/log';
-import { type CheckpointManager } from './checkpoint-manager';
+import type { CheckpointManager } from './checkpoint-manager';
 
 const log = Log.create({ service: 'acp-round-runner' });
 
@@ -20,6 +18,7 @@ export interface AcpRoundRunnerOptions {
   changeDir: string;
   rounds: RoundConfig[];
   acpOptions: AcpConnectionOptions;
+  stage?: string;
   projectId?: string;
   eventBus?: import('../services/event-bus').EventBus;
   checkpointManager?: CheckpointManager;
@@ -37,6 +36,7 @@ export class AcpRoundRunner {
   private changeDir: string;
   private rounds: RoundConfig[];
   private acpOptions: AcpConnectionOptions;
+  private stage: string;
   private projectId?: string;
   private eventBus?: import('../services/event-bus').EventBus;
   private checkpointManager?: CheckpointManager;
@@ -46,6 +46,7 @@ export class AcpRoundRunner {
     this.changeDir = options.changeDir;
     this.rounds = options.rounds;
     this.acpOptions = options.acpOptions;
+    this.stage = options.stage ?? 'plan';
     this.projectId = options.projectId;
     this.eventBus = options.eventBus;
     this.checkpointManager = options.checkpointManager;
@@ -53,16 +54,15 @@ export class AcpRoundRunner {
 
   async execute(): Promise<AcpRoundRunnerResult> {
     const completedSteps: string[] = this.checkpointManager
-      ? this.checkpointManager.getResumeSteps(this.issue.number, 'plan')
+      ? this.checkpointManager.getResumeSteps(this.issue.number, this.stage)
       : [];
 
     const isResuming = completedSteps.length > 0;
 
-    if (!isResuming) {
-      this.cleanChangeDir();
-    } else {
+    if (isResuming) {
       log.info('AcpRoundRunner resuming from checkpoint', {
         issueNumber: this.issue.number,
+        stage: this.stage,
         completedSteps,
       });
     }
@@ -71,7 +71,7 @@ export class AcpRoundRunner {
 
     const connectionOptions: AcpConnectionOptions = {
       ...this.acpOptions,
-      executionId: `plan-${this.issue.number}`,
+      executionId: `${this.stage}-${this.issue.number}`,
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
@@ -124,9 +124,9 @@ export class AcpRoundRunner {
           completedSteps.push(round.type);
           this.checkpointManager?.markStepComplete(
             this.issue.number,
-            'plan',
+            this.stage,
             round.type,
-            this.rounds[index + 1]?.type ?? 'self-review'
+            this.rounds[index + 1]?.type ?? null,
           );
           continue;
         }
@@ -190,9 +190,9 @@ export class AcpRoundRunner {
         completedSteps.push(round.type);
         this.checkpointManager?.markStepComplete(
           this.issue.number,
-          'plan',
+          this.stage,
           round.type,
-          this.rounds[index + 1]?.type ?? 'self-review'
+          this.rounds[index + 1]?.type ?? null,
         );
         executedRounds.push(round.type);
       }
@@ -234,29 +234,5 @@ export class AcpRoundRunner {
         error: e instanceof Error ? e.message : String(e),
       });
     }
-  }
-
-  private cleanChangeDir(): void {
-    if (!fs.existsSync(this.changeDir)) {
-      return;
-    }
-
-    const entries = fs.readdirSync(this.changeDir);
-    for (const entry of entries) {
-      if (entry === '.openspec.yaml') continue;
-      const entryPath = path.join(this.changeDir, entry);
-      fs.rmSync(entryPath, { recursive: true, force: true });
-    }
-  }
-}
-
-export function readReportFile(changeDir: string, filename: string): string | null {
-  const filePath = path.join(changeDir, filename);
-  try {
-    if (!fs.existsSync(filePath)) return null;
-    const content = fs.readFileSync(filePath, 'utf-8').trim();
-    return content.length > 0 ? content : null;
-  } catch {
-    return null;
   }
 }

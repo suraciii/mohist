@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { Stage } from '../types';
 import { buildArtifactPrompt, buildSelfReviewPrompt } from '../agents/artifact-prompt';
 import { AcpRoundRunner, type RoundConfig } from './acp-round-runner';
-import { readReportFile } from './utils';
+import { cleanChangeDir, readReportFile } from './utils';
 import type { StageRunner } from './check-stage-runner';
 import type { StageContext, StageRunResult } from './stage-context';
 import type { CheckpointManager as AcpCheckpointManager } from './checkpoint-manager';
@@ -65,11 +65,17 @@ export class PlanStageRunner implements StageRunner {
       },
     ];
 
+    const resumeSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
+    if (resumeSteps.length === 0) {
+      cleanChangeDir(changeDir);
+    }
+
     const runner = new AcpRoundRunner({
       issue,
       changeDir,
       rounds,
       acpOptions,
+      stage: 'plan',
       projectId: issue.projectId,
       eventBus,
       checkpointManager: checkpointManager as unknown as AcpCheckpointManager,

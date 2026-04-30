@@ -46,3 +46,15 @@ export function readReportFile(changeDir: string, filename: string): string | nu
     return null;
   }
 }
+
+export function cleanChangeDir(changeDir: string): void {
+  if (!fs.existsSync(changeDir)) {
+    return;
+  }
+  const entries = fs.readdirSync(changeDir);
+  for (const entry of entries) {
+    if (entry === '.openspec.yaml') continue;
+    const entryPath = path.join(changeDir, entry);
+    fs.rmSync(entryPath, { recursive: true, force: true });
+  }
+}
