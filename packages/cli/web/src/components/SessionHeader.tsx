@@ -19,7 +19,7 @@ function formatTime(iso: string): string {
 
 function getSessionLabel(session: CoderSessionItem): string {
   if (session.stage === 'plan') return 'Plan'
-  if (session.stage === 'review') return 'Review'
+  if (session.stage === 'check') return 'Check'
   if (session.taskDescription) {
     const truncated = session.taskDescription.length > 24
       ? session.taskDescription.slice(0, 21) + '...'

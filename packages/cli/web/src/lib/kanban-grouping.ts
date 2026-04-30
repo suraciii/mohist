@@ -11,7 +11,7 @@ export const STAGES: { key: Stage; label: string }[] = [
   { key: Stage.Backlog, label: 'Backlog' },
   { key: Stage.Plan, label: 'Plan' },
   { key: Stage.Build, label: 'Build' },
-  { key: Stage.Review, label: 'Review' },
+  { key: Stage.Check, label: 'Check' },
   { key: Stage.Done, label: 'Done' },
 ]
 

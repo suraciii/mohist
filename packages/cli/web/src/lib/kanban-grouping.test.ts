@@ -55,11 +55,11 @@ describe('groupIssuesByStage', () => {
   it('keeps non-closed issues in original stage', () => {
     const issues = [
       makeIssue({ id: '1', stage: Stage.Build, status: IssueStatus.Blocked }),
-      makeIssue({ id: '2', stage: Stage.Review, status: IssueStatus.Active }),
+      makeIssue({ id: '2', stage: Stage.Check, status: IssueStatus.Active }),
     ]
     const cols = groupIssuesByStage(issues)
     expect(cols.find((c) => c.key === Stage.Build)!.issues).toHaveLength(1)
-    expect(cols.find((c) => c.key === Stage.Review)!.issues).toHaveLength(1)
+    expect(cols.find((c) => c.key === Stage.Check)!.issues).toHaveLength(1)
     expect(cols.find((c) => c.key === Stage.Done)!.issues).toHaveLength(0)
   })
 

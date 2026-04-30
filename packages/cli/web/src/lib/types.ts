@@ -3,7 +3,7 @@ export enum Stage {
   Explore = 'explore',
   Plan = 'plan',
   Build = 'build',
-  Review = 'review',
+  Check = 'check',
   Done = 'done',
 }
 

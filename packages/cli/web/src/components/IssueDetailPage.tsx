@@ -18,20 +18,20 @@ import { ReviewApprovalPanel } from './ReviewApprovalPanel'
 import { formatTime, formatTimeAgo } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 
-const STAGES = [Stage.Backlog, Stage.Explore, Stage.Plan, Stage.Build, Stage.Review, Stage.Done]
+const STAGES = [Stage.Backlog, Stage.Explore, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
 const STAGE_LABELS: Record<string, string> = {
   [Stage.Backlog]: 'Backlog',
   [Stage.Explore]: 'Explore',
   [Stage.Plan]: 'Plan',
   [Stage.Build]: 'Build',
-  [Stage.Review]: 'Review',
+  [Stage.Check]: 'Check',
   [Stage.Done]: 'Done',
 }
 
-const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Review, Stage.Done])
+const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Check, Stage.Done])
 
-const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Review, Stage.Done])
+const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
 
 function formatRelativeTime(iso: string): string {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime())
@@ -741,7 +741,7 @@ export function IssueDetailPage() {
 
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
 
-              {isApprovalGate && issue.stage === Stage.Review && (
+              {isApprovalGate && issue.stage === Stage.Check && (
                 <ReviewApprovalPanel
                   output={issue.approvalState?.output}
                   issueNumber={issueNumber}
@@ -752,7 +752,7 @@ export function IssueDetailPage() {
                 />
               )}
 
-              {isApprovalGate && issue.stage !== Stage.Review && reviewOutput && (
+              {isApprovalGate && issue.stage !== Stage.Check && reviewOutput && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h2 className="text-sm font-semibold text-amber-800 mb-2">
                     Review Report
@@ -765,7 +765,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {isApprovalGate && issue.stage !== Stage.Review && (
+              {isApprovalGate && issue.stage !== Stage.Check && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h2 className="text-sm font-semibold text-amber-800 mb-2">
                     Approval Required
@@ -795,7 +795,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {isApprovalGate && issue.stage !== Stage.Review && (
+              {isApprovalGate && issue.stage !== Stage.Check && (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
                   <h2 className="text-sm font-semibold text-blue-800 mb-2">Send Message</h2>
                   <p className="text-xs text-blue-600 mb-3">
