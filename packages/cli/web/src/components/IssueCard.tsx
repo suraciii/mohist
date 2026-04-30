@@ -18,6 +18,7 @@ const MERGE_STATE_LABELS: Record<string, string> = {
 interface Props {
   issue: Issue
   agentStatus: AgentStatus
+  showArchiveButton?: boolean
 }
 
 type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | null
@@ -78,7 +79,7 @@ function Badge({
   return null
 }
 
-export function IssueCard({ issue, agentStatus }: Props) {
+export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
   const isAgentRunning = agentStatus.activeAgents.some(
     (a) => a.issueNumber === issue.number,
@@ -93,6 +94,14 @@ export function IssueCard({ issue, agentStatus }: Props) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
+  const archiveMutation = useMutation({
+    mutationFn: () => api.archiveIssue(issue.number),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
     },
   })
 
@@ -130,9 +139,25 @@ export function IssueCard({ issue, agentStatus }: Props) {
               </span>
             )}
           </div>
-          {badge && badge !== 'closed' && (
-            <Badge type={badge} mergeState={issue.mergeState} />
-          )}
+          <div className="flex items-center gap-1">
+            {badge && badge !== 'closed' && (
+              <Badge type={badge} mergeState={issue.mergeState} />
+            )}
+            {showArchiveButton && issue.status === IssueStatus.Completed && (
+              <button
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  archiveMutation.mutate()
+                }}
+                disabled={archiveMutation.isPending}
+                className="text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-colors text-sm"
+                title="Archive issue"
+              >
+                📦
+              </button>
+            )}
+          </div>
         </div>
 
         <h3
