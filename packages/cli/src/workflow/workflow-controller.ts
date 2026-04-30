@@ -1435,6 +1435,8 @@ function truncateLog(log: string, maxLength: number): string {
 
 const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
 const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
+const CASE_SENSITIVE_RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/m;
+const CASE_SENSITIVE_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/m;
 
 export function parseResult(content: string): 'PASS' | 'FAIL' | null {
   const match = RESULT_RE.exec(content);
@@ -1447,14 +1449,21 @@ export function parseResult(content: string): 'PASS' | 'FAIL' | null {
   return null;
 }
 
-const CASE_SENSITIVE_RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/m;
-const CASE_SENSITIVE_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/m;
-
 export function parseVerdict(content: string): 'PASS' | 'FAIL' {
-  const match = CASE_SENSITIVE_RESULT_RE.exec(content);
-  if (match) return match[1] as 'PASS' | 'FAIL';
-  const legacyMatch = CASE_SENSITIVE_VERDICT_RE.exec(content);
-  if (legacyMatch) return legacyMatch[1] as 'PASS' | 'FAIL';
+  if (!content || content.trim() === '') {
+    return 'FAIL';
+  }
+  const match = RESULT_RE.exec(content);
+  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
+  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
+  if (legacyMatch) {
+    log.warn('parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
+    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
+  }
+  const csMatch = CASE_SENSITIVE_RESULT_RE.exec(content);
+  if (csMatch) return csMatch[1] as 'PASS' | 'FAIL';
+  const csLegacyMatch = CASE_SENSITIVE_VERDICT_RE.exec(content);
+  if (csLegacyMatch) return csLegacyMatch[1] as 'PASS' | 'FAIL';
   return 'FAIL';
 }
 
@@ -1473,23 +1482,6 @@ export interface ParsedDimension {
   name: string;
   status: 'PASS' | 'FAIL';
   issues?: string[];
-}
-
-const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
-const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
-
-export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
-  if (!content || content.trim() === '') {
-    return 'FAIL';
-  }
-  const match = RESULT_RE.exec(content);
-  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
-  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
-  if (legacyMatch) {
-    log.warn('parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
-    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
-  }
-  return 'FAIL';
 }
 
 export function parseDimensions(content: string): ParsedDimension[] {
@@ -1525,15 +1517,4 @@ export function parseDimensions(content: string): ParsedDimension[] {
   }
 
   return dimensions;
-}
-
-export function parseResult(content: string): 'PASS' | 'FAIL' | null {
-  return parseVerdict(content);
-}
-
-export function extractFixSuggestions(content: string): string {
-  const match = content.match(/^##\s*Fix\s*Suggestions\s*$/im);
-  if (!match) return '';
-  const startIdx = match.index! + match[0].length;
-  return content.slice(startIdx).trim();
 }
