@@ -670,13 +670,20 @@ export function IssueDetailPage() {
                   )}
 
                   {issue.status === IssueStatus.Blocked && (
-                    <button
-                      onClick={() => reopenMutation.mutate()}
-                      disabled={reopenMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                    >
-                      {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
-                    </button>
+                    <div className="space-y-2">
+                      {issue.blockedReason && (
+                        <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                          {issue.blockedReason}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => reopenMutation.mutate()}
+                        disabled={reopenMutation.isPending}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      >
+                        {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
+                      </button>
+                    </div>
                   )}
 
                   {issue.status === IssueStatus.Interrupted && (

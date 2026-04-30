@@ -135,10 +135,13 @@ export class IssueService {
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
   }
 
-  block(projectId: string, number: number): Issue | null {
+  block(projectId: string, number: number, reason?: string): Issue | null {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
-    
+
+    if (reason) {
+      return this.issueRepo.blockIssue(issue.id, reason);
+    }
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
   }
 
