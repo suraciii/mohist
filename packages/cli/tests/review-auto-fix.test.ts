@@ -5,6 +5,32 @@ vi.mock('../src/agent-runtime/acp-session', () => ({
   createAcpConnection: vi.fn(),
 }));
 
+vi.mock('../src/config/config-loader', () => ({
+  load: vi.fn().mockReturnValue({}),
+  getAgentTimeoutConfig: vi.fn().mockReturnValue({ timeout: 1800000 }),
+}));
+
+vi.mock('../src/workflow/workflow-loader', () => ({
+  loadWorkflow: vi.fn().mockReturnValue('default'),
+  loadAgentConfig: vi.fn().mockReturnValue({ model: 'test-model' }),
+  loadChecksConfig: vi.fn().mockReturnValue({
+    buildTest: { enabled: true, command: 'npm test', timeout: 300000, autoFix: false, maxFixAttempts: 2 },
+    ffMerge: { enabled: false },
+    aiReview: { enabled: true },
+  }),
+  DEFAULT_CHECKS_CONFIG: {
+    buildTest: { enabled: true, command: 'npm test', timeout: 300000, autoFix: false, maxFixAttempts: 2 },
+    ffMerge: { enabled: false },
+    aiReview: { enabled: true },
+  },
+}));
+
+vi.mock('child_process', () => ({
+  execFile: vi.fn().mockImplementation((_cmd: string, _args: string[], _opts: any, cb: Function) => {
+    cb(null, { stdout: 'Tests passed', stderr: '' });
+  }),
+}));
+
 vi.mock('../src/openspec/ralph-executor', () => ({
   RalphExecutor: vi.fn().mockImplementation(() => ({
     execute: vi.fn().mockResolvedValue({ success: true, completed: 1, failed: 0, total: 1 }),
@@ -42,15 +68,16 @@ vi.mock('../src/agents/artifact-prompt', () => ({
 
 import {
   WorkflowController,
-  parseResult,
-  extractFixSuggestions,
   type ChangeArtifactsManager,
   type StageResult,
 } from '../src/workflow/workflow-controller';
+import {
+  parseResult,
+  extractFixSuggestions,
+} from '../src/workflow';
 import { createAcpConnection } from '../src/agent-runtime/acp-session';
 import type { IssueRepo } from '../src/db/issue-repo';
 import type { EventBus } from '../src/services/event-bus';
-import type { CommentRepo } from '../src/db/comment-repo';
 import type { PipelineCheckpointRepo } from '../src/db/pipeline-checkpoint-repo';
 import * as fs from 'fs';
 
@@ -104,13 +131,6 @@ function createMockRepos() {
       emit: vi.fn(),
       removeAllListeners: vi.fn(),
     } as unknown as EventBus,
-    commentRepo: {
-      create: vi.fn().mockReturnValue({ id: 'c1', issueId: 'issue-1', body: '', createdAt: '' }),
-      findById: vi.fn(),
-      findByIssue: vi.fn().mockReturnValue([]),
-      delete: vi.fn(),
-      deleteByIssue: vi.fn(),
-    } as unknown as CommentRepo,
     checkpointRepo: {
       get: vi.fn().mockReturnValue(null),
       upsert: vi.fn(),
@@ -189,7 +209,7 @@ describe('extractFixSuggestions', () => {
   });
 });
 
-async function runReviewStage(
+async function runCheckStage(
   repos: ReturnType<typeof createMockRepos>,
   promptResults: Array<{ text: string; success: boolean; error?: string; acpSessionId?: string }>,
   readFileSequence: string[],
@@ -200,7 +220,6 @@ async function runReviewStage(
     issueRepo: repos.issueRepo,
     eventBus: repos.eventBus,
     projectId: 'proj-1',
-    commentRepo: repos.commentRepo,
     checkpointRepo: repos.checkpointRepo,
   });
 
@@ -218,7 +237,7 @@ async function runReviewStage(
     return readFileSequence[Math.min(readIdx++, readFileSequence.length - 1)];
   });
 
-  return (ctrl as any).runPipelineReviewStage(
+  return (ctrl as any).runPipelineCheckStage(
     createMockIssue(Stage.Check),
     { cwd: '/tmp/worktree' },
   );
@@ -229,7 +248,7 @@ describe('Review stage Result PASS skips auto-fix', () => {
 
   it('should return requiresApproval without auto-fix when result is PASS', async () => {
     const repos = createMockRepos();
-    const result = await runReviewStage(repos, [
+    const result = await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: PASS_REPORT, success: true },
     ], [PASS_REPORT]);
@@ -246,7 +265,7 @@ describe('Review stage Result FAIL enters auto-fix loop', () => {
 
   it('should enter auto-fix loop on FAIL and succeed on first attempt', async () => {
     const repos = createMockRepos();
-    const result = await runReviewStage(repos, [
+    const result = await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
       { text: 'auto-fix output', success: true },
@@ -257,17 +276,11 @@ describe('Review stage Result FAIL enters auto-fix loop', () => {
     expect(result.requiresApproval).toBe(true);
     expect(result.escalateToStage).toBeUndefined();
     expect(result.message).toContain('Review completed with auto-fix (attempt 1)');
-    expect(repos.commentRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issueId: 'issue-1',
-        body: expect.stringContaining('Auto-fix applied'),
-      }),
-    );
   });
 
   it('should exhaust 2 attempts and return escalateToStage: Stage.Build', async () => {
     const repos = createMockRepos();
-    const result = await runReviewStage(repos, [
+    const result = await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
       { text: 'auto-fix 1', success: true },
@@ -279,12 +292,11 @@ describe('Review stage Result FAIL enters auto-fix loop', () => {
     expect(result.success).toBe(false);
     expect(result.escalateToStage).toBe(Stage.Build);
     expect(result.message).toContain('escalating');
-    expect(repos.commentRepo.create).not.toHaveBeenCalled();
   });
 
   it('should succeed on second auto-fix attempt', async () => {
     const repos = createMockRepos();
-    const result = await runReviewStage(repos, [
+    const result = await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
       { text: 'auto-fix 1', success: true },
@@ -297,28 +309,6 @@ describe('Review stage Result FAIL enters auto-fix loop', () => {
     expect(result.requiresApproval).toBe(true);
     expect(result.escalateToStage).toBeUndefined();
     expect(result.message).toContain('Review completed with auto-fix (attempt 2)');
-    expect(repos.commentRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issueId: 'issue-1',
-        body: expect.stringContaining('attempt 2'),
-      }),
-    );
-  });
-
-  it('should add comment on successful auto-fix', async () => {
-    const repos = createMockRepos();
-    await runReviewStage(repos, [
-      { text: 'review output', success: true },
-      { text: FAIL_REPORT, success: true },
-      { text: 'auto-fix output with details', success: true },
-      { text: PASS_REPORT, success: true },
-    ], [FAIL_REPORT, PASS_REPORT]);
-
-    expect(repos.commentRepo.create).toHaveBeenCalledTimes(1);
-    const commentCall = (repos.commentRepo.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(commentCall.issueId).toBe('issue-1');
-    expect(commentCall.body).toContain('Auto-fix applied');
-    expect(commentCall.body).toContain('Fix X at line 10');
   });
 });
 
@@ -328,7 +318,7 @@ describe('FAIL report without Fix Suggestions skips auto-fix loop', () => {
   it('should return requiresApproval without entering auto-fix loop when no Fix Suggestions', async () => {
     const repos = createMockRepos();
     const FAIL_NO_SUGGESTIONS = '# Review\n\n## Result: FAIL\n\n## Dimensions\n\n### Correctness: FAIL\n- Something wrong\n';
-    const result = await runReviewStage(repos, [
+    const result = await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_NO_SUGGESTIONS, success: true },
     ], [FAIL_NO_SUGGESTIONS]);
@@ -337,7 +327,6 @@ describe('FAIL report without Fix Suggestions skips auto-fix loop', () => {
     expect(result.requiresApproval).toBe(true);
     expect(result.escalateToStage).toBeUndefined();
     expect(result.message).toContain('no auto-fixable suggestions');
-    expect(repos.commentRepo.create).not.toHaveBeenCalled();
   });
 });
 
@@ -348,14 +337,14 @@ describe('no-auto-fix checkpoint skips auto-fix loop', () => {
     const repos = createMockRepos();
     (repos.checkpointRepo.get as ReturnType<typeof vi.fn>).mockImplementation(
       (_issueNumber: number, stage: string) => {
-        if (stage === 'check') {
-          return { issueNumber: 1, stage: 'check', completedSteps: ['no-auto-fix'], nextStep: null };
+        if (stage === 'review') {
+          return { issueNumber: 1, stage: 'review', completedSteps: ['no-auto-fix'], nextStep: null };
         }
         return null;
       },
     );
 
-    const result = await runReviewStage(repos, [
+    const result = await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
     ], [FAIL_REPORT]);
@@ -364,7 +353,6 @@ describe('no-auto-fix checkpoint skips auto-fix loop', () => {
     expect(result.requiresApproval).toBe(true);
     expect(result.escalateToStage).toBeUndefined();
     expect(result.message).toContain('auto-fix skipped due to prior exhaustion');
-    expect(repos.commentRepo.create).not.toHaveBeenCalled();
   });
 });
 
@@ -373,7 +361,7 @@ describe('auto-fix round failure counts as failed attempt', () => {
 
   it('should count auto-fix round failure and exhaust attempts', async () => {
     const repos = createMockRepos();
-    const result = await runReviewStage(repos, [
+    const result = await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
       { text: '', success: false, error: 'auto-fix ACP error' },
@@ -387,7 +375,7 @@ describe('auto-fix round failure counts as failed attempt', () => {
 
   it('should count re-verify round failure and exhaust attempts', async () => {
     const repos = createMockRepos();
-    const result = await runReviewStage(repos, [
+    const result = await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
       { text: 'auto-fix output', success: true },
@@ -426,7 +414,6 @@ describe('run() loop handles escalateToStage', () => {
       issueRepo: repos.issueRepo,
       eventBus: repos.eventBus,
       projectId: 'proj-1',
-      commentRepo: repos.commentRepo,
       checkpointRepo: repos.checkpointRepo,
     });
 
@@ -441,7 +428,7 @@ describe('auto-fix SSE events', () => {
 
   it('should emit plan_round_start for auto-fix and re-verify rounds', async () => {
     const repos = createMockRepos();
-    await runReviewStage(repos, [
+    await runCheckStage(repos, [
       { text: 'review output', success: true },
       { text: FAIL_REPORT, success: true },
       { text: 'auto-fix output', success: true },
@@ -450,7 +437,7 @@ describe('auto-fix SSE events', () => {
 
     expect(repos.eventBus.emit).toHaveBeenCalledWith(
       'plan_round_start',
-      expect.objectContaining({ roundType: 'check', roundIndex: 0 }),
+      expect.objectContaining({ roundType: 'review', roundIndex: 0 }),
     );
     expect(repos.eventBus.emit).toHaveBeenCalledWith(
       'plan_round_start',
@@ -494,17 +481,14 @@ describe('auto-fix SSE events', () => {
       issueRepo: repos.issueRepo,
       eventBus: repos.eventBus,
       projectId: 'proj-1',
-      commentRepo: repos.commentRepo,
       checkpointRepo: repos.checkpointRepo,
     });
 
-    await (ctrl as any).runPipelineReviewStage(
+    await (ctrl as any).runPipelineCheckStage(
       createMockIssue(Stage.Check),
       { cwd: '/tmp/worktree' },
     );
 
-    // roundState is mutated before each round; when createAcpConnection is called
-    // for the auto-fix round, roundState.type is already 'auto-fix'.
     expect(capturedOnSessionUpdate).toBeDefined();
     capturedOnSessionUpdate!({ update: { sessionUpdate: 'test-update' } });
 
