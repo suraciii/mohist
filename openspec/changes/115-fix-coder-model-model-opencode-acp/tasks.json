@@ -153,11 +153,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Same as T-005 but for the multi-round connection path. The event should be emitted after the coderSession row is created at line ~733.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        158601
+      ]
     },
     {
       "id": "T-007",
