@@ -238,6 +238,7 @@ export class ContextAssembler {
       wipResumeContext?: string;
       totalTasks?: number;
       issueNumber?: number;
+      agentConfig?: AgentConfig;
     }
   ): AssembledContext | null {
     const changeDir = path.resolve(this.projectPath, changePath);
@@ -266,6 +267,7 @@ export class ContextAssembler {
       wipResumeContext: options?.wipResumeContext,
       totalTasks: options?.totalTasks,
       issueNumber: options?.issueNumber,
+      agentConfig: options?.agentConfig,
     });
   }
 }

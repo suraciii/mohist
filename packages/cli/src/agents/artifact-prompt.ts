@@ -13,6 +13,7 @@ const REVIEW_SELF_CHECK_PATH = path.join(ARTIFACTS_DIR, 'review-self-check.md');
 const EXPLORE_PROMPT_PATH = path.join(__dirname, 'prompts', 'explore.md');
 const CONFLICT_RESOLUTION_PROMPT_PATH = path.join(__dirname, 'prompts', 'conflict-resolution.md');
 const RE_VERIFY_PROMPT_PATH = path.join(ARTIFACTS_DIR, 're-verify.md');
+const AUTO_FIX_PROMPT_PATH = path.join(__dirname, 'prompts', 'auto-fix.md');
 
 const ARTIFACT_OUTPUT_FILES: Record<ArtifactType, string> = {
   proposal: 'proposal.md',
@@ -48,7 +49,6 @@ function loadFile(filePath: string): string {
 function loadSpecContext(changeDir: string): string {
   const parts: string[] = [];
   const specsDir = path.join(changeDir, 'specs');
-  const tasksPath = path.join(changeDir, 'tasks.json');
 
   if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
     const mdFiles: string[] = [];
@@ -68,11 +68,6 @@ function loadSpecContext(changeDir: string): string {
       }
       parts.push(sections.join('\n\n'));
     }
-  }
-
-  if (fs.existsSync(tasksPath)) {
-    const content = fs.readFileSync(tasksPath, 'utf-8');
-    parts.push(`## Tasks & Acceptance Criteria\n\n${content}`);
   }
 
   return parts.join('\n\n');
@@ -146,6 +141,29 @@ export function buildArtifactPrompt(
   });
 }
 
+function listExistingArtifacts(changeDir: string): Array<{ path: string; desc: string }> {
+  const artifacts: Array<{ path: string; desc: string }> = [];
+  const proposalPath = path.join(changeDir, 'proposal.md');
+  const designPath = path.join(changeDir, 'design.md');
+  const tasksPath = path.join(changeDir, 'tasks.json');
+  const specsDir = path.join(changeDir, 'specs');
+
+  if (fs.existsSync(proposalPath)) {
+    artifacts.push({ path: proposalPath, desc: 'Proposal' });
+  }
+  if (fs.existsSync(designPath)) {
+    artifacts.push({ path: designPath, desc: 'Design' });
+  }
+  if (fs.existsSync(tasksPath)) {
+    artifacts.push({ path: tasksPath, desc: 'Tasks' });
+  }
+  if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
+    artifacts.push({ path: specsDir, desc: 'Specs directory' });
+  }
+
+  return artifacts;
+}
+
 export function buildSelfReviewPrompt(
   issue: Issue,
   changeDir: string,
@@ -153,6 +171,7 @@ export function buildSelfReviewPrompt(
 ): string {
   const instructionFile = path.join(ARTIFACTS_DIR, 'self-review.md');
   const instruction = loadFile(instructionFile);
+  const existingArtifacts = listExistingArtifacts(changeDir);
 
   const taskContent = [
     `Change Directory: ${changeDir}`,
@@ -165,6 +184,7 @@ export function buildSelfReviewPrompt(
   return formatAgentPrompt({
     role: 'Self-review all generated artifacts for this change',
     projectContext: agentConfig?.context,
+    contextFiles: existingArtifacts.length > 0 ? existingArtifacts : undefined,
     task: taskContent,
     instruction,
   });
@@ -262,6 +282,8 @@ export function buildAutoFixPrompt(
   reportFileName: string,
   agentConfig?: AgentConfig,
 ): string {
+  const instruction = loadFile(AUTO_FIX_PROMPT_PATH);
+
   const taskContent = [
     `Change Directory: ${changeDir}`,
     '',
@@ -280,6 +302,7 @@ export function buildAutoFixPrompt(
     projectContext: agentConfig?.context,
     task: taskContent,
     contract: 'Apply ONLY the fixes described in the report. Do NOT modify review.md.',
+    instruction,
   });
 }
 
@@ -312,9 +335,28 @@ export function buildExplorePrompt(
     );
   }
 
+  const contextFiles: Array<{ path: string; desc: string }> = [];
+  const designPath = path.join(changeDir, 'design.md');
+  const specsDir = path.join(changeDir, 'specs');
+
+  if (fs.existsSync(designPath)) {
+    contextFiles.push({ path: designPath, desc: 'Existing design document' });
+  }
+  if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
+    const specFiles = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' })
+      .filter((entry): entry is string => typeof entry === 'string' && entry.endsWith('.md'));
+    for (const specFile of specFiles) {
+      contextFiles.push({
+        path: path.join(specsDir, specFile),
+        desc: `Existing spec: ${specFile}`,
+      });
+    }
+  }
+
   return formatAgentPrompt({
     role: 'Explore the issue and codebase to understand the problem',
     projectContext: agentConfig?.context,
+    contextFiles: contextFiles.length > 0 ? contextFiles : undefined,
     task: taskParts.join('\n'),
     instruction,
   });
@@ -334,6 +376,7 @@ export function buildReVerifyPrompt(
     formatIssueInfo(issue),
     '',
     'Perform a full re-review of all code changes after auto-fix.',
+    'Focus on verifying that auto-fixes correctly resolved the original issues without introducing new problems.',
     '',
     'Review Report:',
     reviewContent,
