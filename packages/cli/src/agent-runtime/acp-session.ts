@@ -776,6 +776,17 @@ export async function createAcpConnection(
         coderSessionId,
         acpSessionId: sessionId,
       });
+      if (eventBus) {
+        eventBus.emit('coder_session_started', {
+          issueId: issueNumber ? String(issueNumber) : (issueId ?? ''),
+          projectId: projectId ?? '',
+          coderSessionId,
+          acpSessionId: sessionId,
+          executionId,
+          model,
+          taskDescription: 'multi-round acp connection',
+        });
+      }
     } catch (err) {
       log.error('Failed to create coder_session row', {
         error: err instanceof Error ? err.message : String(err),
