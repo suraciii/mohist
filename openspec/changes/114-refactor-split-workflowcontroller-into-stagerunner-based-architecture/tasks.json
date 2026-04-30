@@ -339,14 +339,15 @@
       "type": "WRITE",
       "output": "src/workflow/utils.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "parseVerdict and extractFixSuggestions are used by tests but don't exist in the current file — this is a gap in the current codebase that this task fills.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
         600005,
-        428314
+        428314,
+        200338
       ]
     },
     {
