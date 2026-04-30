@@ -1,0 +1,14 @@
+{
+  "task_id": "T-007",
+  "timestamp": "2026-04-30T12:40:22.496Z",
+  "insights": [],
+  "adjustments": [
+    "Consider breaking this task into smaller subtasks",
+    "The task may be too complex for a single execution"
+  ],
+  "success": false,
+  "execution_summary": "Failed on attempt 3: Timed out after 240s",
+  "failure_reason": "Timed out after 240s",
+  "failed_attempts": 3,
+  "failure_category": "timeout"
+}
