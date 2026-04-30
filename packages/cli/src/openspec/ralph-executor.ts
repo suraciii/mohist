@@ -430,12 +430,7 @@ export async function runRalphLoop(
 
   const sortedTasks = sortTasksByOrder(tasks);
   const timeoutConfig = getAgentTimeoutConfig(loadConfig());
-  const taskTimeoutMs = timeoutConfig.taskTimeout * 1000;
-  const MIN_TASK_TIMEOUT_MS = 60 * 1000;
-
-  const perTaskTimeout = context.stageTimeoutMs != null && sortedTasks.length > 0
-    ? Math.max(Math.floor(context.stageTimeoutMs / sortedTasks.length), MIN_TASK_TIMEOUT_MS)
-    : taskTimeoutMs;
+  const perTaskTimeout = timeoutConfig.taskTimeout * 1000;
 
   const skipTaskIds = new Set(options.skipTaskIds ?? []);
 
