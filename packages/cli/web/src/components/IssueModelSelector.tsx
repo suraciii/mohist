@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { Popover, Transition } from '@headlessui/react'
 import fuzzysort from 'fuzzysort'
-import { useModels } from '../hooks/useModels'
-import { useOpencodeModel } from '../hooks/useQueries'
+import { useOpencodeModels, useOpencodeModel } from '../hooks/useQueries'
 import { api } from '../lib/api'
 import { useQueryClient } from '@tanstack/react-query'
-import type { Model } from '../lib/types'
 
 const RECENT_KEY = 'mohist:recent-issue-models'
 const MAX_RECENT = 5
@@ -53,30 +51,19 @@ function ChevronDownIcon() {
   )
 }
 
-function Badge({ type }: { type: 'free' | 'latest' }) {
-  if (type === 'free') {
-    return (
-      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
-        Free
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
-      Latest
-    </span>
-  )
+function modelDisplayName(modelId: string): string {
+  return modelId.split('/').pop() || modelId
 }
 
 interface ModelListItemProps {
-  model: Model
+  modelId: string
   isSelected: boolean
   isHighlighted: boolean
   onSelect: () => void
   onMouseEnter: () => void
 }
 
-function ModelListItem({ model, isSelected, isHighlighted, onSelect, onMouseEnter }: ModelListItemProps) {
+function ModelListItem({ modelId, isSelected, isHighlighted, onSelect, onMouseEnter }: ModelListItemProps) {
   return (
     <button
       onClick={onSelect}
@@ -86,13 +73,8 @@ function ModelListItem({ model, isSelected, isHighlighted, onSelect, onMouseEnte
       }`}
     >
       <div className="flex flex-col items-start gap-1">
-        <span className="font-medium">{model.name}</span>
-        <span className="text-xs text-gray-400">{model.id}</span>
-      </div>
-      <div className="flex items-center gap-1">
-        {model.badges.map(badge => (
-          <Badge key={badge} type={badge} />
-        ))}
+        <span className="font-medium">{modelDisplayName(modelId)}</span>
+        <span className="text-xs text-gray-400">{modelId}</span>
       </div>
     </button>
   )
@@ -100,51 +82,29 @@ function ModelListItem({ model, isSelected, isHighlighted, onSelect, onMouseEnte
 
 export function IssueModelSelector({ issueNumber, currentModel }: Props) {
   const queryClient = useQueryClient()
-  const { data: providers } = useModels()
+  const { data: opencodeModels } = useOpencodeModels()
   const { data: opencodeModelData } = useOpencodeModel()
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
+  const allModels: string[] = opencodeModels ?? []
   const recentModelIds = getRecent()
+  const recentModels = recentModelIds.filter(id => allModels.includes(id))
 
-  const recentModels: Model[] = []
-  const flattenedModels: Model[] = []
-
-  if (providers) {
-    for (const provider of providers) {
-      if (!provider.configured) continue
-      for (const model of provider.models) {
-        flattenedModels.push(model)
-        if (recentModelIds.includes(model.id)) {
-          recentModels.push(model)
-        }
-      }
-    }
-  }
-
+  const searchableModels = allModels.map(id => ({ id, display: modelDisplayName(id) }))
   const filteredResults = searchQuery.trim()
-    ? fuzzysort.go(searchQuery, flattenedModels, { keys: ['name', 'id'] }).map(r => r.obj)
+    ? fuzzysort.go(searchQuery, searchableModels, { keys: ['display', 'id'] }).map(r => r.obj.id)
     : []
 
-  const displayedModels = searchQuery.trim() ? filteredResults : flattenedModels
-
-  const groupedByProvider: Map<string, Model[]> = new Map()
-  for (const model of displayedModels) {
-    const provider = providers?.find(p => p.models.some(m => m.id === model.id))
-    if (provider) {
-      const existing = groupedByProvider.get(provider.name) || []
-      existing.push(model)
-      groupedByProvider.set(provider.name, existing)
-    }
-  }
+  const displayedModels = searchQuery.trim() ? filteredResults : allModels
 
   const handleSelect = useCallback(
-    async (model: Model) => {
+    async (modelId: string) => {
       try {
-        await api.updateIssue(issueNumber, { model: model.id })
-        addRecent(model.id)
+        await api.updateIssue(issueNumber, { model: modelId })
+        addRecent(modelId)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
       } catch (err) {
@@ -194,7 +154,7 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
     : null
 
   const currentModelDisplay = currentModel
-    ? flattenedModels.find(m => m.id === currentModel)?.name || currentModel.split('/').pop() || currentModel
+    ? modelDisplayName(currentModel)
     : defaultModelName || 'Use default'
 
   return (
@@ -265,13 +225,13 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
                       <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50">
                         Recent
                       </div>
-                      {recentModels.map((model, i) => (
+                      {recentModels.map((modelId, i) => (
                         <ModelListItem
-                          key={model.id}
-                          model={model}
-                          isSelected={model.id === currentModel}
+                          key={modelId}
+                          modelId={modelId}
+                          isSelected={modelId === currentModel}
                           isHighlighted={i === highlightedIndex}
-                          onSelect={() => handleSelect(model)}
+                          onSelect={() => handleSelect(modelId)}
                           onMouseEnter={() => setHighlightedIndex(i)}
                         />
                       ))}
@@ -286,35 +246,25 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
                   )}
 
                   {!searchQuery.trim() &&
-                    Array.from(groupedByProvider.entries()).map(([providerName, models]) => (
-                      <div key={providerName}>
-                        <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50">
-                          {providerName}
-                        </div>
-                        {models.map(model => {
-                          const globalIndex = displayedModels.indexOf(model)
-                          return (
-                            <ModelListItem
-                              key={model.id}
-                              model={model}
-                              isSelected={model.id === currentModel}
-                              isHighlighted={globalIndex === highlightedIndex}
-                              onSelect={() => handleSelect(model)}
-                              onMouseEnter={() => setHighlightedIndex(globalIndex)}
-                            />
-                          )
-                        })}
-                      </div>
+                    allModels.map((modelId, i) => (
+                      <ModelListItem
+                        key={modelId}
+                        modelId={modelId}
+                        isSelected={modelId === currentModel}
+                        isHighlighted={i === highlightedIndex}
+                        onSelect={() => handleSelect(modelId)}
+                        onMouseEnter={() => setHighlightedIndex(i)}
+                      />
                     ))}
 
                   {searchQuery.trim() &&
-                    displayedModels.map((model, i) => (
+                    displayedModels.map((modelId, i) => (
                       <ModelListItem
-                        key={model.id}
-                        model={model}
-                        isSelected={model.id === currentModel}
+                        key={modelId}
+                        modelId={modelId}
+                        isSelected={modelId === currentModel}
                         isHighlighted={i === highlightedIndex}
-                        onSelect={() => handleSelect(model)}
+                        onSelect={() => handleSelect(modelId)}
                         onMouseEnter={() => setHighlightedIndex(i)}
                       />
                     ))}
