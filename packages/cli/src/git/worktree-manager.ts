@@ -199,10 +199,14 @@ export class WorktreeManager {
   ): Promise<{ success: boolean; message: string }> {
     const branch = getBranchName(issueNumber);
 
-    const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
-    if (!hasCommits) {
-      log.info('No commits to merge back', { issueNumber, branch, baseBranch });
-      return { success: true, message: `No commits to merge for issue #${issueNumber}` };
+    try {
+      const { stdout: logOut } = await execFileAsync('git', ['log', `${baseBranch}..${branch}`, '--oneline'], { cwd: projectPath });
+      if (logOut.trim().length === 0) {
+        log.info('No commits to merge back', { issueNumber, branch, baseBranch });
+        return { success: true, message: `No commits to merge for issue #${issueNumber}` };
+      }
+    } catch {
+      // ignore, proceed to merge attempt
     }
 
     try {
@@ -274,15 +278,6 @@ export class WorktreeManager {
     }
   }
 
-  private async branchHasCommits(projectPath: string, branch: string, baseBranch: string): Promise<boolean> {
-    try {
-      const { stdout } = await execFileAsync('git', ['log', `${baseBranch}..${branch}`, '--oneline'], { cwd: projectPath });
-      return stdout.trim().length > 0;
-    } catch {
-      return false;
-    }
-  }
-
   async canFastForward(
     projectPath: string,
     projectName: string,
@@ -329,12 +324,6 @@ export class WorktreeManager {
       log.info('Aborted stale rebase before starting new one', { issueNumber });
     } catch {
       // no rebase in progress, that's fine
-    }
-
-    const hasCommits = await this.branchHasCommits(projectPath, branch, baseBranch);
-    if (!hasCommits) {
-      log.info('No commits to rebase', { issueNumber, branch, baseBranch });
-      return { success: true, conflicts: [] };
     }
 
     try {
