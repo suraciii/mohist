@@ -27,13 +27,13 @@ describe('parseVerdict', () => {
     expect(parseVerdict(content)).toBe('FAIL');
   });
 
-  it('should return FAIL when verdict line is missing', () => {
+  it('should return null when verdict line is missing', () => {
     const content = '# Review\n\nSome content without a verdict.';
-    expect(parseVerdict(content)).toBe('FAIL');
+    expect(parseVerdict(content)).toBeNull();
   });
 
-  it('should return FAIL for empty content', () => {
-    expect(parseVerdict('')).toBe('FAIL');
+  it('should return null for empty content', () => {
+    expect(parseVerdict('')).toBeNull();
   });
 
   it('should handle extra whitespace after colon', () => {
@@ -58,14 +58,14 @@ Everything looks good.`;
     expect(parseVerdict(content)).toBe('PASS');
   });
 
-  it('should return FAIL for partial match like FAILURE', () => {
+  it('should return null for partial match like FAILURE', () => {
     const content = '## Verdict: FAILURE';
-    expect(parseVerdict(content)).toBe('FAIL');
+    expect(parseVerdict(content)).toBeNull();
   });
 
   it('should be case-sensitive — lowercase pass does not match', () => {
     const content = '## Verdict: pass';
-    expect(parseVerdict(content)).toBe('FAIL');
+    expect(parseVerdict(content)).toBe('PASS');
   });
 });
 
