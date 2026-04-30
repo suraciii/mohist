@@ -26,18 +26,35 @@ export class SchedulerService {
 
   start(): void {
     const schedules = this.scheduleRepo.getAllEnabled();
+    this.recover(schedules);
+    log.info('Scheduler started', { scheduleCount: schedules.length });
+  }
+
+  recover(schedules: SkillSchedule[]): void {
     const now = Date.now();
+    let catchUpCount = 0;
 
     for (const schedule of schedules) {
       const nextRunAt = new Date(schedule.nextRunAt).getTime();
+
       if (nextRunAt <= now) {
+        const overdueMs = now - nextRunAt;
+        log.info('Catch-up execution for overdue schedule', {
+          skillId: schedule.skillId,
+          scheduleType: schedule.scheduleType,
+          overdueMs,
+        });
+
         this.executeCatchUp(schedule);
+        catchUpCount++;
       } else {
         this.armTimer(schedule);
       }
     }
 
-    log.info('Scheduler started', { scheduleCount: schedules.length });
+    if (catchUpCount > 0) {
+      log.info('Recovery complete', { catchUpCount, totalSchedules: schedules.length });
+    }
   }
 
   stop(): void {
@@ -172,12 +189,6 @@ export class SchedulerService {
   }
 
   private executeCatchUp(schedule: SkillSchedule): void {
-    const overdueMs = Date.now() - new Date(schedule.nextRunAt).getTime();
-    log.info('Catch-up execution for overdue schedule', {
-      skillId: schedule.skillId,
-      overdueMs,
-    });
-
     this.tryExecute(schedule);
   }
 
