@@ -12,5 +12,4 @@ export { ExploreMessageRepo, type CreateExploreMessageData } from './explore-mes
 export { AgentSessionMessageRepo, type AgentSessionMessage, type CreateAgentSessionMessageData } from './agent-session-message-repo';
 export { CoderSessionRepo, type CoderSession, type CreateCoderSessionData } from './coder-session-repo';
 export { PipelineCheckpointRepo, type PipelineCheckpoint } from './pipeline-checkpoint-repo';
-export { SkillRepo, type Skill, type CreateSkillData } from './skill-repo';
-export { SkillRunRepo, type SkillRun, type CreateSkillRunData } from './skill-run-repo';
+export { ScheduleRepo, type SkillSchedule, type CreateScheduleData } from './schedule-repo';
