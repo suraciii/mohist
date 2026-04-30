@@ -62,12 +62,12 @@ export interface CheckContext {
 
 export interface WorktreeManager {
   canFastForward(projectPath: string, projectName: string, issueNumber: number, baseBranch: string): Promise<boolean>;
-  rebaseOntoMaster(projectPath: string, projectName: string, issueNumber: number, baseBranch: string): Promise<{ success: boolean; message: string }>;
+  rebaseOntoMaster(projectPath: string, projectName: string, issueNumber: number, baseBranch: string, options?: { abortOnConflict?: boolean }): Promise<{ success: boolean; conflicts: string[] }>;
   getPath(projectName: string, issueNumber: number): string | null;
   exists(projectName: string, issueNumber: number): boolean;
   remove(projectPath: string, projectName: string, issueNumber: number): Promise<void>;
   findWipCommit(worktreePath: string, taskId: string): Promise<{ hash: string; message: string; changedFiles: string[]; diffStat: string } | null>;
-  createWipCommit(cwd: string, taskId: string, attempt: number): Promise<string>;
+  createWipCommit(worktreePath: string, taskId: string, attemptNumber: number): Promise<string | null>;
   abortRebase(projectName: string, issueNumber: number): Promise<void>;
   isRebaseInProgress(projectName: string, issueNumber: number): Promise<boolean>;
   mergeBack(projectPath: string, projectName: string, issueNumber: number, baseBranch: string): Promise<{ success: boolean; message: string }>;
@@ -78,14 +78,7 @@ export interface WorktreeManager {
 }
 
 export interface ProjectRepo {
-  findByName(name: string): Project | null;
-  findByPath(path: string): Project | null;
   findById(id: string): Project | null;
-  findAll(): Project[];
-  update(id: string, data: Partial<Omit<Project, 'id' | 'createdAt'>>): Project | null;
-  create(data: { name: string; path: string; baseBranch?: string }): Project;
-  delete(id: string): boolean;
-  count(): number;
 }
 
 import type { CheckpointManager as CheckpointManagerInterface } from './checkpoint-manager';

@@ -8,9 +8,9 @@ import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
 import { Stage, IssueStatus } from '../src/types';
 
-vi.mock('../src/workflow/workflow-controller', () => {
+vi.mock('../src/workflow', () => {
   return {
-    WorkflowController: class {
+    WorkflowEngine: class {
       private signal?: AbortSignal;
       constructor(opts: any) {
         this.signal = opts.signal;
@@ -29,13 +29,12 @@ vi.mock('../src/workflow/workflow-controller', () => {
         return { completed: true, stage: Stage.Done, gateRequired: false };
       }
     },
-    createWorkflowController: (opts: any) => new (vi.mocked(
-      class {
-        private signal?: AbortSignal;
-        constructor(o: any) { this.signal = o.signal; }
-        async run() { return { completed: true, stage: Stage.Done, gateRequired: false }; }
-      }
-    ))(opts),
+    PlanStageRunner: vi.fn(),
+    BuildStageRunner: vi.fn(),
+    CheckStageRunner: vi.fn(),
+    BuildTestCheck: vi.fn(),
+    MergeReadyCheck: vi.fn(),
+    AiReviewCheck: vi.fn(),
   };
 });
 
@@ -210,9 +209,9 @@ describe('AgentRunnerService.stop()', () => {
   });
 });
 
-describe('AbortSignal propagation through WorkflowController', () => {
+describe('AbortSignal propagation through WorkflowEngine', () => {
   it('should reject pipeline.run() when signal is already aborted', async () => {
-    const { WorkflowController } = await import('../src/workflow/workflow-controller');
+    const { WorkflowEngine } = await import('../src/workflow');
     const abortController = new AbortController();
     abortController.abort();
 
@@ -242,12 +241,20 @@ describe('AbortSignal propagation through WorkflowController', () => {
       updateTaskPasses: vi.fn().mockReturnValue(false),
     } as any;
 
-    const controller = new WorkflowController({
+    const mockCheckpointManager = {
+      getResumeSteps: vi.fn().mockReturnValue([]),
+      markStepComplete: vi.fn(),
+      delete: vi.fn(),
+      deleteAll: vi.fn(),
+    } as any;
+
+    const engine = new WorkflowEngine({
+      runners: [],
       artifactManager: mockArtifactManager,
-      worktreePath: '/test',
       issueRepo: mockIssueRepo,
       eventBus: mockEventBus,
       projectId: 'proj-1',
+      checkpointManager: mockCheckpointManager,
       signal: abortController.signal,
     });
 
@@ -260,14 +267,14 @@ describe('AbortSignal propagation through WorkflowController', () => {
       status: IssueStatus.Active,
     } as any;
 
-    const result = await controller.run(issue, { cwd: '/test' });
+    const result = await engine.run(issue, { cwd: '/test' });
 
     expect(result.completed).toBe(false);
     expect(result.message).toBe('Agent stopped by user');
   });
 
   it('should return stopped message when signal aborts before entering stage loop', async () => {
-    const { WorkflowController } = await import('../src/workflow/workflow-controller');
+    const { WorkflowEngine } = await import('../src/workflow');
     const abortController = new AbortController();
 
     const mockIssueRepo = {
@@ -296,12 +303,20 @@ describe('AbortSignal propagation through WorkflowController', () => {
       updateTaskPasses: vi.fn().mockReturnValue(false),
     } as any;
 
-    const controller = new WorkflowController({
+    const mockCheckpointManager = {
+      getResumeSteps: vi.fn().mockReturnValue([]),
+      markStepComplete: vi.fn(),
+      delete: vi.fn(),
+      deleteAll: vi.fn(),
+    } as any;
+
+    const engine = new WorkflowEngine({
+      runners: [],
       artifactManager: mockArtifactManager,
-      worktreePath: '/test',
       issueRepo: mockIssueRepo,
       eventBus: mockEventBus,
       projectId: 'proj-1',
+      checkpointManager: mockCheckpointManager,
       signal: abortController.signal,
     });
 
@@ -316,7 +331,7 @@ describe('AbortSignal propagation through WorkflowController', () => {
 
     abortController.abort();
 
-    const result = await controller.run(issue, { cwd: '/test' });
+    const result = await engine.run(issue, { cwd: '/test' });
 
     expect(result.completed).toBe(false);
     expect(result.message).toContain('stopped by user');
@@ -325,8 +340,9 @@ describe('AbortSignal propagation through WorkflowController', () => {
   it('should abort between stages when signal fires during pipeline execution', async () => {
     const abortController = new AbortController();
 
-    const { WorkflowController } = await import('../src/workflow/workflow-controller');
-    const controller = new WorkflowController({
+    const { WorkflowEngine } = await import('../src/workflow');
+    const engine = new WorkflowEngine({
+      runners: [],
       artifactManager: {
         getChangeDir: vi.fn().mockReturnValue(null),
         createChangeDir: vi.fn().mockReturnValue(null),
@@ -336,7 +352,6 @@ describe('AbortSignal propagation through WorkflowController', () => {
         readTasks: vi.fn().mockReturnValue(null),
         updateTaskPasses: vi.fn().mockReturnValue(false),
       } as any,
-      worktreePath: '/test',
       issueRepo: {
         findById: vi.fn().mockImplementation((_id: string) => ({
           id: 'issue-1',
@@ -357,6 +372,12 @@ describe('AbortSignal propagation through WorkflowController', () => {
         off: vi.fn(),
       } as any,
       projectId: 'proj-1',
+      checkpointManager: {
+        getResumeSteps: vi.fn().mockReturnValue([]),
+        markStepComplete: vi.fn(),
+        delete: vi.fn(),
+        deleteAll: vi.fn(),
+      } as any,
       signal: abortController.signal,
     });
 
@@ -371,7 +392,7 @@ describe('AbortSignal propagation through WorkflowController', () => {
 
     abortController.abort();
 
-    const result = await controller.run(buildIssue, { cwd: '/test' });
+    const result = await engine.run(buildIssue, { cwd: '/test' });
 
     expect(result.completed).toBe(false);
     expect(result.message).toContain('stopped by user');
@@ -414,13 +435,21 @@ describe('AbortSignal propagation through WorkflowController', () => {
       updateTaskPasses: vi.fn().mockReturnValue(false),
     } as any;
 
-    const { WorkflowController } = await import('../src/workflow/workflow-controller');
-    const controller = new WorkflowController({
+    const mockCheckpointManager = {
+      getResumeSteps: vi.fn().mockReturnValue([]),
+      markStepComplete: vi.fn(),
+      delete: vi.fn(),
+      deleteAll: vi.fn(),
+    } as any;
+
+    const { WorkflowEngine } = await import('../src/workflow');
+    const engine = new WorkflowEngine({
+      runners: [],
       artifactManager: mockArtifactManager,
-      worktreePath: '/test',
       issueRepo: mockIssueRepo,
       eventBus: mockEventBus,
       projectId: 'proj-1',
+      checkpointManager: mockCheckpointManager,
       signal: abortController.signal,
     });
 
@@ -435,7 +464,7 @@ describe('AbortSignal propagation through WorkflowController', () => {
       status: IssueStatus.Active,
     } as any;
 
-    const result = await controller.run(planIssue, { cwd: '/test' });
+    const result = await engine.run(planIssue, { cwd: '/test' });
 
     expect(result.completed).toBe(false);
     expect(result.gateRequired).toBe(false);
