@@ -1,0 +1,120 @@
+{
+  "project": "mohist",
+  "description": "Branch Bar — 统一 worktree status 可视化 + rebase 操作",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add getWorktreeStatus to WorktreeManager",
+      "spec": "specs/http-api/spec.md#API-提供-worktree-status-端点",
+      "description": "Add a `getWorktreeStatus()` method to `WorktreeManager` in `packages/cli/src/git/worktree-manager.ts` that returns `{ exists, branch, baseBranch, ahead, behind, rebaseInProgress, conflictingFiles }`. Use `git rev-list --left-right --count <baseBranch>...<branch>` for ahead/behind, existing `isRebaseInProgress()` for rebase state, and `getConflictingFiles()` for conflict list. Also add the `WorktreeStatus` interface export.",
+      "acceptanceCriteria": [
+        "WorktreeManager has a getWorktreeStatus(projectPath, projectName, issueNumber, baseBranch) async method",
+        "Method returns WorktreeStatus with exists, branch, baseBranch, ahead, behind, rebaseInProgress, conflictingFiles",
+        "When worktree does not exist, returns { exists: false }",
+        "When worktree exists, ahead/behind are parsed from git rev-list output",
+        "rebaseInProgress uses existing isRebaseInProgress() method",
+        "conflictingFiles populated only when rebaseInProgress is true",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The private getConflictingFiles method already exists at line 357. Make it accessible (either make public or reuse logic inline)."
+    },
+    {
+      "id": "T-002",
+      "title": "Add worktree-status API endpoint",
+      "spec": "specs/http-api/spec.md#API-提供-worktree-status-端点",
+      "description": "Add `GET /:number/worktree-status` route to `packages/cli/src/api/issues.ts`. Place it alongside other sub-resource GET routes (near `GET /:number/diff` around line 1220). Hono uses Trie-based routing so order does not matter. The handler validates project context, finds the issue, gets project baseBranch, and delegates to `worktreeManager.getWorktreeStatus()`. Returns standard ApiResponse envelope.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/worktree-status returns { success: true, data: WorktreeStatus } when worktree exists",
+        "Returns { success: true, data: { exists: false } } when worktree does not exist",
+        "Returns 404 when issue not found",
+        "Returns 400 when no active project",
+        "Route is registered alongside other /:number sub-resource routes (after GET /:number)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Follow the exact pattern of the existing GET /:number/diff endpoint (lines 1220-1294) for route handler structure. Hono uses Trie-based routing, so /:number/worktree-status can be placed alongside other /:number/* routes regardless of order."
+    },
+    {
+      "id": "T-003",
+      "title": "Add frontend API client + useWorktreeStatus hook",
+      "spec": "specs/http-api/spec.md#前端-API-client-提供-getWorktreeStatus-方法",
+      "description": "Add `getWorktreeStatus(number)` method to `packages/cli/web/src/lib/api.ts` that calls `GET /issues/:number/worktree-status`. Add `useWorktreeStatus(issueNumber, enabled)` hook to `packages/cli/web/src/hooks/useQueries.ts` with queryKey `['issues', issueNumber, 'worktree-status']`, 30s refetchInterval, and enabled guard.",
+      "acceptanceCriteria": [
+        "api.getWorktreeStatus(number) sends GET /issues/:number/worktree-status",
+        "useWorktreeStatus(issueNumber, enabled) hook exists in useQueries.ts",
+        "Hook has refetchInterval: 30000",
+        "Hook enabled is false when issueNumber is 0 or undefined or enabled param is false",
+        "Query key is ['issues', issueNumber, 'worktree-status']",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useQueries.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Follow the existing pattern of useIssueDiff or useBuildStatus hooks in useQueries.ts. The api.ts method follows the simple request<T> pattern like getBuildStatus."
+    },
+    {
+      "id": "T-004",
+      "title": "Create BranchBar component",
+      "spec": "specs/branch-bar/spec.md#BranchBar-组件提供统一的分支状态可视化",
+      "description": "Create `packages/cli/web/src/components/BranchBar.tsx`. Self-contained component with props `{ issueNumber, stage, isAgentRunning }`. Internally uses `useWorktreeStatus` hook and owns its own `useMutation` for rebase via `api.rebaseIssue()`. Three visual states: synced (transparent bg, green 'up to date'), behind (amber-50 bg, rebase button), rebasing (blue bg, spinner). Returns null when worktree doesn't exist or stage is Backlog/Explore. Invalidates worktree-status query on mutation completion.",
+      "acceptanceCriteria": [
+        "BranchBar renders branch name (mo/issue-N), ahead/behind counts, baseBranch name",
+        "synced state: transparent background, green 'up to date' text, no rebase button",
+        "behind state: amber-50 background, amber accents, shows 'Rebase onto {baseBranch}' button",
+        "rebasing state: blue background, spinner, 'Rebasing...' text, no button",
+        "conflict state: red accent with conflictingFiles list",
+        "Returns null when data.exists is false",
+        "Returns null for Backlog/Explore stages",
+        "Rebase button disabled when isAgentRunning is true",
+        "Mutation invalidates ['issues', issueNumber, 'worktree-status'] query on settle",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/BranchBar.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Use the same spinner SVG pattern from IssueDetailPage.tsx. Use useQueryClient().invalidateQueries for post-mutation refresh. Import Stage enum from lib/types."
+    },
+    {
+      "id": "T-005",
+      "title": "Integrate BranchBar and remove scattered rebase buttons",
+      "spec": "specs/web-ui/spec.md#Issue-详情页移除散落的-rebase-按钮",
+      "description": "In `packages/cli/web/src/components/IssueDetailPage.tsx`: (1) Import and render `<BranchBar>` in the left column before Description section. (2) Remove the `rebaseMutation` definition (lines ~230-253) and `rebaseResult` state (lines ~224-228). (3) Remove the Build stage rebase button block in Actions panel (lines ~640-660). (4) Remove the Review approval gate rebase block (lines ~803-835). (5) Remove the Plan approval gate rebase block (lines ~855-886). Approval gates become pure approve/reject only.",
+      "acceptanceCriteria": [
+        "BranchBar is rendered inside the left column (lg:col-span-2) before Description",
+        "BranchBar receives issueNumber, stage, isAgentRunning props",
+        "rebaseMutation useMutation definition is removed from IssueDetailPage",
+        "rebaseResult useState is removed from IssueDetailPage",
+        "Build stage Actions panel no longer has a rebase button",
+        "Review approval gate no longer has rebase section",
+        "Plan approval gate no longer has rebase section",
+        "Approval gates only contain approve button (and error display)",
+        "No references to rebaseMutation or rebaseResult remain in IssueDetailPage",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "The BranchBar goes inside <div className=\"lg:col-span-2 space-y-6\"> at line ~406, before the Description block. Pass isAgentRunningOnThis as isAgentRunning prop."
+    }
+  ]
+}
