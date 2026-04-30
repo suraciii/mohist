@@ -12,6 +12,7 @@ import { CreateProjectDialog } from './components/CreateProjectDialog'
 import { CreateIssueDialog } from './components/CreateIssueDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { LogsPage } from './components/LogsPage'
+import { ArchivedPage } from './components/ArchivedPage'
 import { ProjectGuard } from './components/ProjectGuard'
 import { MobileBottomNav } from './components/MobileBottomNav'
 import { FAB } from './components/FAB'
@@ -100,6 +101,7 @@ function AppContent() {
           <Route path="/explore/:id" element={<ExplorePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/logs" element={<LogsPage />} />
+          <Route path="/archived" element={<ArchivedPage />} />
         </Route>
       </Routes>
       {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
