@@ -636,7 +636,7 @@ export class WorkflowController {
       failed: result.failed,
       total: result.total,
       success: result.success,
-      duration,
+      elapsedMs: duration,
     });
 
     if (result.completed === 0 && result.total > 0) {

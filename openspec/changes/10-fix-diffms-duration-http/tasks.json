@@ -1,0 +1,48 @@
+{
+  "project": "mohist",
+  "description": "将内部事件日志的 duration 字段改名为 elapsedMs，与 HTTP 请求的 duration 字段区分",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Rename duration to elapsedMs in all internal event log calls",
+      "spec": "specs/log-tail-api/spec.md#日志文件格式为 JSONL",
+      "description": "将所有非 HTTP 中间件的 log.*() 调用中的 duration 字段改名为 elapsedMs。涉及文件：util/log.ts（Logger.time() stop 回调）、agent-runner-service.ts:781、workflow-controller.ts:934-940、acp-session.ts 中 7 处 log.info/error 调用。不修改 http-server.ts 的 duration，不修改 writeSessionLog/writeLog 的 duration。",
+      "acceptanceCriteria": [
+        "Logger.time() stop 回调输出 elapsedMs 而非 duration",
+        "agent-runner-service.ts pipeline 完成日志使用 elapsedMs",
+        "workflow-controller.ts Ralph loop 完成日志使用 elapsedMs",
+        "acp-session.ts 所有 log.info/error 中的 duration 改为 elapsedMs（7 处）",
+        "http-server.ts HTTP 中间件的 duration 字段不变",
+        "writeSessionLog/writeLog/EventBus 中的 duration 字段不变",
+        "Typecheck passes",
+        "npm run build succeeds"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/util/log.ts, packages/cli/src/services/agent-runner-service.ts, packages/cli/src/workflow/workflow-controller.ts, packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "acp-session.ts 中 log.error 的 duration 也要改（如 ACP initialize timed out、ACP newSession timed out）。局部变量名 duration 可以保留（如 `const duration = Date.now() - startTime`），只改 log 调用中的属性名为 elapsedMs。"
+    },
+    {
+      "id": "T-002",
+      "title": "Update log.test.ts assertions for elapsedMs",
+      "spec": "specs/log-tail-api/spec.md#Logger.time() stop 日志使用 elapsedMs 字段",
+      "description": "更新 tests/log.test.ts 中 time() 方法的测试断言，从匹配 duration= 改为匹配 elapsedMs=，确保 Logger.time() stop 日志输出 elapsedMs 字段。新增测试验证 stop 日志不包含 duration 字段。",
+      "acceptanceCriteria": [
+        "time() 测试断言匹配 elapsedMs 而非 duration",
+        "新增测试：stop 日志不包含 duration 字段",
+        "npm test passes",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/log.test.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "参考 tests/log.test.ts:145-156 中已有的 time() 测试"
+    }
+  ]
+}
