@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "将内部事件日志的 duration 字段改名为 elapsedMs，与 HTTP 请求的 duration 字段区分",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -22,8 +21,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/util/log.ts, packages/cli/src/services/agent-runner-service.ts, packages/cli/src/workflow/workflow-controller.ts, packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "acp-session.ts 中 log.error 的 duration 也要改（如 ACP initialize timed out、ACP newSession timed out）。局部变量名 duration 可以保留（如 `const duration = Date.now() - startTime`），只改 log 调用中的属性名为 elapsedMs。"
+      "passes": true,
+      "notes": "acp-session.ts 中 log.error 的 duration 也要改（如 ACP initialize timed out、ACP newSession timed out）。局部变量名 duration 可以保留（如 `const duration = Date.now() - startTime`），只改 log 调用中的属性名为 elapsedMs。",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        287789
+      ]
     },
     {
       "id": "T-002",
@@ -40,9 +45,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/log.test.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "参考 tests/log.test.ts:145-156 中已有的 time() 测试"
+      "notes": "参考 tests/log.test.ts:145-156 中已有的 time() 测试",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
