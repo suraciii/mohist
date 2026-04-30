@@ -47,11 +47,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "IssueModelSelector currently uses useModels() which returns ModelProvider[]. Need to switch to useOpencodeModels() which returns string[]. The component uses Model type with id/name/badges - need to adapt to work with string model IDs.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        293858
+      ]
     },
     {
       "id": "T-003",
