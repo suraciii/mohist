@@ -4,9 +4,14 @@ import {
   buildSelfReviewPrompt,
   buildReviewerPrompt,
   buildExplorePrompt,
+  buildReviewSelfCheckPrompt,
+  buildAutoFixPrompt,
+  buildReVerifyPrompt,
+  buildConflictResolutionPrompt,
   type ArtifactType,
 } from '../src/agents/artifact-prompt';
 import type { Issue } from '../src/types';
+import type { AgentConfig } from '../src/workflow/workflow-loader';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -23,10 +28,33 @@ const mockIssue: Issue = {
   updatedAt: '2024-01-01T00:00:00Z',
 };
 
+const mockAgentConfig: AgentConfig = {
+  context: 'Tech stack: TypeScript, Node.js. Build: npm run build. Test: npm test.',
+  rules: {
+    plan: ['Keep changes scoped to the issue'],
+    review: ['Check error handling', 'Verify type safety'],
+  },
+};
+
 describe('buildArtifactPrompt', () => {
   const changeDir = '/tmp/test-change';
 
   const artifactTypes: ArtifactType[] = ['proposal', 'specs', 'design', 'tasks'];
+
+  it.each(artifactTypes)('should produce <mohist-task> envelope for %s artifact', (type) => {
+    const result = buildArtifactPrompt(type, mockIssue, changeDir);
+
+    expect(result).toContain('<mohist-task>');
+    expect(result).toContain('</mohist-task>');
+  });
+
+  it.each(artifactTypes)('should include <role> for %s artifact', (type) => {
+    const result = buildArtifactPrompt(type, mockIssue, changeDir);
+
+    expect(result).toContain('<role>');
+    expect(result).toContain(`Create the ${type} artifact`);
+    expect(result).toContain('</role>');
+  });
 
   it.each(artifactTypes)('should include issue info for %s artifact', (type) => {
     const result = buildArtifactPrompt(type, mockIssue, changeDir);
@@ -147,12 +175,27 @@ describe('buildArtifactPrompt', () => {
       buildArtifactPrompt('nonexistent' as ArtifactType, mockIssue, changeDir)
     ).toThrow('File not found');
   });
+
+  it('should include <project_context> when agentConfig is provided', () => {
+    const result = buildArtifactPrompt('proposal', mockIssue, changeDir, mockAgentConfig);
+
+    expect(result).toContain('<project_context>');
+    expect(result).toContain('Tech stack: TypeScript');
+    expect(result).toContain('</project_context>');
+  });
+
+  it('should not include <project_context> when agentConfig is omitted', () => {
+    const result = buildArtifactPrompt('proposal', mockIssue, changeDir);
+
+    expect(result).not.toContain('<project_context>');
+  });
 });
 
 describe('buildSelfReviewPrompt', () => {
   it('should include issue info and change dir', () => {
     const result = buildSelfReviewPrompt(mockIssue, '/tmp/change');
 
+    expect(result).toContain('<mohist-task>');
     expect(result).toContain('Issue #42');
     expect(result).toContain('/tmp/change');
     expect(result).toContain('Self-review');
@@ -166,12 +209,20 @@ describe('buildSelfReviewPrompt', () => {
 
     expect(result).toContain(instruction.slice(0, 50));
   });
+
+  it('should include <project_context> when agentConfig is provided', () => {
+    const result = buildSelfReviewPrompt(mockIssue, '/tmp/change', mockAgentConfig);
+
+    expect(result).toContain('<project_context>');
+    expect(result).toContain('Tech stack: TypeScript');
+  });
 });
 
 describe('buildReviewerPrompt', () => {
   it('should include issue info and change dir', () => {
     const result = buildReviewerPrompt(mockIssue, '/tmp/change');
 
+    expect(result).toContain('<mohist-task>');
     expect(result).toContain('Issue #42');
     expect(result).toContain('/tmp/change');
     expect(result).toContain('Review the implementation');
@@ -185,6 +236,111 @@ describe('buildReviewerPrompt', () => {
 
     expect(result).toContain(instruction.slice(0, 50));
   });
+
+  it('should include <project_context> when agentConfig is provided', () => {
+    const result = buildReviewerPrompt(mockIssue, '/tmp/change', mockAgentConfig);
+
+    expect(result).toContain('<project_context>');
+    expect(result).toContain('Tech stack: TypeScript');
+  });
+
+  it('should include <rules> from review stage when agentConfig has review rules', () => {
+    const result = buildReviewerPrompt(mockIssue, '/tmp/change', mockAgentConfig);
+
+    expect(result).toContain('<rules>');
+    expect(result).toContain('Check error handling');
+    expect(result).toContain('Verify type safety');
+  });
+});
+
+describe('buildReviewSelfCheckPrompt', () => {
+  it('should include issue info and change dir', () => {
+    const result = buildReviewSelfCheckPrompt(mockIssue, '/tmp/change');
+
+    expect(result).toContain('<mohist-task>');
+    expect(result).toContain('Issue #42');
+    expect(result).toContain('/tmp/change');
+    expect(result).toContain('Verify the review report');
+  });
+
+  it('should include <project_context> when agentConfig is provided', () => {
+    const result = buildReviewSelfCheckPrompt(mockIssue, '/tmp/change', mockAgentConfig);
+
+    expect(result).toContain('<project_context>');
+    expect(result).toContain('Tech stack: TypeScript');
+  });
+});
+
+describe('buildAutoFixPrompt', () => {
+  it('should include issue info and report content', () => {
+    const result = buildAutoFixPrompt(mockIssue, '/tmp/change', 'FAIL: missing tests', 'review.md');
+
+    expect(result).toContain('<mohist-task>');
+    expect(result).toContain('Issue #42');
+    expect(result).toContain('/tmp/change');
+    expect(result).toContain('FAIL: missing tests');
+  });
+
+  it('should include contract with fix-only constraint', () => {
+    const result = buildAutoFixPrompt(mockIssue, '/tmp/change', 'FAIL: missing tests', 'review.md');
+
+    expect(result).toContain('<contract>');
+    expect(result).toContain('Apply ONLY the fixes described');
+    expect(result).toContain('Do NOT modify review.md');
+  });
+
+  it('should include <project_context> when agentConfig is provided', () => {
+    const result = buildAutoFixPrompt(mockIssue, '/tmp/change', 'report', 'review.md', mockAgentConfig);
+
+    expect(result).toContain('<project_context>');
+    expect(result).toContain('Tech stack: TypeScript');
+  });
+});
+
+describe('buildReVerifyPrompt', () => {
+  it('should include issue info and review content', () => {
+    const result = buildReVerifyPrompt(mockIssue, '/tmp/change', 'Previous review content');
+
+    expect(result).toContain('<mohist-task>');
+    expect(result).toContain('Issue #42');
+    expect(result).toContain('/tmp/change');
+    expect(result).toContain('Previous review content');
+    expect(result).toContain('Re-verify');
+  });
+
+  it('should include <project_context> when agentConfig is provided', () => {
+    const result = buildReVerifyPrompt(mockIssue, '/tmp/change', 'review', mockAgentConfig);
+
+    expect(result).toContain('<project_context>');
+    expect(result).toContain('Tech stack: TypeScript');
+  });
+});
+
+describe('buildConflictResolutionPrompt', () => {
+  it('should include issue info and conflict files', () => {
+    const result = buildConflictResolutionPrompt(mockIssue, '/tmp/change', ['src/foo.ts', 'src/bar.ts']);
+
+    expect(result).toContain('<mohist-task>');
+    expect(result).toContain('Issue #42');
+    expect(result).toContain('/tmp/change');
+    expect(result).toContain('src/foo.ts');
+    expect(result).toContain('src/bar.ts');
+    expect(result).toContain('Resolve merge conflicts');
+  });
+
+  it('should include contract with conflict-only constraint', () => {
+    const result = buildConflictResolutionPrompt(mockIssue, '/tmp/change', ['src/foo.ts']);
+
+    expect(result).toContain('<contract>');
+    expect(result).toContain('Apply ONLY the conflict resolution');
+  });
+
+  it('should include <project_context> when agentConfig is provided', () => {
+    const result = buildConflictResolutionPrompt(mockIssue, '/tmp/change', ['src/foo.ts'], mockAgentConfig);
+
+    expect(result).toContain('<project_context>');
+    expect(result).toContain('Tech stack: TypeScript');
+  });
 });
 
 describe('buildExplorePrompt', () => {
@@ -194,6 +350,7 @@ describe('buildExplorePrompt', () => {
       '/tmp/change'
     );
 
+    expect(result).toContain('<mohist-task>');
     expect(result).toContain('Issue #5');
     expect(result).toContain('Test');
     expect(result).toContain('Body');
@@ -209,15 +366,15 @@ describe('buildExplorePrompt', () => {
     expect(result).not.toContain('Issue #');
   });
 
-  it('should include existing proposal when provided', () => {
+  it('should include existing proposal content when provided', () => {
     const result = buildExplorePrompt(
       { title: 'Test' },
       '/tmp/change',
       'Existing proposal content'
     );
 
-    expect(result).toContain('Existing Proposal');
     expect(result).toContain('Existing proposal content');
+    expect(result).toContain('Update it based on your exploration');
   });
 
   it('should not include existing proposal section when not provided', () => {
@@ -226,6 +383,18 @@ describe('buildExplorePrompt', () => {
       '/tmp/change'
     );
 
-    expect(result).not.toContain('Existing Proposal');
+    expect(result).not.toContain('Update it based on your exploration');
+  });
+
+  it('should include <project_context> when agentConfig is provided', () => {
+    const result = buildExplorePrompt(
+      { title: 'Test' },
+      '/tmp/change',
+      null,
+      mockAgentConfig
+    );
+
+    expect(result).toContain('<project_context>');
+    expect(result).toContain('Tech stack: TypeScript');
   });
 });

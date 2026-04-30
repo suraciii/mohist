@@ -38,3 +38,20 @@ Started: 2026-04-30T13:08:28.754Z
 - Added totalTasks and issueNumber to BuildContextOptions and ContextAssembler.assembleTaskContext
 - All 37 tests pass, typecheck passes
 - Next: T-004 (artifact-prompt.ts rewrite)
+
+[2026-04-30T21:26:00Z] T-004: Rewrite artifact-prompt.ts buildXxxPrompt functions
+- Rewrote all 8 buildXxxPrompt functions to use formatAgentPrompt from agent-prompt-schema.ts
+- All functions now output <mohist-task> XML envelope with <role>, <task>, <instruction>, etc.
+- Added optional AgentConfig parameter to all functions (wired in T-005)
+- buildArtifactPrompt: <role> describes artifact creation, <task> contains issue info + dependencies + output, <template> and <instruction> preserved
+- buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt: instruction content in <instruction>
+- buildReviewerPrompt: includes <rules> from agentConfig.rules.review and <spec> with spec context
+- buildAutoFixPrompt: <contract> with "Apply ONLY the fixes described" + "Do NOT modify review.md"
+- buildConflictResolutionPrompt: <contract> with conflict-only constraint
+- buildExplorePrompt: proposal content embedded in <task> instead of separate heading
+- buildReVerifyPrompt: review report embedded in <task>
+- Removed unused buildIssueTaskBlock helper
+- Updated tests: 66 tests all pass, added tests for all 8 functions with AgentConfig
+- Typecheck passes
+- Learnings: All function signatures are backward-compatible (agentConfig is optional). Callers don't need changes until T-005 wires the config through. The <dependencies> and <output> sub-tags inside <task> are preserved for buildArtifactPrompt since they're task-specific structure.
+- Next steps: T-005 (wire agent config into call sites), T-006 (add workflow.yaml agent config)
