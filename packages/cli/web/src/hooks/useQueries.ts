@@ -141,36 +141,6 @@ export function useUseProject() {
   })
 }
 
-export function useArchivedIssues(params?: { projectId?: string }) {
-  return useQuery({
-    queryKey: ['archived-issues', params],
-    queryFn: () => api.getArchivedIssues(params),
-    enabled: !!params?.projectId,
-  })
-}
-
-export function useArchiveIssue() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (number: number) => api.archiveIssue(number),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
-    },
-  })
-}
-
-export function useUnarchiveIssue() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (number: number) => api.unarchiveIssue(number),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
-    },
-  })
-}
-
 export function useExploreSession(id: string) {
   return useQuery({
     queryKey: ['explore', id],
@@ -214,6 +184,53 @@ export function useStatus() {
     queryKey: ['status'],
     queryFn: () => api.getStatus(),
     retry: false,
+  })
+}
+
+export function useConfig() {
+  return useQuery<GeneralConfig, Error>({
+    queryKey: ['config'],
+    queryFn: () => api.getConfig(),
+  })
+}
+
+interface UpdateConfigContext {
+  previousConfig?: GeneralConfig
+}
+
+const CONFIG_KEY_TO_PROPERTY: Record<string, keyof GeneralConfig> = {
+  'agent.timeout': 'agentTimeout',
+  'agent.maxConcurrent': 'maxConcurrentAgents',
+  'poll.interval': 'pollInterval',
+}
+
+export function useUpdateConfig() {
+  const queryClient = useQueryClient()
+
+  return useMutation<GeneralConfig, Error, { key: string; value: number }, UpdateConfigContext>({
+    mutationFn: ({ key, value }) => api.updateConfig(key, value),
+    onMutate: async ({ key, value }) => {
+      await queryClient.cancelQueries({ queryKey: ['config'] })
+      const previousConfig = queryClient.getQueryData<GeneralConfig>(['config'])
+
+      const prop = CONFIG_KEY_TO_PROPERTY[key]
+      if (prop) {
+        queryClient.setQueryData<GeneralConfig>(['config'], (old) => {
+          if (!old) return old
+          return { ...old, [prop]: value }
+        })
+      }
+
+      return { previousConfig }
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previousConfig) {
+        queryClient.setQueryData(['config'], context.previousConfig)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] })
+    },
   })
 }
 
@@ -307,66 +324,16 @@ export function useTestProvider() {
   })
 }
 
-export function useWorktreeStatus(issueNumber: number) {
-  return useQuery<{
-    exists: boolean
-    branch: string
-    ahead: number
-    behind: number
-    canFastForward: boolean
-    isRebaseInProgress: boolean
-  } | null>({
-    queryKey: ['worktree-status', issueNumber],
-    queryFn: async () => null,
-    enabled: false,
-  })
-}
-
-export function useConfig() {
-  return useQuery<GeneralConfig>({
-    queryKey: ['config'],
-    queryFn: () => api.getConfig(),
-  })
-}
-
-export function useUpdateConfig() {
-  const queryClient = useQueryClient()
-  return useMutation<GeneralConfig, Error, { key: string; value: number }>({
-    mutationFn: ({ key, value }) => api.updateConfig(key, value),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['config'] })
-    },
+export function useWorktreeStatus(issueNumber: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ['issues', issueNumber, 'worktree-status'],
+    queryFn: () => api.getWorktreeStatus(issueNumber),
+    enabled: enabled && issueNumber > 0,
+    refetchInterval: 30_000,
   })
 }
 
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) return '********'
   return apiKey.slice(0, 4) + '*'.repeat(apiKey.length - 8) + apiKey.slice(-4)
-}
-
-export function useOpencodeModel() {
-  return useQuery<{ model: string | null }>({
-    queryKey: ['opencode-model'],
-    queryFn: () => api.getOpencodeModel(),
-  })
-}
-
-export function useUpdateOpencodeModel() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (model: string | null) => api.updateOpencodeModel(model),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode-model'] })
-    },
-  })
-}
-
-export function useOpencodeModels() {
-  return useQuery<string[]>({
-    queryKey: ['opencode-models'],
-    queryFn: async () => {
-      const data = await api.getOpencodeModels()
-      return data.models
-    },
-  })
 }

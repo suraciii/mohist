@@ -34,31 +34,14 @@ export { ApiError }
 export const api = {
   getProjects: () => request<import('./types').Project[]>('/projects'),
 
-  getIssues: (params?: { stage?: string; label?: string; projectId?: string; archived?: boolean }) => {
+  getIssues: (params?: { stage?: string; label?: string; projectId?: string }) => {
     const search = new URLSearchParams()
     if (params?.projectId) search.set('projectId', params.projectId)
     if (params?.stage) search.set('stage', params.stage)
     if (params?.label) search.set('label', params.label)
-    if (params?.archived) search.set('archived', 'true')
     const qs = search.toString()
     return request<import('./types').Issue[]>(`/issues${qs ? `?${qs}` : ''}`)
   },
-
-  getArchivedIssues: (params?: { projectId?: string }) => {
-    const search = new URLSearchParams()
-    search.set('archived', 'true')
-    if (params?.projectId) search.set('projectId', params.projectId)
-    return request<import('./types').Issue[]>(`/issues?${search.toString()}`)
-  },
-
-  archiveIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/archive`, { method: 'POST' }),
-
-  unarchiveIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/unarchive`, { method: 'POST' }),
-
-  archiveAllCompleted: () =>
-    request<{ archived: number; message: string }>('/issues/archive-completed', { method: 'POST' }),
 
   getIssue: (number: number) =>
     request<import('./types').Issue>(`/issues/${number}`),
@@ -84,17 +67,11 @@ export const api = {
   reopenIssue: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/reopen`, { method: 'POST' }),
 
-  retryIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/retry`, { method: 'POST' }),
-
-  restartIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/restart`, { method: 'POST' }),
-
   approveIssue: (number: number) =>
     request<{ issue: import('./types').Issue; context: string | null; message: string }>(`/issues/${number}/approve`, { method: 'POST' }),
 
   getIssueDiff: (number: number) =>
-    request<import('./types').DiffResponse>(`/issues/${number}/diff`),
+    request<{ files: import('./types').DiffFile[] }>(`/issues/${number}/diff`),
 
   getIssueCommits: (number: number) =>
     request<{ commits: import('./types').CommitEntry[] }>(`/issues/${number}/commits`),
@@ -215,10 +192,10 @@ export const api = {
 
   rebaseIssue: async (number: number) => {
     try {
-      return await request<{ rebased: boolean; autoResolved?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }>(`/issues/${number}/rebase`, { method: 'POST' })
+      return await request<{ rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }>(`/issues/${number}/rebase`, { method: 'POST' })
     } catch (err) {
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
-        return err.data as { rebased: boolean; autoResolved?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }
+        return err.data as { rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }
       }
       throw err
     }
@@ -253,16 +230,15 @@ export const api = {
     return request<import('./types').LogTailResult>(`/logs/tail${qs ? `?${qs}` : ''}`)
   },
 
-  getOpencodeModel: () =>
-    request<{ model: string | null }>('/opencode-config/model'),
-
-  updateOpencodeModel: (model: string | null) =>
-    request<{ model: string | null }>('/opencode-config/model', {
-      method: 'PUT',
-      body: JSON.stringify({ model }),
-    }),
-
-  getOpencodeModels: () =>
-    request<{ models: string[] }>('/opencode/models'),
+  getWorktreeStatus: (number: number) =>
+    request<{
+      exists: boolean
+      branch?: string
+      baseBranch?: string
+      ahead?: number
+      behind?: number
+      rebaseInProgress?: boolean
+      conflictingFiles?: string[]
+    }>(`/issues/${number}/worktree-status`),
 
 }
