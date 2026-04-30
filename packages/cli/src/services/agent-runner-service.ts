@@ -36,6 +36,7 @@ export interface AgentStatus {
   activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>;
   waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>;
   recoverableIssues: RecoverableIssue[];
+  blockedIssues: Array<{ issueNumber: number; blockedReason: string | null; retryCount: number }>;
   queueDepth: number;
   maxConcurrentAgents: number;
 }
@@ -354,6 +355,7 @@ export class AgentRunnerService {
     });
 
     const first = agents[0];
+    const blockedIssues = this.getBlockedIssues();
 
     return {
       running: this.activeAgents.size > 0,
@@ -362,9 +364,20 @@ export class AgentRunnerService {
       activeAgents: agents,
       waitingQuestions: waiting,
       recoverableIssues: this.recoverableIssues,
+      blockedIssues: blockedIssues,
       queueDepth: 0,
       maxConcurrentAgents: this.maxConcurrentAgents,
     };
+  }
+
+  getBlockedIssues(): Array<{ issueNumber: number; blockedReason: string | null; retryCount: number }> {
+    if (!this.issueRepo) return [];
+    const blocked = this.issueRepo.findByMergeStates([IssueStatus.Blocked]);
+    return blocked.map(issue => ({
+      issueNumber: issue.number,
+      blockedReason: issue.blockedReason ?? null,
+      retryCount: issue.retryCount ?? 0,
+    }));
   }
 
   getActiveIssueId(): string | null {

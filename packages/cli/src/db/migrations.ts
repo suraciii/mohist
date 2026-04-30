@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS issues (
 );
 `;
 
+const CREATE_SKILLS_TABLE = `
+CREATE TABLE IF NOT EXISTS skills (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  project_id  TEXT NOT NULL,
+  description TEXT NOT NULL,
+  prompt      TEXT NOT NULL,
+  dir_path    TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+`;
+
 const CREATE_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_issues_project_stage ON issues(project_id, stage);',
   'CREATE INDEX IF NOT EXISTS idx_issues_project_status ON issues(project_id, status);',
@@ -65,6 +78,7 @@ export function runMigrations(db: DatabaseManager): void {
     db.exec(CREATE_PROJECTS_TABLE);
     db.exec(CREATE_ISSUES_TABLE);
     db.exec(CREATE_CONFIG_TABLE);
+    db.exec(CREATE_SKILLS_TABLE);
     
     for (const indexSql of CREATE_INDEXES) {
       db.exec(indexSql);
@@ -607,6 +621,20 @@ function migrateToVersion15(db: DatabaseManager): void {
   });
 }
 
+const CREATE_SKILL_RUNS_TABLE = `
+CREATE TABLE IF NOT EXISTS skill_runs (
+  id          TEXT PRIMARY KEY,
+  skill_id    TEXT NOT NULL,
+  project_id  TEXT NOT NULL,
+  status      TEXT NOT NULL,
+  output      TEXT,
+  error       TEXT,
+  issue_id    TEXT,
+  started_at  TEXT NOT NULL,
+  completed_at TEXT
+);
+`;
+
 const CREATE_AGENT_SKILL_SCHEDULES_TABLE = `
 CREATE TABLE IF NOT EXISTS agent_skill_schedules (
   id              TEXT PRIMARY KEY,
@@ -629,6 +657,25 @@ const CREATE_AGENT_SKILL_SCHEDULES_INDEXES = [
 
 function migrateToVersion16(db: DatabaseManager): void {
   db.transaction(() => {
+    db.exec(CREATE_SKILL_RUNS_TABLE);
+
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(issues)"
+    );
+
+    if (!tableInfo.some(col => col.name === 'archived_at')) {
+      db.exec("ALTER TABLE issues ADD COLUMN archived_at TEXT");
+      db.exec('CREATE INDEX IF NOT EXISTS idx_issues_archived ON issues(archived_at)');
+    }
+
+    if (!tableInfo.some(col => col.name === 'blocked_reason')) {
+      db.exec("ALTER TABLE issues ADD COLUMN blocked_reason TEXT DEFAULT NULL");
+    }
+
+    if (!tableInfo.some(col => col.name === 'retry_count')) {
+      db.exec("ALTER TABLE issues ADD COLUMN retry_count INTEGER DEFAULT 0");
+    }
+
     db.exec(CREATE_AGENT_SKILL_SCHEDULES_TABLE);
     for (const indexSql of CREATE_AGENT_SKILL_SCHEDULES_INDEXES) {
       db.exec(indexSql);
