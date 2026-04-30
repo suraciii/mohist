@@ -4,7 +4,7 @@ import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowController, type PipelineResult } from '../workflow/workflow-controller';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
-import { IssueStatus, MergeState, type Issue } from '../types';
+import { IssueStatus, type Issue } from '../types';
 import { EventBus } from './event-bus';
 import { Stage } from '../types';
 import { load } from '../config/config-loader';
@@ -186,10 +186,19 @@ export class AgentRunnerService {
   }
 
   private recoverBuildStageIssue(issue: Issue): void {
+    const MAX_RETRY = 3;
     const project = this.projectRepo!.findById(issue.projectId);
     if (!project) {
-      this.issueRepo!.blockIssue(issue.id, 'Project 已不存在');
+      const reason = `Project 已不存在 (projectId: ${issue.projectId})`;
+      this.issueRepo!.blockIssue(issue.id, reason);
       this.issueRepo!.clearApprovalState(issue.id);
+      this.eventBus.emit('agent_blocked', {
+        issueId: issue.id,
+        projectId: issue.projectId,
+        issueNumber: issue.number,
+        blockedReason: reason,
+        retryCount: issue.retryCount ?? 0,
+      });
       log.info('Recovered build-stage orphan — project not found', {
         issueNumber: issue.number,
         action: 'status=blocked, project lookup failed',
@@ -199,8 +208,16 @@ export class AgentRunnerService {
 
     const worktreePath = this.worktreeManager!.getPath(project.name, issue.number);
     if (!worktreePath) {
-      this.issueRepo!.blockIssue(issue.id, 'Worktree 已不存在');
+      const reason = `Worktree 已不存在 (project: ${project.name}, issue: #${issue.number})`;
+      this.issueRepo!.blockIssue(issue.id, reason);
       this.issueRepo!.clearApprovalState(issue.id);
+      this.eventBus.emit('agent_blocked', {
+        issueId: issue.id,
+        projectId: issue.projectId,
+        issueNumber: issue.number,
+        blockedReason: reason,
+        retryCount: issue.retryCount ?? 0,
+      });
       log.info('Recovered build-stage orphan — no worktree found', {
         issueNumber: issue.number,
         action: 'status=blocked, worktree not found',
@@ -210,9 +227,17 @@ export class AgentRunnerService {
 
     const changeDir = findChangeDir(worktreePath, issue.number);
     if (!changeDir) {
-      this.issueRepo!.blockIssue(issue.id, '变更目录不存在');
+      const reason = `变更目录不存在 (issue: #${issue.number})`;
+      this.issueRepo!.blockIssue(issue.id, reason);
       this.issueRepo!.clearApprovalState(issue.id);
-      log.info('Recovered build-stage orphan — missing tasks.json', {
+      this.eventBus.emit('agent_blocked', {
+        issueId: issue.id,
+        projectId: issue.projectId,
+        issueNumber: issue.number,
+        blockedReason: reason,
+        retryCount: issue.retryCount ?? 0,
+      });
+      log.info('Recovered build-stage orphan — missing change directory', {
         issueNumber: issue.number,
         action: 'status=blocked, no change directory found',
       });
@@ -221,8 +246,16 @@ export class AgentRunnerService {
 
     const tasksPath = path.join(changeDir, 'tasks.json');
     if (!fs.existsSync(tasksPath)) {
-      this.issueRepo!.blockIssue(issue.id, 'tasks.json 不存在');
+      const reason = `tasks.json 不存在 (${tasksPath})`;
+      this.issueRepo!.blockIssue(issue.id, reason);
       this.issueRepo!.clearApprovalState(issue.id);
+      this.eventBus.emit('agent_blocked', {
+        issueId: issue.id,
+        projectId: issue.projectId,
+        issueNumber: issue.number,
+        blockedReason: reason,
+        retryCount: issue.retryCount ?? 0,
+      });
       log.info('Recovered build-stage orphan — missing tasks.json', {
         issueNumber: issue.number,
         action: 'status=blocked, change directory exists but no tasks.json',
@@ -235,8 +268,16 @@ export class AgentRunnerService {
       const raw = fs.readFileSync(tasksPath, 'utf-8');
       tasksFile = JSON.parse(raw);
     } catch {
-      this.issueRepo!.blockIssue(issue.id, 'tasks.json 格式损坏');
+      const reason = `tasks.json 格式损坏 (${tasksPath})`;
+      this.issueRepo!.blockIssue(issue.id, reason);
       this.issueRepo!.clearApprovalState(issue.id);
+      this.eventBus.emit('agent_blocked', {
+        issueId: issue.id,
+        projectId: issue.projectId,
+        issueNumber: issue.number,
+        blockedReason: reason,
+        retryCount: issue.retryCount ?? 0,
+      });
       log.info('Recovered build-stage orphan — malformed tasks.json', {
         issueNumber: issue.number,
         action: 'status=blocked, tasks.json parse failed',
@@ -245,8 +286,16 @@ export class AgentRunnerService {
     }
 
     if (!tasksFile.tasks || !Array.isArray(tasksFile.tasks)) {
-      this.issueRepo!.blockIssue(issue.id, 'tasks.json 缺少 tasks 数组');
+      const reason = `tasks.json 缺少 tasks 数组 (${tasksPath})`;
+      this.issueRepo!.blockIssue(issue.id, reason);
       this.issueRepo!.clearApprovalState(issue.id);
+      this.eventBus.emit('agent_blocked', {
+        issueId: issue.id,
+        projectId: issue.projectId,
+        issueNumber: issue.number,
+        blockedReason: reason,
+        retryCount: issue.retryCount ?? 0,
+      });
       log.info('Recovered build-stage orphan — malformed tasks.json', {
         issueNumber: issue.number,
         action: 'status=blocked, tasks.json missing tasks array',
@@ -257,6 +306,8 @@ export class AgentRunnerService {
     const allPass = tasksFile.tasks.every(t => t.passes === true);
     if (allPass) {
       this.issueRepo!.updateStage(issue.id, Stage.Check);
+      this.issueRepo!.updateRetryCount(issue.id, 0);
+      this.issueRepo!.updateBlockedReason(issue.id, null);
       log.info('Recovered build-stage orphan — all tasks pass, auto-advanced to review', {
         issueNumber: issue.number,
         totalTasks: tasksFile.tasks.length,
@@ -266,12 +317,60 @@ export class AgentRunnerService {
       const passed = tasksFile.tasks.filter(t => t.passes === true).length;
       const pending = tasksFile.tasks.filter(t => t.passes !== true);
       const pendingIds = pending.map(t => t.id).join(', ');
-      this.issueRepo!.blockIssue(issue.id, `${passed}/${tasksFile.tasks.length} 任务完成，${pendingIds} 待完成`);
-      this.issueRepo!.clearApprovalState(issue.id);
-      log.info('Recovered build-stage orphan — partial progress', {
-        issueNumber: issue.number,
-        action: `status=blocked, ${passed}/${tasksFile.tasks.length} tasks completed, ${pendingIds} pending`,
-      });
+      const currentRetryCount = issue.retryCount ?? 0;
+
+      if (currentRetryCount < MAX_RETRY) {
+        const newRetryCount = currentRetryCount + 1;
+        const reason = `Build 部分完成 ${passed}/${tasksFile.tasks.length}，自动重试 第 ${newRetryCount}/${MAX_RETRY} 次 (pending: ${pendingIds})`;
+        this.issueRepo!.updateBlockedReason(issue.id, reason);
+        this.issueRepo!.updateRetryCount(issue.id, newRetryCount);
+
+        const startResult = this.startPipeline(
+          issue,
+          issue.projectId,
+          this.issueRepo!,
+          worktreePath,
+          { cwd: worktreePath },
+        );
+
+        if (!startResult.started) {
+          const blockReason = `自动重试启动失败: ${startResult.error} (进度: ${passed}/${tasksFile.tasks.length})`;
+          this.issueRepo!.blockIssue(issue.id, blockReason);
+          this.issueRepo!.clearApprovalState(issue.id);
+          this.eventBus.emit('agent_blocked', {
+            issueId: issue.id,
+            projectId: issue.projectId,
+            issueNumber: issue.number,
+            blockedReason: blockReason,
+            retryCount: newRetryCount,
+          });
+          log.info('Recovered build-stage orphan — auto-retry pipeline start failed', {
+            issueNumber: issue.number,
+            action: `status=blocked, ${blockReason}`,
+          });
+        } else {
+          log.info('Recovered build-stage orphan — auto-retry triggered', {
+            issueNumber: issue.number,
+            action: `retry ${newRetryCount}/${MAX_RETRY}, ${passed}/${tasksFile.tasks.length} completed`,
+          });
+        }
+      } else {
+        const reason = `Build 部分完成 ${passed}/${tasksFile.tasks.length}，已自动重试 ${MAX_RETRY} 次仍失败，需人工介入 (pending: ${pendingIds})`;
+        this.issueRepo!.blockIssue(issue.id, reason);
+        this.issueRepo!.updateRetryCount(issue.id, currentRetryCount + 1);
+        this.issueRepo!.clearApprovalState(issue.id);
+        this.eventBus.emit('agent_blocked', {
+          issueId: issue.id,
+          projectId: issue.projectId,
+          issueNumber: issue.number,
+          blockedReason: reason,
+          retryCount: currentRetryCount + 1,
+        });
+        log.info('Recovered build-stage orphan — max retries reached', {
+          issueNumber: issue.number,
+          action: `status=blocked, ${passed}/${tasksFile.tasks.length} completed, max retries (${MAX_RETRY}) reached`,
+        });
+      }
     }
   }
 
@@ -370,13 +469,14 @@ export class AgentRunnerService {
     };
   }
 
-  getBlockedIssues(): Array<{ issueNumber: number; blockedReason: string | null; retryCount: number }> {
+  getBlockedIssues(): Array<{ issueNumber: number; blockedReason: string | null; retryCount: number; stage?: string }> {
     if (!this.issueRepo) return [];
-    const blocked = this.issueRepo.findByMergeStates([MergeState.Blocked]);
+    const blocked = this.issueRepo.findAll({ status: IssueStatus.Blocked });
     return blocked.map(issue => ({
       issueNumber: issue.number,
       blockedReason: issue.blockedReason ?? null,
       retryCount: issue.retryCount ?? 0,
+      stage: issue.stage,
     }));
   }
 
