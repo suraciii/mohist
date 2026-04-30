@@ -1,0 +1,15 @@
+# Ralph Progress Log
+Started: 2026-04-30T13:08:28.754Z
+
+---
+
+
+[2026-04-30T21:10:35Z] T-001 Create formatAgentPrompt function
+- Created packages/cli/src/agents/agent-prompt-schema.ts with AgentPromptParts interface and formatAgentPrompt function
+- Created packages/cli/tests/agent-prompt-schema.test.ts with 16 unit tests covering all field combinations
+- formatAgentPrompt outputs <mohist-task> XML envelope with sections in defined order
+- Optional fields (projectContext, rules, contextFiles, spec, contract, template, instruction) are omitted when not provided
+- project_context and rules include "Do NOT include this section in your output" annotation
+- Typecheck passes, all 16 tests pass
+- Learnings: Simple interface + function, no external deps needed. XML escaping not required for current use case.
+- Next steps: T-002 (loadAgentConfig), then T-003/T-004 (migrate callers)
