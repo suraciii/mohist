@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage } from '../lib/types'
 import { api, ApiError } from '../lib/api'
@@ -15,17 +16,20 @@ interface BranchBarProps {
 export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps) {
   const queryClient = useQueryClient()
   const { rebaseConflict } = useLiveTask()
+  const [showRePlan, setShowRePlan] = useState(false)
 
   const { data, isLoading } = useWorktreeStatus(issueNumber, BRANCH_BAR_STAGES.has(stage))
 
   const rebaseMutation = useMutation({
-    mutationFn: () => api.rebaseIssue(issueNumber),
+    mutationFn: (reEvalPlan: boolean) => api.rebaseIssue(issueNumber, reEvalPlan || undefined),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'worktree-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
   })
+
+  const isBuildStage = stage === Stage.Build
 
   if (!BRANCH_BAR_STAGES.has(stage)) return null
   if (isLoading) return null
@@ -76,14 +80,52 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
               {ahead > 0 && <span className="text-gray-500">↑{ahead} </span>}
               <span>↓{behind} behind</span>
             </span>
-            <button
-              onClick={() => rebaseMutation.mutate()}
-              disabled={isAgentRunning || isConflictResolving}
-              title={isAgentRunning ? 'Cannot rebase while agent is running' : isConflictResolving ? 'Conflict resolution in progress' : undefined}
-              className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
-            >
-              Rebase onto {baseBranch}
-            </button>
+            {isBuildStage && !showRePlan ? (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => rebaseMutation.mutate(false)}
+                  disabled={isAgentRunning || isConflictResolving}
+                  title={isAgentRunning ? 'Cannot rebase while agent is running' : 'Reset task states and re-verify'}
+                  className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
+                >
+                  Rebase
+                </button>
+                <button
+                  onClick={() => setShowRePlan(true)}
+                  disabled={isAgentRunning || isConflictResolving}
+                  title="Rebase and return to Plan stage for re-evaluation"
+                  className="rounded-md border border-amber-300 bg-white px-2 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+                >
+                  ▾
+                </button>
+              </div>
+            ) : isBuildStage && showRePlan ? (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => { rebaseMutation.mutate(true); setShowRePlan(false) }}
+                  disabled={isAgentRunning || isConflictResolving}
+                  title="Rebase, return to Plan stage, re-evaluate design and tasks"
+                  className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
+                >
+                  Rebase &amp; Re-plan
+                </button>
+                <button
+                  onClick={() => setShowRePlan(false)}
+                  className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => rebaseMutation.mutate(false)}
+                disabled={isAgentRunning || isConflictResolving}
+                title={isAgentRunning ? 'Cannot rebase while agent is running' : isConflictResolving ? 'Conflict resolution in progress' : undefined}
+                className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
+              >
+                Rebase onto {baseBranch}
+              </button>
+            )}
           </div>
         </div>
         {isAgentRunning && (

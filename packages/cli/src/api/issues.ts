@@ -2111,7 +2111,48 @@ export function createIssueRoutes(
     );
   }
 
-  function handleBuildRebase(issue: Issue, project: { name: string }, number: number): void {
+  function handleBuildRebase(issue: Issue, project: { name: string }, projectId: string, number: number, reEvalPlan = false): void {
+    if (reEvalPlan) {
+      if (!agentRunner || !stateManager.getIssueRepo()) return;
+      const issueRepo = stateManager.getIssueRepo()!;
+      issueRepo.updateStage(issue.id, Stage.Plan);
+      issueRepo.setApprovalState(issue.id, {
+        stage: Stage.Plan,
+        status: 'awaiting',
+        output: 'Re-planning after rebase — re-evaluating design and tasks against updated codebase',
+        requestedAt: new Date().toISOString(),
+      });
+      eventBus.emit('approval_requested', {
+        issueId: issue.id,
+        projectId,
+        stage: Stage.Plan,
+      });
+      if (agentRunner.hasPendingGate(number)) {
+        const rebaseMessage = 'master has new changes after rebase. Code commits are preserved. Please re-evaluate design artifacts and tasks: check if the existing task breakdown is still appropriate for the updated codebase, merge/split/add/remove tasks as needed, and verify all file paths referenced in tasks.json still exist.';
+        issueService.createComment(issue.id, rebaseMessage);
+        const worktreePath = worktreeManager!.getPath(project.name, issue.number) || process.cwd();
+        const acpOptions: AcpConnectionOptions = {
+          cwd: worktreePath,
+          issueId: issue.id,
+          projectId,
+          workflowLogRepo,
+          coderSessionRepo,
+          eventBus,
+          issueNumber: issue.number,
+          opencodeBinPath,
+        };
+        agentRunner.resumePipeline(
+          issue,
+          projectId,
+          issueRepo,
+          worktreePath,
+          acpOptions,
+          (issueId, status) => issueService.setStatus(issueId, status),
+        );
+      }
+      return;
+    }
+
     if (!checkpointRepo) return;
     const changeDir = findChangeDir(
       worktreeManager!.getPath(project.name, issue.number) || process.cwd(),
@@ -2138,6 +2179,8 @@ export function createIssueRoutes(
     try {
       const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
+      const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+      const reEvalPlan = Boolean(body.reEvalPlan);
 
       if (!projectId) {
         return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
@@ -2296,7 +2339,7 @@ export function createIssueRoutes(
             }
 
             if (refreshedIssue?.stage === Stage.Build) {
-              handleBuildRebase(refreshedIssue, project, resolutionNumber);
+              handleBuildRebase(refreshedIssue, project, resolutionProjectId, resolutionNumber, reEvalPlan);
             }
           })
           .catch(async (err) => {
@@ -2340,17 +2383,18 @@ export function createIssueRoutes(
       }
 
       if (issue.stage === Stage.Build) {
-        handleBuildRebase(issue, project, number);
+        handleBuildRebase(issue, project, projectId, number, reEvalPlan);
       }
 
       const response: ApiResponse = {
         success: true,
         data: {
           rebased: true,
+          rePlan: reEvalPlan && issue.stage === Stage.Build,
           message: issue.stage === Stage.Check
             ? (buildPassed ? 'Rebase successful, build verification passed' : 'Rebase successful but build verification failed')
             : issue.stage === Stage.Build
-              ? 'Rebase successful, checkpoint cleared, resume pipeline to rebuild'
+              ? (reEvalPlan ? 'Rebase successful, returning to plan stage for re-evaluation' : 'Rebase successful, checkpoint cleared, resume pipeline to rebuild')
               : 'Rebase successful',
           ...(buildPassed !== undefined && { buildPassed }),
         },
