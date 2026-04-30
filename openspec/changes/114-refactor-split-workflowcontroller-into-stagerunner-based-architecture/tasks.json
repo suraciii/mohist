@@ -230,13 +230,14 @@
       "type": "WRITE",
       "output": "src/workflow/git-committer.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        66246
+        66246,
+        51834
       ]
     },
     {
