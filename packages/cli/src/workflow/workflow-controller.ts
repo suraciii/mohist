@@ -8,6 +8,7 @@ import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { loadWorkflow } from './workflow-loader';
+import { getAgentTimeoutConfig, load as loadConfig } from '../config/config-loader';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
@@ -507,12 +508,9 @@ export class WorkflowController {
     }
   }
 
-  private getBuildStageTimeoutMs(): number | undefined {
-    const config = loadWorkflow(this.worktreePath);
-    if (typeof config === 'string') return undefined;
-    const buildStage = config.stages.find(s => s.stage === 'build');
-    if (!buildStage?.timeout) return undefined;
-    return buildStage.timeout * 1000;
+  private getBuildStageTimeoutMs(taskCount: number): number {
+    const agentConfig = getAgentTimeoutConfig(loadConfig());
+    return agentConfig.taskTimeout * taskCount * 1000;
   }
 
   private writeLog(workflowLogRepo: WorkflowLogRepo | undefined, issueId: string, eventType: string, data: object): void {
@@ -633,7 +631,7 @@ export class WorkflowController {
       workflowLogRepo: acpOptions.workflowLogRepo,
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
-      stageTimeoutMs: this.getBuildStageTimeoutMs(),
+      stageTimeoutMs: this.getBuildStageTimeoutMs(total),
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
