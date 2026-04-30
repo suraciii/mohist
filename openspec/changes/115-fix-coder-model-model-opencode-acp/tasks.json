@@ -74,9 +74,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
-      "notes": "model is already in AcpSessionOptions interface (line 52) but is never destructured or used in runAcpSession. Must add to destructuring at line ~90-104 and call setSessionConfigOption after newSession at line ~349.",
-      "attempts": 0,
+      "passes": true,
+      "notes": "Already implemented in commit 32d29b4b69 from issue-78 branch. model destructured at line 104, setSessionConfigOption called at lines 353-364 after newSession with try/catch warn.",
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
