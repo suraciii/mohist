@@ -15,6 +15,7 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import type { AgentConfig } from './workflow-loader';
 import type { ChangeArtifactsManager, IssueRepo } from './stage-context';
+import { parseVerdict as parseVerdictImpl, extractFixSuggestions as extractFixSuggestionsImpl, readReportFile, cleanChangeDir } from './utils';
 import { Log } from '../util/log';
 
 const execFileAsync = promisify(execFile);
@@ -1181,7 +1182,7 @@ export class WorkflowController {
         return { result: { name: 'ai-review', status: 'failed', duration, summary: 'Review report is empty after self-check' } };
       }
 
-      const parsedResult = parseVerdict(reviewReport);
+      const parsedResult = parseVerdictImpl(reviewReport);
 
       if (parsedResult === 'PASS') {
         const duration = Date.now() - startTime;
@@ -1194,7 +1195,7 @@ export class WorkflowController {
         return { result: { name: 'ai-review', status: 'failed', duration, summary: 'AI code review found issues (auto-fix skipped)', verdict: 'FAIL', reviewReport } };
       }
 
-      const fixSuggestions = extractFixSuggestions(reviewReport);
+      const fixSuggestions = extractFixSuggestionsImpl(reviewReport);
       if (!fixSuggestions) {
         log.info('No Fix Suggestions found, skipping auto-fix', { issueNumber: issue.number });
         const duration = Date.now() - startTime;
@@ -1348,7 +1349,7 @@ export class WorkflowController {
       }
 
       const updatedReport = readReportFile(changeDir, 'review.md') ?? reVerifyResult.text ?? '';
-      const result = parseVerdict(updatedReport);
+      const result = parseVerdictImpl(updatedReport);
 
       if (result === 'PASS') {
         log.info('Auto-fix succeeded', { attempt: attempt + 1, issueNumber: issue.number });
@@ -1392,67 +1393,13 @@ interface PlanRoundConfig {
   outputPath: string;
 }
 
-function readReportFile(changeDir: string, filename: string): string | null {
-  const filePath = path.join(changeDir, filename);
-  try {
-    if (!fs.existsSync(filePath)) return null;
-    const content = fs.readFileSync(filePath, 'utf-8').trim();
-    return content.length > 0 ? content : null;
-  } catch {
-    return null;
-  }
-}
-
-function cleanChangeDir(changeDir: string): void {
-  if (!fs.existsSync(changeDir)) {
-    return;
-  }
-
-  const entries = fs.readdirSync(changeDir);
-  for (const entry of entries) {
-    if (entry === '.openspec.yaml') continue;
-    const entryPath = path.join(changeDir, entry);
-    fs.rmSync(entryPath, { recursive: true, force: true });
-  }
-}
-
 function truncateLog(log: string, maxLength: number): string {
   if (log.length <= maxLength) return log;
   const half = Math.floor(maxLength / 2);
   return log.slice(0, half) + '\n\n...[truncated]...\n\n' + log.slice(-half);
 }
 
-const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
-const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
-
-export function parseResult(content: string): 'PASS' | 'FAIL' | null {
-  const match = RESULT_RE.exec(content);
-  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
-  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
-  if (legacyMatch) {
-    log.warn('parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
-    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
-  }
-  return null;
-}
-
-const CASE_SENSITIVE_RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/m;
-const CASE_SENSITIVE_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/m;
-
-export function parseVerdict(content: string): 'PASS' | 'FAIL' {
-  const match = CASE_SENSITIVE_RESULT_RE.exec(content);
-  if (match) return match[1] as 'PASS' | 'FAIL';
-  const legacyMatch = CASE_SENSITIVE_VERDICT_RE.exec(content);
-  if (legacyMatch) return legacyMatch[1] as 'PASS' | 'FAIL';
-  return 'FAIL';
-}
-
-export function extractFixSuggestions(content: string): string {
-  const match = content.match(/^##\s*Fix\s*Suggestions\s*$/im);
-  if (!match) return '';
-  const startIdx = match.index! + match[0].length;
-  return content.slice(startIdx).trim();
-}
+export { parseVerdict, parseResult, extractFixSuggestions, parseDimensions, type ParsedDimension, readReportFile, cleanChangeDir } from './utils';
 
 export function createWorkflowController(options: WorkflowControllerOptions): WorkflowController {
   return new WorkflowController(options);
