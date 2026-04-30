@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Issue } from '../types';
+import type { AgentConfig } from '../workflow/workflow-loader';
+import { formatAgentPrompt } from './agent-prompt-schema';
 
 export type ArtifactType = 'proposal' | 'specs' | 'design' | 'tasks';
 
@@ -77,9 +79,9 @@ function loadSpecContext(changeDir: string): string {
 }
 
 function formatIssueInfo(issue: Issue): string {
-  let info = `## Issue #${issue.number}: ${issue.title}\n`;
+  let info = `Issue #${issue.number}: ${issue.title}`;
   if (issue.body) {
-    info += `\n${issue.body}\n`;
+    info += `\n\n${issue.body}`;
   }
   return info;
 }
@@ -107,7 +109,8 @@ function buildDependencies(artifactType: ArtifactType, changeDir: string): strin
 export function buildArtifactPrompt(
   artifactType: ArtifactType,
   issue: Issue,
-  changeDir: string
+  changeDir: string,
+  agentConfig?: AgentConfig,
 ): string {
   const instructionFile = path.join(ARTIFACTS_DIR, `${artifactType}.md`);
   const instruction = loadFile(instructionFile);
@@ -119,13 +122,11 @@ export function buildArtifactPrompt(
   const outputPath = path.join(changeDir, outputFile);
   const dependencies = buildDependencies(artifactType, changeDir);
 
-  const parts: string[] = [
-    formatIssueInfo(issue),
-    '',
-    `<task>`,
+  const taskContent = [
     `Create the ${artifactType} artifact for this change.`,
     ARTIFACT_DESCRIPTIONS[artifactType],
-    `</task>`,
+    '',
+    formatIssueInfo(issue),
     '',
     `<dependencies>`,
     dependencies,
@@ -134,86 +135,88 @@ export function buildArtifactPrompt(
     `<output>`,
     `Write to: ${outputPath}`,
     `</output>`,
-    '',
-    `<template>`,
-    template,
-    `</template>`,
-    '',
-    `<instruction>`,
-    instruction,
-    `</instruction>`,
-  ];
+  ].join('\n');
 
-  return parts.join('\n');
+  return formatAgentPrompt({
+    role: `Create the ${artifactType} artifact for this change`,
+    projectContext: agentConfig?.context,
+    task: taskContent,
+    template,
+    instruction,
+  });
 }
 
 export function buildSelfReviewPrompt(
   issue: Issue,
-  changeDir: string
+  changeDir: string,
+  agentConfig?: AgentConfig,
 ): string {
   const instructionFile = path.join(ARTIFACTS_DIR, 'self-review.md');
   const instruction = loadFile(instructionFile);
 
-  const parts: string[] = [
+  const taskContent = [
+    `Change Directory: ${changeDir}`,
+    '',
     formatIssueInfo(issue),
     '',
-    `## Change Directory\n\n${changeDir}`,
-    '',
-    '## Goal\n\nSelf-review all generated artifacts.',
-    '',
-    '## Instructions\n',
-    instruction,
-  ];
+    'Self-review all generated artifacts.',
+  ].join('\n');
 
-  return parts.join('\n');
+  return formatAgentPrompt({
+    role: 'Self-review all generated artifacts for this change',
+    projectContext: agentConfig?.context,
+    task: taskContent,
+    instruction,
+  });
 }
 
 export function buildReviewerPrompt(
   issue: Issue,
-  changeDir: string
+  changeDir: string,
+  agentConfig?: AgentConfig,
 ): string {
   const instruction = loadFile(REVIEW_PROMPT_PATH);
   const specContext = loadSpecContext(changeDir);
 
-  const parts: string[] = [
+  const taskContent = [
+    `Change Directory: ${changeDir}`,
+    '',
     formatIssueInfo(issue),
     '',
-    `## Change Directory\n\n${changeDir}`,
-  ];
+    'Review the implementation for quality.',
+  ].join('\n');
 
-  if (specContext) {
-    parts.push('', specContext);
-  }
-
-  parts.push(
-    '',
-    '## Goal\n\nReview the implementation for quality.',
-    '',
-    '## Instructions\n',
+  return formatAgentPrompt({
+    role: 'Review the implementation for quality',
+    projectContext: agentConfig?.context,
+    rules: agentConfig?.rules?.review,
+    spec: specContext || undefined,
+    task: taskContent,
     instruction,
-  );
-
-  return parts.join('\n');
+  });
 }
 
 export function buildReviewSelfCheckPrompt(
   issue: Issue,
-  changeDir: string
+  changeDir: string,
+  agentConfig?: AgentConfig,
 ): string {
   const instruction = loadFile(REVIEW_SELF_CHECK_PATH);
 
-  const parts: string[] = [
+  const taskContent = [
+    `Change Directory: ${changeDir}`,
+    '',
     formatIssueInfo(issue),
     '',
-    `## Change Directory\n\n${changeDir}`,
-    '',
-    '## Goal\n\nVerify the review report is properly formatted and complete.',
-    '',
-    '## Instructions\n',
-    instruction,
-  ];
+    'Verify the review report is properly formatted and complete.',
+  ].join('\n');
 
-  return parts.join('\n');
+  return formatAgentPrompt({
+    role: 'Verify the review report is properly formatted and complete',
+    projectContext: agentConfig?.context,
+    task: taskContent,
+    instruction,
+  });
 }
 
 export interface ExploreIssueInfo {
@@ -226,6 +229,7 @@ export function buildConflictResolutionPrompt(
   issue: Issue,
   changeDir: string,
   conflictFiles: string[],
+  agentConfig?: AgentConfig,
 ): string {
   const instruction = loadFile(CONFLICT_RESOLUTION_PROMPT_PATH);
 
@@ -233,19 +237,22 @@ export function buildConflictResolutionPrompt(
     .map((f) => `- ${f}`)
     .join('\n');
 
-  const parts: string[] = [
+  const taskContent = [
+    `Change Directory: ${changeDir}`,
+    '',
     formatIssueInfo(issue),
     '',
-    `## Change Directory\n\n${changeDir}`,
-    '',
-    '## Conflict Files\n',
+    `Conflict Files:`,
     conflictFileList,
-    '',
-    '## Instructions\n',
-    instruction,
-  ];
+  ].join('\n');
 
-  return parts.join('\n');
+  return formatAgentPrompt({
+    role: 'Resolve merge conflicts',
+    projectContext: agentConfig?.context,
+    task: taskContent,
+    contract: 'Apply ONLY the conflict resolution. Do NOT modify unrelated files.',
+    instruction,
+  });
 }
 
 export function buildAutoFixPrompt(
@@ -253,78 +260,89 @@ export function buildAutoFixPrompt(
   changeDir: string,
   reportContent: string,
   reportFileName: string,
+  agentConfig?: AgentConfig,
 ): string {
-  const parts: string[] = [
+  const taskContent = [
+    `Change Directory: ${changeDir}`,
+    '',
     formatIssueInfo(issue),
     '',
-    `## Change Directory\n\n${changeDir}`,
-    '',
-    `## Task\n`,
     `The self-check report (${reportFileName}) produced a FAIL verdict.`,
     `Read the report below and apply ALL fix suggestions it describes.`,
     `Edit the relevant files in ${changeDir} to resolve every issue identified.`,
     '',
-    `## Report (${reportFileName})\n`,
+    `Report (${reportFileName}):`,
     reportContent,
-  ];
+  ].join('\n');
 
-  return parts.join('\n');
+  return formatAgentPrompt({
+    role: 'Apply auto-fixes from self-check report',
+    projectContext: agentConfig?.context,
+    task: taskContent,
+    contract: 'Apply ONLY the fixes described in the report. Do NOT modify review.md.',
+  });
 }
 
 export function buildExplorePrompt(
   issueInfo: ExploreIssueInfo,
   changeDir: string,
   existingProposal?: string | null,
+  agentConfig?: AgentConfig,
 ): string {
   const instruction = loadFile(EXPLORE_PROMPT_PATH);
 
-  const parts: string[] = [];
+  const issueTitle = issueInfo.number
+    ? `Issue #${issueInfo.number}: ${issueInfo.title}`
+    : `Issue: ${issueInfo.title}`;
 
-  if (issueInfo.number) {
-    parts.push(`## Issue #${issueInfo.number}: ${issueInfo.title}`);
-  } else {
-    parts.push(`## Issue: ${issueInfo.title}`);
-  }
+  const taskParts: string[] = [issueTitle];
 
   if (issueInfo.body) {
-    parts.push('', issueInfo.body);
+    taskParts.push('', issueInfo.body);
   }
 
-  parts.push('', `## Change Directory\n\n${changeDir}`);
+  taskParts.push('', `Change Directory: ${changeDir}`);
 
   if (existingProposal) {
-    parts.push(
+    taskParts.push(
       '',
-      '## Existing Proposal\n\nThe following proposal already exists. Update it based on your exploration:\n',
+      'The following proposal already exists. Update it based on your exploration:',
+      '',
       existingProposal,
     );
   }
 
-  parts.push('', '## Instructions\n', instruction);
-
-  return parts.join('\n');
+  return formatAgentPrompt({
+    role: 'Explore the issue and codebase to understand the problem',
+    projectContext: agentConfig?.context,
+    task: taskParts.join('\n'),
+    instruction,
+  });
 }
 
 export function buildReVerifyPrompt(
   issue: Issue,
   changeDir: string,
   reviewContent: string,
+  agentConfig?: AgentConfig,
 ): string {
   const instruction = loadFile(RE_VERIFY_PROMPT_PATH);
 
-  const parts: string[] = [
+  const taskContent = [
+    `Change Directory: ${changeDir}`,
+    '',
     formatIssueInfo(issue),
     '',
-    `## Change Directory\n\n${changeDir}`,
+    'Perform a full re-review of all code changes after auto-fix.',
     '',
-    '## Goal\n\nPerform a full re-review of all code changes after auto-fix.',
-    '',
-    '## Review Report\n',
+    'Review Report:',
     reviewContent,
-    '',
-    '## Instructions\n',
-    instruction,
-  ];
+  ].join('\n');
 
-  return parts.join('\n');
+  return formatAgentPrompt({
+    role: 'Re-verify code changes after auto-fix',
+    projectContext: agentConfig?.context,
+    task: taskContent,
+    instruction,
+  });
 }

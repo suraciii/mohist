@@ -87,7 +87,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/agents/artifact-prompt.ts",
       "dependsOn": ["T-001", "T-002"],
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
