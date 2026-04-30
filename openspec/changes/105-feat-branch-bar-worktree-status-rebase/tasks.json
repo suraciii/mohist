@@ -49,11 +49,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow the exact pattern of the existing GET /:number/diff endpoint (lines 1220-1294) for route handler structure. Hono uses Trie-based routing, so /:number/worktree-status can be placed alongside other /:number/* routes regardless of order.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        94154
+      ]
     },
     {
       "id": "T-003",
