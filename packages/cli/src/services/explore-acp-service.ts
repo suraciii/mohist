@@ -5,6 +5,7 @@ import { buildExplorePrompt } from '../agents/artifact-prompt';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueService } from './issue-service';
 import type { Issue } from '../types';
+import { loadAgentConfig } from '../workflow/workflow-loader';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'explore-acp' });
@@ -52,6 +53,8 @@ export class ExploreAcpService {
     const prompt = buildExplorePrompt(
       { title: issueTitle, number: issue.number },
       changeDir,
+      null,
+      loadAgentConfig(this.worktreePath),
     );
 
     const result = await runAcpSession({
@@ -82,6 +85,7 @@ export class ExploreAcpService {
       { title: issue.title, body: issue.body, number: issue.number },
       changeDir,
       existingProposal,
+      loadAgentConfig(this.worktreePath),
     );
 
     const result = await runAcpSession({

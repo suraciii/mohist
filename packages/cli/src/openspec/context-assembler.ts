@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { OpenSpecChange } from './detector';
 import type { SessionLearning } from '../tools/session-memory';
 import { formatAgentPrompt, type AgentPromptParts } from '../agents/agent-prompt-schema';
+import type { AgentConfig } from '../workflow/workflow-loader';
 
 export interface Task {
   id: string;
@@ -30,6 +31,7 @@ export interface BuildContextOptions {
   wipResumeContext?: string;
   totalTasks?: number;
   issueNumber?: number;
+  agentConfig?: AgentConfig;
 }
 
 export function readFileIfExists(filePath: string): string | null {
@@ -201,6 +203,8 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
 
   const parts: AgentPromptParts = {
     role,
+    projectContext: options.agentConfig?.context,
+    rules: options.agentConfig?.rules?.build,
     contextFiles: contextFiles.length > 0 ? contextFiles : undefined,
     spec: spec ?? undefined,
     task: taskContent,

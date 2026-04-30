@@ -55,3 +55,15 @@ Started: 2026-04-30T13:08:28.754Z
 - Typecheck passes
 - Learnings: All function signatures are backward-compatible (agentConfig is optional). Callers don't need changes until T-005 wires the config through. The <dependencies> and <output> sub-tags inside <task> are preserved for buildArtifactPrompt since they're task-specific structure.
 - Next steps: T-005 (wire agent config into call sites), T-006 (add workflow.yaml agent config)
+
+[2026-04-30T21:34:30Z] T-005: Wire agent config into prompt assembly call sites
+- Added agentConfig?: AgentConfig to BuildContextOptions in context-assembler.ts, wired to formatAgentPrompt's projectContext and rules.build
+- Added agentConfig?: AgentConfig to RalphExecutorContext in ralph-executor.ts, wired to both buildTaskContext calls (initial + retry)
+- Added getAgentConfig() method to WorkflowController (caches loadAgentConfig result)
+- WorkflowController passes agentConfig to: buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, buildReVerifyPrompt, and RalphExecutor
+- explore-acp-service.ts calls loadAgentConfig(worktreePath) and passes to buildExplorePrompt (both run() and runOnIssue())
+- conflict-resolution.ts calls loadAgentConfig(worktreePath) and passes to buildConflictResolutionPrompt
+- Agent config now flows through the full call chain: workflow.yaml → loadAgentConfig → all prompt builders → formatAgentPrompt
+- Typecheck passes, all 96 directly affected tests pass (context-assembler, artifact-prompt, workflow-loader-agent-config, ralph-executor)
+- Learnings: WorkflowController uses cached agentConfig; services that don't have a controller (explore-acp, conflict-resolution) call loadAgentConfig directly. No new tests needed since the wiring is covered by existing integration patterns.
+- Next steps: T-006 (add workflow.yaml agent config for mohist project)

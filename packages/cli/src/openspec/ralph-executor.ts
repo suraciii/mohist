@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
+import type { AgentConfig } from '../workflow/workflow-loader';
 import { runAcpSession as _runAcpSession } from '../agent-runtime/acp-session';
 import { WorktreeManager } from '../git/worktree-manager';
 import { load as loadConfig, getAgentTimeoutConfig } from '../config/config-loader';
@@ -130,6 +131,7 @@ export interface RalphExecutorContext {
   worktreeManager?: WorktreeManager;
   stage?: string;
   model?: string;
+  agentConfig?: AgentConfig;
 }
 
 export interface RalphLoopResult {
@@ -597,6 +599,7 @@ export async function runRalphLoop(
       task: nextTask,
       learnings,
       isRetry: false,
+      agentConfig: context.agentConfig,
     });
 
     let lastError: string | undefined;
@@ -620,6 +623,7 @@ export async function runRalphLoop(
             failureReason: lastError,
             isRetry: true,
             wipResumeContext,
+            agentConfig: context.agentConfig,
           }).fullPrompt
         : assembledContext.fullPrompt;
 
