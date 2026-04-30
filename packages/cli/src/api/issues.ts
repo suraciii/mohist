@@ -89,7 +89,7 @@ export function createIssueRoutes(
       if (archived === 'true') {
         issues = issueService.getByProject(projectId).filter(i => i.archivedAt);
       } else if (all !== 'true') {
-        issues = issues.filter(i => !i.archivedAt);
+        issues = issues.filter(issue => !issue.archivedAt);
       }
 
       if (priority) {
@@ -2680,6 +2680,11 @@ export function createIssueRoutes(
       const projectId = getCurrentProjectId();
       if (!projectId) {
         return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
       }
 
       const { cleanup } = await c.req.json().catch(() => ({ cleanup: true }));

@@ -63,6 +63,10 @@ export class IssueService {
     return this.issueRepo.findAll({ projectId });
   }
 
+  getArchived(projectId: string): Issue[] {
+    return this.issueRepo.findAll({ projectId, archivedOnly: true });
+  }
+
   getByStage(projectId: string, stage: Stage): Issue[] {
     return this.issueRepo.findByStage(projectId, stage);
   }

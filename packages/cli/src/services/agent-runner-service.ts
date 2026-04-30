@@ -37,6 +37,7 @@ export interface BlockedIssueInfo {
   projectId: string;
   blockedReason?: string;
   retryCount: number;
+  stage: string;
 }
 
 export interface AgentStatus {
@@ -535,6 +536,7 @@ export class AgentRunnerService {
       projectId: issue.projectId,
       blockedReason: issue.blockedReason,
       retryCount: issue.retryCount ?? 0,
+      stage: issue.stage,
     }));
   }
 
@@ -566,7 +568,7 @@ export class AgentRunnerService {
       activeAgents: agents,
       waitingQuestions: waiting,
       recoverableIssues: this.recoverableIssues,
-      blockedIssues: blockedIssues,
+      blockedIssues,
       queueDepth: 0,
       maxConcurrentAgents: this.maxConcurrentAgents,
     };
