@@ -77,11 +77,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "StageColumn already has isDone prop. KanbanBoard passes showArchiveButton and archivedCount.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        315541
+      ]
     },
     {
       "id": "T-004",
