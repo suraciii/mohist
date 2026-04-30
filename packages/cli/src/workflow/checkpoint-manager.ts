@@ -39,3 +39,5 @@ class CheckpointManagerImpl implements CheckpointManager {
     this.repo.deleteAll(issueNumber);
   }
 }
+
+export { CheckpointManagerImpl };
