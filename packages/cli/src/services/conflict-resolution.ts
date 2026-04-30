@@ -4,6 +4,7 @@ import type { IssueRepo } from '../db/issue-repo';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from './event-bus';
+import { loadAgentConfig } from '../workflow/workflow-loader';
 
 export interface ConflictResolutionDeps {
   issueRepo: IssueRepo;
@@ -39,7 +40,7 @@ export async function resolveConflictsViaAgent(
   };
 
   try {
-    const prompt = buildConflictResolutionPrompt(issue, worktreePath, conflictFiles);
+    const prompt = buildConflictResolutionPrompt(issue, worktreePath, conflictFiles, loadAgentConfig(worktreePath));
 
     const connection = await createAcpConnection(acpOptions);
     try {

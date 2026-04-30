@@ -108,7 +108,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
       "dependsOn": ["T-003", "T-004"],
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

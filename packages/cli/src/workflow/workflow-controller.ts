@@ -7,13 +7,14 @@ import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
-import { loadWorkflow } from './workflow-loader';
+import { loadWorkflow, loadAgentConfig } from './workflow-loader';
 import { getAgentTimeoutConfig, load as loadConfig } from '../config/config-loader';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
+import type { AgentConfig } from './workflow-loader';
 import { Log } from '../util/log';
 
 const execFileAsync = promisify(execFile);
@@ -69,6 +70,7 @@ export class WorkflowController {
   private worktreeManager?: any;
   private projectRepo?: any;
   private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
+  private _agentConfigCache?: AgentConfig;
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -85,6 +87,13 @@ export class WorkflowController {
 
   getCheckpointRepo(): PipelineCheckpointRepo | undefined {
     return this.checkpointRepo;
+  }
+
+  private getAgentConfig(): AgentConfig {
+    if (!this._agentConfigCache) {
+      this._agentConfigCache = loadAgentConfig(this.worktreePath);
+    }
+    return this._agentConfigCache;
   }
 
   async runPlanStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
@@ -182,7 +191,7 @@ export class WorkflowController {
           }
         }
 
-        const prompt = buildArtifactPrompt(round.type as ArtifactType, issue, changeDir);
+        const prompt = buildArtifactPrompt(round.type as ArtifactType, issue, changeDir, this.getAgentConfig());
         const result = await conn.prompt(prompt);
 
         if (!result.success) {
@@ -262,7 +271,7 @@ export class WorkflowController {
         }
       }
 
-      const selfReviewPrompt = buildSelfReviewPrompt(issue, changeDir);
+      const selfReviewPrompt = buildSelfReviewPrompt(issue, changeDir, this.getAgentConfig());
       const selfReviewResult = await conn.prompt(selfReviewPrompt);
 
       if (!selfReviewResult.success) {
@@ -632,6 +641,7 @@ export class WorkflowController {
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(total),
+      agentConfig: this.getAgentConfig(),
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
@@ -1116,7 +1126,7 @@ export class WorkflowController {
         }
       }
 
-      const reviewerPrompt = buildReviewerPrompt(issue, changeDir);
+      const reviewerPrompt = buildReviewerPrompt(issue, changeDir, this.getAgentConfig());
       const result = await conn.prompt(reviewerPrompt);
 
       if (!result.success) {
@@ -1145,7 +1155,7 @@ export class WorkflowController {
         }
       }
 
-      const selfCheckPrompt = buildReviewSelfCheckPrompt(issue, changeDir);
+      const selfCheckPrompt = buildReviewSelfCheckPrompt(issue, changeDir, this.getAgentConfig());
       const selfCheckResult = await conn.prompt(selfCheckPrompt);
 
       if (!selfCheckResult.success) {
@@ -1302,7 +1312,7 @@ export class WorkflowController {
       roundState.type = 'auto-fix';
       roundState.index = autoFixRoundIndex;
 
-      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport, 'review.md');
+      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport, 'review.md', this.getAgentConfig());
       const autoFixAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
       const autoFixResult = await this.runReviewRound(issue, autoFixAcpOptions, 'auto-fix', autoFixRoundIndex, autoFixPrompt);
 
@@ -1318,7 +1328,7 @@ export class WorkflowController {
       roundState.type = 're-verify';
       roundState.index = reVerifyRoundIndex;
 
-      const reVerifyPrompt = buildReVerifyPrompt(issue, changeDir, reviewReport);
+      const reVerifyPrompt = buildReVerifyPrompt(issue, changeDir, reviewReport, this.getAgentConfig());
       const reVerifyAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
       const reVerifyResult = await this.runReviewRound(issue, reVerifyAcpOptions, 're-verify', reVerifyRoundIndex, reVerifyPrompt);
 
