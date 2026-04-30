@@ -84,11 +84,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The async chain should use `.then()/.catch()` pattern (fire-and-forget). All errors in the chain must be caught — log and emit appropriate events. The `handleReviewRebase` function needs an optional `skipBuildVerify` param that, when true, skips the npm build exec but still emits the verifying progress event for consistency.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        356984
+      ]
     },
     {
       "id": "T-004",
