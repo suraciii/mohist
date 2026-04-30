@@ -147,11 +147,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Provider 列表复用 GET /api/providers 返回的 Provider.configured 字段排序。模型列表从 GET /api/opencode/models 获取。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        274229
+      ]
     },
     {
       "id": "T-006",
