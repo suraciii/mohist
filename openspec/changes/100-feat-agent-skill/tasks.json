@@ -175,11 +175,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/event-bus.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "No code dependency on T-004 (SchedulerService). This just adds the event type definitions. T-004 is what actually emits them. Parallel with T-001 and T-003.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        36921
+      ]
     },
     {
       "id": "T-007",
