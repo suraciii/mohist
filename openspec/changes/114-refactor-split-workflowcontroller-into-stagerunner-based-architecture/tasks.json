@@ -18,15 +18,16 @@
       "type": "WRITE",
       "output": "src/workflow/stage-context.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
         255363,
         171312,
-        240008
+        240008,
+        359089
       ]
     },
     {
