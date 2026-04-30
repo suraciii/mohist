@@ -4,6 +4,7 @@ import {
   ClientSideConnection,
   ndJsonStream,
   PROTOCOL_VERSION,
+  ModelInfo,
 } from '@agentclientprotocol/sdk';
 import { resolveOpencodeBinPath } from '../config/config-loader';
 import { Log } from '../util/log';
@@ -15,11 +16,6 @@ const DISCOVERY_TTL_MS = 5 * 60 * 1000;
 interface DiscoveryCache {
   models: string[];
   timestamp: number;
-}
-
-interface ModelInfo {
-  modelId: string;
-  name: string;
 }
 
 let cache: DiscoveryCache | null = null;
@@ -111,7 +107,7 @@ async function probeModels(): Promise<string[]> {
         const sessionResult = await connection.newSession({ cwd, mcpServers: [] });
         sessionId = sessionResult.sessionId;
 
-        const rawModels = (sessionResult as { models?: { availableModels?: ModelInfo[] } }).models?.availableModels ?? [];
+        const rawModels = (sessionResult.models as unknown as ModelInfo[]) ?? [];
         const models = rawModels.map((m) => m.modelId);
 
         clearTimeout(timeout);
