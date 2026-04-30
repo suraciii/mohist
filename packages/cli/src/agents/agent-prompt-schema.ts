@@ -40,6 +40,7 @@ export function formatAgentPrompt(parts: AgentPromptParts): string {
   if (parts.contextFiles && parts.contextFiles.length > 0) {
     sections.push('');
     sections.push('<context-files>');
+    sections.push('<!-- Read every file listed below before starting. Each provides essential context for your task. -->');
     for (const file of parts.contextFiles) {
       sections.push(`<file path="${file.path}">${file.desc}</file>`);
     }
