@@ -141,6 +141,36 @@ export function useUseProject() {
   })
 }
 
+export function useArchivedIssues(params?: { projectId?: string }) {
+  return useQuery({
+    queryKey: ['archived-issues', params],
+    queryFn: () => api.getArchivedIssues(params),
+    enabled: !!params?.projectId,
+  })
+}
+
+export function useArchiveIssue() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (number: number) => api.archiveIssue(number),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+    },
+  })
+}
+
+export function useUnarchiveIssue() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (number: number) => api.unarchiveIssue(number),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+    },
+  })
+}
+
 export function useExploreSession(id: string) {
   return useQuery({
     queryKey: ['explore', id],
