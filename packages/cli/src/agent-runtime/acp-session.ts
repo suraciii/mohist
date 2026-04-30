@@ -101,6 +101,7 @@ export async function runAcpSession(
     coderSessionRepo,
     issueNumber,
     opencodeBinPath,
+    model,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -349,6 +350,19 @@ export async function runAcpSession(
     sessionId = sessionResult.sessionId;
     log.info('ACP session created', { sessionId });
 
+    if (model) {
+      try {
+        await connection.setSessionConfigOption({
+          sessionId,
+          configId: 'model',
+          value: model,
+        });
+        log.info('ACP session model set', { sessionId, model });
+      } catch (err) {
+        log.warn('setSessionConfigOption for model failed, continuing with default', { sessionId, model, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     if (coderSessionRepo && issueId) {
       try {
         const coderSession = coderSessionRepo.insert({
@@ -468,6 +482,7 @@ export async function createAcpConnection(
     onSessionUpdate,
     opencodeBinPath,
     signal,
+    model,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -722,6 +737,19 @@ export async function createAcpConnection(
 
   sessionId = sessionResult.sessionId;
   log.info('ACP session created', { sessionId });
+
+  if (model) {
+    try {
+      await connection.setSessionConfigOption({
+        sessionId,
+        configId: 'model',
+        value: model,
+      });
+      log.info('ACP connection model set', { sessionId, model });
+    } catch (err) {
+      log.warn('setSessionConfigOption for model failed, continuing with default', { sessionId, model, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   if (coderSessionRepo && issueId) {
     try {
