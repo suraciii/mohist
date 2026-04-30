@@ -134,9 +134,15 @@
       ],
       "passes": false,
       "notes": "Depends on T-003 (AcpRoundRunner) and T-004 (types and Check interface). Can run after T-003 is done. parseVerdict and extractFixSuggestions are referenced by tests but don't exist in the current file — implement them here or in utils.",
-      "attempts": 0,
+      "attempts": 3,
       "order": 999999,
-      "error": null
+      "error": "Auto-skipped (no onAskUser): Timed out during newSession",
+      "durations": [
+        255094,
+        254658,
+        257185,
+        250395
+      ]
     },
     {
       "id": "T-006",
