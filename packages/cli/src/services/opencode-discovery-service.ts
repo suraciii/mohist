@@ -17,6 +17,11 @@ interface DiscoveryCache {
   timestamp: number;
 }
 
+interface ModelInfo {
+  modelId: string;
+  name: string;
+}
+
 let cache: DiscoveryCache | null = null;
 
 async function probeModels(): Promise<string[]> {
@@ -106,7 +111,8 @@ async function probeModels(): Promise<string[]> {
         const sessionResult = await connection.newSession({ cwd, mcpServers: [] });
         sessionId = sessionResult.sessionId;
 
-        const models = (sessionResult as { models?: { availableModels?: string[] } }).models?.availableModels ?? [];
+        const rawModels = (sessionResult as { models?: { availableModels?: ModelInfo[] } }).models?.availableModels ?? [];
+        const models = rawModels.map((m) => m.modelId);
 
         clearTimeout(timeout);
         await cleanup();
