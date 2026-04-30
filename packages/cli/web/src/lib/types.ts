@@ -387,3 +387,28 @@ export interface GeneralConfig {
   maxConcurrentAgents: number
   pollInterval: number
 }
+
+export interface AgentRuntimeConfig {
+  timeout: number
+  stageTimeout: number
+  taskTimeout: number
+  maxConcurrent: number
+  maxGracePeriods: number
+  pollInterval: number
+}
+
+export interface SystemInfo {
+  version: string
+  gitHash: string
+  server: {
+    host: string
+    port: number
+    status: 'running'
+  }
+  paths: {
+    db: string
+    config: string
+    opencode: string | null
+    logs: string
+  }
+}

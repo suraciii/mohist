@@ -262,4 +262,52 @@ export const api = {
   getOpencodeModels: () =>
     request<string[]>('/opencode/models'),
 
+  getModel: () =>
+    request<{ model: string | null }>('/config/model'),
+
+  setModel: (model: string | null) =>
+    request<{ model: string | null }>('/config/model', {
+      method: 'PUT',
+      body: JSON.stringify({ model }),
+    }),
+
+  getOpencodeModelConfig: () =>
+    request<{ model: string | null }>('/config/opencode-model'),
+
+  setOpencodeModel: (model: string | null) =>
+    request<{ model: string | null }>('/config/opencode-model', {
+      method: 'PUT',
+      body: JSON.stringify({ model }),
+    }),
+
+  getLogLevel: () =>
+    request<{ level: string }>('/config/log-level'),
+
+  setLogLevel: (level: string) =>
+    request<{ level: string }>('/config/log-level', {
+      method: 'PUT',
+      body: JSON.stringify({ level }),
+    }),
+
+  getAgentRuntime: () =>
+    request<import('./types').AgentRuntimeConfig>('/config/agent-runtime'),
+
+  updateAgentRuntime: (data: Partial<import('./types').AgentRuntimeConfig>) =>
+    request<import('./types').AgentRuntimeConfig>('/config/agent-runtime', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getStageModels: () =>
+    request<{ stageModels: Record<string, string> | null }>('/config/stage-models'),
+
+  setStageModels: (stageModels: Record<string, string> | null) =>
+    request<{ stageModels: Record<string, string> | null }>('/config/stage-models', {
+      method: 'PUT',
+      body: JSON.stringify({ stageModels }),
+    }),
+
+  getSystemInfo: () =>
+    request<import('./types').SystemInfo>('/system/info'),
+
 }
