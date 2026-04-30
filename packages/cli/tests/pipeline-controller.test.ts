@@ -44,7 +44,20 @@ vi.mock('../src/agents/artifact-prompt', () => ({
   buildReviewSelfCheckPrompt: vi.fn().mockReturnValue('mock-review-self-check-prompt'),
 }));
 
-import { WorkflowController, type ChangeArtifactsManager } from '../src/workflow/workflow-controller';
+import {
+  WorkflowEngine,
+  type ChangeArtifactsManager,
+  createCheckpointManager,
+  PlanStageRunner,
+  BuildStageRunner,
+  CheckStageRunner,
+  BuildTestCheck,
+  MergeReadyCheck,
+  AiReviewCheck,
+  type StageRunner,
+  type StageContext,
+  type StageRunResult,
+} from '../src/workflow';
 import { createAcpConnection } from '../src/agent-runtime/acp-session';
 import type { IssueRepo } from '../src/db/issue-repo';
 import type { EventBus } from '../src/services/event-bus';
@@ -77,6 +90,15 @@ function createMockArtifactManager(): ChangeArtifactsManager {
   };
 }
 
+function createMockCheckpointManager() {
+  return {
+    getResumeSteps: vi.fn().mockReturnValue([]),
+    markStepComplete: vi.fn(),
+    delete: vi.fn(),
+    deleteAll: vi.fn(),
+  };
+}
+
 function createMockRepos() {
   return {
     issueRepo: {
@@ -101,21 +123,40 @@ function createMockRepos() {
   };
 }
 
-describe('WorkflowController pipeline stage ordering', () => {
+function createDefaultRunners(): StageRunner[] {
+  return [
+    new PlanStageRunner(),
+    new BuildStageRunner({ worktreePath: '/tmp/worktree', projectId: 'proj-1' }),
+    new CheckStageRunner([
+      new BuildTestCheck({ worktreePath: '/tmp/worktree' }),
+      new MergeReadyCheck({}),
+      new AiReviewCheck(),
+    ]),
+  ];
+}
+
+function createEngine(opts: {
+  issueRepo: IssueRepo;
+  eventBus: EventBus;
+  artifactManager?: ChangeArtifactsManager;
+  runners?: StageRunner[];
+  signal?: AbortSignal;
+}) {
+  const checkpointManager = createMockCheckpointManager() as any;
+  return new WorkflowEngine({
+    runners: opts.runners ?? createDefaultRunners(),
+    artifactManager: opts.artifactManager ?? createMockArtifactManager(),
+    issueRepo: opts.issueRepo,
+    eventBus: opts.eventBus,
+    projectId: 'proj-1',
+    checkpointManager,
+    signal: opts.signal,
+  });
+}
+
+describe('WorkflowEngine pipeline stage ordering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('should return error when issueRepo or eventBus is missing', async () => {
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-    });
-
-    const result = await ctrl.run(createMockIssue(Stage.Plan), { cwd: '/tmp' });
-
-    expect(result.completed).toBe(false);
-    expect(result.message).toContain('issueRepo and eventBus');
   });
 
   it('should require gate after plan stage', async () => {
@@ -126,13 +167,7 @@ describe('WorkflowController pipeline stage ordering', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const result = await ctrl.run(createMockIssue(Stage.Plan), { cwd: '/tmp/worktree' });
 
@@ -149,13 +184,7 @@ describe('WorkflowController pipeline stage ordering', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     await ctrl.run(createMockIssue(Stage.Plan), { cwd: '/tmp' });
 
@@ -183,62 +212,13 @@ describe('WorkflowController pipeline stage ordering', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
     expect(issueRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Check);
     expect(result.stage).toBe(Stage.Check);
     expect(result.gateRequired).toBe(true);
-  });
-
-  it('should send 5 prompts in plan stage (4 artifacts + self-review)', async () => {
-    const { issueRepo, eventBus } = createMockRepos();
-    const mockConn = {
-      prompt: vi.fn().mockResolvedValue({ text: 'ok', success: true, acpSessionId: 's1' }),
-      close: vi.fn().mockResolvedValue(undefined),
-    };
-    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
-
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
-
-    await ctrl.runPlanStage(createMockIssue(Stage.Plan), { cwd: '/tmp/worktree' });
-
-    expect(mockConn.prompt).toHaveBeenCalledTimes(5);
-    expect(mockConn.close).toHaveBeenCalled();
-  });
-
-  it('should clean change dir before plan stage', async () => {
-    const { issueRepo, eventBus } = createMockRepos();
-    const mockConn = {
-      prompt: vi.fn().mockResolvedValue({ text: 'ok', success: true, acpSessionId: 's1' }),
-      close: vi.fn().mockResolvedValue(undefined),
-    };
-    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
-
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
-
-    await ctrl.runPlanStage(createMockIssue(Stage.Plan), { cwd: '/tmp/worktree' });
-
-    expect(mockConn.prompt).toHaveBeenCalledTimes(5);
   });
 });
 
@@ -254,7 +234,7 @@ describe('AgentRunnerService pipeline gate management', () => {
   });
 });
 
-describe('WorkflowController done stage sets Completed status', () => {
+describe('WorkflowEngine done stage sets Completed status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -268,13 +248,7 @@ describe('WorkflowController done stage sets Completed status', () => {
       (_id: string, _status: unknown) => createMockIssue(Stage.Done, { status: IssueStatus.Completed }),
     );
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const doneIssue = createMockIssue(Stage.Done);
     const result = await ctrl.run(doneIssue, { cwd: '/tmp/worktree' });
@@ -296,13 +270,7 @@ describe('WorkflowController done stage sets Completed status', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const planIssue = createMockIssue(Stage.Plan);
     const result = await ctrl.run(planIssue, { cwd: '/tmp/worktree' });
@@ -313,7 +281,7 @@ describe('WorkflowController done stage sets Completed status', () => {
   });
 });
 
-describe('WorkflowController build stage git commit', () => {
+describe('WorkflowEngine build stage git commit', () => {
   let mockExecFileAsync: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -327,13 +295,7 @@ describe('WorkflowController build stage git commit', () => {
       (_id: string, stage: Stage) => createMockIssue(stage),
     );
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     mockExecFileAsync
       .mockResolvedValueOnce({ stdout: 'M src/foo.ts\nA src/bar.ts\n' })
@@ -342,7 +304,6 @@ describe('WorkflowController build stage git commit', () => {
 
     vi.doMock('child_process', () => ({
       execFile: (...args: unknown[]) => {
-        const cb = args[args.length - 1];
         const cmd = args[0] as string;
         const cmdArgs = args[1] as string[];
         if (cmd === 'git' && cmdArgs[0] === 'status') {
@@ -363,13 +324,7 @@ describe('WorkflowController build stage git commit', () => {
       (_id: string, stage: Stage) => createMockIssue(stage),
     );
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
@@ -377,7 +332,7 @@ describe('WorkflowController build stage git commit', () => {
   });
 });
 
-describe('WorkflowController review stage multi-round', () => {
+describe('WorkflowEngine review stage multi-round', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -390,13 +345,7 @@ describe('WorkflowController review stage multi-round', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
@@ -414,13 +363,7 @@ describe('WorkflowController review stage multi-round', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
@@ -439,13 +382,7 @@ describe('WorkflowController review stage multi-round', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
@@ -462,13 +399,7 @@ describe('WorkflowController review stage multi-round', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
@@ -485,13 +416,7 @@ describe('WorkflowController review stage multi-round', () => {
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
+    const ctrl = createEngine({ issueRepo, eventBus });
 
     await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 

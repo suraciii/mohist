@@ -42,7 +42,7 @@ vi.mock('../src/agents/artifact-prompt', () => ({
 }));
 
 import * as fs from 'fs';
-import { WorkflowController, type ChangeArtifactsManager } from '../src/workflow/workflow-controller';
+import { WorkflowEngine, type ChangeArtifactsManager, createCheckpointManager, PlanStageRunner, BuildStageRunner, CheckStageRunner, BuildTestCheck, MergeReadyCheck, AiReviewCheck, type StageRunner } from '../src/workflow';
 import { createAcpConnection } from '../src/agent-runtime/acp-session';
 import { buildArtifactPrompt } from '../src/agents/artifact-prompt';
 

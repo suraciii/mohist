@@ -392,7 +392,10 @@
       "notes": "",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        600017
+      ]
     },
     {
       "id": "T-014",
