@@ -46,11 +46,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The MergeQueue callback adapter should map `entry.issueId → issueId`, `entry.projectId → projectId`, and forward `worktreePath`/`conflictFiles` directly.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        184587
+      ]
     },
     {
       "id": "T-003",
