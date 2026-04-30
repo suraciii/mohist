@@ -38,9 +38,9 @@ const ALL_EVENT_TYPES: EventName[] = [
   'rebase_progress',
   'rebase_completed',
   'rebase_conflict',
-  'skill_started',
-  'skill_completed',
-  'skill_failed',
+  'schedule_triggered',
+  'schedule_completed',
+  'schedule_failed',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {
