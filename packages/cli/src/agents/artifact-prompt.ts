@@ -81,24 +81,20 @@ function formatIssueInfo(issue: Issue): string {
   return info;
 }
 
-function buildDependencies(artifactType: ArtifactType, changeDir: string): string {
+function buildDependencyFiles(artifactType: ArtifactType, changeDir: string): Array<{ path: string; desc: string }> {
   const myIndex = DEPENDENCY_ORDER.indexOf(artifactType);
-  const lines: string[] = ['Read these files for context:'];
+  const files: Array<{ path: string; desc: string }> = [];
 
   for (let i = 0; i < myIndex; i++) {
     const depType = DEPENDENCY_ORDER[i];
     const depFile = ARTIFACT_OUTPUT_FILES[depType];
     const depPath = path.join(changeDir, depFile);
     if (fs.existsSync(depPath)) {
-      lines.push(`- ${depPath}`);
+      files.push({ path: depPath, desc: `Previous artifact: ${depType}` });
     }
   }
 
-  if (lines.length === 1) {
-    return 'No previous artifacts to reference.';
-  }
-
-  return lines.join('\n');
+  return files;
 }
 
 export function buildArtifactPrompt(
@@ -115,27 +111,22 @@ export function buildArtifactPrompt(
 
   const outputFile = ARTIFACT_OUTPUT_FILES[artifactType];
   const outputPath = path.join(changeDir, outputFile);
-  const dependencies = buildDependencies(artifactType, changeDir);
+  const depFiles = buildDependencyFiles(artifactType, changeDir);
 
   const taskContent = [
     `Create the ${artifactType} artifact for this change.`,
     ARTIFACT_DESCRIPTIONS[artifactType],
     '',
     formatIssueInfo(issue),
-    '',
-    `<dependencies>`,
-    dependencies,
-    `</dependencies>`,
-    '',
-    `<output>`,
-    `Write to: ${outputPath}`,
-    `</output>`,
   ].join('\n');
 
   return formatAgentPrompt({
     role: `Create the ${artifactType} artifact for this change`,
     projectContext: agentConfig?.context,
+    rules: agentConfig?.rules?.plan,
+    contextFiles: depFiles.length > 0 ? depFiles : undefined,
     task: taskContent,
+    contract: `Write the output file to: ${outputPath}`,
     template,
     instruction,
   });
@@ -184,6 +175,7 @@ export function buildSelfReviewPrompt(
   return formatAgentPrompt({
     role: 'Self-review all generated artifacts for this change',
     projectContext: agentConfig?.context,
+    rules: agentConfig?.rules?.plan,
     contextFiles: existingArtifacts.length > 0 ? existingArtifacts : undefined,
     task: taskContent,
     instruction,

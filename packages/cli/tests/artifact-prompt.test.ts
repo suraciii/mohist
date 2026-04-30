@@ -78,18 +78,11 @@ describe('buildArtifactPrompt', () => {
     expect(result).toContain(`Create the ${type} artifact`);
   });
 
-  it.each(artifactTypes)('should include <dependencies> section for %s artifact', (type) => {
+  it.each(artifactTypes)('should include <context-files> or <contract> for dependencies and output for %s artifact', (type) => {
     const result = buildArtifactPrompt(type, mockIssue, changeDir);
 
-    expect(result).toContain('<dependencies>');
-    expect(result).toContain('</dependencies>');
-  });
-
-  it.each(artifactTypes)('should include <output> section for %s artifact', (type) => {
-    const result = buildArtifactPrompt(type, mockIssue, changeDir);
-
-    expect(result).toContain('<output>');
-    expect(result).toContain('</output>');
+    expect(result).toContain(`<contract>`);
+    expect(result).toContain(`</contract>`);
     expect(result).toContain(changeDir);
   });
 
@@ -125,7 +118,7 @@ describe('buildArtifactPrompt', () => {
     }
   });
 
-  it('should list only existing dependencies', () => {
+  it('should list only existing dependencies as <context-files>', () => {
     const tmpDir = fs.mkdtempSync('/tmp/mohist-test-deps-');
     try {
       fs.writeFileSync(path.join(tmpDir, 'proposal.md'), '# Proposal');
@@ -133,6 +126,7 @@ describe('buildArtifactPrompt', () => {
 
       const result = buildArtifactPrompt('design', mockIssue, tmpDir);
 
+      expect(result).toContain('<context-files>');
       expect(result).toContain(path.join(tmpDir, 'proposal.md'));
       expect(result).toContain(path.join(tmpDir, 'specs'));
     } finally {
@@ -140,18 +134,18 @@ describe('buildArtifactPrompt', () => {
     }
   });
 
-  it('should show no dependencies for proposal (first artifact)', () => {
+  it('should not include <context-files> for proposal (first artifact)', () => {
     const result = buildArtifactPrompt('proposal', mockIssue, changeDir);
 
-    expect(result).toContain('No previous artifacts to reference');
+    expect(result).not.toContain('<context-files>');
   });
 
-  it('should not list missing dependencies', () => {
+  it('should not include <context-files> when no previous artifacts exist', () => {
     const tmpDir = fs.mkdtempSync('/tmp/mohist-test-nodeps-');
     try {
       const result = buildArtifactPrompt('design', mockIssue, tmpDir);
 
-      expect(result).toContain('No previous artifacts to reference');
+      expect(result).not.toContain('<context-files>');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
