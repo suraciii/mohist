@@ -187,7 +187,7 @@ export class AgentRunnerService {
   private recoverBuildStageIssue(issue: Issue): void {
     const project = this.projectRepo!.findById(issue.projectId);
     if (!project) {
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.blockIssue(issue.id, 'Project 已不存在');
       this.issueRepo!.clearApprovalState(issue.id);
       log.info('Recovered build-stage orphan — project not found', {
         issueNumber: issue.number,
@@ -198,7 +198,7 @@ export class AgentRunnerService {
 
     const worktreePath = this.worktreeManager!.getPath(project.name, issue.number);
     if (!worktreePath) {
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.blockIssue(issue.id, 'Worktree 已不存在');
       this.issueRepo!.clearApprovalState(issue.id);
       log.info('Recovered build-stage orphan — no worktree found', {
         issueNumber: issue.number,
@@ -209,7 +209,7 @@ export class AgentRunnerService {
 
     const changeDir = findChangeDir(worktreePath, issue.number);
     if (!changeDir) {
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.blockIssue(issue.id, '变更目录不存在');
       this.issueRepo!.clearApprovalState(issue.id);
       log.info('Recovered build-stage orphan — missing tasks.json', {
         issueNumber: issue.number,
@@ -220,7 +220,7 @@ export class AgentRunnerService {
 
     const tasksPath = path.join(changeDir, 'tasks.json');
     if (!fs.existsSync(tasksPath)) {
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.blockIssue(issue.id, 'tasks.json 不存在');
       this.issueRepo!.clearApprovalState(issue.id);
       log.info('Recovered build-stage orphan — missing tasks.json', {
         issueNumber: issue.number,
@@ -234,7 +234,7 @@ export class AgentRunnerService {
       const raw = fs.readFileSync(tasksPath, 'utf-8');
       tasksFile = JSON.parse(raw);
     } catch {
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.blockIssue(issue.id, 'tasks.json 格式损坏');
       this.issueRepo!.clearApprovalState(issue.id);
       log.info('Recovered build-stage orphan — malformed tasks.json', {
         issueNumber: issue.number,
@@ -244,7 +244,7 @@ export class AgentRunnerService {
     }
 
     if (!tasksFile.tasks || !Array.isArray(tasksFile.tasks)) {
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.blockIssue(issue.id, 'tasks.json 缺少 tasks 数组');
       this.issueRepo!.clearApprovalState(issue.id);
       log.info('Recovered build-stage orphan — malformed tasks.json', {
         issueNumber: issue.number,
@@ -265,7 +265,7 @@ export class AgentRunnerService {
       const passed = tasksFile.tasks.filter(t => t.passes === true).length;
       const pending = tasksFile.tasks.filter(t => t.passes !== true);
       const pendingIds = pending.map(t => t.id).join(', ');
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Blocked);
+      this.issueRepo!.blockIssue(issue.id, `${passed}/${tasksFile.tasks.length} 任务完成，${pendingIds} 待完成`);
       this.issueRepo!.clearApprovalState(issue.id);
       log.info('Recovered build-stage orphan — partial progress', {
         issueNumber: issue.number,
@@ -319,7 +319,7 @@ export class AgentRunnerService {
 
     if (this.issueRepo) {
       try {
-        this.issueRepo.updateStatus(issueId, IssueStatus.Blocked);
+        this.issueRepo.blockIssue(issueId, '用户手动停止 agent');
         this.issueRepo.clearApprovalState(issueId);
       } catch (err) {
         log.error('Failed to update issue status after stop', {
