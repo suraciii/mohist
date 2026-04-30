@@ -1,6 +1,6 @@
 import { useState, useMemo, Fragment, useEffect, useRef, useCallback } from 'react'
 import { Popover, Transition } from '@headlessui/react'
-import { useProviders, useDeleteProvider, useModel, useSetModel, useOpencodeModel, useUpdateOpencodeModel, useStageModels, useSetStageModels } from '../hooks/useQueries'
+import { useProviders, useDeleteProvider, useModel, useSetModel, useOpencodeModel, useUpdateOpencodeModel, useStageModels, useSetStageModels, useOpencodeModels } from '../hooks/useQueries'
 import { useModels } from '../hooks/useModels'
 import type { Provider } from '../lib/provider-api'
 import type { Model } from '../lib/types'
@@ -332,6 +332,7 @@ export function AiSettingsSection() {
   const { data: modelProviders } = useModels()
   const { data: modelData } = useModel()
   const setModel = useSetModel()
+  const { data: opencodeModelsList } = useOpencodeModels()
   const { data: opencodeModelData } = useOpencodeModel()
   const setOpencodeModel = useUpdateOpencodeModel()
   const { data: stageModelsData } = useStageModels()
@@ -377,6 +378,13 @@ export function AiSettingsSection() {
     }
     return models.sort((a, b) => a.id.localeCompare(b.id))
   }, [modelProviders])
+
+  const coderModels = useMemo(() => {
+    if (!opencodeModelsList) return []
+    return opencodeModelsList
+      .map((id): Model => ({ id, name: id.split('/').pop() || id, badges: [], contextWindow: 0 }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+  }, [opencodeModelsList])
 
   const handleConfirmDisconnect = () => {
     if (confirmRemove) {
@@ -546,7 +554,7 @@ export function AiSettingsSection() {
               <ModelSelect
                 value={opencodeModelData?.model ?? null}
                 placeholder="Same as Mohist Model"
-                models={availableModels}
+                models={coderModels}
                 onChange={handleSetOpencodeModel}
                 onClear={handleClearOpencodeModel}
                 allowClear
