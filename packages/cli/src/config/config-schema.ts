@@ -23,10 +23,11 @@ export const ConfigInfoSchema = z.object({
   }).strip().optional(),
   agent: z.object({
     timeout: z.number().optional(),
-    maxConcurrent: z.number().optional(),
-    taskTimeout: z.number().optional(),
     stageTimeout: z.number().optional(),
+    taskTimeout: z.number().optional(),
+    maxConcurrent: z.number().optional(),
     maxGracePeriods: z.number().optional(),
+    pollInterval: z.number().optional(),
   }).superRefine((agent, ctx) => {
     if (agent.taskTimeout !== undefined) {
       if (agent.taskTimeout < 60) {
