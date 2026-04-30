@@ -1,7 +1,11 @@
 import { Log } from '../util/log';
-import { ScheduleRepo, type SkillSchedule } from '../db/schedule-repo';
+import { ScheduleRepo, type SkillSchedule, type CreateScheduleData } from '../db/schedule-repo';
 import type { EventBus } from './event-bus';
-import { computeNextRun, parseDuration, type ScheduleConfig } from './schedule-parser';
+import { computeNextRun, parseDuration, parseScheduleConfig, type ScheduleConfig } from './schedule-parser';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import * as yaml from 'yaml';
 
 const log = Log.create({ service: 'scheduler-service' });
 
@@ -77,6 +81,130 @@ export class SchedulerService {
       this.armTimer(schedule);
     } else {
       this.clearTimer(schedule?.id ?? skillId);
+    }
+  }
+
+  enableSchedule(skillId: string): SkillSchedule | null {
+    const schedule = this.scheduleRepo.getBySkillId(skillId);
+    if (!schedule) return null;
+
+    this.scheduleRepo.setEnabled(schedule.id, true);
+
+    const config = this.reconstructConfig(schedule);
+    const nextRunAt = computeNextRun(config);
+    const lastRunAt = schedule.lastRunAt ?? new Date().toISOString();
+    this.scheduleRepo.updateNextRun(schedule.id, nextRunAt, lastRunAt);
+
+    const updated = this.scheduleRepo.getBySkillId(skillId);
+    if (updated) {
+      this.armTimer(updated);
+    }
+    return updated;
+  }
+
+  disableSchedule(skillId: string): SkillSchedule | null {
+    const schedule = this.scheduleRepo.getBySkillId(skillId);
+    if (!schedule) return null;
+
+    this.clearTimer(schedule.id);
+    this.scheduleRepo.setEnabled(schedule.id, false);
+    return this.scheduleRepo.getBySkillId(skillId);
+  }
+
+  refreshSchedules(projectPath?: string): { created: number; updated: number; removed: number } {
+    const scanDirs = this.getSkillScanDirs(projectPath);
+    const discovered = new Map<string, { every?: string; cron?: string; at?: string; anchor?: string }>();
+
+    for (const dir of scanDirs) {
+      if (!fs.existsSync(dir)) continue;
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillFile = path.join(dir, entry.name, 'SKILL.md');
+        if (!fs.existsSync(skillFile)) continue;
+        const parsed = this.parseScheduleFromSkillFile(skillFile);
+        if (parsed) {
+          discovered.set(entry.name, parsed);
+        }
+      }
+    }
+
+    const existing = this.scheduleRepo.getAll();
+    const existingBySkillId = new Map(existing.map(s => [s.skillId, s]));
+
+    let created = 0;
+    let updated = 0;
+    let removed = 0;
+
+    for (const [skillId, rawSchedule] of discovered) {
+      const config = parseScheduleConfig(rawSchedule);
+      if (!config) continue;
+
+      const nextRunAt = computeNextRun(config);
+      const existingSchedule = existingBySkillId.get(skillId);
+
+      const scheduleValue = config.type === 'every'
+        ? rawSchedule.every!
+        : config.type === 'cron'
+          ? config.expression
+          : config.timestamp;
+
+      const data: CreateScheduleData = {
+        skillId,
+        scheduleType: config.type,
+        scheduleValue,
+        anchor: config.type === 'every' && 'anchor' in config ? (config as ScheduleConfig & { anchor: string }).anchor : undefined,
+        nextRunAt,
+      };
+
+      if (!existingSchedule) {
+        this.scheduleRepo.upsert(data);
+        created++;
+      } else {
+        const changed = existingSchedule.scheduleType !== data.scheduleType
+          || existingSchedule.scheduleValue !== data.scheduleValue
+          || existingSchedule.anchor !== (data.anchor ?? null);
+        if (changed) {
+          this.scheduleRepo.upsert(data);
+          updated++;
+        }
+      }
+
+      this.refreshSchedule(skillId);
+      existingBySkillId.delete(skillId);
+    }
+
+    for (const [skillId, schedule] of existingBySkillId) {
+      this.clearTimer(schedule.id);
+      this.scheduleRepo.deleteBySkillId(skillId);
+      removed++;
+    }
+
+    log.info('Schedules refreshed', { created, updated, removed, total: discovered.size });
+    return { created, updated, removed };
+  }
+
+  private getSkillScanDirs(projectPath?: string): string[] {
+    const dirs: string[] = [];
+    if (projectPath) {
+      dirs.push(path.join(projectPath, '.opencode', 'skills'));
+    }
+    dirs.push(path.join(os.homedir(), '.config', 'opencode', 'skills'));
+    return dirs;
+  }
+
+  private parseScheduleFromSkillFile(filePath: string): { every?: string; cron?: string; at?: string; anchor?: string } | null {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const frontmatterMatch = /^---\s*\n([\s\S]*?)\n---/.exec(content);
+      if (!frontmatterMatch) return null;
+      const parsed = yaml.parse(frontmatterMatch[1]);
+      if (!parsed || typeof parsed !== 'object') return null;
+      const schedule = (parsed as any).mohist?.schedule ?? (parsed as any).schedule;
+      if (!schedule || typeof schedule !== 'object') return null;
+      return schedule as { every?: string; cron?: string; at?: string; anchor?: string };
+    } catch {
+      return null;
     }
   }
 
