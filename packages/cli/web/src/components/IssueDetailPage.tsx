@@ -3,12 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import type { DiffFile, CommitEntry } from '../lib/types'
-import { api, ApiError } from '../lib/api'
+import { api } from '../lib/api'
 import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 import { EditIssueDialog } from './EditIssueDialog'
 import { NotFoundPage } from './NotFoundPage'
 import { IssueModelSelector } from './IssueModelSelector'
+import { BranchBar } from './BranchBar'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
@@ -223,37 +224,6 @@ export function IssueDetailPage() {
 
   const sendMessageMutation = useSendMessage(issueNumber)
 
-  const [rebaseResult, setRebaseResult] = useState<{
-    type: 'success' | 'info' | 'error'
-    message: string
-    conflicts?: string[]
-  } | null>(null)
-
-  const rebaseMutation = useMutation({
-    mutationFn: () => api.rebaseIssue(issueNumber),
-    onSuccess: (data) => {
-      if (data.conflicts && data.conflicts.length > 0) {
-        setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: data.conflicts })
-      } else if (data.rebased) {
-        setRebaseResult({ type: 'success', message: 'Rebase successful' })
-      } else {
-        setRebaseResult({ type: 'info', message: 'Already up to date' })
-      }
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-    },
-    onError: (error: Error) => {
-      if (error instanceof ApiError && error.data && typeof error.data === 'object') {
-        const d = error.data as { conflicts?: string[] }
-        if (d.conflicts && d.conflicts.length > 0) {
-          setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: d.conflicts })
-          return
-        }
-      }
-      setRebaseResult({ type: 'error', message: error.message })
-    },
-  })
-
   const { data: exploreSessions } = useExploreSessions(issue?.projectId ?? '')
   const createExploreMutation = useCreateExploreSession()
   const [exploreError, setExploreError] = useState<string | null>(null)
@@ -410,6 +380,7 @@ export function IssueDetailPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
+              <BranchBar issueNumber={issueNumber} stage={issue.stage} isAgentRunning={isAgentRunningOnThis} />
               {issue.body && (
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
@@ -643,28 +614,6 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {issue.stage === Stage.Build && issue.status !== IssueStatus.Closed && (
-                    <div>
-                      <button
-                        onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
-                        disabled={isAgentRunningOnThis || rebaseMutation.isPending}
-                        title={isAgentRunningOnThis ? 'Cannot rebase while agent is running' : undefined}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
-                      >
-                        {rebaseMutation.isPending && (
-                          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                        )}
-                        {rebaseMutation.isPending ? 'Rebasing...' : 'Rebase onto master'}
-                      </button>
-                      {isAgentRunningOnThis && (
-                        <p className="mt-1 text-xs text-gray-400">Cannot rebase while agent is running</p>
-                      )}
-                    </div>
-                  )}
-
                   {isAgentRunningOnThis && (
                     <div ref={forceStopPanelRef} className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
                       <div className="flex items-center gap-2">
@@ -747,23 +696,6 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {rebaseResult && issue.stage !== Stage.Plan && issue.stage !== Stage.Review && (
-                    <div className={`rounded-md px-3 py-2 text-xs ${
-                      rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
-                      rebaseResult.type === 'info' ? 'bg-blue-50 text-blue-700' :
-                      'bg-red-50 text-red-600'
-                    }`}>
-                      {rebaseResult.message}
-                      {rebaseResult.conflicts && rebaseResult.conflicts.length > 0 && (
-                        <ul className="mt-1 ml-3 list-disc">
-                          {rebaseResult.conflicts.map((f) => (
-                            <li key={f} className="font-mono text-xs">{f}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  )}
-
                   {exploreError && (
                     <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
                       {exploreError}
@@ -833,39 +765,6 @@ export function IssueDetailPage() {
                   {approveMutation.error && (
                     <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
                       {approveMutation.error.message}
-                    </div>
-                  )}
-                  {issue.stage === Stage.Plan && (
-                    <div className="mt-3 pt-3 border-t border-amber-200">
-                      <button
-                        onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
-                        disabled={rebaseMutation.isPending}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
-                      >
-                        {rebaseMutation.isPending && (
-                          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                        )}
-                        {rebaseMutation.isPending ? 'Rebasing...' : 'Rebase onto master'}
-                      </button>
-                      {rebaseResult && (
-                        <div className={`mt-2 rounded-md px-3 py-2 text-xs ${
-                          rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
-                          rebaseResult.type === 'info' ? 'bg-blue-50 text-blue-700' :
-                          'bg-red-50 text-red-600'
-                        }`}>
-                          {rebaseResult.message}
-                          {rebaseResult.conflicts && rebaseResult.conflicts.length > 0 && (
-                            <ul className="mt-1 ml-3 list-disc">
-                              {rebaseResult.conflicts.map((f) => (
-                                <li key={f} className="font-mono text-xs">{f}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
