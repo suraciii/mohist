@@ -4,7 +4,7 @@ import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowController, type PipelineResult } from '../workflow/workflow-controller';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
-import { IssueStatus, type Issue } from '../types';
+import { IssueStatus, MergeState, type Issue } from '../types';
 import { EventBus } from './event-bus';
 import { Stage } from '../types';
 import { load } from '../config/config-loader';
@@ -372,7 +372,7 @@ export class AgentRunnerService {
 
   getBlockedIssues(): Array<{ issueNumber: number; blockedReason: string | null; retryCount: number }> {
     if (!this.issueRepo) return [];
-    const blocked = this.issueRepo.findByMergeStates([IssueStatus.Blocked]);
+    const blocked = this.issueRepo.findByMergeStates([MergeState.Blocked]);
     return blocked.map(issue => ({
       issueNumber: issue.number,
       blockedReason: issue.blockedReason ?? null,
