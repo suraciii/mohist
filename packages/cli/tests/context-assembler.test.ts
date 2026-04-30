@@ -5,9 +5,8 @@ import * as os from 'os';
 import {
   buildTaskContext,
   loadLearningsFromDir,
-  formatLearningsForPrompt,
-  formatTaskForPrompt,
-  formatRetryContext,
+  listLearningFiles,
+  formatTaskBlock,
   type Task,
 } from '../src/openspec/context-assembler';
 import type { OpenSpecChange } from '../src/openspec/detector';
@@ -63,13 +62,13 @@ describe('context-assembler', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  describe('formatTaskForPrompt', () => {
+  describe('formatTaskBlock', () => {
     it('should format task with all fields', () => {
-      const result = formatTaskForPrompt(sampleTask);
+      const result = formatTaskBlock(sampleTask);
 
-      expect(result).toContain('[Task T-003]');
+      expect(result).toContain('ID: T-003');
       expect(result).toContain('Title: Implement login API');
-      expect(result).toContain('Description: Create a login endpoint that returns JWT');
+      expect(result).toContain('Create a login endpoint that returns JWT');
       expect(result).toContain('POST /api/login returns JWT');
       expect(result).toContain('Validates email format');
       expect(result).toContain('Returns 401 for invalid credentials');
@@ -90,7 +89,7 @@ describe('context-assembler', () => {
         attempts: 0,
       };
 
-      const result = formatTaskForPrompt(taskWithFields);
+      const result = formatTaskBlock(taskWithFields);
 
       expect(result).toContain('Mode: AFK');
       expect(result).toContain('Type: MIGRATE');
@@ -108,7 +107,7 @@ describe('context-assembler', () => {
         attempts: 0,
       };
 
-      const result = formatTaskForPrompt(minimalTask);
+      const result = formatTaskBlock(minimalTask);
 
       expect(result).not.toContain('Mode:');
       expect(result).not.toContain('Type:');
@@ -126,70 +125,12 @@ describe('context-assembler', () => {
         attempts: 0,
       };
 
-      const result = formatTaskForPrompt(minimalTask);
+      const result = formatTaskBlock(minimalTask);
 
-      expect(result).toContain('[Task T-001]');
+      expect(result).toContain('ID: T-001');
       expect(result).toContain('Title: Simple task');
-      expect(result).toContain('Description: A simple task description');
+      expect(result).toContain('A simple task description');
       expect(result).not.toContain('Acceptance Criteria');
-    });
-  });
-
-  describe('formatLearningsForPrompt', () => {
-    it('should return empty string for empty learnings', () => {
-      const result = formatLearningsForPrompt([]);
-      expect(result).toBe('');
-    });
-
-    it('should format successful learnings', () => {
-      const learnings: SessionLearning[] = [
-        {
-          task_id: 'T-001',
-          timestamp: '2024-01-15T10:30:00Z',
-          insights: ['Project uses single quotes'],
-          adjustments: [],
-          success: true,
-          execution_summary: 'Implemented login UI',
-        },
-      ];
-
-      const result = formatLearningsForPrompt(learnings);
-
-      expect(result).toContain('[Previous Task Learnings]');
-      expect(result).toContain('From T-001:');
-      expect(result).toContain('"Implemented login UI"');
-      expect(result).toContain('Insights: Project uses single quotes');
-    });
-
-    it('should format failed learnings with failure reason', () => {
-      const learnings: SessionLearning[] = [
-        {
-          task_id: 'T-002',
-          timestamp: '2024-01-15T11:30:00Z',
-          insights: [],
-          adjustments: ['Add backend validation'],
-          success: false,
-          execution_summary: 'Tried to implement validation',
-          failure_reason: 'Only frontend validation implemented',
-        },
-      ];
-
-      const result = formatLearningsForPrompt(learnings);
-
-      expect(result).toContain('From T-002:');
-      expect(result).toContain('Failed: "Only frontend validation implemented"');
-      expect(result).toContain('Adjustments: Add backend validation');
-    });
-  });
-
-  describe('formatRetryContext', () => {
-    it('should format retry context with failure reason', () => {
-      const result = formatRetryContext('Missing backend validation', sampleTask);
-
-      expect(result).toContain('[Previous Attempt Failed]');
-      expect(result).toContain('Failure Reason: Missing backend validation');
-      expect(result).toContain('[Task]');
-      expect(result).toContain('T-003');
     });
   });
 
@@ -272,37 +213,117 @@ describe('context-assembler', () => {
     });
   });
 
+  describe('listLearningFiles', () => {
+    it('should return empty array when directory does not exist', () => {
+      const result = listLearningFiles(path.join(tempDir, 'nonexistent'));
+      expect(result).toEqual([]);
+    });
+
+    it('should list learning files sorted by name', () => {
+      fs.writeFileSync(
+        path.join(changeDir, 'session-memories', 'T-002.json'),
+        JSON.stringify({ task_id: 'T-002', timestamp: '', insights: [], adjustments: [], success: true, execution_summary: '' })
+      );
+      fs.writeFileSync(
+        path.join(changeDir, 'session-memories', 'T-001.json'),
+        JSON.stringify({ task_id: 'T-001', timestamp: '', insights: [], adjustments: [], success: true, execution_summary: '' })
+      );
+
+      const result = listLearningFiles(path.join(changeDir, 'session-memories'));
+
+      expect(result).toHaveLength(2);
+      expect(result[0].path).toContain('T-001.json');
+      expect(result[1].path).toContain('T-002.json');
+      expect(result[0].desc).toContain('T-001');
+    });
+  });
+
   describe('buildTaskContext', () => {
-    it('should assemble complete context with all components', () => {
-      const learnings: SessionLearning[] = [
-        {
-          task_id: 'T-001',
-          timestamp: '2024-01-15T10:00:00Z',
-          insights: ['Project uses single quotes'],
-          adjustments: [],
-          success: true,
-          execution_summary: 'Completed first task',
-        },
-      ];
+    it('should produce XML-structured prompt with context-files for proposal and design', () => {
+      const result = buildTaskContext({
+        change,
+        task: sampleTask,
+        learnings: [],
+        totalTasks: 5,
+        issueNumber: 42,
+      });
+
+      expect(result.fullPrompt).toContain('<mohist-task>');
+      expect(result.fullPrompt).toContain('</mohist-task>');
+      expect(result.fullPrompt).toContain('<role>');
+      expect(result.fullPrompt).toContain('task T-003 of 5');
+      expect(result.fullPrompt).toContain('issue #42');
+      expect(result.fullPrompt).toContain('<context-files>');
+      expect(result.fullPrompt).toContain(change.proposalPath);
+      expect(result.fullPrompt).toContain(change.designPath);
+      expect(result.fullPrompt).not.toContain(sampleProposal);
+      expect(result.fullPrompt).not.toContain(sampleDesign);
+    });
+
+    it('should inline spec within <spec> tags', () => {
+      const result = buildTaskContext({
+        change,
+        task: sampleTask,
+        learnings: [],
+      });
+
+      expect(result.fullPrompt).toContain('<spec>');
+      expect(result.fullPrompt).toContain(sampleSpec);
+      expect(result.fullPrompt).toContain('</spec>');
+    });
+
+    it('should include <contract> with commit as first item', () => {
+      const result = buildTaskContext({
+        change,
+        task: sampleTask,
+        learnings: [],
+      });
+
+      expect(result.fullPrompt).toContain('<contract>');
+      expect(result.fullPrompt).toContain('git add -A');
+      expect(result.fullPrompt).toContain('git commit -m "T-003:');
+      expect(result.fullPrompt).toContain('</contract>');
+    });
+
+    it('should include <role> with task position info', () => {
+      const result = buildTaskContext({
+        change,
+        task: sampleTask,
+        learnings: [],
+        totalTasks: 8,
+        issueNumber: 99,
+      });
+
+      expect(result.fullPrompt).toContain('<role>');
+      expect(result.fullPrompt).toContain('task T-003 of 8 for issue #99');
+      expect(result.fullPrompt).toContain('</role>');
+    });
+
+    it('should include learning files as context-files entries', () => {
+      const learning: SessionLearning = {
+        task_id: 'T-001',
+        timestamp: '2024-01-15T10:00:00Z',
+        insights: ['Project uses single quotes'],
+        adjustments: [],
+        success: true,
+        execution_summary: 'Completed first task',
+      };
+      fs.writeFileSync(
+        path.join(changeDir, 'session-memories', 'T-001.json'),
+        JSON.stringify(learning)
+      );
 
       const result = buildTaskContext({
         change,
         task: sampleTask,
-        learnings,
+        learnings: [learning],
       });
 
-      expect(result.proposal).toBe(sampleProposal);
-      expect(result.design).toBe(sampleDesign);
-      expect(result.spec).toBe(sampleSpec);
-      expect(result.learnings).toEqual(learnings);
-      expect(result.fullPrompt).toContain('[Proposal]');
-      expect(result.fullPrompt).toContain('[Design]');
-      expect(result.fullPrompt).toContain('[Current Requirement: specs/auth/spec.md]');
-      expect(result.fullPrompt).toContain('[Previous Task Learnings]');
-      expect(result.fullPrompt).toContain('From T-001:');
+      expect(result.fullPrompt).toContain('session-memories/T-001.json');
+      expect(result.fullPrompt).not.toContain('Project uses single quotes');
     });
 
-    it('should assemble context with retry failure context', () => {
+    it('should inline retry failure reason within <task>', () => {
       const result = buildTaskContext({
         change,
         task: sampleTask,
@@ -311,9 +332,26 @@ describe('context-assembler', () => {
         isRetry: true,
       });
 
+      expect(result.fullPrompt).toContain('<task>');
       expect(result.fullPrompt).toContain('[Previous Attempt Failed]');
       expect(result.fullPrompt).toContain('Failure Reason: Missing validation');
-      expect(result.fullPrompt).toContain('[Task]');
+      expect(result.fullPrompt).toContain('</task>');
+    });
+
+    it('should inline WIP resume context within <task>', () => {
+      const wipContext = 'Modified files:\n- src/index.ts\nDiff summary:\n src/index.ts | 10 +++++-----';
+      const result = buildTaskContext({
+        change,
+        task: sampleTask,
+        learnings: [],
+        wipResumeContext: wipContext,
+      });
+
+      expect(result.fullPrompt).toContain('<task>');
+      expect(result.fullPrompt).toContain('[WIP Resume]');
+      expect(result.fullPrompt).toContain('Modified files:');
+      expect(result.fullPrompt).toContain('Diff summary:');
+      expect(result.fullPrompt).toContain('</task>');
     });
 
     it('should handle missing optional files gracefully', () => {
@@ -328,8 +366,7 @@ describe('context-assembler', () => {
 
       expect(result.proposal).toBeNull();
       expect(result.design).toBeNull();
-      expect(result.fullPrompt).not.toContain('[Proposal]');
-      expect(result.fullPrompt).not.toContain('[Design]');
+      expect(result.fullPrompt).toContain('<mohist-task>');
     });
 
     it('should handle missing spec file', () => {
@@ -349,10 +386,10 @@ describe('context-assembler', () => {
       });
 
       expect(result.spec).toBeNull();
-      expect(result.fullPrompt).not.toContain('[Current Requirement]');
+      expect(result.fullPrompt).not.toContain('<spec>');
     });
 
-    it('should work with task that has spec path with subdirectories', () => {
+    it('should handle task with nested spec path', () => {
       fs.mkdirSync(path.join(changeDir, 'specs', 'session-memory'), { recursive: true });
       fs.writeFileSync(
         path.join(changeDir, 'specs', 'session-memory', 'spec.md'),
@@ -376,7 +413,7 @@ describe('context-assembler', () => {
       });
 
       expect(result.spec).toContain('Session Memory Spec');
-      expect(result.fullPrompt).toContain('session-memory/spec.md');
+      expect(result.fullPrompt).toContain('<spec>');
     });
   });
 });

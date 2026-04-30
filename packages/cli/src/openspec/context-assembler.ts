@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenSpecChange } from './detector';
 import type { SessionLearning } from '../tools/session-memory';
+import { formatAgentPrompt, type AgentPromptParts } from '../agents/agent-prompt-schema';
 
 export interface Task {
   id: string;
@@ -27,6 +28,8 @@ export interface BuildContextOptions {
   failureReason?: string;
   isRetry?: boolean;
   wipResumeContext?: string;
+  totalTasks?: number;
+  issueNumber?: number;
 }
 
 export function readFileIfExists(filePath: string): string | null {
@@ -60,7 +63,6 @@ export function loadLearningsFromDir(memoriesPath: string): SessionLearning[] {
       const learning = JSON.parse(content) as SessionLearning;
       learnings.push(learning);
     } catch {
-      // Skip invalid files
     }
   }
 
@@ -73,35 +75,27 @@ export function loadLearningsFromDir(memoriesPath: string): SessionLearning[] {
   return learnings;
 }
 
-export function formatLearningsForPrompt(learnings: SessionLearning[]): string {
-  if (learnings.length === 0) {
-    return '';
+export function listLearningFiles(memoriesPath: string): Array<{ path: string; desc: string }> {
+  if (!fs.existsSync(memoriesPath)) {
+    return [];
   }
 
-  const lines: string[] = [];
-  lines.push('[Previous Task Learnings]');
-
-  for (const learning of learnings) {
-    const prefix = `From ${learning.task_id}:`;
-    if (!learning.success && learning.failure_reason) {
-      lines.push(`${prefix} Failed: "${learning.failure_reason}"`);
-      if (learning.adjustments.length > 0) {
-        lines.push(`  Adjustments: ${learning.adjustments.join(', ')}`);
-      }
-    } else {
-      lines.push(`${prefix} "${learning.execution_summary}"`);
-      if (learning.insights.length > 0) {
-        lines.push(`  Insights: ${learning.insights.join(', ')}`);
-      }
-    }
+  let files: string[];
+  try {
+    files = fs.readdirSync(memoriesPath).filter((f) => f.endsWith('.json')).sort();
+  } catch {
+    return [];
   }
 
-  return lines.join('\n');
+  return files.map((f) => ({
+    path: path.join(memoriesPath, f),
+    desc: `Previous task learning from ${path.basename(f, '.json')}`,
+  }));
 }
 
-export function formatTaskForPrompt(task: Task): string {
+export function formatTaskBlock(task: Task): string {
   const lines: string[] = [];
-  lines.push(`[Task ${task.id}]`);
+  lines.push(`ID: ${task.id}`);
   lines.push(`Title: ${task.title}`);
   if (task.mode) {
     lines.push(`Mode: ${task.mode}`);
@@ -116,28 +110,14 @@ export function formatTaskForPrompt(task: Task): string {
     lines.push(`Depends On: ${task.dependsOn.join(', ')}`);
   }
   lines.push('');
-  lines.push(`Description: ${task.description}`);
-  if (task.spec) {
-    lines.push('');
-    lines.push(`Spec: ${task.spec}`);
-  }
+  lines.push(task.description);
   if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
     lines.push('');
     lines.push('Acceptance Criteria:');
     for (const ac of task.acceptanceCriteria) {
-      lines.push(`  - [ ] ${ac}`);
+      lines.push(`- [ ] ${ac}`);
     }
   }
-  return lines.join('\n');
-}
-
-export function formatRetryContext(failureReason: string, task: Task): string {
-  const lines: string[] = [];
-  lines.push('[Previous Attempt Failed]');
-  lines.push(`Failure Reason: ${failureReason}`);
-  lines.push('');
-  lines.push('[Task]');
-  lines.push(formatTaskForPrompt(task));
   return lines.join('\n');
 }
 
@@ -146,13 +126,53 @@ export interface AssembledContext {
   design: string | null;
   spec: string | null;
   learnings: SessionLearning[];
-  formattedLearnings: string;
-  taskPrompt: string;
   fullPrompt: string;
 }
 
+function buildRole(task: Task, options: BuildContextOptions): string {
+  const parts: string[] = ['You are implementing task'];
+  if (options.totalTasks) {
+    parts.push(`${task.id} of ${options.totalTasks}`);
+  } else {
+    parts.push(task.id);
+  }
+  if (options.issueNumber) {
+    parts.push(`for issue #${options.issueNumber}`);
+  }
+  return parts.join(' ');
+}
+
+function buildContract(task: Task): string {
+  const lines: string[] = [];
+  lines.push('1. After completing this task, commit your changes:');
+  lines.push('   - Run `git add -A` to stage all changes');
+  lines.push(`   - Run \`git commit -m "${task.id}: <brief summary of what you did>"\``);
+  lines.push('2. Read context-files if you need architectural guidance');
+  return lines.join('\n');
+}
+
+function buildTaskContent(task: Task, options: BuildContextOptions): string {
+  const parts: string[] = [];
+
+  if (options.isRetry && options.failureReason) {
+    parts.push('[Previous Attempt Failed]');
+    parts.push(`Failure Reason: ${options.failureReason}`);
+    parts.push('');
+  }
+
+  parts.push(formatTaskBlock(task));
+
+  if (options.wipResumeContext) {
+    parts.push('');
+    parts.push('[WIP Resume]');
+    parts.push(options.wipResumeContext);
+  }
+
+  return parts.join('\n');
+}
+
 export function buildTaskContext(options: BuildContextOptions): AssembledContext {
-  const { change, task, learnings = [], failureReason, isRetry = false, wipResumeContext } = options;
+  const { change, task, learnings = [] } = options;
 
   const proposal = readFileIfExists(change.proposalPath);
   const design = readFileIfExists(change.designPath);
@@ -163,63 +183,37 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
     spec = readFileIfExists(specPath);
   }
 
-  const formattedLearnings = formatLearningsForPrompt(learnings);
-  const taskPrompt = formatTaskForPrompt(task);
-
-  const sections: string[] = [];
+  const contextFiles: Array<{ path: string; desc: string }> = [];
 
   if (proposal) {
-    sections.push('[Proposal]');
-    sections.push(proposal);
-    sections.push('');
+    contextFiles.push({ path: change.proposalPath, desc: 'Proposal — why this change is needed' });
   }
-
   if (design) {
-    sections.push('[Design]');
-    sections.push(design);
-    sections.push('');
+    contextFiles.push({ path: change.designPath, desc: 'Design — how this change is implemented' });
   }
 
-  if (spec) {
-    sections.push(`[Current Requirement: ${task.spec || 'spec'}]`);
-    sections.push(spec);
-    sections.push('');
-  }
+  const learningFiles = listLearningFiles(change.sessionMemoriesPath);
+  contextFiles.push(...learningFiles);
 
-  if (formattedLearnings) {
-    sections.push(formattedLearnings);
-    sections.push('');
-  }
+  const role = buildRole(task, options);
+  const taskContent = buildTaskContent(task, options);
+  const contract = buildContract(task);
 
-  if (wipResumeContext) {
-    sections.push('[WIP Resume]');
-    sections.push(wipResumeContext);
-    sections.push('');
-  }
+  const parts: AgentPromptParts = {
+    role,
+    contextFiles: contextFiles.length > 0 ? contextFiles : undefined,
+    spec: spec ?? undefined,
+    task: taskContent,
+    contract,
+  };
 
-  if (isRetry && failureReason) {
-    sections.push(formatRetryContext(failureReason, task));
-  } else {
-    sections.push(taskPrompt);
-  }
-
-  sections.push('');
-  sections.push('[Post-Task Instruction]');
-  sections.push(`After completing this task (${task.id}), you MUST commit your changes:`);
-  sections.push('1. Run `git add -A` to stage all changes');
-  sections.push(`2. Run \`git commit -m "${task.id}: <brief summary of what you did>"\``);
-  sections.push('This ensures your work is persisted and visible to subsequent tasks.');
-  sections.push('');
-
-  const fullPrompt = sections.join('\n');
+  const fullPrompt = formatAgentPrompt(parts);
 
   return {
     proposal,
     design,
     spec,
     learnings,
-    formattedLearnings,
-    taskPrompt,
     fullPrompt,
   };
 }
@@ -238,6 +232,8 @@ export class ContextAssembler {
       failureReason?: string;
       isRetry?: boolean;
       wipResumeContext?: string;
+      totalTasks?: number;
+      issueNumber?: number;
     }
   ): AssembledContext | null {
     const changeDir = path.resolve(this.projectPath, changePath);
@@ -264,6 +260,8 @@ export class ContextAssembler {
       failureReason: options?.failureReason,
       isRetry: options?.isRetry,
       wipResumeContext: options?.wipResumeContext,
+      totalTasks: options?.totalTasks,
+      issueNumber: options?.issueNumber,
     });
   }
 }
