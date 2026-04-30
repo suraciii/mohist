@@ -186,11 +186,14 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing test patterns in packages/cli/tests/. Use the in-memory SQLite setup pattern from database.test.ts for repo tests. API tests follow api-routes.test.ts pattern.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        425604
+      ]
     }
   ]
 }
