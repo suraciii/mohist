@@ -198,10 +198,26 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
   const contextFiles: Array<{ path: string; desc: string }> = [];
 
   if (proposal) {
-    contextFiles.push({ path: change.proposalPath, desc: 'Proposal — why this change is needed' });
+    contextFiles.push({ path: change.proposalPath, desc: 'Proposal — understand WHY this change is needed' });
   }
   if (design) {
-    contextFiles.push({ path: change.designPath, desc: 'Design — how this change is implemented' });
+    contextFiles.push({ path: change.designPath, desc: 'Design — understand HOW this change is implemented' });
+  }
+
+  if (fs.existsSync(change.specsPath) && fs.statSync(change.specsPath).isDirectory()) {
+    const specEntries = fs.readdirSync(change.specsPath, { recursive: true, encoding: 'utf-8' });
+    for (const entry of specEntries) {
+      if (typeof entry === 'string' && entry.endsWith('.md')) {
+        contextFiles.push({
+          path: path.join(change.specsPath, entry),
+          desc: `Spec: ${entry} — requirements and acceptance criteria`,
+        });
+      }
+    }
+  }
+
+  if (fs.existsSync(change.tasksPath)) {
+    contextFiles.push({ path: change.tasksPath, desc: 'Tasks — all tasks, their status, and dependency graph' });
   }
 
   const learningFiles = listLearningFiles(change.sessionMemoriesPath);

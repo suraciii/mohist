@@ -90,7 +90,13 @@ function buildDependencyFiles(artifactType: ArtifactType, changeDir: string): Ar
     const depFile = ARTIFACT_OUTPUT_FILES[depType];
     const depPath = path.join(changeDir, depFile);
     if (fs.existsSync(depPath)) {
-      files.push({ path: depPath, desc: `Previous artifact: ${depType}` });
+      const descs: Record<ArtifactType, string> = {
+        proposal: 'Proposal — understand the scope and motivation for this change',
+        specs: 'Specs — existing requirements and acceptance criteria',
+        design: 'Design — existing implementation approach',
+        tasks: 'Tasks — existing task breakdown',
+      };
+      files.push({ path: depPath, desc: descs[depType] });
     }
   }
 
@@ -140,16 +146,24 @@ function listExistingArtifacts(changeDir: string): Array<{ path: string; desc: s
   const specsDir = path.join(changeDir, 'specs');
 
   if (fs.existsSync(proposalPath)) {
-    artifacts.push({ path: proposalPath, desc: 'Proposal' });
+    artifacts.push({ path: proposalPath, desc: 'Proposal — understand WHY this change is needed' });
   }
   if (fs.existsSync(designPath)) {
-    artifacts.push({ path: designPath, desc: 'Design' });
+    artifacts.push({ path: designPath, desc: 'Design — understand HOW this change is implemented' });
   }
   if (fs.existsSync(tasksPath)) {
-    artifacts.push({ path: tasksPath, desc: 'Tasks' });
+    artifacts.push({ path: tasksPath, desc: 'Tasks — all tasks and their dependency graph' });
   }
   if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
-    artifacts.push({ path: specsDir, desc: 'Specs directory' });
+    const specEntries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
+    for (const entry of specEntries) {
+      if (typeof entry === 'string' && entry.endsWith('.md')) {
+        artifacts.push({
+          path: path.join(specsDir, entry),
+          desc: `Spec: ${entry} — requirements and acceptance criteria`,
+        });
+      }
+    }
   }
 
   return artifacts;
@@ -190,6 +204,16 @@ export function buildReviewerPrompt(
   const instruction = loadFile(REVIEW_PROMPT_PATH);
   const specContext = loadSpecContext(changeDir);
 
+  const contextFiles: Array<{ path: string; desc: string }> = [];
+  const proposalPath = path.join(changeDir, 'proposal.md');
+  const designPath = path.join(changeDir, 'design.md');
+  if (fs.existsSync(proposalPath)) {
+    contextFiles.push({ path: proposalPath, desc: 'Proposal — understand the scope and motivation' });
+  }
+  if (fs.existsSync(designPath)) {
+    contextFiles.push({ path: designPath, desc: 'Design — understand the intended implementation approach' });
+  }
+
   const taskContent = [
     `Change Directory: ${changeDir}`,
     '',
@@ -202,6 +226,7 @@ export function buildReviewerPrompt(
     role: 'Review the implementation for quality',
     projectContext: agentConfig?.context,
     rules: agentConfig?.rules?.review,
+    contextFiles: contextFiles.length > 0 ? contextFiles : undefined,
     spec: specContext || undefined,
     task: taskContent,
     instruction,
@@ -276,6 +301,20 @@ export function buildAutoFixPrompt(
 ): string {
   const instruction = loadFile(AUTO_FIX_PROMPT_PATH);
 
+  const contextFiles: Array<{ path: string; desc: string }> = [];
+  const specsDir = path.join(changeDir, 'specs');
+  if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
+    const specEntries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
+    for (const entry of specEntries) {
+      if (typeof entry === 'string' && entry.endsWith('.md')) {
+        contextFiles.push({
+          path: path.join(specsDir, entry),
+          desc: `Spec: ${entry} — verify fixes satisfy these requirements`,
+        });
+      }
+    }
+  }
+
   const taskContent = [
     `Change Directory: ${changeDir}`,
     '',
@@ -292,6 +331,7 @@ export function buildAutoFixPrompt(
   return formatAgentPrompt({
     role: 'Apply auto-fixes from self-check report',
     projectContext: agentConfig?.context,
+    contextFiles: contextFiles.length > 0 ? contextFiles : undefined,
     task: taskContent,
     contract: 'Apply ONLY the fixes described in the report. Do NOT modify review.md.',
     instruction,
@@ -362,6 +402,20 @@ export function buildReVerifyPrompt(
 ): string {
   const instruction = loadFile(RE_VERIFY_PROMPT_PATH);
 
+  const contextFiles: Array<{ path: string; desc: string }> = [];
+  const specsDir = path.join(changeDir, 'specs');
+  if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
+    const specEntries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
+    for (const entry of specEntries) {
+      if (typeof entry === 'string' && entry.endsWith('.md')) {
+        contextFiles.push({
+          path: path.join(specsDir, entry),
+          desc: `Spec: ${entry} — re-verify against these requirements`,
+        });
+      }
+    }
+  }
+
   const taskContent = [
     `Change Directory: ${changeDir}`,
     '',
@@ -377,6 +431,7 @@ export function buildReVerifyPrompt(
   return formatAgentPrompt({
     role: 'Re-verify code changes after auto-fix',
     projectContext: agentConfig?.context,
+    contextFiles: contextFiles.length > 0 ? contextFiles : undefined,
     task: taskContent,
     instruction,
   });
