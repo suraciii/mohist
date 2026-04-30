@@ -240,11 +240,14 @@
         "T-004",
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The refresh endpoint needs SkillService to re-scan SKILL.md files and SchedulerService to re-sync timers.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        317797
+      ]
     },
     {
       "id": "T-009",
