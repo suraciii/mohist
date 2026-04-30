@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add archive UI to kanban Done column and create /archived list page",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/api.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Backend endpoints provided by Issue #101"
+      "passes": true,
+      "notes": "Backend endpoints provided by Issue #101",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        98537
+      ]
     },
     {
       "id": "T-002",
@@ -36,9 +41,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -61,9 +71,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueCard.tsx, packages/cli/web/src/components/StageColumn.tsx",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "StageColumn already has isDone prop. KanbanBoard passes showArchiveButton and archivedCount."
+      "notes": "StageColumn already has isDone prop. KanbanBoard passes showArchiveButton and archivedCount.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -81,9 +96,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/KanbanBoard.tsx, packages/cli/web/src/App.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -107,9 +127,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ArchivedPage.tsx",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Can be built in parallel with T-003/T-004 since it only depends on the hooks from T-002"
+      "notes": "Can be built in parallel with T-003/T-004 since it only depends on the hooks from T-002",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -125,9 +150,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/App.tsx",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Trivial wiring task, depends on ArchivedPage existing"
+      "notes": "Trivial wiring task, depends on ArchivedPage existing",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
