@@ -379,6 +379,16 @@ export function useOpencodeModels() {
   })
 }
 
+export function useRebuildSystem() {
+  const queryClient = useQueryClient()
+  return useMutation<{ success: boolean }, Error, void>({
+    mutationFn: () => api.rebuildSystem(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['status'] })
+    },
+  })
+}
+
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) return '********'
   return apiKey.slice(0, 4) + '*'.repeat(apiKey.length - 8) + apiKey.slice(-4)

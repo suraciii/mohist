@@ -160,6 +160,10 @@ export const api = {
     activeIssues: number
     issuesByStage: Record<string, number>
     llm: { configured: false; provider?: undefined; model?: undefined } | { configured: true; provider: string; model: string }
+    version: string | null
+    gitHash: string | null
+    sourceHead: string | null
+    upToDate: boolean
   }>('/status'),
 
   getAvailableModels: () => request<import('./types').ModelProvider[]>('/providers/models'),
@@ -315,5 +319,8 @@ export const api = {
 
   getSystemInfo: () =>
     request<import('./types').SystemInfo>('/system/info'),
+
+  rebuildSystem: () =>
+    request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
 
 }
