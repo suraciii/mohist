@@ -285,9 +285,14 @@
       ],
       "passes": false,
       "notes": "",
-      "attempts": 0,
+      "attempts": 3,
       "order": 999999,
-      "error": null
+      "error": "Auto-skipped (no onAskUser): Timed out after 240s",
+      "durations": [
+        240004,
+        240003,
+        240004
+      ]
     },
     {
       "id": "T-011",
