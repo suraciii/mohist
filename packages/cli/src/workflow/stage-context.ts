@@ -1,9 +1,19 @@
 import type { Stage, Issue, Project, IssueStatus } from '../types';
+import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
-import type { ChangeArtifactsManager } from './workflow-controller';
+
+export interface ChangeArtifactsManager {
+  getChangeDir(issueNumber: number): string | null;
+  createChangeDir(issueNumber: number, title: string): string | null;
+  readArtifact(changeDir: string, artifactPath: string): string | null;
+  writeArtifact(changeDir: string, artifactPath: string, content: string): boolean;
+  exists(changeDir: string): boolean;
+  readTasks(issueNumber: number): TasksFile | null;
+  updateTaskPasses(issueNumber: number, taskId: string, passes: boolean, error?: string | null): boolean;
+}
 
 export interface IssueRepo {
   updateStage(id: string, stage: Stage): Issue | null;

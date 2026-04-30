@@ -15,7 +15,7 @@ export class CheckStageRunner implements StageRunner {
   }
 
   canHandle(stage: Stage): boolean {
-    return stage === Stage.Review;
+    return stage === Stage.Check;
   }
 
   async run(ctx: StageContext): Promise<StageRunResult> {

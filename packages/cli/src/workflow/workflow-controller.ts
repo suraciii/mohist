@@ -3,7 +3,6 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Stage, IssueStatus, type Issue } from '../types';
-import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
@@ -11,26 +10,16 @@ import { loadWorkflow, loadAgentConfig } from './workflow-loader';
 import { getAgentTimeoutConfig, load as loadConfig } from '../config/config-loader';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import { formatAgentPrompt } from '../agents/agent-prompt-schema';
-import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import type { AgentConfig } from './workflow-loader';
+import type { ChangeArtifactsManager, IssueRepo } from './stage-context';
 import { Log } from '../util/log';
 
 const execFileAsync = promisify(execFile);
 
 const log = Log.create({ service: 'workflow' });
-
-export interface ChangeArtifactsManager {
-  getChangeDir(issueNumber: number): string | null;
-  createChangeDir(issueNumber: number, title: string): string | null;
-  readArtifact(changeDir: string, artifactPath: string): string | null;
-  writeArtifact(changeDir: string, artifactPath: string, content: string): boolean;
-  exists(changeDir: string): boolean;
-  readTasks(issueNumber: number): TasksFile | null;
-  updateTaskPasses(issueNumber: number, taskId: string, passes: boolean, error?: string | null): boolean;
-}
 
 export interface StageResult {
   success: boolean;

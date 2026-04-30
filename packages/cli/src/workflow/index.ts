@@ -6,9 +6,10 @@ export {
   extractFixSuggestions,
   type WorkflowControllerOptions,
   type StageResult,
-  type ChangeArtifactsManager,
   type PipelineResult,
 } from './workflow-controller';
+
+export { type ChangeArtifactsManager } from './stage-context';
 
 export { type PlanResult, type ReviewResult } from '../types/workflow-results';
 
