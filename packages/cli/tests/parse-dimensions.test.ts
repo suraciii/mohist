@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDimensions, parseVerdict, type ParsedDimension } from '../src/workflow/workflow-controller';
+import { parseDimensions, parseVerdict, type ParsedDimension } from '../src/workflow';
 
 const REVIEW_ALL_PASS = `# Code Review
 
