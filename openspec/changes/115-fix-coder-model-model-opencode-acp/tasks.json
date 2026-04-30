@@ -102,10 +102,13 @@
         "T-001"
       ],
       "passes": true,
-      "notes": "Already implemented — model is destructured at line 485, setSessionConfigOption called at lines 741-752 with try/catch and warn logging. Typecheck passes.",
+      "notes": "model is already in AcpConnectionOptions interface (line 440) but is never destructured or used in createAcpConnection. Must add to destructuring and call setSessionConfigOption after newSession at line ~723.",
       "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        175275
+      ]
     },
     {
       "id": "T-005",
