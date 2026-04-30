@@ -44,6 +44,15 @@ function formatPriority(priority: string): string {
   return color(priority);
 }
 
+function formatArchivedAt(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString();
+  } catch {
+    return iso;
+  }
+}
+
 function formatLabels(labels: string[]): string {
   if (!labels || labels.length === 0) return '';
   return labels.map(l => chalk.blue(`[${l}]`)).join(' ');
@@ -111,6 +120,8 @@ export function setupIssueCommands(program: Command): void {
     .option('-s, --status <stage>', 'Filter by stage')
     .option('-l, --label <label>', 'Filter by label')
     .option('-p, --priority <level>', 'Filter by priority')
+    .option('--archived', 'Show only archived issues')
+    .option('--all', 'Show all issues including archived')
     .action(async (options) => {
       try {
         let path = '/issues';
@@ -124,6 +135,11 @@ export function setupIssueCommands(program: Command): void {
         if (options.priority) {
           params.push(`priority=${options.priority}`);
         }
+        if (options.archived) {
+          params.push('archived=true');
+        } else if (options.all) {
+          params.push('all=true');
+        }
         if (params.length > 0) {
           path += `?${params.join('&')}`;
         }
@@ -132,13 +148,20 @@ export function setupIssueCommands(program: Command): void {
         
         if (response.success && response.data) {
           if (response.data.length === 0) {
-            console.log(chalk.yellow('No issues found'));
+            console.log(chalk.yellow(options.archived ? 'No archived issues' : 'No issues found'));
             return;
           }
           
-          console.log(chalk.bold('\nIssues:\n'));
-          console.log('  ID                 Priority  Stage                     Status    Labels              Title');
-          console.log('  ' + '─'.repeat(105));
+          const header = options.archived ? 'Archived Issues:' : 'Issues:';
+          console.log(chalk.bold(`\n${header}\n`));
+
+          if (options.archived || options.all) {
+            console.log('  ID                 Priority  Stage                     Status    Labels              Title                                       Archived');
+            console.log('  ' + '─'.repeat(130));
+          } else {
+            console.log('  ID                 Priority  Stage                     Status    Labels              Title');
+            console.log('  ' + '─'.repeat(105));
+          }
           
           response.data.forEach((issue: any) => {
             const id = chalk.cyan(`${issue.projectName || 'unknown'}#${issue.number}`.padEnd(18));
@@ -146,9 +169,17 @@ export function setupIssueCommands(program: Command): void {
             const stage = formatStage(issue.stage).padEnd(25);
             const status = formatStatus(issue.status).padEnd(9);
             const labels = formatLabels(issue.labels).padEnd(20);
-            const title = issue.title.substring(0, 40);
-            
-            console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${title}`);
+            const titlePart = issue.title.substring(0, 40);
+
+            if (options.archived || options.all) {
+              const archivedCol = issue.archivedAt
+                ? chalk.gray(formatArchivedAt(issue.archivedAt)).padEnd(24)
+                : '';
+              const suffix = issue.archivedAt && !options.archived ? chalk.gray(' (archived)') : '';
+              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart.padEnd(42)}${archivedCol}${suffix}`);
+            } else {
+              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart}`);
+            }
           });
           console.log();
         }
@@ -174,6 +205,10 @@ export function setupIssueCommands(program: Command): void {
           console.log(`  Priority: ${formatPriority(issue.priority || 'p2')}`);
           console.log(`  Stage: ${formatStage(issue.stage)}`);
           console.log(`  Status: ${formatStatus(issue.status)}`);
+
+          if (issue.archivedAt) {
+            console.log(`  Archived: ${chalk.gray(new Date(issue.archivedAt).toLocaleString())}`);
+          }
           
           if (issue.approvalState) {
             const statusColors: Record<string, typeof chalk.green> = {
@@ -275,6 +310,81 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to close issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('archive')
+    .description('Archive an issue (or all completed issues)')
+    .option('--all-completed', 'Archive all completed issues')
+    .option('--no-cleanup', 'Skip worktree and openspec cleanup')
+    .argument('[number]', 'Issue number to archive')
+    .action(async (number, options) => {
+      try {
+        if (options.allCompleted) {
+          const response = await apiClient<ApiResponse>(
+            'POST',
+            '/issues/archive-completed'
+          );
+
+          if (response.success && response.data) {
+            const { archived, message } = response.data;
+            if (archived === 0) {
+              console.log(chalk.yellow('No completed issues to archive'));
+            } else {
+              console.log(chalk.green(`✓ Archived ${archived} completed issue(s)`));
+            }
+            if (message) {
+              console.log(chalk.gray(`  ${message}`));
+            }
+          } else {
+            console.error(chalk.red(`Error: ${response.error}`));
+          }
+          return;
+        }
+
+        if (!number) {
+          console.error(chalk.red('Error: provide an issue number or --all-completed'));
+          return;
+        }
+
+        const body: { cleanup: boolean } = { cleanup: options.cleanup !== false };
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          `/issues/${number}/archive`,
+          body
+        );
+
+        if (response.success) {
+          console.log(chalk.green(`✓ Archived issue #${number}`));
+          if (response.data?.warning) {
+            console.log(chalk.yellow(`  Warning: ${response.data.warning}`));
+          }
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to archive issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('unarchive <number>')
+    .description('Unarchive an issue')
+    .action(async (number) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'POST',
+          `/issues/${number}/unarchive`
+        );
+
+        if (response.success) {
+          console.log(chalk.green(`✓ Unarchived issue #${number}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to unarchive issue: ${error}`));
       }
     });
 
