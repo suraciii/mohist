@@ -127,11 +127,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "EventBus type already supports model?: string in coder_session_started. Need to find where eventBus.emit('coder_session_started', ...) would be called - currently only acp_session_start/completed are logged to workflow_log, not the SSE event.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        87112
+      ]
     },
     {
       "id": "T-006",
