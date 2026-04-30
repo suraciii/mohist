@@ -115,11 +115,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Section 组件暂时用占位符（如 <div>AI Section Placeholder</div>），后续任务填充。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        336181
+      ]
     },
     {
       "id": "T-005",
