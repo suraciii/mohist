@@ -49,11 +49,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/system-settings.ts, packages/cli/src/server/index.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Design D2: spawn detached child process, not execSync. Reuse build sequence from server-systemd.ts updateServer(). Import detectInstallMode, isSystemdServiceInstalled, runSystemctlUserSafe from server-systemd.ts.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        189132
+      ]
     },
     {
       "id": "T-003",
