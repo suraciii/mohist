@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
-import { useIssues, useProjects, useCurrentProject, useAgentStatus } from './hooks/useQueries'
-import useSSE, { LiveTaskContext } from './hooks/useSSE'
+import { useIssues, useArchivedIssues, useProjects, useCurrentProject, useAgentStatus } from './hooks/useQueries'
+import useSSE from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
 import { Header } from './components/Header'
 import { IssueDetailPage } from './components/IssueDetailPage'
-import { SessionPage } from './components/SessionPage'
 import { ExplorePage } from './components/ExplorePage'
 import { ExploreSessionList } from './components/ExploreSessionList'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
 import { CreateIssueDialog } from './components/CreateIssueDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { LogsPage } from './components/LogsPage'
-import { NotFoundPage } from './components/NotFoundPage'
 import { ProjectGuard } from './components/ProjectGuard'
 import { MobileBottomNav } from './components/MobileBottomNav'
 import { FAB } from './components/FAB'
@@ -22,6 +20,7 @@ function KanbanView() {
   const { projectId } = useProject()
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { data: issues, isLoading } = useIssues(projectId ? { projectId } : undefined)
+  const { data: archivedIssues } = useArchivedIssues(projectId ? { projectId } : undefined)
   const { data: agentStatus } = useAgentStatus()
   const [showCreateProject, setShowCreateProject] = useState(false)
 
@@ -58,6 +57,7 @@ function KanbanView() {
         <KanbanBoard
           issues={issues ?? []}
           agentStatus={agentStatus ?? { running: false, issueId: null, issueNumber: null, activeAgents: [], maxConcurrentAgents: 8, queueDepth: 0, waitingQuestions: [], recoverableIssues: [] }}
+          archivedCount={archivedIssues?.length ?? 0}
         />
       )}
     </>
@@ -66,7 +66,7 @@ function KanbanView() {
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
-  const liveState = useSSE(projectId)
+  const { LiveTaskProvider } = useSSE(projectId)
   const location = useLocation()
 
   const { data: projects } = useProjects()
@@ -88,7 +88,7 @@ function AppContent() {
   }, [currentProject, projects, projectId, setProjectId])
 
   return (
-    <LiveTaskContext.Provider value={liveState}>
+    <LiveTaskProvider>
     <div className="min-h-screen bg-gray-50 flex flex-col pb-14 md:pb-0">
       <Header onCreateIssue={() => setCreateIssueOpen(true)} />
       <MobileBottomNav />
@@ -96,18 +96,16 @@ function AppContent() {
         <Route element={<ProjectGuard />}>
           <Route path="/" element={<KanbanView />} />
           <Route path="/issue/:number" element={<IssueDetailPage />} />
-          <Route path="/issue/:number/session/:sessionId" element={<SessionPage />} />
           <Route path="/explore" element={<ExploreSessionList />} />
           <Route path="/explore/:id" element={<ExplorePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/logs" element={<LogsPage />} />
-          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
       {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
       <CreateIssueDialog open={createIssueOpen} onClose={() => setCreateIssueOpen(false)} />
     </div>
-    </LiveTaskContext.Provider>
+    </LiveTaskProvider>
   )
 }
 

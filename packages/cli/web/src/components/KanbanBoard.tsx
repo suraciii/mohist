@@ -3,12 +3,10 @@ import type { Issue, AgentStatus } from '../lib/types'
 import { Stage } from '../lib/types'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
-import { useArchivedIssues } from '../hooks/useQueries'
-import { useProject } from '../context/ProjectContext'
 
 const STAGES: { key: Stage; label: string }[] = [
   { key: Stage.Backlog, label: 'Backlog' },
- { key: Stage.Plan, label: 'Plan' },
+  { key: Stage.Plan, label: 'Plan' },
   { key: Stage.Build, label: 'Build' },
   { key: Stage.Review, label: 'Review' },
   { key: Stage.Done, label: 'Done' },
@@ -17,12 +15,10 @@ const STAGES: { key: Stage; label: string }[] = [
 interface Props {
   issues: Issue[]
   agentStatus: AgentStatus
+  archivedCount?: number
 }
 
-export function KanbanBoard({ issues, agentStatus }: Props) {
-  const { projectId } = useProject()
-  const { data: archivedIssues } = useArchivedIssues(projectId ? { projectId } : undefined)
-  const archivedCount = archivedIssues?.length ?? 0
+export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
 
   const columns = useMemo(() => {
     const map = new Map<Stage, Issue[]>()
