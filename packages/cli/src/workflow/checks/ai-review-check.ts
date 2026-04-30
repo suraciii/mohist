@@ -49,6 +49,7 @@ export class AiReviewCheck implements Check {
         ...ctx.acpOptions,
         executionId: `review-${ctx.issue.number}`,
       },
+      stage: 'review',
       projectId: ctx.projectId,
       eventBus: ctx.eventBus,
     };
