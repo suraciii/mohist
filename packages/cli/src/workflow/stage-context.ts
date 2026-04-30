@@ -78,9 +78,6 @@ export interface ProjectRepo {
   count(): number;
 }
 
-export interface CheckpointManager {
-  get(issueNumber: number, stage: string): { issueNumber: number; stage: string; completedSteps: string[]; nextStep: string | null; updatedAt: string } | null;
-  upsert(issueNumber: number, stage: string, completedSteps: string[], nextStep: string | null): void;
-  delete(issueNumber: number, stage: string): void;
-  deleteAll(issueNumber: number): void;
-}
+import type { CheckpointManager as CheckpointManagerInterface } from './checkpoint-manager';
+
+export type CheckpointManager = CheckpointManagerInterface;

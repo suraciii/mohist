@@ -256,7 +256,10 @@
       "notes": "",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        240005
+      ]
     },
     {
       "id": "T-010",
