@@ -9,9 +9,9 @@
     "mo-server": "./bin/mo-server"
   },
   "scripts": {
-    "build": "tsc && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/ && npm run build:web",
+    "build": "tsc && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ 2>/dev/null || true && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/ 2>/dev/null || true && npm run build:web",
     "build:web": "npm --prefix web install && npm --prefix web run build",
-    "build:backend": "tsc && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/",
+    "build:backend": "tsc && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ 2>/dev/null || true && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/ 2>/dev/null || true",
     "generate:snapshot": "node script/build-models-snapshot.mjs",
     "dev": "tsc --watch",
     "start:server": "node bin/mo-server",
