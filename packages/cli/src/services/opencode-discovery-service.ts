@@ -4,7 +4,6 @@ import {
   ClientSideConnection,
   ndJsonStream,
   PROTOCOL_VERSION,
-  ModelInfo,
 } from '@agentclientprotocol/sdk';
 import { resolveOpencodeBinPath } from '../config/config-loader';
 import { Log } from '../util/log';
@@ -107,7 +106,7 @@ async function probeModels(): Promise<string[]> {
         const sessionResult = await connection.newSession({ cwd, mcpServers: [] });
         sessionId = sessionResult.sessionId;
 
-        const rawModels = (sessionResult.models as unknown as ModelInfo[]) ?? [];
+        const rawModels = sessionResult.models?.availableModels ?? [];
         const models = rawModels.map((m) => m.modelId);
 
         clearTimeout(timeout);
