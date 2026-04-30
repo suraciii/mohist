@@ -218,7 +218,7 @@ async function runReviewStage(
     return readFileSequence[Math.min(readIdx++, readFileSequence.length - 1)];
   });
 
-  return (ctrl as any).runPipelineReviewStage(
+  return (ctrl as any).runPipelineCheckStage(
     createMockIssue(Stage.Check),
     { cwd: '/tmp/worktree' },
   );
@@ -498,7 +498,7 @@ describe('auto-fix SSE events', () => {
       checkpointRepo: repos.checkpointRepo,
     });
 
-    await (ctrl as any).runPipelineReviewStage(
+    await (ctrl as any).runPipelineCheckStage(
       createMockIssue(Stage.Check),
       { cwd: '/tmp/worktree' },
     );

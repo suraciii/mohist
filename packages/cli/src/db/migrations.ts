@@ -680,12 +680,6 @@ function migrateToVersion16(db: DatabaseManager): void {
     for (const indexSql of CREATE_AGENT_SKILL_SCHEDULES_INDEXES) {
       db.exec(indexSql);
     }
-    const tableInfo = db.all<{ name: string }>("PRAGMA table_info(issues)");
-    const hasArchivedAt = tableInfo.some(col => col.name === 'archived_at');
-    if (!hasArchivedAt) {
-      db.exec("ALTER TABLE issues ADD COLUMN archived_at TEXT DEFAULT NULL");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_issues_archived ON issues(archived_at)");
-    }
     setSchemaVersion(db, 16);
   });
 }
