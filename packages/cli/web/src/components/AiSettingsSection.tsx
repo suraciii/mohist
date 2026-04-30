@@ -1,6 +1,6 @@
 import { useState, useMemo, Fragment, useEffect, useRef, useCallback } from 'react'
 import { Popover, Transition } from '@headlessui/react'
-import { useProviders, useDeleteProvider, useModel, useSetModel, useOpencodeModel, useSetOpencodeModel, useStageModels, useSetStageModels } from '../hooks/useQueries'
+import { useProviders, useDeleteProvider, useModel, useSetModel, useOpencodeModel, useUpdateOpencodeModel, useStageModels, useSetStageModels } from '../hooks/useQueries'
 import { useModels } from '../hooks/useModels'
 import type { Provider } from '../lib/provider-api'
 import type { Model } from '../lib/types'
@@ -333,7 +333,7 @@ export function AiSettingsSection() {
   const { data: modelData } = useModel()
   const setModel = useSetModel()
   const { data: opencodeModelData } = useOpencodeModel()
-  const setOpencodeModel = useSetOpencodeModel()
+  const setOpencodeModel = useUpdateOpencodeModel()
   const { data: stageModelsData } = useStageModels()
   const setStageModels = useSetStageModels()
 
