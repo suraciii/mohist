@@ -44,7 +44,9 @@ vi.mock('../src/agents/artifact-prompt', () => ({
   buildReviewSelfCheckPrompt: vi.fn().mockReturnValue('mock-review-self-check-prompt'),
 }));
 
-import { WorkflowController, type ChangeArtifactsManager, type MergeBackResult } from '../src/workflow/workflow-controller';
+import { WorkflowController, type ChangeArtifactsManager } from '../src/workflow';
+
+type MergeBackResult = { success: boolean; message: string };
 import { createAcpConnection } from '../src/agent-runtime/acp-session';
 import type { IssueRepo } from '../src/db/issue-repo';
 import type { EventBus } from '../src/services/event-bus';

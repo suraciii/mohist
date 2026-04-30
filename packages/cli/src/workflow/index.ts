@@ -79,3 +79,10 @@ export {
   type OpenSpecDetection,
   type WorkflowConfigWithDetection,
 } from './workflow-loader';
+
+export {
+  WorkflowController,
+  type WorkflowControllerOptions,
+  type StageResult,
+  createWorkflowController,
+} from './workflow-controller';
