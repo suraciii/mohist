@@ -116,11 +116,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The SSE events `agent_conflict_resolution_started/completed/failed` already exist in the EventSource subscription list in `useSSE.tsx` (lines 183+). The `rebase_conflict` event with `status: 'resolving' | 'failed'` is already handled in `useSSE.tsx:122-130`. The main work is: (1) updating the mutation onSuccess to handle the new 202 response, (2) extending types with error field, (3) displaying the resolving/failed states in UI components using the existing `rebaseConflict` from `useLiveTask()`.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        414246
+      ]
     }
   ]
 }
