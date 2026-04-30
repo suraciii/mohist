@@ -15,6 +15,7 @@ import { createQuestionRoutes } from '../api/questions';
 import { createExploreRoutes } from '../api/explore';
 import { createLogRoutes } from '../api/logs';
 import { createOpencodeModelsRoutes } from '../api/opencode-models';
+import { createScheduleRoutes } from '../api/schedules';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, type SkillRunner } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
@@ -270,6 +271,7 @@ async function main(): Promise<void> {
     });
   }));
   server.addRouter('/api/logs', createLogRoutes());
+  server.addRouter('/api/agent/schedules', createScheduleRoutes(stateManager.getScheduleRepo(), scheduler));
 
   eventBus.on('agent_completed', async ({ issueNumber }) => {
     log.info('Agent completed', { issueNumber });
