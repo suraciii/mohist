@@ -18,14 +18,15 @@
       "type": "WRITE",
       "output": "src/workflow/stage-context.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
         255363,
-        171312
+        171312,
+        240008
       ]
     },
     {
@@ -47,9 +48,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Extract from lines 91-103 (Plan), 515-524 (Build), and Review equivalent in workflow-controller.ts",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -75,9 +76,9 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Extract round loop from Plan stage (lines 138-232) and review ACP pattern (lines 764-834) in the 908-line file",
-      "attempts": 2,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -103,9 +104,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "BuildTestCheck and MergeReadyCheck do NOT use AcpRoundRunner — they can start as soon as T-001 (types) is done. This is intentional: they run in parallel with T-003 (AcpRoundRunner). These checks are new — not extracted from the current 908-line file.",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -132,9 +133,9 @@
         "T-003",
         "T-004"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Depends on T-003 (AcpRoundRunner) and T-004 (types and Check interface). Can run after T-003 is done. parseVerdict and extractFixSuggestions are referenced by tests but don't exist in the current file — implement them here or in utils.",
-      "attempts": 5,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -164,9 +165,9 @@
         "T-004",
         "T-005"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 2,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -194,9 +195,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Depends on T-003 (AcpRoundRunner). Runs in parallel with T-004/T-005 (checks).",
-      "attempts": 4,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -222,9 +223,9 @@
       "type": "WRITE",
       "output": "src/workflow/git-committer.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -252,9 +253,9 @@
         "T-002",
         "T-008"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 2,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -285,9 +286,9 @@
       ],
       "passes": false,
       "notes": "",
-      "attempts": 3,
+      "attempts": 0,
       "order": 999999,
-      "error": "Auto-skipped (no onAskUser): Timed out after 240s",
+      "error": null,
       "durations": [
         240004,
         240003,
