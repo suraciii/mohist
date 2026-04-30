@@ -99,6 +99,16 @@ async function branchExists(projectPath: string, branch: string): Promise<boolea
   }
 }
 
+export interface WorktreeStatus {
+  exists: boolean;
+  branch?: string;
+  baseBranch?: string;
+  ahead?: number;
+  behind?: number;
+  rebaseInProgress?: boolean;
+  conflictingFiles?: string[];
+}
+
 export interface RebaseResult {
   success: boolean;
   conflicts: string[];
@@ -652,6 +662,55 @@ export class WorktreeManager {
   getPath(projectName: string, issueNumber: number): string | null {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     return fs.existsSync(worktreePath) ? worktreePath : null;
+  }
+
+  async getWorktreeStatus(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<WorktreeStatus> {
+    if (!this.exists(projectName, issueNumber)) {
+      return { exists: false };
+    }
+
+    const branch = getBranchName(issueNumber);
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+
+    let ahead = 0;
+    let behind = 0;
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['rev-list', '--left-right', '--count', `${baseBranch}...${branch}`],
+        { cwd: projectPath }
+      );
+      const parts = stdout.trim().split(/\s+/);
+      behind = parseInt(parts[0], 10) || 0;
+      ahead = parseInt(parts[1], 10) || 0;
+    } catch (err) {
+      log.warn('Failed to get ahead/behind counts', {
+        issueNumber,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    const rebaseInProgress = await this.isRebaseInProgress(projectName, issueNumber);
+
+    let conflictingFiles: string[] | undefined;
+    if (rebaseInProgress) {
+      conflictingFiles = await this.getConflictingFiles(worktreePath);
+    }
+
+    return {
+      exists: true,
+      branch,
+      baseBranch,
+      ahead,
+      behind,
+      rebaseInProgress,
+      conflictingFiles,
+    };
   }
 
   exists(projectName: string, issueNumber: number): boolean {
