@@ -10,6 +10,7 @@ import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } fr
 import { loadWorkflow, loadAgentConfig } from './workflow-loader';
 import { getAgentTimeoutConfig, load as loadConfig } from '../config/config-loader';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { formatAgentPrompt } from '../agents/agent-prompt-schema';
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
@@ -208,14 +209,11 @@ export class WorkflowController {
         if (!round.verify()) {
           log.warn('Plan stage artifact not found after round, sending retry', { artifact: round.label, roundIndex: index });
 
-          const retryPrompt = [
-            `The artifact file ${round.outputPath} was not found. You MUST create it now.`,
-            '',
-            `Use the write_file tool to write the ${round.type} artifact to:`,
-            round.outputPath,
-            '',
-            'This is a retry. The pipeline cannot continue without this file.',
-          ].join('\n');
+          const retryPrompt = formatAgentPrompt({
+            role: `Create the ${round.type} artifact for this change`,
+            task: `The artifact file was not found. You MUST create it now.\n\nUse the write_file tool to write the ${round.type} artifact to:\n${round.outputPath}\n\nThis is a retry. The pipeline cannot continue without this file.`,
+            contract: `Write to: ${round.outputPath}`,
+          });
 
           log.info('Plan stage retry prompt sent', { artifact: round.type, roundIndex: index });
 
