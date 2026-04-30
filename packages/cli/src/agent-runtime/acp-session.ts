@@ -373,6 +373,18 @@ export async function runAcpSession(
         });
         coderSessionId = coderSession.id;
         log.info('coder_session row created', { coderSessionId, acpSessionId: sessionId });
+        if (eventBus) {
+          eventBus.emit('coder_session_started', {
+            issueId: sseIssueId,
+            projectId: projectId ?? '',
+            coderSessionId,
+            acpSessionId: sessionId,
+            executionId,
+            model,
+            stage: options.stage,
+            taskDescription: task.slice(0, 200),
+          });
+        }
       } catch (err) {
         log.error('Failed to create coder_session row', { error: err instanceof Error ? err.message : String(err) });
       }
