@@ -192,10 +192,10 @@ export const api = {
 
   rebaseIssue: async (number: number) => {
     try {
-      return await request<{ rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }>(`/issues/${number}/rebase`, { method: 'POST' })
+      return await request<{ rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }>(`/issues/${number}/rebase`, { method: 'POST' })
     } catch (err) {
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
-        return err.data as { rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string }
+        return err.data as { rebased: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }
       }
       throw err
     }

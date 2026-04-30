@@ -144,7 +144,9 @@ export function IssueDetailPage() {
   const rebaseMutation = useMutation({
     mutationFn: () => api.rebaseIssue(issueNumber),
     onSuccess: (data) => {
-      if (data.conflicts && data.conflicts.length > 0) {
+      if (data.status === 'resolving-conflicts') {
+        setRebaseResult({ type: 'info', message: 'Resolving conflicts...' })
+      } else if (data.conflicts && data.conflicts.length > 0) {
         setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: data.conflicts })
       } else if (data.rebased) {
         setRebaseResult({ type: 'success', message: 'Rebase successful' })

@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../lib/api'
 import { useWorktreeStatus } from '../hooks/useQueries'
 import { onRebaseEvent } from '../lib/rebase-events'
+import { useLiveTask } from '../hooks/useSSE'
 
 interface WorktreePanelProps {
   issueNumber: number
@@ -27,6 +28,7 @@ const STEP_LABELS: Record<RebaseStep, string> = {
 export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProps) {
   const queryClient = useQueryClient()
   const { data: status, isLoading } = useWorktreeStatus(issueNumber, true)
+  const { rebaseConflict } = useLiveTask()
   const [rebaseResult, setRebaseResult] = useState<RebaseResult | null>(null)
   const [rebaseStep, setRebaseStep] = useState<RebaseStep | null>(null)
 
@@ -47,7 +49,11 @@ export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProp
         }
       } else if (event.type === 'rebase_conflict') {
         setRebaseStep(null)
-        setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: event.conflicts })
+        if (event.status === 'resolving') {
+          setRebaseResult({ type: 'info', message: 'Conflicts detected, resolving via agent...', conflicts: event.conflicts })
+        } else {
+          setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: event.conflicts })
+        }
       }
     })
   }, [issueNumber])
@@ -55,7 +61,9 @@ export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProp
   const rebaseMutation = useMutation({
     mutationFn: () => api.rebaseIssue(issueNumber),
     onSuccess: (data) => {
-      if (data.conflicts && data.conflicts.length > 0) {
+      if (data.status === 'resolving-conflicts') {
+        setRebaseResult({ type: 'info', message: 'Resolving conflicts...' })
+      } else if (data.conflicts && data.conflicts.length > 0) {
         setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: data.conflicts })
       } else if (data.rebased) {
         setRebaseResult({ type: 'success', message: 'Rebase successful' })
@@ -84,7 +92,9 @@ export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProp
   const isBehind = (status.behind ?? 0) > 0
   const isAhead = (status.ahead ?? 0) > 0
   const isUpToDate = !isBehind && !isAhead
-  const isRebasing = rebaseMutation.isPending || status.rebaseInProgress === true
+  const isConflictResolving = rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving'
+  const isConflictFailed = rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'failed'
+  const isRebasing = rebaseMutation.isPending || status.rebaseInProgress === true || isConflictResolving
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -126,6 +136,16 @@ export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProp
         )}
       </div>
 
+      {isRebasing && !rebaseStep && isConflictResolving && (
+        <div className="mb-3 flex items-center gap-2 text-xs text-blue-700">
+          <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          Resolving conflicts via agent...
+        </div>
+      )}
+
       {isRebasing && rebaseStep && (
         <div className="mb-3 flex items-center gap-2 text-xs text-blue-700">
           <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -136,7 +156,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProp
         </div>
       )}
 
-      {rebaseResult && (
+      {rebaseResult && !isConflictFailed && (
         <div className={`mb-3 rounded-md px-3 py-2 text-xs ${
           rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
           rebaseResult.type === 'error' ? 'bg-red-50 text-red-700' :
@@ -150,6 +170,12 @@ export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProp
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {isConflictFailed && (
+        <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+          Conflict resolution failed{rebaseConflict?.error ? `: ${rebaseConflict.error}` : ''}
         </div>
       )}
 

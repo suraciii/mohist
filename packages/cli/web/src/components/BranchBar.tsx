@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage } from '../lib/types'
 import { api, ApiError } from '../lib/api'
 import { useWorktreeStatus } from '../hooks/useQueries'
+import { useLiveTask } from '../hooks/useSSE'
 
 const BRANCH_BAR_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Review, Stage.Done])
 
@@ -13,6 +14,7 @@ interface BranchBarProps {
 
 export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps) {
   const queryClient = useQueryClient()
+  const { rebaseConflict } = useLiveTask()
 
   const { data, isLoading } = useWorktreeStatus(issueNumber, BRANCH_BAR_STAGES.has(stage))
 
@@ -31,7 +33,9 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
 
   const rebaseResult = rebaseMutation.data
   const isBehind = (data.behind ?? 0) > 0
-  const isRebasing = data.rebaseInProgress === true || rebaseMutation.isPending
+  const isConflictResolving = rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving'
+  const isConflictFailed = rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'failed'
+  const isRebasing = data.rebaseInProgress === true || rebaseMutation.isPending || isConflictResolving
   const hasConflicts = rebaseResult?.conflicts && rebaseResult.conflicts.length > 0
     ? rebaseResult.conflicts
     : data.conflictingFiles && data.conflictingFiles.length > 0
@@ -51,7 +55,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
-          <span className="text-sm font-medium text-blue-800">Rebasing...</span>
+          <span className="text-sm font-medium text-blue-800">{isConflictResolving ? 'Resolving conflicts...' : 'Rebasing...'}</span>
           <span className="text-xs text-blue-600 font-mono">{branch}</span>
         </div>
       </div>
@@ -74,8 +78,8 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
             </span>
             <button
               onClick={() => rebaseMutation.mutate()}
-              disabled={isAgentRunning}
-              title={isAgentRunning ? 'Cannot rebase while agent is running' : undefined}
+              disabled={isAgentRunning || isConflictResolving}
+              title={isAgentRunning ? 'Cannot rebase while agent is running' : isConflictResolving ? 'Conflict resolution in progress' : undefined}
               className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
             >
               Rebase onto {baseBranch}
@@ -92,7 +96,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
               : 'Rebase failed'}
           </div>
         )}
-        {hasConflicts && (
+        {hasConflicts && !isConflictFailed && (
           <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
             <span>Conflicting files:</span>
             <ul className="mt-1 ml-3 list-disc">
@@ -100,6 +104,11 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
                 <li key={f} className="font-mono">{f}</li>
               ))}
             </ul>
+          </div>
+        )}
+        {isConflictFailed && (
+          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            <span>Conflict resolution failed{rebaseConflict?.error ? `: ${rebaseConflict.error}` : ''}</span>
           </div>
         )}
       </div>
