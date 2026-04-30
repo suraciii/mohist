@@ -302,7 +302,16 @@ export function buildAutoFixPrompt(
   const instruction = loadFile(AUTO_FIX_PROMPT_PATH);
 
   const contextFiles: Array<{ path: string; desc: string }> = [];
+  const proposalPath = path.join(changeDir, 'proposal.md');
+  const designPath = path.join(changeDir, 'design.md');
   const specsDir = path.join(changeDir, 'specs');
+
+  if (fs.existsSync(proposalPath)) {
+    contextFiles.push({ path: proposalPath, desc: 'Proposal — understand WHY these changes were needed' });
+  }
+  if (fs.existsSync(designPath)) {
+    contextFiles.push({ path: designPath, desc: 'Design — understand HOW the implementation was approached' });
+  }
   if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
     const specEntries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
     for (const entry of specEntries) {
@@ -368,11 +377,15 @@ export function buildExplorePrompt(
   }
 
   const contextFiles: Array<{ path: string; desc: string }> = [];
+  const proposalPath = path.join(changeDir, 'proposal.md');
   const designPath = path.join(changeDir, 'design.md');
   const specsDir = path.join(changeDir, 'specs');
 
+  if (fs.existsSync(proposalPath)) {
+    contextFiles.push({ path: proposalPath, desc: 'Existing proposal — understand the scope and motivation' });
+  }
   if (fs.existsSync(designPath)) {
-    contextFiles.push({ path: designPath, desc: 'Existing design document' });
+    contextFiles.push({ path: designPath, desc: 'Existing design — understand the implementation approach' });
   }
   if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
     const specFiles = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' })
@@ -403,7 +416,16 @@ export function buildReVerifyPrompt(
   const instruction = loadFile(RE_VERIFY_PROMPT_PATH);
 
   const contextFiles: Array<{ path: string; desc: string }> = [];
+  const proposalPath = path.join(changeDir, 'proposal.md');
+  const designPath = path.join(changeDir, 'design.md');
   const specsDir = path.join(changeDir, 'specs');
+
+  if (fs.existsSync(proposalPath)) {
+    contextFiles.push({ path: proposalPath, desc: 'Proposal — understand WHY these changes were needed' });
+  }
+  if (fs.existsSync(designPath)) {
+    contextFiles.push({ path: designPath, desc: 'Design — understand HOW the implementation was approached' });
+  }
   if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
     const specEntries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
     for (const entry of specEntries) {
