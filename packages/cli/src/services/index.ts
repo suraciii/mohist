@@ -11,3 +11,4 @@ export { ExploreAcpService } from './explore-acp-service';
 export type { ExploreAcpServiceOptions, ExploreResult } from './explore-acp-service';
 export { OpencodeDiscoveryService, getOpencodeDiscoveryService } from './opencode-discovery-service';
 export { SchedulerService, type SkillRunner } from './scheduler-service';
+export { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
