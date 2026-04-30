@@ -183,11 +183,14 @@
         "T-004",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "从 GET /api/config/agent-runtime 获取所有初始值（timeout/stageTimeout/taskTimeout/maxConcurrent/maxGracePeriods/pollInterval）。dirty state 用 localValues vs savedValues 浅比较。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        188101
+      ]
     },
     {
       "id": "T-007",
