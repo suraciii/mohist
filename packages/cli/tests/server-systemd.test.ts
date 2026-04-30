@@ -163,7 +163,7 @@ describe('server-systemd', () => {
   describe('getSystemdStatus', () => {
     it('should return status with activeState and mainPID from systemctl show output', () => {
       mockExec.mockReturnValue(
-        'Loaded=loaded (/home/user/.config/systemd/user/mohist.service; enabled)\n' +
+        'LoadState=loaded\n' +
           'ActiveState=active\n' +
           'MainPID=12345\n',
       );
@@ -208,7 +208,8 @@ describe('server-systemd', () => {
 
     it('should return unknown activeState when ActiveState line is missing', () => {
       mockExec.mockReturnValue(
-        'Loaded=loaded (/home/user/.config/systemd/user/mohist.service)\n' +
+        'LoadState=loaded\n' +
+          'Loaded=loaded (/home/user/.config/systemd/user/mohist.service)\n' +
           'MainPID=0\n',
       );
 

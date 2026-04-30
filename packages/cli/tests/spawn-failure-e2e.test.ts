@@ -76,7 +76,7 @@ describe('End-to-end spawn failure rollback', () => {
 
     const updated = issueRepo.findById(issue.id);
     expect(updated?.status).toBe(IssueStatus.Blocked);
-    expect(updated?.stage).toBe(Stage.Draft);
+    expect(updated?.stage).toBe(Stage.Backlog);
     expect(activeAgents.has(issue.id)).toBe(false);
     expect(agentErrorEvents.length).toBe(1);
     expect(agentErrorEvents[0].issueId).toBe(issue.id);

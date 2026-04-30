@@ -217,7 +217,7 @@ describe('IssueRepo', () => {
       expect(issue.number).toBe(1);
       expect(issue.title).toBe('Test Issue');
       expect(issue.body).toBe('Test body');
-      expect(issue.stage).toBe(Stage.Draft);
+      expect(issue.stage).toBe(Stage.Backlog);
       expect(issue.status).toBe(IssueStatus.Active);
     });
   });
@@ -237,11 +237,11 @@ describe('IssueRepo', () => {
 
   describe('findByStage', () => {
     it('should find issues by stage', () => {
-      repo.create({ number: 1, projectId, title: 'Draft 1' });
-      repo.create({ number: 2, projectId, title: 'Draft 2' });
+      repo.create({ number: 1, projectId, title: 'Backlog 1' });
+      repo.create({ number: 2, projectId, title: 'Backlog 2' });
       
-      const draftIssues = repo.findByStage(projectId, Stage.Draft);
-      expect(draftIssues).toHaveLength(2);
+      const backlogIssues = repo.findByStage(projectId, Stage.Backlog);
+      expect(backlogIssues).toHaveLength(2);
     });
   });
 
