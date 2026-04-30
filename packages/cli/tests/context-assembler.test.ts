@@ -272,7 +272,7 @@ describe('context-assembler', () => {
       expect(result.fullPrompt).toContain('</spec>');
     });
 
-    it('should include <contract> with commit as first item', () => {
+    it('should include <contract> with commit instruction', () => {
       const result = buildTaskContext({
         change,
         task: sampleTask,
@@ -280,9 +280,22 @@ describe('context-assembler', () => {
       });
 
       expect(result.fullPrompt).toContain('<contract>');
-      expect(result.fullPrompt).toContain('git add -A');
-      expect(result.fullPrompt).toContain('git commit -m "T-003:');
+      expect(result.fullPrompt).toContain('stage and commit');
+      expect(result.fullPrompt).toContain('T-003:');
       expect(result.fullPrompt).toContain('</contract>');
+    });
+
+    it('should include <instruction> with build execution strategy', () => {
+      const result = buildTaskContext({
+        change,
+        task: sampleTask,
+        learnings: [],
+      });
+
+      expect(result.fullPrompt).toContain('<instruction>');
+      expect(result.fullPrompt).toContain('Before You Start');
+      expect(result.fullPrompt).toContain('Read the context-files');
+      expect(result.fullPrompt).toContain('</instruction>');
     });
 
     it('should include <role> with task position info', () => {
