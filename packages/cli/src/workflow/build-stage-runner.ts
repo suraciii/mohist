@@ -157,7 +157,9 @@ export class BuildStageRunner implements StageRunner {
       elapsedMs: duration,
     });
 
-    if (result.completed === 0 && result.total > 0) {
+    const hadCheckpoint = activeCompletedTaskIds.length > 0;
+
+    if (result.completed === 0 && result.total > 0 && !hadCheckpoint) {
       log.warn('Build completed with 0 tasks executed out of total', {
         total: result.total,
         issueNumber: issue.number,
