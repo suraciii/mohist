@@ -56,6 +56,16 @@ In addition to the standard fields above, mohist tasks include:
 
 - `dependsOn`: Array of task IDs this task depends on (must reference lower-priority tasks)
 
+## Tasking Principle
+
+Each task should be the **smallest deliverable unit that is both complete and valuable**:
+- **Smallest**: Do not bundle unrelated concerns into one task
+- **Deliverable**: Produces something that can be independently verified
+- **Complete**: Not a half-finished artifact — the task's output should work on its own
+- **Valuable**: Not so granular that it delivers no independent value (e.g., a single import statement)
+
+When in doubt, ask: "If only this task were completed and nothing else, would it still be a useful, testable increment?"
+
 ## Granularity
 
 A well-sized task:
