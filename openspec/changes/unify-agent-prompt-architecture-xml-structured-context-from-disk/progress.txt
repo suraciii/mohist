@@ -13,3 +13,14 @@ Started: 2026-04-30T13:08:28.754Z
 - Typecheck passes, all 16 tests pass
 - Learnings: Simple interface + function, no external deps needed. XML escaping not required for current use case.
 - Next steps: T-002 (loadAgentConfig), then T-003/T-004 (migrate callers)
+
+
+[2026-04-30T21:13:45Z] T-002 Add loadAgentConfig to workflow-loader
+- Added AgentConfig interface and loadAgentConfig() to workflow-loader.ts
+- Reads agent.context (string) and agent.rules (Record<string, string[]>) from workflow.yaml
+- Returns empty object when agent section absent, no error thrown
+- Checks both workflow.yaml and .mohist/workflow.yaml, prefers root
+- Created packages/cli/tests/workflow-loader-agent-config.test.ts with 11 tests covering: absent config, present config, partial config, empty agent section, .mohist fallback, preference order, non-string context, non-array rules, malformed YAML
+- Typecheck passes, all 11 tests pass
+- Learnings: YAML colons in unquoted values cause parse errors — always quote values with colons in test fixtures.
+- Next steps: T-003 (rewrite buildTaskContext), T-004 (rewrite artifact-prompt)
