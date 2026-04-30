@@ -4,7 +4,7 @@ A review report with `## Result: FAIL` and `## Fix Suggestions`. Auto-fixes have
 
 ## Process
 
-1. Read the context-files (specs) to understand the requirements
+1. Read the context-files to understand the change intent (proposal), approach (design), and requirements (specs)
 2. Identify all changed files (git diff or scan)
 2. Review against all dimensions with concrete evidence:
    - Correctness, Complexity, Test Coverage, Security, Spec Compliance
