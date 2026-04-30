@@ -23,12 +23,28 @@ vi.mock('../src/openspec/detector', () => ({
 }));
 
 vi.mock('fs', () => ({
-  existsSync: vi.fn().mockReturnValue(true),
+  existsSync: vi.fn((p: string) => {
+    if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) return false;
+    return true;
+  }),
   readdirSync: vi.fn().mockReturnValue([]),
   rmSync: vi.fn(),
   mkdirSync: vi.fn(),
   writeFileSync: vi.fn(),
-  readFileSync: vi.fn(),
+  readFileSync: vi.fn((p: string) => {
+    if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) {
+      return '## Result: PASS\nAll checks passed.';
+    }
+    return '{}';
+  }),
+}));
+
+vi.mock('child_process', () => ({
+  execFile: vi.fn((...args: unknown[]) => {
+    const lastArg = args[args.length - 1];
+    const callback = typeof lastArg === 'function' ? lastArg : undefined;
+    if (callback) callback(null, { stdout: '', stderr: '' });
+  }),
 }));
 
 vi.mock('../src/config/config-loader', () => ({
@@ -42,6 +58,30 @@ vi.mock('../src/agents/artifact-prompt', () => ({
   buildSelfReviewPrompt: vi.fn().mockReturnValue('mock-self-review-prompt'),
   buildReviewerPrompt: vi.fn().mockReturnValue('mock-reviewer-prompt'),
   buildReviewSelfCheckPrompt: vi.fn().mockReturnValue('mock-review-self-check-prompt'),
+}));
+
+vi.mock('../src/config/config-loader', () => ({
+  load: vi.fn().mockReturnValue({}),
+  getAgentTimeoutConfig: vi.fn().mockReturnValue({
+    taskTimeout: 600,
+    stageTimeout: 3600,
+    maxGracePeriods: 2,
+  }),
+  clearConfigCache: vi.fn(),
+  getProviderConfig: vi.fn().mockReturnValue({
+    sdk: 'openai-compatible',
+    name: 'test',
+    apiKey: null,
+    baseURL: null,
+    envVars: [],
+    source: 'none',
+  }),
+  getServerConfig: vi.fn().mockReturnValue({ port: 3456, host: '127.0.0.1' }),
+  getLogConfig: vi.fn().mockReturnValue({ level: 'INFO' }),
+  getConfigPath: vi.fn().mockReturnValue('/tmp/test-config.jsonc'),
+  getConfigDir: vi.fn().mockReturnValue('/tmp/test-config-dir'),
+  resolveOpencodeBinPath: vi.fn().mockReturnValue(undefined),
+  writeConfig: vi.fn(),
 }));
 
 import {
@@ -282,11 +322,8 @@ describe('WorkflowEngine done stage sets Completed status', () => {
 });
 
 describe('WorkflowEngine build stage git commit', () => {
-  let mockExecFileAsync: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    mockExecFileAsync = vi.fn();
   });
 
   it('should commit changes after successful build', async () => {
@@ -296,22 +333,6 @@ describe('WorkflowEngine build stage git commit', () => {
     );
 
     const ctrl = createEngine({ issueRepo, eventBus });
-
-    mockExecFileAsync
-      .mockResolvedValueOnce({ stdout: 'M src/foo.ts\nA src/bar.ts\n' })
-      .mockResolvedValueOnce({ stdout: '' })
-      .mockResolvedValueOnce({ stdout: '' });
-
-    vi.doMock('child_process', () => ({
-      execFile: (...args: unknown[]) => {
-        const cmd = args[0] as string;
-        const cmdArgs = args[1] as string[];
-        if (cmd === 'git' && cmdArgs[0] === 'status') {
-          return mockExecFileAsync(...(args as [unknown, unknown, unknown]));
-        }
-        return mockExecFileAsync(...(args as [unknown, unknown, unknown]));
-      },
-    }));
 
     const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
