@@ -83,11 +83,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Design D3: reconnect via polling /api/health. Design D4: System tab separates About concerns from General config. In non-source mode, shows version info but no rebuild button.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        264421
+      ]
     }
   ]
 }
