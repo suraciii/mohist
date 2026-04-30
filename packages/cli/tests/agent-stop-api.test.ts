@@ -136,6 +136,16 @@ describe('Agent Stop API', () => {
     expect(result.started).toBe(true);
   }
 
+  function setAwaitingApproval(issueId: string, stage: Stage = Stage.Plan) {
+    const issueRepo = stateManager.getIssueRepo();
+    issueRepo.setApprovalState(issueId, {
+      stage,
+      status: 'awaiting',
+      output: {},
+      requestedAt: new Date().toISOString(),
+    });
+  }
+
   describe('POST /api/issues/:number/stop', () => {
     it('returns 200 when agent is running and stops it', async () => {
       const issue = issueService.create({ projectId, title: 'Running Issue' });
@@ -226,23 +236,48 @@ describe('Agent Stop API', () => {
   });
 
   describe('POST /api/issues/:number/approve with force', () => {
-    it('stops agent with force=true and does not return 409', async () => {
+    it('stops the running agent with force=true and does not return 409', async () => {
       const issue = issueService.create({ projectId, title: 'Approve Force' });
       const issueRepo = stateManager.getIssueRepo();
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
       issueRepo.updateStage(issue.id, Stage.Plan);
       startAgentOnIssue(issue.id);
-      issueRepo.setApprovalState(issue.id, {
-        stage: Stage.Plan,
-        status: 'awaiting',
-        output: {},
-        requestedAt: new Date().toISOString(),
-      });
+      setAwaitingApproval(issue.id, Stage.Plan);
 
       const response = await request(server)
         .post('/api/issues/1/approve?force=true');
 
       expect(response.status).not.toBe(409);
+      expect(agentRunner.isRunning(issue.id)).toBe(false);
+    });
+
+    it('returns 200 with force=true when no agent running and pending gate exists in DB', async () => {
+      const issue = issueService.create({ projectId, title: 'Approve No Agent' });
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      issueRepo.updateStage(issue.id, Stage.Plan);
+      setAwaitingApproval(issue.id, Stage.Plan);
+
+      const response = await request(server)
+        .post('/api/issues/1/approve?force=true');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+    });
+
+    it('returns 409 without force when agent running', async () => {
+      const issue = issueService.create({ projectId, title: 'Approve No Force' });
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      issueRepo.updateStage(issue.id, Stage.Plan);
+      startAgentOnIssue(issue.id);
+      setAwaitingApproval(issue.id, Stage.Plan);
+
+      const response = await request(server)
+        .post('/api/issues/1/approve');
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toContain('force=true');
     });
   });
 
@@ -253,12 +288,7 @@ describe('Agent Stop API', () => {
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
       issueRepo.updateStage(issue.id, Stage.Plan);
       startAgentOnIssue(issue.id);
-      issueRepo.setApprovalState(issue.id, {
-        stage: Stage.Plan,
-        status: 'awaiting',
-        output: {},
-        requestedAt: new Date().toISOString(),
-      });
+      setAwaitingApproval(issue.id, Stage.Plan);
 
       const response = await request(server)
         .post('/api/issues/1/reject?force=true')
@@ -266,6 +296,22 @@ describe('Agent Stop API', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
+    });
+
+    it('returns 409 without force when agent running', async () => {
+      const issue = issueService.create({ projectId, title: 'Reject No Force' });
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      issueRepo.updateStage(issue.id, Stage.Plan);
+      startAgentOnIssue(issue.id);
+      setAwaitingApproval(issue.id, Stage.Plan);
+
+      const response = await request(server)
+        .post('/api/issues/1/reject')
+        .send({ message: 'Reject attempt' });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toContain('force=true');
     });
   });
 });
