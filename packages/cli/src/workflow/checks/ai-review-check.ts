@@ -87,12 +87,12 @@ export class AiReviewCheck implements Check {
       };
     }
 
-    const fixSuggestions = verdict === 'fail' ? extractFixSuggestions(reviewReport) : [];
+    const fixSuggestions = verdict === 'FAIL' ? extractFixSuggestions(reviewReport) : '';
 
     return {
       name: this.name,
-      status: verdict === 'pass' ? 'pass' : 'fail',
-      message: verdict === 'pass' ? 'AI review passed' : 'AI review failed',
+      status: verdict === 'PASS' ? 'pass' : 'fail',
+      message: verdict === 'PASS' ? 'AI review passed' : 'AI review failed',
       output: {
         verdict,
         reviewReport,

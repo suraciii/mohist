@@ -1,39 +1,82 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { Log } from '../util/log';
 
-export function parseVerdict(content: string): 'pass' | 'fail' | null {
-  const passMatch = content.match(/^##\s*Result:\s*PASS/m);
-  const failMatch = content.match(/^##\s*Result:\s*FAIL/m);
+const log = Log.create({ service: 'workflow-utils' });
 
-  if (failMatch) return 'fail';
-  if (passMatch) return 'pass';
+const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
+const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
+
+export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
+  const match = RESULT_RE.exec(content);
+  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
+  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
+  if (legacyMatch) {
+    log.warn('parseVerdict: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
+    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
+  }
   return null;
 }
 
-export function extractFixSuggestions(content: string): Array<{ file: string; line?: number; description: string }> {
-  const suggestions: Array<{ file: string; line?: number; description: string }> = [];
+export function parseResult(content: string): 'PASS' | 'FAIL' | null {
+  const match = RESULT_RE.exec(content);
+  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
+  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
+  if (legacyMatch) {
+    process.stderr.write('[warn] parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"\n');
+    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
+  }
+  return null;
+}
 
-  const fixSectionMatch = content.match(/^##\s*Fix\s*Suggestions$\s*^((?:(?!\n^##).)+)/m);
+export function extractFixSuggestions(content: string): string {
+  const match = content.match(/^##\s*Fix\s*Suggestions\s*$/im);
+  if (!match) return '';
+  const startIdx = match.index! + match[0].length;
+  return content.slice(startIdx).trim();
+}
 
-  if (!fixSectionMatch) return suggestions;
+export interface ParsedDimension {
+  name: string;
+  status: 'PASS' | 'FAIL';
+  issues?: string[];
+}
 
-  const lines = fixSectionMatch[1].split('\n');
+export function parseDimensions(content: string): ParsedDimension[] {
+  const dimensions: ParsedDimension[] = [];
+  const lines = content.split('\n');
+  let currentDim: ParsedDimension | null = null;
+  let currentIssues: string[] = [];
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const match = trimmed.match(/^\d+\.\s*\[([^\]:]+)(?::(\d+))?\]\s*(.+)/);
-    if (match) {
-      suggestions.push({
-        file: match[1],
-        line: match[2] ? parseInt(match[2], 10) : undefined,
-        description: match[3],
-      });
+    const dimMatch = line.match(/^###\s+(.+?)\s*:\s*(PASS|FAIL)\s*$/);
+    if (dimMatch) {
+      if (currentDim) {
+        if (currentIssues.length > 0) {
+          currentDim.issues = currentIssues;
+        }
+        dimensions.push(currentDim);
+      }
+      currentDim = { name: dimMatch[1], status: dimMatch[2] as 'PASS' | 'FAIL' };
+      currentIssues = [];
+      continue;
+    }
+    if (currentDim && currentDim.status === 'FAIL') {
+      const issueMatch = line.match(/^\s*-\s+(.+)/);
+      if (issueMatch) {
+        currentIssues.push(issueMatch[1].trim());
+      }
     }
   }
 
-  return suggestions;
+  if (currentDim) {
+    if (currentIssues.length > 0) {
+      currentDim.issues = currentIssues;
+    }
+    dimensions.push(currentDim);
+  }
+
+  return dimensions;
 }
 
 export function readReportFile(changeDir: string, filename: string): string | null {
