@@ -180,11 +180,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "AiSettingsSection.tsx:332 is the second frontend breakage point. The DefaultCoderModel selector currently uses useModels() and needs to switch to useOpencodeModels(). Follow same adaptation pattern as T-002.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        200149
+      ]
     }
   ]
 }
