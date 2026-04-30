@@ -86,11 +86,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "WorktreeManager.remove() already exists and handles worktree+branch cleanup. ChangeArtifactsManager.archiveChange()/restoreChange() already exist. The service orchestrates these existing methods. For the date prefix on archived openspec dirs, call archiveChange() then rename to add YYYY-MM-DD- prefix.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        221913
+      ]
     },
     {
       "id": "T-004",
