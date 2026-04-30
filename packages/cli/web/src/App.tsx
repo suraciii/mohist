@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { useIssues, useArchivedIssues, useProjects, useCurrentProject, useAgentStatus } from './hooks/useQueries'
 import { LiveTaskProvider } from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
@@ -98,7 +98,8 @@ function AppContent() {
           <Route path="/issue/:number" element={<IssueDetailPage />} />
           <Route path="/explore" element={<ExploreSessionList />} />
           <Route path="/explore/:id" element={<ExplorePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
+          <Route path="/settings/:section" element={<SettingsPage />} />
           <Route path="/logs" element={<LogsPage />} />
           <Route path="/archived" element={<ArchivedPage />} />
         </Route>
