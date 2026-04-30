@@ -142,7 +142,7 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Mock WorkflowController to simulate long-running pipeline. Use real EventBus and in-memory DB.",
       "attempts": 4,
       "order": 999999,
@@ -176,7 +176,7 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow patterns from existing api-routes.test.ts. Mock AgentRunnerService.stop() to avoid needing real ACP subprocess.",
       "attempts": 1,
       "order": 999999,
