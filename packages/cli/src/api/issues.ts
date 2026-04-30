@@ -6,7 +6,7 @@ import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORI
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
-import type { ConflictResolutionDeps } from '../services';
+import { resolveConflictsViaAgent, type ConflictResolutionDeps } from '../services';
 import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
@@ -42,6 +42,8 @@ export function createIssueRoutes(
   _resolveConflictsDeps?: ConflictResolutionDeps,
 ): Hono {
   const app = new Hono();
+
+  const conflictResolutionInProgress = new Set<string>();
 
   const getCurrentProjectId = (): string | null => {
     return projectService.getCurrentId();
@@ -2060,7 +2062,11 @@ export function createIssueRoutes(
 
   const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Review, Stage.Done];
 
-  async function handleReviewRebase(issue: Issue, project: { name: string; baseBranch: string }, projectId: string, number: number): Promise<boolean | undefined> {
+  async function handleReviewRebase(issue: Issue, project: { name: string; baseBranch: string }, projectId: string, number: number, skipBuildVerify?: boolean): Promise<boolean | undefined> {
+    if (skipBuildVerify) {
+      log.info('Skipping build verification after conflict resolution', { issueNumber: number });
+      return undefined;
+    }
     eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'verifying' });
     try {
       const worktreePath = worktreeManager!.getPath(project.name, issue.number);
@@ -2174,6 +2180,10 @@ export function createIssueRoutes(
         return c.json({ success: false, error: 'Agent is running' } satisfies ApiResponse, 409);
       }
 
+      if (conflictResolutionInProgress.has(issue.id)) {
+        return c.json({ success: false, error: 'Conflict resolution in progress' } satisfies ApiResponse, 409);
+      }
+
       eventBus.emit('rebase_started', { issueId: issue.id, projectId, issueNumber: number });
 
       eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'fetching' });
@@ -2193,21 +2203,129 @@ export function createIssueRoutes(
         project.name,
         issue.number,
         project.baseBranch,
-        { abortOnConflict: true },
+        { abortOnConflict: false },
       );
 
       if (!rebaseResult.success) {
+        if (!_resolveConflictsDeps) {
+          await worktreeManager.abortRebase(project.name, issue.number);
+          eventBus.emit('rebase_conflict', {
+            issueId: issue.id,
+            projectId,
+            issueNumber: number,
+            conflicts: rebaseResult.conflicts,
+          });
+          return c.json({
+            success: false,
+            error: 'Rebase aborted due to conflicts',
+            data: { rebased: false, conflicts: rebaseResult.conflicts, message: 'Rebase aborted due to conflicts (no auto-resolution available)' },
+          } satisfies ApiResponse, 409);
+        }
+
+        const worktreePath = worktreeManager.getPath(project.name, issue.number);
+        if (!worktreePath) {
+          await worktreeManager.abortRebase(project.name, issue.number);
+          return c.json({ success: false, error: 'Worktree path not found' } satisfies ApiResponse, 500);
+        }
+
+        conflictResolutionInProgress.add(issue.id);
+
         eventBus.emit('rebase_conflict', {
           issueId: issue.id,
           projectId,
           issueNumber: number,
           conflicts: rebaseResult.conflicts,
+          status: 'resolving',
         });
+        eventBus.emit('agent_conflict_resolution_started', {
+          issueId: issue.id,
+          projectId,
+          issueNumber: number,
+          conflictFiles: rebaseResult.conflicts,
+        });
+
+        const resolutionIssueId = issue.id;
+        const resolutionProjectId = projectId;
+        const resolutionNumber = number;
+        const resolutionConflicts = rebaseResult.conflicts;
+
+        resolveConflictsViaAgent(
+          _resolveConflictsDeps,
+          resolutionIssueId,
+          resolutionProjectId,
+          worktreePath,
+          resolutionConflicts,
+        )
+          .then(async (result) => {
+            if (!result.success) {
+              await worktreeManager.abortRebase(project.name, resolutionNumber);
+              eventBus.emit('agent_conflict_resolution_failed', {
+                issueId: resolutionIssueId,
+                projectId: resolutionProjectId,
+                issueNumber: resolutionNumber,
+                error: result.error || 'Conflict resolution failed',
+              });
+              eventBus.emit('rebase_conflict', {
+                issueId: resolutionIssueId,
+                projectId: resolutionProjectId,
+                issueNumber: resolutionNumber,
+                conflicts: resolutionConflicts,
+                status: 'failed',
+                error: result.error || 'Conflict resolution failed',
+              });
+              return;
+            }
+
+            eventBus.emit('agent_conflict_resolution_completed', {
+              issueId: resolutionIssueId,
+              projectId: resolutionProjectId,
+              issueNumber: resolutionNumber,
+            });
+
+            const refreshedIssue = issueService.getByNumber(resolutionProjectId, resolutionNumber);
+
+            if (refreshedIssue?.stage === Stage.Review) {
+              await handleReviewRebase(refreshedIssue, project, resolutionProjectId, resolutionNumber, true);
+            }
+
+            eventBus.emit('rebase_progress', { issueId: resolutionIssueId, projectId: resolutionProjectId, issueNumber: resolutionNumber, step: 'completing' });
+            eventBus.emit('rebase_completed', { issueId: resolutionIssueId, projectId: resolutionProjectId, issueNumber: resolutionNumber, rebased: true });
+
+            if (refreshedIssue?.stage === Stage.Plan) {
+              handlePlanRebase(refreshedIssue, project, resolutionProjectId, resolutionNumber);
+            }
+
+            if (refreshedIssue?.stage === Stage.Build) {
+              handleBuildRebase(refreshedIssue, project, resolutionNumber);
+            }
+          })
+          .catch(async (err) => {
+            log.error('Unexpected error in conflict resolution chain', { issueNumber: resolutionNumber, error: err instanceof Error ? err.message : String(err) });
+            try {
+              await worktreeManager.abortRebase(project.name, resolutionNumber);
+            } catch {}
+            eventBus.emit('rebase_conflict', {
+              issueId: resolutionIssueId,
+              projectId: resolutionProjectId,
+              issueNumber: resolutionNumber,
+              conflicts: resolutionConflicts,
+              status: 'failed',
+              error: err instanceof Error ? err.message : 'Unexpected error during conflict resolution',
+            });
+          })
+          .finally(() => {
+            conflictResolutionInProgress.delete(resolutionIssueId);
+          });
+
         return c.json({
-          success: false,
-          error: 'Rebase aborted due to conflicts',
-          data: { rebased: false, conflicts: rebaseResult.conflicts, message: 'Rebase aborted due to conflicts' },
-        } satisfies ApiResponse, 409);
+          success: true,
+          data: {
+            status: 'resolving-conflicts',
+            rebased: false,
+            conflicts: rebaseResult.conflicts,
+            message: 'Rebase has conflicts, auto-resolution in progress',
+          },
+        } satisfies ApiResponse, 202);
       }
 
       let buildPassed: boolean | undefined;
