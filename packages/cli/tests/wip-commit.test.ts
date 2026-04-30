@@ -264,7 +264,7 @@ describe('buildTaskContext with WIP resume', () => {
     expect(result.fullPrompt).not.toContain('[WIP Resume]');
   });
 
-  it('should include [WIP Resume] section before [Previous Attempt Failed] in retry', () => {
+  it('should include [WIP Resume] after [Previous Attempt Failed] within <task>', () => {
     const wipContext = 'Some WIP context';
 
     const result = buildTaskContext({
@@ -280,6 +280,6 @@ describe('buildTaskContext with WIP resume', () => {
     const retryIndex = result.fullPrompt.indexOf('[Previous Attempt Failed]');
     expect(wipIndex).toBeGreaterThan(-1);
     expect(retryIndex).toBeGreaterThan(-1);
-    expect(wipIndex).toBeLessThan(retryIndex);
+    expect(retryIndex).toBeLessThan(wipIndex);
   });
 });

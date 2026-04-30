@@ -61,7 +61,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/openspec/context-assembler.ts",
       "dependsOn": ["T-001", "T-002"],
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

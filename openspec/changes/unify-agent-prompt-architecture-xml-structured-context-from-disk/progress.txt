@@ -24,3 +24,17 @@ Started: 2026-04-30T13:08:28.754Z
 - Typecheck passes, all 11 tests pass
 - Learnings: YAML colons in unquoted values cause parse errors — always quote values with colons in test fixtures.
 - Next steps: T-003 (rewrite buildTaskContext), T-004 (rewrite artifact-prompt)
+
+[2026-04-30T21:20:00Z] T-003: Rewrite buildTaskContext to use formatAgentPrompt
+- Rewrote buildTaskContext to use formatAgentPrompt from agent-prompt-schema.ts
+- Proposal and design are now <context-files> references (not inlined)
+- Spec content stays inline in <spec> tags
+- Learnings are listed as <context-files> file references via new listLearningFiles()
+- Added <role> with task position info (e.g. "task T-003 of 5 for issue #42")
+- Added <contract> with commit instructions as first item
+- WIP resume and retry failure reason inlined within <task>
+- Removed old formatLearningsForPrompt, formatTaskForPrompt, formatRetryContext exports
+- Added formatTaskBlock (replacement for formatTaskForPrompt)
+- Added totalTasks and issueNumber to BuildContextOptions and ContextAssembler.assembleTaskContext
+- All 37 tests pass, typecheck passes
+- Next: T-004 (artifact-prompt.ts rewrite)
