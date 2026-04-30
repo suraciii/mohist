@@ -79,7 +79,10 @@
       "notes": "Extract round loop from Plan stage (lines 138-232) and review ACP pattern (lines 764-834) in the 908-line file",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        251428
+      ]
     },
     {
       "id": "T-004",
