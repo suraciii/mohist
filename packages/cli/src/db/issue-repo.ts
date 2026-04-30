@@ -72,6 +72,8 @@ export interface IssueQueryOptions {
   stage?: Stage;
   status?: IssueStatus;
   priority?: Priority;
+  includeArchived?: boolean;
+  archivedOnly?: boolean;
 }
 
 export class IssueRepo {
@@ -140,6 +142,12 @@ export class IssueRepo {
       sql += ' AND priority = ?';
       params.push(options.priority);
     }
+
+    if (options.archivedOnly) {
+      sql += ' AND archived_at IS NOT NULL';
+    } else if (!options.includeArchived) {
+      sql += ' AND archived_at IS NULL';
+    }
     
     sql += ' ORDER BY priority ASC, number ASC';
     
@@ -157,6 +165,28 @@ export class IssueRepo {
 
   findActive(projectId: string): Issue[] {
     return this.findAll({ projectId, status: IssueStatus.Active });
+  }
+
+  archive(issueId: string): Issue | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE issues SET archived_at = ?, updated_at = ? WHERE id = ?',
+      [now, now, issueId]
+    );
+    return this.findById(issueId);
+  }
+
+  unarchive(issueId: string): Issue | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE issues SET archived_at = NULL, updated_at = ? WHERE id = ?',
+      [now, issueId]
+    );
+    return this.findById(issueId);
+  }
+
+  findArchived(projectId: string): Issue[] {
+    return this.findAll({ projectId, archivedOnly: true });
   }
 
   updateStage(issueId: string, stage: Stage): Issue | null {
