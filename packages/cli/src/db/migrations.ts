@@ -605,18 +605,32 @@ function migrateToVersion15(db: DatabaseManager): void {
   });
 }
 
+const CREATE_AGENT_SKILL_SCHEDULES_TABLE = `
+CREATE TABLE IF NOT EXISTS agent_skill_schedules (
+  id              TEXT PRIMARY KEY,
+  skill_id        TEXT NOT NULL REFERENCES agent_skills(id) ON DELETE CASCADE,
+  schedule_type   TEXT NOT NULL,
+  schedule_value  TEXT NOT NULL,
+  anchor          TEXT,
+  next_run_at     TEXT NOT NULL,
+  last_run_at     TEXT,
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+`;
+
+const CREATE_AGENT_SKILL_SCHEDULES_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_agent_skill_schedules_skill_id ON agent_skill_schedules(skill_id);',
+  'CREATE INDEX IF NOT EXISTS idx_agent_skill_schedules_enabled_next_run ON agent_skill_schedules(enabled, next_run_at);',
+];
+
 function migrateToVersion16(db: DatabaseManager): void {
   db.transaction(() => {
-    const tableInfo = db.all<{ name: string }>(
-      "PRAGMA table_info(issues)"
-    );
-    const hasArchivedAt = tableInfo.some(col => col.name === 'archived_at');
-
-    if (!hasArchivedAt) {
-      db.exec("ALTER TABLE issues ADD COLUMN archived_at TEXT DEFAULT NULL");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_issues_archived ON issues(archived_at)");
+    db.exec(CREATE_AGENT_SKILL_SCHEDULES_TABLE);
+    for (const indexSql of CREATE_AGENT_SKILL_SCHEDULES_INDEXES) {
+      db.exec(indexSql);
     }
-
     setSchemaVersion(db, 16);
   });
 }
