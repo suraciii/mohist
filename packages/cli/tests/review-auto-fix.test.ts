@@ -31,6 +31,12 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(),
 }));
 
+vi.mock('../src/config/config-loader', () => ({
+  load: vi.fn().mockReturnValue({}),
+  clearConfigCache: vi.fn(),
+  getAgentTimeoutConfig: vi.fn().mockReturnValue({ taskTimeout: 600, stageTimeout: 3600, maxGracePeriods: 2 }),
+}));
+
 vi.mock('../src/agents/artifact-prompt', () => ({
   buildArtifactPrompt: vi.fn().mockReturnValue('mock-prompt'),
   buildSelfReviewPrompt: vi.fn().mockReturnValue('mock-self-review-prompt'),

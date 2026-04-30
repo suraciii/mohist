@@ -193,10 +193,10 @@ describe('IssueService', () => {
       expect(issue2.number).toBe(2);
     });
 
-    it('should create issue in draft stage', () => {
+    it('should create issue in backlog stage', () => {
       const issue = service.create({ projectId, title: 'Test' });
 
-      expect(issue.stage).toBe(Stage.Draft);
+      expect(issue.stage).toBe(Stage.Backlog);
       expect(issue.status).toBe(IssueStatus.Active);
     });
   });
@@ -271,10 +271,10 @@ describe('IssueService', () => {
       service.transitionToStageByNumber(projectId, 1, Stage.Plan);
 
       const plan = service.getByStage(projectId, Stage.Plan);
-      const drafts = service.getByStage(projectId, Stage.Draft);
+      const backlog = service.getByStage(projectId, Stage.Backlog);
 
       expect(plan).toHaveLength(1);
-      expect(drafts).toHaveLength(1);
+      expect(backlog).toHaveLength(1);
     });
   });
 });

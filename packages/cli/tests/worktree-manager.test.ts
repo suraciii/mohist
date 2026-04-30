@@ -171,7 +171,7 @@ describe('WorktreeManager', () => {
       expect(result).toBe(true);
       expect(execFileMock).toHaveBeenCalledWith(
         'git',
-        ['merge-base', '--is-ancestor', 'origin/main', 'mo/issue-1'],
+        ['merge-base', '--is-ancestor', 'main', 'mo/issue-1'],
         { cwd: tmpDir },
         expect.any(Function),
       );
@@ -224,8 +224,7 @@ describe('WorktreeManager', () => {
         if (
           cmd === 'git' &&
           args?.[0] === 'rebase' &&
-          typeof args?.[1] === 'string' &&
-          args[1].startsWith('origin/')
+          typeof args?.[1] === 'string'
         ) {
           if (rebaseConflicts) {
             cb?.(new Error('CONFLICT') as any, mockStdout(''), '');

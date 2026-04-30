@@ -109,10 +109,10 @@ describe('POST /issues/:number/start resilience', () => {
     expect(response.body.error).toContain('git fetch failed');
 
     const updatedIssue = issueService.getByNumber(projectId, issue.number);
-    expect(updatedIssue?.stage).toBe(Stage.Draft);
+    expect(updatedIssue?.stage).toBe(Stage.Backlog);
   });
 
-  it('should keep stage as Draft when agentRunner is not configured', async () => {
+  it('should keep stage as Backlog when agentRunner is not configured', async () => {
     const issue = await setupProjectAndIssue();
     const worktreeManager = createMockWorktreeManager();
 
@@ -130,12 +130,12 @@ describe('POST /issues/:number/start resilience', () => {
     expect(response.body.error).toContain('AgentRunnerService not configured');
 
     const updatedIssue = issueService.getByNumber(projectId, issue.number);
-    expect(updatedIssue?.stage).toBe(Stage.Draft);
+    expect(updatedIssue?.stage).toBe(Stage.Backlog);
 
     expect(worktreeManager.create).not.toHaveBeenCalled();
   });
 
-  it('should rollback stage to Draft when error occurs after stage transition', async () => {
+    it('should rollback stage to Backlog when error occurs after stage transition', async () => {
     const issue = await setupProjectAndIssue();
     const worktreeManager = createMockWorktreeManager();
 
@@ -160,7 +160,7 @@ describe('POST /issues/:number/start resilience', () => {
     expect(response.body.error).toContain('agent start unexpected failure');
 
     const updatedIssue = issueService.getByNumber(projectId, issue.number);
-    expect(updatedIssue?.stage).toBe(Stage.Draft);
+    expect(updatedIssue?.stage).toBe(Stage.Backlog);
 
     stderrSpy.mockRestore();
   });
@@ -199,7 +199,7 @@ describe('POST /issues/:number/start resilience', () => {
     expect(response.body.error).toContain('agent start failed');
 
     expect(stderrSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to rollback stage to Draft')
+      expect.stringContaining('Failed to rollback stage to Backlog')
     );
 
     stderrSpy.mockRestore();
