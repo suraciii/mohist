@@ -247,11 +247,14 @@
         "T-006",
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "这是收尾任务，确保所有 section 组件正确集成到 SettingsPage 中，无残留旧代码。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        157588
+      ]
     }
   ]
 }
