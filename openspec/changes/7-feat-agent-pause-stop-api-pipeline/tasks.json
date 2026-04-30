@@ -112,11 +112,14 @@
         "T-001",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Extract a helper like `ensureAgentStopped(issueId, force)` to avoid duplicating the stop-then-check logic across four handlers.",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        79892
+      ]
     },
     {
       "id": "T-005",
