@@ -47,11 +47,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Extract from lines 91-103 (Plan), 515-524 (Build), and Review equivalent in workflow-controller.ts",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        79239
+      ]
     },
     {
       "id": "T-003",
