@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add issue archive lifecycle: archived_at field, archive/unarchive API, resource cleanup, CLI commands",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/db/migrations.ts, packages/cli/src/types/index.ts, packages/cli/src/db/issue-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow existing pattern: SCHEMA_VERSION bump, migrateToVersionN with PRAGMA table_info check, transaction wrapping. Current version is 15."
+      "passes": true,
+      "notes": "Follow existing pattern: SCHEMA_VERSION bump, migrateToVersionN with PRAGMA table_info check, transaction wrapping. Current version is 15.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        200776
+      ]
     },
     {
       "id": "T-002",
@@ -42,9 +47,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/db/issue-repo.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "findArchived can delegate to findAll({ archivedOnly: true, projectId }). The findAll SQL needs conditional WHERE clauses for archived_at."
+      "notes": "findArchived can delegate to findAll({ archivedOnly: true, projectId }). The findAll SQL needs conditional WHERE clauses for archived_at.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -70,9 +80,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/issue-service.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "WorktreeManager.remove() already exists and handles worktree+branch cleanup. ChangeArtifactsManager.archiveChange()/restoreChange() already exist. The service orchestrates these existing methods. For the date prefix on archived openspec dirs, call archiveChange() then rename to add YYYY-MM-DD- prefix."
+      "notes": "WorktreeManager.remove() already exists and handles worktree+branch cleanup. ChangeArtifactsManager.archiveChange()/restoreChange() already exist. The service orchestrates these existing methods. For the date prefix on archived openspec dirs, call archiveChange() then rename to add YYYY-MM-DD- prefix.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -98,9 +113,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Follow existing route pattern using createIssueRoutes(). The archive-completed route must be registered BEFORE /:number routes to avoid path collision. Use ApiResponse<T> wrapper."
+      "notes": "Follow existing route pattern using createIssueRoutes(). The archive-completed route must be registered BEFORE /:number routes to avoid path collision. Use ApiResponse<T> wrapper.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -122,9 +142,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/issue.ts",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Follow existing command pattern with setupIssueCommands(program). All commands use shared apiClient from ../api-client. Archive command with --all-completed should NOT require a number argument."
+      "notes": "Follow existing command pattern with setupIssueCommands(program). All commands use shared apiClient from ../api-client. Archive command with --all-completed should NOT require a number argument.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -146,9 +171,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/issue-archive.test.ts",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Follow existing test patterns in packages/cli/tests/. Use the in-memory SQLite setup pattern from database.test.ts for repo tests. API tests follow api-routes.test.ts pattern."
+      "notes": "Follow existing test patterns in packages/cli/tests/. Use the in-memory SQLite setup pattern from database.test.ts for repo tests. API tests follow api-routes.test.ts pattern.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
