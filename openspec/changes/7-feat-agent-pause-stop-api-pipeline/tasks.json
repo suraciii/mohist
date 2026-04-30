@@ -22,7 +22,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "The AbortSignal must propagate through WorkflowController to createAcpConnection so the ACP prompt() call is interrupted. Add signal?: AbortSignal to WorkflowControllerOptions and AcpConnectionOptions.",
       "attempts": 1,
       "order": 999999,
@@ -49,7 +49,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "The AcpConnection already has connection.cancel() logic for timeouts (line 382, 766). Reuse the same pattern for abort signal.",
       "attempts": 1,
       "order": 999999,
@@ -75,7 +75,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Follow the same pattern as the close handler — check project, check issue, check agent, then act.",
       "attempts": 1,
       "order": 999999,
@@ -103,7 +103,7 @@
         "T-001",
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Extract a helper like `ensureAgentStopped(issueId, force)` to avoid duplicating the stop-then-check logic across four handlers.",
       "attempts": 1,
       "order": 999999,
@@ -130,7 +130,7 @@
         "T-001",
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Mock WorkflowController to simulate long-running pipeline. Use real EventBus and in-memory DB.",
       "attempts": 4,
       "order": 999999,
@@ -164,7 +164,7 @@
         "T-003",
         "T-004"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Follow patterns from existing api-routes.test.ts. Mock AgentRunnerService.stop() to avoid needing real ACP subprocess.",
       "attempts": 1,
       "order": 999999,
