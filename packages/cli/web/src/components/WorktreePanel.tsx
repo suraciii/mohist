@@ -26,7 +26,7 @@ const STEP_LABELS: Record<RebaseStep, string> = {
 
 export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProps) {
   const queryClient = useQueryClient()
-  const { data: status, isLoading } = useWorktreeStatus(issueNumber)
+  const { data: status, isLoading } = useWorktreeStatus(issueNumber, true)
   const [rebaseResult, setRebaseResult] = useState<RebaseResult | null>(null)
   const [rebaseStep, setRebaseStep] = useState<RebaseStep | null>(null)
 
@@ -81,10 +81,10 @@ export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProp
   if (!status?.exists) return null
   if (isLoading) return null
 
-  const isBehind = status.behind > 0
-  const isAhead = status.ahead > 0
+  const isBehind = (status.behind ?? 0) > 0
+  const isAhead = (status.ahead ?? 0) > 0
   const isUpToDate = !isBehind && !isAhead
-  const isRebasing = rebaseMutation.isPending || status.isRebaseInProgress
+  const isRebasing = rebaseMutation.isPending || status.rebaseInProgress === true
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">

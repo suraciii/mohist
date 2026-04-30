@@ -135,6 +135,29 @@ export function IssueDetailPage() {
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
   const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
+  const [rebaseResult, setRebaseResult] = useState<{
+    type: 'success' | 'error' | 'info'
+    message: string
+    conflicts?: string[]
+  } | null>(null)
+
+  const rebaseMutation = useMutation({
+    mutationFn: () => api.rebaseIssue(issueNumber),
+    onSuccess: (data) => {
+      if (data.conflicts && data.conflicts.length > 0) {
+        setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: data.conflicts })
+      } else if (data.rebased) {
+        setRebaseResult({ type: 'success', message: 'Rebase successful' })
+      } else {
+        setRebaseResult({ type: 'info', message: 'Already up to date' })
+      }
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+    },
+    onError: (error: Error) => {
+      setRebaseResult({ type: 'error', message: error.message })
+    },
+  })
 
   useEffect(() => {
     if (!forceStopConfirming) return

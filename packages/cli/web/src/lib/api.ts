@@ -241,4 +241,25 @@ export const api = {
       conflictingFiles?: string[]
     }>(`/issues/${number}/worktree-status`),
 
+  archiveIssue: (number: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/archive`, { method: 'POST' }),
+
+  unarchiveIssue: (number: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/unarchive`, { method: 'POST' }),
+
+  archiveAllCompleted: () =>
+    request<{ archived: number; message: string }>('/issues/archive-completed', { method: 'POST' }),
+
+  getOpencodeModel: () =>
+    request<{ model: string | null }>('/opencode/model'),
+
+  updateOpencodeModel: (model: string | null) =>
+    request<{ model: string | null }>('/opencode/model', {
+      method: 'PUT',
+      body: JSON.stringify({ model }),
+    }),
+
+  getOpencodeModels: () =>
+    request<string[]>('/opencode/models'),
+
 }

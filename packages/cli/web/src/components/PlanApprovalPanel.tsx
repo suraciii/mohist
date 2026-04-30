@@ -33,7 +33,7 @@ function ArtifactItem({ artifact }: { artifact: ApprovalArtifact }) {
         <svg className="h-4 w-4 text-gray-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
         </svg>
-        <span className="text-gray-700 font-medium truncate">{artifact.name}</span>
+        <span className="text-gray-700 font-medium truncate">{artifact.path}</span>
         <span className="ml-auto text-xs text-gray-400 font-mono truncate">{artifact.path}</span>
       </button>
       {expanded && hasContent && (
@@ -101,7 +101,7 @@ export function PlanApprovalPanel({ issueNumber, output }: PlanApprovalPanelProp
     ? output.artifacts
     : null
 
-  const selfReviewNotes = output.selfReviewNotes?.trim() || null
+  const selfReviewNotes = typeof output.selfReviewNotes === 'string' && output.selfReviewNotes.trim() ? output.selfReviewNotes : null
 
   const handleSendNotes = () => {
     if (!notesText.trim()) return

@@ -138,7 +138,7 @@ function DefaultCoderModelSelector() {
   const currentModel = modelData?.model ?? null
 
   const filteredModels = searchQuery.trim() && models
-    ? fuzzysort.go(searchQuery, models, { keys: [s => s] }).map(r => r.obj)
+    ? fuzzysort.go(searchQuery, models).map(r => r.target)
     : models ?? []
 
   const displayedModels = searchQuery.trim() ? filteredModels : (models ?? [])

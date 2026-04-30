@@ -101,10 +101,12 @@ async function branchExists(projectPath: string, branch: string): Promise<boolea
 
 export interface WorktreeStatus {
   exists: boolean;
-  branch?: string;
+  branch: string;
   baseBranch?: string;
-  ahead?: number;
-  behind?: number;
+  ahead: number;
+  behind: number;
+  canFastForward: boolean;
+  isRebaseInProgress: boolean;
   rebaseInProgress?: boolean;
   conflictingFiles?: string[];
 }
@@ -112,15 +114,6 @@ export interface WorktreeStatus {
 export interface RebaseResult {
   success: boolean;
   conflicts: string[];
-}
-
-export interface WorktreeStatus {
-  exists: boolean;
-  branch: string;
-  ahead: number;
-  behind: number;
-  canFastForward: boolean;
-  isRebaseInProgress: boolean;
 }
 
 export class WorktreeManager {
@@ -414,6 +407,7 @@ export class WorktreeManager {
     const empty: WorktreeStatus = {
       exists: false,
       branch: '',
+      baseBranch,
       ahead: 0,
       behind: 0,
       canFastForward: false,
@@ -426,6 +420,12 @@ export class WorktreeManager {
 
     const branch = getBranchName(issueNumber);
     const rebaseInProgress = await this.isRebaseInProgress(projectName, issueNumber);
+
+    let conflictingFiles: string[] | undefined;
+    if (rebaseInProgress) {
+      const worktreePath = getWorktreePath(projectName, issueNumber);
+      conflictingFiles = await this.getConflictingFiles(worktreePath);
+    }
 
     try {
       const { stdout } = await execFileAsync(
@@ -440,19 +440,25 @@ export class WorktreeManager {
       return {
         exists: true,
         branch,
+        baseBranch,
         ahead,
         behind,
         canFastForward: behind === 0,
         isRebaseInProgress: rebaseInProgress,
+        rebaseInProgress,
+        conflictingFiles,
       };
     } catch {
       return {
         exists: true,
         branch,
+        baseBranch,
         ahead: 0,
         behind: 0,
         canFastForward: false,
         isRebaseInProgress: rebaseInProgress,
+        rebaseInProgress,
+        conflictingFiles,
       };
     }
   }
@@ -662,55 +668,6 @@ export class WorktreeManager {
   getPath(projectName: string, issueNumber: number): string | null {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     return fs.existsSync(worktreePath) ? worktreePath : null;
-  }
-
-  async getWorktreeStatus(
-    projectPath: string,
-    projectName: string,
-    issueNumber: number,
-    baseBranch: string = 'main'
-  ): Promise<WorktreeStatus> {
-    if (!this.exists(projectName, issueNumber)) {
-      return { exists: false };
-    }
-
-    const branch = getBranchName(issueNumber);
-    const worktreePath = getWorktreePath(projectName, issueNumber);
-
-    let ahead = 0;
-    let behind = 0;
-    try {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['rev-list', '--left-right', '--count', `${baseBranch}...${branch}`],
-        { cwd: projectPath }
-      );
-      const parts = stdout.trim().split(/\s+/);
-      behind = parseInt(parts[0], 10) || 0;
-      ahead = parseInt(parts[1], 10) || 0;
-    } catch (err) {
-      log.warn('Failed to get ahead/behind counts', {
-        issueNumber,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    const rebaseInProgress = await this.isRebaseInProgress(projectName, issueNumber);
-
-    let conflictingFiles: string[] | undefined;
-    if (rebaseInProgress) {
-      conflictingFiles = await this.getConflictingFiles(worktreePath);
-    }
-
-    return {
-      exists: true,
-      branch,
-      baseBranch,
-      ahead,
-      behind,
-      rebaseInProgress,
-      conflictingFiles,
-    };
   }
 
   exists(projectName: string, issueNumber: number): boolean {

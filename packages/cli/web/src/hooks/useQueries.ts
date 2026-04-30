@@ -333,6 +333,52 @@ export function useWorktreeStatus(issueNumber: number, enabled: boolean) {
   })
 }
 
+export function useArchivedIssues(params?: { projectId?: string }) {
+  return useQuery({
+    queryKey: ['archived-issues', params],
+    queryFn: async () => {
+      const issues = await api.getIssues({ ...params })
+      return issues.filter(i => i.archivedAt != null)
+    },
+    enabled: !!params?.projectId,
+  })
+}
+
+export function useUnarchiveIssue() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (number: number) => api.unarchiveIssue(number),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+    },
+  })
+}
+
+export function useOpencodeModel() {
+  return useQuery<{ model: string | null }>({
+    queryKey: ['opencode-model'],
+    queryFn: () => api.getOpencodeModel(),
+  })
+}
+
+export function useUpdateOpencodeModel() {
+  const queryClient = useQueryClient()
+  return useMutation<{ model: string | null }, Error, string | null>({
+    mutationFn: (model) => api.updateOpencodeModel(model),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['opencode-model'] })
+    },
+  })
+}
+
+export function useOpencodeModels() {
+  return useQuery<string[]>({
+    queryKey: ['opencode-models'],
+    queryFn: () => api.getOpencodeModels(),
+  })
+}
+
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) return '********'
   return apiKey.slice(0, 4) + '*'.repeat(apiKey.length - 8) + apiKey.slice(-4)

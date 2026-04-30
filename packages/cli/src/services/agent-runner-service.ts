@@ -111,6 +111,28 @@ export class AgentRunnerService {
     return this.llmConfig;
   }
 
+  forceStop(issueId: string): { stopped: boolean } {
+    const agent = this.activeAgents.get(issueId);
+    if (!agent) return { stopped: false };
+
+    const { issueNumber, abortController } = agent;
+    log.info('Force stopping agent', { issueId, issueNumber });
+    abortController.abort();
+
+    this.activeAgents.delete(issueId);
+    this.pendingGates.delete(issueNumber);
+    this.waitingQuestions.delete(issueId);
+
+    this.eventBus.emit('agent_stopped', {
+      issueId,
+      projectId: agent.projectId,
+      issueNumber,
+      reason: 'force_stop',
+    });
+
+    return { stopped: true };
+  }
+
   private detectRecoverableIssues(): RecoverableIssue[] {
     if (!this.issueRepo) return [];
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active });
@@ -307,7 +329,7 @@ export class AgentRunnerService {
       }
     }
 
-    this.eventBus.emit('agent_stopped', { issueId, projectId, issueNumber });
+    this.eventBus.emit('agent_stopped', { issueId, projectId, issueNumber, reason: 'user_stop' });
     log.info('Agent stopped', { issueId, issueNumber });
 
     return true;

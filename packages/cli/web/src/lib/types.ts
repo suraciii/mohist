@@ -43,6 +43,7 @@ export interface Issue {
   priority?: string | null
   model?: string | null
   archivedAt?: string
+  blockedReason?: string
 }
 
 export interface Project {
@@ -144,6 +145,16 @@ export type PlanSessionUpdateEvent = {
   coderSessionId?: string
 }
 
+export type PlanRoundCompleteEvent = {
+  issueId: string
+  projectId: string
+  roundType: string
+  roundLabel?: string
+  roundIndex: number
+  duration: number
+  verdict?: string
+}
+
 export type AgentDetailEventMap = {
   agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number }
   main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number }
@@ -153,6 +164,7 @@ export type AgentDetailEventMap = {
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number }
   plan_round_start: PlanRoundStartEvent
   plan_session_update: PlanSessionUpdateEvent
+  plan_round_complete: PlanRoundCompleteEvent
   coder_recovery_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
   coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string }
   coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number }
@@ -165,6 +177,7 @@ export type EventMap = {
   agent_completed: { issueId: string; projectId: string }
   agent_paused: { issueId: string; projectId: string }
   agent_error: { issueId: string; projectId: string; error: string }
+  agent_blocked: { issueId: string; projectId: string; issueNumber: number; blockedReason: string; retryCount: number }
   approval_requested: { issueId: string; projectId: string; stage: string }
   question_asked: { issueId: string; projectId: string; questionId: string; question: string }
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
@@ -176,7 +189,7 @@ export type EventMap = {
   rebase_started: { issueId: string; projectId: string; issueNumber: number }
   rebase_progress: { issueId: string; projectId: string; issueNumber: number; step: 'fetching' | 'checking' | 'rebasing' | 'verifying' }
   rebase_completed: { issueId: string; projectId: string; issueNumber: number; rebased: boolean }
-  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[] }
+  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[]; status?: string }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap
@@ -341,9 +354,28 @@ export interface BuildStatus {
   tasks: Task[]
 }
 
+export interface RebaseConflictState {
+  issueNumber: number
+  conflicts: string[]
+  status: string
+}
+
 export interface LiveTaskState {
   activeTaskId: string | null
   activeTaskElapsedMs: number | null
+  rebaseConflict: RebaseConflictState | null
+}
+
+export type ApprovalArtifact = {
+  type: string
+  path: string
+  content: string
+}
+
+export type ApprovalOutput = {
+  summary?: string
+  artifacts?: ApprovalArtifact[]
+  [key: string]: unknown
 }
 
 export interface GeneralConfig {
