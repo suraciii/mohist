@@ -378,9 +378,9 @@
         "T-009",
         "T-011"
       ],
-      "passes": false,
-      "notes": "",
-      "attempts": 0,
+      "passes": true,
+      "notes": "File was already in correct state from prior attempt. All acceptance criteria verified.",
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
