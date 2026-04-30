@@ -142,7 +142,7 @@ describe("Log", () => {
   })
 
   describe("time()", () => {
-    it("should output started and completed logs with duration", async () => {
+    it("should output started and completed logs with elapsedMs", async () => {
       const writeSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
       await Log.init({ print: true })
       const log = Log.create({ service: "time-test" })
@@ -154,6 +154,30 @@ describe("Log", () => {
       const allOutput = writeSpy.mock.calls.map((c: any) => String(c[0])).join("")
       expect(allOutput).toContain("status=completed")
       expect(allOutput).toMatch(/elapsedMs=\d+/)
+    })
+
+    it("should not include duration field in stop log", async () => {
+      await Log.init({ print: false })
+      const logfile = Log.file()
+      const log = Log.create({ service: "time-no-duration" })
+      const timer = log.time("op")
+      timer.stop()
+      await new Promise((r) => setTimeout(r, 100))
+      const content = await fs.readFile(logfile, "utf-8")
+      const lines = content.trim().split("\n")
+      const stopLine = lines.find((l: string) => {
+        try {
+          const p = JSON.parse(l)
+          return p.status === "completed"
+        } catch {
+          return false
+        }
+      })
+      expect(stopLine).toBeDefined()
+      const parsed = JSON.parse(stopLine!)
+      expect(parsed).toHaveProperty("elapsedMs")
+      expect(parsed).not.toHaveProperty("duration")
+      await fs.unlink(logfile).catch(() => {})
     })
   })
 
