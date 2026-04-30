@@ -227,6 +227,52 @@ export function loadChecksConfig(workflow: WorkflowConfig): ChecksConfig {
   return parseChecksConfig(parsed.checks) ?? DEFAULT_CHECKS_CONFIG;
 }
 
+export interface AgentConfig {
+  context?: string;
+  rules?: Record<string, string[]>;
+}
+
+export function loadAgentConfig(cwd: string): AgentConfig {
+  const candidates = [
+    path.join(cwd, 'workflow.yaml'),
+    path.join(cwd, '.mohist', 'workflow.yaml'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const content = fs.readFileSync(candidate, 'utf-8');
+      const parsed = yaml.parse(content);
+      if (!parsed || typeof parsed !== 'object') continue;
+      if (!parsed.agent || typeof parsed.agent !== 'object') continue;
+
+      const agent = parsed.agent as Record<string, unknown>;
+      const result: AgentConfig = {};
+
+      if (typeof agent.context === 'string' && agent.context.length > 0) {
+        result.context = agent.context;
+      }
+
+      if (agent.rules && typeof agent.rules === 'object') {
+        const rules: Record<string, string[]> = {};
+        for (const [stage, val] of Object.entries(agent.rules as Record<string, unknown>)) {
+          if (Array.isArray(val) && val.every((v) => typeof v === 'string')) {
+            rules[stage] = val as string[];
+          }
+        }
+        if (Object.keys(rules).length > 0) {
+          result.rules = rules;
+        }
+      }
+
+      return result;
+    } catch {
+      continue;
+    }
+  }
+
+  return {};
+}
+
 export function loadWorkflowWithDetection(cwd: string, issueNumber: number): WorkflowConfigWithDetection | string {
   const workflow = loadWorkflow(cwd);
   if (typeof workflow === 'string') return workflow;
