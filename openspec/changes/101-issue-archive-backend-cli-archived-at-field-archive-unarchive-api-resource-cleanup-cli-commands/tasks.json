@@ -122,11 +122,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing route pattern using createIssueRoutes(). The archive-completed route must be registered BEFORE /:number routes to avoid path collision. Use ApiResponse<T> wrapper.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        183004
+      ]
     },
     {
       "id": "T-005",
