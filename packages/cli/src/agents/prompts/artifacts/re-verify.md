@@ -1,38 +1,27 @@
-# Re-Verify
-
-You are performing a full re-review of code changes after auto-fixes have been applied. The previous review found issues, auto-fixes were attempted, and you must now produce a fresh, complete review.
-
 ## Input
 
-You are given a review report (`review.md` in the change directory) with a `## Result: FAIL` and a `## Fix Suggestions` section. Auto-fixes have been applied to the codebase since this report was written.
+A review report with `## Result: FAIL` and `## Fix Suggestions`. Auto-fixes have been applied since.
 
 ## Process
 
-1. Identify all changed files (git diff or file system scan)
-2. Review each file against all standard review dimensions:
-   - **Correctness**: logic errors, bugs, TypeScript types, lint violations
-   - **Complexity**: function length, cyclomatic complexity, code duplication
-   - **Test Coverage**: tests exist, tests pass, coverage is adequate
-   - **Security**: input validation, injection risks, exposed secrets
-   - **Spec Compliance**: verify each acceptance criterion is satisfied with concrete evidence
-3. Run the project's build command (e.g. `npm run build`) and check the result
-4. Run the project's test command (e.g. `npm test`) and check the result
-5. Update `{changeDir}/review.md`:
-   - If ALL dimensions pass AND build passes AND tests pass:
-     Set `## Result: PASS` and note any remaining observations
-   - If any dimension fails OR build/tests fail:
-     Set `## Result: FAIL` and include Fix Suggestions for all issues found
+1. Identify all changed files (git diff or scan)
+2. Review against all dimensions with concrete evidence:
+   - Correctness, Complexity, Test Coverage, Security, Spec Compliance
+3. Run build and tests, check results
+4. Update `review.md`:
+   - If ALL pass: set `## Result: PASS`
+   - If any fail: set `## Result: FAIL` with Fix Suggestions
 
 ## Rules
 
-- Perform a **full re-review** — auto-fixes can introduce new issues, so review the entire change set
-- Be strict: a fix is FIXED only if the original issue is completely resolved
-- Build and test failures count as unresolved issues
-- Include new findings beyond the original Fix Suggestions if present
+- Full re-review — auto-fixes can introduce new issues
+- A fix is FIXED only if the original issue is completely resolved
+- Build and test failures count as unresolved
+- Include new findings beyond original Fix Suggestions
 
 ## Output
 
-Produce the updated `review.md` file. The file must follow the same format as the original review:
+Same format as original review:
 
 ```markdown
 # Review Report
@@ -54,10 +43,10 @@ Produce the updated `review.md` file. The file must follow the same format as th
 - [findings]
 
 ### Spec Compliance: PASS / FAIL
-- [per-criterion findings with pass/fail and specific deviations]
+- [per-criterion findings]
 
 ## Fix Suggestions
-1. [file:line] description of remaining fix (only if result is FAIL)
+1. [file:line] description
 ```
 
-Output ONLY the final review report. Do NOT include any thinking process, reasoning, or meta-commentary.
+Output ONLY the final report. No thinking process or meta-commentary.
