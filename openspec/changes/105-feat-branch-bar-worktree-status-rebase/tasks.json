@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Branch Bar — 统一 worktree status 可视化 + rebase 操作",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/git/worktree-manager.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "The private getConflictingFiles method already exists at line 357. Make it accessible (either make public or reuse logic inline)."
+      "passes": true,
+      "notes": "The private getConflictingFiles method already exists at line 357. Make it accessible (either make public or reuse logic inline).",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        141944
+      ]
     },
     {
       "id": "T-002",
@@ -41,9 +46,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Follow the exact pattern of the existing GET /:number/diff endpoint (lines 1220-1294) for route handler structure. Hono uses Trie-based routing, so /:number/worktree-status can be placed alongside other /:number/* routes regardless of order."
+      "notes": "Follow the exact pattern of the existing GET /:number/diff endpoint (lines 1220-1294) for route handler structure. Hono uses Trie-based routing, so /:number/worktree-status can be placed alongside other /:number/* routes regardless of order.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +72,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Follow the existing pattern of useIssueDiff or useBuildStatus hooks in useQueries.ts. The api.ts method follows the simple request<T> pattern like getBuildStatus."
+      "notes": "Follow the existing pattern of useIssueDiff or useBuildStatus hooks in useQueries.ts. The api.ts method follows the simple request<T> pattern like getBuildStatus.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -87,9 +102,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/BranchBar.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Use the same spinner SVG pattern from IssueDetailPage.tsx. Use useQueryClient().invalidateQueries for post-mutation refresh. Import Stage enum from lib/types."
+      "notes": "Use the same spinner SVG pattern from IssueDetailPage.tsx. Use useQueryClient().invalidateQueries for post-mutation refresh. Import Stage enum from lib/types.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -112,9 +132,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "The BranchBar goes inside <div className=\"lg:col-span-2 space-y-6\"> at line ~406, before the Description block. Pass isAgentRunningOnThis as isAgentRunning prop."
+      "notes": "The BranchBar goes inside <div className=\"lg:col-span-2 space-y-6\"> at line ~406, before the Description block. Pass isAgentRunningOnThis as isAgentRunning prop.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
