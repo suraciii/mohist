@@ -84,11 +84,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "新增的 query keys: 'model', 'opencode-model', 'log-level', 'agent-runtime', 'stage-models', 'system-info'。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        243604
+      ]
     },
     {
       "id": "T-004",
