@@ -154,11 +154,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing command pattern with setupIssueCommands(program). All commands use shared apiClient from ../api-client. Archive command with --all-completed should NOT require a number argument.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        135702
+      ]
     },
     {
       "id": "T-006",
