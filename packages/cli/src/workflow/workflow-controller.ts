@@ -529,7 +529,7 @@ export class WorkflowController {
     }
   }
 
-  private async runPipelineBuildStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+  async runPipelineBuildStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
     const buildStartTime = Date.now();
     const issueId = issue.id;
     const projectId = this.projectId ?? issue.projectId;
@@ -663,7 +663,9 @@ export class WorkflowController {
       elapsedMs: duration,
     });
 
-    if (result.completed === 0 && result.total > 0 && (completedTaskIds.length === 0 || !result.success)) {
+    const hadCheckpoint = activeCompletedTaskIds.length > 0;
+
+    if (result.completed === 0 && result.total > 0 && !hadCheckpoint) {
       log.warn('Build completed with 0 tasks executed out of total', {
         total: result.total,
         issueNumber: issue.number,
