@@ -79,8 +79,7 @@ export interface Issue {
   mergeState?: MergeState;
   conflictRetryCount?: number;
   model?: string;
-  blockedReason?: string;
-  retryCount?: number;
+  archivedAt?: string;
 }
 
 export interface Project {
@@ -98,9 +97,6 @@ export interface Config {
   pollInterval: number;
   maxConcurrentAgents: number;
   agentTimeout: number;
-  taskTimeout: number;
-  stageTimeout: number;
-  maxGracePeriods: number;
 }
 
 export interface ServerState {
