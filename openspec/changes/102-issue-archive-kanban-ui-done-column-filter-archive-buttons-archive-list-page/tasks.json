@@ -139,11 +139,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Can be built in parallel with T-003/T-004 since it only depends on the hooks from T-002",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        173931
+      ]
     },
     {
       "id": "T-006",
