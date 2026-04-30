@@ -6,6 +6,7 @@ import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORI
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
+import type { ConflictResolutionDeps } from '../services';
 import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
@@ -38,6 +39,7 @@ export function createIssueRoutes(
   opencodeBinPath?: string,
   mergeQueue?: MergeQueue,
   checkpointRepo?: PipelineCheckpointRepo,
+  _resolveConflictsDeps?: ConflictResolutionDeps,
 ): Hono {
   const app = new Hono();
 

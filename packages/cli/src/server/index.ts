@@ -16,13 +16,12 @@ import { createExploreRoutes } from '../api/explore';
 import { createLogRoutes } from '../api/logs';
 import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, type SkillRunner } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import { Stage, MergeState } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
-import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
 import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { MergeEntry } from '../git/merge-queue';
 import { Log } from '../util/log';
@@ -127,6 +126,14 @@ async function main(): Promise<void> {
   const issueRepo = stateManager.getIssueRepo();
   const coderSessionRepo = stateManager.getCoderSessionRepo();
 
+  const conflictResolutionDeps: ConflictResolutionDeps = {
+    issueRepo,
+    workflowLogRepo,
+    coderSessionRepo,
+    eventBus,
+    opencodeBinPath,
+  };
+
   const mergeQueue = new MergeQueue({
     worktreeManager,
     eventBus,
@@ -138,39 +145,7 @@ async function main(): Promise<void> {
     },
     resolveConflicts: async (entry, worktreePath, conflictFiles) => {
       log.info('resolveConflicts callback invoked', { issueNumber: entry.issueNumber, conflictFiles });
-
-      const refreshedIssue = issueRepo.findById(entry.issueId);
-      if (!refreshedIssue) {
-        return { success: false, error: 'Issue not found for conflict resolution' };
-      }
-
-      const acpOptions: AcpConnectionOptions = {
-        cwd: worktreePath,
-        issueId: refreshedIssue.id,
-        projectId: entry.projectId,
-        workflowLogRepo,
-        coderSessionRepo,
-        eventBus,
-        issueNumber: refreshedIssue.number,
-        opencodeBinPath,
-      };
-
-      try {
-        const prompt = buildConflictResolutionPrompt(refreshedIssue, worktreePath, conflictFiles);
-
-        const connection = await createAcpConnection(acpOptions);
-        try {
-          const result = await connection.prompt(prompt);
-          if (!result.success) {
-            return { success: false, error: result.error || 'Agent ACP session failed' };
-          }
-          return { success: true };
-        } finally {
-          await connection.close().catch(() => {});
-        }
-      } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
-      }
+      return resolveConflictsViaAgent(conflictResolutionDeps, entry.issueId, entry.projectId, worktreePath, conflictFiles);
     },
     fixBuildErrors: async (entry: MergeEntry, worktreePath: string, buildOutput: string) => {
       log.info('fixBuildErrors callback invoked', { issueNumber: entry.issueNumber });
@@ -253,7 +228,7 @@ async function main(): Promise<void> {
   const server = new HttpServer(config, rateLimiter);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo, stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo()));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo, stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), conflictResolutionDeps));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
