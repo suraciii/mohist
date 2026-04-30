@@ -19,6 +19,7 @@ import { createScheduleRoutes } from '../api/schedules';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, type SkillRunner } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
+import { Stage, MergeState } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
@@ -273,8 +274,14 @@ async function main(): Promise<void> {
   server.addRouter('/api/logs', createLogRoutes());
   server.addRouter('/api/agent/schedules', createScheduleRoutes(stateManager.getScheduleRepo(), scheduler));
 
-  eventBus.on('agent_completed', async ({ issueNumber }) => {
+  eventBus.on('agent_completed', async ({ issueId, issueNumber, projectId }) => {
     log.info('Agent completed', { issueNumber });
+
+    const issue = issueRepo.findById(issueId);
+    if (issue && issue.stage === Stage.Done && !issue.mergeState) {
+      issueRepo.setMergeState(issueId, MergeState.Pending);
+      mergeQueue.enqueue(projectId, issueNumber);
+    }
   });
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');

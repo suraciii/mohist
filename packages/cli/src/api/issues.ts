@@ -981,6 +981,27 @@ export function createIssueRoutes(
         worktreePath = existingPath || process.cwd();
       }
 
+      if (approvalStage === Stage.Review) {
+        issueRepo.updateStage(issue.id, Stage.Done);
+        issueRepo.clearApprovalState(issue.id);
+        issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+        issueRepo.setMergeState(issue.id, MergeState.Pending);
+
+        if (mergeQueue && worktreeManager) {
+          mergeQueue.enqueue(projectId, number);
+        }
+
+        const completedIssue = issueRepo.findById(issue.id);
+        const response: ApiResponse = {
+          success: true,
+          data: {
+            issue: completedIssue ?? issue,
+            message: `Issue #${number} approved and completed`
+          }
+        };
+        return c.json(response);
+      }
+
       let nextStage: Stage | undefined;
       if (approvalStage === Stage.Plan) {
         nextStage = Stage.Build;
