@@ -27,7 +27,8 @@
         255363,
         171312,
         240008,
-        359089
+        359089,
+        217655
       ]
     },
     {
@@ -56,7 +57,8 @@
       "error": null,
       "durations": [
         79239,
-        90270
+        90270,
+        134614
       ]
     },
     {
@@ -86,7 +88,8 @@
       "durations": [
         251428,
         220914,
-        451834
+        451834,
+        180145
       ]
     },
     {
@@ -114,7 +117,8 @@
       "error": null,
       "durations": [
         187326,
-        214519
+        214519,
+        114283
       ]
     },
     {
@@ -148,7 +152,8 @@
         257185,
         250395,
         107486,
-        194736
+        194736,
+        172408
       ]
     },
     {
@@ -170,9 +175,9 @@
         "T-004",
         "T-005"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -201,9 +206,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Depends on T-003 (AcpRoundRunner). Runs in parallel with T-004/T-005 (checks).",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -230,9 +235,9 @@
       "type": "WRITE",
       "output": "src/workflow/git-committer.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -261,9 +266,9 @@
         "T-002",
         "T-008"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -293,9 +298,9 @@
         "T-007",
         "T-009"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -323,9 +328,9 @@
       "type": "WRITE",
       "output": "src/workflow/utils.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "parseVerdict and extractFixSuggestions are used by tests but don't exist in the current file — this is a gap in the current codebase that this task fills.",
-      "attempts": 2,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -361,9 +366,9 @@
         "T-009",
         "T-011"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -388,15 +393,11 @@
       "dependsOn": [
         "T-012"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "",
-      "attempts": 2,
+      "attempts": 0,
       "order": 999999,
-      "error": null,
-      "durations": [
-        600017,
-        494559
-      ]
+      "error": null
     },
     {
       "id": "T-014",
