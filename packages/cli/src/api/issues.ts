@@ -62,6 +62,8 @@ export function createIssueRoutes(
       const stage = c.req.query('stage') as Stage | undefined;
       const label = c.req.query('label') as string | undefined;
       const priority = c.req.query('priority') as string | undefined;
+      const showArchived = c.req.query('archived') === 'true';
+      const showAll = c.req.query('all') === 'true';
 
       if (priority && !VALID_PRIORITIES.includes(priority as Priority)) {
         const response: ApiResponse = {
@@ -70,10 +72,18 @@ export function createIssueRoutes(
         };
         return c.json(response, 400);
       }
-      
-      let issues = stage 
-        ? issueService.getByStage(projectId, stage)
-        : issueService.getByProject(projectId);
+
+      const issueRepo = stateManager.getIssueRepo();
+      let issues: Issue[];
+      if (showArchived) {
+        issues = issueRepo.findAll({ projectId, stage, archivedOnly: true });
+      } else if (showAll) {
+        issues = issueRepo.findAll({ projectId, stage, includeArchived: true });
+      } else {
+        issues = stage
+          ? issueService.getByStage(projectId, stage)
+          : issueService.getByProject(projectId);
+      }
 
       if (priority) {
         issues = issues.filter(issue => issue.priority === priority);
@@ -139,6 +149,30 @@ export function createIssueRoutes(
         data: issue
       };
       return c.json(response, 201);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/archive-completed', async (c) => {
+    try {
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const result = await issueService.archiveAllCompleted(projectId);
+
+      const response: ApiResponse = {
+        success: true,
+        data: { archived: result.count, message: result.message }
+      };
+      return c.json(response);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
@@ -637,6 +671,107 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: { issue: closedIssue, message: `Issue #${number} closed` }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/archive', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} has a running agent. Force-stop it first.`
+        };
+        return c.json(response, 409);
+      }
+
+      const { cleanup } = await c.req.json().catch(() => ({ cleanup: true }));
+      const result = await issueService.archive(projectId, number, { cleanup });
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          issue: result.issue,
+          warning: result.warning,
+          message: `Issue #${number} archived`,
+        }
+      };
+      return c.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      const response: ApiResponse = {
+        success: false,
+        error: message
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/unarchive', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (!issue.archivedAt) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is not archived`
+        };
+        return c.json(response, 400);
+      }
+
+      const result = await issueService.unarchive(projectId, number);
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          issue: result,
+          message: `Issue #${number} unarchived`,
+        }
       };
       return c.json(response);
     } catch (error) {
