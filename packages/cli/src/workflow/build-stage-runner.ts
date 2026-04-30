@@ -233,6 +233,7 @@ export class BuildStageRunner implements StageRunner {
     return {
       success: result.success,
       requiresApproval: false,
+      nextStage: result.success ? Stage.Check : undefined,
       output: {
         stage: Stage.Build,
         issueNumber: issue.number,
