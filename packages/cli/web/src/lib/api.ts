@@ -34,14 +34,31 @@ export { ApiError }
 export const api = {
   getProjects: () => request<import('./types').Project[]>('/projects'),
 
-  getIssues: (params?: { stage?: string; label?: string; projectId?: string }) => {
+  getIssues: (params?: { stage?: string; label?: string; projectId?: string; archived?: boolean }) => {
     const search = new URLSearchParams()
     if (params?.projectId) search.set('projectId', params.projectId)
     if (params?.stage) search.set('stage', params.stage)
     if (params?.label) search.set('label', params.label)
+    if (params?.archived) search.set('archived', 'true')
     const qs = search.toString()
     return request<import('./types').Issue[]>(`/issues${qs ? `?${qs}` : ''}`)
   },
+
+  getArchivedIssues: (params?: { projectId?: string }) => {
+    const search = new URLSearchParams()
+    search.set('archived', 'true')
+    if (params?.projectId) search.set('projectId', params.projectId)
+    return request<import('./types').Issue[]>(`/issues?${search.toString()}`)
+  },
+
+  archiveIssue: (number: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/archive`, { method: 'POST' }),
+
+  unarchiveIssue: (number: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/unarchive`, { method: 'POST' }),
+
+  archiveAllCompleted: () =>
+    request<{ archived: number; message: string }>('/issues/archive-completed', { method: 'POST' }),
 
   getIssue: (number: number) =>
     request<import('./types').Issue>(`/issues/${number}`),

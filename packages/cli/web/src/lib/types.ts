@@ -42,8 +42,7 @@ export interface Issue {
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
   priority?: string | null
   model?: string | null
-  blockedReason?: string
-  retryCount?: number
+  archivedAt?: string
 }
 
 export interface Project {
@@ -154,7 +153,6 @@ export type AgentDetailEventMap = {
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number }
   plan_round_start: PlanRoundStartEvent
   plan_session_update: PlanSessionUpdateEvent
-  plan_round_complete: { issueId: string; projectId: string; roundType: string; roundIndex: number; roundLabel?: string; verdict?: string; duration?: number }
   coder_recovery_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
   coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string }
   coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number }
@@ -178,8 +176,7 @@ export type EventMap = {
   rebase_started: { issueId: string; projectId: string; issueNumber: number }
   rebase_progress: { issueId: string; projectId: string; issueNumber: number; step: 'fetching' | 'checking' | 'rebasing' | 'verifying' }
   rebase_completed: { issueId: string; projectId: string; issueNumber: number; rebased: boolean }
-  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[]; status?: string }
-  agent_blocked: { issueId: string; projectId: string; issueNumber: number; blockedReason: string; retryCount: number }
+  rebase_conflict: { issueId: string; projectId: string; issueNumber: number; conflicts: string[] }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap
@@ -347,40 +344,6 @@ export interface BuildStatus {
 export interface LiveTaskState {
   activeTaskId: string | null
   activeTaskElapsedMs: number | null
-  rebaseConflict: RebaseConflictState | null
-}
-
-export interface RebaseConflictState {
-  issueNumber: number
-  conflicts: string[]
-  status: 'resolving' | 'failed'
-}
-
-export interface ApprovalArtifact {
-  name: string
-  path: string
-  content?: string
-}
-
-export interface ApprovalDimension {
-  name: string
-  status: 'PASS' | 'FAIL'
-  issues?: string[]
-}
-
-export interface ApprovalOutput {
-  verdict?: 'PASS' | 'FAIL' | string
-  stage?: string
-  artifacts?: ApprovalArtifact[]
-  selfReviewNotes?: string
-  reviewReport?: string
-  dimensions?: ApprovalDimension[]
-}
-
-export interface DiffResponse {
-  files: DiffFile[]
-  totalAdditions: number
-  totalDeletions: number
 }
 
 export interface GeneralConfig {
