@@ -48,11 +48,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "参考 tests/log.test.ts:145-156 中已有的 time() 测试",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        116508
+      ]
     }
   ]
 }
