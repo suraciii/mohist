@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add project null check to 5 worktree-using endpoints in issues.ts, returning 404 instead of silently falling back to process.cwd()",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -22,8 +21,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "All 5 fixes are in a single file, same mechanical pattern. No need to split into separate tasks."
+      "passes": true,
+      "notes": "All 5 fixes are in a single file, same mechanical pattern. No need to split into separate tasks.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        369699
+      ]
     }
   ]
 }
