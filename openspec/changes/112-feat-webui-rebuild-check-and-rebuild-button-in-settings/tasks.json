@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add source staleness detection and rebuild button to WebUI Settings",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/version.ts, packages/cli/src/api/status.ts, packages/cli/src/server/index.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Design D1: extend existing /api/status rather than new endpoint. Design D5: per-request git rev-parse, not cached."
+      "passes": true,
+      "notes": "Design D1: extend existing /api/status rather than new endpoint. Design D5: per-request git rev-parse, not cached.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        131877
+      ]
     },
     {
       "id": "T-002",
@@ -45,7 +50,10 @@
       "output": "packages/cli/src/api/system-settings.ts, packages/cli/src/server/index.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Design D2: spawn detached child process, not execSync. Reuse build sequence from server-systemd.ts updateServer(). Import detectInstallMode, isSystemdServiceInstalled, runSystemctlUserSafe from server-systemd.ts."
+      "notes": "Design D2: spawn detached child process, not execSync. Reuse build sequence from server-systemd.ts updateServer(). Import detectInstallMode, isSystemdServiceInstalled, runSystemctlUserSafe from server-systemd.ts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -68,9 +76,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SystemSettingsSection.tsx, packages/cli/web/src/components/SettingsPage.tsx",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Design D3: reconnect via polling /api/health. Design D4: System tab separates About concerns from General config. In non-source mode, shows version info but no rebuild button."
+      "notes": "Design D3: reconnect via polling /api/health. Design D4: System tab separates About concerns from General config. In non-source mode, shows version info but no rebuild button.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
