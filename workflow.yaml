@@ -1,0 +1,28 @@
+agent:
+  context: |
+    Tech stack: TypeScript (target ES2022, strict mode), Node.js >=18, SQLite via better-sqlite3, Hono HTTP framework, Vitest for testing, Commander.js for CLI.
+    Build: cd packages/cli && npm run build (tsc + copy prompt/template assets)
+    Test: cd packages/cli && npm test (vitest run)
+    Typecheck: cd packages/cli && npx tsc --noEmit
+    Lint: cd packages/cli && npm run lint
+    Directory layout: packages/cli/src/ is the monorepo core (cli/, server/, agent/, services/, db/, api/, workflow/, providers/).
+    Agent runner spawns `opencode agent --local` subprocesses. Prompt assembly is in agents/agent-prompt-schema.ts and openspec/context-assembler.ts.
+  rules:
+    build:
+      - Keep changes scoped to the task description — do not refactor unrelated code
+      - Run typecheck (npx tsc --noEmit) after every change
+      - Run tests (npm test) to verify nothing is broken
+      - Do not add comments unless explicitly requested
+      - Follow existing code conventions and import patterns from surrounding files
+      - Do not introduce new dependencies without checking they are already in package.json
+    plan:
+      - Specs must have clear acceptance criteria with testable conditions
+      - Each spec must be independently verifiable
+      - Describe the "what" not the "how" — implementation details belong in design
+      - Include error scenarios and edge cases in acceptance criteria
+    review:
+      - "Evaluate on all dimensions: correctness, completeness, code style, test coverage, error handling"
+      - Check that acceptance criteria are fully met
+      - Verify typecheck and tests pass
+      - Flag any changes outside the scope of the task
+      - Confirm no new dependencies were introduced without justification

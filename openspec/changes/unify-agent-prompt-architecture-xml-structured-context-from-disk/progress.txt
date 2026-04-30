@@ -67,3 +67,13 @@ Started: 2026-04-30T13:08:28.754Z
 - Typecheck passes, all 96 directly affected tests pass (context-assembler, artifact-prompt, workflow-loader-agent-config, ralph-executor)
 - Learnings: WorkflowController uses cached agentConfig; services that don't have a controller (explore-acp, conflict-resolution) call loadAgentConfig directly. No new tests needed since the wiring is covered by existing integration patterns.
 - Next steps: T-006 (add workflow.yaml agent config for mohist project)
+
+[2026-04-30T21:40:00Z] T-006: Add workflow.yaml agent config for mohist project
+- Created workflow.yaml at project root with agent.context and agent.rules
+- agent.context: tech stack (TypeScript, Node.js, SQLite, Hono, Vitest, Commander.js), build/test/typecheck/lint commands, directory layout, agent runner info
+- agent.rules.build: 6 rules (scoped changes, typecheck, tests, no comments, follow conventions, no new deps)
+- agent.rules.plan: 4 rules (clear acceptance criteria, independently verifiable, what not how, edge cases)
+- agent.rules.review: 5 rules (all dimensions, acceptance criteria met, typecheck/tests, scope check, no unjustified deps)
+- Typecheck passes, loadAgentConfig successfully reads all fields
+- Learnings: YAML colons in unquoted strings cause parsing as mapping — quote values containing colons (same lesson as T-002)
+- All 6 tasks complete
