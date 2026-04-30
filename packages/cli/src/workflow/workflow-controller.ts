@@ -978,18 +978,21 @@ export class WorkflowController {
 
       conn = await createAcpConnection(acpOptions);
 
-      const prompt = [
-        `The build/test command failed in the worktree at: ${this.worktreePath}`,
-        '',
-        '## Build/Test Error Output',
-        '```',
-        truncateLog(buildOutput, 30000),
-        '```',
-        '',
-        'Fix the build/test errors. Focus on the specific errors shown above.',
-        'Do NOT modify any files unrelated to the build/test failures.',
-        'After fixing, do NOT run the build/test command yourself — the pipeline will re-run it.',
-      ].join('\n');
+      const prompt = formatAgentPrompt({
+        role: 'Fix build/test errors',
+        task: [
+          `The build/test command failed in the worktree at: ${this.worktreePath}`,
+          '',
+          '## Build/Test Error Output',
+          '```',
+          truncateLog(buildOutput, 30000),
+          '```',
+        ].join('\n'),
+        contract: [
+          'Fix ONLY the errors shown above — do NOT modify unrelated files.',
+          'After fixing, do NOT run the build/test command yourself — the pipeline will re-run it.',
+        ].join('\n'),
+      });
 
       const result = await conn.prompt(prompt);
       await conn.close();
