@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { EventName, EventMap, LiveTaskState, RebaseConflictState } from '../lib/types'
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../lib/agent-events'
 import type { AgentDetailEventMap } from '../lib/types'
+import { useProject } from '../context/ProjectContext'
 
 const SSE_URL = '/api/events'
 const LIVE_TIMER_INTERVAL = 500
@@ -220,6 +221,16 @@ function useSSEInner(projectId: string | null): LiveTaskState {
   }, [clearLiveTimer])
 
   return { activeTaskId, activeTaskElapsedMs, rebaseConflict }
+}
+
+export function LiveTaskProvider({ children }: { children: React.ReactNode }) {
+  const { projectId } = useProject()
+  const state = useSSEInner(projectId)
+  return (
+    <LiveTaskContext.Provider value={state}>
+      {children}
+    </LiveTaskContext.Provider>
+  )
 }
 
 export default function useSSE(projectId: string | null) {

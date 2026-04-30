@@ -47,6 +47,10 @@ export interface AcpSessionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
+  onProcessSpawned?: (proc: import('child_process').ChildProcess) => void;
+  stage?: string;
+  model?: string;
+  onBeforeKill?: (cwd: string) => Promise<boolean>;
 }
 
 export interface AcpSessionResult {
@@ -54,6 +58,7 @@ export interface AcpSessionResult {
   success: boolean;
   error?: string;
   acpSessionId?: string;
+  wipCommitted?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
@@ -432,6 +437,7 @@ export interface AcpConnectionOptions {
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
   signal?: AbortSignal;
+  model?: string;
 }
 
 export interface AcpConnection {

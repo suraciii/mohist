@@ -1,4 +1,5 @@
 export enum Stage {
+  Draft = 'draft',
   Explore = 'explore',
   Plan = 'plan',
   Build = 'build',
@@ -8,6 +9,7 @@ export enum Stage {
 }
 
 export const STAGE_ORDER: Stage[] = [
+  Stage.Draft,
   Stage.Explore,
   Stage.Plan,
   Stage.Build,
@@ -16,6 +18,7 @@ export const STAGE_ORDER: Stage[] = [
 ];
 
 export const STAGE_TRANSITIONS: Record<Stage, Stage[]> = {
+  [Stage.Draft]: [Stage.Explore, Stage.Plan],
   [Stage.Explore]: [Stage.Plan],
   [Stage.Plan]: [Stage.Build],
   [Stage.Build]: [Stage.Review],

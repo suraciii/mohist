@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { useIssues, useArchivedIssues, useProjects, useCurrentProject, useAgentStatus } from './hooks/useQueries'
-import useSSE from './hooks/useSSE'
+import { LiveTaskProvider } from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
 import { Header } from './components/Header'
@@ -67,7 +67,6 @@ function KanbanView() {
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
-  const { LiveTaskProvider } = useSSE(projectId)
   const location = useLocation()
 
   const { data: projects } = useProjects()
