@@ -159,7 +159,7 @@ export function Header({ onCreateIssue }: HeaderProps) {
           </button>
           <button
             className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
-            onClick={() => navigate('/settings')}
+            onClick={() => navigate('/settings/ai')}
             title="Settings"
           >
             <svg className="h-4 w-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
