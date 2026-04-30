@@ -55,6 +55,8 @@ The system SHALL allow users to export their data in CSV format.
 
 Specs should be testable — each scenario is a potential test case.
 
+**IMPORTANT**: Project context and rules from the prompt are constraints for you. Do NOT copy them into the output file.
+
 ## Output
 
 Write each spec file to `{changeDir}/specs/<capability>/spec.md`.

@@ -19,6 +19,8 @@ Focus on architecture and approach, not line-by-line implementation. Reference t
 
 Good design docs explain the "why" behind technical decisions.
 
+**IMPORTANT**: Project context and rules from the prompt are constraints for you. Do NOT copy them into the output file.
+
 ## Output
 
 Write the file to `{changeDir}/design.md`.

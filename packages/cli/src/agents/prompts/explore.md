@@ -5,6 +5,10 @@
 3. Let the shape of the problem emerge before structuring
 4. Generate a proposal document
 
+## Existing Artifacts
+
+Check what already exists in the change directory. If `proposal.md` already exists, update it based on your exploration. If `design.md` or `specs/` exist, read them for context — they may constrain or inform the proposal.
+
 ## Proposal Structure
 
 - **Why**: What problem does this solve? Why now?
@@ -22,3 +26,4 @@
 - Consider edge cases and backward compatibility
 - Keep it concise (1-2 pages)
 - Focus on the "why" not the "how"
+- **Project context and rules are constraints for you** — do NOT copy them into the proposal

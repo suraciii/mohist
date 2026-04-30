@@ -19,6 +19,8 @@ Keep it concise (1-2 pages). Focus on the "why" not the "how" — implementation
 
 This is the foundation — specs, design, and tasks all build on this.
 
+**IMPORTANT**: Project context and rules from the prompt are constraints for you. Do NOT copy them into the output file.
+
 ## Output
 
 Write the file to `{changeDir}/proposal.md`.

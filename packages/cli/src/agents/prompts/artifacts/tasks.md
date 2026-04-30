@@ -147,6 +147,8 @@ You MUST perform explicit dependency analysis when generating tasks. Follow thes
 
 Extract acceptance criteria from `specs/*/spec.md` SHALL requirements.
 
+**IMPORTANT**: Project context and rules from the prompt are constraints for you. Do NOT copy them into the output file.
+
 ## Example: Multi-Level Dependency Chain
 
 ```json
