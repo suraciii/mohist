@@ -16,15 +16,16 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/opencode-discovery-service.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "The newSession response from opencode has models directly on the result object, not nested under .models.availableModels. Need to trace the actual response structure and extract modelId strings.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
         542571,
         542432,
-        538788
+        538788,
+        166342
       ]
     },
     {
