@@ -78,11 +78,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow the existing pattern of useIssueDiff or useBuildStatus hooks in useQueries.ts. The api.ts method follows the simple request<T> pattern like getBuildStatus.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        100530
+      ]
     },
     {
       "id": "T-004",
