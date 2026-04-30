@@ -3,7 +3,7 @@ import { ProjectService } from '../services/project-service';
 import { IssueService } from '../services/issue-service';
 import { ApiResponse } from '../types';
 import { resolveModel, type LlmConfig } from '../agent-runtime';
-import type { VersionInfo } from '../version';
+import { getVersionInfo, getSourceHead, type VersionInfo } from '../version';
 
 export function createStatusRoutes(
   projectService: ProjectService,
@@ -77,6 +77,10 @@ export function createStatusRoutes(
         // LLM not configured or invalid - llm stays { configured: false }
       }
 
+      const version = versionInfo ?? getVersionInfo();
+      const sourceHead = getSourceHead();
+      const upToDate = sourceHead !== null ? sourceHead === version.gitHash : true;
+
       const status = {
         name: current.name,
         path: current.path,
@@ -90,8 +94,10 @@ export function createStatusRoutes(
           done: issues.filter(i => i.stage === 'done').length,
         },
         llm,
-        version: versionInfo?.version ?? null,
-        gitHash: versionInfo?.gitHash ?? null,
+        version: version.version ?? null,
+        gitHash: version.gitHash ?? null,
+        sourceHead,
+        upToDate,
       };
 
       const response: ApiResponse = {
