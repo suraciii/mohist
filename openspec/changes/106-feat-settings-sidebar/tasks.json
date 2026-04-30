@@ -54,11 +54,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "GET /api/system/info 中 gitHash 用 execSync('git rev-parse --short HEAD') 获取，失败返回 'unknown'。version 从 package.json 读取。opencode 路径用 config-loader 已有的 resolveOpencodeBinPath()。",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        403007
+      ]
     },
     {
       "id": "T-003",
