@@ -50,11 +50,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "findArchived can delegate to findAll({ archivedOnly: true, projectId }). The findAll SQL needs conditional WHERE clauses for archived_at.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        61936
+      ]
     },
     {
       "id": "T-003",
