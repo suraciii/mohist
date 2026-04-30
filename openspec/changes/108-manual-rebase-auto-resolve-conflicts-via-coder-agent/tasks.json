@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Manual rebase auto-resolve conflicts via coder agent — extract shared conflict resolution function, wire deps, implement async rebase endpoint, and update frontend",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/conflict-resolution.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Extract the exact logic from server/index.ts:139-174. The function should be self-contained with no dependency on MergeQueue types (use issueId/projectId strings instead of MergeEntry)."
+      "passes": true,
+      "notes": "Extract the exact logic from server/index.ts:139-174. The function should be self-contained with no dependency on MergeQueue types (use issueId/projectId strings instead of MergeEntry).",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        139854
+      ]
     },
     {
       "id": "T-002",
@@ -38,9 +43,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/server/index.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "The MergeQueue callback adapter should map `entry.issueId → issueId`, `entry.projectId → projectId`, and forward `worktreePath`/`conflictFiles` directly."
+      "notes": "The MergeQueue callback adapter should map `entry.issueId → issueId`, `entry.projectId → projectId`, and forward `worktreePath`/`conflictFiles` directly.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -67,9 +77,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "The async chain should use `.then()/.catch()` pattern (fire-and-forget). All errors in the chain must be caught — log and emit appropriate events. The `handleReviewRebase` function needs an optional `skipBuildVerify` param that, when true, skips the npm build exec but still emits the verifying progress event for consistency."
+      "notes": "The async chain should use `.then()/.catch()` pattern (fire-and-forget). All errors in the chain must be caught — log and emit appropriate events. The `handleReviewRebase` function needs an optional `skipBuildVerify` param that, when true, skips the npm build exec but still emits the verifying progress event for consistency.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -91,9 +107,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "The SSE events `agent_conflict_resolution_started/completed/failed` already exist in the EventSource subscription list in `useSSE.tsx` (lines 183+). The `rebase_conflict` event with `status: 'resolving' | 'failed'` is already handled in `useSSE.tsx:122-130`. The main work is: (1) updating the mutation onSuccess to handle the new 202 response, (2) extending types with error field, (3) displaying the resolving/failed states in UI components using the existing `rebaseConflict` from `useLiveTask()`."
+      "notes": "The SSE events `agent_conflict_resolution_started/completed/failed` already exist in the EventSource subscription list in `useSSE.tsx` (lines 183+). The `rebase_conflict` event with `status: 'resolving' | 'failed'` is already handled in `useSSE.tsx:122-130`. The main work is: (1) updating the mutation onSuccess to handle the new 202 response, (2) extending types with error field, (3) displaying the resolving/failed states in UI components using the existing `rebaseConflict` from `useLiveTask()`.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
