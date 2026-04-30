@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Settings 页重设计：Sidebar 导航 + 按意图分区的信息架构（AI / Agent / System）",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/config/config-schema.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "仅扩展 schema，不改变 load/writeConfig 行为。字段都是 optional，向后兼容。"
+      "passes": true,
+      "notes": "仅扩展 schema，不改变 load/writeConfig 行为。字段都是 optional，向后兼容。",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        77698
+      ]
     },
     {
       "id": "T-002",
@@ -46,9 +51,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/settings-config.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "GET /api/system/info 中 gitHash 用 execSync('git rev-parse --short HEAD') 获取，失败返回 'unknown'。version 从 package.json 读取。opencode 路径用 config-loader 已有的 resolveOpencodeBinPath()。"
+      "notes": "GET /api/system/info 中 gitHash 用 execSync('git rev-parse --short HEAD') 获取，失败返回 'unknown'。version 从 package.json 读取。opencode 路径用 config-loader 已有的 resolveOpencodeBinPath()。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -68,9 +78,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "新增的 query keys: 'model', 'opencode-model', 'log-level', 'agent-runtime', 'stage-models', 'system-info'。"
+      "notes": "新增的 query keys: 'model', 'opencode-model', 'log-level', 'agent-runtime', 'stage-models', 'system-info'。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -91,9 +106,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SettingsPage.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Section 组件暂时用占位符（如 <div>AI Section Placeholder</div>），后续任务填充。"
+      "notes": "Section 组件暂时用占位符（如 <div>AI Section Placeholder</div>），后续任务填充。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -115,9 +135,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Provider 列表复用 GET /api/providers 返回的 Provider.configured 字段排序。模型列表从 GET /api/opencode/models 获取。"
+      "notes": "Provider 列表复用 GET /api/providers 返回的 Provider.configured 字段排序。模型列表从 GET /api/opencode/models 获取。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -142,9 +167,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/AgentSettingsSection.tsx",
-      "dependsOn": ["T-004", "T-003"],
+      "dependsOn": [
+        "T-004",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "从 GET /api/config/agent-runtime 获取所有初始值（timeout/stageTimeout/taskTimeout/maxConcurrent/maxGracePeriods/pollInterval）。dirty state 用 localValues vs savedValues 浅比较。"
+      "notes": "从 GET /api/config/agent-runtime 获取所有初始值（timeout/stageTimeout/taskTimeout/maxConcurrent/maxGracePeriods/pollInterval）。dirty state 用 localValues vs savedValues 浅比较。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -166,9 +197,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SystemSettingsSection.tsx",
-      "dependsOn": ["T-004", "T-003"],
+      "dependsOn": [
+        "T-004",
+        "T-003"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -187,9 +224,16 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/",
-      "dependsOn": ["T-005", "T-006", "T-007"],
+      "dependsOn": [
+        "T-005",
+        "T-006",
+        "T-007"
+      ],
       "passes": false,
-      "notes": "这是收尾任务，确保所有 section 组件正确集成到 SettingsPage 中，无残留旧代码。"
+      "notes": "这是收尾任务，确保所有 section 组件正确集成到 SettingsPage 中，无残留旧代码。",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
