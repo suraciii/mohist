@@ -19,7 +19,7 @@ import { EventBus } from '../src/services/event-bus';
 import { StateManager } from '../src/server/state-manager';
 import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { createIssueRoutes } from '../src/api/issues';
-import type { ChangeArtifactsManager } from '../src/workflow/workflow-controller';
+import type { ChangeArtifactsManager } from '../src/workflow';
 import type { OpenSpecChange } from '../src/openspec/detector';
 
 vi.mock('../src/agent-runtime/acp-session', () => ({
@@ -64,7 +64,7 @@ vi.mock('../src/agents/artifact-prompt', () => ({
 }));
 
 import type { PipelineCheckpointRepo } from '../src/db/pipeline-checkpoint-repo';
-import { WorkflowController } from '../src/workflow/workflow-controller';
+import { WorkflowController } from '../src/workflow';
 
 function createMockIssue(stage: Stage, overrides?: Partial<Issue>): Issue {
   return {
