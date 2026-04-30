@@ -150,6 +150,10 @@ function buildContract(task: Task): string {
   lines.push('   - Run `git add -A` to stage all changes');
   lines.push(`   - Run \`git commit -m "${task.id}: <brief summary of what you did>"\``);
   lines.push('2. Read context-files if you need architectural guidance');
+  if (task.spec) {
+    lines.push(`3. Read and verify all scenarios in the spec file (${task.spec})`);
+    lines.push('   Ensure every WHEN/THEN scenario in the referenced requirement passes');
+  }
   return lines.join('\n');
 }
 
@@ -168,6 +172,12 @@ function buildTaskContent(task: Task, options: BuildContextOptions): string {
     parts.push('');
     parts.push('[WIP Resume]');
     parts.push(options.wipResumeContext);
+  }
+
+  if (options.totalTasks) {
+    const completedBefore = (task.order || parseInt(task.id.replace(/[^0-9]/g, ''), 10) || 1) - 1;
+    parts.push('');
+    parts.push(`Progress: ${completedBefore} of ${options.totalTasks} tasks completed before this one.`);
   }
 
   return parts.join('\n');
