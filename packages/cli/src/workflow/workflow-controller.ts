@@ -753,12 +753,14 @@ export class WorkflowController {
   private async runPipelineCheckStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
     const checks: any[] = [];
     const overallStartTime = Date.now();
+    const workflowLogRepo = acpOptions.workflowLogRepo;
 
     this.emitSafe('check_started', {
       issueId: issue.id,
       projectId: this.projectId ?? issue.projectId,
       issueNumber: issue.number,
     });
+    this.writeLog(workflowLogRepo, issue.id, 'check_started', { issueNumber: issue.number });
 
     this.emitSafe('check_update', {
       issueId: issue.id,
@@ -766,8 +768,9 @@ export class WorkflowController {
       checkName: 'build-test',
       status: 'running',
     });
+    this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'build-test', status: 'running' });
 
-    const buildTestResult = await this.runBuildTestCheck(issue);
+    const buildTestResult = await this.runBuildTestCheck(issue, acpOptions);
     checks.push(buildTestResult);
 
     this.emitSafe('check_update', {
@@ -809,6 +812,7 @@ export class WorkflowController {
         checkName: 'merge-ready',
         status: 'running',
       });
+      this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'merge-ready', status: 'running' });
 
       const mergeReadyResult = await this.runMergeReadyCheck(issue);
       checks.push(mergeReadyResult);
@@ -820,6 +824,7 @@ export class WorkflowController {
         status: mergeReadyResult.status,
         duration: mergeReadyResult.duration,
       });
+      this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'merge-ready', status: mergeReadyResult.status, duration: mergeReadyResult.duration });
     }
 
     if (checksConfig.aiReview.enabled) {
@@ -829,6 +834,7 @@ export class WorkflowController {
         checkName: 'ai-review',
         status: 'running',
       });
+      this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'ai-review', status: 'running' });
 
       const { result: aiReviewResult, escalateToStage } = await this.runAiReviewCheck(issue, acpOptions);
       checks.push(aiReviewResult);
@@ -842,12 +848,14 @@ export class WorkflowController {
         autoFixed: aiReviewResult.autoFixed,
         verdict: aiReviewResult.verdict,
       });
+      this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'ai-review', status: aiReviewResult.status, duration: aiReviewResult.duration, autoFixed: aiReviewResult.autoFixed, verdict: aiReviewResult.verdict });
 
       if (aiReviewResult.status === 'failed') {
         const suiteOutput = { checks, overallResult: 'failed' };
 
         if (escalateToStage !== undefined) {
           this.checkpointRepo?.upsert(issue.number, 'review', ['no-auto-fix'], null);
+          this.writeLog(workflowLogRepo, issue.id, 'check_failed', { checks, reason: aiReviewResult.summary, escalatedTo: escalateToStage });
           return {
             success: false,
             requiresApproval: false,
@@ -857,6 +865,7 @@ export class WorkflowController {
           };
         }
 
+        this.writeLog(workflowLogRepo, issue.id, 'check_completed', { checks, overallResult: 'failed-awaiting-approval' });
         return {
           success: true,
           requiresApproval: true,
@@ -867,6 +876,7 @@ export class WorkflowController {
     }
 
     const suiteOutput = { checks, overallResult: 'passed' };
+    this.writeLog(workflowLogRepo, issue.id, 'check_completed', { checks, duration: Date.now() - overallStartTime });
     return {
       success: true,
       requiresApproval: true,
@@ -875,7 +885,7 @@ export class WorkflowController {
     };
   }
 
-  private async runBuildTestCheck(issue: Issue): Promise<any> {
+  private async runBuildTestCheck(issue: Issue, acpOptions: AcpConnectionOptions): Promise<any> {
     const { loadChecksConfig, DEFAULT_CHECKS_CONFIG } = await import('./workflow-loader');
     const workflow = loadWorkflow(this.worktreePath);
     const config = typeof workflow === 'string' ? DEFAULT_CHECKS_CONFIG : loadChecksConfig(workflow);
@@ -942,7 +952,7 @@ export class WorkflowController {
           maxFixAttempts,
         });
 
-        const fixResult = await this.spawnBuildTestFixAgent(issue, output);
+        const fixResult = await this.spawnBuildTestFixAgent(issue, output, acpOptions);
         if (!fixResult.success) {
           log.warn('Build & Test auto-fix agent failed', {
             issueNumber: issue.number,
@@ -965,15 +975,19 @@ export class WorkflowController {
   private async spawnBuildTestFixAgent(
     issue: Issue,
     buildOutput: string,
+    parentAcpOptions: AcpConnectionOptions,
   ): Promise<{ success: boolean; error?: string }> {
     let conn: import('../agent-runtime/acp-session').AcpConnection | undefined;
     try {
-      const acpOptions = {
+      const acpOptions: AcpConnectionOptions = {
         cwd: this.worktreePath,
         issueNumber: issue.number,
         issueId: issue.id,
         projectId: this.projectId ?? issue.projectId,
         model: issue.model ?? undefined,
+        workflowLogRepo: parentAcpOptions.workflowLogRepo,
+        eventBus: parentAcpOptions.eventBus,
+        signal: parentAcpOptions.signal,
       };
 
       conn = await createAcpConnection(acpOptions);
