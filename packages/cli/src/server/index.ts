@@ -15,8 +15,7 @@ import { createQuestionRoutes } from '../api/questions';
 import { createExploreRoutes } from '../api/explore';
 import { createLogRoutes } from '../api/logs';
 import { createOpencodeModelsRoutes } from '../api/opencode-models';
-import { createSkillRoutes } from '../api/skills';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SkillService } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, type SkillRunner } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
@@ -112,15 +111,6 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
-
-  const skillService = new SkillService({
-    skillRepo: stateManager.getSkillRepo(),
-    skillRunRepo: stateManager.getSkillRunRepo(),
-    issueService,
-    eventBus,
-    opencodeBinPath,
-  });
-
   const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, opencodeBinPath);
 
   agentRunner.setLlmConfig(fileConfig);
@@ -243,6 +233,20 @@ async function main(): Promise<void> {
 
   mergeQueue.recoverFromDB();
 
+  const skillRunner: SkillRunner = {
+    async runSkill(skillName: string): Promise<void> {
+      log.warn('SkillRunner.runSkill called but SkillService is not yet available', { skillName });
+    },
+  };
+
+  const scheduler = new SchedulerService(
+    stateManager.getScheduleRepo(),
+    skillRunner,
+    eventBus,
+  );
+
+  scheduler.start();
+
   const rateLimiter = new RateLimiter(60 * 1000, 30);
   const server = new HttpServer(config, rateLimiter);
   
@@ -266,7 +270,6 @@ async function main(): Promise<void> {
     });
   }));
   server.addRouter('/api/logs', createLogRoutes());
-  server.addRouter('/api/skills', createSkillRoutes(skillService, projectService));
 
   eventBus.on('agent_completed', async ({ issueNumber }) => {
     log.info('Agent completed', { issueNumber });
@@ -277,6 +280,7 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', async () => {
     log.info('Received SIGTERM, shutting down gracefully...');
+    scheduler.stop();
     agentRunner.shutdown();
     await server.stop();
     process.exit(143);
@@ -284,6 +288,7 @@ async function main(): Promise<void> {
 
   process.on('SIGINT', async () => {
     log.info('Received SIGINT, shutting down gracefully...');
+    scheduler.stop();
     agentRunner.shutdown();
     await server.stop();
   });

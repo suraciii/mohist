@@ -10,4 +10,4 @@ export type { ExploreSessionWithMessages, CreateExploreSessionInput } from './ex
 export { ExploreAcpService } from './explore-acp-service';
 export type { ExploreAcpServiceOptions, ExploreResult } from './explore-acp-service';
 export { OpencodeDiscoveryService, getOpencodeDiscoveryService } from './opencode-discovery-service';
-export { SkillService, type SkillServiceDeps } from './skill-service';
+export { SchedulerService, type SkillRunner } from './scheduler-service';
