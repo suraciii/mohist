@@ -347,7 +347,7 @@
       "durations": [
         600005,
         428314,
-        323274
+        200338
       ]
     },
     {
@@ -379,12 +379,13 @@
         "T-011"
       ],
       "passes": true,
-      "notes": "File was already in correct state from prior attempt. All acceptance criteria verified.",
+      "notes": "",
       "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        67843
+        67843,
+        133664
       ]
     },
     {
