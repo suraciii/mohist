@@ -193,6 +193,8 @@ export type EventMap = {
   agent_conflict_resolution_started: { issueId: string; projectId: string; issueNumber: number }
   agent_conflict_resolution_completed: { issueId: string; projectId: string; issueNumber: number }
   agent_conflict_resolution_failed: { issueId: string; projectId: string; issueNumber: number; error: string }
+  check_started: { issueId: string; projectId: string; issueNumber: number }
+  check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap
@@ -380,6 +382,22 @@ export type ApprovalOutput = {
   summary?: string
   artifacts?: ApprovalArtifact[]
   [key: string]: unknown
+}
+
+export interface CheckResult {
+  name: string
+  status: 'pending' | 'running' | 'passed' | 'failed'
+  duration?: number
+  summary?: string
+  buildLog?: string
+  reviewReport?: string
+  autoFixed?: boolean
+  verdict?: string
+}
+
+export interface CheckSuiteOutput {
+  checks: CheckResult[]
+  overallResult: 'passed' | 'failed'
 }
 
 export interface GeneralConfig {

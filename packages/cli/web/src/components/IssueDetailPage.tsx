@@ -14,7 +14,7 @@ import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
 import { TaskList } from './TaskList'
-import { ReviewApprovalPanel } from './ReviewApprovalPanel'
+import { CheckResultsPanel } from './CheckResultsPanel'
 import { formatTime, formatTimeAgo } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 
@@ -135,31 +135,7 @@ export function IssueDetailPage() {
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
   const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
-  const [rebaseResult, setRebaseResult] = useState<{
-    type: 'success' | 'error' | 'info'
-    message: string
-    conflicts?: string[]
-  } | null>(null)
 
-  const rebaseMutation = useMutation({
-    mutationFn: () => api.rebaseIssue(issueNumber),
-    onSuccess: (data) => {
-      if (data.status === 'resolving-conflicts') {
-        setRebaseResult({ type: 'info', message: 'Resolving conflicts...' })
-      } else if (data.conflicts && data.conflicts.length > 0) {
-        setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: data.conflicts })
-      } else if (data.rebased) {
-        setRebaseResult({ type: 'success', message: 'Rebase successful' })
-      } else {
-        setRebaseResult({ type: 'info', message: 'Already up to date' })
-      }
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-    },
-    onError: (error: Error) => {
-      setRebaseResult({ type: 'error', message: error.message })
-    },
-  })
 
   useEffect(() => {
     if (!forceStopConfirming) return
@@ -742,13 +718,10 @@ export function IssueDetailPage() {
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
 
               {isApprovalGate && issue.stage === Stage.Check && (
-                <ReviewApprovalPanel
+                <CheckResultsPanel
                   output={issue.approvalState?.output}
                   issueNumber={issueNumber}
                   onViewFiles={() => setDiffTab('files')}
-                  rebaseResult={rebaseResult}
-                  onRebase={() => { setRebaseResult(null); rebaseMutation.mutate() }}
-                  rebasePending={rebaseMutation.isPending}
                 />
               )}
 

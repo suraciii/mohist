@@ -159,6 +159,11 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
+          case 'check_started':
+          case 'check_update': {
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            break
+          }
         }
       } catch {
         // ignore malformed events
@@ -213,6 +218,8 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'agent_conflict_resolution_started',
       'agent_conflict_resolution_completed',
       'agent_conflict_resolution_failed',
+      'check_started',
+      'check_update',
     ]
 
     for (const type of eventTypes) {
