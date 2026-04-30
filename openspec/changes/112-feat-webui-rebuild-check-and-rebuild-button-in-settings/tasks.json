@@ -1,0 +1,76 @@
+{
+  "project": "mohist",
+  "description": "Add source staleness detection and rebuild button to WebUI Settings",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add sourceHead and upToDate to GET /api/status",
+      "spec": "specs/source-staleness-detection/spec.md",
+      "description": "Extend GET /api/status to include sourceHead (live git HEAD in source mode) and upToDate (boolean). Add a getSourceHead() helper in version.ts that runs git rev-parse HEAD in the workingDir from detectInstallMode(). Modify createStatusRoutes to accept versionInfo and compute these fields. Wire versionInfo in server/index.ts.",
+      "acceptanceCriteria": [
+        "GET /api/status returns sourceHead field (string hash or null)",
+        "GET /api/status returns upToDate field (boolean)",
+        "In source mode with matching HEAD, upToDate is true",
+        "In source mode with differing HEAD, upToDate is false",
+        "In non-source mode, sourceHead is null and upToDate is true",
+        "Git command failure returns sourceHead null and upToDate true without error",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/version.ts, packages/cli/src/api/status.ts, packages/cli/src/server/index.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D1: extend existing /api/status rather than new endpoint. Design D5: per-request git rev-parse, not cached."
+    },
+    {
+      "id": "T-002",
+      "title": "Add POST /api/settings/system/rebuild endpoint",
+      "spec": "specs/rebuild-api/spec.md",
+      "description": "Create a new rebuild route at POST /api/settings/system/rebuild. It checks source mode (detectInstallMode) and systemd service, returns 400 if unavailable, otherwise returns { success: true } immediately and spawns background build+restart. Extract the build+restart logic from server-systemd.ts updateServer() into a reusable function (spawnRebuild) that runs npm run build in cli and web dirs, then systemctl restart.",
+      "acceptanceCriteria": [
+        "POST /api/settings/system/rebuild returns { success: true } with 200 in source mode",
+        "POST /api/settings/system/rebuild returns 400 in non-source mode",
+        "POST /api/settings/system/rebuild returns 400 when systemd not installed",
+        "Background build runs npm run build in packages/cli then packages/cli/web",
+        "Background build logs failures and does not restart on failure",
+        "Successful build triggers systemctl --user restart mohist.service",
+        "Route is registered in server/index.ts under /api/settings/system",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/system-settings.ts, packages/cli/src/server/index.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D2: spawn detached child process, not execSync. Reuse build sequence from server-systemd.ts updateServer(). Import detectInstallMode, isSystemdServiceInstalled, runSystemctlUserSafe from server-systemd.ts."
+    },
+    {
+      "id": "T-003",
+      "title": "Add System tab with About section and rebuild button to SettingsPage",
+      "spec": "specs/source-staleness-detection/spec.md",
+      "description": "Add a 'System' tab to SettingsPage alongside Providers and General. Create SystemSettingsSection component that fetches /api/status to get version/gitHash/sourceHead/upToDate, displays an About section with version info and staleness indicator, and shows a 'Rebuild & Restart' button when upToDate is false and sourceHead is not null. On click, POST /api/settings/system/rebuild, then enter reconnect UX: show 'Rebuilding...' on button, poll /api/health every 5s for up to 60s after connection drops, show 'Restarting... reconnecting in Ns' countdown, refresh version info on reconnect.",
+      "acceptanceCriteria": [
+        "SettingsPage has three tabs: Providers, General, System",
+        "System tab shows version, gitHash, and sourceHead in About section",
+        "When upToDate is true, shows green 'Up to date' indicator",
+        "When upToDate is false, shows amber 'Source changed - rebuild needed' warning",
+        "Rebuild & Restart button only appears when sourceHead is not null and upToDate is false",
+        "Clicking rebuild button: button changes to 'Rebuilding...' and is disabled",
+        "After connection drops: shows 'Restarting... reconnecting in Ns' countdown",
+        "Reconnect polls /api/health every 5s, max 60s",
+        "On reconnect success: refreshes version info",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/SystemSettingsSection.tsx, packages/cli/web/src/components/SettingsPage.tsx",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Design D3: reconnect via polling /api/health. Design D4: System tab separates About concerns from General config. In non-source mode, shows version info but no rebuild button."
+    }
+  ]
+}

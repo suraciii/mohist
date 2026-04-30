@@ -26,6 +26,7 @@ import { SessionManager } from '../agent-runtime';
 import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { MergeEntry } from '../git/merge-queue';
 import { Log } from '../util/log';
+import { getVersionInfo } from '../version';
 
 
 import { load as loadConfig, getServerConfig, getLogConfig, resolveOpencodeBinPath } from '../config/config-loader';
@@ -235,7 +236,7 @@ async function main(): Promise<void> {
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
   server.addRouter('/api/providers', createProviderRoutes(eventBus, rateLimiter));
-  server.addRouter('/api', createStatusRoutes(projectService, issueService, fileConfig));
+  server.addRouter('/api', createStatusRoutes(projectService, issueService, fileConfig, getVersionInfo()));
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner));
   server.addRouter('/api/opencode', createOpencodeModelsRoutes());

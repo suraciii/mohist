@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import { detectInstallMode } from './cli/commands/server-systemd';
 
 export interface VersionInfo {
   version: string;
@@ -33,4 +34,19 @@ export function getVersionInfo(): VersionInfo {
 
   cached = { version, gitHash, versionString };
   return cached;
+}
+
+export function getSourceHead(): string | null {
+  const mode = detectInstallMode();
+  if (!mode.workingDir) return null;
+
+  try {
+    return execSync('git rev-parse --short HEAD', {
+      cwd: mode.workingDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
 }
