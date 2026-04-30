@@ -6,7 +6,7 @@ import { api } from '../lib/api'
 import { getStripColor, getLabelStyle, formatPriority, sortLabels } from '../lib/label-colors'
 import { formatRelativeTime } from '../lib/relative-time'
 
-export const APPROVAL_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Review])
+export const APPROVAL_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check])
 
 const MERGE_STATE_LABELS: Record<string, string> = {
   'build-failed': 'Failed',

@@ -4,7 +4,7 @@ import { api, ApiError } from '../lib/api'
 import { useWorktreeStatus } from '../hooks/useQueries'
 import { useLiveTask } from '../hooks/useSSE'
 
-const BRANCH_BAR_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Review, Stage.Done])
+const BRANCH_BAR_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
 
 interface BranchBarProps {
   issueNumber: number
