@@ -60,6 +60,7 @@
     "better-sqlite3": "^12.8.0",
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
+    "cron-parser": "^5.5.0",
     "hono": "^4.7.0",
     "jsonc-parser": "^3.3.1",
     "uuid": "^9.0.0",
