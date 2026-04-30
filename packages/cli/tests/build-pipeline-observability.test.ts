@@ -21,6 +21,7 @@ import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { createIssueRoutes } from '../src/api/issues';
 import type { ChangeArtifactsManager } from '../src/workflow';
 import type { OpenSpecChange } from '../src/openspec/detector';
+import type { IssueRepo } from '../src/db/issue-repo';
 
 vi.mock('../src/agent-runtime/acp-session', () => ({
   createAcpConnection: vi.fn(),
@@ -64,7 +65,8 @@ vi.mock('../src/agents/artifact-prompt', () => ({
 }));
 
 import type { PipelineCheckpointRepo } from '../src/db/pipeline-checkpoint-repo';
-import { WorkflowController } from '../src/workflow';
+import { BuildStageRunner, createCheckpointManager } from '../src/workflow';
+import type { StageContext } from '../src/workflow';
 
 function createMockIssue(stage: Stage, overrides?: Partial<Issue>): Issue {
   return {
@@ -155,7 +157,42 @@ const FAKE_CHANGE: OpenSpecChange = {
   specsPath: '/tmp/change/specs',
 };
 
-describe('Build Pipeline Observability - WorkflowController', () => {
+function createMockCheckpointRepo(): PipelineCheckpointRepo {
+  return {
+    get: vi.fn().mockReturnValue(null),
+    upsert: vi.fn(),
+    delete: vi.fn(),
+    deleteAll: vi.fn(),
+  } as unknown as PipelineCheckpointRepo;
+}
+
+function runBuildStage(
+  issue: Issue,
+  deps: {
+    issueRepo: IssueRepo;
+    eventBus: EventBus;
+    workflowLogRepo: any;
+    checkpointRepo?: PipelineCheckpointRepo;
+    artifactManager?: ChangeArtifactsManager;
+  },
+) {
+  const runner = new BuildStageRunner({ worktreePath: '/tmp/worktree', projectId: 'proj-1' });
+  const checkpointManager = createCheckpointManager(deps.checkpointRepo ?? createMockCheckpointRepo());
+  const ctx: StageContext = {
+    issue,
+    acpOptions: { cwd: '/tmp', workflowLogRepo: deps.workflowLogRepo },
+    artifactManager: deps.artifactManager ?? createMockArtifactManager(),
+    worktreeManager: {} as any,
+    projectRepo: {} as any,
+    eventBus: deps.eventBus,
+    checkpointManager,
+    issueRepo: deps.issueRepo as any,
+    workflowLogRepo: deps.workflowLogRepo,
+  };
+  return runner.run(ctx);
+}
+
+describe('Build Pipeline Observability - BuildStageRunner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDetectResult = null;
@@ -191,17 +228,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
         success: true,
       };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      const result = await ctrl.runPipelineBuildStage(
+      const result = await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo },
       );
 
       expect(result.success).toBe(false);
@@ -230,17 +259,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
         success: true,
       };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      const result = await ctrl.runPipelineBuildStage(
+      const result = await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo },
       );
 
       expect(result.success).toBe(true);
@@ -254,17 +275,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
 
       mockDetectResult = null;
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      await ctrl.runPipelineBuildStage(
+      await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo },
       );
 
       expect(eventBus.emit).toHaveBeenCalledWith(
@@ -295,17 +308,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
         success: true,
       };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      await ctrl.runPipelineBuildStage(
+      await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo },
       );
 
       expect(eventBus.emit).toHaveBeenCalledWith(
@@ -340,17 +345,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
         success: true,
       };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      await ctrl.runPipelineBuildStage(
+      await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo },
       );
 
       expect(eventBus.emit).toHaveBeenCalledWith(
@@ -381,17 +378,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
         success: false,
       };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      await ctrl.runPipelineBuildStage(
+      await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo },
       );
 
       expect(eventBus.emit).toHaveBeenCalledWith(
@@ -435,18 +424,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
         success: true,
       };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-        checkpointRepo: mockCheckpointRepo,
-      });
-
-      const result = await ctrl.runPipelineBuildStage(
+      const result = await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo, checkpointRepo: mockCheckpointRepo },
       );
 
       expect(result.success).toBe(true);
@@ -495,18 +475,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
         success: true,
       };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-        checkpointRepo: mockCheckpointRepo,
-      });
-
-      const result = await ctrl.runPipelineBuildStage(
+      const result = await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo, checkpointRepo: mockCheckpointRepo },
       );
 
       expect(result.success).toBe(true);
@@ -537,17 +508,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
         success: true,
       };
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      await ctrl.runPipelineBuildStage(
+      await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo },
       );
 
       expect(eventBus.emit).toHaveBeenCalledWith(
@@ -564,17 +527,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
 
       mockDetectResult = null;
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      await ctrl.runPipelineBuildStage(
+      await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo },
       );
 
       expect(workflowLogRepo.insert).toHaveBeenCalledWith(
@@ -606,17 +561,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
       success: true,
     };
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
-
-    await ctrl.runPipelineBuildStage(
+    await runBuildStage(
       createMockIssue(Stage.Build),
-      { cwd: '/tmp', workflowLogRepo } as any,
+      { issueRepo, eventBus, workflowLogRepo },
     );
 
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
@@ -656,17 +603,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
       success: true,
     };
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
-
-    await ctrl.runPipelineBuildStage(
+    await runBuildStage(
       createMockIssue(Stage.Build),
-      { cwd: '/tmp', workflowLogRepo } as any,
+      { issueRepo, eventBus, workflowLogRepo },
     );
 
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
@@ -699,17 +638,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
       success: false,
     };
 
-    const ctrl = new WorkflowController({
-      artifactManager: createMockArtifactManager(),
-      worktreePath: '/tmp/worktree',
-      issueRepo,
-      eventBus,
-      projectId: 'proj-1',
-    });
-
-    await ctrl.runPipelineBuildStage(
+    await runBuildStage(
       createMockIssue(Stage.Build),
-      { cwd: '/tmp', workflowLogRepo } as any,
+      { issueRepo, eventBus, workflowLogRepo },
     );
 
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
@@ -737,17 +668,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
 
       mockDetectResult = null;
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus: mockEventBus,
-        projectId: 'proj-1',
-      });
-
-      const result = await ctrl.runPipelineBuildStage(
+      const result = await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo: { insert: vi.fn() } as any } as any,
+        { issueRepo, eventBus: mockEventBus, workflowLogRepo: { insert: vi.fn() } as any },
       );
 
       expect(result.success).toBe(false);
@@ -764,17 +687,9 @@ describe('Build Pipeline Observability - WorkflowController', () => {
 
       mockDetectResult = null;
 
-      const ctrl = new WorkflowController({
-        artifactManager: createMockArtifactManager(),
-        worktreePath: '/tmp/worktree',
-        issueRepo,
-        eventBus,
-        projectId: 'proj-1',
-      });
-
-      const result = await ctrl.runPipelineBuildStage(
+      const result = await runBuildStage(
         createMockIssue(Stage.Build),
-        { cwd: '/tmp', workflowLogRepo: throwingLogRepo } as any,
+        { issueRepo, eventBus, workflowLogRepo: throwingLogRepo },
       );
 
       expect(result.success).toBe(false);
