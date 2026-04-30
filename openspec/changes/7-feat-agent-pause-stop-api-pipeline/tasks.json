@@ -81,11 +81,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow the same pattern as the close handler — check project, check issue, check agent, then act.",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        85213
+      ]
     },
     {
       "id": "T-004",
