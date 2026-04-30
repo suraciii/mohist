@@ -213,9 +213,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-003 (AcpRoundRunner). Runs in parallel with T-004/T-005 (checks).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
@@ -223,7 +223,8 @@
         250684,
         247509,
         150160,
-        158727
+        158727,
+        140987
       ]
     },
     {
