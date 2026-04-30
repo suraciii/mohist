@@ -124,18 +124,18 @@ describe('WorkflowController Review merge flow', () => {
         projectId: 'proj-1',
       });
 
-      const issue = createMockIssue(Stage.Review);
+      const issue = createMockIssue(Stage.Check);
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
       expect(mockConn.prompt).toHaveBeenCalledTimes(2);
       expect(result.gateRequired).toBe(true);
       expect(result.completed).toBe(false);
-      expect(result.stage).toBe(Stage.Review);
+      expect(result.stage).toBe(Stage.Check);
       expect(result.message).toBe('Review completed, awaiting approval');
       expect(issueRepo.setApprovalState).toHaveBeenCalledWith(
         'issue-1',
         expect.objectContaining({
-          stage: Stage.Review,
+          stage: Stage.Check,
           status: 'awaiting',
         }),
       );
@@ -143,7 +143,7 @@ describe('WorkflowController Review merge flow', () => {
         'approval_requested',
         expect.objectContaining({
           issueId: 'issue-1',
-          stage: Stage.Review,
+          stage: Stage.Check,
         }),
       );
     });
@@ -164,8 +164,8 @@ describe('WorkflowController Review merge flow', () => {
         mergeBackFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
-        approvalState: { stage: Stage.Review, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
+      const issue = createMockIssue(Stage.Check, {
+        approvalState: { stage: Stage.Check, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
@@ -195,8 +195,8 @@ describe('WorkflowController Review merge flow', () => {
         onMergeConflictFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
-        approvalState: { stage: Stage.Review, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
+      const issue = createMockIssue(Stage.Check, {
+        approvalState: { stage: Stage.Check, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
@@ -205,7 +205,7 @@ describe('WorkflowController Review merge flow', () => {
       expect(issueRepo.setMergeState).not.toHaveBeenCalled();
       expect(issueRepo.updateStage).not.toHaveBeenCalledWith('issue-1', Stage.Done);
       expect(result.completed).toBe(false);
-      expect(result.stage).toBe(Stage.Review);
+      expect(result.stage).toBe(Stage.Check);
       expect(result.message).toContain('conflict in foo.ts');
       expect(result.message).toContain('Conflict resolution triggered');
     });
@@ -226,14 +226,14 @@ describe('WorkflowController Review merge flow', () => {
         mergeBackFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
-        approvalState: { stage: Stage.Review, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
+      const issue = createMockIssue(Stage.Check, {
+        approvalState: { stage: Stage.Check, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
       expect(issueRepo.setMergeState).toHaveBeenCalledWith('issue-1', MergeState.Blocked);
       expect(result.completed).toBe(false);
-      expect(result.stage).toBe(Stage.Review);
+      expect(result.stage).toBe(Stage.Check);
       expect(result.message).toContain('conflict');
     });
   });
@@ -255,8 +255,8 @@ describe('WorkflowController Review merge flow', () => {
         onMergeConflictFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
-        approvalState: { stage: Stage.Review, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
+      const issue = createMockIssue(Stage.Check, {
+        approvalState: { stage: Stage.Check, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
@@ -280,8 +280,8 @@ describe('WorkflowController Review merge flow', () => {
         mergeBackFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
-        approvalState: { stage: Stage.Review, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
+      const issue = createMockIssue(Stage.Check, {
+        approvalState: { stage: Stage.Check, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
@@ -305,7 +305,7 @@ describe('WorkflowController Review merge flow', () => {
         mergeBackFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
+      const issue = createMockIssue(Stage.Check, {
         mergeState: MergeState.Resolving,
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
@@ -336,7 +336,7 @@ describe('WorkflowController Review merge flow', () => {
         onMergeConflictFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
+      const issue = createMockIssue(Stage.Check, {
         mergeState: MergeState.Resolving,
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
@@ -344,7 +344,7 @@ describe('WorkflowController Review merge flow', () => {
       expect(mergeBackFn).toHaveBeenCalledWith(1);
       expect(onMergeConflictFn).toHaveBeenCalledWith(1);
       expect(result.completed).toBe(false);
-      expect(result.stage).toBe(Stage.Review);
+      expect(result.stage).toBe(Stage.Check);
       expect(result.message).toContain('still conflicting');
     });
 
@@ -362,7 +362,7 @@ describe('WorkflowController Review merge flow', () => {
         mergeBackFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
+      const issue = createMockIssue(Stage.Check, {
         mergeState: MergeState.Resolving,
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
@@ -385,8 +385,8 @@ describe('WorkflowController Review merge flow', () => {
         projectId: 'proj-1',
       });
 
-      const issue = createMockIssue(Stage.Review, {
-        approvalState: { stage: Stage.Review, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
+      const issue = createMockIssue(Stage.Check, {
+        approvalState: { stage: Stage.Check, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
 
@@ -408,7 +408,7 @@ describe('WorkflowController Review merge flow', () => {
         projectId: 'proj-1',
       });
 
-      const issue = createMockIssue(Stage.Review, {
+      const issue = createMockIssue(Stage.Check, {
         mergeState: MergeState.Resolving,
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });
@@ -435,8 +435,8 @@ describe('WorkflowController Review merge flow', () => {
         mergeBackFn,
       });
 
-      const issue = createMockIssue(Stage.Review, {
-        approvalState: { stage: Stage.Review, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
+      const issue = createMockIssue(Stage.Check, {
+        approvalState: { stage: Stage.Check, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
         mergeState: MergeState.Resolving,
       });
       const result = await ctrl.run(issue, { cwd: '/tmp/worktree' });

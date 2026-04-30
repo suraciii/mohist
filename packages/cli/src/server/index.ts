@@ -20,7 +20,7 @@ import { createSettingsConfigRoutes } from '../api/settings-config';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
-import { Stage, MergeState } from '../types';
+import { Stage, IssueStatus } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { SessionManager } from '../agent-runtime';
 import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
@@ -251,13 +251,22 @@ async function main(): Promise<void> {
   server.addRouter('/api/agent/schedules', createScheduleRoutes(stateManager.getScheduleRepo(), scheduler));
   server.addRouter('/api', createSettingsConfigRoutes({ host: config.serverHost, port: config.serverPort }));
 
-  eventBus.on('agent_completed', async ({ issueId, issueNumber, projectId }) => {
+  eventBus.on('agent_completed', async ({ issueNumber }) => {
     log.info('Agent completed', { issueNumber });
+  });
 
-    const issue = issueRepo.findById(issueId);
-    if (issue && issue.stage === Stage.Done && !issue.mergeState) {
-      issueRepo.setMergeState(issueId, MergeState.Pending);
-      mergeQueue.enqueue(projectId, issueNumber);
+  eventBus.on('merge_completed', ({ issueId, issueNumber }) => {
+    log.info('Merge completed, transitioning issue to done', { issueNumber });
+
+    try {
+      issueRepo.updateStage(issueId, Stage.Done);
+      issueRepo.updateStatus(issueId, IssueStatus.Completed);
+      issueRepo.clearApprovalState(issueId);
+    } catch (err) {
+      log.error('Failed to transition issue to done after merge_completed', {
+        issueNumber,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   });
 

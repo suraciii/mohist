@@ -237,7 +237,7 @@ describe('backend output enrichment', () => {
     const dimensions = parseDimensions(reviewReport);
 
     const output = {
-      stage: 'review',
+      stage: 'check',
       issueNumber: 42,
       reviewReport,
       verdict,
@@ -250,7 +250,7 @@ describe('backend output enrichment', () => {
       expect.objectContaining({ name: 'Correctness', status: 'FAIL', issues: expect.any(Array) }),
     ]));
     expect(output.reviewReport).toBe(reviewReport);
-    expect(output.stage).toBe('review');
+    expect(output.stage).toBe('check');
     expect(output.issueNumber).toBe(42);
   });
 
@@ -260,7 +260,7 @@ describe('backend output enrichment', () => {
     const dimensions = parseDimensions(reviewReport);
 
     const output = {
-      stage: 'review',
+      stage: 'check',
       issueNumber: 7,
       reviewReport,
       verdict,
@@ -302,7 +302,7 @@ describe('backend output enrichment', () => {
     expect(dimensions).toEqual([]);
 
     const output = {
-      stage: 'review',
+      stage: 'check',
       issueNumber: 99,
       reviewReport,
       verdict,

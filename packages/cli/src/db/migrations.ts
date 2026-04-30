@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS issues (
   body        TEXT,
   stage       TEXT NOT NULL DEFAULT 'backlog',
   status      TEXT NOT NULL DEFAULT 'active',
+  archived_at TEXT DEFAULT NULL,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   UNIQUE(project_id, number)
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS issues (
 const CREATE_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_issues_project_stage ON issues(project_id, stage);',
   'CREATE INDEX IF NOT EXISTS idx_issues_project_status ON issues(project_id, status);',
+  'CREATE INDEX IF NOT EXISTS idx_issues_archived ON issues(archived_at);',
 ];
 
 const CREATE_CONFIG_TABLE = `
@@ -630,6 +632,12 @@ function migrateToVersion16(db: DatabaseManager): void {
     db.exec(CREATE_AGENT_SKILL_SCHEDULES_TABLE);
     for (const indexSql of CREATE_AGENT_SKILL_SCHEDULES_INDEXES) {
       db.exec(indexSql);
+    }
+    const tableInfo = db.all<{ name: string }>("PRAGMA table_info(issues)");
+    const hasArchivedAt = tableInfo.some(col => col.name === 'archived_at');
+    if (!hasArchivedAt) {
+      db.exec("ALTER TABLE issues ADD COLUMN archived_at TEXT DEFAULT NULL");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_issues_archived ON issues(archived_at)");
     }
     setSchemaVersion(db, 16);
   });

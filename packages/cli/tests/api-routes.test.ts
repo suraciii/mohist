@@ -364,7 +364,7 @@ describe('API Routes', () => {
 
           const issueRepo = stateManager.getIssueRepo();
           const updated = issueRepo.findById(issue.id);
-          expect(updated?.stage).toBe(Stage.Review);
+          expect(updated?.stage).toBe(Stage.Check);
         } finally {
           fs.rmSync(tmpDir, { recursive: true, force: true });
         }
