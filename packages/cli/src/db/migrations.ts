@@ -605,44 +605,18 @@ function migrateToVersion15(db: DatabaseManager): void {
   });
 }
 
-const CREATE_SKILLS_TABLE = `
-CREATE TABLE IF NOT EXISTS skills (
-  id          TEXT PRIMARY KEY,
-  name        TEXT UNIQUE NOT NULL,
-  project_id  TEXT NOT NULL REFERENCES projects(id),
-  description TEXT NOT NULL DEFAULT '',
-  prompt      TEXT NOT NULL DEFAULT '',
-  dir_path    TEXT NOT NULL,
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
-);
-`;
-
-const CREATE_SKILL_RUNS_TABLE = `
-CREATE TABLE IF NOT EXISTS skill_runs (
-  id            TEXT PRIMARY KEY,
-  skill_id      TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-  project_id    TEXT NOT NULL,
-  status        TEXT NOT NULL DEFAULT 'running',
-  output        TEXT,
-  error         TEXT,
-  issue_id      TEXT REFERENCES issues(id),
-  started_at    TEXT NOT NULL,
-  completed_at  TEXT
-);
-`;
-
-const CREATE_SKILL_RUNS_INDEXES = [
-  'CREATE INDEX IF NOT EXISTS idx_skill_runs_skill_id ON skill_runs(skill_id);',
-];
-
 function migrateToVersion16(db: DatabaseManager): void {
   db.transaction(() => {
-    db.exec(CREATE_SKILLS_TABLE);
-    db.exec(CREATE_SKILL_RUNS_TABLE);
-    for (const indexSql of CREATE_SKILL_RUNS_INDEXES) {
-      db.exec(indexSql);
+    const tableInfo = db.all<{ name: string }>(
+      "PRAGMA table_info(issues)"
+    );
+    const hasArchivedAt = tableInfo.some(col => col.name === 'archived_at');
+
+    if (!hasArchivedAt) {
+      db.exec("ALTER TABLE issues ADD COLUMN archived_at TEXT DEFAULT NULL");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_issues_archived ON issues(archived_at)");
     }
+
     setSchemaVersion(db, 16);
   });
 }

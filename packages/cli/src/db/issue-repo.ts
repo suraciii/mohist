@@ -18,8 +18,7 @@ interface IssueRow {
   merge_state: string | null;
   conflict_retry_count: number | null;
   model: string | null;
-  blocked_reason: string | null;
-  retry_count: number | null;
+  archived_at: string | null;
 }
 
 function rowToIssue(row: IssueRow): Issue {
@@ -55,8 +54,7 @@ function rowToIssue(row: IssueRow): Issue {
     mergeState: (row.merge_state as MergeState) || undefined,
     conflictRetryCount: row.conflict_retry_count ?? undefined,
     model: row.model ?? undefined,
-    blockedReason: row.blocked_reason ?? undefined,
-    retryCount: row.retry_count ?? undefined,
+    archivedAt: row.archived_at ?? undefined,
   };
 }
 
@@ -183,7 +181,7 @@ export class IssueRepo {
     return this.findById(issueId);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState; priority: Priority; model: string | null; blockedReason: string | null }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState; priority: Priority; model: string | null }>): Issue | null {
     const existing = this.findById(issueId);
     if (!existing) return null;
     
@@ -221,10 +219,6 @@ export class IssueRepo {
     if (data.model !== undefined) {
       updates.push('model = ?');
       values.push(data.model);
-    }
-    if (data.blockedReason !== undefined) {
-      updates.push('blocked_reason = ?');
-      values.push(data.blockedReason);
     }
     
     if (updates.length === 0) return existing;
@@ -343,39 +337,6 @@ export class IssueRepo {
     this.db.run(
       'UPDATE issues SET model = ?, updated_at = ? WHERE id = ?',
       [model, now, issueId]
-    );
-
-    return this.findById(issueId);
-  }
-
-  blockIssue(issueId: string, reason: string): Issue | null {
-    const now = new Date().toISOString();
-
-    this.db.run(
-      'UPDATE issues SET status = ?, blocked_reason = ?, updated_at = ? WHERE id = ?',
-      [IssueStatus.Blocked, reason, now, issueId]
-    );
-
-    return this.findById(issueId);
-  }
-
-  updateBlockedReason(issueId: string, reason: string | null): Issue | null {
-    const now = new Date().toISOString();
-
-    this.db.run(
-      'UPDATE issues SET blocked_reason = ?, updated_at = ? WHERE id = ?',
-      [reason, now, issueId]
-    );
-
-    return this.findById(issueId);
-  }
-
-  updateRetryCount(issueId: string, count: number): Issue | null {
-    const now = new Date().toISOString();
-
-    this.db.run(
-      'UPDATE issues SET retry_count = ?, updated_at = ? WHERE id = ?',
-      [count, now, issueId]
     );
 
     return this.findById(issueId);
