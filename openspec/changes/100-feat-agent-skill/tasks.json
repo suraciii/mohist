@@ -119,11 +119,14 @@
         "T-001",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-001 for schedule-parser (computeNextRun) and T-003 for ScheduleRepo. Also depends on #99's SkillService existing.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        230953
+      ]
     },
     {
       "id": "T-005",
