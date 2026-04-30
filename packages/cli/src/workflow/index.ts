@@ -18,7 +18,6 @@ export {
   type IssueRepo,
   type WorktreeManager,
   type ProjectRepo,
-  type CheckpointManager,
 } from './stage-context';
 
 export {
@@ -48,7 +47,7 @@ export {
 } from './acp-round-runner';
 
 export {
-  type CheckpointManager as CheckpointManagerInterface,
+  CheckpointManager,
   createCheckpointManager,
 } from './checkpoint-manager';
 
