@@ -111,11 +111,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use the same spinner SVG pattern from IssueDetailPage.tsx. Use useQueryClient().invalidateQueries for post-mutation refresh. Import Stage enum from lib/types.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        212547
+      ]
     },
     {
       "id": "T-005",
