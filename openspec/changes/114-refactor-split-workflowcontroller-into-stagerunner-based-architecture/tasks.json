@@ -347,7 +347,7 @@
       "durations": [
         600005,
         428314,
-        323274
+        200338
       ]
     },
     {
@@ -385,7 +385,7 @@
       "error": null,
       "durations": [
         67843,
-        224680
+        133664
       ]
     },
     {
@@ -412,8 +412,8 @@
       "order": 999999,
       "error": null,
       "durations": [
-        600993,
-        360896
+        604153,
+        282077
       ]
     },
     {
@@ -439,7 +439,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        81650
+        73969
       ]
     },
     {
@@ -461,14 +461,14 @@
         "T-014"
       ],
       "passes": true,
-      "notes": "Build succeeds, typecheck clean, 0 new test failures (132 vs pre-existing 137), lint has pre-existing ESLint config issue",
+      "notes": "",
       "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
-        605035,
-        608723,
-        45
+        604467,
+        609282,
+        204217
       ]
     }
   ]
