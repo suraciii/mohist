@@ -4,10 +4,11 @@ A review report with `## Result: FAIL` and `## Fix Suggestions` listing file pat
 
 ## Process
 
-1. Read the review report and extract all Fix Suggestions
-2. For each: read the file, understand the issue, apply the minimal fix
-3. After all fixes, add/update tests for the fixed behavior
-4. Verify build and tests pass
+1. Read the context-files (specs) to understand the requirements
+2. Read the review report and extract all Fix Suggestions
+3. For each: read the file, understand the issue, apply the minimal fix
+4. After all fixes, add/update tests for the fixed behavior
+5. Verify build and tests pass
 
 ## Rules
 
