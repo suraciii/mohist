@@ -43,7 +43,7 @@ export class CheckStageRunner implements StageRunner {
       const result = await check.run(checkContext);
       results.push(result);
 
-      if (result.status === 'fail' && check.name === 'BuildTestCheck') {
+      if (result.status === 'fail' && check.name === 'build-test') {
         return {
           success: false,
           requiresApproval: false,
