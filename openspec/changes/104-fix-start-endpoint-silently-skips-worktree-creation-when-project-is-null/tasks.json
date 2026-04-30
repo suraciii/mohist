@@ -1,0 +1,29 @@
+{
+  "project": "mohist",
+  "description": "Add project null check to 5 worktree-using endpoints in issues.ts, returning 404 instead of silently falling back to process.cwd()",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add project null check to all 5 worktree-using endpoints",
+      "spec": "specs/http-api/spec.md#Worktree-using-endpoints-SHALL-reject-when-project-not-found",
+      "description": "In packages/cli/src/api/issues.ts, add `if (!project) { log.warn(...); return c.json({success:false,error:'Project not found'},404); }` after `const project = projectService.getById(projectId)` in 5 endpoints: start (L431), reopen (L679), approve (L960), reject (L1081), messages (L1173). For start endpoint, the check must go BEFORE the stage transition at L437. Reference propose.ts:60-66 for the exact pattern.",
+      "acceptanceCriteria": [
+        "start endpoint returns 404 with {success:false,error:'Project not found'} when project is null, before stage transition",
+        "reopen endpoint returns 404 when project is null",
+        "approve endpoint returns 404 when project is null",
+        "reject endpoint returns 404 when project is null",
+        "messages endpoint returns 404 when project is null",
+        "Each null check logs warn with projectId and issueNumber",
+        "No remaining `let worktreePath = process.cwd()` pattern without preceding project null guard",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "All 5 fixes are in a single file, same mechanical pattern. No need to split into separate tasks."
+    }
+  ]
+}

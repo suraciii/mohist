@@ -429,8 +429,17 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
+      if (!project) {
+        log.warn('Project not found', { projectId, issueNumber: number });
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
       let worktreePath = process.cwd();
-      if (worktreeManager && project) {
+      if (worktreeManager) {
         worktreePath = await worktreeManager.create(project.path, project.name, issue.number, project.baseBranch);
       }
 
@@ -677,8 +686,17 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
+      if (!project) {
+        log.warn('Project not found', { projectId, issueNumber: number });
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
       let worktreePath = process.cwd();
-      if (worktreeManager && project) {
+      if (worktreeManager) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
         worktreePath = existingPath || process.cwd();
       }
@@ -947,6 +965,22 @@ export function createIssueRoutes(
         });
       }
 
+      const project = projectService.getById(projectId);
+      if (!project) {
+        log.warn('Project not found', { projectId, issueNumber: number });
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      let worktreePath = process.cwd();
+      if (worktreeManager) {
+        const existingPath = worktreeManager.getPath(project.name, issue.number);
+        worktreePath = existingPath || process.cwd();
+      }
+
       let nextStage: Stage | undefined;
       if (approvalStage === Stage.Plan) {
         nextStage = Stage.Build;
@@ -955,13 +989,6 @@ export function createIssueRoutes(
       let resumedIssue = issue;
       if (nextStage) {
         resumedIssue = issueRepo.updateStage(issue.id, nextStage)!;
-      }
-
-      const project = projectService.getById(projectId);
-      let worktreePath = process.cwd();
-      if (worktreeManager && project) {
-        const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || process.cwd();
       }
 
       const acpOptions: AcpConnectionOptions = {
@@ -1079,8 +1106,17 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
+      if (!project) {
+        log.warn('Project not found', { projectId, issueNumber: number });
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
       let worktreePath = process.cwd();
-      if (worktreeManager && project) {
+      if (worktreeManager) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
         worktreePath = existingPath || process.cwd();
       }
@@ -1171,8 +1207,17 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
+      if (!project) {
+        log.warn('Project not found', { projectId, issueNumber: number });
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
       let worktreePath = process.cwd();
-      if (worktreeManager && project) {
+      if (worktreeManager) {
         const existingPath = worktreeManager.getPath(project.name, issue.number);
         worktreePath = existingPath || process.cwd();
       }
