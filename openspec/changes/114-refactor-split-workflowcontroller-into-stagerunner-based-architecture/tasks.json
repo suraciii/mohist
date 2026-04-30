@@ -137,9 +137,9 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-003 (AcpRoundRunner) and T-004 (types and Check interface). Can run after T-003 is done. parseVerdict and extractFixSuggestions are referenced by tests but don't exist in the current file — implement them here or in utils.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
@@ -147,7 +147,8 @@
         254658,
         257185,
         250395,
-        107486
+        107486,
+        194736
       ]
     },
     {
