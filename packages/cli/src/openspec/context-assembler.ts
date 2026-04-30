@@ -5,6 +5,16 @@ import type { SessionLearning } from '../tools/session-memory';
 import { formatAgentPrompt, type AgentPromptParts } from '../agents/agent-prompt-schema';
 import type { AgentConfig } from '../workflow/workflow-loader';
 
+const BUILD_INSTRUCTION_PATH = path.join(__dirname, '..', 'agents', 'prompts', 'build.md');
+
+let cachedBuildInstruction: string | null = null;
+
+function loadBuildInstruction(): string {
+  if (cachedBuildInstruction !== null) return cachedBuildInstruction;
+  cachedBuildInstruction = fs.readFileSync(BUILD_INSTRUCTION_PATH, 'utf-8');
+  return cachedBuildInstruction;
+}
+
 export interface Task {
   id: string;
   order: number;
@@ -146,14 +156,8 @@ function buildRole(task: Task, options: BuildContextOptions): string {
 
 function buildContract(task: Task): string {
   const lines: string[] = [];
-  lines.push('1. After completing this task, commit your changes:');
-  lines.push('   - Run `git add -A` to stage all changes');
-  lines.push(`   - Run \`git commit -m "${task.id}: <brief summary of what you did>"\``);
-  lines.push('2. Read context-files if you need architectural guidance');
-  if (task.spec) {
-    lines.push(`3. Read and verify all scenarios in the spec file (${task.spec})`);
-    lines.push('   Ensure every WHEN/THEN scenario in the referenced requirement passes');
-  }
+  lines.push('After completing this task, stage and commit your changes.');
+  lines.push(`Commit message must start with "${task.id}: " followed by a brief summary.`);
   return lines.join('\n');
 }
 
@@ -235,6 +239,7 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
     spec: spec ?? undefined,
     task: taskContent,
     contract,
+    instruction: loadBuildInstruction(),
   };
 
   const fullPrompt = formatAgentPrompt(parts);
