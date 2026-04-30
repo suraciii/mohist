@@ -3,7 +3,7 @@
 1. **Preserve both sides.** Never drop or overwrite either side's changes.
 2. **Resolve every conflict.** Search for `<<<<<<<`, `=======`, `>>>>>>>` across all files. No markers may remain.
 3. **TypeScript compilation must pass.** After resolving, run build to verify.
-4. **Commit each resolution.** After resolving: `git add -A && git commit -m "resolve merge conflicts"`
+4. **Commit each resolution.** After resolving, stage and commit with a descriptive message.
 
 ## Steps — Loop Until Complete
 

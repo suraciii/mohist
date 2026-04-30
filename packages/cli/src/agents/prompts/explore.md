@@ -1,6 +1,7 @@
 ## Your Task
 
 1. Read the issue description
+2. Read any context-files listed above — existing design and specs constrain the proposal
 2. Explore the codebase — read files, search patterns, trace dependencies
 3. Let the shape of the problem emerge before structuring
 4. Generate a proposal document

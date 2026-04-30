@@ -1,3 +1,7 @@
+## Before You Start
+
+Read the context-files. Understand the proposal scope and design approach before reviewing.
+
 ## Review Dimensions
 
 ### Correctness
