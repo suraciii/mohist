@@ -83,11 +83,14 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/db/schedule-repo.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Parallel with T-001 — different files, no code dependency. The FK to agent_skills means #99 must have created that table first.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        216158
+      ]
     },
     {
       "id": "T-004",
