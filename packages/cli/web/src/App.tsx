@@ -6,6 +6,7 @@ import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
 import { Header } from './components/Header'
 import { IssueDetailPage } from './components/IssueDetailPage'
+import { SessionPage } from './components/SessionPage'
 import { ExplorePage } from './components/ExplorePage'
 import { ExploreSessionList } from './components/ExploreSessionList'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
@@ -96,6 +97,7 @@ function AppContent() {
         <Route element={<ProjectGuard />}>
           <Route path="/" element={<KanbanView />} />
           <Route path="/issue/:number" element={<IssueDetailPage />} />
+          <Route path="/issue/:number/session/:sessionId" element={<SessionPage />} />
           <Route path="/explore" element={<ExploreSessionList />} />
           <Route path="/explore/:id" element={<ExplorePage />} />
           <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
