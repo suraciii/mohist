@@ -663,7 +663,7 @@ export class WorkflowController {
       elapsedMs: duration,
     });
 
-    if (result.completed === 0 && result.total > 0) {
+    if (result.completed === 0 && result.total > 0 && (completedTaskIds.length === 0 || !result.success)) {
       log.warn('Build completed with 0 tasks executed out of total', {
         total: result.total,
         issueNumber: issue.number,
@@ -1434,7 +1434,7 @@ function truncateLog(log: string, maxLength: number): string {
 const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
 const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
 
-export function parseResult(content: string): 'PASS' | 'FAIL' {
+export function parseResult(content: string): 'PASS' | 'FAIL' | null {
   const match = RESULT_RE.exec(content);
   if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
   const legacyMatch = LEGACY_VERDICT_RE.exec(content);
@@ -1442,11 +1442,18 @@ export function parseResult(content: string): 'PASS' | 'FAIL' {
     log.warn('parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
     return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
   }
-  return 'FAIL';
+  return null;
 }
 
+const CASE_SENSITIVE_RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/m;
+const CASE_SENSITIVE_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/m;
+
 export function parseVerdict(content: string): 'PASS' | 'FAIL' {
-  return parseResult(content);
+  const match = CASE_SENSITIVE_RESULT_RE.exec(content);
+  if (match) return match[1] as 'PASS' | 'FAIL';
+  const legacyMatch = CASE_SENSITIVE_VERDICT_RE.exec(content);
+  if (legacyMatch) return legacyMatch[1] as 'PASS' | 'FAIL';
+  return 'FAIL';
 }
 
 export function extractFixSuggestions(content: string): string {
