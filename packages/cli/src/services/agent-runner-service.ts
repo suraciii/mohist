@@ -2,7 +2,8 @@ import type { IssueRepo } from '../db/issue-repo';
 import type { ProjectRepo } from '../db/project-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
-import { WorkflowController, type PipelineResult } from '../workflow/workflow-controller';
+import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner, BuildTestCheck, MergeReadyCheck, AiReviewCheck } from '../workflow';
+import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue } from '../types';
 import { EventBus } from './event-bus';
@@ -532,13 +533,25 @@ export class AgentRunnerService {
     const promise = (async () => {
       try {
         const artifactManager = new ChangeArtifactsManager(worktreePath);
-        const pipeline = new WorkflowController({
+        const checkpointManager = this.checkpointRepo
+          ? createCheckpointManager(this.checkpointRepo)
+          : createCheckpointManager({ get: () => null, upsert: () => {}, delete: () => {} } as any);
+        const runners = [
+          new PlanStageRunner(),
+          new BuildStageRunner({ worktreePath, projectId }),
+          new CheckStageRunner([
+            new BuildTestCheck({ worktreePath }),
+            new MergeReadyCheck({ worktreeManager: this.worktreeManager, projectRepo: this.projectRepo as any }),
+            new AiReviewCheck(),
+          ]),
+        ];
+        const pipeline = new WorkflowEngine({
+          runners,
           artifactManager,
-          worktreePath,
           issueRepo,
           eventBus: this.eventBus,
           projectId,
-          checkpointRepo: this.checkpointRepo,
+          checkpointManager,
           signal: abortController.signal,
         });
 

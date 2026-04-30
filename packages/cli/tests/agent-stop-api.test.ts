@@ -15,8 +15,8 @@ import { StateManager } from '../src/server/state-manager';
 import { createIssueRoutes } from '../src/api/issues';
 import { Stage, IssueStatus } from '../src/types';
 
-vi.mock('../src/workflow/workflow-controller', () => ({
-  WorkflowController: class {
+vi.mock('../src/workflow', () => ({
+  WorkflowEngine: class {
     private signal?: AbortSignal;
     constructor(opts: any) {
       this.signal = opts.signal;
@@ -35,6 +35,12 @@ vi.mock('../src/workflow/workflow-controller', () => ({
       return { completed: true, stage: Stage.Done, gateRequired: false };
     }
   },
+  PlanStageRunner: vi.fn(),
+  BuildStageRunner: vi.fn(),
+  CheckStageRunner: vi.fn(),
+  BuildTestCheck: vi.fn(),
+  MergeReadyCheck: vi.fn(),
+  AiReviewCheck: vi.fn(),
 }));
 
 vi.mock('../src/artifacts/change-artifacts-manager', () => ({

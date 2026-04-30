@@ -47,12 +47,11 @@ vi.mock('../src/agents/artifact-prompt', () => ({
 }));
 
 import {
-  WorkflowController,
+  WorkflowEngine,
   parseResult,
   extractFixSuggestions,
   type ChangeArtifactsManager,
-  type StageResult,
-} from '../src/workflow/workflow-controller';
+} from '../src/workflow';
 import { createAcpConnection } from '../src/agent-runtime/acp-session';
 import type { IssueRepo } from '../src/db/issue-repo';
 import type { EventBus } from '../src/services/event-bus';

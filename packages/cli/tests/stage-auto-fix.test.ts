@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseVerdict } from '../src/workflow/workflow-controller';
+import { parseVerdict } from '../src/workflow';
 import { buildAutoFixPrompt } from '../src/agents/artifact-prompt';
 import type { Issue } from '../src/types';
 
