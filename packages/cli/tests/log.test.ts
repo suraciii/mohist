@@ -153,7 +153,7 @@ describe("Log", () => {
       timer.stop()
       const allOutput = writeSpy.mock.calls.map((c: any) => String(c[0])).join("")
       expect(allOutput).toContain("status=completed")
-      expect(allOutput).toMatch(/duration=\d+/)
+      expect(allOutput).toMatch(/elapsedMs=\d+/)
     })
   })
 

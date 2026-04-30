@@ -224,7 +224,7 @@ export namespace Log {
         function stop() {
           result.info(message, {
             status: "completed",
-            duration: Date.now() - now,
+            elapsedMs: Date.now() - now,
             ...extra,
           })
         }
