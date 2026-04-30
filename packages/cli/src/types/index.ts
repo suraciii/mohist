@@ -107,6 +107,28 @@ export interface Config {
   maxGracePeriods?: number;
 }
 
+export type CheckStatus = 'passed' | 'failed' | 'running' | 'pending';
+
+export type CheckOverallResult = 'passed' | 'failed' | 'blocked';
+
+export interface CheckResult {
+  name: string;
+  status: CheckStatus;
+  duration?: number;
+  autoFixed?: boolean;
+  summary?: string;
+  verdict?: string;
+  dimensions?: string[];
+  reviewReport?: string;
+  buildLog?: string;
+  conflictFiles?: string[];
+}
+
+export interface CheckSuiteOutput {
+  checks: CheckResult[];
+  overallResult: CheckOverallResult;
+}
+
 export interface ServerState {
   isRunning: boolean;
   pid?: number;

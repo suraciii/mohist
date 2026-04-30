@@ -2284,7 +2284,7 @@ export function createIssueRoutes(
 
             const refreshedIssue = issueService.getByNumber(resolutionProjectId, resolutionNumber);
 
-            if (refreshedIssue?.stage === Stage.Review) {
+            if (refreshedIssue?.stage === Stage.Check) {
               await handleReviewRebase(refreshedIssue, project, resolutionProjectId, resolutionNumber, true);
             }
 
