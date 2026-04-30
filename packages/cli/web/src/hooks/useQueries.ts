@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { GeneralConfig } from '../lib/types'
+import type { AgentRuntimeConfig, GeneralConfig, SystemInfo } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
@@ -382,4 +382,96 @@ export function useOpencodeModels() {
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) return '********'
   return apiKey.slice(0, 4) + '*'.repeat(apiKey.length - 8) + apiKey.slice(-4)
+}
+
+export function useModel() {
+  return useQuery<{ model: string | null }>({
+    queryKey: ['model'],
+    queryFn: () => api.getModel(),
+  })
+}
+
+export function useSetModel() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (model: string | null) => api.setModel(model),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['model'] })
+    },
+  })
+}
+
+export function useOpencodeModelConfig() {
+  return useQuery<{ model: string | null }>({
+    queryKey: ['opencode-model-config'],
+    queryFn: () => api.getOpencodeModelConfig(),
+  })
+}
+
+export function useSetOpencodeModelConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (model: string | null) => api.setOpencodeModel(model),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['opencode-model-config'] })
+    },
+  })
+}
+
+export function useLogLevel() {
+  return useQuery<{ level: string }>({
+    queryKey: ['log-level'],
+    queryFn: () => api.getLogLevel(),
+  })
+}
+
+export function useSetLogLevel() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (level: string) => api.setLogLevel(level),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['log-level'] })
+    },
+  })
+}
+
+export function useAgentRuntime() {
+  return useQuery<AgentRuntimeConfig>({
+    queryKey: ['agent-runtime'],
+    queryFn: () => api.getAgentRuntime(),
+  })
+}
+
+export function useSetAgentRuntime() {
+  const queryClient = useQueryClient()
+  return useMutation<AgentRuntimeConfig, Error, Partial<AgentRuntimeConfig>>({
+    mutationFn: (data) => api.updateAgentRuntime(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-runtime'] })
+    },
+  })
+}
+
+export function useStageModels() {
+  return useQuery<{ stageModels: Record<string, string> | null }>({
+    queryKey: ['stage-models'],
+    queryFn: () => api.getStageModels(),
+  })
+}
+
+export function useSetStageModels() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (stageModels: Record<string, string> | null) => api.setStageModels(stageModels),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stage-models'] })
+    },
+  })
+}
+
+export function useSystemInfo() {
+  return useQuery<SystemInfo>({
+    queryKey: ['system-info'],
+    queryFn: () => api.getSystemInfo(),
+  })
 }
