@@ -91,7 +91,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Review);
+    expect(recovered?.stage).toBe(Stage.Check);
   });
 
   it('build-stage partial: auto-retry triggered', () => {
@@ -401,7 +401,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(service.hasPendingGate(awaitingIssue.number)).toBe(true);
 
     const rBuild = issueRepo.findById(buildIssue.id);
-    expect(rBuild?.stage).toBe(Stage.Review);
+    expect(rBuild?.stage).toBe(Stage.Check);
 
     const rPlan = issueRepo.findById(planIssue.id);
     expect(rPlan?.status).toBe(IssueStatus.Interrupted);
@@ -434,7 +434,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Review);
+    expect(recovered?.stage).toBe(Stage.Check);
   });
 });
 
@@ -898,7 +898,7 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
 
     const recovered = issueRepo.findById(issue.id);
     expect(recovered?.status).toBe(IssueStatus.Active);
-    expect(recovered?.stage).toBe(Stage.Review);
+    expect(recovered?.stage).toBe(Stage.Check);
     expect(recovered?.retryCount).toBe(0);
     expect(recovered?.blockedReason).toBeUndefined();
   });

@@ -95,7 +95,7 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
     expect(spy).toHaveBeenCalledTimes(1);
 
     const [calledIssue, calledProjectId, calledIssueRepo, calledWorktreePath, calledAcpOptions] = spy.mock.calls[0];
-    expect(calledIssue.stage).toBe(Stage.Review);
+    expect(calledIssue.stage).toBe(Stage.Check);
     expect(calledProjectId).toBe(project.id);
     expect(calledIssueRepo).toBe(issueRepo);
     expect(calledWorktreePath).toBe(tmpDir);
@@ -104,7 +104,7 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
     expect(calledAcpOptions.projectId).toBe(project.id);
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Review);
+    expect(recovered?.stage).toBe(Stage.Check);
     expect(recovered?.status).toBe(IssueStatus.Active);
   });
 
@@ -142,7 +142,7 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
 
     const recovered = issueRepo.findById(issue.id);
     expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.stage).toBe(Stage.Review);
+    expect(recovered?.stage).toBe(Stage.Check);
   });
 
   it('partial-pass does not call startPipeline, sets Blocked', () => {

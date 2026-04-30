@@ -388,23 +388,23 @@ export class WorkflowController {
             };
           }
 
-          currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Review)!;
+          currentIssue = this.issueRepo.updateStage(currentIssue.id, Stage.Check)!;
           break;
         }
 
-        case Stage.Review: {
+        case Stage.Check: {
           const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptsWithSignal);
           if (!reviewResult.success) {
             return {
               completed: false,
-              stage: Stage.Review,
+              stage: Stage.Check,
               gateRequired: false,
               message: reviewResult.message,
             };
           }
 
           this.issueRepo.setApprovalState(currentIssue.id, {
-            stage: Stage.Review,
+            stage: Stage.Check,
             status: 'awaiting',
             output: reviewResult.output,
             requestedAt: new Date().toISOString(),
@@ -412,12 +412,12 @@ export class WorkflowController {
           this.eventBus.emit('approval_requested', {
             issueId: currentIssue.id,
             projectId: this.projectId ?? currentIssue.projectId,
-            stage: Stage.Review,
+            stage: Stage.Check,
           });
 
           return {
             completed: false,
-            stage: Stage.Review,
+            stage: Stage.Check,
             gateRequired: true,
             message: 'Review completed, awaiting approval',
           };
@@ -848,7 +848,7 @@ export class WorkflowController {
         success: true,
         requiresApproval: true,
         output: {
-          stage: Stage.Review,
+          stage: Stage.Check,
           issueNumber: issue.number,
           reviewReport,
         },

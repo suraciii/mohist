@@ -706,7 +706,7 @@ export function createIssueRoutes(
       }
 
       let isReviewRecovery = false;
-      if (issue.stage === Stage.Review) {
+      if (issue.stage === Stage.Check) {
         const changeDir = findChangeDir(worktreePath, issue.number);
         if (changeDir) {
           try {
@@ -857,7 +857,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      issueService.transitionToStage(issue.id, Stage.Review);
+      issueService.transitionToStage(issue.id, Stage.Check);
       issueService.setStatus(issue.id, IssueStatus.Active);
 
       if (agentRunner) {
@@ -985,22 +985,22 @@ export function createIssueRoutes(
         worktreePath = existingPath || process.cwd();
       }
 
-      if (approvalStage === Stage.Review) {
-        issueRepo.updateStage(issue.id, Stage.Done);
-        issueRepo.clearApprovalState(issue.id);
-        issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-        issueRepo.setMergeState(issue.id, MergeState.Pending);
-
-        if (mergeQueue && worktreeManager) {
-          mergeQueue.enqueue(projectId, number);
+      if (approvalStage === Stage.Check) {
+        if (!mergeQueue) {
+          const response: ApiResponse = {
+            success: false,
+            error: 'MergeQueue not configured'
+          };
+          return c.json(response, 500);
         }
 
-        const completedIssue = issueRepo.findById(issue.id);
+        mergeQueue.enqueue(projectId, number);
+
         const response: ApiResponse = {
           success: true,
           data: {
-            issue: completedIssue ?? issue,
-            message: `Issue #${number} approved and completed`
+            issue: issueService.getByNumber(projectId, number),
+            message: `Issue #${number} approved, enqueued for merge`
           }
         };
         return c.json(response);
@@ -1126,7 +1126,7 @@ export function createIssueRoutes(
       });
 
       let resumedIssue = issue;
-      if (rejectedStage === Stage.Review) {
+      if (rejectedStage === Stage.Check) {
         resumedIssue = issueRepo.updateStage(issue.id, Stage.Build)!;
       }
 
@@ -1171,7 +1171,7 @@ export function createIssueRoutes(
         success: true,
         data: {
           issue: resumedIssue,
-          message: `Issue #${number} rejected, pipeline restarted from ${rejectedStage === Stage.Review ? 'build' : 'plan'}`
+          message: `Issue #${number} rejected, pipeline restarted from ${rejectedStage === Stage.Check ? 'build' : 'plan'}`
         }
       };
       return c.json(response);
@@ -2060,7 +2060,7 @@ export function createIssueRoutes(
     }
   });
 
-  const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Review, Stage.Done];
+  const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done];
 
   async function handleReviewRebase(issue: Issue, project: { name: string; baseBranch: string }, projectId: string, number: number, skipBuildVerify?: boolean): Promise<boolean | undefined> {
     if (skipBuildVerify) {
@@ -2329,7 +2329,7 @@ export function createIssueRoutes(
       }
 
       let buildPassed: boolean | undefined;
-      if (issue.stage === Stage.Review) {
+      if (issue.stage === Stage.Check) {
         buildPassed = await handleReviewRebase(issue, project, projectId, number);
       }
 
@@ -2347,7 +2347,7 @@ export function createIssueRoutes(
         success: true,
         data: {
           rebased: true,
-          message: issue.stage === Stage.Review
+          message: issue.stage === Stage.Check
             ? (buildPassed ? 'Rebase successful, build verification passed' : 'Rebase successful but build verification failed')
             : issue.stage === Stage.Build
               ? 'Rebase successful, checkpoint cleared, resume pipeline to rebuild'

@@ -86,7 +86,7 @@ export function createStatusRoutes(
           backlog: issues.filter(i => i.stage === 'backlog').length,
           plan: issues.filter(i => i.stage === 'plan').length,
           build: issues.filter(i => i.stage === 'build').length,
-          review: issues.filter(i => i.stage === 'review').length,
+          check: issues.filter(i => i.stage === 'check').length,
           done: issues.filter(i => i.stage === 'done').length,
         },
         llm,

@@ -219,7 +219,7 @@ async function runReviewStage(
   });
 
   return (ctrl as any).runPipelineReviewStage(
-    createMockIssue(Stage.Review),
+    createMockIssue(Stage.Check),
     { cwd: '/tmp/worktree' },
   );
 }
@@ -348,8 +348,8 @@ describe('no-auto-fix checkpoint skips auto-fix loop', () => {
     const repos = createMockRepos();
     (repos.checkpointRepo.get as ReturnType<typeof vi.fn>).mockImplementation(
       (_issueNumber: number, stage: string) => {
-        if (stage === 'review') {
-          return { issueNumber: 1, stage: 'review', completedSteps: ['no-auto-fix'], nextStep: null };
+        if (stage === 'check') {
+          return { issueNumber: 1, stage: 'check', completedSteps: ['no-auto-fix'], nextStep: null };
         }
         return null;
       },
@@ -430,7 +430,7 @@ describe('run() loop handles escalateToStage', () => {
       checkpointRepo: repos.checkpointRepo,
     });
 
-    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+    const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
     expect(repos.issueRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Build);
   });
@@ -450,7 +450,7 @@ describe('auto-fix SSE events', () => {
 
     expect(repos.eventBus.emit).toHaveBeenCalledWith(
       'plan_round_start',
-      expect.objectContaining({ roundType: 'review', roundIndex: 0 }),
+      expect.objectContaining({ roundType: 'check', roundIndex: 0 }),
     );
     expect(repos.eventBus.emit).toHaveBeenCalledWith(
       'plan_round_start',
@@ -499,7 +499,7 @@ describe('auto-fix SSE events', () => {
     });
 
     await (ctrl as any).runPipelineReviewStage(
-      createMockIssue(Stage.Review),
+      createMockIssue(Stage.Check),
       { cwd: '/tmp/worktree' },
     );
 

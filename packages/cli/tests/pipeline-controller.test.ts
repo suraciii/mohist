@@ -187,8 +187,8 @@ describe('WorkflowController pipeline stage ordering', () => {
 
     const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
-    expect(issueRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Review);
-    expect(result.stage).toBe(Stage.Review);
+    expect(issueRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Check);
+    expect(result.stage).toBe(Stage.Check);
     expect(result.gateRequired).toBe(true);
   });
 
@@ -392,12 +392,12 @@ describe('WorkflowController review stage multi-round', () => {
       projectId: 'proj-1',
     });
 
-    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+    const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
     expect(mockConn.prompt).toHaveBeenCalledTimes(2);
     expect(mockConn.close).toHaveBeenCalled();
     expect(result.gateRequired).toBe(true);
-    expect(result.stage).toBe(Stage.Review);
+    expect(result.stage).toBe(Stage.Check);
   });
 
   it('should not send self-check prompt when review round fails', async () => {
@@ -416,7 +416,7 @@ describe('WorkflowController review stage multi-round', () => {
       projectId: 'proj-1',
     });
 
-    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+    const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
     expect(mockConn.prompt).toHaveBeenCalledTimes(1);
     expect(result.gateRequired).toBe(false);
@@ -441,7 +441,7 @@ describe('WorkflowController review stage multi-round', () => {
       projectId: 'proj-1',
     });
 
-    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+    const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
     expect(mockConn.prompt).toHaveBeenCalledTimes(2);
     expect(result.gateRequired).toBe(false);
@@ -464,7 +464,7 @@ describe('WorkflowController review stage multi-round', () => {
       projectId: 'proj-1',
     });
 
-    const result = await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+    const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
     expect(mockConn.prompt).toHaveBeenCalledTimes(2);
     expect(result.gateRequired).toBe(false);
@@ -487,11 +487,11 @@ describe('WorkflowController review stage multi-round', () => {
       projectId: 'proj-1',
     });
 
-    await ctrl.run(createMockIssue(Stage.Review), { cwd: '/tmp/worktree' });
+    await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
 
     expect(eventBus.emit).toHaveBeenCalledWith(
       'plan_round_start',
-      expect.objectContaining({ roundType: 'review', roundIndex: 0 }),
+      expect.objectContaining({ roundType: 'check', roundIndex: 0 }),
     );
     expect(eventBus.emit).toHaveBeenCalledWith(
       'plan_round_start',

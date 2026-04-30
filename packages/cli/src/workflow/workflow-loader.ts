@@ -50,7 +50,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
       approval: false,
     },
     {
-      stage: 'review',
+      stage: 'check',
       prompt: '审查实现成果，检查功能正确性和代码质量',
       approval: true,
     },

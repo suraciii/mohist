@@ -255,7 +255,7 @@ export class AgentRunnerService {
 
     const allPass = tasksFile.tasks.every(t => t.passes === true);
     if (allPass) {
-      this.issueRepo!.updateStage(issue.id, Stage.Review);
+      this.issueRepo!.updateStage(issue.id, Stage.Check);
       log.info('Recovered build-stage orphan — all tasks pass, auto-advanced to review', {
         issueNumber: issue.number,
         totalTasks: tasksFile.tasks.length,
