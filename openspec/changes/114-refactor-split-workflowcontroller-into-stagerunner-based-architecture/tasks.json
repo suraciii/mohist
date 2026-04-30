@@ -107,13 +107,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "BuildTestCheck and MergeReadyCheck do NOT use AcpRoundRunner — they can start as soon as T-001 (types) is done. This is intentional: they run in parallel with T-003 (AcpRoundRunner). These checks are new — not extracted from the current 908-line file.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        187326
+        187326,
+        214519
       ]
     },
     {
