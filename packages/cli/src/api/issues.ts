@@ -2,11 +2,11 @@ import { Hono } from 'hono';
 import * as fs from 'fs';
 import * as path from 'path';
 import { StateManager } from '../server/state-manager';
-import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORITIES } from '../types';
+import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORITIES, MergeState } from '../types';
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
-import { WorktreeManager } from '../git/worktree-manager';
+import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
@@ -145,6 +145,37 @@ export function createIssueRoutes(
     }
   });
 
+  app.get('/merge-blocked', async (c) => {
+    try {
+      const projectId = c.req.query('projectId') || getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issueRepo = stateManager.getIssueRepo();
+      if (!issueRepo) {
+        return c.json({ success: false, error: 'IssueRepo not configured' } satisfies ApiResponse, 500);
+      }
+
+      const blockedIssues = issueRepo.findByMergeStates([MergeState.Blocked])
+        .filter(issue => issue.projectId === projectId);
+
+      const blockedEntries = blockedIssues.map(issue => {
+        const queueEntry = mergeQueue?.getStatus().find(e => e.issueNumber === issue.number);
+        return {
+          issueNumber: issue.number,
+          title: issue.title,
+          conflictingFiles: queueEntry?.conflictingFiles ?? [],
+          blockedAt: issue.updatedAt,
+        };
+      });
+
+      return c.json({ success: true, data: blockedEntries } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
   app.get('/merge-queue/status', async (c) => {
     try {
       const projectId = getCurrentProjectId();
@@ -231,7 +262,7 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const { title, body, addLabels, removeLabels, priority } = await c.req.json();
+      const { title, body, addLabels, removeLabels, priority, model } = await c.req.json();
 
       if (priority !== undefined && !VALID_PRIORITIES.includes(priority as Priority)) {
         const response: ApiResponse = {
@@ -241,11 +272,20 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const updateData: Partial<{ title: string; body: string; labels: string[]; priority: Priority }> = {};
+      if (model !== undefined && model !== null && typeof model === 'string' && !model.includes('/')) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Invalid model format'
+        };
+        return c.json(response, 400);
+      }
+
+      const updateData: Partial<{ title: string; body: string; labels: string[]; priority: Priority; model: string | null }> = {};
       
       if (title !== undefined) updateData.title = title;
       if (body !== undefined) updateData.body = body;
       if (priority !== undefined) updateData.priority = priority;
+      if (model !== undefined) updateData.model = model;
       
       if (addLabels || removeLabels) {
         let currentLabels = [...issue.labels];
@@ -372,10 +412,10 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (issue.stage !== Stage.Draft) {
+      if (issue.stage !== Stage.Backlog) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is not in draft stage (current: ${issue.stage}). Only draft issues can be started.`
+          error: `Issue #${number} is not in backlog stage (current: ${issue.stage}). Only backlog issues can be started.`
         };
         return c.json(response, 400);
       }
@@ -424,6 +464,7 @@ export function createIssueRoutes(
         eventBus,
         issueNumber: updatedIssue.number,
         opencodeBinPath,
+        model: updatedIssue.model ?? undefined,
       };
 
       const startResult = agentRunner.startPipeline(
@@ -461,10 +502,10 @@ export function createIssueRoutes(
         try {
           const issue = projectId ? issueService.getByNumber(projectId, number) : null;
           if (issue && issue.stage === Stage.Plan) {
-            issueService.transitionToStage(issue.id, Stage.Draft);
+            issueService.transitionToStage(issue.id, Stage.Backlog);
           }
         } catch (rollbackError) {
-          log.error('Failed to rollback stage to Draft', { error: rollbackError instanceof Error ? rollbackError.message : rollbackError });
+          log.error('Failed to rollback stage to Backlog', { error: rollbackError instanceof Error ? rollbackError.message : rollbackError });
         }
       } else if (worktreeManager && project) {
         try {
@@ -485,7 +526,7 @@ export function createIssueRoutes(
     }
   });
 
-  app.post('/:number/stop', async (c) => {
+  app.post('/:number/force-stop', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
       const projectId = getCurrentProjectId();
@@ -515,7 +556,8 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      if (!agentRunner.isRunning(issue.id)) {
+      const result = agentRunner.forceStop(issue.id);
+      if (!result.stopped) {
         const response: ApiResponse = {
           success: false,
           error: `No agent running for issue #${number}`
@@ -523,18 +565,11 @@ export function createIssueRoutes(
         return c.json(response, 409);
       }
 
-      const stopped = await agentRunner.stop(issue.id);
-      if (!stopped) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Failed to stop agent for issue #${number}`
-        };
-        return c.json(response, 500);
-      }
+      issueService.setStatus(issue.id, IssueStatus.Interrupted);
 
       const response: ApiResponse = {
         success: true,
-        data: { message: `Agent for issue #${number} stopped` }
+        data: { ok: true as const, issueNumber: number }
       };
       return c.json(response);
     } catch (error) {
@@ -569,15 +604,11 @@ export function createIssueRoutes(
       }
 
       if (agentRunner && agentRunner.isRunning(issue.id)) {
-        const force = c.req.query('force') === 'true';
-        if (!force) {
-          const response: ApiResponse = {
-            success: false,
-            error: `Issue #${number} has an agent running. Use ?force=true to stop it first, or wait for it to complete.`
-          };
-          return c.json(response, 409);
-        }
-        await agentRunner.stop(issue.id);
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} has an agent running. Wait for it to complete or pause first.`
+        };
+        return c.json(response, 409);
       }
 
       const { cleanup } = await c.req.json().catch(() => ({ cleanup: false }));
@@ -627,35 +658,22 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const preIssue = issueService.getByNumber(projectId, number);
-      if (!preIssue) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} not found`
-        };
-        return c.json(response, 404);
-      }
-
-      if (agentRunner && agentRunner.isRunning(preIssue.id)) {
-        const force = c.req.query('force') === 'true';
-        if (!force) {
-          const response: ApiResponse = {
-            success: false,
-            error: `Issue #${number} has an agent running. Use ?force=true to stop it first, or wait for it to complete.`
-          };
-          return c.json(response, 409);
-        }
-        await agentRunner.stop(preIssue.id);
-      }
-
       const issue = issueService.reopen(projectId, number);
-
+      
       if (!issue) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} not reopenable (current status must be closed, blocked, or paused)`
+          error: `Issue #${number} not found or not reopenable (current status must be closed, blocked, or paused)`
         };
         return c.json(response, 404);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} already has an agent running. Wait for it to complete first.`
+        };
+        return c.json(response, 409);
       }
 
       const project = projectService.getById(projectId);
@@ -690,6 +708,7 @@ export function createIssueRoutes(
           eventBus,
           issueNumber: issue.number,
           opencodeBinPath,
+          model: issue.model ?? undefined,
         };
 
         agentRunner.resumePipeline(
@@ -829,6 +848,7 @@ export function createIssueRoutes(
           eventBus,
           issueNumber: issue.number,
           opencodeBinPath,
+          model: issue.model ?? undefined,
         };
 
         agentRunner.resumePipeline(
@@ -883,15 +903,11 @@ export function createIssueRoutes(
       }
 
       if (agentRunner && agentRunner.isRunning(issue.id)) {
-        const force = c.req.query('force') === 'true';
-        if (!force) {
-          const response: ApiResponse = {
-            success: false,
-            error: `Issue #${number} is already running. Use ?force=true to stop it first, or wait for it to complete.`
-          };
-          return c.json(response, 409);
-        }
-        await agentRunner.stop(issue.id);
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is already running. Wait for it to complete first.`
+        };
+        return c.json(response, 400);
       }
 
       if (!agentRunner) {
@@ -934,8 +950,6 @@ export function createIssueRoutes(
       let nextStage: Stage | undefined;
       if (approvalStage === Stage.Plan) {
         nextStage = Stage.Build;
-      } else if (approvalStage === Stage.Review) {
-        nextStage = Stage.Done;
       }
 
       let resumedIssue = issue;
@@ -959,6 +973,7 @@ export function createIssueRoutes(
         eventBus,
         issueNumber: issue.number,
         opencodeBinPath,
+        model: issue.model ?? undefined,
       };
 
       agentRunner.resumePipeline(
@@ -1020,15 +1035,11 @@ export function createIssueRoutes(
       }
 
       if (agentRunner && agentRunner.isRunning(issue.id)) {
-        const force = c.req.query('force') === 'true';
-        if (!force) {
-          const response: ApiResponse = {
-            success: false,
-            error: `Issue #${number} is already running. Use ?force=true to stop it first, or wait for it to complete.`
-          };
-          return c.json(response, 409);
-        }
-        await agentRunner.stop(issue.id);
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} is already running. Wait for it to complete first.`
+        };
+        return c.json(response, 400);
       }
 
       if (!agentRunner) {
@@ -1083,6 +1094,7 @@ export function createIssueRoutes(
         eventBus,
         issueNumber: issue.number,
         opencodeBinPath,
+        model: issue.model ?? undefined,
       };
 
       agentRunner.resumePipeline(
@@ -1176,6 +1188,7 @@ export function createIssueRoutes(
         eventBus,
         issueNumber: issue.number,
         opencodeBinPath,
+        model: issue.model ?? undefined,
       };
 
       agentRunner.resumePipeline(
@@ -1269,6 +1282,242 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: { files }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/worktree-status', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      if (!worktreeManager) {
+        const response: ApiResponse = {
+          success: true,
+          data: { exists: false }
+        };
+        return c.json(response);
+      }
+
+      const status = await worktreeManager.getWorktreeStatus(
+        project.path,
+        project.name,
+        issue.number,
+        project.baseBranch
+      );
+
+      const response: ApiResponse = {
+        success: true,
+        data: status
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/commits', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        const response: ApiResponse = {
+          success: true,
+          data: { commits: [] }
+        };
+        return c.json(response);
+      }
+
+      const branchName = `mo/issue-${number}`;
+      const logOutput = await execFileAsync(
+        'git',
+        ['log', `${project.baseBranch}..${branchName}`, '--format=%h%x00%s%x00%an%x00%aI%x01', '--stat'],
+        { cwd: project.path }
+      );
+
+      const commits: Array<{ hash: string; message: string; author: string; date: string; filesChanged: number; additions: number; deletions: number }> = [];
+      const rawOutput = logOutput.stdout.trim();
+
+      if (rawOutput) {
+        const entries = rawOutput.split('\x01').filter(e => e.trim());
+        for (const entry of entries) {
+          const [headerLine, ...statLines] = entry.trim().split('\n');
+          const parts = headerLine.split('\x00');
+          if (parts.length < 4) continue;
+
+          const hash = parts[0].trim();
+          const message = parts[1].trim();
+          const author = parts[2].trim();
+          const date = parts[3].trim();
+
+          let filesChanged = 0;
+          let additions = 0;
+          let deletions = 0;
+
+          const statSummary = statLines.find(l => l.includes('files changed') || l.includes('file changed'));
+          if (statSummary) {
+            const fc = statSummary.match(/(\d+) files? changed/);
+            if (fc) filesChanged = parseInt(fc[1], 10);
+            const ins = statSummary.match(/(\d+) insertions?\(\+\)/);
+            if (ins) additions = parseInt(ins[1], 10);
+            const del = statSummary.match(/(\d+) deletions?\(-\)/);
+            if (del) deletions = parseInt(del[1], 10);
+          }
+
+          commits.push({ hash, message, author, date, filesChanged, additions, deletions });
+        }
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: { commits }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/commits/:hash/diff', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const hash = c.req.param('hash');
+      const projectId = getCurrentProjectId();
+
+      if (!/^[0-9a-f]{7,40}$/i.test(hash)) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Invalid commit hash'
+        };
+        return c.json(response, 400);
+      }
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Project not found'
+        };
+        return c.json(response, 404);
+      }
+
+      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        const response: ApiResponse = {
+          success: false,
+          error: `No worktree for issue #${number}`
+        };
+        return c.json(response, 404);
+      }
+
+      const branchName = `mo/issue-${number}`;
+      const containsOutput = await execFileAsync(
+        'git',
+        ['branch', '--contains', hash, '--list', branchName],
+        { cwd: project.path }
+      );
+
+      if (!containsOutput.stdout.trim()) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Commit ${hash} does not belong to branch ${branchName}`
+        };
+        return c.json(response, 404);
+      }
+
+      const diffOutput = await execFileAsync(
+        'git',
+        ['show', '--format=', '--patch', hash],
+        { cwd: project.path }
+      );
+
+      const response: ApiResponse = {
+        success: true,
+        data: { hash, diff: diffOutput.stdout }
       };
       return c.json(response);
     } catch (error) {
@@ -1486,6 +1735,9 @@ export function createIssueRoutes(
           status: session.status,
           createdAt: session.createdAt,
           completedAt: session.completedAt,
+          model: session.model,
+          coderType: session.coderType,
+          stage: session.stage,
           workflowLogs: logs.map(l => ({
             id: l.id,
             eventType: l.eventType,
@@ -1556,7 +1808,7 @@ export function createIssueRoutes(
         return c.json(response);
       }
 
-      let tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null }> = [];
+      let tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null; durations?: number[] }> = [];
       let total = 0;
       let completed = 0;
       let failed = 0;
@@ -1564,7 +1816,7 @@ export function createIssueRoutes(
 
       try {
         const tasksContent = fs.readFileSync(change.tasksPath, 'utf-8');
-        const tasksFile = JSON.parse(tasksContent) as { tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null }> };
+        const tasksFile = JSON.parse(tasksContent) as { tasks: Array<{ id: string; title: string; passes: boolean; attempts: number; error?: string | null; durations?: number[] }> };
         tasks = tasksFile.tasks;
         total = tasks.length;
         completed = tasks.filter(t => t.passes).length;
@@ -1738,6 +1990,191 @@ export function createIssueRoutes(
     }
   });
 
+  const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Review, Stage.Done];
+
+  async function handleReviewRebase(issue: Issue, project: { name: string; baseBranch: string }, projectId: string, number: number): Promise<boolean | undefined> {
+    eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'verifying' });
+    try {
+      const worktreePath = worktreeManager!.getPath(project.name, issue.number);
+      if (worktreePath) {
+        await execFileAsync('npm', ['run', 'build'], {
+          cwd: worktreePath,
+          timeout: 5 * 60 * 1000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  function handlePlanRebase(issue: Issue, project: { name: string }, projectId: string, number: number): void {
+    if (!agentRunner) return;
+    if (!agentRunner.hasPendingGate(number)) {
+      log.info('Skipping re-self-review injection: no pending gate for issue', { issueNumber: number });
+      return;
+    }
+    const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
+    const worktreePath = worktreeManager!.getPath(project.name, issue.number) || process.cwd();
+    issueService.createComment(issue.id, rebaseMessage);
+    const acpOptions: AcpConnectionOptions = {
+      cwd: worktreePath,
+      issueId: issue.id,
+      projectId,
+      workflowLogRepo,
+      coderSessionRepo,
+      eventBus,
+      issueNumber: issue.number,
+      opencodeBinPath,
+    };
+    agentRunner.resumePipeline(
+      issue,
+      projectId,
+      stateManager.getIssueRepo(),
+      worktreePath,
+      acpOptions,
+      (issueId, status) => issueService.setStatus(issueId, status),
+    );
+  }
+
+  function handleBuildRebase(issue: Issue, project: { name: string }, number: number): void {
+    if (!checkpointRepo) return;
+    const changeDir = findChangeDir(
+      worktreeManager!.getPath(project.name, issue.number) || process.cwd(),
+      issue.number,
+    );
+    if (!changeDir) return;
+    try {
+      const tasksPath = path.join(changeDir, 'tasks.json');
+      const tasksContent = fs.readFileSync(tasksPath, 'utf-8');
+      const tasksFile = JSON.parse(tasksContent);
+      for (const task of tasksFile.tasks) {
+        task.passes = false;
+        task.error = null;
+        task.attempts = 0;
+      }
+      fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
+      checkpointRepo.delete(issue.number, 'build');
+    } catch (err) {
+      log.warn('Failed to clear build checkpoint after rebase', { issueNumber: number, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  app.post('/:number/rebase', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (!REBASE_ALLOWED_STAGES.includes(issue.stage)) {
+        return c.json({ success: false, error: `Rebase not available in current stage (${issue.stage})` } satisfies ApiResponse, 400);
+      }
+
+      if (issue.stage === Stage.Done) {
+        if (!mergeQueue) {
+          return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
+        }
+        const retried = mergeQueue.retry(number);
+        if (!retried) {
+          return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state` } satisfies ApiResponse, 409);
+        }
+        return c.json({ success: true, data: { rebased: true, message: 'Rebase delegated to merge queue retry' } } satisfies ApiResponse);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        return c.json({ success: false, error: 'Project not found' } satisfies ApiResponse, 404);
+      }
+
+      if (!worktreeManager) {
+        return c.json({ success: false, error: 'WorktreeManager not configured' } satisfies ApiResponse, 500);
+      }
+
+      if (!worktreeManager.exists(project.name, issue.number)) {
+        return c.json({ success: false, error: 'Worktree not found' } satisfies ApiResponse, 400);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        return c.json({ success: false, error: 'Agent is running' } satisfies ApiResponse, 409);
+      }
+
+      eventBus.emit('rebase_started', { issueId: issue.id, projectId, issueNumber: number });
+
+      eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'fetching' });
+      await smartFetch(project.path);
+
+      eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'checking' });
+      const canFF = await worktreeManager.canFastForward(project.path, project.name, issue.number, project.baseBranch);
+
+      if (canFF) {
+        eventBus.emit('rebase_completed', { issueId: issue.id, projectId, issueNumber: number, rebased: false });
+        return c.json({ success: true, data: { rebased: false, message: 'Already up to date' } } satisfies ApiResponse);
+      }
+
+      eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'rebasing' });
+      const rebaseResult = await worktreeManager.rebaseOntoMaster(
+        project.path,
+        project.name,
+        issue.number,
+        project.baseBranch,
+        { abortOnConflict: true },
+      );
+
+      if (!rebaseResult.success) {
+        eventBus.emit('rebase_conflict', {
+          issueId: issue.id,
+          projectId,
+          issueNumber: number,
+          conflicts: rebaseResult.conflicts,
+        });
+        return c.json({
+          success: false,
+          error: 'Rebase aborted due to conflicts',
+          data: { rebased: false, conflicts: rebaseResult.conflicts, message: 'Rebase aborted due to conflicts' },
+        } satisfies ApiResponse, 409);
+      }
+
+      let buildPassed: boolean | undefined;
+      if (issue.stage === Stage.Review) {
+        buildPassed = await handleReviewRebase(issue, project, projectId, number);
+      }
+
+      eventBus.emit('rebase_completed', { issueId: issue.id, projectId, issueNumber: number, rebased: true });
+
+      if (issue.stage === Stage.Plan) {
+        handlePlanRebase(issue, project, projectId, number);
+      }
+
+      if (issue.stage === Stage.Build) {
+        handleBuildRebase(issue, project, number);
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          rebased: true,
+          message: issue.stage === Stage.Review
+            ? (buildPassed ? 'Rebase successful, build verification passed' : 'Rebase successful but build verification failed')
+            : issue.stage === Stage.Build
+              ? 'Rebase successful, checkpoint cleared, resume pipeline to rebuild'
+              : 'Rebase successful',
+          ...(buildPassed !== undefined && { buildPassed }),
+        },
+      };
+      return c.json(response);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
   app.post('/:number/retry-merge', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
@@ -1763,7 +2200,9 @@ export function createIssueRoutes(
 
       const retried = mergeQueue.retry(number);
       if (!retried) {
-        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (build-failed or conflict)` } satisfies ApiResponse, 409);
+        const queueEntry = mergeQueue.getStatus().find(e => e.issueNumber === number);
+        const currentState = queueEntry?.mergeState ?? 'unknown';
+        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (current state: ${currentState}; retryable: build-failed, conflict, blocked)` } satisfies ApiResponse, 409);
       }
 
       return c.json({ success: true, data: { message: `Issue #${number} re-enqueued for merge` } } satisfies ApiResponse);
