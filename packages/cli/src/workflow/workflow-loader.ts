@@ -147,6 +147,86 @@ export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSp
   return { detected: true, changePath, tasksPath, mode: 'openspec' };
 }
 
+export interface BuildTestCheckConfig {
+  command: string;
+  timeout: number;
+  autoFix: boolean;
+  maxFixAttempts: number;
+}
+
+export interface FfMergeCheckConfig {
+  enabled: boolean;
+}
+
+export interface AiReviewCheckConfig {
+  enabled: boolean;
+}
+
+export interface ChecksConfig {
+  buildTest: BuildTestCheckConfig;
+  ffMerge: FfMergeCheckConfig;
+  aiReview: AiReviewCheckConfig;
+}
+
+export const DEFAULT_CHECKS_CONFIG: ChecksConfig = {
+  buildTest: {
+    command: 'npm run build && npm test',
+    timeout: 5 * 60 * 1000,
+    autoFix: true,
+    maxFixAttempts: 2,
+  },
+  ffMerge: {
+    enabled: true,
+  },
+  aiReview: {
+    enabled: true,
+  },
+};
+
+function parseChecksConfig(raw: unknown): ChecksConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+
+  let buildTest: BuildTestCheckConfig | undefined;
+  if (r.buildTest && typeof r.buildTest === 'object') {
+    const bt = r.buildTest as Record<string, unknown>;
+    buildTest = {
+      command: typeof bt.command === 'string' ? bt.command : DEFAULT_CHECKS_CONFIG.buildTest.command,
+      timeout: typeof bt.timeout === 'number' ? bt.timeout : DEFAULT_CHECKS_CONFIG.buildTest.timeout,
+      autoFix: typeof bt.autoFix === 'boolean' ? bt.autoFix : DEFAULT_CHECKS_CONFIG.buildTest.autoFix,
+      maxFixAttempts: typeof bt.maxFixAttempts === 'number' ? bt.maxFixAttempts : DEFAULT_CHECKS_CONFIG.buildTest.maxFixAttempts,
+    };
+  }
+
+  let ffMerge: FfMergeCheckConfig | undefined;
+  if (r.ffMerge && typeof r.ffMerge === 'object') {
+    const ff = r.ffMerge as Record<string, unknown>;
+    ffMerge = {
+      enabled: typeof ff.enabled === 'boolean' ? ff.enabled : DEFAULT_CHECKS_CONFIG.ffMerge.enabled,
+    };
+  }
+
+  let aiReview: AiReviewCheckConfig | undefined;
+  if (r.aiReview && typeof r.aiReview === 'object') {
+    const ar = r.aiReview as Record<string, unknown>;
+    aiReview = {
+      enabled: typeof ar.enabled === 'boolean' ? ar.enabled : DEFAULT_CHECKS_CONFIG.aiReview.enabled,
+    };
+  }
+
+  return {
+    buildTest: buildTest ?? DEFAULT_CHECKS_CONFIG.buildTest,
+    ffMerge: ffMerge ?? DEFAULT_CHECKS_CONFIG.ffMerge,
+    aiReview: aiReview ?? DEFAULT_CHECKS_CONFIG.aiReview,
+  };
+}
+
+export function loadChecksConfig(workflow: WorkflowConfig): ChecksConfig {
+  const parsed = workflow as any;
+  if (!parsed.checks) return DEFAULT_CHECKS_CONFIG;
+  return parseChecksConfig(parsed.checks) ?? DEFAULT_CHECKS_CONFIG;
+}
+
 export function loadWorkflowWithDetection(cwd: string, issueNumber: number): WorkflowConfigWithDetection | string {
   const workflow = loadWorkflow(cwd);
   if (typeof workflow === 'string') return workflow;

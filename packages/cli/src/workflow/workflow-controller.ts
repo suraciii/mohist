@@ -8,7 +8,7 @@ import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { loadWorkflow } from './workflow-loader';
-import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, type ArtifactType } from '../agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt, buildReviewSelfCheckPrompt, buildAutoFixPrompt, buildReVerifyPrompt, type ArtifactType } from '../agents/artifact-prompt';
 import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
@@ -34,6 +34,7 @@ export interface StageResult {
   requiresApproval: boolean;
   output: unknown;
   message?: string;
+  escalateToStage?: Stage;
 }
 
 export interface WorkflowControllerOptions {
@@ -44,6 +45,9 @@ export interface WorkflowControllerOptions {
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
   signal?: AbortSignal;
+  worktreeManager?: any;
+  projectRepo?: any;
+  onChildProcess?: (proc: any) => void;
 }
 
 export interface PipelineResult {
@@ -61,6 +65,9 @@ export class WorkflowController {
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
   private signal?: AbortSignal;
+  private worktreeManager?: any;
+  private projectRepo?: any;
+  private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
 
   constructor(options: WorkflowControllerOptions) {
     this.artifactManager = options.artifactManager;
@@ -70,6 +77,9 @@ export class WorkflowController {
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
     this.signal = options.signal;
+    this.worktreeManager = options.worktreeManager;
+    this.projectRepo = options.projectRepo;
+    this._onChildProcess = options.onChildProcess;
   }
 
   getCheckpointRepo(): PipelineCheckpointRepo | undefined {
@@ -393,20 +403,28 @@ export class WorkflowController {
         }
 
         case Stage.Check: {
-          const reviewResult = await this.runPipelineReviewStage(currentIssue, acpOptsWithSignal);
-          if (!reviewResult.success) {
+          const checkResult = await this.runPipelineCheckStage(currentIssue, acpOptsWithSignal);
+          if (!checkResult.success) {
+            if (checkResult.escalateToStage !== undefined) {
+              return {
+                completed: false,
+                stage: checkResult.escalateToStage,
+                gateRequired: false,
+                message: checkResult.message ?? 'Check suite failed, escalating to build',
+              };
+            }
             return {
               completed: false,
               stage: Stage.Check,
               gateRequired: false,
-              message: reviewResult.message,
+              message: checkResult.message ?? 'Check suite failed',
             };
           }
 
           this.issueRepo.setApprovalState(currentIssue.id, {
             stage: Stage.Check,
             status: 'awaiting',
-            output: reviewResult.output,
+            output: checkResult.output,
             requestedAt: new Date().toISOString(),
           });
           this.eventBus.emit('approval_requested', {
@@ -419,7 +437,7 @@ export class WorkflowController {
             completed: false,
             stage: Stage.Check,
             gateRequired: true,
-            message: 'Review completed, awaiting approval',
+            message: checkResult.message ?? 'Check suite completed, awaiting approval',
           };
         }
 
@@ -726,19 +744,336 @@ export class WorkflowController {
     };
   }
 
-  private async runPipelineReviewStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
-    const changeDir = this.artifactManager.getChangeDir(issue.number);
-    if (!changeDir) {
+  private async runPipelineCheckStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+    const checks: any[] = [];
+    const overallStartTime = Date.now();
+
+    this.emitSafe('check_started', {
+      issueId: issue.id,
+      projectId: this.projectId ?? issue.projectId,
+      issueNumber: issue.number,
+    });
+
+    this.emitSafe('check_update', {
+      issueId: issue.id,
+      projectId: this.projectId ?? issue.projectId,
+      checkName: 'build-test',
+      status: 'running',
+    });
+
+    const buildTestResult = await this.runBuildTestCheck(issue);
+    checks.push(buildTestResult);
+
+    this.emitSafe('check_update', {
+      issueId: issue.id,
+      projectId: this.projectId ?? issue.projectId,
+      checkName: 'build-test',
+      status: buildTestResult.status,
+      duration: buildTestResult.duration,
+    });
+
+    if (buildTestResult.status === 'failed') {
+      const overallDuration = Date.now() - overallStartTime;
+      const suiteOutput = {
+        checks,
+        overallResult: 'failed',
+      };
+
+      log.warn('Check suite stopped: Build & Test failed', {
+        issueNumber: issue.number,
+        duration: overallDuration,
+      });
+
       return {
         success: false,
         requiresApproval: false,
-        output: null,
-        message: `Change directory not found for issue #${issue.number}`,
+        output: suiteOutput,
+        message: `Check suite stopped: Build & Test failed — ${buildTestResult.summary}`,
       };
     }
 
-    const roundState = { type: '', index: 0 };
+    const { loadChecksConfig, DEFAULT_CHECKS_CONFIG } = await import('./workflow-loader');
+    const workflow = loadWorkflow(this.worktreePath);
+    const checksConfig = typeof workflow === 'string' ? DEFAULT_CHECKS_CONFIG : loadChecksConfig(workflow);
 
+    if (checksConfig.ffMerge.enabled) {
+      this.emitSafe('check_update', {
+        issueId: issue.id,
+        projectId: this.projectId ?? issue.projectId,
+        checkName: 'merge-ready',
+        status: 'running',
+      });
+
+      const mergeReadyResult = await this.runMergeReadyCheck(issue);
+      checks.push(mergeReadyResult);
+
+      this.emitSafe('check_update', {
+        issueId: issue.id,
+        projectId: this.projectId ?? issue.projectId,
+        checkName: 'merge-ready',
+        status: mergeReadyResult.status,
+        duration: mergeReadyResult.duration,
+      });
+    }
+
+    if (checksConfig.aiReview.enabled) {
+      this.emitSafe('check_update', {
+        issueId: issue.id,
+        projectId: this.projectId ?? issue.projectId,
+        checkName: 'ai-review',
+        status: 'running',
+      });
+
+      const { result: aiReviewResult, escalateToStage } = await this.runAiReviewCheck(issue, acpOptions);
+      checks.push(aiReviewResult);
+
+      this.emitSafe('check_update', {
+        issueId: issue.id,
+        projectId: this.projectId ?? issue.projectId,
+        checkName: 'ai-review',
+        status: aiReviewResult.status,
+        duration: aiReviewResult.duration,
+        autoFixed: aiReviewResult.autoFixed,
+        verdict: aiReviewResult.verdict,
+      });
+
+      if (aiReviewResult.status === 'failed') {
+        const suiteOutput = { checks, overallResult: 'failed' };
+
+        if (escalateToStage !== undefined) {
+          this.checkpointRepo?.upsert(issue.number, 'review', ['no-auto-fix'], null);
+          return {
+            success: false,
+            requiresApproval: false,
+            output: suiteOutput,
+            escalateToStage,
+            message: aiReviewResult.summary ?? 'AI review failed and auto-fix exhausted',
+          };
+        }
+
+        return {
+          success: true,
+          requiresApproval: true,
+          output: suiteOutput,
+          message: 'Check suite completed with AI review failures, awaiting user approval',
+        };
+      }
+    }
+
+    const suiteOutput = { checks, overallResult: 'passed' };
+    return {
+      success: true,
+      requiresApproval: true,
+      output: suiteOutput,
+      message: 'Check suite completed, awaiting user approval',
+    };
+  }
+
+  private async runBuildTestCheck(issue: Issue): Promise<any> {
+    const { loadChecksConfig, DEFAULT_CHECKS_CONFIG } = await import('./workflow-loader');
+    const workflow = loadWorkflow(this.worktreePath);
+    const config = typeof workflow === 'string' ? DEFAULT_CHECKS_CONFIG : loadChecksConfig(workflow);
+    const { command, timeout, autoFix, maxFixAttempts } = config.buildTest;
+
+    const startTime = Date.now();
+
+    for (let attempt = 0; attempt <= (autoFix ? maxFixAttempts : 0); attempt++) {
+      log.info('Build & Test check running', {
+        issueNumber: issue.number,
+        command,
+        timeout,
+        attempt: attempt + 1,
+        autoFix,
+      });
+
+      try {
+        const { stdout, stderr } = await execFileAsync(command, [], {
+          cwd: this.worktreePath,
+          timeout,
+          maxBuffer: 10 * 1024 * 1024,
+          shell: true,
+        });
+
+        const duration = Date.now() - startTime;
+        log.info('Build & Test check passed', { issueNumber: issue.number, duration, attempt: attempt + 1 });
+
+        return {
+          name: 'build-test',
+          status: 'passed',
+          duration,
+          autoFixed: attempt > 0,
+          summary: `Build & test passed${attempt > 0 ? ` (auto-fixed on attempt ${attempt + 1})` : ' on first attempt'}`,
+          buildLog: truncateLog(stdout + '\n' + stderr, 50000),
+        };
+      } catch (err: any) {
+        const output = [err.stdout, err.stderr, err.message].filter(Boolean).join('\n');
+        const isTimeout = err.killed === true;
+        const duration = Date.now() - startTime;
+
+        if (!autoFix || attempt >= maxFixAttempts) {
+          log.warn('Build & Test check failed, no more attempts', {
+            issueNumber: issue.number,
+            attempt: attempt + 1,
+            autoFix,
+            maxFixAttempts,
+            isTimeout,
+          });
+
+          return {
+            name: 'build-test',
+            status: 'failed',
+            duration,
+            summary: isTimeout
+              ? `Build & test timed out after ${timeout}ms`
+              : `Build & test failed: ${err.message ?? 'unknown error'}`,
+            buildLog: truncateLog(output, 50000),
+          };
+        }
+
+        log.info('Build & Test check failed, spawning coder agent for auto-fix', {
+          issueNumber: issue.number,
+          attempt: attempt + 1,
+          maxFixAttempts,
+        });
+
+        const fixResult = await this.spawnBuildTestFixAgent(issue, output);
+        if (!fixResult.success) {
+          log.warn('Build & Test auto-fix agent failed', {
+            issueNumber: issue.number,
+            attempt: attempt + 1,
+            error: fixResult.error,
+          });
+        }
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    return {
+      name: 'build-test',
+      status: 'failed',
+      duration,
+      summary: `Build & test failed after ${maxFixAttempts} auto-fix attempt(s)`,
+    };
+  }
+
+  private async spawnBuildTestFixAgent(
+    issue: Issue,
+    buildOutput: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    let conn: import('../agent-runtime/acp-session').AcpConnection | undefined;
+    try {
+      const acpOptions = {
+        cwd: this.worktreePath,
+        issueNumber: issue.number,
+        issueId: issue.id,
+        projectId: this.projectId ?? issue.projectId,
+        model: issue.model ?? undefined,
+      };
+
+      conn = await createAcpConnection(acpOptions);
+
+      const prompt = [
+        `The build/test command failed in the worktree at: ${this.worktreePath}`,
+        '',
+        '## Build/Test Error Output',
+        '```',
+        truncateLog(buildOutput, 30000),
+        '```',
+        '',
+        'Fix the build/test errors. Focus on the specific errors shown above.',
+        'Do NOT modify any files unrelated to the build/test failures.',
+        'After fixing, do NOT run the build/test command yourself — the pipeline will re-run it.',
+      ].join('\n');
+
+      const result = await conn.prompt(prompt);
+      await conn.close();
+      conn = undefined;
+
+      if (!result.success) {
+        return { success: false, error: result.error ?? 'unknown error' };
+      }
+      return { success: true };
+    } catch (err) {
+      if (conn) {
+        try { await conn.close(); } catch { /* ignore */ }
+      }
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private async runMergeReadyCheck(issue: Issue): Promise<any> {
+    const startTime = Date.now();
+
+    if (!this.worktreeManager || !this.projectRepo) {
+      const duration = Date.now() - startTime;
+      log.warn('Merge Ready check skipped: worktreeManager or projectRepo not available', {
+        issueNumber: issue.number,
+      });
+      return {
+        name: 'merge-ready',
+        status: 'passed',
+        duration,
+        summary: 'Merge Ready: skipped (worktreeManager or projectRepo not configured)',
+      };
+    }
+
+    const project = this.projectRepo.findById(issue.projectId);
+    if (!project) {
+      const duration = Date.now() - startTime;
+      log.warn('Merge Ready check skipped: project not found', {
+        issueNumber: issue.number,
+        projectId: issue.projectId,
+      });
+      return {
+        name: 'merge-ready',
+        status: 'passed',
+        duration,
+        summary: 'Merge Ready: skipped (project not found)',
+      };
+    }
+
+    try {
+      const canFF = await this.worktreeManager.canFastForward(
+        project.path,
+        project.name,
+        issue.number,
+        project.baseBranch,
+      );
+      const duration = Date.now() - startTime;
+
+      return {
+        name: 'merge-ready',
+        status: 'passed',
+        duration,
+        summary: canFF ? 'Merge Ready: yes' : 'Merge Ready: needs rebase',
+      };
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      log.warn('Merge Ready check error', {
+        issueNumber: issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return {
+        name: 'merge-ready',
+        status: 'passed',
+        duration,
+        summary: `Merge Ready: check error (${err instanceof Error ? err.message : String(err)})`,
+      };
+    }
+  }
+
+  private async runAiReviewCheck(issue: Issue, acpOptions: AcpConnectionOptions): Promise<{ result: any; escalateToStage?: Stage }> {
+    const startTime = Date.now();
+
+    const changeDir = this.artifactManager.getChangeDir(issue.number);
+    if (!changeDir) {
+      const duration = Date.now() - startTime;
+      return { result: { name: 'ai-review', status: 'failed', duration, summary: `Change directory not found for issue #${issue.number}` } };
+    }
+
+    const hasNoAutoFix = this.checkpointRepo?.get(issue.number, 'review')?.completedSteps.includes('no-auto-fix') ?? false;
+
+    const roundState = { type: '', index: 0 };
     const reviewAcpOptions: AcpConnectionOptions = {
       ...acpOptions,
       executionId: `review-${issue.number}`,
@@ -759,11 +1094,11 @@ export class WorkflowController {
       },
     };
 
-    let conn: AcpConnection | undefined;
+    let conn: import('../agent-runtime/acp-session').AcpConnection | undefined;
+
     try {
       conn = await createAcpConnection(reviewAcpOptions);
 
-      // Round 0: review
       roundState.type = 'review';
       roundState.index = 0;
 
@@ -789,15 +1124,10 @@ export class WorkflowController {
       if (!result.success) {
         log.error('Review stage round failed', { roundType: 'review', error: result.error });
         await conn.close();
-        return {
-          success: false,
-          requiresApproval: false,
-          output: null,
-          message: `Review failed: ${result.error ?? 'unknown error'}`,
-        };
+        const duration = Date.now() - startTime;
+        return { result: { name: 'ai-review', status: 'failed', duration, summary: `AI review failed: ${result.error ?? 'unknown error'}` } };
       }
 
-      // Round 1: self-check
       roundState.type = 'review-self-check';
       roundState.index = 1;
 
@@ -823,52 +1153,221 @@ export class WorkflowController {
       if (!selfCheckResult.success) {
         log.error('Review stage self-check failed', { error: selfCheckResult.error });
         await conn.close();
-        return {
-          success: false,
-          requiresApproval: false,
-          output: null,
-          message: `Review stage failed at self-check: ${selfCheckResult.error ?? 'unknown error'}`,
-        };
+        const duration = Date.now() - startTime;
+        return { result: { name: 'ai-review', status: 'failed', duration, summary: `AI review self-check failed: ${selfCheckResult.error ?? 'unknown error'}` } };
       }
 
       await conn.close();
+      conn = undefined;
 
       const reviewReport = readReportFile(changeDir, 'review.md') ?? selfCheckResult.text;
 
       if (!reviewReport || reviewReport.trim().length === 0) {
+        const duration = Date.now() - startTime;
+        return { result: { name: 'ai-review', status: 'failed', duration, summary: 'Review report is empty after self-check' } };
+      }
+
+      const parsedResult = parseVerdict(reviewReport);
+
+      if (parsedResult === 'PASS') {
+        const duration = Date.now() - startTime;
+        return { result: { name: 'ai-review', status: 'passed', duration, summary: 'AI code review passed', verdict: 'PASS', reviewReport } };
+      }
+
+      if (hasNoAutoFix) {
+        log.info('no-auto-fix checkpoint present, skipping auto-fix loop', { issueNumber: issue.number });
+        const duration = Date.now() - startTime;
+        return { result: { name: 'ai-review', status: 'failed', duration, summary: 'AI code review found issues (auto-fix skipped)', verdict: 'FAIL', reviewReport } };
+      }
+
+      const fixSuggestions = extractFixSuggestions(reviewReport);
+      if (!fixSuggestions) {
+        log.info('No Fix Suggestions found, skipping auto-fix', { issueNumber: issue.number });
+        const duration = Date.now() - startTime;
+        return { result: { name: 'ai-review', status: 'failed', duration, summary: 'AI code review found issues (no auto-fixable suggestions)', verdict: 'FAIL', reviewReport } };
+      }
+
+      const autoFixResult = await this.runAutoFixLoop(issue, acpOptions, changeDir, reviewReport, fixSuggestions, roundState);
+
+      const duration = Date.now() - startTime;
+
+      if (autoFixResult.success) {
+        const updatedReport = typeof autoFixResult.output === 'object' && autoFixResult.output !== null
+          ? (autoFixResult.output as any).reviewReport ?? reviewReport
+          : reviewReport;
+
+        return { result: { name: 'ai-review', status: 'passed', duration, autoFixed: true, summary: 'AI code review passed after auto-fix', verdict: 'PASS', reviewReport: updatedReport } };
+      }
+
+      if (autoFixResult.escalateToStage !== undefined) {
         return {
-          success: false,
-          requiresApproval: false,
-          output: null,
-          message: 'Review stage failed: review.md is empty after self-check',
+          result: { name: 'ai-review', status: 'failed', duration, summary: autoFixResult.message ?? 'Auto-fix loop exhausted', verdict: 'FAIL', reviewReport },
+          escalateToStage: autoFixResult.escalateToStage,
         };
       }
 
-      return {
-        success: true,
-        requiresApproval: true,
-        output: {
-          stage: Stage.Check,
-          issueNumber: issue.number,
-          reviewReport,
-        },
-        message: 'Review completed, awaiting user approval',
-      };
+      return { result: { name: 'ai-review', status: 'failed', duration, summary: autoFixResult.message ?? 'AI code review found issues after auto-fix attempts', verdict: 'FAIL', reviewReport } };
     } catch (err) {
       if (conn) {
-        try {
-          await conn.close();
-        } catch {
-          // ignore cleanup errors
-        }
+        try { await conn.close(); } catch { /* ignore */ }
       }
-      return {
-        success: false,
-        requiresApproval: false,
-        output: null,
-        message: `Review stage error: ${err instanceof Error ? err.message : String(err)}`,
-      };
+      const duration = Date.now() - startTime;
+      return { result: { name: 'ai-review', status: 'failed', duration, summary: `AI review error: ${err instanceof Error ? err.message : String(err)}` } };
     }
+  }
+
+  private buildReviewAcpOptions(
+    issue: Issue,
+    acpOptions: AcpConnectionOptions,
+    roundState: { type: string; index: number },
+    _connRef: { current: import('../agent-runtime/acp-session').AcpConnection | undefined },
+  ): any {
+    return {
+      ...acpOptions,
+      executionId: `review-${issue.number}`,
+      model: issue.model ?? undefined,
+      onProcessSpawned: (proc: any) => { this._onChildProcess?.(proc); },
+      onSessionUpdate: (_notification: any) => {
+        if (!this.eventBus) return;
+        try {
+          this.eventBus.emit('plan_session_update', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: this.projectId ?? issue.projectId,
+            roundType: roundState.type,
+            roundIndex: roundState.index,
+            sessionUpdate: _notification.update.sessionUpdate,
+            data: _notification.update as unknown,
+          });
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_session_update', { roundType: roundState.type, error: e instanceof Error ? e.message : String(e) });
+        }
+      },
+    };
+  }
+
+  private async runReviewRound(
+    issue: Issue,
+    acpOptions: AcpConnectionOptions,
+    roundType: string,
+    roundIndex: number,
+    prompt: string,
+  ): Promise<{ success: boolean; text?: string; error?: string }> {
+    const issueId = String(acpOptions.issueNumber ?? acpOptions.issueId ?? '');
+    const projectId = this.projectId ?? issue.projectId;
+
+    log.info('Review stage round', { roundType, roundIndex, issueNumber: issue.number });
+
+    this.emitSafe('plan_round_start', {
+      issueId,
+      projectId,
+      roundType,
+      roundLabel: roundType,
+      roundIndex,
+    });
+
+    let conn: import('../agent-runtime/acp-session').AcpConnection | undefined;
+    try {
+      conn = await createAcpConnection(acpOptions);
+      const result = await conn.prompt(prompt);
+      await conn.close();
+      conn = undefined;
+
+      if (!result.success) {
+        log.error('Review round failed', { roundType, roundIndex, error: result.error });
+        return { success: false, error: result.error ?? 'unknown error' };
+      }
+
+      return { success: true, text: result.text };
+    } catch (err) {
+      if (conn) {
+        try { await conn.close(); } catch { /* ignore */ }
+      }
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private async runAutoFixLoop(
+    issue: Issue,
+    acpOptions: AcpConnectionOptions,
+    changeDir: string,
+    reviewReport: string,
+    _fixSuggestions: string,
+    roundState: { type: string; index: number },
+  ): Promise<StageResult> {
+    const MAX_ATTEMPTS = 2;
+    const connRef = { current: undefined as import('../agent-runtime/acp-session').AcpConnection | undefined };
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const autoFixRoundIndex = 2 + attempt * 2;
+      const reVerifyRoundIndex = 3 + attempt * 2;
+
+      roundState.type = 'auto-fix';
+      roundState.index = autoFixRoundIndex;
+
+      const autoFixPrompt = buildAutoFixPrompt(issue, changeDir, reviewReport, 'review.md');
+      const autoFixAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
+      const autoFixResult = await this.runReviewRound(issue, autoFixAcpOptions, 'auto-fix', autoFixRoundIndex, autoFixPrompt);
+
+      if (!autoFixResult.success) {
+        log.warn('Auto-fix round failed, counting as attempt', {
+          attempt: attempt + 1,
+          error: autoFixResult.error,
+          issueNumber: issue.number,
+        });
+        continue;
+      }
+
+      roundState.type = 're-verify';
+      roundState.index = reVerifyRoundIndex;
+
+      const reVerifyPrompt = buildReVerifyPrompt(issue, changeDir, reviewReport);
+      const reVerifyAcpOptions = this.buildReviewAcpOptions(issue, acpOptions, roundState, connRef);
+      const reVerifyResult = await this.runReviewRound(issue, reVerifyAcpOptions, 're-verify', reVerifyRoundIndex, reVerifyPrompt);
+
+      if (!reVerifyResult.success) {
+        log.warn('Re-verify round failed', {
+          attempt: attempt + 1,
+          error: reVerifyResult.error,
+          issueNumber: issue.number,
+        });
+        continue;
+      }
+
+      const updatedReport = readReportFile(changeDir, 'review.md') ?? reVerifyResult.text ?? '';
+      const result = parseVerdict(updatedReport);
+
+      if (result === 'PASS') {
+        log.info('Auto-fix succeeded', { attempt: attempt + 1, issueNumber: issue.number });
+        return {
+          success: true,
+          requiresApproval: true,
+          output: {
+            stage: Stage.Check,
+            issueNumber: issue.number,
+            reviewReport: updatedReport,
+          },
+          message: `Review completed with auto-fix (attempt ${attempt + 1}), awaiting user approval`,
+        };
+      }
+
+      log.info('Re-verify still FAIL after auto-fix attempt', {
+        attempt: attempt + 1,
+        issueNumber: issue.number,
+      });
+    }
+
+    log.warn('Auto-fix loop exhausted, escalating to build stage', {
+      issueNumber: issue.number,
+      maxAttempts: MAX_ATTEMPTS,
+    });
+
+    return {
+      success: false,
+      requiresApproval: false,
+      output: null,
+      escalateToStage: Stage.Build,
+      message: `Auto-fix loop exhausted after ${MAX_ATTEMPTS} attempts, escalating to build stage`,
+    };
   }
 }
 
@@ -901,6 +1400,33 @@ function cleanChangeDir(changeDir: string): void {
     const entryPath = path.join(changeDir, entry);
     fs.rmSync(entryPath, { recursive: true, force: true });
   }
+}
+
+function truncateLog(log: string, maxLength: number): string {
+  if (log.length <= maxLength) return log;
+  const half = Math.floor(maxLength / 2);
+  return log.slice(0, half) + '\n\n...[truncated]...\n\n' + log.slice(-half);
+}
+
+const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
+const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
+
+export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
+  const match = RESULT_RE.exec(content);
+  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
+  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
+  if (legacyMatch) {
+    log.warn('parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
+    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
+  }
+  return null;
+}
+
+export function extractFixSuggestions(content: string): string {
+  const match = content.match(/^##\s*Fix\s*Suggestions\s*$/im);
+  if (!match) return '';
+  const startIdx = match.index! + match[0].length;
+  return content.slice(startIdx).trim();
 }
 
 export function createWorkflowController(options: WorkflowControllerOptions): WorkflowController {
