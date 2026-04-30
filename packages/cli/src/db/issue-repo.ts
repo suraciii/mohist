@@ -19,6 +19,8 @@ interface IssueRow {
   conflict_retry_count: number | null;
   model: string | null;
   archived_at: string | null;
+  blocked_reason: string | null;
+  retry_count: number | null;
 }
 
 function rowToIssue(row: IssueRow): Issue {
@@ -55,6 +57,8 @@ function rowToIssue(row: IssueRow): Issue {
     conflictRetryCount: row.conflict_retry_count ?? undefined,
     model: row.model ?? undefined,
     archivedAt: row.archived_at ?? undefined,
+    blockedReason: row.blocked_reason ?? undefined,
+    retryCount: row.retry_count ?? undefined,
   };
 }
 
@@ -369,6 +373,33 @@ export class IssueRepo {
       [model, now, issueId]
     );
 
+    return this.findById(issueId);
+  }
+
+  blockIssue(issueId: string, reason: string): Issue | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE issues SET status = ?, blocked_reason = ?, updated_at = ? WHERE id = ?',
+      [IssueStatus.Blocked, reason, now, issueId]
+    );
+    return this.findById(issueId);
+  }
+
+  updateBlockedReason(issueId: string, reason: string | null): Issue | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE issues SET blocked_reason = ?, updated_at = ? WHERE id = ?',
+      [reason, now, issueId]
+    );
+    return this.findById(issueId);
+  }
+
+  updateRetryCount(issueId: string, count: number | null): Issue | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE issues SET retry_count = ?, updated_at = ? WHERE id = ?',
+      [count, now, issueId]
+    );
     return this.findById(issueId);
   }
 
