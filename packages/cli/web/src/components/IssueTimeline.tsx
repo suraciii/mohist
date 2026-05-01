@@ -165,7 +165,7 @@ function BuildTasks({ tasks }: { tasks: TimelineTask[] }) {
           <span className="text-xs font-mono text-gray-700">{task.taskId}</span>
           <span className="text-xs text-gray-500 truncate flex-1">{task.title}</span>
           {task.error && (
-            <span className="text-xs text-red-500 truncate max-w-[120px]" title={task.error}>
+            <span className="text-xs text-red-500 truncate max-w-20 sm:max-w-30" title={task.error}>
               {task.error}
             </span>
           )}
@@ -349,7 +349,7 @@ export function IssueTimeline({ issueNumber }: { issueNumber: number }) {
   }
 
   return (
-    <div className="mb-6">
+    <div className="mb-6 overflow-hidden">
       {timeline.map((node, i) => (
         <TimelineStageRow
           key={`${node.stage}-${i}`}
