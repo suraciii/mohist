@@ -171,6 +171,9 @@ export type AgentDetailEventMap = {
   coder_recovery_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
   coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string }
   coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number }
+  agent_paused: { issueId: string; projectId: string }
+  question_asked: { issueId: string; projectId: string; questionId: string; question: string }
+  question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
 }
 
 export type EventMap = {
