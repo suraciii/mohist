@@ -183,7 +183,7 @@ function StageExpandedContent({
   issueNumber: number
 }) {
   return (
-    <div className="ml-6 mt-1 mb-1 pl-3 border-l-2 border-gray-200 space-y-2">
+    <div className="ml-4 sm:ml-6 mt-1 mb-1 pl-2 sm:pl-3 border-l-2 border-gray-200 space-y-2">
       {node.stage === 'plan' && node.rounds.length > 0 && (
         <PlanRounds rounds={node.rounds} />
       )}
@@ -191,7 +191,7 @@ function StageExpandedContent({
         <BuildTasks tasks={node.tasks} />
       )}
       {node.model && (
-        <div className="text-xs text-gray-400 pt-0.5">
+        <div className="text-xs text-gray-400 pt-0.5 truncate" title={node.model}>
           Model: {node.model}
         </div>
       )}
