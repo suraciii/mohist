@@ -35,7 +35,7 @@ export function createIssueRoutes(
   _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
   workflowLogRepo?: WorkflowLogRepo,
-  _sessionStreamLogRepo?: SessionStreamLogRepo,
+  sessionStreamLogRepo?: SessionStreamLogRepo,
   agentSessionMessageRepo?: AgentSessionMessageRepo,
   coderSessionRepo?: CoderSessionRepo,
   _opencodeBinPath?: string,
@@ -1736,9 +1736,27 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
+      const SESSION_STREAM_EVENT_TYPES = new Set([
+        'agent_thought_chunk',
+        'agent_message_chunk',
+        'tool_call',
+        'tool_call_update',
+        'user_message_chunk',
+      ]);
+
       const sessions = coderSessionRepo.findByIssueId(issue.id);
       const data = sessions.map(session => {
-        const logs = workflowLogRepo.findBySessionId(session.acpSessionId);
+        let logs;
+        if (sessionStreamLogRepo) {
+          const streamLogs = sessionStreamLogRepo.findBySessionId(session.acpSessionId);
+          if (streamLogs.length > 0) {
+            logs = streamLogs;
+          }
+        }
+        if (!logs) {
+          const fallbackLogs = workflowLogRepo.findBySessionId(session.acpSessionId);
+          logs = fallbackLogs.filter(l => SESSION_STREAM_EVENT_TYPES.has(l.eventType));
+        }
         return {
           id: session.id,
           acpSessionId: session.acpSessionId,
