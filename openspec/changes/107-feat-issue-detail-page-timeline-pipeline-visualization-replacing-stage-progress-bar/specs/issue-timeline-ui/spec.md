@@ -39,11 +39,11 @@ The `useIssueTimeline` hook SHALL implement requestAnimationFrame-based throttli
 
 #### Scenario: SSE events during running issue
 - **WHEN** an issue is actively running and `plan_round_start`, `plan_round_complete`, `ralph_task_update`, or `build_started`/`build_completed` events arrive
-- **THEN** the timeline updates in batches every 100ms using requestAnimationFrame instead of per-event
+- **THEN** the timeline batches updates via requestAnimationFrame instead of processing per-event
 
 #### Scenario: High-frequency event burst during Build stage
 - **WHEN** 500+ `ralph_task_update` events arrive within 3 seconds
-- **THEN** UI remains responsive with updates throttled to 100ms batches
+- **THEN** UI remains responsive with updates batched via requestAnimationFrame
 
 ### Requirement: useIssueTimeline aggregates data from existing APIs
 The `useIssueTimeline` hook SHALL aggregate data from three sources: `useIssue` (for createdAt and approval_state), `useCoderSessions` (for stage sessions), and `GET /api/issues/:number/logs` filtered to plan/build events (for round and task details).
@@ -71,3 +71,15 @@ When a coder session includes model information, the expanded stage details SHAL
 #### Scenario: Plan stage shows model
 - **WHEN** the Plan stage is expanded
 - **THEN** "Model: MiniMax-M2.7" (or appropriate model name) appears at the bottom of the expanded section
+
+### Requirement: Timeline displays stage failure states
+When a stage fails (e.g., Build fails), the timeline node SHALL display a failure indicator instead of a checkmark.
+
+#### Scenario: Build stage fails
+- **WHEN** the Build stage encounters an error and fails
+- **THEN** the Build timeline node displays a failure icon (e.g., red ✗) instead of a checkmark
+- **AND** the stage remains expandable to show which task(s) failed
+
+#### Scenario: Stage is retried after failure
+- **WHEN** a failed Build stage is retried and succeeds
+- **THEN** the timeline shows the latest attempt's result (success checkmark with total duration including retry)
