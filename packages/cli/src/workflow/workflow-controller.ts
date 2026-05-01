@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import { Stage, IssueStatus, type Issue } from '../types';
+import { Stage, IssueStatus, type Issue, type CheckSuiteStatus } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
@@ -15,6 +15,7 @@ import type { IssueRepo } from '../db/issue-repo';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
+import type { CheckSuiteRepo } from '../db/check-suite-repo';
 import type { AgentConfig } from './workflow-loader';
 import { Log } from '../util/log';
 
@@ -47,6 +48,7 @@ export interface WorkflowControllerOptions {
   eventBus?: EventBus;
   projectId?: string;
   checkpointRepo?: PipelineCheckpointRepo;
+  checkSuiteRepo?: CheckSuiteRepo;
   signal?: AbortSignal;
   worktreeManager?: any;
   projectRepo?: any;
@@ -67,6 +69,7 @@ export class WorkflowController {
   private eventBus?: EventBus;
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
+  private checkSuiteRepo?: CheckSuiteRepo;
   private signal?: AbortSignal;
   private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
   private _agentConfigCache?: AgentConfig;
@@ -78,6 +81,7 @@ export class WorkflowController {
     this.eventBus = options.eventBus;
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
+    this.checkSuiteRepo = options.checkSuiteRepo;
     this.signal = options.signal;
     this._onChildProcess = options.onChildProcess;
   }
@@ -748,117 +752,302 @@ export class WorkflowController {
     };
   }
 
-  private async runPipelineCheckStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
-    const checks: any[] = [];
-    const overallStartTime = Date.now();
-    const workflowLogRepo = acpOptions.workflowLogRepo;
+  private readHeadSha(): string {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: this.worktreePath,
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
+  }
 
-    this.emitSafe('check_started', {
+  private emitSuiteStatusChanged(
+    issue: Issue,
+    suiteStatus: CheckSuiteStatus,
+    snapshotSha: string,
+  ): void {
+    this.emitSafe('check_suite_status_changed', {
       issueId: issue.id,
       projectId: this.projectId ?? issue.projectId,
       issueNumber: issue.number,
+      suiteStatus,
+      snapshotSha,
     });
-    this.writeLog(workflowLogRepo, issue.id, 'check_started', { issueNumber: issue.number });
+  }
 
-    this.emitSafe('check_update', {
-      issueId: issue.id,
-      projectId: this.projectId ?? issue.projectId,
-      checkName: 'build-test',
-      status: 'running',
+  private async runPipelineCheckStage(issue: Issue, acpOptions: AcpConnectionOptions): Promise<StageResult> {
+    const MAX_RETRIES = 3;
+    const workflowLogRepo = acpOptions.workflowLogRepo;
+    const issueId = issue.id;
+    const projectId = this.projectId ?? issue.projectId;
+
+    this.emitSafe('check_started', {
+      issueId,
+      projectId,
+      issueNumber: issue.number,
     });
-    this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'build-test', status: 'running' });
+    this.writeLog(workflowLogRepo, issueId, 'check_started', { issueNumber: issue.number });
 
-    const buildTestResult = await this.runBuildTestCheck(issue, acpOptions);
-    checks.push(buildTestResult);
-
-    this.emitSafe('check_update', {
-      issueId: issue.id,
-      projectId: this.projectId ?? issue.projectId,
-      checkName: 'build-test',
-      status: buildTestResult.status,
-      duration: buildTestResult.duration,
-    });
-
-    if (buildTestResult.status === 'failed') {
-      const overallDuration = Date.now() - overallStartTime;
-      const suiteOutput = {
-        checks,
-        overallResult: 'failed',
-      };
-
-      log.warn('Check suite stopped: Build & Test failed', {
-        issueNumber: issue.number,
-        duration: overallDuration,
-      });
-
+    let snapshotSha: string;
+    try {
+      snapshotSha = this.readHeadSha();
+    } catch (err) {
+      log.error('Failed to read HEAD SHA for check stage', { error: err instanceof Error ? err.message : String(err) });
       return {
         success: false,
         requiresApproval: false,
-        output: suiteOutput,
-        message: `Check suite stopped: Build & Test failed — ${buildTestResult.summary}`,
+        output: null,
+        message: `Check stage failed: could not read HEAD SHA — ${err instanceof Error ? err.message : String(err)}`,
       };
     }
 
-    const { loadChecksConfig, DEFAULT_CHECKS_CONFIG } = await import('./workflow-loader');
-    const workflow = loadWorkflow(this.worktreePath);
-    const checksConfig = typeof workflow === 'string' ? DEFAULT_CHECKS_CONFIG : loadChecksConfig(workflow);
+    let suiteId: string;
+    if (this.checkSuiteRepo) {
+      const existing = this.checkSuiteRepo.findActiveByIssueId(issueId);
+      if (existing) {
+        suiteId = existing.id;
+        log.info('Reusing existing CheckSuite', { suiteId, issueNumber: issue.number });
+      } else {
+        const suite = this.checkSuiteRepo.create({ issueId, snapshotSha });
+        suiteId = suite.id;
+        log.info('Created CheckSuite', { suiteId, snapshotSha, issueNumber: issue.number });
+      }
+      this.emitSuiteStatusChanged(issue, 'running', snapshotSha);
+    } else {
+      suiteId = '';
+    }
 
-    if (checksConfig.aiReview.enabled) {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      log.info('Check loop attempt', { attempt, maxRetries: MAX_RETRIES, issueNumber: issue.number });
+
       this.emitSafe('check_update', {
-        issueId: issue.id,
-        projectId: this.projectId ?? issue.projectId,
-        checkName: 'ai-review',
+        issueId,
+        projectId,
+        checkName: 'build-test',
         status: 'running',
+        snapshotSha,
       });
-      this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'ai-review', status: 'running' });
+      this.writeLog(workflowLogRepo, issueId, 'check_update', { checkName: 'build-test', status: 'running', snapshotSha, attempt });
 
-      const { result: aiReviewResult, escalateToStage } = await this.runAiReviewCheck(issue, acpOptions);
-      checks.push(aiReviewResult);
+      if (this.checkSuiteRepo) {
+        this.checkSuiteRepo.updateChecks(suiteId, 'build-test', { status: 'running' });
+      }
+
+      const buildTestResult = await this.runBuildTestCheck(issue, acpOptions);
 
       this.emitSafe('check_update', {
-        issueId: issue.id,
-        projectId: this.projectId ?? issue.projectId,
-        checkName: 'ai-review',
-        status: aiReviewResult.status,
-        duration: aiReviewResult.duration,
-        autoFixed: aiReviewResult.autoFixed,
-        verdict: aiReviewResult.verdict,
+        issueId,
+        projectId,
+        checkName: 'build-test',
+        status: buildTestResult.status,
+        duration: buildTestResult.duration,
+        autoFixed: buildTestResult.autoFixed,
+        snapshotSha,
       });
-      this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'ai-review', status: aiReviewResult.status, duration: aiReviewResult.duration, autoFixed: aiReviewResult.autoFixed, verdict: aiReviewResult.verdict });
+      this.writeLog(workflowLogRepo, issueId, 'check_update', {
+        checkName: 'build-test',
+        status: buildTestResult.status,
+        duration: buildTestResult.duration,
+        autoFixed: buildTestResult.autoFixed,
+        snapshotSha,
+        attempt,
+      });
 
-      if (aiReviewResult.status === 'failed') {
-        const suiteOutput = { checks, overallResult: 'failed' };
+      if (this.checkSuiteRepo) {
+        this.checkSuiteRepo.updateChecks(suiteId, 'build-test', {
+          status: buildTestResult.status,
+          output: { summary: buildTestResult.summary, buildLog: buildTestResult.buildLog },
+          ranAt: new Date().toISOString(),
+        });
+      }
 
-        if (escalateToStage !== undefined) {
-          this.checkpointRepo?.upsert(issue.number, 'review', ['no-auto-fix'], null);
-          this.writeLog(workflowLogRepo, issue.id, 'check_failed', { checks, reason: aiReviewResult.summary, escalatedTo: escalateToStage });
+      if (buildTestResult.status === 'failed') {
+        const shaBeforeFix = this.readHeadShaSafe();
+        const fixResult = await this.spawnBuildTestFixAgent(issue, buildTestResult.buildLog ?? '', acpOptions);
+        const shaAfterFix = this.readHeadShaSafe();
+
+        if (fixResult.success && shaAfterFix && shaAfterFix !== shaBeforeFix) {
+          snapshotSha = shaAfterFix;
+          log.info('Build-test auto-fix produced new commit, restarting loop', {
+            newSha: snapshotSha,
+            attempt,
+            issueNumber: issue.number,
+          });
+          if (this.checkSuiteRepo) {
+            this.checkSuiteRepo.updateSnapshotSha(suiteId, snapshotSha);
+          }
+          this.emitSuiteStatusChanged(issue, 'running', snapshotSha);
+          continue;
+        }
+
+        log.warn('Build-test auto-fix did not produce new commit or failed', {
+          attempt,
+          fixSuccess: fixResult.success,
+          shaChanged: shaAfterFix !== shaBeforeFix,
+          issueNumber: issue.number,
+        });
+
+        if (attempt >= MAX_RETRIES) {
+          if (this.checkSuiteRepo) {
+            this.checkSuiteRepo.updateStatus(suiteId, 'failed');
+          }
+          this.emitSuiteStatusChanged(issue, 'failed', snapshotSha);
+          this.writeLog(workflowLogRepo, issueId, 'check_failed', { reason: 'build-test', attempt, maxRetries: MAX_RETRIES });
           return {
             success: false,
             requiresApproval: false,
-            output: suiteOutput,
-            escalateToStage,
-            message: aiReviewResult.summary ?? 'AI review failed and auto-fix exhausted',
+            output: { checks: [buildTestResult], overallResult: 'failed' },
+            escalateToStage: Stage.Plan,
+            message: `Check suite failed after ${MAX_RETRIES} attempts: Build & Test — ${buildTestResult.summary}`,
           };
         }
-
-        this.writeLog(workflowLogRepo, issue.id, 'check_completed', { checks, overallResult: 'failed-awaiting-approval' });
-        return {
-          success: true,
-          requiresApproval: true,
-          output: suiteOutput,
-          message: 'Check suite completed with AI review failures, awaiting user approval',
-        };
+        continue;
       }
+
+      const { loadChecksConfig, DEFAULT_CHECKS_CONFIG } = await import('./workflow-loader');
+      const workflow = loadWorkflow(this.worktreePath);
+      const checksConfig = typeof workflow === 'string' ? DEFAULT_CHECKS_CONFIG : loadChecksConfig(workflow);
+
+      if (checksConfig.aiReview.enabled) {
+        this.emitSafe('check_update', {
+          issueId,
+          projectId,
+          checkName: 'ai-review',
+          status: 'running',
+          snapshotSha,
+        });
+        this.writeLog(workflowLogRepo, issueId, 'check_update', { checkName: 'ai-review', status: 'running', snapshotSha, attempt });
+
+        if (this.checkSuiteRepo) {
+          this.checkSuiteRepo.updateChecks(suiteId, 'ai-review', { status: 'running' });
+        }
+
+        const { result: aiReviewResult, escalateToStage } = await this.runAiReviewCheck(issue, acpOptions);
+
+        this.emitSafe('check_update', {
+          issueId,
+          projectId,
+          checkName: 'ai-review',
+          status: aiReviewResult.status,
+          duration: aiReviewResult.duration,
+          autoFixed: aiReviewResult.autoFixed,
+          verdict: aiReviewResult.verdict,
+          snapshotSha,
+        });
+        this.writeLog(workflowLogRepo, issueId, 'check_update', {
+          checkName: 'ai-review',
+          status: aiReviewResult.status,
+          duration: aiReviewResult.duration,
+          autoFixed: aiReviewResult.autoFixed,
+          verdict: aiReviewResult.verdict,
+          snapshotSha,
+          attempt,
+        });
+
+        if (this.checkSuiteRepo) {
+          this.checkSuiteRepo.updateChecks(suiteId, 'ai-review', {
+            status: aiReviewResult.status,
+            output: { summary: aiReviewResult.summary, verdict: aiReviewResult.verdict, reviewReport: aiReviewResult.reviewReport },
+            ranAt: new Date().toISOString(),
+          });
+        }
+
+        if (aiReviewResult.status === 'failed') {
+          if (escalateToStage !== undefined) {
+            if (this.checkSuiteRepo) {
+              this.checkSuiteRepo.updateStatus(suiteId, 'failed');
+            }
+            this.emitSuiteStatusChanged(issue, 'failed', snapshotSha);
+            this.checkpointRepo?.upsert(issue.number, 'review', ['no-auto-fix'], null);
+            this.writeLog(workflowLogRepo, issueId, 'check_failed', { reason: 'ai-review', attempt, escalatedTo: escalateToStage });
+            return {
+              success: false,
+              requiresApproval: false,
+              output: { checks: [buildTestResult, aiReviewResult], overallResult: 'failed' },
+              escalateToStage: Stage.Plan,
+              message: aiReviewResult.summary ?? 'AI review failed and auto-fix exhausted',
+            };
+          }
+
+          const shaBeforeFix = this.readHeadShaSafe();
+          const changeDir = this.artifactManager.getChangeDir(issue.number);
+          const reviewReport = aiReviewResult.reviewReport ?? '';
+          const fixSuggestions = extractFixSuggestions(reviewReport);
+
+          if (fixSuggestions && changeDir) {
+            const autoFixResult = await this.runAutoFixLoop(issue, acpOptions, changeDir, reviewReport, fixSuggestions, { type: '', index: 0 });
+            const shaAfterFix = this.readHeadShaSafe();
+
+            if (autoFixResult.success && shaAfterFix && shaAfterFix !== shaBeforeFix) {
+              snapshotSha = shaAfterFix;
+              log.info('AI-review auto-fix produced new commit, restarting loop', {
+                newSha: snapshotSha,
+                attempt,
+                issueNumber: issue.number,
+              });
+              if (this.checkSuiteRepo) {
+                this.checkSuiteRepo.updateSnapshotSha(suiteId, snapshotSha);
+              }
+              this.emitSuiteStatusChanged(issue, 'running', snapshotSha);
+              continue;
+            }
+          }
+
+          log.warn('AI-review auto-fix did not produce new commit or failed', {
+            attempt,
+            issueNumber: issue.number,
+          });
+
+          if (attempt >= MAX_RETRIES) {
+            if (this.checkSuiteRepo) {
+              this.checkSuiteRepo.updateStatus(suiteId, 'failed');
+            }
+            this.emitSuiteStatusChanged(issue, 'failed', snapshotSha);
+            this.writeLog(workflowLogRepo, issueId, 'check_failed', { reason: 'ai-review', attempt, maxRetries: MAX_RETRIES });
+            return {
+              success: false,
+              requiresApproval: false,
+              output: { checks: [buildTestResult, aiReviewResult], overallResult: 'failed' },
+              escalateToStage: Stage.Plan,
+              message: `Check suite failed after ${MAX_RETRIES} attempts: AI Review — ${aiReviewResult.summary}`,
+            };
+          }
+          continue;
+        }
+      }
+
+      if (this.checkSuiteRepo) {
+        this.checkSuiteRepo.updateStatus(suiteId, 'awaiting-approval');
+      }
+      this.emitSuiteStatusChanged(issue, 'awaiting-approval', snapshotSha);
+      this.writeLog(workflowLogRepo, issueId, 'check_completed', { attempt, snapshotSha, overallResult: 'passed' });
+      return {
+        success: true,
+        requiresApproval: true,
+        output: { checks: [buildTestResult], overallResult: 'passed' },
+        message: 'Check suite completed, awaiting user approval',
+      };
     }
 
-    const suiteOutput = { checks, overallResult: 'passed' };
-    this.writeLog(workflowLogRepo, issue.id, 'check_completed', { checks, duration: Date.now() - overallStartTime });
+    if (this.checkSuiteRepo) {
+      this.checkSuiteRepo.updateStatus(suiteId, 'failed');
+    }
+    this.emitSuiteStatusChanged(issue, 'failed', snapshotSha);
+    this.writeLog(workflowLogRepo, issueId, 'check_failed', { reason: 'max_retries_exhausted', maxRetries: MAX_RETRIES });
     return {
-      success: true,
-      requiresApproval: true,
-      output: suiteOutput,
-      message: 'Check suite completed, awaiting user approval',
+      success: false,
+      requiresApproval: false,
+      output: { overallResult: 'failed' },
+      escalateToStage: Stage.Plan,
+      message: `Check suite failed after ${MAX_RETRIES} attempts`,
     };
+  }
+
+  private readHeadShaSafe(): string | null {
+    try {
+      return this.readHeadSha();
+    } catch {
+      return null;
+    }
   }
 
   private async runBuildTestCheck(issue: Issue, acpOptions: AcpConnectionOptions): Promise<any> {
