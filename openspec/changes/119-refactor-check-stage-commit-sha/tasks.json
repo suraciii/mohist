@@ -202,15 +202,16 @@
         "T-004",
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use existing test patterns from the codebase (vitest, in-memory SQLite). Mock git SHA reading for deterministic tests.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
         631577,
         124631,
-        607145
+        607145,
+        405772
       ]
     }
   ]
