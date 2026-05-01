@@ -46,11 +46,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep existing check_started and check_update events unchanged except adding snapshotSha field to check_update.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        52641
+      ]
     },
     {
       "id": "T-003",
