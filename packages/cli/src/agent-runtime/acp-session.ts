@@ -370,6 +370,7 @@ export async function runAcpSession(
           acpSessionId: sessionId,
           executionId,
           taskDescription: task.slice(0, 200),
+          stage: options.stage,
         });
         coderSessionId = coderSession.id;
         log.info('coder_session row created', { coderSessionId, acpSessionId: sessionId });
@@ -496,6 +497,7 @@ export async function createAcpConnection(
     opencodeBinPath,
     signal,
     model,
+    stage,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -771,7 +773,7 @@ export async function createAcpConnection(
         acpSessionId: sessionId,
         executionId,
         taskDescription: 'multi-round acp connection',
-        stage: options.stage,
+        stage,
       });
       coderSessionId = coderSession.id;
       log.info('coder_session row created', {
@@ -786,6 +788,7 @@ export async function createAcpConnection(
           acpSessionId: sessionId,
           executionId,
           model,
+          stage,
           taskDescription: 'multi-round acp connection',
         });
       }
