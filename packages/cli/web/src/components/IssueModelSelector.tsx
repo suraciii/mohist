@@ -82,7 +82,7 @@ function ModelListItem({ modelId, isSelected, isHighlighted, onSelect, onMouseEn
 
 export function IssueModelSelector({ issueNumber, currentModel }: Props) {
   const queryClient = useQueryClient()
-  const { data: opencodeModels } = useOpencodeModels()
+  const { data: opencodeModels, isLoading, error } = useOpencodeModels()
   const { data: opencodeModelData } = useOpencodeModel()
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
@@ -205,7 +205,19 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
                 </div>
 
                 <div ref={listRef} className="max-h-80 overflow-y-auto border-t border-gray-100">
-                  {currentModel && !searchQuery.trim() && (
+                  {isLoading && (
+                    <div className="px-3 py-6 text-center text-sm text-gray-400">
+                      Loading models...
+                    </div>
+                  )}
+
+                  {error && !isLoading && (
+                    <div className="px-3 py-6 text-center text-sm text-red-500">
+                      Failed to load models: {(error as Error).message}
+                    </div>
+                  )}
+
+                  {!isLoading && !error && currentModel && !searchQuery.trim() && (
                     <div>
                       <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50">
                         Override
@@ -220,7 +232,7 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
                     </div>
                   )}
 
-                  {recentModels.length > 0 && !searchQuery.trim() && (
+                  {!isLoading && !error && recentModels.length > 0 && !searchQuery.trim() && (
                     <div>
                       <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50">
                         Recent
@@ -239,13 +251,13 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
                     </div>
                   )}
 
-                  {displayedModels.length === 0 && searchQuery.trim() && (
+                  {!isLoading && !error && displayedModels.length === 0 && (
                     <div className="px-3 py-6 text-center text-sm text-gray-400">
                       No models found
                     </div>
                   )}
 
-                  {!searchQuery.trim() &&
+                  {!isLoading && !error && !searchQuery.trim() &&
                     allModels.map((modelId, i) => (
                       <ModelListItem
                         key={modelId}
@@ -257,7 +269,7 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
                       />
                     ))}
 
-                  {searchQuery.trim() &&
+                  {!isLoading && !error && searchQuery.trim() &&
                     displayedModels.map((modelId, i) => (
                       <ModelListItem
                         key={modelId}

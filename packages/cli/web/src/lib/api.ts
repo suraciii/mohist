@@ -264,10 +264,10 @@ export const api = {
     request<{ archived: number; message: string }>('/issues/archive-completed', { method: 'POST' }),
 
   getOpencodeModel: () =>
-    request<{ model: string | null }>('/opencode/model'),
+    request<{ model: string | null }>('/opencode-model'),
 
   updateOpencodeModel: (model: string | null) =>
-    request<{ model: string | null }>('/opencode/model', {
+    request<{ model: string | null }>('/opencode-model', {
       method: 'PUT',
       body: JSON.stringify({ model }),
     }),

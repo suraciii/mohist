@@ -582,14 +582,14 @@ export function AiSettingsSection() {
                   <label className="block text-xs font-medium text-gray-600 capitalize">
                     {stage}
                   </label>
-                  <ModelSelect
-                    value={localStageModels[stage] ?? null}
-                    placeholder="Default"
-                    models={availableModels}
-                    onChange={(modelId) => handleSetStageModel(stage, modelId)}
-                    onClear={() => handleClearStageModel(stage)}
-                    allowClear={!!localStageModels[stage]}
-                  />
+                    <ModelSelect
+                      value={localStageModels[stage] ?? null}
+                      placeholder="Default"
+                      models={coderModels}
+                      onChange={(modelId) => handleSetStageModel(stage, modelId)}
+                      onClear={() => handleClearStageModel(stage)}
+                      allowClear={!!localStageModels[stage]}
+                    />
                 </div>
               ))}
             </div>
