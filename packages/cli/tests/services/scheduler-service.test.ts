@@ -9,9 +9,11 @@ function ensureAgentSkillsTable(db: DatabaseManager): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_skills (
       id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      prompt TEXT,
+      name TEXT UNIQUE NOT NULL,
+      project_id TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      dir_path TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -20,10 +22,12 @@ function ensureAgentSkillsTable(db: DatabaseManager): void {
 
 function insertTestSkill(db: DatabaseManager, skillId: string): void {
   const now = new Date().toISOString();
+  const projectRow = db.get<{ id: string }>('SELECT id FROM projects LIMIT 1');
+  const projectId = projectRow ? projectRow.id : 'test-project';
   db.run(
-    `INSERT OR IGNORE INTO agent_skills (id, name, description, prompt, created_at, updated_at)
-     VALUES (?, ?, 'test', 'test', ?, ?)`,
-    [skillId, skillId, now, now],
+    `INSERT OR IGNORE INTO agent_skills (id, name, project_id, description, prompt, dir_path, created_at, updated_at)
+     VALUES (?, ?, ?, 'test', 'test', '/tmp', ?, ?)`,
+    [skillId, skillId, projectId, now, now],
   );
 }
 

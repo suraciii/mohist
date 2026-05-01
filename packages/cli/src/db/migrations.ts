@@ -854,10 +854,30 @@ const CREATE_ISSUE_TASK_QUEUE_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_issue_task_queue_issue_status ON issue_task_queue(issue_id, status);',
 ];
 
+const CREATE_CHECK_SUITES_TABLE = `
+CREATE TABLE IF NOT EXISTS check_suites (
+  id            TEXT PRIMARY KEY,
+  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  snapshot_sha  TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'running',
+  checks        TEXT NOT NULL DEFAULT '{}',
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+`;
+
+const CREATE_CHECK_SUITES_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_check_suites_issue_status ON check_suites(issue_id, status);',
+];
+
 function migrateToVersion18(db: DatabaseManager): void {
   db.transaction(() => {
     db.exec(CREATE_ISSUE_TASK_QUEUE_TABLE);
     for (const indexSql of CREATE_ISSUE_TASK_QUEUE_INDEXES) {
+      db.exec(indexSql);
+    }
+    db.exec(CREATE_CHECK_SUITES_TABLE);
+    for (const indexSql of CREATE_CHECK_SUITES_INDEXES) {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 18);
