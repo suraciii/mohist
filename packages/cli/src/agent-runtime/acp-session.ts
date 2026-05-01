@@ -63,7 +63,7 @@ export interface AcpSessionResult {
   wipCommitted?: boolean;
 }
 
-const SESSION_STREAM_EVENT_TYPES = new Set([
+export const SESSION_STREAM_EVENT_TYPES = new Set([
   'agent_thought_chunk',
   'agent_message_chunk',
   'tool_call',
