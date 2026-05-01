@@ -20,13 +20,14 @@
       "dependsOn": [],
       "passes": true,
       "notes": "Reuse reconstructRoundsFromLogs from useSessionTimeline.ts for plan round inference",
-      "attempts": 3,
+      "attempts": 4,
       "order": 999999,
       "error": null,
       "durations": [
         345262,
         71379,
-        196681
+        196681,
+        122945
       ]
     },
     {
