@@ -32,11 +32,6 @@ export {
 } from './checks/build-test-check';
 
 export {
-  MergeReadyCheck,
-  type MergeReadyCheckOptions,
-} from './checks/merge-ready-check';
-
-export {
   AiReviewCheck,
   type AiReviewCheckOptions,
 } from './checks/ai-review-check';
