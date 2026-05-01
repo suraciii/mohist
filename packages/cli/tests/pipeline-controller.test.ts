@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Stage, IssueStatus, type Issue } from '../src/types';
 
 vi.mock('../src/agent-runtime/acp-session', () => ({
@@ -22,15 +22,22 @@ vi.mock('../src/openspec/detector', () => ({
   }),
 }));
 
+const writtenFiles = new Set<string>();
+
 vi.mock('fs', () => ({
   existsSync: vi.fn((p: string) => {
-    if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) return false;
+    if (typeof p === 'string') {
+      if (writtenFiles.has(p)) return true;
+      if (p.endsWith('review.md') || p.endsWith('review-self-check.md')) return false;
+    }
     return true;
   }),
   readdirSync: vi.fn().mockReturnValue([]),
   rmSync: vi.fn(),
   mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
+  writeFileSync: vi.fn((p: string) => {
+    if (typeof p === 'string') writtenFiles.add(p);
+  }),
   readFileSync: vi.fn((p: string) => {
     if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) {
       return '## Result: PASS\nAll checks passed.';
@@ -200,6 +207,7 @@ function createEngine(opts: {
 
 describe('WorkflowEngine pipeline stage ordering', () => {
   beforeEach(() => {
+    writtenFiles.clear();
     vi.clearAllMocks();
   });
 
@@ -280,6 +288,7 @@ describe('AgentRunnerService pipeline gate management', () => {
 
 describe('WorkflowEngine done stage sets Completed status', () => {
   beforeEach(() => {
+    writtenFiles.clear();
     vi.clearAllMocks();
   });
 
@@ -327,6 +336,7 @@ describe('WorkflowEngine done stage sets Completed status', () => {
 
 describe('WorkflowEngine build stage git commit', () => {
   beforeEach(() => {
+    writtenFiles.clear();
     vi.clearAllMocks();
   });
 
@@ -359,13 +369,19 @@ describe('WorkflowEngine build stage git commit', () => {
 
 describe('WorkflowEngine review stage multi-round', () => {
   beforeEach(() => {
+    writtenFiles.clear();
     vi.clearAllMocks();
   });
 
   it('should send 2 prompts in review stage (review + self-check)', async () => {
     const { issueRepo, eventBus } = createMockRepos();
     const mockConn = {
-      prompt: vi.fn().mockResolvedValue({ text: 'review report content', success: true, acpSessionId: 's1' }),
+      prompt: vi.fn().mockImplementation((_prompt: string) => {
+        const calls = mockConn.prompt.mock.calls.length;
+        if (calls === 1) writtenFiles.add('/tmp/change/review.md');
+        if (calls === 2) writtenFiles.add('/tmp/change/review-self-check.md');
+        return Promise.resolve({ text: 'review report content', success: true, acpSessionId: 's1' });
+      }),
       close: vi.fn().mockResolvedValue(undefined),
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
@@ -394,15 +410,19 @@ describe('WorkflowEngine review stage multi-round', () => {
 
     expect(mockConn.prompt).toHaveBeenCalledTimes(1);
     expect(result.gateRequired).toBe(false);
-    expect(result.message).toContain('Review failed');
+    expect(result.message).toContain('review failed');
   });
 
   it('should return error when self-check round fails', async () => {
     const { issueRepo, eventBus } = createMockRepos();
     const mockConn = {
-      prompt: vi.fn()
-        .mockResolvedValueOnce({ text: 'review content', success: true, acpSessionId: 's1' })
-        .mockResolvedValueOnce({ text: '', success: false, error: 'self-check failed', acpSessionId: 's2' }),
+      prompt: vi.fn().mockImplementation((_prompt: string) => {
+        const calls = mockConn.prompt.mock.calls.length;
+        if (calls === 1) writtenFiles.add('/tmp/change/review.md');
+        return calls === 1
+          ? Promise.resolve({ text: 'review content', success: true, acpSessionId: 's1' })
+          : Promise.resolve({ text: '', success: false, error: 'self-check failed', acpSessionId: 's2' });
+      }),
       close: vi.fn().mockResolvedValue(undefined),
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
@@ -419,7 +439,11 @@ describe('WorkflowEngine review stage multi-round', () => {
   it('should return error when report is empty after self-check', async () => {
     const { issueRepo, eventBus } = createMockRepos();
     const mockConn = {
-      prompt: vi.fn().mockResolvedValue({ text: '', success: true, acpSessionId: 's1' }),
+      prompt: vi.fn().mockImplementation((_prompt: string) => {
+        const calls = mockConn.prompt.mock.calls.length;
+        if (calls === 1) writtenFiles.add('/tmp/change/review.md');
+        return Promise.resolve({ text: '', success: true, acpSessionId: 's1' });
+      }),
       close: vi.fn().mockResolvedValue(undefined),
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
@@ -430,13 +454,18 @@ describe('WorkflowEngine review stage multi-round', () => {
 
     expect(mockConn.prompt).toHaveBeenCalledTimes(2);
     expect(result.gateRequired).toBe(false);
-    expect(result.message).toContain('empty');
+    expect(result.message).toContain('not found');
   });
 
   it('should emit plan_round_start for both review and self-check rounds', async () => {
     const { issueRepo, eventBus } = createMockRepos();
     const mockConn = {
-      prompt: vi.fn().mockResolvedValue({ text: 'review report', success: true, acpSessionId: 's1' }),
+      prompt: vi.fn().mockImplementation((_prompt: string) => {
+        const calls = mockConn.prompt.mock.calls.length;
+        if (calls === 1) writtenFiles.add('/tmp/change/review.md');
+        if (calls === 2) writtenFiles.add('/tmp/change/review-self-check.md');
+        return Promise.resolve({ text: 'review report', success: true, acpSessionId: 's1' });
+      }),
       close: vi.fn().mockResolvedValue(undefined),
     };
     (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
@@ -447,7 +476,7 @@ describe('WorkflowEngine review stage multi-round', () => {
 
     expect(eventBus.emit).toHaveBeenCalledWith(
       'plan_round_start',
-      expect.objectContaining({ roundType: 'check', roundIndex: 0 }),
+      expect.objectContaining({ roundType: 'review', roundIndex: 0 }),
     );
     expect(eventBus.emit).toHaveBeenCalledWith(
       'plan_round_start',
