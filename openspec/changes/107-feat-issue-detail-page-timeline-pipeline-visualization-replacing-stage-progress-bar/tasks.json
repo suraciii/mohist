@@ -121,9 +121,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Mock useIssue, useCoderSessions, and api.getWorkflowLogs. Use fake timers for RAF testing.",
-      "attempts": 5,
+      "attempts": 6,
       "order": 999999,
       "error": null,
       "durations": [
@@ -131,7 +131,8 @@
         100802,
         227279,
         67403,
-        128536
+        128536,
+        48555
       ]
     },
     {
