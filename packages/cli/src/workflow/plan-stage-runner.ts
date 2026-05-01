@@ -33,6 +33,20 @@ export class PlanStageRunner implements StageRunner {
       };
     }
 
+    // If already approved and artifacts exist, skip re-execution and advance to build
+    if (issue.approvalState?.status === 'approved' && verifyPlanArtifacts(changeDir).length === 0) {
+      return {
+        success: true,
+        nextStage: Stage.Build,
+        message: 'Plan already approved, advancing to build',
+      };
+    }
+
+    const resumeSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
+    if (resumeSteps.length === 0) {
+      cleanChangeDir(changeDir);
+    }
+
     const rounds: RoundConfig[] = [
       {
         type: 'proposal',
@@ -71,7 +85,6 @@ export class PlanStageRunner implements StageRunner {
       },
     ];
 
-    const resumeSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
     if (resumeSteps.length === 0) {
       cleanChangeDir(changeDir);
     }

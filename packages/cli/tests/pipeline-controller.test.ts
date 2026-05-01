@@ -249,6 +249,35 @@ describe('WorkflowEngine pipeline stage ordering', () => {
     );
   });
 
+  it('should auto-advance from plan to build when already approved', async () => {
+    const { PlanStageRunner } = await import('../src/workflow/plan-stage-runner');
+    const runner = new PlanStageRunner();
+
+    const approvedIssue = createMockIssue(Stage.Plan, {
+      approvalState: {
+        stage: Stage.Plan,
+        status: 'approved',
+        output: null,
+        requestedAt: new Date().toISOString(),
+      },
+    });
+
+    const ctx = {
+      issue: approvedIssue,
+      acpOptions: { cwd: '/tmp' },
+      artifactManager: createMockArtifactManager(),
+      eventBus: createMockRepos().eventBus,
+      checkpointManager: createMockCheckpointManager() as any,
+      issueRepo: createMockRepos().issueRepo,
+    } as any;
+
+    const result = await runner.run(ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.nextStage).toBe(Stage.Build);
+    expect(result.requiresApproval ?? false).toBe(false);
+  });
+
   it('should advance from build to review without gate', async () => {
     const { issueRepo, eventBus } = createMockRepos();
     const mockConn = {
