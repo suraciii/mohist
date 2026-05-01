@@ -1,0 +1,128 @@
+{
+  "project": "mohist",
+  "description": "Add toast notifications for mutations and SSE events, plus dynamic page title reflecting route and agent activity",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Install sonner and mount Toaster in App.tsx",
+      "spec": "specs/toast-notifications/spec.md#toast-notification-provider",
+      "description": "Install the sonner package in the web frontend. Add `<Toaster />` from sonner to `AppContent` in `App.tsx`, inside the `<BrowserRouter>` tree at the top level of the app layout div, before `<Header>`.",
+      "acceptanceCriteria": [
+        "sonner is listed in packages/cli/web/package.json dependencies",
+        "packages/cli/web/node_modules/sonner exists",
+        "<Toaster /> from sonner is rendered in AppContent component",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "packages/cli/web/src/App.tsx",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Run: cd packages/cli/web && npm install sonner"
+    },
+    {
+      "id": "T-002",
+      "title": "Create useDocumentTitle hook",
+      "spec": "specs/dynamic-page-title/spec.md#page-title-hook-implementation",
+      "description": "Create `packages/cli/web/src/hooks/useDocumentTitle.ts` with a hook that accepts a title string and optional active boolean. Sets `document.title` to `(active ? '● ' : '') + title`. Restores previous title on unmount via useRef.",
+      "acceptanceCriteria": [
+        "Hook file exists at packages/cli/web/src/hooks/useDocumentTitle.ts",
+        "Hook sets document.title to the provided title prefixed with '● ' when active is true",
+        "Hook sets document.title to the provided title without prefix when active is false or omitted",
+        "Hook restores previous document.title on component unmount",
+        "Typecheck passes: cd packages/cli/web && npx tsc --noEmit"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useDocumentTitle.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Add mutation success/error toasts in useQueries.ts",
+      "spec": "specs/toast-notifications/spec.md#mutation-success-toasts",
+      "description": "Add `import { toast } from 'sonner'` to useQueries.ts. For each of the 18 listed mutation hooks, add `toast.success(message)` in the existing `onSuccess` callback. Add `onError` callback with `toast.error(err.message || 'Request failed')` where not already present.",
+      "acceptanceCriteria": [
+        "toast.success is called in onSuccess for all 18 mutation hooks listed in the spec",
+        "toast.error is called in onError for mutations, showing err.message or fallback 'Request failed'",
+        "useQuery hooks do NOT call toast",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useQueries.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Mutation hooks: useCreateProject, useDeleteProject, useUseProject, useSendMessage, useUnarchiveIssue, useSaveProvider, useDeleteProvider, useRebuildSystem, useUpdateConfig, useUpdateOpencodeModel, useSetModel, useSetOpencodeModelConfig, useSetLogLevel, useSetAgentRuntime, useSetStageModels, useCreateExploreSession, useUpdateExploreSessionTitle, useTestProvider. Also covers specs/toast-notifications/spec.md#mutation-error-toasts"
+    },
+    {
+      "id": "T-004",
+      "title": "Add SSE background event toasts in useSSE.tsx",
+      "spec": "specs/toast-notifications/spec.md#sse-background-event-toasts",
+      "description": "Add toast calls in the SSE event handler for: agent_paused (info), agent_error (error), rebase_conflict with status=failed (error), merge_completed (success), merge_failed (error). Only show toast when the event's issue is NOT the currently viewed issue. Use a ref tracking the current issue number from window.location.pathname.",
+      "acceptanceCriteria": [
+        "agent_paused SSE event shows info toast 'Issue #N needs approval' only when not viewing that issue",
+        "agent_error SSE event shows error toast 'Issue #N encountered an error' only when not viewing that issue",
+        "rebase_conflict with status=failed shows error toast 'Rebase conflict on Issue #N'",
+        "merge_completed shows success toast 'Issue #N merged successfully'",
+        "merge_failed shows error toast 'Merge failed for Issue #N'",
+        "No toast shown when the event's issue matches the currently viewed issue (for agent_paused, agent_error)",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useSSE.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Parse current issue number from window.location.pathname matching /issue/(\\d+). Use a useRef updated on location change."
+    },
+    {
+      "id": "T-005",
+      "title": "Wire useDocumentTitle into all page components",
+      "spec": "specs/dynamic-page-title/spec.md#dynamic-page-title-reflects-current-route",
+      "description": "Add useDocumentTitle calls to each page component: KanbanView ('Mohist'), IssueDetailPage ('Issue #N — Mohist'), SessionPage ('Session — Issue #N — Mohist'), ExploreSessionList ('Explore — Mohist'), ExplorePage ('Explore — Mohist'), SettingsPage ('Settings — Mohist'), LogsPage ('Logs — Mohist'), ArchivedPage ('Archived — Mohist'). For IssueDetailPage and KanbanView, also read useAgentStatus and pass active=true when agent is running. Also covers specs/dynamic-page-title/spec.md#page-title-indicates-live-agent-activity.",
+      "acceptanceCriteria": [
+        "KanbanView sets title to 'Mohist', prefixed with '● ' when agent is running",
+        "IssueDetailPage sets title to 'Issue #N — Mohist', prefixed with '● ' when agent is running",
+        "SessionPage sets title to 'Session — Issue #N — Mohist'",
+        "ExploreSessionList sets title to 'Explore — Mohist'",
+        "ExplorePage sets title to 'Explore — Mohist'",
+        "SettingsPage sets title to 'Settings — Mohist'",
+        "LogsPage sets title to 'Logs — Mohist'",
+        "ArchivedPage sets title to 'Archived — Mohist'",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/*.tsx",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "KanbanView is defined in App.tsx, not a separate component file."
+    },
+    {
+      "id": "T-006",
+      "title": "Build verification and final integration check",
+      "spec": "",
+      "description": "Run the full build and typecheck to verify all changes integrate correctly. Ensure no regressions in existing tests.",
+      "acceptanceCriteria": [
+        "cd packages/cli && npm run build succeeds",
+        "cd packages/cli && npm test passes (no test regressions)",
+        "Typecheck passes: cd packages/cli && npx tsc --noEmit"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Verification that build + tests pass",
+      "dependsOn": ["T-003", "T-004", "T-005"],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
