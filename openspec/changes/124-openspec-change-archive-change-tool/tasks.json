@@ -49,11 +49,15 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Design D1: archive in CheckStageRunner between allPassed and requiresApproval. Design D3: extend stage-context.ts interface. Risk mitigation: catch archive errors gracefully per design doc.",
-      "attempts": 0,
+      "attempts": 2,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        99426,
+        79082
+      ]
     },
     {
       "id": "T-003",
