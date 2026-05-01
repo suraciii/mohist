@@ -1,0 +1,137 @@
+{
+  "project": "mohist",
+  "description": "Separate session stream data (agent thought/message chunks, tool calls) from workflow_log into a new session_stream_log table",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create session_stream_log table, repo, and register in StateManager",
+      "spec": "specs/session-stream-log/spec.md",
+      "description": "Add schema migration v19 creating session_stream_log table with indexes. Create SessionStreamLogRepo class mirroring WorkflowLogRepo (insert, findBySessionId, findByIssueId). Register in StateManager with getSessionStreamLogRepo(). Export from db/index.ts.",
+      "acceptanceCriteria": [
+        "session_stream_log table created with id, session_id (NOT NULL), issue_id (FK CASCADE), event_type, data, created_at columns",
+        "idx_session_stream_log_session index on (session_id, created_at)",
+        "idx_session_stream_log_issue index on (issue_id, created_at)",
+        "SessionStreamLogRepo.insert persists entry and returns it",
+        "SessionStreamLogRepo.findBySessionId returns entries ordered by created_at ASC",
+        "SessionStreamLogRepo.findByIssueId returns entries ordered by created_at ASC",
+        "SCHEMA_VERSION constant updated to 19",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/session-stream-log-repo.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follow the exact pattern of workflow-log-repo.ts (89 lines). Migration follows migrateToVersion18 pattern in migrations.ts."
+    },
+    {
+      "id": "T-002",
+      "title": "Plumb sessionStreamLogRepo through DI chain",
+      "spec": "specs/session-stream-log/spec.md",
+      "description": "Add sessionStreamLogRepo? field to BOTH AcpSessionOptions and AcpConnectionOptions (two separate interfaces in acp-session.ts), AcpOptions (workflow-engine.ts), RalphExecutorContext, StageContext, ConflictResolutionDeps, and all intermediate types. Pass it from server/index.ts through to acp-session.ts following the exact same path as workflowLogRepo. Update createIssueRoutes signature to accept sessionStreamLogRepo.",
+      "acceptanceCriteria": [
+        "AcpSessionOptions has sessionStreamLogRepo? field",
+        "AcpConnectionOptions (separate interface in acp-session.ts for multi-round) has sessionStreamLogRepo? field",
+        "AcpOptions (workflow-engine.ts) has sessionStreamLogRepo? field",
+        "RalphExecutorContext has sessionStreamLogRepo? field",
+        "StageContext has sessionStreamLogRepo? field",
+        "ConflictResolutionDeps has sessionStreamLogRepo field",
+        "server/index.ts retrieves sessionStreamLogRepo from StateManager and passes to AgentRunnerService and createIssueRoutes",
+        "All callers that pass workflowLogRepo also pass sessionStreamLogRepo",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Mechanical propagation touching ~10 files. Key: acp-session.ts has TWO separate interfaces (AcpSessionOptions for single-shot, AcpConnectionOptions for multi-round at line 463) — both need the field. Files: acp-session.ts, workflow-engine.ts, stage-context.ts, ralph-executor.ts, build-stage-runner.ts, workflow-controller.ts, agent-runner-service.ts, server/index.ts, api/issues.ts, checks/build-test-check.ts, conflict-resolution.ts. Note: agent-runner-service.ts constructor has _workflowLogRepo typed as unknown and unused — still add the new param to maintain pattern. Note: event-bus.ts emitPersistent also accepts workflowLogRepo in opts but is currently dead code (never called) — skip for now."
+    },
+    {
+      "id": "T-003",
+      "title": "Route session stream events to session_stream_log in acp-session.ts",
+      "spec": "specs/session-stream-log/spec.md",
+      "description": "In acp-session.ts, add SESSION_STREAM_EVENT_TYPES constant set. At both write sites (runAcpSession line ~246 and createAcpConnection line ~663), replace the unconditional workflowLogRepo.insert with routing logic: if eventType is in SESSION_STREAM_EVENT_TYPES, write to sessionStreamLogRepo; otherwise write to workflowLogRepo. The routing reads sessionStreamLogRepo from the respective options object (AcpSessionOptions for runAcpSession, AcpConnectionOptions for createAcpConnection). writeSessionLog helper (lifecycle events) continues unchanged.",
+      "acceptanceCriteria": [
+        "SESSION_STREAM_EVENT_TYPES constant contains: agent_thought_chunk, agent_message_chunk, tool_call, tool_call_update, user_message_chunk",
+        "Single-shot sessionUpdate handler (runAcpSession) routes stream events to sessionStreamLogRepo",
+        "Multi-round sessionUpdate handler (createAcpConnection) routes stream events to sessionStreamLogRepo",
+        "Non-stream event types (usage_update, etc.) continue to workflowLogRepo",
+        "Lifecycle events via writeSessionLog helper still write to workflowLogRepo unchanged",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Two write sites to modify: line ~246 (runAcpSession) and line ~663 (createAcpConnection). The writeSessionLog helper does NOT change."
+    },
+    {
+      "id": "T-004",
+      "title": "Update coder-sessions API to read from session_stream_log with fallback",
+      "spec": "specs/workflow-log/spec.md",
+      "description": "In api/issues.ts GET /:number/coder-sessions handler, change the per-session log query to first try sessionStreamLogRepo.findBySessionId(). If empty (old sessions), fall back to workflowLogRepo.findBySessionId() and filter to only SESSION_STREAM_EVENT_TYPES entries. Update createIssueRoutes to accept sessionStreamLogRepo parameter.",
+      "acceptanceCriteria": [
+        "coder-sessions API queries sessionStreamLogRepo.findBySessionId() first",
+        "If session_stream_log returns empty for a session, falls back to workflowLogRepo.findBySessionId() filtered to stream event types",
+        "Old sessions (pre-migration data in workflow_log) still render correctly in session detail",
+        "New sessions (data in session_stream_log) render correctly",
+        "createIssueRoutes accepts and uses sessionStreamLogRepo",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Fallback ensures old session detail pages still work. Filter fallback results to only stream event types to avoid mixing lifecycle events."
+    },
+    {
+      "id": "T-005",
+      "title": "Remove unused getWorkflowLogs call from useIssueTimeline",
+      "spec": "specs/session-timeline-ui/spec.md",
+      "description": "In useIssueTimeline.ts, remove the useEffect that calls api.getWorkflowLogs() (lines ~259-269), the logsRef ref, and the logsFetchedRef ref. Remove the logs parameter from the buildTimeline() call site. The _logs parameter in buildTimeline can remain as-is (it's already unused). Do NOT touch useSessionTimeline.ts.",
+      "acceptanceCriteria": [
+        "useIssueTimeline no longer calls api.getWorkflowLogs()",
+        "logsRef and logsFetchedRef refs removed",
+        "buildTimeline call site updated to not pass logs",
+        "useSessionTimeline.ts is NOT modified",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useIssueTimeline.ts",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Pure cleanup — buildTimeline already ignores the _logs parameter. Do NOT remove getWorkflowLogs from useSessionTimeline (Path B is kept per design D4)."
+    },
+    {
+      "id": "T-006",
+      "title": "Add unit tests for SessionStreamLogRepo and event routing",
+      "spec": "specs/session-stream-log/spec.md",
+      "description": "Write tests verifying: (1) SessionStreamLogRepo insert/findBySessionId/findByIssueId work correctly, (2) migration creates table with indexes, (3) event routing constant SESSION_STREAM_EVENT_TYPES contains the correct 5 types. Follow existing test patterns in the codebase.",
+      "acceptanceCriteria": [
+        "SessionStreamLogRepo insert persists and readback returns correct data",
+        "findBySessionId returns entries for specific session ordered by created_at ASC",
+        "findByIssueId returns entries across sessions ordered by created_at ASC",
+        "SESSION_STREAM_EVENT_TYPES contains exactly: agent_thought_chunk, agent_message_chunk, tool_call, tool_call_update, user_message_chunk",
+        "Schema migration v19 creates session_stream_log table",
+        "Tests pass: cd packages/cli && npm test",
+        "Build passes: cd packages/cli && npm run build"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/session-stream-log.test.ts",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Follow existing test patterns. Check packages/cli/tests/ for test conventions and database test setup helpers."
+    }
+  ]
+}
