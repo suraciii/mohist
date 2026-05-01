@@ -92,7 +92,7 @@ export class IssueRepo {
     this.db.run(
       `INSERT INTO issues (id, number, project_id, title, body, stage, status, labels, priority, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, data.number, data.projectId, data.title, data.body || null, Stage.Draft, IssueStatus.Active, labels, priority, now, now]
+      [id, data.number, data.projectId, data.title, data.body || null, Stage.Backlog, IssueStatus.Active, labels, priority, now, now]
     );
     
     return {
@@ -100,7 +100,7 @@ export class IssueRepo {
       number: data.number,
       title: data.title,
       body: data.body,
-      stage: Stage.Draft,
+      stage: Stage.Backlog,
       status: IssueStatus.Active,
       projectId: data.projectId,
       labels: data.labels || [],
