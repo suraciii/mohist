@@ -130,11 +130,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Needs issueRepo reference in the reopen handler to call hasCompletedCoderSession(). T-003 must be done first so stage column is populated for new sessions.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        83611
+      ]
     },
     {
       "id": "T-006",
