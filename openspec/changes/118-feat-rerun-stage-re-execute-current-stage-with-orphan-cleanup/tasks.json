@@ -49,11 +49,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Design D1: logic in API handler, D3: use resumePipeline(), D4: reject draft/done",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        139431
+      ]
     },
     {
       "id": "T-003",
