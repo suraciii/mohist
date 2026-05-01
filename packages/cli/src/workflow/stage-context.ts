@@ -14,6 +14,7 @@ export interface ChangeArtifactsManager {
   exists(changeDir: string): boolean;
   readTasks(issueNumber: number): TasksFile | null;
   updateTaskPasses(issueNumber: number, taskId: string, passes: boolean, error?: string | null): boolean;
+  archiveChange(issueNumber: number): Promise<void>;
 }
 
 export interface IssueRepo {
