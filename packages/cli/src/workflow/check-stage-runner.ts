@@ -58,20 +58,22 @@ export class CheckStageRunner implements StageRunner {
     const anyError = results.some((r) => r.status === 'error');
 
     if (anyError) {
+      const errorMessages = results.filter((r) => r.status === 'error').map((r) => r.message).filter(Boolean);
       return {
         success: false,
         requiresApproval: false,
         output: { checkResults: results },
-        message: 'Check stage encountered errors',
+        message: errorMessages.length > 0 ? `Check stage encountered errors: ${errorMessages.join('; ')}` : 'Check stage encountered errors',
       };
     }
 
     if (!allPassed) {
+      const failMessages = results.filter((r) => r.status === 'fail').map((r) => r.message).filter(Boolean);
       return {
         success: false,
         requiresApproval: false,
         output: { checkResults: results },
-        message: 'One or more checks failed',
+        message: failMessages.length > 0 ? `One or more checks failed: ${failMessages.join('; ')}` : 'One or more checks failed',
       };
     }
 
