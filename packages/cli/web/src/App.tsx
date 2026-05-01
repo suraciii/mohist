@@ -12,6 +12,7 @@ import { ExploreSessionList } from './components/ExploreSessionList'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
 import { CreateIssueDialog } from './components/CreateIssueDialog'
 import { SettingsPage } from './components/SettingsPage'
+import { ActivityPage } from './components/ActivityPage'
 import { LogsPage } from './components/LogsPage'
 import { ArchivedPage } from './components/ArchivedPage'
 import { ProjectGuard } from './components/ProjectGuard'
@@ -103,6 +104,7 @@ function AppContent() {
           <Route path="/" element={<KanbanView />} />
           <Route path="/issue/:number" element={<IssueDetailPage />} />
           <Route path="/issue/:number/session/:sessionId" element={<SessionPage />} />
+          <Route path="/activity" element={<ActivityPage />} />
           <Route path="/explore" element={<ExploreSessionList />} />
           <Route path="/explore/:id" element={<ExplorePage />} />
           <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
