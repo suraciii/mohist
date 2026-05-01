@@ -13,3 +13,4 @@ export { AgentSessionMessageRepo, type AgentSessionMessage, type CreateAgentSess
 export { CoderSessionRepo, type CoderSession, type CreateCoderSessionData } from './coder-session-repo';
 export { PipelineCheckpointRepo, type PipelineCheckpoint } from './pipeline-checkpoint-repo';
 export { ScheduleRepo, type SkillSchedule, type CreateScheduleData } from './schedule-repo';
+export { IssueTaskQueueRepo, type IssueTaskQueueRecord, type CreateTaskQueueEntryData, type UpdateTaskStatusFields, type TaskType, type TaskStatus } from './issue-task-queue-repo';
