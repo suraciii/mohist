@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState, createContext, useContext } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { EventName, EventMap, LiveTaskState, RebaseConflictState } from '../lib/types'
+import { toast } from 'sonner'
+import type { EventName, EventMap, LiveTaskState, RebaseConflictState, Issue } from '../lib/types'
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../lib/agent-events'
 import type { AgentDetailEventMap } from '../lib/types'
 import { useProject } from '../context/ProjectContext'
@@ -24,6 +25,11 @@ export function useLiveTask(): LiveTaskState {
   return useContext(LiveTaskContext)
 }
 
+function getCurrentIssueNumber(): number | null {
+  const match = window.location.pathname.match(/\/issue\/(\d+)/)
+  return match ? parseInt(match[1], 10) : null
+}
+
 function useSSEInner(projectId: string | null): LiveTaskState {
   const queryClient = useQueryClient()
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -32,6 +38,29 @@ function useSSEInner(projectId: string | null): LiveTaskState {
   const [rebaseConflict, setRebaseConflict] = useState<RebaseConflictState | null>(null)
   const taskStartRef = useRef<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const viewedIssueRef = useRef<number | null>(getCurrentIssueNumber())
+
+  useEffect(() => {
+    const update = () => {
+      viewedIssueRef.current = getCurrentIssueNumber()
+    }
+    window.addEventListener('popstate', update)
+    const origPush = history.pushState
+    const origReplace = history.replaceState
+    history.pushState = function (...args) {
+      origPush.apply(this, args)
+      update()
+    }
+    history.replaceState = function (...args) {
+      origReplace.apply(this, args)
+      update()
+    }
+    return () => {
+      window.removeEventListener('popstate', update)
+      history.pushState = origPush
+      history.replaceState = origReplace
+    }
+  }, [])
 
   const clearLiveTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -88,6 +117,28 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           case 'agent_error': {
             queryClient.invalidateQueries({ queryKey: ['agent-status'] })
             queryClient.invalidateQueries({ queryKey: ['issues'] })
+            if (eventName === 'agent_paused' || eventName === 'agent_error') {
+              const viewed = viewedIssueRef.current
+              const evt = parsed as EventMap['agent_paused'] | EventMap['agent_error']
+              const matches = queryClient.getQueriesData<Issue[]>({ queryKey: ['issues'] })
+              let issueNumber: number | null = null
+              for (const [, data] of matches) {
+                if (Array.isArray(data)) {
+                  const found = data.find((i) => i.id === evt.issueId)
+                  if (found) {
+                    issueNumber = found.number
+                    break
+                  }
+                }
+              }
+              if (issueNumber !== null && issueNumber !== viewed) {
+                if (eventName === 'agent_paused') {
+                  toast.info(`Issue #${issueNumber} needs approval`)
+                } else {
+                  toast.error(`Issue #${issueNumber} encountered an error`)
+                }
+              }
+            }
             break
           }
           case 'agent_blocked': {
@@ -112,6 +163,13 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           case 'merge_completed':
           case 'merge_failed': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
+            if (eventName === 'merge_completed') {
+              const d = parsed as EventMap['merge_completed']
+              toast.success(`Issue #${d.issueNumber} merged successfully`)
+            } else if (eventName === 'merge_failed') {
+              const d = parsed as EventMap['merge_failed']
+              toast.error(`Merge failed for Issue #${d.issueNumber}`)
+            }
             break
           }
           case 'rebase_completed': {
@@ -125,6 +183,9 @@ function useSSEInner(projectId: string | null): LiveTaskState {
               setRebaseConflict({ issueNumber: d.issueNumber, conflicts: d.conflicts, status: d.status, error: d.error })
             } else {
               setRebaseConflict(null)
+            }
+            if (d.status === 'failed') {
+              toast.error(`Rebase conflict on Issue #${d.issueNumber}`)
             }
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
