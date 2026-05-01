@@ -26,28 +26,23 @@ const writtenFiles = new Set<string>();
 
 vi.mock('fs', () => ({
   existsSync: vi.fn((p: string) => {
-    if (typeof p === 'string') {
-      if (writtenFiles.has(p)) return true;
-      if (p.endsWith('review.md') || p.endsWith('review-self-check.md')) return false;
-    }
+    if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) return false;
     return true;
   }),
   readdirSync: vi.fn().mockReturnValue([]),
   rmSync: vi.fn(),
   mkdirSync: vi.fn(),
-  writeFileSync: vi.fn((p: string) => {
-    if (typeof p === 'string') writtenFiles.add(p);
-  }),
+  writeFileSync: vi.fn(),
   readFileSync: vi.fn((p: string) => {
     if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) {
       return '## Result: PASS\nAll checks passed.';
     }
     if (typeof p === 'string' && p.endsWith('tasks.json')) {
-      return JSON.stringify({ version: 1, tasks: [{ id: 'T-001', title: 'Test task', passes: true }] });
+      return JSON.stringify({ version: 1, tasks: [{ id: 'T-001', title: 'Test task', passes: true, attempts: 0 }] });
     }
-    return '# content';
+    return 'artifact content';
   }),
-  statSync: vi.fn().mockReturnValue({ size: 100 }),
+  statSync: vi.fn().mockReturnValue({ size: 100, isFile: () => true, isDirectory: () => false }),
 }));
 
 vi.mock('child_process', () => ({

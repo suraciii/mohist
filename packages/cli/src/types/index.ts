@@ -129,6 +129,31 @@ export interface CheckSuiteOutput {
   overallResult: CheckOverallResult;
 }
 
+export type CheckSuiteStatus = 'running' | 'awaiting-approval' | 'passed' | 'failed';
+
+export type CheckStateStatus = 'pending' | 'running' | 'passed' | 'failed';
+
+export interface CheckState {
+  status: CheckStateStatus;
+  output?: unknown;
+  ranAt?: string;
+}
+
+export interface CheckSuiteChecks {
+  'build-test': CheckState;
+  'ai-review': CheckState;
+}
+
+export interface CheckSuite {
+  id: string;
+  issueId: string;
+  snapshotSha: string;
+  status: CheckSuiteStatus;
+  checks: CheckSuiteChecks;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ServerState {
   isRunning: boolean;
   pid?: number;
