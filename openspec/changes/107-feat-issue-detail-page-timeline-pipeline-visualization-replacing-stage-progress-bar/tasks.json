@@ -149,7 +149,7 @@
         "T-003"
       ],
       "passes": true,
-      "notes": "Verified via code review: overflow-hidden root, min-w-0 flex-1 content areas, responsive padding (ml-4 sm:ml-6, pl-2 sm:pl-3), truncate on long text, text-sm/text-xs sizes. All content fits within 315px available at 375px viewport. Typecheck passes.",
+      "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient.",
       "attempts": 5,
       "order": 999999,
       "error": null,
@@ -157,7 +157,8 @@
         322837,
         539709,
         533598,
-        611576
+        611576,
+        147098
       ]
     }
   ]
