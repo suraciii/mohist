@@ -166,12 +166,13 @@
         "T-005"
       ],
       "passes": true,
-      "notes": "Build passes, typecheck passes. Tests: 64 failures (pre-existing, 67 on base branch = no regressions).",
+      "notes": "",
       "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        249411
+        249411,
+        149498
       ]
     }
   ]
