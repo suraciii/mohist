@@ -72,13 +72,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Mutation hooks: useCreateProject, useDeleteProject, useUseProject, useSendMessage, useUnarchiveIssue, useSaveProvider, useDeleteProvider, useRebuildSystem, useUpdateConfig, useUpdateOpencodeModel, useSetModel, useSetOpencodeModelConfig, useSetLogLevel, useSetAgentRuntime, useSetStageModels, useCreateExploreSession, useUpdateExploreSessionTitle, useTestProvider. Also covers specs/toast-notifications/spec.md#mutation-error-toasts",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        237183
+        237183,
+        74235
       ]
     },
     {
