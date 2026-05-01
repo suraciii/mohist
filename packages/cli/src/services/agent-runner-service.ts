@@ -498,7 +498,7 @@ export class AgentRunnerService {
       };
     }
 
-    this.executePipeline(issue, projectId, issueRepo, worktreePath, acpOptions, updateIssueStatus);
+    this.executePipeline(issue, projectId, issueRepo, worktreePath, acpOptions);
     return { started: true };
   }
 
@@ -513,9 +513,8 @@ export class AgentRunnerService {
     if (this.activeAgents.has(issue.id)) {
       throw new Error(`Issue #${issue.number} is already running`);
     }
-
     this.pendingGates.delete(issue.number);
-    this.executePipeline(issue, projectId, issueRepo, worktreePath, acpOptions, updateIssueStatus);
+    this.executePipeline(issue, projectId, issueRepo, worktreePath, acpOptions);
   }
 
   private executePipeline(
@@ -524,7 +523,6 @@ export class AgentRunnerService {
     issueRepo: IssueRepo,
     worktreePath: string,
     acpOptions: AcpConnectionOptions,
-    updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
   ): void {
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
     log.info('Pipeline started', { issueNumber: issue.number, projectId });
@@ -592,9 +590,9 @@ export class AgentRunnerService {
             });
           }
           try {
-            updateIssueStatus?.(issue.id, IssueStatus.Blocked);
+            issueRepo.blockIssue(issue.id, result.message ?? 'Pipeline failed without completing');
           } catch (updateErr) {
-            log.error('Failed to update issue status to blocked', {
+            log.error('Failed to block issue', {
               issueNumber: issue.number,
               error: updateErr instanceof Error ? updateErr.message : String(updateErr),
             });
@@ -634,9 +632,9 @@ export class AgentRunnerService {
           });
         }
         try {
-          updateIssueStatus?.(issue.id, IssueStatus.Blocked);
+          issueRepo.blockIssue(issue.id, errorMsg);
         } catch (updateErr) {
-          log.error('Failed to update issue status to blocked', {
+          log.error('Failed to block issue', {
             issueNumber: issue.number,
             error: updateErr instanceof Error ? updateErr.message : String(updateErr),
           });
