@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add POST /issues/:number/rerun endpoint and frontend Rerun Stage button — re-execute current pipeline stage with orphan session cleanup",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/db/coder-session-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Design D2: bulk UPDATE WHERE issue_id = ? AND status = 'running'"
+      "passes": true,
+      "notes": "Design D2: bulk UPDATE WHERE issue_id = ? AND status = 'running'",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        61446
+      ]
     },
     {
       "id": "T-002",
@@ -41,9 +46,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Design D1: logic in API handler, D3: use resumePipeline(), D4: reject draft/done"
+      "notes": "Design D1: logic in API handler, D3: use resumePipeline(), D4: reject draft/done",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -59,9 +69,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/api.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -79,9 +94,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Also modifies IssueCard.tsx. Design D5: reuse existing mutation pattern."
+      "notes": "Also modifies IssueCard.tsx. Design D5: reuse existing mutation pattern.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
