@@ -22,11 +22,12 @@
       "dependsOn": [],
       "passes": true,
       "notes": "See design.md D1 for the SQL query. No schema changes needed.",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        125151
+        125151,
+        68040
       ]
     },
     {
@@ -51,7 +52,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "See design.md D6 — reuse existing createAgentRoutes, extend its signature.",
       "attempts": 1,
       "order": 999999,
@@ -80,7 +81,7 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Follow existing patterns in api.ts (request helper) and useQueries.ts (useQuery with queryKey).",
       "attempts": 1,
       "order": 999999,
@@ -108,7 +109,7 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/App.tsx, packages/cli/web/src/components/Header.tsx, packages/cli/web/src/components/MobileBottomNav.tsx",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "Can be done in parallel with T-001 through T-003. Placeholder ActivityPage just renders a div.",
       "attempts": 1,
       "order": 999999,
@@ -137,7 +138,7 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Pure presentational component. Receives counts as props.",
       "attempts": 1,
       "order": 999999,
@@ -173,7 +174,7 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "See design.md D2, D3, D5. Follow onAgentEvent pattern from useSessionTimeline.ts.",
       "attempts": 1,
       "order": 999999,
@@ -206,7 +207,7 @@
       "dependsOn": [
         "T-006"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Duration timer driven by parent's setInterval(1000) render counter. See design.md D7.",
       "attempts": 1,
       "order": 999999,
@@ -237,7 +238,7 @@
       "dependsOn": [
         "T-007"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "See design.md D4. Pure client-side computation, no backend involvement.",
       "attempts": 1,
       "order": 999999,
@@ -275,7 +276,7 @@
         "T-007",
         "T-008"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "This is the integration task. Replaces the placeholder ActivityPage from T-004.",
       "attempts": 1,
       "order": 999999,
@@ -306,7 +307,7 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Follow existing test patterns in packages/cli/tests/.",
       "attempts": 1,
       "order": 999999,
