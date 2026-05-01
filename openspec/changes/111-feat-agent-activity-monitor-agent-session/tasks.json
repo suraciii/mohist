@@ -295,15 +295,16 @@
         "T-007",
         "T-008"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is the integration task. Replaces the placeholder ActivityPage from T-004.",
-      "attempts": 2,
+      "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
         131464,
         125465,
-        66166
+        66166,
+        403937
       ]
     },
     {
