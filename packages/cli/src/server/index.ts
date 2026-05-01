@@ -240,7 +240,7 @@ async function main(): Promise<void> {
   server.addRouter('/api/providers', createProviderRoutes(eventBus, rateLimiter));
   server.addRouter('/api', createStatusRoutes(projectService, issueService, fileConfig, getVersionInfo()));
   server.addRouter('/api/events', createEventRoutes(eventBus));
-  server.addRouter('/api/agent', createAgentRoutes(agentRunner));
+  server.addRouter('/api/agent', createAgentRoutes(agentRunner, coderSessionRepo, projectService));
   server.addRouter('/api/opencode', createOpencodeModelsRoutes());
   server.addRouter('/api/fs', createFsRoutes());
   server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), eventBus, (projectPath: string) => {
