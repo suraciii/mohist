@@ -17,6 +17,7 @@ import { ArchivedPage } from './components/ArchivedPage'
 import { ProjectGuard } from './components/ProjectGuard'
 import { MobileBottomNav } from './components/MobileBottomNav'
 import { FAB } from './components/FAB'
+import { Toaster } from 'sonner'
 
 function KanbanView() {
   const { projectId } = useProject()
@@ -91,6 +92,7 @@ function AppContent() {
   return (
     <LiveTaskProvider>
     <div className="min-h-screen bg-gray-50 flex flex-col pb-14 md:pb-0">
+      <Toaster />
       <Header onCreateIssue={() => setCreateIssueOpen(true)} />
       <MobileBottomNav />
       <Routes>
