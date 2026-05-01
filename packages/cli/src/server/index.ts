@@ -127,6 +127,7 @@ async function main(): Promise<void> {
 
   agentRunner.setLlmConfig(fileConfig);
 
+  agentRunner.recoverFromQueue();
   agentRunner.recoverIssues();
 
   const expiredCount = stateManager.getQuestionRepo().expireAllPending();

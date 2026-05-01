@@ -218,6 +218,61 @@ export class AgentRunnerService {
       .map(issue => ({ issueNumber: issue.number, stage: issue.stage }));
   }
 
+  recoverFromQueue(): void {
+    if (!this.taskQueueRepo || !this.issueRepo) {
+      log.info('Queue recovery skipped — missing taskQueueRepo or issueRepo');
+      return;
+    }
+
+    const runningTasks = this.taskQueueRepo.findAllRunning();
+    log.info('Recovering queue state from DB', { runningTasks: runningTasks.length });
+
+    for (const task of runningTasks) {
+      const issue = this.issueRepo.findById(task.issueId);
+
+      if (issue?.approvalState?.status === 'awaiting') {
+        this.taskQueueRepo.updateStatus(task.id, 'completed', {
+          result: 'approval_gate',
+          completedAt: new Date().toISOString(),
+        });
+        log.info('Recovered running task — at approval gate, marked completed', {
+          taskId: task.id,
+          issueNumber: task.issueNumber,
+          stage: issue.stage,
+        });
+      } else {
+        this.taskQueueRepo.updateStatus(task.id, 'failed', {
+          result: 'Server restarted',
+          completedAt: new Date().toISOString(),
+        });
+        if (issue) {
+          this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
+          this.cleanupOrphanedCoderSessions(issue.id, issue.number);
+        }
+        log.info('Recovered running task — mid-execution, marked failed', {
+          taskId: task.id,
+          issueNumber: task.issueNumber,
+          action: 'task=failed, issue=interrupted',
+        });
+      }
+    }
+
+    const pendingTasks = this.taskQueueRepo.findAllPending();
+    log.info('Loading pending tasks from DB', { pendingTasks: pendingTasks.length });
+
+    for (const task of pendingTasks) {
+      const queue = this.pendingQueues.get(task.issueId) ?? [];
+      this.insertByPriority(queue, task);
+      this.pendingQueues.set(task.issueId, queue);
+    }
+
+    this.schedule();
+    log.info('Queue recovery complete', {
+      recoveredRunning: runningTasks.length,
+      recoveredPending: pendingTasks.length,
+    });
+  }
+
   recoverIssues(): void {
     if (!this.issueRepo) return;
 
