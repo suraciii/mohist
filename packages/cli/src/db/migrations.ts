@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -178,6 +178,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 17) {
     migrateToVersion17(db);
+  }
+
+  if (currentVersion < 18) {
+    migrateToVersion18(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -824,5 +828,38 @@ function migrateToVersion17(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 17);
+  });
+}
+
+const CREATE_ISSUE_TASK_QUEUE_TABLE = `
+CREATE TABLE IF NOT EXISTS issue_task_queue (
+  id            TEXT PRIMARY KEY,
+  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  issue_number  INTEGER NOT NULL,
+  project_id    TEXT NOT NULL REFERENCES projects(id),
+  task_type     TEXT NOT NULL,
+  payload       TEXT NOT NULL DEFAULT '{}',
+  priority      INTEGER NOT NULL DEFAULT 0,
+  status        TEXT NOT NULL DEFAULT 'pending',
+  enqueued_at   TEXT NOT NULL,
+  started_at    TEXT,
+  result        TEXT,
+  completed_at  TEXT
+);
+`;
+
+const CREATE_ISSUE_TASK_QUEUE_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_issue_task_queue_issue_id ON issue_task_queue(issue_id);',
+  'CREATE INDEX IF NOT EXISTS idx_issue_task_queue_status ON issue_task_queue(status);',
+  'CREATE INDEX IF NOT EXISTS idx_issue_task_queue_issue_status ON issue_task_queue(issue_id, status);',
+];
+
+function migrateToVersion18(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_ISSUE_TASK_QUEUE_TABLE);
+    for (const indexSql of CREATE_ISSUE_TASK_QUEUE_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 18);
   });
 }
