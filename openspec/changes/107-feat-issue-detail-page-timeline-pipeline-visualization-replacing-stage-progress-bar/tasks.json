@@ -20,7 +20,7 @@
       "dependsOn": [],
       "passes": true,
       "notes": "Reuse reconstructRoundsFromLogs from useSessionTimeline.ts for plan round inference",
-      "attempts": 10,
+      "attempts": 11,
       "order": 999999,
       "error": null,
       "durations": [
@@ -33,7 +33,8 @@
         637558,
         631618,
         635501,
-        148864
+        148864,
+        121664
       ]
     },
     {
@@ -60,7 +61,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Reuse getRoundColor and round label logic from SessionTimeline.tsx",
       "attempts": 7,
       "order": 999999,
@@ -93,7 +94,7 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Remove the Fragment + STAGES.map section that renders the horizontal bar",
       "attempts": 7,
       "order": 999999,
@@ -127,7 +128,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Mock useIssue, useCoderSessions, and api.getWorkflowLogs. Use fake timers for RAF testing.",
       "attempts": 7,
       "order": 999999,
@@ -159,7 +160,7 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient.",
       "attempts": 8,
       "order": 999999,
