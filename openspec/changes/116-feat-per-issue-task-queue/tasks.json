@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Per-Issue Task Queue — replace scattered in-memory concurrency controls (activeAgents, pendingGates, conflictResolutionInProgress) with a unified, DB-persisted, per-issue FIFO task queue inside AgentRunnerService.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/db/issue-task-queue-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow the pattern from comment-repo.ts (simplest existing repo). See db/migrations.ts for migration pattern — add migrateToVersion18(), bump SCHEMA_VERSION to 18, add guard in initializeDatabase()."
+      "passes": true,
+      "notes": "Follow the pattern from comment-repo.ts (simplest existing repo). See db/migrations.ts for migration pattern — add migrateToVersion18(), bump SCHEMA_VERSION to 18, add guard in initializeDatabase().",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        222031
+      ]
     },
     {
       "id": "T-002",
@@ -46,8 +51,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-001"],
-      "notes": "This is the core task. The queue logic is additive — do NOT remove activeAgents/pendingGates yet. The old executePipeline() is called by the new executeTask() dispatcher (T-003). For now, enqueue just manages the queue data structures and schedule() calls a placeholder executeTask() that will be filled in T-003."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "This is the core task. The queue logic is additive — do NOT remove activeAgents/pendingGates yet. The old executePipeline() is called by the new executeTask() dispatcher (T-003). For now, enqueue just manages the queue data structures and schedule() calls a placeholder executeTask() that will be filled in T-003.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -69,8 +80,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-002"],
-      "notes": "The rebase executor needs access to WorktreeManager, ProjectRepo, and resolveConflictsViaAgent. These are already available or can be added to AgentRunnerService constructor. The conflict resolution chain currently lives inline in api/issues.ts — move it into a private method like executeRebaseTask()."
+      "dependsOn": [
+        "T-002"
+      ],
+      "notes": "The rebase executor needs access to WorktreeManager, ProjectRepo, and resolveConflictsViaAgent. These are already available or can be added to AgentRunnerService constructor. The conflict resolution chain currently lives inline in api/issues.ts — move it into a private method like executeRebaseTask().",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -91,8 +108,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-002", "T-003"],
-      "notes": "The existing recoverIssues() in AgentRunnerService (lines 176-250) handles orphaned issues. The new recoverFromQueue() handles DB-persisted queue state. Both should run during startup. recoverFromQueue() runs first (restores queue state), then recoverIssues() handles any remaining orphans not covered by the queue."
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "notes": "The existing recoverIssues() in AgentRunnerService (lines 176-250) handles orphaned issues. The new recoverFromQueue() handles DB-persisted queue state. Both should run during startup. recoverFromQueue() runs first (restores queue state), then recoverIssues() handles any remaining orphans not covered by the queue.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -120,8 +144,16 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/services/issue-task-queue.test.ts",
-      "dependsOn": ["T-002", "T-003", "T-004"],
-      "notes": "Follow existing test patterns in packages/cli/tests/. Use vitest. Create an in-memory SQLite DB for repo tests. For AgentRunnerService tests, mock the dependencies (IssueRepo, EventBus, etc.)."
+      "dependsOn": [
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "notes": "Follow existing test patterns in packages/cli/tests/. Use vitest. Create an in-memory SQLite DB for repo tests. For AgentRunnerService tests, mock the dependencies (IssueRepo, EventBus, etc.).",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -146,8 +178,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-002"],
-      "notes": "Also modifies api/propose.ts (isRunning/startPipeline → enqueue). /approve was previously removed (returned 404) — this task creates a new handler. /retry and /rerun keep their pre-processing (synchronous DB operations) in the handler, only replacing the final resumePipeline() call with enqueue(). /rebase is handled separately in T-007."
+      "dependsOn": [
+        "T-002"
+      ],
+      "notes": "Also modifies api/propose.ts (isRunning/startPipeline → enqueue). /approve was previously removed (returned 404) — this task creates a new handler. /retry and /rerun keep their pre-processing (synchronous DB operations) in the handler, only replacing the final resumePipeline() call with enqueue(). /rebase is handled separately in T-007.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -165,8 +203,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-003", "T-006"],
-      "notes": "The rebase handler currently has ~200 lines of inline logic (lines 2210-2429). After this task, it should be ~20 lines: validate issue exists, validate worktree exists, call enqueue, return 202. The rebase executor was built in T-003."
+      "dependsOn": [
+        "T-003",
+        "T-006"
+      ],
+      "notes": "The rebase handler currently has ~200 lines of inline logic (lines 2210-2429). After this task, it should be ~20 lines: validate issue exists, validate worktree exists, call enqueue, return 202. The rebase executor was built in T-003.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -190,8 +235,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-006", "T-007"],
-      "notes": "This is pure deletion. All API endpoints have been converted to enqueue in T-006 and T-007, so the old methods are unused. Search for all references to activeAgents, pendingGates, startPipeline, resumePipeline, isRunning, getMaxConcurrentAgents across the codebase and remove them."
+      "dependsOn": [
+        "T-006",
+        "T-007"
+      ],
+      "notes": "This is pure deletion. All API endpoints have been converted to enqueue in T-006 and T-007, so the old methods are unused. Search for all references to activeAgents, pendingGates, startPipeline, resumePipeline, isRunning, getMaxConcurrentAgents across the codebase and remove them.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     }
   ]
 }
