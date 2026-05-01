@@ -132,11 +132,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "KanbanView is defined in App.tsx, not a separate component file.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        180965
+      ]
     },
     {
       "id": "T-006",
