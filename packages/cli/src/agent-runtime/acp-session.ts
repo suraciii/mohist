@@ -131,6 +131,11 @@ export async function runAcpSession(
     rejectOnSpawn = reject;
   });
 
+  let rejectOnExit: ((err: Error) => void) | undefined;
+  const exitFailure = new Promise<never>((_, reject) => {
+    rejectOnExit = reject;
+  });
+
   proc.on('error', (err) => {
     log.error('opencode acp subprocess error', { error: err.message });
     writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, timestamp: new Date().toISOString() });
@@ -153,9 +158,13 @@ export async function runAcpSession(
         rejectOnSpawn(new Error(`[SPAWN_FAILED] opencode process exited before initialize (exit code: ${code ?? 'signal'})`));
       }
     }
+    if (initialized && code !== 0 && rejectOnExit) {
+      log.error('opencode acp subprocess exited unexpectedly during session', { exitCode: code });
+      rejectOnExit(new Error(`[PROCESS_EXIT] opencode process exited unexpectedly (exit code: ${code ?? 'killed by signal'})`));
+      rejectOnExit = undefined;
+    }
   });
 
-  // Close streams immediately on spawn failure to prevent EPIPE errors
   proc.stdin.on('error', () => {});
   proc.stdout.on('error', () => {});
 
@@ -397,6 +406,7 @@ export async function runAcpSession(
         prompt: [{ type: 'text', text: task }],
       }),
       timeoutPromise,
+      exitFailure,
     ]);
 
     if (promptResult === 'timeout') {
@@ -540,6 +550,11 @@ export async function createAcpConnection(
     rejectOnInit = reject;
   });
 
+  let rejectOnExit: ((err: Error) => void) | undefined;
+  const exitFailure = new Promise<never>((_, reject) => {
+    rejectOnExit = reject;
+  });
+
   proc.on('error', (err) => {
     log.error('opencode acp subprocess error', { error: err.message });
     writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, mode: 'multi-round', timestamp: new Date().toISOString() });
@@ -561,6 +576,11 @@ export async function createAcpConnection(
       if (rejectOnInit) {
         rejectOnInit(new Error(`[SPAWN_FAILED] opencode process exited before initialize (exit code: ${code ?? 'signal'})`));
       }
+    }
+    if (initialized && code !== 0 && rejectOnExit) {
+      log.error('opencode acp subprocess exited unexpectedly during multi-round session', { exitCode: code });
+      rejectOnExit(new Error(`[PROCESS_EXIT] opencode process exited unexpectedly (exit code: ${code ?? 'killed by signal'})`));
+      rejectOnExit = undefined;
     }
   });
 
@@ -825,6 +845,7 @@ export async function createAcpConnection(
         }),
         createTimeout(timeout),
         abortPromise,
+        exitFailure,
       ]);
 
       if (promptResult === 'aborted') {

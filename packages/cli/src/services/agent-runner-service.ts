@@ -76,6 +76,7 @@ export class AgentRunnerService {
   private recoverableIssues: RecoverableIssue[];
   private llmConfig?: LlmConfig;
   private readonly providersChangedListener: (data: { providers: Array<{ id: string; name?: string; apiKey?: string; baseURL?: string; sdk?: string; models?: string[] }> }) => void;
+  private orphanScanTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly eventBus: EventBus,
@@ -99,10 +100,17 @@ export class AgentRunnerService {
       this.handleProvidersChanged();
     };
     this.eventBus.on('config:providers:changed', this.providersChangedListener);
+
+    this.orphanScanTimer = setInterval(() => this.scanOrphanedIssues(), 5 * 60 * 1000);
   }
 
   shutdown(): void {
     this.eventBus.off('config:providers:changed', this.providersChangedListener);
+
+    if (this.orphanScanTimer) {
+      clearInterval(this.orphanScanTimer);
+      this.orphanScanTimer = undefined;
+    }
 
     for (const [issueId, agent] of this.activeAgents) {
       try {
@@ -186,6 +194,39 @@ export class AgentRunnerService {
     }
 
     this.recoverableIssues = [];
+  }
+
+  private scanOrphanedIssues(): void {
+    if (!this.issueRepo || !this.coderSessionRepo) return;
+
+    const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active })
+      .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog);
+
+    const orphans = activeIssues.filter(issue => {
+      if (this.activeAgents.has(issue.id)) return false;
+      if (this.pendingGates.has(issue.number)) return false;
+      return true;
+    });
+
+    if (orphans.length === 0) return;
+
+    log.info('Orphan scan detected issues without active agent or pending gate', {
+      count: orphans.length,
+      issues: orphans.map(i => `#${i.number} (${i.stage})`).join(', '),
+    });
+
+    for (const issue of orphans) {
+      this.cleanupOrphanedCoderSessions(issue.id, issue.number);
+      try {
+        this.issueRepo!.blockIssue(issue.id, '检测到 agent 已退出但状态未更新，自动恢复');
+        log.info('Orphan scan blocked issue', { issueNumber: issue.number, stage: issue.stage });
+      } catch (err) {
+        log.error('Orphan scan failed to block issue', {
+          issueNumber: issue.number,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   recoverSingleIssueById(issueId: string): void {
@@ -804,6 +845,22 @@ export class AgentRunnerService {
       } finally {
         this.activeAgents.delete(issue.id);
         this.clearWaiting(issue.id);
+
+        const finalIssue = issueRepo.findById(issue.id);
+        if (finalIssue && finalIssue.status === IssueStatus.Active && !this.pendingGates.has(issue.number)) {
+          log.warn('Pipeline finished but issue still active without pending gate, forcing to blocked', {
+            issueNumber: issue.number,
+            stage: finalIssue.stage,
+          });
+          try {
+            issueRepo.blockIssue(issue.id, 'Agent 异常退出，状态自动恢复');
+          } catch (blockErr) {
+            log.error('Failed to force-block orphaned issue in finally', {
+              issueNumber: issue.number,
+              error: blockErr instanceof Error ? blockErr.message : String(blockErr),
+            });
+          }
+        }
       }
     })();
 
