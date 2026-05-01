@@ -1,5 +1,6 @@
 import type { IssueRepo } from '../db/issue-repo';
 import type { ProjectRepo } from '../db/project-repo';
+import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner, BuildTestCheck, MergeReadyCheck, AiReviewCheck } from '../workflow';
@@ -79,7 +80,7 @@ export class AgentRunnerService {
     private readonly issueRepo?: IssueRepo,
     maxConcurrentAgents: number = 8,
     _agentSessionMessageRepo?: unknown,
-    _coderSessionRepo?: unknown,
+    private readonly coderSessionRepo?: CoderSessionRepo,
     private readonly checkpointRepo?: PipelineCheckpointRepo,
     private readonly projectRepo?: ProjectRepo,
     private readonly worktreeManager?: WorktreeManager,
@@ -195,6 +196,7 @@ export class AgentRunnerService {
           });
         } else {
           this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
+          this.cleanupOrphanedCoderSessions(issue.id);
           log.info('Recovered orphaned issue', {
             issueNumber: issue.number,
             stage: issue.stage,
@@ -391,6 +393,28 @@ export class AgentRunnerService {
     return this.issueRepo.hasCompletedCoderSession(issue.id, issue.stage);
   }
 
+  private cleanupOrphanedCoderSessions(issueId: string): void {
+    if (!this.coderSessionRepo) return;
+    try {
+      const sessions = this.coderSessionRepo.findByIssueId(issueId);
+      let cleaned = 0;
+      for (const session of sessions) {
+        if (session.status === 'running') {
+          this.coderSessionRepo.updateStatus(session.id, 'failed');
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        log.info('Cleaned up orphaned coder sessions', { issueId, cleaned });
+      }
+    } catch (err) {
+      log.error('Failed to cleanup orphaned coder sessions', {
+        issueId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   getMaxConcurrentAgents(): number {
     return this.maxConcurrentAgents;
   }
@@ -565,6 +589,14 @@ export class AgentRunnerService {
     const startTime = Date.now();
     const promise = (async () => {
       try {
+        issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      } catch (err) {
+        log.warn('Failed to set issue status to active on pipeline start', {
+          issueNumber: issue.number,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      try {
         const artifactManager = new ChangeArtifactsManager(worktreePath);
         const checkpointManager = this.checkpointRepo
           ? createCheckpointManager(this.checkpointRepo)
@@ -622,11 +654,14 @@ export class AgentRunnerService {
         if (result.completed) {
           this.eventBus.emit('agent_completed', { issueId: issue.id, projectId, issueNumber: issue.number });
         } else if (!result.gateRequired) {
+          const failureSummary = result.stage
+            ? `[${result.stage}] ${result.message ?? 'Pipeline 未完成'}`
+            : result.message ?? 'Pipeline 未完成';
           try {
             issueRepo.setApprovalState(issue.id, {
               stage: result.stage,
               status: 'error',
-              output: { error: result.message ?? 'Pipeline failed without completing' },
+              output: { error: failureSummary },
               requestedAt: new Date().toISOString(),
             });
           } catch (stateErr) {
@@ -636,7 +671,7 @@ export class AgentRunnerService {
             });
           }
           try {
-            issueRepo.blockIssue(issue.id, result.message ?? 'Pipeline failed without completing');
+            issueRepo.blockIssue(issue.id, failureSummary);
           } catch (updateErr) {
             log.error('Failed to block issue', {
               issueNumber: issue.number,
@@ -647,7 +682,7 @@ export class AgentRunnerService {
             this.eventBus.emit('agent_error', {
               issueId: issue.id,
               projectId,
-              error: result.message ?? 'Pipeline failed without completing',
+              error: failureSummary,
             });
           } catch (emitErr) {
             log.error('Failed to emit agent_error event', {
@@ -657,12 +692,14 @@ export class AgentRunnerService {
           }
         }
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        const rawErrorMsg = err instanceof Error ? err.message : String(err);
         const currentIssue = issueRepo.findById(issue.id);
+        const stageLabel = currentIssue?.stage ?? 'unknown';
+        const errorMsg = `[${stageLabel}] Pipeline 异常: ${rawErrorMsg}`;
         log.error('Pipeline execution failed', {
           issueNumber: issue.number,
-          stage: currentIssue?.stage ?? 'unknown',
-          error: errorMsg,
+          stage: stageLabel,
+          error: rawErrorMsg,
         });
         try {
           issueRepo.setApprovalState(issue.id, {

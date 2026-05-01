@@ -95,6 +95,13 @@ export class WorkflowEngine {
         if (result.escalateToStage !== undefined) {
           return { completed: false, stage: result.escalateToStage, gateRequired: false, message: result.message ?? 'Stage failed, escalating' };
         }
+        if (result.nextStage !== undefined) {
+          const updated = this.issueRepo.updateStage(currentIssue.id, result.nextStage);
+          if (updated) {
+            currentIssue = updated;
+            continue;
+          }
+        }
         return { completed: false, stage: currentIssue.stage, gateRequired: false, message: result.message };
       }
 
