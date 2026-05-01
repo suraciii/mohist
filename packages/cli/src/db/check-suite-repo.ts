@@ -28,6 +28,7 @@ function makeInitialChecks(): CheckSuiteChecks {
   return {
     'build-test': { status: 'pending' },
     'ai-review': { status: 'pending' },
+    'user-approval': { status: 'pending' },
   };
 }
 

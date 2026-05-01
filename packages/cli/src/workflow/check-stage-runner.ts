@@ -77,11 +77,23 @@ export class CheckStageRunner implements StageRunner {
       };
     }
 
+    // Check if user has approved
+    const isUserApproved = ctx.issue.approvalState?.status === 'approved';
+    if (!isUserApproved) {
+      return {
+        success: true,
+        requiresApproval: true,
+        output: { checkResults: results, userApproved: false },
+        message: 'All checks passed, awaiting user approval',
+      };
+    }
+
     return {
       success: true,
-      requiresApproval: true,
-      output: { checkResults: results },
-      message: 'All checks passed, awaiting user approval',
+      requiresApproval: false,
+      nextStage: Stage.Done,
+      output: { checkResults: results, userApproved: true },
+      message: 'All checks passed and approved, advancing to done',
     };
   }
 }

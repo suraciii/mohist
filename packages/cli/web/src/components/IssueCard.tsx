@@ -81,9 +81,9 @@ function Badge({
 
 export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
-  const isAgentRunning = agentStatus.activeAgents.some(
+  const isAgentRunning = agentStatus.activeAgents?.some(
     (a) => a.issueNumber === issue.number,
-  )
+  ) ?? false
   const badge = getBadgeType(issue, isAgentRunning)
   const isBlocked = issue.status === IssueStatus.Blocked
   const isClosed = issue.status === IssueStatus.Closed

@@ -8,12 +8,14 @@ const PENDING_STATE: CheckState = { status: 'pending' }
 const DEFAULT_CHECKS: CheckSuiteChecks = {
   'build-test': { ...PENDING_STATE },
   'ai-review': { ...PENDING_STATE },
+  'user-approval': { ...PENDING_STATE },
 }
 
 function resetChecksToPending(_checks: CheckSuiteChecks): CheckSuiteChecks {
   return {
     'build-test': { ...PENDING_STATE },
     'ai-review': { ...PENDING_STATE },
+    'user-approval': { ...PENDING_STATE },
   }
 }
 
