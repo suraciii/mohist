@@ -21,17 +21,6 @@ import { statusBadge } from '../lib/status-badge'
 import { DiffViewer } from './DiffViewer'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
-const STAGES = [Stage.Backlog, Stage.Explore, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
-
-const STAGE_LABELS: Record<string, string> = {
-  [Stage.Backlog]: 'Backlog',
-  [Stage.Explore]: 'Explore',
-  [Stage.Plan]: 'Plan',
-  [Stage.Build]: 'Build',
-  [Stage.Check]: 'Check',
-  [Stage.Done]: 'Done',
-}
-
 const DIFF_STAGES = new Set<string>([Stage.Explore, Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
 
 const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
@@ -262,8 +251,6 @@ export function IssueDetailPage() {
       </div>
     )
   }
-
-  const stageIndex = STAGES.indexOf(issue.stage)
 
   const maxConcurrent = agentStatus?.maxConcurrentAgents ?? Infinity
   const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
