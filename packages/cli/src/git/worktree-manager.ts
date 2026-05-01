@@ -152,16 +152,14 @@ export class WorktreeManager {
 
     await smartFetch(projectPath);
 
-    let startPoint = `origin/${baseBranch}`;
-    const originExists = await branchExists(projectPath, `origin/${baseBranch}`);
+    const startPoint = baseBranch;
+    const localExists = await branchExists(projectPath, baseBranch);
 
-    if (!originExists) {
-      const localExists = await branchExists(projectPath, baseBranch);
-      if (localExists) {
-        startPoint = baseBranch;
-      } else {
-        throw new Error(`Branch '${baseBranch}' not found locally or on origin`);
-      }
+    if (!localExists) {
+      throw new Error(
+        `Base branch '${baseBranch}' not found locally. ` +
+        `Run 'git fetch origin' or set the correct base branch for this project.`
+      );
     }
 
     try {
@@ -293,7 +291,7 @@ export class WorktreeManager {
     try {
       await execFileAsync(
         'git',
-        ['merge-base', '--is-ancestor', `origin/${baseBranch}`, branch],
+        ['merge-base', '--is-ancestor', baseBranch, branch],
         { cwd: projectPath }
       );
       return true;
@@ -344,7 +342,7 @@ export class WorktreeManager {
     }
 
     try {
-      await execFileAsync('git', ['rebase', `origin/${baseBranch}`], { cwd: worktreePath });
+      await execFileAsync('git', ['rebase', baseBranch], { cwd: worktreePath });
       log.info('Rebase succeeded', { issueNumber, branch, baseBranch });
       return { success: true, conflicts: [] };
     } catch (err: any) {
