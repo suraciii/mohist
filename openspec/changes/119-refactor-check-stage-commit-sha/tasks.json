@@ -141,13 +141,14 @@
         "T-001",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "SHA mismatch rerun: call resumePipeline targeting Check stage. Need to import CheckSuiteRepo via stateManager. For issue detail, join or query CheckSuiteRepo when returning issue data.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        460502
+        460502,
+        577867
       ]
     },
     {
