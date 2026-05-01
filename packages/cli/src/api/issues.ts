@@ -86,6 +86,12 @@ export function createIssueRoutes(
         issues = issueService.getByProject(projectId);
       }
 
+      if (archived === 'true') {
+        issues = issueService.getByProject(projectId).filter(i => i.archivedAt);
+      } else if (all !== 'true') {
+        issues = issues.filter(i => !i.archivedAt);
+      }
+
       if (priority) {
         issues = issues.filter(issue => issue.priority === priority);
       }
@@ -2404,6 +2410,202 @@ export function createIssueRoutes(
         },
       };
       return c.json(response);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/archive', async (c) => {
+    try {
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const number = parseInt(c.req.param('number'));
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      const body = await c.req.json().catch(() => ({}));
+      const result = await issueService.archive(projectId, number, { cleanup: body.cleanup !== false });
+
+      return c.json({
+        success: true,
+        data: { issue: result.issue, message: result.warning ?? `Issue #${number} archived`, warning: result.warning },
+      } satisfies ApiResponse);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (message.includes('not found')) {
+        return c.json({ success: false, error: message } satisfies ApiResponse, 404);
+      }
+      return c.json({ success: false, error: message } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/unarchive', async (c) => {
+    try {
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const number = parseInt(c.req.param('number'));
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (!issue.archivedAt) {
+        return c.json({ success: false, error: `Issue #${number} is not archived` } satisfies ApiResponse, 400);
+      }
+
+      const result = await issueService.unarchive(projectId, number);
+
+      return c.json({
+        success: true,
+        data: { issue: result, message: `Issue #${number} unarchived` },
+      } satisfies ApiResponse);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (message.includes('not found')) {
+        return c.json({ success: false, error: message } satisfies ApiResponse, 404);
+      }
+      return c.json({ success: false, error: message } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/archive-completed', async (c) => {
+    try {
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const result = await issueService.archiveAllCompleted(projectId);
+
+      return c.json({
+        success: true,
+        data: { archived: result.count, message: result.message },
+      } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/retry', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (issue.status !== IssueStatus.Blocked) {
+        return c.json({ success: false, error: `Issue #${number} is not blocked (current: ${issue.status})` } satisfies ApiResponse, 409);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        return c.json({ success: false, error: `Issue #${number} already has an agent running` } satisfies ApiResponse, 409);
+      }
+
+      const issueRepo = stateManager.getIssueRepo();
+
+      issueRepo.updateRetryCount(issue.id, 0);
+      issueRepo.updateBlockedReason(issue.id, null);
+      issueRepo.clearApprovalState(issue.id);
+
+      let hasCheckpoint = false;
+      let checkpointStage: string | null = null;
+
+      if (worktreeManager && checkpointRepo) {
+        const project = projectService.getById(projectId);
+        if (project) {
+          const wtPath = worktreeManager.getPath(project.name, number);
+          if (wtPath) {
+            const changeDir = findChangeDir(wtPath, number);
+            if (changeDir) {
+              const tasksPath = path.join(changeDir, 'tasks.json');
+              if (fs.existsSync(tasksPath)) {
+                hasCheckpoint = true;
+                checkpointStage = issue.stage;
+              }
+            }
+          }
+        }
+      }
+
+      if (hasCheckpoint && checkpointStage && agentRunner) {
+        issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        const project = projectService.getById(projectId)!;
+        const wtPath = worktreeManager!.getPath(project.name, number)!;
+
+        issueRepo.updateBlockedReason(issue.id, null);
+
+        agentRunner.resumePipeline(
+          issue,
+          projectId,
+          issueRepo,
+          wtPath,
+          { cwd: wtPath },
+        );
+
+        return c.json({
+          success: true,
+          data: { message: `Issue #${number} retrying from checkpoint (${checkpointStage})` },
+        } satisfies ApiResponse);
+      }
+
+      issueService.transitionToStage(issue.id, Stage.Backlog);
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+      return c.json({
+        success: true,
+        data: { message: `Issue #${number} retrying — no checkpoint found, reset to draft stage. Use start to begin again.` },
+      } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/restart', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (issue.status !== IssueStatus.Blocked) {
+        return c.json({ success: false, error: `Issue #${number} is not blocked (current: ${issue.status})` } satisfies ApiResponse, 409);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        return c.json({ success: false, error: `Issue #${number} already has an agent running` } satisfies ApiResponse, 409);
+      }
+
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.updateRetryCount(issue.id, 0);
+      issueRepo.updateBlockedReason(issue.id, null);
+      issueRepo.clearApprovalState(issue.id);
+      issueService.transitionToStage(issue.id, Stage.Backlog);
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+      return c.json({
+        success: true,
+        data: { message: `Issue #${number} reset to draft stage. Use start to begin again.` },
+      } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

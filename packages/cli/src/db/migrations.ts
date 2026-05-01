@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -174,6 +174,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 16) {
     migrateToVersion16(db);
+  }
+
+  if (currentVersion < 17) {
+    migrateToVersion17(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -739,5 +743,56 @@ function migrateToVersion16(db: DatabaseManager): void {
     }
 
     setSchemaVersion(db, 16);
+  });
+}
+
+const CREATE_SKILLS_TABLE = `
+CREATE TABLE IF NOT EXISTS skills (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  project_id  TEXT NOT NULL REFERENCES projects(id),
+  description TEXT NOT NULL,
+  prompt      TEXT NOT NULL,
+  dir_path    TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+`;
+
+const CREATE_SKILLS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_skills_project ON skills(project_id);',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name ON skills(name);',
+];
+
+const CREATE_SKILL_RUNS_TABLE = `
+CREATE TABLE IF NOT EXISTS skill_runs (
+  id            TEXT PRIMARY KEY,
+  skill_id      TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  project_id    TEXT NOT NULL REFERENCES projects(id),
+  status        TEXT NOT NULL DEFAULT 'running',
+  output        TEXT,
+  error         TEXT,
+  issue_id      TEXT,
+  started_at    TEXT NOT NULL,
+  completed_at  TEXT
+);
+`;
+
+const CREATE_SKILL_RUNS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_skill_runs_skill_id ON skill_runs(skill_id);',
+  'CREATE INDEX IF NOT EXISTS idx_skill_runs_project_id ON skill_runs(project_id);',
+];
+
+function migrateToVersion17(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_SKILLS_TABLE);
+    for (const indexSql of CREATE_SKILLS_INDEXES) {
+      db.exec(indexSql);
+    }
+    db.exec(CREATE_SKILL_RUNS_TABLE);
+    for (const indexSql of CREATE_SKILL_RUNS_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 17);
   });
 }
