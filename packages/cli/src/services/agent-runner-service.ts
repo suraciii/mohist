@@ -3,6 +3,7 @@ import type { ProjectRepo } from '../db/project-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
+import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskType } from '../db/issue-task-queue-repo';
 import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner, BuildTestCheck, MergeReadyCheck, AiReviewCheck } from '../workflow';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
@@ -17,6 +18,31 @@ import { findChangeDir } from '../openspec/detector';
 import { WorktreeManager } from '../git/worktree-manager';
 import * as fs from 'fs';
 import * as path from 'path';
+
+export type TaskType = QueueTaskType;
+
+export interface EnqueueOptions {
+  priority?: number;
+}
+
+export interface EnqueueResult {
+  taskId: string;
+  status: 'pending' | 'running';
+  queuePosition?: number;
+}
+
+export interface IssueQueueStatus {
+  running: IssueTaskQueueRecord | null;
+  pending: IssueTaskQueueRecord[];
+  queueLength: number;
+}
+
+export interface GlobalQueueStatus {
+  totalRunning: number;
+  totalPending: number;
+  maxSlots: number;
+  issues: Map<string, IssueQueueStatus>;
+}
 
 export interface RunningAgent {
   issueId: string;
@@ -77,6 +103,8 @@ export class AgentRunnerService {
   private llmConfig?: LlmConfig;
   private readonly providersChangedListener: (data: { providers: Array<{ id: string; name?: string; apiKey?: string; baseURL?: string; sdk?: string; models?: string[] }> }) => void;
   private orphanScanTimer?: ReturnType<typeof setInterval>;
+  private runningSlots = new Map<string, IssueTaskQueueRecord>();
+  private pendingQueues = new Map<string, IssueTaskQueueRecord[]>();
 
   constructor(
     private readonly eventBus: EventBus,
@@ -88,6 +116,7 @@ export class AgentRunnerService {
     private readonly checkpointRepo?: PipelineCheckpointRepo,
     private readonly projectRepo?: ProjectRepo,
     private readonly worktreeManager?: WorktreeManager,
+    private readonly taskQueueRepo?: IssueTaskQueueRepo,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -520,6 +549,282 @@ export class AgentRunnerService {
 
   clearWaiting(issueId: string): void {
     this.waitingQuestions.delete(issueId);
+  }
+
+  enqueue(
+    issueId: string,
+    taskType: TaskType,
+    payload: Record<string, unknown> = {},
+    options?: EnqueueOptions,
+  ): EnqueueResult {
+    if (!this.issueRepo || !this.taskQueueRepo) {
+      throw new Error('IssueTaskQueueRepo and IssueRepo are required for queue operations');
+    }
+
+    const issue = this.issueRepo.findById(issueId);
+    if (!issue) {
+      throw new Error(`Issue not found: ${issueId}`);
+    }
+
+    const record = this.taskQueueRepo.insert({
+      issueId: issue.id,
+      issueNumber: issue.number,
+      projectId: issue.projectId,
+      taskType,
+      payload: JSON.stringify(payload),
+      priority: options?.priority ?? 0,
+    });
+
+    const queue = this.pendingQueues.get(issueId) ?? [];
+    this.insertByPriority(queue, record);
+    this.pendingQueues.set(issueId, queue);
+
+    log.info('Task enqueued', {
+      taskId: record.id,
+      issueNumber: issue.number,
+      taskType,
+      priority: record.priority,
+      queuePosition: queue.indexOf(record),
+    });
+
+    const immediateStart = this.runningSlots.size < this.maxConcurrentAgents
+      && !this.runningSlots.has(issueId);
+
+    if (immediateStart) {
+      this.schedule();
+    }
+
+    const updatedRecord = this.taskQueueRepo.findById(record.id);
+    const isRunning = updatedRecord?.status === 'running';
+    const position = isRunning ? undefined : queue.findIndex(t => t.id === record.id);
+
+    return {
+      taskId: record.id,
+      status: isRunning ? 'running' : 'pending',
+      queuePosition: position !== undefined && position >= 0 ? position : undefined,
+    };
+  }
+
+  cancel(taskId: string): boolean {
+    if (!this.taskQueueRepo) return false;
+
+    const record = this.taskQueueRepo.findById(taskId);
+    if (!record) return false;
+
+    if (record.status === 'running') {
+      return false;
+    }
+
+    if (record.status !== 'pending') {
+      return false;
+    }
+
+    this.taskQueueRepo.updateStatus(taskId, 'cancelled', {
+      result: 'cancelled',
+      completedAt: new Date().toISOString(),
+    });
+
+    const queue = this.pendingQueues.get(record.issueId);
+    if (queue) {
+      const idx = queue.findIndex(t => t.id === taskId);
+      if (idx >= 0) {
+        queue.splice(idx, 1);
+      }
+      if (queue.length === 0) {
+        this.pendingQueues.delete(record.issueId);
+      }
+    }
+
+    log.info('Task cancelled', { taskId, issueId: record.issueId });
+    return true;
+  }
+
+  cancelAll(issueId: string): void {
+    if (!this.taskQueueRepo) return;
+
+    const queue = this.pendingQueues.get(issueId);
+    if (queue) {
+      for (const task of queue) {
+        this.taskQueueRepo.updateStatus(task.id, 'cancelled', {
+          result: 'cancelled',
+          completedAt: new Date().toISOString(),
+        });
+      }
+      this.pendingQueues.delete(issueId);
+    }
+
+    this.taskQueueRepo.cancelPendingByIssueId(issueId);
+
+    const runningTask = this.runningSlots.get(issueId);
+    if (runningTask) {
+      this.forceStop(issueId);
+      this.runningSlots.delete(issueId);
+
+      this.taskQueueRepo.updateStatus(runningTask.id, 'cancelled', {
+        result: 'cancelled',
+        completedAt: new Date().toISOString(),
+      });
+
+      this.schedule();
+    }
+
+    log.info('All tasks cancelled for issue', { issueId });
+  }
+
+  getQueueStatus(issueId?: string): IssueQueueStatus | GlobalQueueStatus {
+    if (issueId !== undefined) {
+      const running = this.runningSlots.get(issueId) ?? null;
+      const pending = this.pendingQueues.get(issueId) ?? [];
+      return {
+        running,
+        pending: [...pending],
+        queueLength: pending.length,
+      };
+    }
+
+    const issues = new Map<string, IssueQueueStatus>();
+    for (const [id, task] of this.runningSlots) {
+      issues.set(id, {
+        running: task,
+        pending: [...(this.pendingQueues.get(id) ?? [])],
+        queueLength: this.pendingQueues.get(id)?.length ?? 0,
+      });
+    }
+    for (const [id, queue] of this.pendingQueues) {
+      if (!issues.has(id)) {
+        issues.set(id, { running: null, pending: [...queue], queueLength: queue.length });
+      }
+    }
+
+    let totalPending = 0;
+    for (const queue of this.pendingQueues.values()) {
+      totalPending += queue.length;
+    }
+
+    return {
+      totalRunning: this.runningSlots.size,
+      totalPending,
+      maxSlots: this.maxConcurrentAgents,
+      issues,
+    };
+  }
+
+  private insertByPriority(queue: IssueTaskQueueRecord[], task: IssueTaskQueueRecord): void {
+    let insertIdx = queue.length;
+    for (let i = 0; i < queue.length; i++) {
+      if (task.priority > queue[i].priority) {
+        insertIdx = i;
+        break;
+      }
+    }
+    queue.splice(insertIdx, 0, task);
+  }
+
+  schedule(): void {
+    if (!this.taskQueueRepo) return;
+
+    while (this.runningSlots.size < this.maxConcurrentAgents) {
+      const candidate = this.pickHighestPriorityPending();
+      if (!candidate) break;
+
+      const queue = this.pendingQueues.get(candidate.issueId);
+      if (queue) {
+        const idx = queue.findIndex(t => t.id === candidate.id);
+        if (idx >= 0) {
+          queue.splice(idx, 1);
+        }
+        if (queue.length === 0) {
+          this.pendingQueues.delete(candidate.issueId);
+        }
+      }
+
+      const now = new Date().toISOString();
+      this.taskQueueRepo.updateStatus(candidate.id, 'running', { startedAt: now });
+
+      const runningRecord = this.taskQueueRepo.findById(candidate.id) ?? candidate;
+      this.runningSlots.set(candidate.issueId, {
+        ...runningRecord,
+        status: 'running',
+        startedAt: runningRecord.startedAt ?? now,
+      });
+
+      log.info('Task started', {
+        taskId: candidate.id,
+        issueId: candidate.issueId,
+        issueNumber: candidate.issueNumber,
+        taskType: candidate.taskType,
+        slotsUsed: this.runningSlots.size,
+      });
+
+      this.executeTask(candidate);
+    }
+  }
+
+  private pickHighestPriorityPending(): IssueTaskQueueRecord | null {
+    let best: IssueTaskQueueRecord | null = null;
+
+    for (const [issueId, queue] of this.pendingQueues) {
+      if (queue.length === 0) continue;
+      if (this.runningSlots.has(issueId)) continue;
+
+      const front = queue[0];
+      if (!best) {
+        best = front;
+        continue;
+      }
+
+      if (front.priority > best.priority) {
+        best = front;
+      } else if (front.priority === best.priority && front.enqueuedAt < best.enqueuedAt) {
+        best = front;
+      }
+    }
+
+    return best;
+  }
+
+  private executeTask(task: IssueTaskQueueRecord): void {
+    if (!this.issueRepo || !this.taskQueueRepo) return;
+
+    log.info('executeTask placeholder called — full dispatcher in T-003', {
+      taskId: task.id,
+      taskType: task.taskType,
+      issueId: task.issueId,
+    });
+
+    const taskPromise = (async () => {
+      try {
+        log.info('Task executed (placeholder)', {
+          taskId: task.id,
+          taskType: task.taskType,
+          issueId: task.issueId,
+        });
+        this.completeTask(task.id, 'completed', 'placeholder');
+      } catch (err) {
+        this.completeTask(task.id, 'failed', err instanceof Error ? err.message : String(err));
+      }
+    })();
+
+    taskPromise.catch(() => {});
+  }
+
+  private completeTask(taskId: string, status: 'completed' | 'failed', result: string): void {
+    if (!this.taskQueueRepo) return;
+
+    this.taskQueueRepo.updateStatus(taskId, status, {
+      result,
+      completedAt: new Date().toISOString(),
+    });
+
+    for (const [issueId, running] of this.runningSlots) {
+      if (running.id === taskId) {
+        this.runningSlots.delete(issueId);
+        log.info('Task completed, slot released', { taskId, issueId, status });
+        break;
+      }
+    }
+
+    this.schedule();
   }
 
   getWaitingQuestions(): Map<string, WaitingQuestion> {
