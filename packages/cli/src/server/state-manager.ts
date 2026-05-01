@@ -7,6 +7,7 @@ import {
   CommentRepo,
   LabelRepo,
   WorkflowLogRepo,
+  SessionStreamLogRepo,
   QuestionRepo,
   ExploreSessionRepo,
   ExploreMessageRepo,
@@ -26,6 +27,7 @@ export class StateManager {
   private commentRepo: CommentRepo;
   private labelRepo: LabelRepo;
   private workflowLogRepo: WorkflowLogRepo;
+  private sessionStreamLogRepo: SessionStreamLogRepo;
   private questionRepo: QuestionRepo;
   private exploreSessionRepo: ExploreSessionRepo;
   private exploreMessageRepo: ExploreMessageRepo;
@@ -46,6 +48,7 @@ export class StateManager {
     this.commentRepo = new CommentRepo(db);
     this.labelRepo = new LabelRepo(db);
     this.workflowLogRepo = new WorkflowLogRepo(db);
+    this.sessionStreamLogRepo = new SessionStreamLogRepo(db);
     this.questionRepo = new QuestionRepo(db);
     this.exploreSessionRepo = new ExploreSessionRepo(db);
     this.exploreMessageRepo = new ExploreMessageRepo(db);
@@ -86,6 +89,10 @@ export class StateManager {
 
   getWorkflowLogRepo(): WorkflowLogRepo {
     return this.workflowLogRepo;
+  }
+
+  getSessionStreamLogRepo(): SessionStreamLogRepo {
+    return this.sessionStreamLogRepo;
   }
 
   getQuestionRepo(): QuestionRepo {
