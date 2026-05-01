@@ -100,6 +100,15 @@ export class CoderSessionRepo {
     return rowToCoderSession(row);
   }
 
+  failRunningByIssueId(issueId: string): number {
+    const now = new Date().toISOString();
+    const result = this.db.run(
+      "UPDATE coder_session SET status = 'failed', completed_at = ? WHERE issue_id = ? AND status = 'running'",
+      [now, issueId]
+    );
+    return result.changes;
+  }
+
   findByIssueId(issueId: string): CoderSession[] {
     const rows = this.db.all<CoderSessionRow>(
       'SELECT * FROM coder_session WHERE issue_id = ? ORDER BY created_at ASC',
