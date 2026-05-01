@@ -161,12 +161,12 @@
         "T-005"
       ],
       "passes": true,
-      "notes": "Build passes. Typecheck passes. Tests: 1112 passed, 67 pre-existing failures (unrelated to this change).",
+      "notes": "",
       "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        120000
+        249411
       ]
     }
   ]
