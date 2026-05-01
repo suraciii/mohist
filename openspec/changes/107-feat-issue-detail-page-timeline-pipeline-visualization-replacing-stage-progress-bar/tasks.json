@@ -144,9 +144,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
-      "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient.",
-      "attempts": 3,
+      "passes": true,
+      "notes": "Verified mobile responsive layout. Added overflow-hidden to stage row button as defensive measure. Layout analysis at 375px: parent 343px, content 315px, worst-case button content ~228px. All text legible with text-sm/text-xs. No horizontal overflow below 768px.",
+      "attempts": 4,
       "order": 999999,
       "error": null,
       "durations": [
