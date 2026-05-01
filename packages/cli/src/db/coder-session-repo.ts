@@ -55,8 +55,67 @@ export interface CreateCoderSessionData {
   stage?: string;
 }
 
+export interface SessionWithIssueInfo {
+  issueNumber: number;
+  issueTitle: string;
+  issueStage: string;
+  sessionId: string;
+  status: string;
+  model: string | null;
+  taskDescription: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  lastActivityAt: string | null;
+}
+
+interface SessionWithIssueInfoRow {
+  issue_number: number;
+  issue_title: string;
+  issue_stage: string;
+  session_id: string;
+  status: string;
+  model: string | null;
+  task_description: string | null;
+  created_at: string;
+  completed_at: string | null;
+  last_activity_at: string | null;
+}
+
 export class CoderSessionRepo {
   constructor(private db: DatabaseManager) {}
+
+  findAllWithIssueInfo(projectId: string, status?: string, limit: number = 50): SessionWithIssueInfo[] {
+    const statusFilter = status ? ' AND cs.status = ?' : '';
+    const params: unknown[] = [projectId];
+    if (status) params.push(status);
+    params.push(limit);
+
+    const rows = this.db.all<SessionWithIssueInfoRow>(
+      `SELECT i.number AS issue_number, i.title AS issue_title, i.stage AS issue_stage,
+        cs.id AS session_id, cs.status, cs.model, cs.task_description,
+        cs.created_at, cs.completed_at,
+        (SELECT wl.created_at FROM workflow_log wl WHERE wl.session_id = cs.acp_session_id ORDER BY wl.created_at DESC LIMIT 1) AS last_activity_at
+      FROM coder_session cs
+      JOIN issues i ON cs.issue_id = i.id
+      WHERE i.project_id = ?${statusFilter}
+      ORDER BY cs.created_at DESC
+      LIMIT ?`,
+      params
+    );
+
+    return rows.map((row) => ({
+      issueNumber: row.issue_number,
+      issueTitle: row.issue_title,
+      issueStage: row.issue_stage,
+      sessionId: row.session_id,
+      status: row.status,
+      model: row.model,
+      taskDescription: row.task_description ? row.task_description.slice(0, 200) : null,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
+      lastActivityAt: row.last_activity_at,
+    }));
+  }
 
   insert(data: CreateCoderSessionData): CoderSession {
     const id = uuidv4();
