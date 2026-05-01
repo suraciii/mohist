@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Issue detail page timeline — replace horizontal stage progress bar with vertical pipeline timeline showing the complete issue narrative",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useIssueTimeline.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Reuse reconstructRoundsFromLogs from useSessionTimeline.ts for plan round inference"
+      "passes": true,
+      "notes": "Reuse reconstructRoundsFromLogs from useSessionTimeline.ts for plan round inference",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        345262
+      ]
     },
     {
       "id": "T-002",
@@ -43,9 +48,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueTimeline.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Reuse getRoundColor and round label logic from SessionTimeline.tsx"
+      "notes": "Reuse getRoundColor and round label logic from SessionTimeline.tsx",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +72,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Remove the Fragment + STAGES.map section that renders the horizontal bar"
+      "notes": "Remove the Fragment + STAGES.map section that renders the horizontal bar",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -82,9 +97,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/web/src/hooks/useIssueTimeline.test.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Mock useIssue, useCoderSessions, and api.getWorkflowLogs. Use fake timers for RAF testing."
+      "notes": "Mock useIssue, useCoderSessions, and api.getWorkflowLogs. Use fake timers for RAF testing.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -100,9 +120,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "Manual verification at 375px viewport",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient."
+      "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
