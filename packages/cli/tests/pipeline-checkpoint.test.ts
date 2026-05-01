@@ -32,13 +32,27 @@ vi.mock('fs', () => ({
   rmSync: vi.fn(),
   mkdirSync: vi.fn(),
   writeFileSync: vi.fn(),
-  readFileSync: vi.fn(),
+  readFileSync: vi.fn((p: string) => {
+    if (typeof p === 'string' && p.endsWith('tasks.json')) {
+      return JSON.stringify({ version: 1, tasks: [{ id: 'T-001', title: 'Test task', passes: true, attempts: 0 }] });
+    }
+    return 'artifact content';
+  }),
+  statSync: vi.fn().mockReturnValue({ size: 100, isFile: () => true, isDirectory: () => false }),
 }));
 
 vi.mock('../src/agents/artifact-prompt', () => ({
   buildArtifactPrompt: vi.fn().mockReturnValue('mock-prompt'),
   buildSelfReviewPrompt: vi.fn().mockReturnValue('mock-self-review-prompt'),
   buildReviewerPrompt: vi.fn().mockReturnValue('mock-reviewer-prompt'),
+}));
+
+vi.mock('child_process', () => ({
+  execFile: vi.fn((...args: unknown[]) => {
+    const lastArg = args[args.length - 1];
+    const callback = typeof lastArg === 'function' ? lastArg : undefined;
+    if (callback) callback(null, { stdout: '', stderr: '' });
+  }),
 }));
 
 import * as fs from 'fs';
