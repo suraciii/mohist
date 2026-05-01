@@ -221,7 +221,8 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             break
           }
           case 'check_started':
-          case 'check_update': {
+          case 'check_update':
+          case 'check_suite_status_changed': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
@@ -281,6 +282,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'agent_conflict_resolution_failed',
       'check_started',
       'check_update',
+      'check_suite_status_changed',
     ]
 
     for (const type of eventTypes) {

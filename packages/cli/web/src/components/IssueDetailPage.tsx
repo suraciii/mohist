@@ -16,6 +16,7 @@ import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
 import { TaskList } from './TaskList'
 import { CheckResultsPanel } from './CheckResultsPanel'
+import { CheckSuitePanel } from './CheckSuitePanel'
 import { formatTime, formatTimeAgo } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 import { DiffViewer } from './DiffViewer'
@@ -727,7 +728,14 @@ export function IssueDetailPage() {
 
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
 
-              {isApprovalGate && issue.stage === Stage.Check && (
+              {issue.stage === Stage.Check && (issue.checkSuite || isApprovalGate) && (
+                <CheckSuitePanel
+                  issueNumber={issueNumber}
+                  checkSuite={issue.checkSuite ?? null}
+                />
+              )}
+
+              {isApprovalGate && issue.stage === Stage.Check && !issue.checkSuite && (
                 <CheckResultsPanel
                   output={issue.approvalState?.output}
                   issueNumber={issueNumber}
