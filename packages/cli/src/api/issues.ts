@@ -913,13 +913,6 @@ export function createIssueRoutes(
       }
 
       const approvalStage = issue.approvalState?.stage;
-      if (approvalStage && issue.approvalState) {
-        issueRepo.setApprovalState(issue.id, {
-          ...issue.approvalState,
-          status: 'approved',
-          respondedAt: new Date().toISOString(),
-        });
-      }
 
       if (approvalStage === Stage.Check) {
         if (!mergeQueue) {
@@ -936,7 +929,7 @@ export function createIssueRoutes(
             let headSha: string | null = null;
             try {
               if (worktreeManager) {
-                const wtPath = worktreeManager.getPath(project!.name, issue.number);
+                const wtPath = worktreeManager.getPath(project.name, issue.number);
                 if (wtPath) {
                   const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: wtPath });
                   headSha = stdout.trim();
@@ -947,31 +940,29 @@ export function createIssueRoutes(
             }
 
             if (headSha && headSha !== activeSuite.snapshotSha) {
-              if (agentRunner) {
-                checkSuiteRepo.updateStatus(activeSuite.id, 'running');
-                checkSuiteRepo.updateSnapshotSha(activeSuite.id, headSha);
+              checkSuiteRepo.updateStatus(activeSuite.id, 'running');
+              checkSuiteRepo.updateSnapshotSha(activeSuite.id, headSha);
 
-                const acpOptions: AcpConnectionOptions = {
-                  cwd: worktreePath,
-                  issueId: issue.id,
-                  projectId,
-                  workflowLogRepo,
-                  coderSessionRepo,
-                  eventBus,
-                  issueNumber: issue.number,
-                  opencodeBinPath,
-                  model: issue.model ?? undefined,
-                };
+              const acpOptions: AcpConnectionOptions = {
+                cwd: worktreePath,
+                issueId: issue.id,
+                projectId,
+                workflowLogRepo,
+                coderSessionRepo,
+                eventBus,
+                issueNumber: issue.number,
+                opencodeBinPath,
+                model: issue.model ?? undefined,
+              };
 
-                agentRunner.resumePipeline(
-                  issue,
-                  projectId,
-                  issueRepo,
-                  worktreePath,
-                  acpOptions,
-                  (issueId, status) => issueService.setStatus(issueId, status),
-                );
-              }
+              agentRunner.resumePipeline(
+                issue,
+                projectId,
+                issueRepo,
+                worktreePath,
+                acpOptions,
+                (issueId, status) => issueService.setStatus(issueId, status),
+              );
 
               const response: ApiResponse = {
                 success: true,
@@ -983,6 +974,14 @@ export function createIssueRoutes(
               return c.json(response, 202);
             }
           }
+        }
+
+        if (issue.approvalState) {
+          issueRepo.setApprovalState(issue.id, {
+            ...issue.approvalState,
+            status: 'approved',
+            respondedAt: new Date().toISOString(),
+          });
         }
 
         mergeQueue.enqueue(projectId, number);
@@ -997,6 +996,18 @@ export function createIssueRoutes(
         return c.json(response);
       }
 
+<<<<<<< HEAD
+=======
+      if (approvalStage && issue.approvalState) {
+        issueRepo.setApprovalState(issue.id, {
+          ...issue.approvalState,
+          status: 'approved',
+          respondedAt: new Date().toISOString(),
+        });
+      }
+
+      let nextStage: Stage | undefined;
+>>>>>>> 26510d0f19 (T-005: restructure approve endpoint to validate SHA before approving for Check stage)
       if (approvalStage === Stage.Plan) {
         issueRepo.updateStage(issue.id, Stage.Build);
       }
