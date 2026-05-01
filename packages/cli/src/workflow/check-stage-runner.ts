@@ -77,7 +77,12 @@ export class CheckStageRunner implements StageRunner {
       };
     }
 
-    // Check if user has approved
+    try {
+      await ctx.artifactManager.archiveChange(ctx.issue.number);
+    } catch (err) {
+      console.error(`[CheckStageRunner] Failed to archive change for issue #${ctx.issue.number}:`, err);
+    }
+
     const isUserApproved = ctx.issue.approvalState?.status === 'approved';
     if (!isUserApproved) {
       return {
