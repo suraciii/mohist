@@ -975,9 +975,15 @@ export function createIssueRoutes(
         return c.json(response, 202);
       }
 
-
+      // Plan stage: just set approval state and resume pipeline; runner will auto-advance
       if (approvalStage === Stage.Plan) {
-        issueRepo.updateStage(issue.id, Stage.Build);
+        if (issue.approvalState) {
+          issueRepo.setApprovalState(issue.id, {
+            ...issue.approvalState,
+            status: 'approved',
+            respondedAt: new Date().toISOString(),
+          });
+        }
       }
 
       const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
@@ -1087,6 +1093,12 @@ export function createIssueRoutes(
             });
             checkSuiteRepo.updateStatus(activeSuite.id, 'failed');
           }
+        }
+      }
+
+      if (rejectedStage === Stage.Plan) {
+        if (checkpointRepo) {
+          checkpointRepo.delete(issue.id, 'plan');
         }
       }
 
