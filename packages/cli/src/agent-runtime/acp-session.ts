@@ -63,6 +63,14 @@ export interface AcpSessionResult {
   wipCommitted?: boolean;
 }
 
+const SESSION_STREAM_EVENT_TYPES = new Set([
+  'agent_thought_chunk',
+  'agent_message_chunk',
+  'tool_call',
+  'tool_call_update',
+  'user_message_chunk',
+]);
+
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
 const PER_ROUND_TIMEOUT = 15 * 60 * 1000;
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024;
@@ -98,6 +106,7 @@ export async function runAcpSession(
     projectId,
     executionId,
     workflowLogRepo,
+    sessionStreamLogRepo,
     eventBus,
     throttleMs = 100,
     coderSessionRepo,
@@ -245,7 +254,14 @@ export async function runAcpSession(
             }
           }
 
-          if (workflowLogRepo) {
+          if (SESSION_STREAM_EVENT_TYPES.has(eventType)) {
+            sessionStreamLogRepo?.insert(
+              issueId ?? '',
+              sessionId,
+              eventType,
+              update as unknown as Record<string, unknown>,
+            );
+          } else if (workflowLogRepo) {
             workflowLogRepo.insert(
               issueId ?? '',
               sessionId || null,
@@ -502,6 +518,7 @@ export async function createAcpConnection(
     projectId,
     executionId,
     workflowLogRepo,
+    sessionStreamLogRepo,
     eventBus,
     throttleMs = 100,
     coderSessionRepo,
@@ -663,7 +680,14 @@ export async function createAcpConnection(
             onSessionUpdate(notification);
           }
 
-          if (workflowLogRepo) {
+          if (SESSION_STREAM_EVENT_TYPES.has(eventType)) {
+            sessionStreamLogRepo?.insert(
+              issueId ?? '',
+              sessionId,
+              eventType,
+              update as unknown as Record<string, unknown>
+            );
+          } else if (workflowLogRepo) {
             workflowLogRepo.insert(
               issueId ?? '',
               sessionId || null,
