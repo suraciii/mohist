@@ -215,6 +215,14 @@ export function IssueDetailPage() {
     },
   })
 
+  const rerunMutation = useMutation({
+    mutationFn: () => api.rerunIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
   const addCommentMutation = useMutation({
     mutationFn: (body: string) => api.addComment(issueNumber, body),
     onSuccess: () => {
@@ -696,11 +704,22 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {(closeMutation.error || reopenMutation.error || startMutation.error) && (
+                  {!isBacklog && issue.stage !== Stage.Done && !isAgentRunningOnThis && (
+                    <button
+                      onClick={() => rerunMutation.mutate()}
+                      disabled={rerunMutation.isPending}
+                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                    >
+                      {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
+                    </button>
+                  )}
+
+                  {(closeMutation.error || reopenMutation.error || startMutation.error || rerunMutation.error) && (
                     <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
                       {closeMutation.error?.message ||
                         reopenMutation.error?.message ||
-                        startMutation.error?.message}
+                        startMutation.error?.message ||
+                        rerunMutation.error?.message}
                     </div>
                   )}
 
