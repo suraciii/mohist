@@ -87,10 +87,13 @@
         "T-002"
       ],
       "notes": "The rebase executor needs access to WorktreeManager, ProjectRepo, and resolveConflictsViaAgent. These are already available or can be added to AgentRunnerService constructor. The conflict resolution chain currently lives inline in api/issues.ts — move it into a private method like executeRebaseTask().",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        506791
+      ]
     },
     {
       "id": "T-004",
