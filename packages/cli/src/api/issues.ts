@@ -493,10 +493,10 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (issue.stage !== Stage.Draft) {
+      if (issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is not in draft stage (current: ${issue.stage}). Only draft issues can be started.`
+          error: `Issue #${number} is not in a startable stage (current: ${issue.stage}). Only draft/backlog issues can be started.`
         };
         return c.json(response, 400);
       }
