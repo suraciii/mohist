@@ -256,14 +256,14 @@
       ],
       "passes": true,
       "notes": "See design.md D4. Pure client-side computation, no backend involvement.",
-      "attempts": 3,
+      "attempts": 4,
       "order": 999999,
       "error": null,
       "durations": [
         286598,
         117058,
         630249,
-        30000
+        172495
       ]
     },
     {
