@@ -44,11 +44,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Key file: packages/cli/src/api/issues.ts line 1461-1552. Design decision D3: parse per-file lines from --stat output using regex /^\\s+(.+?)\\s*\\|/. The statLines array already contains per-file lines (e.g., ' src/foo.ts | 5 ++---') — just extract the path before the pipe.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        65402
+      ]
     },
     {
       "id": "T-003",
