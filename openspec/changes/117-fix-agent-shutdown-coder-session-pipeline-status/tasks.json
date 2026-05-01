@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix agent hang, shutdown cleanup, coder_session orphan cleanup, pipeline status guard, and reopen review-recovery",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Current shutdown() at line ~100 only does eventBus.off(). No agent abort, no map cleanup."
+      "passes": true,
+      "notes": "Current shutdown() at line ~100 only does eventBus.off(). No agent abort, no map cleanup.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        57302
+      ]
     },
     {
       "id": "T-002",
@@ -39,9 +44,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "CoderSessionRepo already has findByIssueId() and updateStatus() methods. No new repo methods needed."
+      "notes": "CoderSessionRepo already has findByIssueId() and updateStatus() methods. No new repo methods needed.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -60,7 +70,10 @@
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "This is a prerequisite for T-005 (review-recovery detection uses hasCompletedCoderSession which queries by stage column). Currently stage column is always null in coder_session inserts."
+      "notes": "This is a prerequisite for T-005 (review-recovery detection uses hasCompletedCoderSession which queries by stage column). Currently stage column is always null in coder_session inserts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -79,9 +92,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "The timeout wraps pipeline.run() inside executePipeline(), not individual stage runners. The abortPromise (already exists) handles the AbortController signal rejection."
+      "notes": "The timeout wraps pipeline.run() inside executePipeline(), not individual stage runners. The abortPromise (already exists) handles the AbortController signal rejection.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -100,9 +118,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Needs issueRepo reference in the reopen handler to call hasCompletedCoderSession(). T-003 must be done first so stage column is populated for new sessions."
+      "notes": "Needs issueRepo reference in the reopen handler to call hasCompletedCoderSession(). T-003 must be done first so stage column is populated for new sessions.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -118,9 +141,18 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/dist/",
-      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Final verification step. Catch any cross-file type issues from the 4 modified source files."
+      "notes": "Final verification step. Catch any cross-file type issues from the 4 modified source files.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
