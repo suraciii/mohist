@@ -481,7 +481,7 @@ export class AgentRunnerService {
     issueRepo: IssueRepo,
     worktreePath: string,
     acpOptions: AcpConnectionOptions,
-    updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
+    _updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
   ): { started: boolean; error?: string } {
     if (this.activeAgents.has(issue.id)) {
       return { started: false, error: `Issue #${issue.number} already has an agent running` };
@@ -509,7 +509,7 @@ export class AgentRunnerService {
     issueRepo: IssueRepo,
     worktreePath: string,
     acpOptions: AcpConnectionOptions,
-    updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
+    _updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
   ): void {
     if (this.activeAgents.has(issue.id)) {
       throw new Error(`Issue #${issue.number} is already running`);

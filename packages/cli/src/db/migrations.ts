@@ -746,7 +746,7 @@ function migrateToVersion16(db: DatabaseManager): void {
   });
 }
 
-const CREATE_SKILLS_TABLE = `
+const CREATE_SKILLS_TABLE_V17 = `
 CREATE TABLE IF NOT EXISTS skills (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
@@ -759,12 +759,12 @@ CREATE TABLE IF NOT EXISTS skills (
 );
 `;
 
-const CREATE_SKILLS_INDEXES = [
+const CREATE_SKILLS_INDEXES_V17 = [
   'CREATE INDEX IF NOT EXISTS idx_skills_project ON skills(project_id);',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name ON skills(name);',
 ];
 
-const CREATE_SKILL_RUNS_TABLE = `
+const CREATE_SKILL_RUNS_TABLE_V17 = `
 CREATE TABLE IF NOT EXISTS skill_runs (
   id            TEXT PRIMARY KEY,
   skill_id      TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
@@ -778,19 +778,19 @@ CREATE TABLE IF NOT EXISTS skill_runs (
 );
 `;
 
-const CREATE_SKILL_RUNS_INDEXES = [
+const CREATE_SKILL_RUNS_INDEXES_V17 = [
   'CREATE INDEX IF NOT EXISTS idx_skill_runs_skill_id ON skill_runs(skill_id);',
   'CREATE INDEX IF NOT EXISTS idx_skill_runs_project_id ON skill_runs(project_id);',
 ];
 
 function migrateToVersion17(db: DatabaseManager): void {
   db.transaction(() => {
-    db.exec(CREATE_SKILLS_TABLE);
-    for (const indexSql of CREATE_SKILLS_INDEXES) {
+    db.exec(CREATE_SKILLS_TABLE_V17);
+    for (const indexSql of CREATE_SKILLS_INDEXES_V17) {
       db.exec(indexSql);
     }
-    db.exec(CREATE_SKILL_RUNS_TABLE);
-    for (const indexSql of CREATE_SKILL_RUNS_INDEXES) {
+    db.exec(CREATE_SKILL_RUNS_TABLE_V17);
+    for (const indexSql of CREATE_SKILL_RUNS_INDEXES_V17) {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 17);
