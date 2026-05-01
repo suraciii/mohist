@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Agent Activity Monitor — global agent session monitoring page with real-time SSE updates",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/db/coder-session-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "See design.md D1 for the SQL query. No schema changes needed."
+      "passes": true,
+      "notes": "See design.md D1 for the SQL query. No schema changes needed.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        125151
+      ]
     },
     {
       "id": "T-002",
@@ -43,9 +48,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/agent.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "See design.md D6 — reuse existing createAgentRoutes, extend its signature."
+      "notes": "See design.md D6 — reuse existing createAgentRoutes, extend its signature.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -64,9 +74,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Follow existing patterns in api.ts (request helper) and useQueries.ts (useQuery with queryKey)."
+      "notes": "Follow existing patterns in api.ts (request helper) and useQueries.ts (useQuery with queryKey).",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -88,7 +103,10 @@
       "output": "packages/cli/web/src/App.tsx, packages/cli/web/src/components/Header.tsx, packages/cli/web/src/components/MobileBottomNav.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "Can be done in parallel with T-001 through T-003. Placeholder ActivityPage just renders a div."
+      "notes": "Can be done in parallel with T-001 through T-003. Placeholder ActivityPage just renders a div.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -107,9 +125,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/StatusBar.tsx",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Pure presentational component. Receives counts as props."
+      "notes": "Pure presentational component. Receives counts as props.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -135,9 +158,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useActivityCards.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "See design.md D2, D3, D5. Follow onAgentEvent pattern from useSessionTimeline.ts."
+      "notes": "See design.md D2, D3, D5. Follow onAgentEvent pattern from useSessionTimeline.ts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -160,9 +188,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/SessionCard.tsx",
-      "dependsOn": ["T-006"],
+      "dependsOn": [
+        "T-006"
+      ],
       "passes": false,
-      "notes": "Duration timer driven by parent's setInterval(1000) render counter. See design.md D7."
+      "notes": "Duration timer driven by parent's setInterval(1000) render counter. See design.md D7.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -183,9 +216,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/AnomalyBadge.tsx",
-      "dependsOn": ["T-007"],
+      "dependsOn": [
+        "T-007"
+      ],
       "passes": false,
-      "notes": "See design.md D4. Pure client-side computation, no backend involvement."
+      "notes": "See design.md D4. Pure client-side computation, no backend involvement.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-009",
@@ -209,9 +247,18 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ActivityPage.tsx",
-      "dependsOn": ["T-004", "T-005", "T-006", "T-007", "T-008"],
+      "dependsOn": [
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008"
+      ],
       "passes": false,
-      "notes": "This is the integration task. Replaces the placeholder ActivityPage from T-004."
+      "notes": "This is the integration task. Replaces the placeholder ActivityPage from T-004.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-010",
@@ -232,9 +279,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/api/agent-sessions.test.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Follow existing test patterns in packages/cli/tests/."
+      "notes": "Follow existing test patterns in packages/cli/tests/.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
