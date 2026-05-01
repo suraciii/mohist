@@ -53,7 +53,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Reuse getRoundColor and round label logic from SessionTimeline.tsx",
       "attempts": 3,
       "order": 999999,
@@ -82,7 +82,7 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Remove the Fragment + STAGES.map section that renders the horizontal bar",
       "attempts": 3,
       "order": 999999,
@@ -112,7 +112,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Mock useIssue, useCoderSessions, and api.getWorkflowLogs. Use fake timers for RAF testing.",
       "attempts": 3,
       "order": 999999,
@@ -140,7 +140,7 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient.",
       "attempts": 3,
       "order": 999999,
