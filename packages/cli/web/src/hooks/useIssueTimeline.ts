@@ -77,17 +77,13 @@ export interface TimelineApprovedNode {
 
 export type TimelineNode = TimelineCreatedNode | TimelineStageNode | TimelineApprovedNode
 
-function getSessionForStage(sessions: CoderSessionItem[], stage: string): CoderSessionItem | undefined {
-  return sessions.find((s) => s.stage === stage)
-}
-
-function computeDurationMs(start: string | null, end: string | null): number | null {
+export function computeDurationMs(start: string | null, end: string | null): number | null {
   if (!start) return null
   const endTime = end ? new Date(end).getTime() : Date.now()
   return endTime - new Date(start).getTime()
 }
 
-function inferStageStatus(
+export function inferStageStatus(
   stage: string,
   issueStage: string,
   session: CoderSessionItem | undefined,
@@ -116,6 +112,10 @@ function inferStageStatus(
   return 'running'
 }
 
+function getSessionForStage(sessions: CoderSessionItem[], stage: string): CoderSessionItem | undefined {
+  return sessions.find((s) => s.stage === stage)
+}
+
 function buildRoundsFromSession(session: CoderSessionItem): TimelineRound[] {
   const rounds = reconstructRoundsFromLogs(session.workflowLogs)
   return rounds.map((r) => ({
@@ -129,7 +129,7 @@ function buildRoundsFromSession(session: CoderSessionItem): TimelineRound[] {
   }))
 }
 
-function buildTimeline(
+export function buildTimeline(
   issueData: { createdAt: string; stage: string; approvalState?: { status: string; requestedAt: string; approvedAt?: string; stage?: string } | null } | null | undefined,
   sessions: CoderSessionItem[],
   _logs: WorkflowLogItem[],
