@@ -283,6 +283,7 @@ describe('MergeQueue', () => {
         success: false,
         conflicts: ['src/foo.ts', 'src/bar.ts'],
       });
+      (worktreeManager as any).isRebaseInProgress = vi.fn().mockResolvedValue(false);
       resolveConflictsMock.mockResolvedValue({ success: true });
       execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
         cb?.(null, '', '');
@@ -300,7 +301,6 @@ describe('MergeQueue', () => {
         WORKTREE_PATH,
         ['src/foo.ts', 'src/bar.ts'],
       );
-      expect(worktreeManager.rebaseContinue).toHaveBeenCalled();
       expect(completedEvents).toHaveLength(1);
       expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
     });
@@ -340,10 +340,7 @@ describe('MergeQueue', () => {
         conflicts: ['src/foo.ts'],
       });
       resolveConflictsMock.mockResolvedValue({ success: true });
-      worktreeManager.rebaseContinue = vi.fn().mockResolvedValue({
-        success: false,
-        conflicts: ['src/foo.ts', 'src/bar.ts'],
-      });
+      (worktreeManager as any).isRebaseInProgress = vi.fn().mockResolvedValue(true);
 
       const failedEvents: any[] = [];
       eventBus.on('merge_failed', (data) => failedEvents.push(data));
@@ -351,7 +348,6 @@ describe('MergeQueue', () => {
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
-      expect(worktreeManager.rebaseContinue).toHaveBeenCalled();
       expect(worktreeManager.abortRebase).toHaveBeenCalled();
       expect(issueRepo.findById(issue.id)?.mergeState).toBe('conflict');
       expect(failedEvents).toHaveLength(1);

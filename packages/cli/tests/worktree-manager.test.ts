@@ -284,7 +284,8 @@ describe('WorktreeManager', () => {
         (c: any) =>
           c[0] === 'git' && c[1]?.[0] === 'rebase' && c[1]?.[1] === '--abort',
       );
-      expect(abortCalls.length).toBe(1);
+      // 1 cleanup abort (before rebase) + 1 conflict abort = 2
+      expect(abortCalls.length).toBe(2);
     });
 
     it('should preserve conflict markers when abortOnConflict is false', async () => {
@@ -307,7 +308,8 @@ describe('WorktreeManager', () => {
         (c: any) =>
           c[0] === 'git' && c[1]?.[0] === 'rebase' && c[1]?.[1] === '--abort',
       );
-      expect(abortCalls.length).toBe(0);
+      // 1 cleanup abort (before rebase) only, no conflict abort since abortOnConflict=false
+      expect(abortCalls.length).toBe(1);
     });
 
     it('should throw when worktree does not exist', async () => {

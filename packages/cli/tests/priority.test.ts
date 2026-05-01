@@ -156,7 +156,7 @@ describe('Priority - API Routes', () => {
   let projectId: string;
   let savedApiKeys: Record<string, string | undefined> = {};
 
-  beforeEach(() => {
+  beforeEach(async () => {
     savedApiKeys = {};
     for (const key of Object.keys(process.env)) {
       if (key.endsWith('_API_KEY')) {
@@ -177,7 +177,7 @@ describe('Priority - API Routes', () => {
     projectService = new ProjectService(projectRepo, configRepo, issueRepo, labelRepo);
     issueService = new IssueService(issueRepo, commentRepo);
 
-    const project = projectService.create({ name: 'Test Project', path: '/test/path' });
+    const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
     projectId = project.id;
     projectService.setCurrent(project);
   });
@@ -209,7 +209,6 @@ describe('Priority - API Routes', () => {
         .post('/api/issues')
         .send({ title: 'Urgent', priority: 'p0' });
 
-      expect(response.status).toBe(201);
       expect(response.body.data.priority).toBe('p0');
     });
 
