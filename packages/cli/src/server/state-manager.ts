@@ -14,7 +14,8 @@ import {
   CoderSessionRepo,
   PipelineCheckpointRepo,
   ScheduleRepo,
-  IssueTaskQueueRepo
+  IssueTaskQueueRepo,
+  CheckSuiteRepo
 } from '../db';
 import { initializeDefaultConfig } from '../db/config-repo';
 
@@ -33,6 +34,7 @@ export class StateManager {
   private pipelineCheckpointRepo: PipelineCheckpointRepo;
   private scheduleRepo: ScheduleRepo;
   private issueTaskQueueRepo: IssueTaskQueueRepo;
+  private checkSuiteRepo: CheckSuiteRepo;
   private initialized: boolean = false;
 
   constructor(db: DatabaseManager) {
@@ -52,6 +54,7 @@ export class StateManager {
     this.pipelineCheckpointRepo = new PipelineCheckpointRepo(db);
     this.scheduleRepo = new ScheduleRepo(db);
     this.issueTaskQueueRepo = new IssueTaskQueueRepo(db);
+    this.checkSuiteRepo = new CheckSuiteRepo(db);
     
     initializeDefaultConfig(this.configRepo);
     this.initialized = true;
@@ -115,5 +118,9 @@ export class StateManager {
 
   getIssueTaskQueueRepo(): IssueTaskQueueRepo {
     return this.issueTaskQueueRepo;
+  }
+
+  getCheckSuiteRepo(): CheckSuiteRepo {
+    return this.checkSuiteRepo;
   }
 }

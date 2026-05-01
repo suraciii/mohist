@@ -13,6 +13,7 @@ import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
+import { CheckSuiteRepo } from '../db/check-suite-repo';
 import { detectOpenSpecChange, findChangeDir } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -37,6 +38,8 @@ export function createIssueRoutes(
   _opencodeBinPath?: string,
   mergeQueue?: MergeQueue,
   checkpointRepo?: PipelineCheckpointRepo,
+  _resolveConflictsDeps?: ConflictResolutionDeps,
+  checkSuiteRepo?: CheckSuiteRepo,
 ): Hono {
   const app = new Hono();
 
@@ -251,6 +254,31 @@ export function createIssueRoutes(
     }
   });
 
+  app.get('/:number/check-suite', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (!checkSuiteRepo) {
+        return c.json({ success: false, error: 'CheckSuiteRepo not configured' } satisfies ApiResponse, 500);
+      }
+
+      const checkSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
+      return c.json({ success: true, data: checkSuite } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
   app.get('/merge-queue/status', async (c) => {
     try {
       const projectId = getCurrentProjectId();
@@ -295,6 +323,8 @@ export function createIssueRoutes(
       const comments = issueService.getCommentsByIssue(issue.id);
       const project = projectService.getById(projectId);
 
+      const checkSuite = checkSuiteRepo ? checkSuiteRepo.findActiveByIssueId(issue.id) : null;
+
       const response: ApiResponse = {
         success: true,
         data: {
@@ -302,7 +332,8 @@ export function createIssueRoutes(
           projectName: project?.name || 'unknown',
           projectPath: project?.path || '',
           baseBranch: project?.baseBranch || 'main',
-          comments
+          comments,
+          checkSuite
         }
       };
       return c.json(response);
@@ -897,6 +928,61 @@ export function createIssueRoutes(
             error: 'MergeQueue not configured'
           };
           return c.json(response, 500);
+        }
+
+        if (checkSuiteRepo) {
+          const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
+          if (activeSuite) {
+            let headSha: string | null = null;
+            try {
+              if (worktreeManager) {
+                const wtPath = worktreeManager.getPath(project!.name, issue.number);
+                if (wtPath) {
+                  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: wtPath });
+                  headSha = stdout.trim();
+                }
+              }
+            } catch (err) {
+              log.warn('Failed to read HEAD SHA for approve validation', { issueNumber: number, error: err instanceof Error ? err.message : err });
+            }
+
+            if (headSha && headSha !== activeSuite.snapshotSha) {
+              if (agentRunner) {
+                checkSuiteRepo.updateStatus(activeSuite.id, 'running');
+                checkSuiteRepo.updateSnapshotSha(activeSuite.id, headSha);
+
+                const acpOptions: AcpConnectionOptions = {
+                  cwd: worktreePath,
+                  issueId: issue.id,
+                  projectId,
+                  workflowLogRepo,
+                  coderSessionRepo,
+                  eventBus,
+                  issueNumber: issue.number,
+                  opencodeBinPath,
+                  model: issue.model ?? undefined,
+                };
+
+                agentRunner.resumePipeline(
+                  issue,
+                  projectId,
+                  issueRepo,
+                  worktreePath,
+                  acpOptions,
+                  (issueId, status) => issueService.setStatus(issueId, status),
+                );
+              }
+
+              const response: ApiResponse = {
+                success: true,
+                data: {
+                  issue: issueService.getByNumber(projectId, number),
+                  message: 'Code has changed since last check, re-running checks'
+                }
+              };
+              return c.json(response, 202);
+            }
+          }
         }
 
         mergeQueue.enqueue(projectId, number);
