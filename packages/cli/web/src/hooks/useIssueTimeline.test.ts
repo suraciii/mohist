@@ -515,6 +515,84 @@ describe('RAF throttling behavior', () => {
     raf.flush()
     expect(processed).toEqual([['event-1'], ['event-2', 'event-3']])
   })
+
+  it('batches 500 events arriving rapidly into single flush', () => {
+    const processed: number[][] = []
+    let rafId: number | null = null
+    const pending: number[] = []
+
+    function scheduleFlush() {
+      if (rafId !== null) return
+      rafId = requestAnimationFrame(() => {
+        processed.push([...pending])
+        pending.length = 0
+        rafId = null
+      })
+    }
+
+    for (let i = 0; i < 500; i++) {
+      pending.push(i)
+      scheduleFlush()
+    }
+
+    expect(processed).toHaveLength(0)
+    expect(pending).toHaveLength(500)
+
+    raf.flush()
+
+    expect(processed).toHaveLength(1)
+    expect(processed[0]).toHaveLength(500)
+    expect(pending).toHaveLength(0)
+  })
+
+  it('uses setTimeout fallback when within 100ms throttle window', () => {
+    const processed: string[][] = []
+    const pending: string[] = []
+    let rafId: number | null = null
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let lastFlush = 0
+    const FLUSH_INTERVAL = 100
+
+    function doFlush() {
+      processed.push([...pending])
+      pending.length = 0
+      rafId = null
+      lastFlush = Date.now()
+    }
+
+    function scheduleFlush() {
+      if (rafId !== null || timeoutId !== null) return
+      const now = Date.now()
+      const elapsed = now - lastFlush
+      if (elapsed >= FLUSH_INTERVAL) {
+        rafId = requestAnimationFrame(doFlush)
+      } else {
+        timeoutId = setTimeout(() => {
+          timeoutId = null
+          rafId = requestAnimationFrame(doFlush)
+        }, FLUSH_INTERVAL - elapsed)
+      }
+    }
+
+    pending.push('a')
+    scheduleFlush()
+    raf.flush()
+    expect(processed).toEqual([['a']])
+
+    pending.push('b')
+    scheduleFlush()
+    expect(rafId).toBeNull()
+    expect(timeoutId).not.toBeNull()
+
+    pending.push('c')
+    scheduleFlush()
+    expect(pending).toEqual(['b', 'c'])
+
+    vi.advanceTimersByTime(100)
+    raf.flush()
+
+    expect(processed).toEqual([['a'], ['b', 'c']])
+  })
 })
 
 describe('SSE event handling via buildTimeline', () => {
@@ -578,5 +656,188 @@ describe('SSE event handling via buildTimeline', () => {
     expect(buildNode.tasks.find((t) => t.taskId === 'T-001')!.status).toBe('passed')
     expect(buildNode.tasks.find((t) => t.taskId === 'T-002')!.status).toBe('running')
     expect(buildNode.tasks.find((t) => t.taskId === 'T-003')!.status).toBe('pending')
+  })
+})
+
+describe('buildTimeline with workflow logs', () => {
+  function makeWorkflowLogs(): Array<{ id: string; eventType: string; data: unknown; createdAt: string }> {
+    return [
+      { id: 'l1', eventType: 'user_message_chunk', data: { content: { text: 'Write proposal' } }, createdAt: '2026-04-27T10:00:00.000Z' },
+      { id: 'l2', eventType: 'agent_message_chunk', data: { content: { text: 'Creating proposal...' } }, createdAt: '2026-04-27T10:01:00.000Z' },
+      { id: 'l3', eventType: 'user_message_chunk', data: { content: { text: 'Write specs' } }, createdAt: '2026-04-27T10:02:00.000Z' },
+      { id: 'l4', eventType: 'agent_message_chunk', data: { content: { text: 'Creating specs...' } }, createdAt: '2026-04-27T10:03:00.000Z' },
+    ]
+  }
+
+  it('reconstructs plan rounds from session workflow logs', () => {
+    const planSession = makeSession({
+      stage: 'plan',
+      status: 'completed',
+      createdAt: '2026-04-27T10:00:00.000Z',
+      completedAt: '2026-04-27T10:10:00.000Z',
+      workflowLogs: makeWorkflowLogs(),
+    })
+
+    const nodes = buildTimeline(
+      { createdAt: '2026-04-27T09:00:00.000Z', stage: 'build' },
+      [planSession],
+      [],
+      new Map(),
+      [],
+    )
+
+    const planNode = nodes.find((n) => n.stage === 'plan') as TimelineStageNode
+    expect(planNode.rounds).toHaveLength(2)
+    expect(planNode.rounds[0].label).toBe('proposal.md')
+    expect(planNode.rounds[0].startedAt).toBe('2026-04-27T10:00:00.000Z')
+    expect(planNode.rounds[0].completedAt).toBe('2026-04-27T10:02:00.000Z')
+    expect(planNode.rounds[1].label).toBe('specs/')
+    expect(planNode.rounds[1].startedAt).toBe('2026-04-27T10:02:00.000Z')
+  })
+
+  it('uses planSteps from SSE events over workflow log reconstruction', () => {
+    const planSession = makeSession({
+      stage: 'plan',
+      status: 'running',
+      createdAt: '2026-04-27T10:00:00.000Z',
+      completedAt: null,
+      workflowLogs: makeWorkflowLogs(),
+    })
+
+    const planSteps = [
+      { roundType: 'proposal', roundLabel: 'Proposal', roundIndex: 0, status: 'completed' as const, duration: 120000, verdict: 'PASS' as const },
+    ]
+
+    const nodes = buildTimeline(
+      { createdAt: '2026-04-27T09:00:00.000Z', stage: 'plan' },
+      [planSession],
+      [],
+      new Map(),
+      planSteps,
+    )
+
+    const planNode = nodes.find((n) => n.stage === 'plan') as TimelineStageNode
+    expect(planNode.rounds).toHaveLength(1)
+    expect(planNode.rounds[0].label).toBe('Proposal')
+    expect(planNode.rounds[0].verdict).toBe('PASS')
+    expect(planNode.rounds[0].duration).toBe(120000)
+  })
+
+  it('full timeline reconstruction from issue + sessions + logs', () => {
+    const planSession = makeSession({
+      id: 's-plan',
+      stage: 'plan',
+      status: 'completed',
+      createdAt: '2026-04-27T03:12:00.000Z',
+      completedAt: '2026-04-27T03:20:26.000Z',
+      model: 'MiniMax-M2.7',
+      workflowLogs: [
+        { id: 'l1', eventType: 'user_message_chunk', data: { content: { text: 'go' } }, createdAt: '2026-04-27T03:12:00.000Z' },
+        { id: 'l2', eventType: 'user_message_chunk', data: { content: { text: 'next' } }, createdAt: '2026-04-27T03:16:00.000Z' },
+      ],
+    })
+    const buildSession = makeSession({
+      id: 's-build',
+      stage: 'build',
+      status: 'completed',
+      createdAt: '2026-04-27T03:21:00.000Z',
+      completedAt: '2026-04-27T03:27:10.000Z',
+    })
+    const taskProgress = new Map<string, TaskProgressEntry>([
+      ['T-001', { taskId: 'T-001', taskIndex: 0, totalTasks: 1, status: 'passed' }],
+    ])
+
+    const nodes = buildTimeline(
+      {
+        createdAt: '2026-04-27T03:00:00.000Z',
+        stage: 'check',
+        approvalState: {
+          status: 'approved',
+          requestedAt: '2026-04-27T03:20:30.000Z',
+          approvedAt: '2026-04-27T03:20:45.000Z',
+          stage: 'plan',
+        },
+      },
+      [planSession, buildSession],
+      [],
+      taskProgress,
+      [],
+    )
+
+    expect(nodes[0]).toEqual({ stage: 'created', label: 'Created', timestamp: '2026-04-27T03:00:00.000Z' })
+
+    const planNode = nodes.find((n) => n.stage === 'plan') as TimelineStageNode
+    expect(planNode.status).toBe('completed')
+    expect(planNode.durationMs).toBe(506000)
+    expect(planNode.rounds).toHaveLength(2)
+    expect(planNode.model).toBe('MiniMax-M2.7')
+
+    const approvedNode = nodes.find((n) => n.stage === 'approved')
+    expect(approvedNode).toBeDefined()
+
+    const buildNode = nodes.find((n) => n.stage === 'build') as TimelineStageNode
+    expect(buildNode.status).toBe('completed')
+    expect(buildNode.durationMs).toBe(370000)
+    expect(buildNode.tasks).toHaveLength(1)
+    expect(buildNode.tasks[0].status).toBe('passed')
+
+    const checkNode = nodes.find((n) => n.stage === 'check') as TimelineStageNode
+    expect(checkNode.status).toBe('running')
+
+    const doneNode = nodes.find((n) => n.stage === 'done') as TimelineStageNode
+    expect(doneNode.status).toBe('pending')
+  })
+})
+
+describe('pending stage inference', () => {
+  it('all stages after current are pending when issue is in plan', () => {
+    const nodes = buildTimeline(
+      { createdAt: '2026-04-27T10:00:00.000Z', stage: 'plan' },
+      [],
+      [],
+      new Map(),
+      [],
+    )
+    const planNode = nodes.find((n) => n.stage === 'plan') as TimelineStageNode
+    const buildNode = nodes.find((n) => n.stage === 'build') as TimelineStageNode
+    const checkNode = nodes.find((n) => n.stage === 'check') as TimelineStageNode
+    const doneNode = nodes.find((n) => n.stage === 'done') as TimelineStageNode
+
+    expect(planNode.status).toBe('running')
+    expect(buildNode.status).toBe('pending')
+    expect(checkNode.status).toBe('pending')
+    expect(doneNode.status).toBe('pending')
+  })
+
+  it('only done is pending when issue is in check stage', () => {
+    const nodes = buildTimeline(
+      { createdAt: '2026-04-27T10:00:00.000Z', stage: 'check' },
+      [],
+      [],
+      new Map(),
+      [],
+    )
+    const checkNode = nodes.find((n) => n.stage === 'check') as TimelineStageNode
+    const doneNode = nodes.find((n) => n.stage === 'done') as TimelineStageNode
+
+    expect(checkNode.status).toBe('running')
+    expect(doneNode.status).toBe('pending')
+  })
+
+  it('pending stages have null timestamps and durations', () => {
+    const nodes = buildTimeline(
+      { createdAt: '2026-04-27T10:00:00.000Z', stage: 'plan' },
+      [],
+      [],
+      new Map(),
+      [],
+    )
+    const buildNode = nodes.find((n) => n.stage === 'build') as TimelineStageNode
+    expect(buildNode.startedAt).toBeNull()
+    expect(buildNode.completedAt).toBeNull()
+    expect(buildNode.durationMs).toBeNull()
+    expect(buildNode.sessionId).toBeNull()
+    expect(buildNode.rounds).toEqual([])
+    expect(buildNode.tasks).toEqual([])
   })
 })
