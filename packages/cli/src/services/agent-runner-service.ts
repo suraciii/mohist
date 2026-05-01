@@ -202,9 +202,12 @@ export class AgentRunnerService {
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active })
       .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog);
 
+    const activeMergeStates = new Set(['resolving', 'rebasing', 'merging']);
+
     const orphans = activeIssues.filter(issue => {
       if (this.activeAgents.has(issue.id)) return false;
       if (this.pendingGates.has(issue.number)) return false;
+      if (issue.mergeState && activeMergeStates.has(issue.mergeState)) return false;
       return true;
     });
 
@@ -846,8 +849,9 @@ export class AgentRunnerService {
         this.activeAgents.delete(issue.id);
         this.clearWaiting(issue.id);
 
+        const activeMergeStates = new Set(['resolving', 'rebasing', 'merging']);
         const finalIssue = issueRepo.findById(issue.id);
-        if (finalIssue && finalIssue.status === IssueStatus.Active && !this.pendingGates.has(issue.number)) {
+        if (finalIssue && finalIssue.status === IssueStatus.Active && !this.pendingGates.has(issue.number) && !(finalIssue.mergeState && activeMergeStates.has(finalIssue.mergeState))) {
           log.warn('Pipeline finished but issue still active without pending gate, forcing to blocked', {
             issueNumber: issue.number,
             stage: finalIssue.stage,
