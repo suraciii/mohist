@@ -137,13 +137,13 @@
         "T-003"
       ],
       "passes": true,
-      "notes": "Code review verified: container overflow-hidden + min-w-0 flex-1 prevents horizontal overflow. At 375px, 299px available for content (worst-case button row ~199px). text-sm/text-xs legible. Typecheck passes.",
+      "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient.",
       "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
         322837,
-        0
+        539709
       ]
     }
   ]
