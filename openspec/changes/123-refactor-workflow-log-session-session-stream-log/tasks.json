@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Separate session stream data (agent thought/message chunks, tool calls) from workflow_log into a new session_stream_log table",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -22,8 +21,14 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/db/session-stream-log-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow the exact pattern of workflow-log-repo.ts (89 lines). Migration follows migrateToVersion18 pattern in migrations.ts."
+      "passes": true,
+      "notes": "Follow the exact pattern of workflow-log-repo.ts (89 lines). Migration follows migrateToVersion18 pattern in migrations.ts.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        179896
+      ]
     },
     {
       "id": "T-002",
@@ -45,9 +50,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Mechanical propagation touching ~10 files. Key: acp-session.ts has TWO separate interfaces (AcpSessionOptions for single-shot, AcpConnectionOptions for multi-round at line 463) — both need the field. Files: acp-session.ts, workflow-engine.ts, stage-context.ts, ralph-executor.ts, build-stage-runner.ts, workflow-controller.ts, agent-runner-service.ts, server/index.ts, api/issues.ts, checks/build-test-check.ts, conflict-resolution.ts. Note: agent-runner-service.ts constructor has _workflowLogRepo typed as unknown and unused — still add the new param to maintain pattern. Note: event-bus.ts emitPersistent also accepts workflowLogRepo in opts but is currently dead code (never called) — skip for now."
+      "notes": "Mechanical propagation touching ~10 files. Key: acp-session.ts has TWO separate interfaces (AcpSessionOptions for single-shot, AcpConnectionOptions for multi-round at line 463) — both need the field. Files: acp-session.ts, workflow-engine.ts, stage-context.ts, ralph-executor.ts, build-stage-runner.ts, workflow-controller.ts, agent-runner-service.ts, server/index.ts, api/issues.ts, checks/build-test-check.ts, conflict-resolution.ts. Note: agent-runner-service.ts constructor has _workflowLogRepo typed as unknown and unused — still add the new param to maintain pattern. Note: event-bus.ts emitPersistent also accepts workflowLogRepo in opts but is currently dead code (never called) — skip for now.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -66,9 +76,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Two write sites to modify: line ~246 (runAcpSession) and line ~663 (createAcpConnection). The writeSessionLog helper does NOT change."
+      "notes": "Two write sites to modify: line ~246 (runAcpSession) and line ~663 (createAcpConnection). The writeSessionLog helper does NOT change.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -87,9 +102,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-002", "T-003"],
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Fallback ensures old session detail pages still work. Filter fallback results to only stream event types to avoid mixing lifecycle events."
+      "notes": "Fallback ensures old session detail pages still work. Filter fallback results to only stream event types to avoid mixing lifecycle events.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -107,9 +128,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useIssueTimeline.ts",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Pure cleanup — buildTimeline already ignores the _logs parameter. Do NOT remove getWorkflowLogs from useSessionTimeline (Path B is kept per design D4)."
+      "notes": "Pure cleanup — buildTimeline already ignores the _logs parameter. Do NOT remove getWorkflowLogs from useSessionTimeline (Path B is kept per design D4).",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -129,9 +155,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/session-stream-log.test.ts",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Follow existing test patterns. Check packages/cli/tests/ for test conventions and database test setup helpers."
+      "notes": "Follow existing test patterns. Check packages/cli/tests/ for test conventions and database test setup helpers.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
