@@ -81,7 +81,7 @@ export function createIssueRoutes(
       } else if (all === 'true') {
         issues = issueRepo.findAll({ projectId, includeArchived: true });
       } else if (stage) {
-        issues = issueService.getByStage(projectId, stage);
+        issues = issueService.getByStage(projectId, stage).filter(issue => !issue.archivedAt);
       } else {
         issues = issueService.getByProject(projectId);
       }
@@ -89,6 +89,7 @@ export function createIssueRoutes(
       if (all !== 'true' && archived !== 'true') {
         issues = issues.filter(issue => !issue.archivedAt);
       }
+
 
       if (priority) {
         issues = issues.filter(issue => issue.priority === priority);
