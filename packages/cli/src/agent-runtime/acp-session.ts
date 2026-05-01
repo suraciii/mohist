@@ -11,6 +11,7 @@ import type {
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
@@ -41,6 +42,7 @@ export interface AcpSessionOptions {
   projectId?: string;
   executionId?: string;
   workflowLogRepo?: WorkflowLogRepo;
+  sessionStreamLogRepo?: SessionStreamLogRepo;
   eventBus?: EventBus;
   throttleMs?: number;
   coderSessionRepo?: CoderSessionRepo;
@@ -467,6 +469,7 @@ export interface AcpConnectionOptions {
   projectId?: string;
   executionId?: string;
   workflowLogRepo?: WorkflowLogRepo;
+  sessionStreamLogRepo?: SessionStreamLogRepo;
   eventBus?: EventBus;
   throttleMs?: number;
   coderSessionRepo?: CoderSessionRepo;

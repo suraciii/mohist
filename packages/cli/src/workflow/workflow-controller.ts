@@ -636,6 +636,7 @@ export class WorkflowController {
       eventBus: this.eventBus,
       executionId: `build-${issue.number}`,
       workflowLogRepo: acpOptions.workflowLogRepo,
+      sessionStreamLogRepo: acpOptions.sessionStreamLogRepo,
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(total),
@@ -1184,6 +1185,7 @@ export class WorkflowController {
         projectId: this.projectId ?? issue.projectId,
         model: issue.model ?? undefined,
         workflowLogRepo: parentAcpOptions.workflowLogRepo,
+        sessionStreamLogRepo: parentAcpOptions.sessionStreamLogRepo,
         eventBus: parentAcpOptions.eventBus,
         signal: parentAcpOptions.signal,
       };

@@ -115,9 +115,11 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
+  const sessionStreamLogRepo = stateManager.getSessionStreamLogRepo();
   const conflictResolutionDeps: ConflictResolutionDeps = {
     issueRepo: stateManager.getIssueRepo(),
     workflowLogRepo,
+    sessionStreamLogRepo,
     coderSessionRepo: stateManager.getCoderSessionRepo(),
     eventBus,
     opencodeBinPath,
@@ -164,6 +166,7 @@ async function main(): Promise<void> {
         issueId: refreshedIssue.id,
         projectId: entry.projectId,
         workflowLogRepo,
+        sessionStreamLogRepo,
         coderSessionRepo,
         eventBus,
         issueNumber: refreshedIssue.number,
@@ -232,7 +235,7 @@ async function main(): Promise<void> {
   const server = new HttpServer(config, rateLimiter);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo, stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), conflictResolutionDeps, stateManager.getCheckSuiteRepo()));
+server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo()));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, sessionManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));

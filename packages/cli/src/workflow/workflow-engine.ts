@@ -5,6 +5,7 @@ import type { CheckpointManager } from './checkpoint-manager';
 import type { EventBus, EventMap } from '../services/event-bus';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 
 export interface PipelineResult {
@@ -25,6 +26,7 @@ export interface WorkflowEngineOptions {
   projectId?: string;
   signal?: AbortSignal;
   workflowLogRepo?: WorkflowLogRepo;
+  sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
 }
 
@@ -39,6 +41,7 @@ export class WorkflowEngine {
   private projectId?: string;
   private signal?: AbortSignal;
   private workflowLogRepo?: WorkflowLogRepo;
+  private sessionStreamLogRepo?: SessionStreamLogRepo;
   private coderSessionRepo?: CoderSessionRepo;
 
   constructor(options: WorkflowEngineOptions) {
@@ -52,6 +55,7 @@ export class WorkflowEngine {
     this.projectId = options.projectId;
     this.signal = options.signal;
     this.workflowLogRepo = options.workflowLogRepo;
+    this.sessionStreamLogRepo = options.sessionStreamLogRepo;
     this.coderSessionRepo = options.coderSessionRepo;
   }
 
@@ -66,6 +70,7 @@ export class WorkflowEngine {
       checkpointManager: this.checkpointManager,
       issueRepo: this.issueRepo,
       workflowLogRepo: this.workflowLogRepo,
+      sessionStreamLogRepo: this.sessionStreamLogRepo,
       coderSessionRepo: this.coderSessionRepo,
       signal: this.signal,
     };

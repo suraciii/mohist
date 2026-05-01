@@ -132,6 +132,7 @@ export class BuildStageRunner implements StageRunner {
       eventBus,
       executionId: `build-${issue.number}`,
       workflowLogRepo: acpOptions.workflowLogRepo,
+      sessionStreamLogRepo: acpOptions.sessionStreamLogRepo,
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),

@@ -11,6 +11,7 @@ import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
+import { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
@@ -34,6 +35,7 @@ export function createIssueRoutes(
   _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
   workflowLogRepo?: WorkflowLogRepo,
+  _sessionStreamLogRepo?: SessionStreamLogRepo,
   agentSessionMessageRepo?: AgentSessionMessageRepo,
   coderSessionRepo?: CoderSessionRepo,
   _opencodeBinPath?: string,
