@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Optimize issue detail Changes view to commits-first design with full commit info and DiffViewer integration",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Key file: packages/cli/src/api/issues.ts line 1325-1399. Design decision D2: run two git commands (--numstat for stats, plain diff for content). Split diff output on 'diff --git' boundaries to get per-file diff strings. Match by file path."
+      "passes": true,
+      "notes": "Key file: packages/cli/src/api/issues.ts line 1325-1399. Design decision D2: run two git commands (--numstat for stats, plain diff for content). Split diff output on 'diff --git' boundaries to get per-file diff strings. Match by file path.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        281384
+      ]
     },
     {
       "id": "T-002",
@@ -40,7 +45,10 @@
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Key file: packages/cli/src/api/issues.ts line 1461-1552. Design decision D3: parse per-file lines from --stat output using regex /^\\s+(.+?)\\s*\\|/. The statLines array already contains per-file lines (e.g., ' src/foo.ts | 5 ++---') — just extract the path before the pipe."
+      "notes": "Key file: packages/cli/src/api/issues.ts line 1461-1552. Design decision D3: parse per-file lines from --stat output using regex /^\\s+(.+?)\\s*\\|/. The statLines array already contains per-file lines (e.g., ' src/foo.ts | 5 ++---') — just extract the path before the pipe.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -64,9 +72,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Files to modify: (1) packages/cli/web/src/lib/types.ts — add fields to DiffFile and CommitEntry, (2) packages/cli/web/src/components/IssueDetailPage.tsx — all UI changes. DiffViewer is at packages/cli/web/src/components/DiffViewer.tsx and accepts a single `diff: string` prop. Design decision D1: reuse DiffViewer as-is. Design decision D4: DIFF_STAGES = {explore, plan, build, check, done}. Design decision D5: truncate file list at 5. Import DiffViewer at the top of IssueDetailPage.tsx."
+      "notes": "Files to modify: (1) packages/cli/web/src/lib/types.ts — add fields to DiffFile and CommitEntry, (2) packages/cli/web/src/components/IssueDetailPage.tsx — all UI changes. DiffViewer is at packages/cli/web/src/components/DiffViewer.tsx and accepts a single `diff: string` prop. Design decision D1: reuse DiffViewer as-is. Design decision D4: DIFF_STAGES = {explore, plan, build, check, done}. Design decision D5: truncate file list at 5. Import DiffViewer at the top of IssueDetailPage.tsx.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
