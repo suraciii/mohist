@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '../lib/api'
-import type { AgentRuntimeConfig, GeneralConfig, SystemInfo } from '../lib/types'
+import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, SystemInfo } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
@@ -89,6 +89,13 @@ export function useAgentStatus() {
     queryKey: ['agent-status'],
     queryFn: () => api.getAgentStatus(),
     refetchInterval: 5000,
+  })
+}
+
+export function useAgentSessions(params?: { status?: string; limit?: number }) {
+  return useQuery<AgentSessionInfo[]>({
+    queryKey: ['agent-sessions', params],
+    queryFn: () => api.getAgentSessions(params),
   })
 }
 

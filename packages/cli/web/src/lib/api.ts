@@ -110,6 +110,14 @@ export const api = {
 
   getAgentStatus: () => request<import('./types').AgentStatus>('/agent/status'),
 
+  getAgentSessions: (params?: { status?: string; limit?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.status) search.set('status', params.status)
+    if (params?.limit != null) search.set('limit', String(params.limit))
+    const qs = search.toString()
+    return request<import('./types').AgentSessionInfo[]>(`/agent/sessions${qs ? `?${qs}` : ''}`)
+  },
+
   createProject: (data: { name: string; path: string }) =>
     request<import('./types').Project>('/projects', {
       method: 'POST',

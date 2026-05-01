@@ -418,6 +418,19 @@ export interface AgentRuntimeConfig {
   pollInterval: number
 }
 
+export interface AgentSessionInfo {
+  issueNumber: number
+  issueTitle: string
+  issueStage: string
+  sessionId: string
+  status: string
+  model: string | null
+  taskDescription: string | null
+  createdAt: string
+  completedAt: string | null
+  lastActivityAt: string | null
+}
+
 export interface SystemInfo {
   version: string
   gitHash: string
