@@ -137,11 +137,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Pure presentational component. Receives counts as props.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        118862
+      ]
     },
     {
       "id": "T-006",
