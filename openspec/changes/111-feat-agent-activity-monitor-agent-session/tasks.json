@@ -82,13 +82,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing patterns in api.ts (request helper) and useQueries.ts (useQuery with queryKey).",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        104796
+        104796,
+        77993
       ]
     },
     {
