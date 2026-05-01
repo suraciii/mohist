@@ -112,11 +112,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Fallback ensures old session detail pages still work. Filter fallback results to only stream event types to avoid mixing lifecycle events.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        100400
+      ]
     },
     {
       "id": "T-005",
