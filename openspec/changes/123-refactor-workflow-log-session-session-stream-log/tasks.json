@@ -53,11 +53,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Mechanical propagation touching ~10 files. Key: acp-session.ts has TWO separate interfaces (AcpSessionOptions for single-shot, AcpConnectionOptions for multi-round at line 463) — both need the field. Files: acp-session.ts, workflow-engine.ts, stage-context.ts, ralph-executor.ts, build-stage-runner.ts, workflow-controller.ts, agent-runner-service.ts, server/index.ts, api/issues.ts, checks/build-test-check.ts, conflict-resolution.ts. Note: agent-runner-service.ts constructor has _workflowLogRepo typed as unknown and unused — still add the new param to maintain pattern. Note: event-bus.ts emitPersistent also accepts workflowLogRepo in opts but is currently dead code (never called) — skip for now.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        402844
+      ]
     },
     {
       "id": "T-003",
