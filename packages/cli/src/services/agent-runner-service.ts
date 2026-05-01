@@ -15,9 +15,16 @@ import { maskSensitiveData } from '../utils/sensitive-data';
 import { Log } from '../util/log';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { findChangeDir } from '../openspec/detector';
-import { WorktreeManager } from '../git/worktree-manager';
+import { WorktreeManager, smartFetch } from '../git/worktree-manager';
+import { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+
+const execFileAsync = promisify(execFile);
+
+const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done];
 
 export type TaskType = QueueTaskType;
 
@@ -117,6 +124,7 @@ export class AgentRunnerService {
     private readonly projectRepo?: ProjectRepo,
     private readonly worktreeManager?: WorktreeManager,
     private readonly taskQueueRepo?: IssueTaskQueueRepo,
+    private readonly conflictResolutionDeps?: ConflictResolutionDeps,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -786,26 +794,555 @@ export class AgentRunnerService {
   private executeTask(task: IssueTaskQueueRecord): void {
     if (!this.issueRepo || !this.taskQueueRepo) return;
 
-    log.info('executeTask placeholder called — full dispatcher in T-003', {
-      taskId: task.id,
-      taskType: task.taskType,
-      issueId: task.issueId,
-    });
-
     const taskPromise = (async () => {
       try {
-        log.info('Task executed (placeholder)', {
+        const issue = this.issueRepo!.findById(task.issueId);
+        if (!issue) {
+          this.completeTask(task.id, 'completed', 'skipped');
+          return;
+        }
+
+        switch (task.taskType) {
+          case 'start-pipeline':
+            await this.executeStartPipelineTask(task, issue);
+            break;
+          case 'resume-pipeline':
+            await this.executeResumePipelineTask(task, issue);
+            break;
+          case 'rebase':
+            await this.executeRebaseTask(task, issue);
+            break;
+          default:
+            this.completeTask(task.id, 'completed', 'skipped');
+        }
+      } catch (err) {
+        log.error('Task execution failed', {
           taskId: task.id,
           taskType: task.taskType,
           issueId: task.issueId,
+          error: err instanceof Error ? err.message : String(err),
         });
-        this.completeTask(task.id, 'completed', 'placeholder');
-      } catch (err) {
         this.completeTask(task.id, 'failed', err instanceof Error ? err.message : String(err));
       }
     })();
 
     taskPromise.catch(() => {});
+  }
+
+  private async executeStartPipelineTask(task: IssueTaskQueueRecord, issue: Issue): Promise<void> {
+    if (!this.issueRepo || !this.projectRepo || !this.worktreeManager) {
+      this.completeTask(task.id, 'failed', 'Missing dependencies for pipeline execution');
+      return;
+    }
+
+    if (issue.status === IssueStatus.Blocked) {
+      log.info('Skipping start-pipeline: issue is blocked', { issueNumber: issue.number });
+      this.completeTask(task.id, 'completed', 'skipped');
+      return;
+    }
+
+    if (issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog) {
+      log.info('Skipping start-pipeline: issue not in draft/backlog', { issueNumber: issue.number, stage: issue.stage });
+      this.completeTask(task.id, 'completed', 'skipped');
+      return;
+    }
+
+    const project = this.projectRepo.findById(issue.projectId);
+    if (!project) {
+      this.completeTask(task.id, 'failed', `Project not found: ${issue.projectId}`);
+      return;
+    }
+
+    const worktreePath = await this.ensureWorktree(project.path, project.name, issue.number, project.baseBranch);
+    if (!worktreePath) {
+      this.completeTask(task.id, 'failed', `Failed to create worktree for issue #${issue.number}`);
+      return;
+    }
+
+    const acpOptions: AcpConnectionOptions = { cwd: worktreePath };
+    await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
+  }
+
+  private async executeResumePipelineTask(task: IssueTaskQueueRecord, issue: Issue): Promise<void> {
+    if (!this.issueRepo || !this.projectRepo || !this.worktreeManager) {
+      this.completeTask(task.id, 'failed', 'Missing dependencies for pipeline execution');
+      return;
+    }
+
+    if (issue.status === IssueStatus.Blocked) {
+      log.info('Skipping resume-pipeline: issue is blocked', { issueNumber: issue.number });
+      this.completeTask(task.id, 'completed', 'skipped');
+      return;
+    }
+
+    if (issue.stage === Stage.Done) {
+      log.info('Skipping resume-pipeline: issue already done', { issueNumber: issue.number });
+      this.completeTask(task.id, 'completed', 'skipped');
+      return;
+    }
+
+    const project = this.projectRepo.findById(issue.projectId);
+    if (!project) {
+      this.completeTask(task.id, 'failed', `Project not found: ${issue.projectId}`);
+      return;
+    }
+
+    const worktreePath = this.worktreeManager.getPath(project.name, issue.number);
+    if (!worktreePath) {
+      this.completeTask(task.id, 'failed', `Worktree not found for issue #${issue.number}`);
+      return;
+    }
+
+    const acpOptions: AcpConnectionOptions = { cwd: worktreePath };
+    await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
+  }
+
+  private async runPipelineToCompletion(
+    task: IssueTaskQueueRecord,
+    issue: Issue,
+    projectId: string,
+    issueRepo: IssueRepo,
+    worktreePath: string,
+    acpOptions: AcpConnectionOptions,
+  ): Promise<void> {
+    this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
+    log.info('Pipeline started via task queue', { issueNumber: issue.number, taskType: task.taskType, taskId: task.id });
+
+    const abortController = new AbortController();
+    const startTime = Date.now();
+
+    try {
+      try {
+        issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      } catch (statusErr) {
+        log.warn('Failed to set issue status to active before pipeline', {
+          issueNumber: issue.number,
+          error: statusErr instanceof Error ? statusErr.message : String(statusErr),
+        });
+      }
+
+      this.pendingGates.delete(issue.number);
+
+      const artifactManager = new ChangeArtifactsManager(worktreePath);
+      const checkpointManager = this.checkpointRepo
+        ? createCheckpointManager(this.checkpointRepo)
+        : createCheckpointManager({ get: () => null, upsert: () => {}, delete: () => {} } as any);
+      const runners = [
+        new PlanStageRunner(),
+        new BuildStageRunner({ worktreePath, projectId }),
+        new CheckStageRunner([
+          new BuildTestCheck({ worktreePath }),
+          new MergeReadyCheck({ worktreeManager: this.worktreeManager, projectRepo: this.projectRepo as any }),
+          new AiReviewCheck(),
+        ]),
+      ];
+      const pipeline = new WorkflowEngine({
+        runners,
+        artifactManager,
+        issueRepo,
+        eventBus: this.eventBus,
+        projectId,
+        checkpointManager,
+        signal: abortController.signal,
+      });
+
+      const abortPromise = new Promise<never>((_resolve, reject) => {
+        abortController.signal.addEventListener('abort', () => {
+          reject(new Error('Agent stopped by user'));
+        });
+      });
+
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          abortController.abort();
+          reject(new Error(`Pipeline timed out after ${PIPELINE_TIMEOUT_MS / 60000} minutes`));
+        }, PIPELINE_TIMEOUT_MS);
+      });
+
+      let result: PipelineResult;
+      try {
+        result = await Promise.race([
+          pipeline.run(issue, acpOptions),
+          abortPromise,
+          timeoutPromise,
+        ]);
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      }
+
+      const duration = Date.now() - startTime;
+      log.info('Pipeline run completed', { issueNumber: issue.number, elapsedMs: duration, completed: result.completed, gateRequired: result.gateRequired });
+
+      if (result.gateRequired) {
+        this.pendingGates.set(issue.number, {
+          issueId: issue.id,
+          issueNumber: issue.number,
+          projectId,
+          stage: result.stage,
+        });
+        this.eventBus.emit('agent_paused', {
+          issueId: issue.id,
+          projectId,
+          issueNumber: issue.number,
+        });
+        log.info('Pipeline paused at gate, marking task completed', {
+          issueNumber: issue.number,
+          stage: result.stage,
+          taskId: task.id,
+        });
+        this.completeTask(task.id, 'completed', 'approval_gate');
+        return;
+      }
+
+      if (result.completed) {
+        this.eventBus.emit('agent_completed', { issueId: issue.id, projectId, issueNumber: issue.number });
+        this.completeTask(task.id, 'completed', 'success');
+      } else {
+        const failureSummary = result.stage
+          ? `[${result.stage}] ${result.message ?? 'Pipeline 未完成'}`
+          : result.message ?? 'Pipeline 未完成';
+        this.handlePipelineFailure(issue, issueRepo, projectId, failureSummary);
+        this.completeTask(task.id, 'failed', failureSummary);
+      }
+    } catch (err) {
+      const rawErrorMsg = err instanceof Error ? err.message : String(err);
+      const currentIssue = issueRepo.findById(issue.id);
+      const stageLabel = currentIssue?.stage ?? 'unknown';
+      const errorMsg = `[${stageLabel}] Pipeline 异常: ${rawErrorMsg}`;
+      log.error('Pipeline execution failed', {
+        issueNumber: issue.number,
+        stage: stageLabel,
+        error: rawErrorMsg,
+      });
+      this.handlePipelineFailure(issue, issueRepo, projectId, errorMsg);
+      this.completeTask(task.id, 'failed', errorMsg);
+    } finally {
+      this.activeAgents.delete(issue.id);
+      this.clearWaiting(issue.id);
+    }
+  }
+
+  private handlePipelineFailure(issue: Issue, issueRepo: IssueRepo, projectId: string, errorMsg: string): void {
+    try {
+      const currentIssue = issueRepo.findById(issue.id);
+      issueRepo.setApprovalState(issue.id, {
+        stage: currentIssue?.stage ?? Stage.Draft,
+        status: 'error',
+        output: { error: errorMsg },
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (stateErr) {
+      log.error('Failed to set error approval state', {
+        issueNumber: issue.number,
+        error: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+    }
+    try {
+      issueRepo.blockIssue(issue.id, errorMsg);
+    } catch (updateErr) {
+      log.error('Failed to block issue', {
+        issueNumber: issue.number,
+        error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+      });
+    }
+    try {
+      this.eventBus.emit('agent_error', { issueId: issue.id, projectId, error: errorMsg });
+    } catch (emitErr) {
+      log.error('Failed to emit agent_error event', {
+        issueNumber: issue.number,
+        error: emitErr instanceof Error ? emitErr.message : String(emitErr),
+      });
+    }
+  }
+
+  private async ensureWorktree(projectPath: string, projectName: string, issueNumber: number, baseBranch: string): Promise<string | null> {
+    if (!this.worktreeManager) return null;
+    try {
+      if (this.worktreeManager.exists(projectName, issueNumber)) {
+        return this.worktreeManager.getPath(projectName, issueNumber);
+      }
+      return await this.worktreeManager.create(projectPath, projectName, issueNumber, baseBranch);
+    } catch (err) {
+      log.error('Failed to ensure worktree', { issueNumber, error: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  }
+
+  private async executeRebaseTask(task: IssueTaskQueueRecord, issue: Issue): Promise<void> {
+    if (!this.issueRepo || !this.projectRepo || !this.worktreeManager) {
+      this.completeTask(task.id, 'failed', 'Missing dependencies for rebase execution');
+      return;
+    }
+
+    if (!REBASE_ALLOWED_STAGES.includes(issue.stage)) {
+      log.info('Skipping rebase: stage not allowed', { issueNumber: issue.number, stage: issue.stage });
+      this.completeTask(task.id, 'completed', 'skipped');
+      return;
+    }
+
+    const project = this.projectRepo.findById(issue.projectId);
+    if (!project) {
+      this.completeTask(task.id, 'failed', `Project not found: ${issue.projectId}`);
+      return;
+    }
+
+    if (!this.worktreeManager.exists(project.name, issue.number)) {
+      this.completeTask(task.id, 'failed', `Worktree not found for issue #${issue.number}`);
+      return;
+    }
+
+    const payload = this.parsePayload(task.payload);
+    const reEvalPlan = Boolean(payload.reEvalPlan);
+    const issueNumber = issue.number;
+    const issueId = issue.id;
+    const projectId = issue.projectId;
+
+    this.eventBus.emit('rebase_started', { issueId, projectId, issueNumber });
+
+    this.eventBus.emit('rebase_progress', { issueId, projectId, issueNumber, step: 'fetching' });
+    await smartFetch(project.path);
+
+    this.eventBus.emit('rebase_progress', { issueId, projectId, issueNumber, step: 'checking' });
+    const canFF = await this.worktreeManager.canFastForward(project.path, project.name, issueNumber, project.baseBranch);
+
+    if (canFF) {
+      this.eventBus.emit('rebase_completed', { issueId, projectId, issueNumber, rebased: false });
+      this.completeTask(task.id, 'completed', 'up_to_date');
+      return;
+    }
+
+    this.eventBus.emit('rebase_progress', { issueId, projectId, issueNumber, step: 'rebasing' });
+    const rebaseResult = await this.worktreeManager.rebaseOntoMaster(
+      project.path,
+      project.name,
+      issueNumber,
+      project.baseBranch,
+      { abortOnConflict: false },
+    );
+
+    if (!rebaseResult.success) {
+      if (!this.conflictResolutionDeps) {
+        await this.worktreeManager.abortRebase(project.name, issueNumber);
+        this.eventBus.emit('rebase_conflict', {
+          issueId,
+          projectId,
+          issueNumber,
+          conflicts: rebaseResult.conflicts,
+        });
+        this.completeTask(task.id, 'failed', 'Rebase conflicts, no auto-resolution available');
+        return;
+      }
+
+      const worktreePath = this.worktreeManager.getPath(project.name, issueNumber);
+      if (!worktreePath) {
+        await this.worktreeManager.abortRebase(project.name, issueNumber);
+        this.completeTask(task.id, 'failed', 'Worktree path not found');
+        return;
+      }
+
+      this.eventBus.emit('rebase_conflict', {
+        issueId,
+        projectId,
+        issueNumber,
+        conflicts: rebaseResult.conflicts,
+        status: 'resolving',
+      });
+      this.eventBus.emit('agent_conflict_resolution_started', {
+        issueId,
+        projectId,
+        issueNumber,
+        conflictFiles: rebaseResult.conflicts,
+      });
+
+      try {
+        const resolutionResult = await resolveConflictsViaAgent(
+          this.conflictResolutionDeps,
+          issueId,
+          projectId,
+          worktreePath,
+          rebaseResult.conflicts,
+        );
+
+        if (!resolutionResult.success) {
+          await this.worktreeManager.abortRebase(project.name, issueNumber);
+          this.eventBus.emit('agent_conflict_resolution_failed', {
+            issueId,
+            projectId,
+            issueNumber,
+            error: resolutionResult.error || 'Conflict resolution failed',
+          });
+          this.eventBus.emit('rebase_conflict', {
+            issueId,
+            projectId,
+            issueNumber,
+            conflicts: rebaseResult.conflicts,
+            status: 'failed',
+            error: resolutionResult.error || 'Conflict resolution failed',
+          });
+          this.completeTask(task.id, 'failed', resolutionResult.error || 'Conflict resolution failed');
+          return;
+        }
+
+        this.eventBus.emit('agent_conflict_resolution_completed', {
+          issueId,
+          projectId,
+          issueNumber,
+        });
+
+        const refreshedIssue = this.issueRepo!.findById(issueId);
+
+        if (refreshedIssue?.stage === Stage.Check) {
+          await this.handleReviewRebase(refreshedIssue, project, projectId, issueNumber, true);
+        }
+
+        this.eventBus.emit('rebase_progress', { issueId, projectId, issueNumber, step: 'completing' });
+        this.eventBus.emit('rebase_completed', { issueId, projectId, issueNumber, rebased: true });
+
+        if (refreshedIssue?.stage === Stage.Plan) {
+          this.handlePlanRebase(refreshedIssue, project, projectId, issueNumber);
+        }
+
+        if (refreshedIssue?.stage === Stage.Build) {
+          this.handleBuildRebase(refreshedIssue, project, projectId, issueNumber, reEvalPlan);
+        }
+
+        this.completeTask(task.id, 'completed', 'success');
+      } catch (err) {
+        log.error('Unexpected error in conflict resolution', { issueNumber, error: err instanceof Error ? err.message : String(err) });
+        try {
+          await this.worktreeManager.abortRebase(project.name, issueNumber);
+        } catch {}
+        this.eventBus.emit('rebase_conflict', {
+          issueId,
+          projectId,
+          issueNumber,
+          conflicts: rebaseResult.conflicts,
+          status: 'failed',
+          error: err instanceof Error ? err.message : 'Unexpected error during conflict resolution',
+        });
+        this.completeTask(task.id, 'failed', err instanceof Error ? err.message : 'Unexpected error during conflict resolution');
+      }
+      return;
+    }
+
+    if (issue.stage === Stage.Check) {
+      await this.handleReviewRebase(issue, project, projectId, issueNumber);
+    }
+
+    this.eventBus.emit('rebase_completed', { issueId, projectId, issueNumber, rebased: true });
+
+    if (issue.stage === Stage.Plan) {
+      this.handlePlanRebase(issue, project, projectId, issueNumber);
+    }
+
+    if (issue.stage === Stage.Build) {
+      this.handleBuildRebase(issue, project, projectId, issueNumber, reEvalPlan);
+    }
+
+    this.completeTask(task.id, 'completed', 'success');
+  }
+
+  private async handleReviewRebase(
+    issue: Issue,
+    project: { name: string; baseBranch: string },
+    projectId: string,
+    number: number,
+    skipBuildVerify?: boolean,
+  ): Promise<boolean | undefined> {
+    if (!this.worktreeManager) return undefined;
+    if (skipBuildVerify) {
+      log.info('Skipping build verification after conflict resolution', { issueNumber: number });
+      return undefined;
+    }
+    this.eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'verifying' });
+    try {
+      const worktreePath = this.worktreeManager.getPath(project.name, issue.number);
+      if (worktreePath) {
+        await execFileAsync('npm', ['run', 'build'], {
+          cwd: worktreePath,
+          timeout: 5 * 60 * 1000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  private handlePlanRebase(issue: Issue, project: { name: string }, projectId: string, number: number): void {
+    if (!this.worktreeManager || !this.issueRepo) return;
+    if (!this.hasPendingGate(number)) {
+      log.info('Skipping re-self-review injection: no pending gate for issue', { issueNumber: number });
+      return;
+    }
+    const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
+    const worktreePath = this.worktreeManager.getPath(project.name, issue.number) || process.cwd();
+    const commentRepo = (this as any).commentRepo;
+    if (commentRepo) {
+      commentRepo.create({ issueId: issue.id, body: rebaseMessage });
+    }
+    const acpOptions: AcpConnectionOptions = { cwd: worktreePath };
+    this.resumePipeline(
+      issue,
+      projectId,
+      this.issueRepo,
+      worktreePath,
+      acpOptions,
+    );
+  }
+
+  private handleBuildRebase(issue: Issue, project: { name: string }, projectId: string, number: number, reEvalPlan = false): void {
+    if (!this.worktreeManager || !this.issueRepo) return;
+
+    if (reEvalPlan) {
+      this.issueRepo.updateStage(issue.id, Stage.Plan);
+      this.issueRepo.clearApprovalState(issue.id);
+      const rebaseMessage = 'master has new changes after rebase. Code commits are preserved. Please re-evaluate design artifacts and tasks: check if the existing task breakdown is still appropriate for the updated codebase, merge/split/add/remove tasks as needed, and verify all file paths referenced in tasks.json still exist.';
+      const commentRepo = (this as any).commentRepo;
+      if (commentRepo) {
+        commentRepo.create({ issueId: issue.id, body: rebaseMessage });
+      }
+      const worktreePath = this.worktreeManager.getPath(project.name, issue.number) || process.cwd();
+      const acpOptions: AcpConnectionOptions = { cwd: worktreePath };
+      this.startPipeline(
+        issue,
+        projectId,
+        this.issueRepo,
+        worktreePath,
+        acpOptions,
+      );
+      return;
+    }
+
+    if (!this.checkpointRepo) return;
+    const changeDir = findChangeDir(
+      this.worktreeManager.getPath(project.name, issue.number) || process.cwd(),
+      issue.number,
+    );
+    if (!changeDir) return;
+    try {
+      const tasksPath = path.join(changeDir, 'tasks.json');
+      const tasksContent = fs.readFileSync(tasksPath, 'utf-8');
+      const tasksFile = JSON.parse(tasksContent);
+      for (const task of tasksFile.tasks) {
+        task.passes = false;
+        task.error = null;
+        task.attempts = 0;
+      }
+      fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
+      this.checkpointRepo.delete(issue.number, 'build');
+    } catch (err) {
+      log.warn('Failed to clear build checkpoint after rebase', { issueNumber: number, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private parsePayload(payloadStr: string): Record<string, unknown> {
+    try {
+      return JSON.parse(payloadStr);
+    } catch {
+      return {};
+    }
   }
 
   private completeTask(taskId: string, status: 'completed' | 'failed', result: string): void {
