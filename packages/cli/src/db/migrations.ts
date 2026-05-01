@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -182,6 +182,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 18) {
     migrateToVersion18(db);
+  }
+
+  if (currentVersion < 19) {
+    migrateToVersion19(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -881,5 +885,31 @@ function migrateToVersion18(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 18);
+  });
+}
+
+const CREATE_SESSION_STREAM_LOG_TABLE = `
+CREATE TABLE IF NOT EXISTS session_stream_log (
+  id          TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL,
+  issue_id    TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  event_type  TEXT NOT NULL,
+  data        TEXT NOT NULL DEFAULT '{}',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`;
+
+const CREATE_SESSION_STREAM_LOG_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_session_stream_log_session ON session_stream_log(session_id, created_at);',
+  'CREATE INDEX IF NOT EXISTS idx_session_stream_log_issue ON session_stream_log(issue_id, created_at);',
+];
+
+function migrateToVersion19(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_SESSION_STREAM_LOG_TABLE);
+    for (const indexSql of CREATE_SESSION_STREAM_LOG_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 19);
   });
 }

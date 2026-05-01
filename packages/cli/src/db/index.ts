@@ -6,6 +6,7 @@ export { ConfigRepo, DEFAULT_CONFIG, initializeDefaultConfig } from './config-re
 export { CommentRepo, type CreateCommentData } from './comment-repo';
 export { LabelRepo } from './label-repo';
 export { WorkflowLogRepo, type WorkflowLogEntry } from './workflow-log-repo';
+export { SessionStreamLogRepo, type SessionStreamLogEntry } from './session-stream-log-repo';
 export { QuestionRepo } from './question-repo';
 export { ExploreSessionRepo, type CreateExploreSessionData } from './explore-session-repo';
 export { ExploreMessageRepo, type CreateExploreMessageData } from './explore-message-repo';
