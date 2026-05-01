@@ -225,10 +225,13 @@
         "T-006"
       ],
       "notes": "The rebase handler currently has ~200 lines of inline logic (lines 2210-2429). After this task, it should be ~20 lines: validate issue exists, validate worktree exists, call enqueue, return 202. The rebase executor was built in T-003.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        484809
+      ]
     },
     {
       "id": "T-008",
