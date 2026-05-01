@@ -448,6 +448,14 @@ export class IssueRepo {
        LIMIT 1`,
       [issueId, stage],
     );
-    return !!row;
+    if (row) return true;
+
+    const nullStageRow = this.db.get<{ status: string } | undefined>(
+      `SELECT status FROM coder_session
+       WHERE issue_id = ? AND stage IS NULL AND status = 'completed'
+       LIMIT 1`,
+      [issueId],
+    );
+    return !!nullStageRow;
   }
 }

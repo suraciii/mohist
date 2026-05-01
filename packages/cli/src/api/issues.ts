@@ -758,6 +758,10 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
+      if (agentRunner) {
+        agentRunner.recoverSingleIssueById(issue.id);
+      }
+
       if (agentRunner && agentRunner.isRunning(issue.id)) {
         const response: ApiResponse = {
           success: false,

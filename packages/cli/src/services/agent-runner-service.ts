@@ -161,57 +161,71 @@ export class AgentRunnerService {
     if (orphans.length === 0) return;
 
     for (const issue of orphans) {
-      try {
-        if (issue.approvalState?.status === 'awaiting') {
-          this.pendingGates.set(issue.number, {
-            issueId: issue.id,
-            issueNumber: issue.number,
-            projectId: issue.projectId,
-            stage: issue.approvalState.stage ?? issue.stage,
-          });
-          log.info('Restored pending gate for awaiting issue', {
-            issueNumber: issue.number,
-            stage: issue.approvalState.stage ?? issue.stage,
-            action: 'pendingGate restored, status remains active',
-          });
-        } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
-          this.recoverBuildStageIssue(issue);
-        } else if (this.isStageCompletedInDb(issue)) {
-          this.issueRepo.setApprovalState(issue.id, {
-            stage: issue.stage,
-            status: 'awaiting',
-            output: { recovered: true, reason: 'agent completed but approval_state not written' },
-            requestedAt: new Date().toISOString(),
-          });
-          this.pendingGates.set(issue.number, {
-            issueId: issue.id,
-            issueNumber: issue.number,
-            projectId: issue.projectId,
-            stage: issue.stage,
-          });
-          log.info('Recovered orphaned issue — stage completed, restored approval gate', {
-            issueNumber: issue.number,
-            stage: issue.stage,
-            action: 'approval_state=awaiting, pendingGate restored',
-          });
-        } else {
-          this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
-          this.cleanupOrphanedCoderSessions(issue.id);
-          log.info('Recovered orphaned issue', {
-            issueNumber: issue.number,
-            stage: issue.stage,
-            action: 'status=interrupted, stage preserved, checkpoint preserved',
-          });
-        }
-      } catch (err) {
-        log.error('Failed to recover orphaned issue', {
-          issueNumber: issue.number,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      this.recoverSingleIssue(issue);
     }
 
     this.recoverableIssues = [];
+  }
+
+  recoverSingleIssueById(issueId: string): void {
+    if (!this.issueRepo) return;
+    const issue = this.issueRepo.findById(issueId);
+    if (!issue) return;
+    if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) return;
+    if (issue.status !== IssueStatus.Active) return;
+    this.recoverSingleIssue(issue);
+  }
+
+  private recoverSingleIssue(issue: Issue): void {
+    if (!this.issueRepo) return;
+    try {
+      if (issue.approvalState?.status === 'awaiting') {
+        this.pendingGates.set(issue.number, {
+          issueId: issue.id,
+          issueNumber: issue.number,
+          projectId: issue.projectId,
+          stage: issue.approvalState.stage ?? issue.stage,
+        });
+        log.info('Restored pending gate for awaiting issue', {
+          issueNumber: issue.number,
+          stage: issue.approvalState.stage ?? issue.stage,
+          action: 'pendingGate restored, status remains active',
+        });
+      } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
+        this.recoverBuildStageIssue(issue);
+      } else if (this.isStageCompletedInDb(issue)) {
+        this.issueRepo.setApprovalState(issue.id, {
+          stage: issue.stage,
+          status: 'awaiting',
+          output: { recovered: true, reason: 'agent completed but approval_state not written' },
+          requestedAt: new Date().toISOString(),
+        });
+        this.pendingGates.set(issue.number, {
+          issueId: issue.id,
+          issueNumber: issue.number,
+          projectId: issue.projectId,
+          stage: issue.stage,
+        });
+        log.info('Recovered orphaned issue — stage completed, restored approval gate', {
+          issueNumber: issue.number,
+          stage: issue.stage,
+          action: 'approval_state=awaiting, pendingGate restored',
+        });
+      } else {
+        this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
+        this.cleanupOrphanedCoderSessions(issue.id);
+        log.info('Recovered orphaned issue', {
+          issueNumber: issue.number,
+          stage: issue.stage,
+          action: 'status=interrupted, stage preserved, checkpoint preserved',
+        });
+      }
+    } catch (err) {
+      log.error('Failed to recover orphaned issue', {
+        issueNumber: issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private recoverBuildStageIssue(issue: Issue): void {

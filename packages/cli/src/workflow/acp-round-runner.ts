@@ -72,6 +72,7 @@ export class AcpRoundRunner {
     const connectionOptions: AcpConnectionOptions = {
       ...this.acpOptions,
       executionId: `${this.stage}-${this.issue.number}`,
+      stage: this.stage,
       onSessionUpdate: (_notification) => {
         if (!this.eventBus) return;
         try {
