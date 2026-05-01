@@ -101,11 +101,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The timeout wraps pipeline.run() inside executePipeline(), not individual stage runners. The abortPromise (already exists) handles the AbortController signal rejection.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        125057
+      ]
     },
     {
       "id": "T-005",
