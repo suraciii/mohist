@@ -46,9 +46,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Keep existing check_started and check_update events unchanged except adding snapshotSha field to check_update.",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -74,9 +74,9 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "MergeReadyCheck always returned pass (informational only), so removing it does not change check semantics. Merge readiness is already handled by merge queue rebase logic.",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -107,9 +107,9 @@
         "T-002",
         "T-003"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Keep existing runBuildTestCheck and runAiReviewCheck internal methods. Add outer loop wrapper that coordinates them. For ai-review auto-fix, spawn a coder agent with fix prompt similar to spawnBuildTestFixAgent. Read HEAD SHA via execFileSync('git', ['rev-parse', 'HEAD']) in worktree dir.",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -137,9 +137,9 @@
         "T-001",
         "T-004"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "SHA mismatch rerun: call resumePipeline targeting Check stage. Need to import CheckSuiteRepo via stateManager. For issue detail, join or query CheckSuiteRepo when returning issue data.",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
@@ -167,9 +167,9 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Follow existing SSE subscription pattern in the webui codebase. Use existing UI components (Badge, spinner) for status indicators.",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
