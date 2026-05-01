@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { DatabaseManager } from './database';
+import { DatabaseManager, type SqlValue } from './database';
 
 export interface CoderSession {
   id: string;
@@ -86,7 +86,7 @@ export class CoderSessionRepo {
 
   findAllWithIssueInfo(projectId: string, status?: string, limit: number = 50): SessionWithIssueInfo[] {
     const statusFilter = status ? ' AND cs.status = ?' : '';
-    const params: unknown[] = [projectId];
+    const params: SqlValue[] = [projectId];
     if (status) params.push(status);
     params.push(limit);
 
