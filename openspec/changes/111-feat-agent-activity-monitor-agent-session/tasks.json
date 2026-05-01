@@ -275,11 +275,14 @@
         "T-007",
         "T-008"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is the integration task. Replaces the placeholder ActivityPage from T-004.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        131464
+      ]
     },
     {
       "id": "T-010",
