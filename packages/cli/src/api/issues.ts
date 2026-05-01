@@ -996,18 +996,7 @@ export function createIssueRoutes(
         return c.json(response);
       }
 
-<<<<<<< HEAD
-=======
-      if (approvalStage && issue.approvalState) {
-        issueRepo.setApprovalState(issue.id, {
-          ...issue.approvalState,
-          status: 'approved',
-          respondedAt: new Date().toISOString(),
-        });
-      }
 
-      let nextStage: Stage | undefined;
->>>>>>> 26510d0f19 (T-005: restructure approve endpoint to validate SHA before approving for Check stage)
       if (approvalStage === Stage.Plan) {
         issueRepo.updateStage(issue.id, Stage.Build);
       }
