@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
@@ -10,6 +10,7 @@ import { EditIssueDialog } from './EditIssueDialog'
 import { NotFoundPage } from './NotFoundPage'
 import { IssueModelSelector } from './IssueModelSelector'
 import { BranchBar } from './BranchBar'
+import { IssueTimeline } from './IssueTimeline'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
@@ -263,6 +264,7 @@ export function IssueDetailPage() {
   }
 
   const stageIndex = STAGES.indexOf(issue.stage)
+
   const maxConcurrent = agentStatus?.maxConcurrentAgents ?? Infinity
   const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
   const agentProgress = thisAgent?.progress
@@ -349,35 +351,7 @@ export function IssueDetailPage() {
             )}
           </div>
 
-          <div className="mb-6">
-            <div className="flex items-center gap-1">
-              {STAGES.map((stage, i) => (
-                <Fragment key={stage}>
-                  {i > 0 && (
-                    <div
-                      className={`h-0.5 flex-1 ${i <= stageIndex ? 'bg-blue-500' : 'bg-gray-200'}`}
-                    />
-                  )}
-                  <div className="flex flex-col items-center">
-                    <div
-                      className={`h-3 w-3 rounded-full ${
-                        i < stageIndex
-                          ? 'bg-blue-500'
-                          : i === stageIndex
-                            ? 'bg-blue-500 ring-4 ring-blue-100'
-                            : 'bg-gray-200'
-                      }`}
-                    />
-                    <span
-                      className={`mt-1 text-xs ${i <= stageIndex ? 'text-blue-600 font-medium' : 'text-gray-400'}`}
-                    >
-                      {STAGE_LABELS[stage]}
-                    </span>
-                  </div>
-                </Fragment>
-              ))}
-            </div>
-          </div>
+          <IssueTimeline issueNumber={issueNumber} />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
