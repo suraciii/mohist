@@ -1362,26 +1362,50 @@ export function createIssueRoutes(
       }
 
       const branchName = `mo/issue-${number}`;
-      const diffOutput = await execFileAsync(
-        'git',
-        ['diff', `${project.baseBranch}...${branchName}`, '--stat'],
-        { cwd: project.path }
-      );
+      const diffArgs = ['diff', `${project.baseBranch}...${branchName}`];
 
-      const files: Array<{ file: string; additions: number; deletions: number }> = [];
-      const lines = diffOutput.stdout.trim().split('\n');
-      for (const line of lines) {
-        const match = line.match(/^(.+?)\s*\|\s*(\d+)\s*([+-]+)$/);
-        if (match) {
-          const diffSymbols = match[3] || '';
-          const additions = diffSymbols.split('+').length - 1;
-          const deletions = diffSymbols.split('-').length - 1;
-          files.push({
-            file: match[1].trim(),
-            additions,
-            deletions,
-          });
+      const [numstatOutput, fullDiffOutput] = await Promise.all([
+        execFileAsync('git', [...diffArgs, '--numstat'], { cwd: project.path }),
+        execFileAsync('git', diffArgs, { cwd: project.path }),
+      ]);
+
+      const numstatEntries = new Map<string, { additions: number; deletions: number; isBinary: boolean }>();
+      for (const line of numstatOutput.stdout.trim().split('\n')) {
+        if (!line.trim()) continue;
+        const parts = line.split('\t');
+        if (parts.length < 3) continue;
+        const [addStr, delStr, filePath] = parts;
+        const isBinary = addStr === '-' && delStr === '-';
+        numstatEntries.set(filePath, {
+          additions: isBinary ? 0 : parseInt(addStr, 10),
+          deletions: isBinary ? 0 : parseInt(delStr, 10),
+          isBinary,
+        });
+      }
+
+      const diffByFile = new Map<string, string>();
+      const fullDiff = fullDiffOutput.stdout;
+      if (fullDiff.trim()) {
+        const blocks = fullDiff.split(/(?=^diff --git )/m);
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+          const firstLine = block.split('\n')[0];
+          const match = firstLine.match(/^diff --git a\/(.+?) b\/(.+)$/);
+          if (match) {
+            diffByFile.set(match[2], block);
+          }
         }
+      }
+
+      const files: Array<{ file: string; additions: number; deletions: number; diff: string; isBinary: boolean }> = [];
+      for (const [filePath, stats] of numstatEntries) {
+        files.push({
+          file: filePath,
+          additions: stats.additions,
+          deletions: stats.deletions,
+          diff: stats.isBinary ? '' : (diffByFile.get(filePath) || ''),
+          isBinary: stats.isBinary,
+        });
       }
 
       const response: ApiResponse = {
