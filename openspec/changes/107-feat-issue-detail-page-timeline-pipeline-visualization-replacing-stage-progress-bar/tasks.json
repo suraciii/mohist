@@ -163,9 +163,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient.",
-      "attempts": 8,
+      "attempts": 9,
       "order": 999999,
       "error": null,
       "durations": [
