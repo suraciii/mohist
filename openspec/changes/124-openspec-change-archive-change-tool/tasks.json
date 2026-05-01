@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix openspec change archive timing and path, remove zombie archive_change tool",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -22,8 +21,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/artifacts/change-artifacts-manager.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Current archiveChange() at line 284 uses plain <name> without date prefix. Reference archive-change.ts conflict handling pattern but target openspec/changes/archive/ not openspec/archive/. CRITICAL: restoreChange() at line 308 uses startsWith('${issueNumber}-') which won't match date-prefixed archives like '2026-05-01-42-fix-auth'. Must update search to handle date prefix AND strip prefix on restore."
+      "passes": true,
+      "notes": "Current archiveChange() at line 284 uses plain <name> without date prefix. Reference archive-change.ts conflict handling pattern but target openspec/changes/archive/ not openspec/archive/. CRITICAL: restoreChange() at line 308 uses startsWith('${issueNumber}-') which won't match date-prefixed archives like '2026-05-01-42-fix-auth'. Must update search to handle date prefix AND strip prefix on restore.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        516547
+      ]
     },
     {
       "id": "T-002",
@@ -41,9 +46,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/check-stage-runner.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Design D1: archive in CheckStageRunner between allPassed and requiresApproval. Design D3: extend stage-context.ts interface. Risk mitigation: catch archive errors gracefully per design doc."
+      "notes": "Design D1: archive in CheckStageRunner between allPassed and requiresApproval. Design D3: extend stage-context.ts interface. Risk mitigation: catch archive errors gracefully per design doc.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -60,9 +70,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/issue-service.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Remove lines 280-287 in issue-service.ts performCleanup(). The ChangeArtifactsManager import can stay if unarchive still uses it (line 226)."
+      "notes": "Remove lines 280-287 in issue-service.ts performCleanup(). The ChangeArtifactsManager import can stay if unarchive still uses it (line 226).",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -80,7 +95,10 @@
       "output": "packages/cli/src/tools/archive-change.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "createArchiveChangeTool is never imported anywhere. Safe to delete entire file."
+      "notes": "createArchiveChangeTool is never imported anywhere. Safe to delete entire file.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -100,9 +118,17 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/",
-      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Check existing test patterns in packages/cli/tests/ before writing. Follow the project's test conventions."
+      "notes": "Check existing test patterns in packages/cli/tests/ before writing. Follow the project's test conventions.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
