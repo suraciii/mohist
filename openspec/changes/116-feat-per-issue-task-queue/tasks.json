@@ -260,10 +260,13 @@
         "T-007"
       ],
       "notes": "This is pure deletion. All API endpoints have been converted to enqueue in T-006 and T-007, so the old methods are unused. Search for all references to activeAgents, pendingGates, startPipeline, resumePipeline, isRunning, getMaxConcurrentAgents across the codebase and remove them.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        604008
+      ]
     }
   ]
 }
