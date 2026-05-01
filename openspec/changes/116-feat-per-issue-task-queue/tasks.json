@@ -159,10 +159,14 @@
         "T-004"
       ],
       "notes": "Follow existing test patterns in packages/cli/tests/. Use vitest. Create an in-memory SQLite DB for repo tests. For AgentRunnerService tests, mock the dependencies (IssueRepo, EventBus, etc.).",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 2,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        621750,
+        245745
+      ]
     },
     {
       "id": "T-006",
