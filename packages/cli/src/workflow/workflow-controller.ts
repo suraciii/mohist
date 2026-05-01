@@ -1015,16 +1015,49 @@ export class WorkflowController {
         }
       }
 
+      // Check user-approval state
+      const isUserApproved = issue.approvalState?.status === 'approved';
+      const userApprovalStatus = isUserApproved ? 'passed' : 'pending';
+
       if (this.checkSuiteRepo) {
-        this.checkSuiteRepo.updateStatus(suiteId, 'awaiting-approval');
+        this.checkSuiteRepo.updateChecks(suiteId, 'user-approval', {
+          status: userApprovalStatus,
+          output: { approved: isUserApproved, requestedAt: issue.approvalState?.requestedAt },
+          ranAt: isUserApproved ? new Date().toISOString() : undefined,
+        });
       }
-      this.emitSuiteStatusChanged(issue, 'awaiting-approval', snapshotSha);
-      this.writeLog(workflowLogRepo, issueId, 'check_completed', { attempt, snapshotSha, overallResult: 'passed' });
+      this.emitSafe('check_update', {
+        issueId,
+        projectId,
+        checkName: 'user-approval',
+        status: userApprovalStatus,
+        snapshotSha,
+      });
+
+      if (!isUserApproved) {
+        if (this.checkSuiteRepo) {
+          this.checkSuiteRepo.updateStatus(suiteId, 'awaiting-approval');
+        }
+        this.emitSuiteStatusChanged(issue, 'awaiting-approval', snapshotSha);
+        this.writeLog(workflowLogRepo, issueId, 'check_completed', { attempt, snapshotSha, overallResult: 'passed' });
+        return {
+          success: true,
+          requiresApproval: true,
+          output: { checks: [buildTestResult], overallResult: 'passed' },
+          message: 'Check suite completed, awaiting user approval',
+        };
+      }
+
+      if (this.checkSuiteRepo) {
+        this.checkSuiteRepo.updateStatus(suiteId, 'passed');
+      }
+      this.emitSuiteStatusChanged(issue, 'passed', snapshotSha);
+      this.writeLog(workflowLogRepo, issueId, 'check_completed', { attempt, snapshotSha, overallResult: 'passed', userApproved: true });
       return {
         success: true,
         requiresApproval: true,
-        output: { checks: [buildTestResult], overallResult: 'passed' },
-        message: 'Check suite completed, awaiting user approval',
+        output: { checks: [buildTestResult], overallResult: 'passed', userApproved: true },
+        message: 'Check suite completed and approved, awaiting merge',
       };
     }
 

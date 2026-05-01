@@ -696,18 +696,6 @@ export function createIssueRoutes(
         agentRunner.recoverSingleIssueById(issue.id);
       }
 
-      if (issue.stage === Stage.Check) {
-        const issueRepo = stateManager.getIssueRepo();
-        if (issueRepo && issueRepo.hasCompletedCoderSession(issue.id, 'check')) {
-          issueRepo.setApprovalState(issue.id, {
-            stage: Stage.Check,
-            status: 'awaiting',
-            output: { recovered: true, reason: 'check stage completed, review recovery' },
-            requestedAt: new Date().toISOString(),
-          });
-        }
-      }
-
       if (agentRunner) {
         const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
         const response: ApiResponse = {
@@ -972,14 +960,19 @@ export function createIssueRoutes(
 
         mergeQueue.enqueue(projectId, number);
 
+        const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
+
         const response: ApiResponse = {
           success: true,
           data: {
             issue: issueService.getByNumber(projectId, number),
-            message: `Issue #${number} approved, enqueued for merge`
+            taskId: result.taskId,
+            status: result.status,
+            queuePosition: result.queuePosition,
+            message: `Issue #${number} approved, enqueued for merge and resuming pipeline`,
           }
         };
-        return c.json(response);
+        return c.json(response, 202);
       }
 
 
@@ -1083,6 +1076,18 @@ export function createIssueRoutes(
 
       if (rejectedStage === Stage.Check) {
         issueRepo.updateStage(issue.id, Stage.Build);
+
+        if (checkSuiteRepo) {
+          const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
+          if (activeSuite) {
+            checkSuiteRepo.updateChecks(activeSuite.id, 'user-approval', {
+              status: 'failed',
+              output: { rejected: true, message: message || 'User rejected' },
+              ranAt: new Date().toISOString(),
+            });
+            checkSuiteRepo.updateStatus(activeSuite.id, 'failed');
+          }
+        }
       }
 
       const result = agentRunner.enqueue(issue.id, 'resume-pipeline');

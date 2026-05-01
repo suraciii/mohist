@@ -423,6 +423,7 @@ export interface CheckState {
 export interface CheckSuiteChecks {
   'build-test': CheckState
   'ai-review': CheckState
+  'user-approval': CheckState
 }
 
 export interface CheckSuite {

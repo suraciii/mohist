@@ -441,21 +441,4 @@ export class IssueRepo {
     return row?.count || 0;
   }
 
-  hasCompletedCoderSession(issueId: string, stage: string): boolean {
-    const row = this.db.get<{ status: string } | undefined>(
-      `SELECT status FROM coder_session
-       WHERE issue_id = ? AND stage = ? AND status = 'completed'
-       LIMIT 1`,
-      [issueId, stage],
-    );
-    if (row) return true;
-
-    const nullStageRow = this.db.get<{ status: string } | undefined>(
-      `SELECT status FROM coder_session
-       WHERE issue_id = ? AND stage IS NULL AND status = 'completed'
-       LIMIT 1`,
-      [issueId],
-    );
-    return !!nullStageRow;
-  }
 }

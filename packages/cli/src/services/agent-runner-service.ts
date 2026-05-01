@@ -323,18 +323,6 @@ export class AgentRunnerService {
         });
       } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
         this.recoverBuildStageIssue(issue);
-      } else if (this.isStageCompletedInDb(issue)) {
-        this.issueRepo.setApprovalState(issue.id, {
-          stage: issue.stage,
-          status: 'awaiting',
-          output: { recovered: true, reason: 'agent completed but approval_state not written' },
-          requestedAt: new Date().toISOString(),
-        });
-        log.info('Recovered orphaned issue — stage completed, restored approval gate', {
-          issueNumber: issue.number,
-          stage: issue.stage,
-          action: 'approval_state=awaiting',
-        });
       } else {
         this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
         this.cleanupOrphanedCoderSessions(issue.id, issue.number);
@@ -513,15 +501,6 @@ export class AgentRunnerService {
         error: emitErr instanceof Error ? emitErr.message : String(emitErr),
       });
     }
-  }
-
-  private isStageCompletedInDb(issue: Issue): boolean {
-    if (!this.issueRepo) return false;
-
-    const approvalStages: Stage[] = [Stage.Plan, Stage.Check];
-    if (!approvalStages.includes(issue.stage)) return false;
-
-    return this.issueRepo.hasCompletedCoderSession(issue.id, issue.stage);
   }
 
   private cleanupOrphanedCoderSessions(issueId: string, issueNumber: number): void {
