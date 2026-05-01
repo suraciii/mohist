@@ -28,7 +28,7 @@ The pipeline metaphor (Plan → Build → Review → Done) is mohist's core, yet
 
 ### D1: Vertical timeline replaces horizontal progress bar
 
-The existing horizontal stage progress bar (lines 376-404 in IssueDetailPage.tsx) is replaced entirely with a vertical `IssueTimeline` component below the issue title. This is the user's first visual anchor point — vertical orientation better expresses "how we got here" vs horizontal's "where we are".
+The existing horizontal stage progress bar (lines 352-380 in IssueDetailPage.tsx, the `<div className="mb-6">` block containing `STAGES.map`) is replaced entirely with a vertical `IssueTimeline` component below the issue title. This is the user's first visual anchor point — vertical orientation better expresses "how we got here" vs horizontal's "where we are".
 
 **Alternatives considered:**
 - Keep horizontal bar and add timeline as secondary element → rejected (adds page complexity without solving the core UX problem)
@@ -93,15 +93,23 @@ function scheduleUpdate() {
 **Alternatives considered:**
 - Duplicate the round inference in `useIssueTimeline` → rejected (code duplication, divergence risk)
 
-### D6: Timeline node types
+### D6: Timeline node types and Stage enum mapping
+
+Timeline labels are user-facing abstractions that map to underlying data sources:
 
 ```
-Created        → issues.createdAt
-Plan session   → coder_session(stage=plan).createdAt → completedAt
-Approved gate  → issues.approvalState.requestedAt (if status === 'awaiting')
-Build session  → coder_session(stage=build).createdAt → completedAt
-Pending stages → inferred from stage ordering, no timestamps
+Timeline Label    → Data Source                              Stage Enum
+─────────────────────────────────────────────────────────────────────────
+Created           → issues.createdAt                         (event, not a stage)
+Plan              → coder_session(stage=plan)                 Stage.Plan
+Approved          → issues.approvalState.requestedAt          (approval gate event)
+Build             → coder_session(stage=build)                Stage.Build
+Review            → coder_session(stage=check)                Stage.Check  ← "Review" is display label for Stage.Check
+Done              → inferred from Stage.Done                  Stage.Done
+Pending stages    → inferred from STAGE_ORDER, no timestamps
 ```
+
+**Note:** `Stage.Explore` and `Stage.Draft/Backlog` are intentionally omitted from the timeline. The timeline starts with "Created" (issue creation timestamp) and the Explore phase is considered part of the pre-Plan workflow, not a distinct pipeline stage visible to the user. This simplification keeps the timeline focused on the core pipeline: Plan → Build → Review → Done.
 
 Duration is computed as `completedAt - createdAt` for completed stages.
 
@@ -119,7 +127,7 @@ Duration is computed as `completedAt - createdAt` for completed stages.
 
 1. **Create `useIssueTimeline.ts`** — new hook aggregating issue + sessions + workflow logs
 2. **Create `IssueTimeline.tsx`** — timeline UI component with three-level collapse
-3. **Modify `IssueDetailPage.tsx`** — replace lines 376-404 (horizontal progress bar) with `<IssueTimeline issueNumber={issueNumber} />`
+3. **Modify `IssueDetailPage.tsx`** — replace lines 352-380 (horizontal progress bar, the `<div className="mb-6">` block containing `STAGES.map`) with `<IssueTimeline issueNumber={issueNumber} />`
 4. **Add SSE subscriptions** — hook listens for `plan_round_start`, `plan_round_complete`, `ralph_task_update`, `build_started`, `build_completed`
 5. **Test** — verify real-time updates during active issue, verify mobile layout at 375px width
 6. **Remove old progress bar** — confirm no other component depends on the horizontal bar
