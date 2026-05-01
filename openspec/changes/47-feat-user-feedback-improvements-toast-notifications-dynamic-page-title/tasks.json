@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add toast notifications for mutations and SSE events, plus dynamic page title reflecting route and agent activity",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -18,8 +17,14 @@
       "type": "CONFIG",
       "output": "packages/cli/web/src/App.tsx",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Run: cd packages/cli/web && npm install sonner"
+      "passes": true,
+      "notes": "Run: cd packages/cli/web && npm install sonner",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        58816
+      ]
     },
     {
       "id": "T-002",
@@ -39,7 +44,10 @@
       "output": "packages/cli/web/src/hooks/useDocumentTitle.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -56,9 +64,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Mutation hooks: useCreateProject, useDeleteProject, useUseProject, useSendMessage, useUnarchiveIssue, useSaveProvider, useDeleteProvider, useRebuildSystem, useUpdateConfig, useUpdateOpencodeModel, useSetModel, useSetOpencodeModelConfig, useSetLogLevel, useSetAgentRuntime, useSetStageModels, useCreateExploreSession, useUpdateExploreSessionTitle, useTestProvider. Also covers specs/toast-notifications/spec.md#mutation-error-toasts"
+      "notes": "Mutation hooks: useCreateProject, useDeleteProject, useUseProject, useSendMessage, useUnarchiveIssue, useSaveProvider, useDeleteProvider, useRebuildSystem, useUpdateConfig, useUpdateOpencodeModel, useSetModel, useSetOpencodeModelConfig, useSetLogLevel, useSetAgentRuntime, useSetStageModels, useCreateExploreSession, useUpdateExploreSessionTitle, useTestProvider. Also covers specs/toast-notifications/spec.md#mutation-error-toasts",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -78,9 +91,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useSSE.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Parse current issue number from window.location.pathname matching /issue/(\\d+). Use a useRef updated on location change."
+      "notes": "Parse current issue number from window.location.pathname matching /issue/(\\d+). Use a useRef updated on location change.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -102,9 +120,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/*.tsx",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "KanbanView is defined in App.tsx, not a separate component file."
+      "notes": "KanbanView is defined in App.tsx, not a separate component file.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -120,9 +143,16 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "Verification that build + tests pass",
-      "dependsOn": ["T-003", "T-004", "T-005"],
+      "dependsOn": [
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
