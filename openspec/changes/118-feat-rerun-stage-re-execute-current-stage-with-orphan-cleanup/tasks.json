@@ -1,0 +1,87 @@
+{
+  "project": "mohist",
+  "description": "Add POST /issues/:number/rerun endpoint and frontend Rerun Stage button — re-execute current pipeline stage with orphan session cleanup",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add failRunningByIssueId to CoderSessionRepo",
+      "spec": "specs/rerun-stage/spec.md#orphan-coder-session-cleanup",
+      "description": "Add a `failRunningByIssueId(issueId: string): number` method to CoderSessionRepo that bulk-updates all coder sessions with status='running' for the given issue to status='failed', sets completed_at to now, and returns the count of affected rows.",
+      "acceptanceCriteria": [
+        "Method updates all running sessions for an issue to failed with completed_at set",
+        "Method returns count of affected rows",
+        "No running sessions for an issue is a no-op returning 0",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/db/coder-session-repo.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D2: bulk UPDATE WHERE issue_id = ? AND status = 'running'"
+    },
+    {
+      "id": "T-002",
+      "title": "Add POST /:number/rerun endpoint to issues API",
+      "spec": "specs/http-api/spec.md#api-rerun",
+      "description": "Add the rerun route handler in issues.ts. Validate issue exists, stage is not draft/done, no agent running. Then: fail orphan coder sessions via failRunningByIssueId, clear current stage checkpoint via checkpointRepo.delete, clear approval_state/blocked_reason/retry_count, set status to active (also reopens closed issues), ensure worktree exists, call agentRunner.resumePipeline().",
+      "acceptanceCriteria": [
+        "Returns 200 with issue data on successful rerun for active/blocked/interrupted/closed issues",
+        "Returns 409 when agent is running on the issue",
+        "Returns 404 when issue does not exist",
+        "Returns 400 with guidance when stage is draft or done",
+        "Orphan coder sessions are cleaned to failed",
+        "Current stage checkpoint is cleared",
+        "approval_state, blocked_reason cleared, retry_count reset to 0",
+        "Pipeline resumes from current stage via resumePipeline()",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D1: logic in API handler, D3: use resumePipeline(), D4: reject draft/done"
+    },
+    {
+      "id": "T-003",
+      "title": "Add rerunIssue to frontend API client",
+      "spec": "specs/web-ui/spec.md#rerunIssue-api-client",
+      "description": "Add `rerunIssue(number: number)` method to api.ts that sends POST /issues/:number/rerun and returns the issue data with message. Follow the existing pattern of startIssue, reopenIssue, etc.",
+      "acceptanceCriteria": [
+        "rerunIssue(5) sends POST /issues/5/rerun",
+        "Returns typed response with issue and message",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/api.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-004",
+      "title": "Add Rerun Stage button to IssueDetailPage and IssueCard",
+      "spec": "specs/web-ui/spec.md#rerun-button-ui",
+      "description": "Add a rerunMutation (useMutation calling api.rerunIssue) and 'Rerun Stage' button to IssueDetailPage, visible when stage is not draft/done and no agent is running. Also add a smaller Rerun button to IssueCard for the same conditions. Both invalidate ['issues'] and ['agent-status'] query keys on success.",
+      "acceptanceCriteria": [
+        "IssueDetailPage shows Rerun Stage button when stage is not draft/done and no agent running",
+        "IssueDetailPage hides Rerun Stage button when agent is running or stage is draft/done",
+        "IssueCard shows Rerun button under same conditions",
+        "Clicking Rerun calls POST /issues/:number/rerun and refreshes state on success",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Also modifies IssueCard.tsx. Design D5: reuse existing mutation pattern."
+    }
+  ]
+}
