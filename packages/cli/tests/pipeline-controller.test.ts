@@ -35,8 +35,12 @@ vi.mock('fs', () => ({
     if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) {
       return '## Result: PASS\nAll checks passed.';
     }
-    return '{}';
+    if (typeof p === 'string' && p.endsWith('tasks.json')) {
+      return JSON.stringify({ version: 1, tasks: [{ id: 'T-001', title: 'Test task', passes: true }] });
+    }
+    return '# content';
   }),
+  statSync: vi.fn().mockReturnValue({ size: 100 }),
 }));
 
 vi.mock('child_process', () => ({
