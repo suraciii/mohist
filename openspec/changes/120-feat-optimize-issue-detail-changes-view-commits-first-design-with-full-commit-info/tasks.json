@@ -79,11 +79,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Files to modify: (1) packages/cli/web/src/lib/types.ts — add fields to DiffFile and CommitEntry, (2) packages/cli/web/src/components/IssueDetailPage.tsx — all UI changes. DiffViewer is at packages/cli/web/src/components/DiffViewer.tsx and accepts a single `diff: string` prop. Design decision D1: reuse DiffViewer as-is. Design decision D4: DIFF_STAGES = {explore, plan, build, check, done}. Design decision D5: truncate file list at 5. Import DiffViewer at the top of IssueDetailPage.tsx.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        228347
+      ]
     }
   ]
 }
