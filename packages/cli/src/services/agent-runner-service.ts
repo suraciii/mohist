@@ -276,12 +276,10 @@ export class AgentRunnerService {
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active })
       .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog);
 
-    const activeMergeStates = new Set(['resolving', 'rebasing', 'merging']);
-
     const orphans = activeIssues.filter(issue => {
-      if (this.runningSlots.has(issue.id)) return false;
-      if (issue.approvalState?.status === 'awaiting') return false;
-      if (issue.mergeState && activeMergeStates.has(issue.mergeState)) return false;
+      if (this.activeAgents.has(issue.id)) return false;
+      if (this.pendingGates.has(issue.number)) return false;
+      if (issue.mergeState) return false;
       return true;
     });
 
