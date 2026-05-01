@@ -2624,6 +2624,99 @@ export function createIssueRoutes(
     }
   });
 
+  app.post('/:number/rerun', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
+        return c.json({ success: false, error: `Issue #${number} is in ${issue.stage} stage. Use start instead of rerun.` } satisfies ApiResponse, 400);
+      }
+
+      if (issue.stage === Stage.Done) {
+        return c.json({ success: false, error: `Issue #${number} is in done stage. Rerun is not supported for completed issues.` } satisfies ApiResponse, 400);
+      }
+
+      if (agentRunner && agentRunner.isRunning(issue.id)) {
+        return c.json({ success: false, error: `Issue #${number} already has an agent running` } satisfies ApiResponse, 409);
+      }
+
+      if (!agentRunner) {
+        return c.json({ success: false, error: 'AgentRunnerService not configured' } satisfies ApiResponse, 500);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        return c.json({ success: false, error: 'Project not found' } satisfies ApiResponse, 404);
+      }
+
+      if (coderSessionRepo) {
+        coderSessionRepo.failRunningByIssueId(issue.id);
+      }
+
+      if (checkpointRepo) {
+        checkpointRepo.delete(issue.number, issue.stage);
+      }
+
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.clearApprovalState(issue.id);
+      issueRepo.updateBlockedReason(issue.id, null);
+      issueRepo.updateRetryCount(issue.id, 0);
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+      let worktreePath = process.cwd();
+      if (worktreeManager) {
+        const existingPath = worktreeManager.getPath(project.name, issue.number);
+        if (existingPath) {
+          worktreePath = existingPath;
+        } else {
+          worktreePath = await worktreeManager.create(project.path, project.name, issue.number, project.baseBranch);
+        }
+      }
+
+      const updatedIssue = issueService.getByNumber(projectId, number)!;
+
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
+        issueId: updatedIssue.id,
+        projectId,
+        workflowLogRepo,
+        coderSessionRepo,
+        eventBus,
+        issueNumber: updatedIssue.number,
+        opencodeBinPath,
+        model: updatedIssue.model ?? undefined,
+      };
+
+      agentRunner.resumePipeline(
+        updatedIssue,
+        projectId,
+        issueRepo,
+        worktreePath,
+        acpOptions,
+        (issueId, status) => issueService.setStatus(issueId, status),
+      );
+
+      return c.json({
+        success: true,
+        data: {
+          issue: updatedIssue,
+          message: `Issue #${number} rerun from ${updatedIssue.stage} stage`,
+        },
+      } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
   app.post('/:number/retry-merge', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
