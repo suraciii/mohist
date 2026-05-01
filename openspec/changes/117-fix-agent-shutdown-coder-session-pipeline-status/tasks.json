@@ -72,11 +72,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "This is a prerequisite for T-005 (review-recovery detection uses hasCompletedCoderSession which queries by stage column). Currently stage column is always null in coder_session inserts.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        109283
+      ]
     },
     {
       "id": "T-004",
