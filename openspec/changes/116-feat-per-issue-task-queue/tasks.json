@@ -55,10 +55,13 @@
         "T-001"
       ],
       "notes": "This is the core task. The queue logic is additive — do NOT remove activeAgents/pendingGates yet. The old executePipeline() is called by the new executeTask() dispatcher (T-003). For now, enqueue just manages the queue data structures and schedule() calls a placeholder executeTask() that will be filled in T-003.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        336211
+      ]
     },
     {
       "id": "T-003",
