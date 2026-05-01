@@ -206,11 +206,14 @@
       "dependsOn": [
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Duration timer driven by parent's setInterval(1000) render counter. See design.md D7.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        109355
+      ]
     },
     {
       "id": "T-008",
