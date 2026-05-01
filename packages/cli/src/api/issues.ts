@@ -760,78 +760,11 @@ export function createIssueRoutes(
         return c.json(response, 409);
       }
 
-      const project = projectService.getById(projectId);
-      if (!project) {
-        log.warn('Project not found', { projectId, issueNumber: number });
-        const response: ApiResponse = {
-          success: false,
-          error: 'Project not found'
-        };
-        return c.json(response, 404);
-      }
-
-      let worktreePath = process.cwd();
-      if (worktreeManager) {
-        const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || process.cwd();
-      }
-
-      let isReviewRecovery = false;
-      if (issue.stage === Stage.Check) {
-        const changeDir = findChangeDir(worktreePath, issue.number);
-        if (changeDir) {
-          try {
-            const tasksPath = path.join(changeDir, 'tasks.json');
-            const tasksContent = fs.readFileSync(tasksPath, 'utf-8');
-            const tasksFile = JSON.parse(tasksContent);
-            if (tasksFile.tasks && tasksFile.tasks.length > 0 && tasksFile.tasks.every((t: { passes: boolean }) => t.passes)) {
-              isReviewRecovery = true;
-            }
-          } catch {}
-        }
-      }
-
-      if (agentRunner) {
-        const acpOptions: AcpConnectionOptions = {
-          cwd: worktreePath,
-          issueId: issue.id,
-          projectId,
-          workflowLogRepo,
-          coderSessionRepo,
-          eventBus,
-          issueNumber: issue.number,
-          opencodeBinPath,
-          model: issue.model ?? undefined,
-        };
-
-        agentRunner.resumePipeline(
-          issue,
-          projectId,
-          stateManager.getIssueRepo(),
-          worktreePath,
-          acpOptions,
-          (issueId, status) => issueService.setStatus(issueId, status),
-        );
-
-        const response: ApiResponse = {
-          success: true,
-          data: {
-            issue,
-            message: isReviewRecovery
-              ? `Issue #${number} reopened at review stage, use start to continue`
-              : `Issue #${number} reopened and resumed from stage ${issue.stage}`,
-          }
-        };
-        return c.json(response);
-      }
-
       const response: ApiResponse = {
         success: true,
         data: {
           issue,
-          message: isReviewRecovery
-            ? `Issue #${number} reopened at review stage, use start to continue`
-            : `Issue #${number} reopened`,
+          message: `Issue #${number} reopened at stage ${issue.stage}. Use start to continue.`,
         }
       };
       return c.json(response);
