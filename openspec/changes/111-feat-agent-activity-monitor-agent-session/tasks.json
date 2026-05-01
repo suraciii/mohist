@@ -254,14 +254,16 @@
       "dependsOn": [
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D4. Pure client-side computation, no backend involvement.",
-      "attempts": 2,
+      "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
         286598,
-        117058
+        117058,
+        630249,
+        30000
       ]
     },
     {
