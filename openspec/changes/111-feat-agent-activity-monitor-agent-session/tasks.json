@@ -51,11 +51,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D6 — reuse existing createAgentRoutes, extend its signature.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        85945
+      ]
     },
     {
       "id": "T-003",
