@@ -115,7 +115,15 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const eventBus = new EventBus();
   const workflowLogRepo = stateManager.getWorkflowLogRepo();
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo());
+  const conflictResolutionDeps: ConflictResolutionDeps = {
+    issueRepo: stateManager.getIssueRepo(),
+    workflowLogRepo,
+    coderSessionRepo: stateManager.getCoderSessionRepo(),
+    eventBus,
+    opencodeBinPath,
+  };
+
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getAgentSessionMessageRepo(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps);
 
   agentRunner.setLlmConfig(fileConfig);
 
@@ -128,14 +136,6 @@ async function main(): Promise<void> {
 
   const issueRepo = stateManager.getIssueRepo();
   const coderSessionRepo = stateManager.getCoderSessionRepo();
-
-  const conflictResolutionDeps: ConflictResolutionDeps = {
-    issueRepo,
-    workflowLogRepo,
-    coderSessionRepo,
-    eventBus,
-    opencodeBinPath,
-  };
 
   const mergeQueue = new MergeQueue({
     worktreeManager,
