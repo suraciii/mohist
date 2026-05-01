@@ -68,8 +68,6 @@ export class WorkflowController {
   private projectId?: string;
   private checkpointRepo?: PipelineCheckpointRepo;
   private signal?: AbortSignal;
-  private worktreeManager?: any;
-  private projectRepo?: any;
   private _onChildProcess?: WorkflowControllerOptions['onChildProcess'];
   private _agentConfigCache?: AgentConfig;
 
@@ -81,8 +79,6 @@ export class WorkflowController {
     this.projectId = options.projectId;
     this.checkpointRepo = options.checkpointRepo;
     this.signal = options.signal;
-    this.worktreeManager = options.worktreeManager;
-    this.projectRepo = options.projectRepo;
     this._onChildProcess = options.onChildProcess;
   }
 
@@ -807,28 +803,6 @@ export class WorkflowController {
     const workflow = loadWorkflow(this.worktreePath);
     const checksConfig = typeof workflow === 'string' ? DEFAULT_CHECKS_CONFIG : loadChecksConfig(workflow);
 
-    if (checksConfig.ffMerge.enabled) {
-      this.emitSafe('check_update', {
-        issueId: issue.id,
-        projectId: this.projectId ?? issue.projectId,
-        checkName: 'merge-ready',
-        status: 'running',
-      });
-      this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'merge-ready', status: 'running' });
-
-      const mergeReadyResult = await this.runMergeReadyCheck(issue);
-      checks.push(mergeReadyResult);
-
-      this.emitSafe('check_update', {
-        issueId: issue.id,
-        projectId: this.projectId ?? issue.projectId,
-        checkName: 'merge-ready',
-        status: mergeReadyResult.status,
-        duration: mergeReadyResult.duration,
-      });
-      this.writeLog(workflowLogRepo, issue.id, 'check_update', { checkName: 'merge-ready', status: mergeReadyResult.status, duration: mergeReadyResult.duration });
-    }
-
     if (checksConfig.aiReview.enabled) {
       this.emitSafe('check_update', {
         issueId: issue.id,
@@ -1023,67 +997,6 @@ export class WorkflowController {
         try { await conn.close(); } catch { /* ignore */ }
       }
       return { success: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-
-  private async runMergeReadyCheck(issue: Issue): Promise<any> {
-    const startTime = Date.now();
-
-    if (!this.worktreeManager || !this.projectRepo) {
-      const duration = Date.now() - startTime;
-      log.warn('Merge Ready check skipped: worktreeManager or projectRepo not available', {
-        issueNumber: issue.number,
-      });
-      return {
-        name: 'merge-ready',
-        status: 'passed',
-        duration,
-        summary: 'Merge Ready: skipped (worktreeManager or projectRepo not configured)',
-      };
-    }
-
-    const project = this.projectRepo.findById(issue.projectId);
-    if (!project) {
-      const duration = Date.now() - startTime;
-      log.warn('Merge Ready check skipped: project not found', {
-        issueNumber: issue.number,
-        projectId: issue.projectId,
-      });
-      return {
-        name: 'merge-ready',
-        status: 'passed',
-        duration,
-        summary: 'Merge Ready: skipped (project not found)',
-      };
-    }
-
-    try {
-      const canFF = await this.worktreeManager.canFastForward(
-        project.path,
-        project.name,
-        issue.number,
-        project.baseBranch,
-      );
-      const duration = Date.now() - startTime;
-
-      return {
-        name: 'merge-ready',
-        status: 'passed',
-        duration,
-        summary: canFF ? 'Merge Ready: yes' : 'Merge Ready: needs rebase',
-      };
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      log.warn('Merge Ready check error', {
-        issueNumber: issue.number,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return {
-        name: 'merge-ready',
-        status: 'passed',
-        duration,
-        summary: `Merge Ready: check error (${err instanceof Error ? err.message : String(err)})`,
-      };
     }
   }
 
