@@ -7,8 +7,9 @@ import type { CheckResult, CheckSuiteOutput } from '../lib/types'
 
 function parseCheckSuite(output?: Record<string, unknown>): CheckSuiteOutput | null {
   if (!output) return null
-  const checks = Array.isArray(output.checks)
-    ? output.checks
+  const rawChecks = output.checks ?? output.checkResults
+  const checks = Array.isArray(rawChecks)
+    ? rawChecks
         .filter((c): c is Record<string, unknown> => typeof c === 'object' && c !== null)
         .map((c) => ({
           name: typeof c.name === 'string' ? c.name : 'unknown',
@@ -232,7 +233,7 @@ export function CheckResultsPanel({ output, issueNumber, onViewFiles }: CheckRes
         </div>
       )}
 
-      {allPassed && (
+      {(allPassed || !suite || (suite && suite.checks.length === 0)) && (
         <div className="space-y-3 pt-2 border-t border-gray-100">
           <button
             onClick={() => {
