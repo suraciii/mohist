@@ -82,11 +82,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Two write sites to modify: line ~246 (runAcpSession) and line ~663 (createAcpConnection). The writeSessionLog helper does NOT change.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        86661
+      ]
     },
     {
       "id": "T-004",
