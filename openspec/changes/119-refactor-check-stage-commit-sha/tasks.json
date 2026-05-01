@@ -107,11 +107,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep existing runBuildTestCheck and runAiReviewCheck internal methods. Add outer loop wrapper that coordinates them. For ai-review auto-fix, spawn a coder agent with fix prompt similar to spawnBuildTestFixAgent. Read HEAD SHA via execFileSync('git', ['rev-parse', 'HEAD']) in worktree dir.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        330126
+      ]
     },
     {
       "id": "T-005",
