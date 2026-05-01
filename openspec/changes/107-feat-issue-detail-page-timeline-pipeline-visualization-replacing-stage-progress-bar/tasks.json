@@ -86,7 +86,7 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Remove the Fragment + STAGES.map section that renders the horizontal bar",
       "attempts": 4,
       "order": 999999,
