@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useIssue, useBuildStatus, useTasks } from './useQueries'
 import { useCoderSessions } from './useCoderSessions'
 import { onAgentEvent } from '../lib/agent-events'
-import { api } from '../lib/api'
 import { reconstructRoundsFromLogs } from './useSessionTimeline'
 import type {
   Stage,
@@ -248,25 +247,11 @@ export function useIssueTimeline(issueNumber: number) {
   const [planSteps, setPlanSteps] = useState<PlanStep[]>([])
   const [timeline, setTimeline] = useState<TimelineNode[]>([])
 
-  const logsRef = useRef<WorkflowLogItem[]>([])
   const pendingRef = useRef<PendingSSEEvent[]>([])
   const rafRef = useRef<number | null>(null)
   const timeoutRef = useRef<number | null>(null)
   const lastFlushRef = useRef(0)
   const mountedRef = useRef(true)
-  const logsFetchedRef = useRef(false)
-
-  useEffect(() => {
-    if (issueNumber <= 0) return
-    let cancelled = false
-    logsFetchedRef.current = false
-    api.getWorkflowLogs(issueNumber).then((logs) => {
-      if (cancelled) return
-      logsRef.current = logs
-      logsFetchedRef.current = true
-    })
-    return () => { cancelled = true }
-  }, [issueNumber])
 
   useEffect(() => {
     if (buildStatus?.tasks) {
@@ -463,7 +448,7 @@ export function useIssueTimeline(issueNumber: number) {
 
   useEffect(() => {
     if (issueLoading || sessionsLoading) return
-    const result = buildTimeline(issue, sessions, logsRef.current, taskProgress, planSteps)
+    const result = buildTimeline(issue, sessions, [], taskProgress, planSteps)
     setTimeline(result)
   }, [issue, sessions, issueLoading, sessionsLoading, taskProgress, planSteps])
 
