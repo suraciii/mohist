@@ -44,6 +44,7 @@ export interface Issue {
   model?: string | null
   archivedAt?: string
   blockedReason?: string
+  checkSuite?: CheckSuite | null
 }
 
 export interface Project {
@@ -174,6 +175,8 @@ export type AgentDetailEventMap = {
   agent_paused: { issueId: string; projectId: string }
   question_asked: { issueId: string; projectId: string; questionId: string; question: string }
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
+  check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string; snapshotSha?: string }
+  check_suite_status_changed: { issueId: string; projectId: string; issueNumber: number; suiteStatus: string; snapshotSha: string }
 }
 
 export type EventMap = {
@@ -200,7 +203,8 @@ export type EventMap = {
   agent_conflict_resolution_completed: { issueId: string; projectId: string; issueNumber: number }
   agent_conflict_resolution_failed: { issueId: string; projectId: string; issueNumber: number; error: string }
   check_started: { issueId: string; projectId: string; issueNumber: number }
-  check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string }
+  check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string; snapshotSha?: string }
+  check_suite_status_changed: { issueId: string; projectId: string; issueNumber: number; suiteStatus: string; snapshotSha: string }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap
@@ -404,6 +408,31 @@ export interface CheckResult {
 export interface CheckSuiteOutput {
   checks: CheckResult[]
   overallResult: 'passed' | 'failed'
+}
+
+export type CheckSuiteStatus = 'running' | 'awaiting-approval' | 'passed' | 'failed'
+
+export type CheckStateStatus = 'pending' | 'running' | 'passed' | 'failed'
+
+export interface CheckState {
+  status: CheckStateStatus
+  output?: unknown
+  ranAt?: string
+}
+
+export interface CheckSuiteChecks {
+  'build-test': CheckState
+  'ai-review': CheckState
+}
+
+export interface CheckSuite {
+  id: string
+  issueId: string
+  snapshotSha: string
+  status: CheckSuiteStatus
+  checks: CheckSuiteChecks
+  createdAt: string
+  updatedAt: string
 }
 
 export interface GeneralConfig {
