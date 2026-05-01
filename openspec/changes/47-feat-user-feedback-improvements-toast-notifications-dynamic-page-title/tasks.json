@@ -19,11 +19,12 @@
       "dependsOn": [],
       "passes": true,
       "notes": "Run: cd packages/cli/web && npm install sonner",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        58816
+        58816,
+        80474
       ]
     },
     {
@@ -43,7 +44,7 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useDocumentTitle.ts",
       "dependsOn": [],
-      "passes": true,
+      "passes": false,
       "notes": "",
       "attempts": 1,
       "order": 999999,
@@ -70,7 +71,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Mutation hooks: useCreateProject, useDeleteProject, useUseProject, useSendMessage, useUnarchiveIssue, useSaveProvider, useDeleteProvider, useRebuildSystem, useUpdateConfig, useUpdateOpencodeModel, useSetModel, useSetOpencodeModelConfig, useSetLogLevel, useSetAgentRuntime, useSetStageModels, useCreateExploreSession, useUpdateExploreSessionTitle, useTestProvider. Also covers specs/toast-notifications/spec.md#mutation-error-toasts",
       "attempts": 1,
       "order": 999999,
@@ -100,7 +101,7 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Parse current issue number from window.location.pathname matching /issue/(\\d+). Use a useRef updated on location change.",
       "attempts": 1,
       "order": 999999,
@@ -132,7 +133,7 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "KanbanView is defined in App.tsx, not a separate component file.",
       "attempts": 1,
       "order": 999999,
@@ -160,7 +161,7 @@
         "T-004",
         "T-005"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "",
       "attempts": 1,
       "order": 999999,
