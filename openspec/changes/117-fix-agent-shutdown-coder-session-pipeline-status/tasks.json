@@ -47,11 +47,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "CoderSessionRepo already has findByIssueId() and updateStatus() methods. No new repo methods needed.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        197695
+      ]
     },
     {
       "id": "T-003",
