@@ -119,10 +119,13 @@
         "T-003"
       ],
       "notes": "The existing recoverIssues() in AgentRunnerService (lines 176-250) handles orphaned issues. The new recoverFromQueue() handles DB-persisted queue state. Both should run during startup. recoverFromQueue() runs first (restores queue state), then recoverIssues() handles any remaining orphans not covered by the queue.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        216576
+      ]
     },
     {
       "id": "T-005",
