@@ -2126,40 +2126,28 @@ export function createIssueRoutes(
       if (!agentRunner || !stateManager.getIssueRepo()) return;
       const issueRepo = stateManager.getIssueRepo()!;
       issueRepo.updateStage(issue.id, Stage.Plan);
-      issueRepo.setApprovalState(issue.id, {
-        stage: Stage.Plan,
-        status: 'awaiting',
-        output: 'Re-planning after rebase — re-evaluating design and tasks against updated codebase',
-        requestedAt: new Date().toISOString(),
-      });
-      eventBus.emit('approval_requested', {
+      issueRepo.clearApprovalState(issue.id);
+      const rebaseMessage = 'master has new changes after rebase. Code commits are preserved. Please re-evaluate design artifacts and tasks: check if the existing task breakdown is still appropriate for the updated codebase, merge/split/add/remove tasks as needed, and verify all file paths referenced in tasks.json still exist.';
+      issueService.createComment(issue.id, rebaseMessage);
+      const worktreePath = worktreeManager!.getPath(project.name, issue.number) || process.cwd();
+      const acpOptions: AcpConnectionOptions = {
+        cwd: worktreePath,
         issueId: issue.id,
         projectId,
-        stage: Stage.Plan,
-      });
-      if (agentRunner.hasPendingGate(number)) {
-        const rebaseMessage = 'master has new changes after rebase. Code commits are preserved. Please re-evaluate design artifacts and tasks: check if the existing task breakdown is still appropriate for the updated codebase, merge/split/add/remove tasks as needed, and verify all file paths referenced in tasks.json still exist.';
-        issueService.createComment(issue.id, rebaseMessage);
-        const worktreePath = worktreeManager!.getPath(project.name, issue.number) || process.cwd();
-        const acpOptions: AcpConnectionOptions = {
-          cwd: worktreePath,
-          issueId: issue.id,
-          projectId,
-          workflowLogRepo,
-          coderSessionRepo,
-          eventBus,
-          issueNumber: issue.number,
-          opencodeBinPath,
-        };
-        agentRunner.resumePipeline(
-          issue,
-          projectId,
-          issueRepo,
-          worktreePath,
-          acpOptions,
-          (issueId, status) => issueService.setStatus(issueId, status),
-        );
-      }
+        workflowLogRepo,
+        coderSessionRepo,
+        eventBus,
+        issueNumber: issue.number,
+        opencodeBinPath,
+      };
+      agentRunner.startPipeline(
+        issue,
+        projectId,
+        issueRepo,
+        worktreePath,
+        acpOptions,
+        (issueId, status) => issueService.setStatus(issueId, status),
+      );
       return;
     }
 

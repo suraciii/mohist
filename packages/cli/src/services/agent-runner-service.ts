@@ -175,6 +175,24 @@ export class AgentRunnerService {
           });
         } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
           this.recoverBuildStageIssue(issue);
+        } else if (this.isStageCompletedInDb(issue)) {
+          this.issueRepo.setApprovalState(issue.id, {
+            stage: issue.stage,
+            status: 'awaiting',
+            output: { recovered: true, reason: 'agent completed but approval_state not written' },
+            requestedAt: new Date().toISOString(),
+          });
+          this.pendingGates.set(issue.number, {
+            issueId: issue.id,
+            issueNumber: issue.number,
+            projectId: issue.projectId,
+            stage: issue.stage,
+          });
+          log.info('Recovered orphaned issue — stage completed, restored approval gate', {
+            issueNumber: issue.number,
+            stage: issue.stage,
+            action: 'approval_state=awaiting, pendingGate restored',
+          });
         } else {
           this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
           log.info('Recovered orphaned issue', {
@@ -285,12 +303,18 @@ export class AgentRunnerService {
     const allPass = tasksFile.tasks.every(t => t.passes === true);
     if (allPass) {
       this.issueRepo!.updateStage(issue.id, Stage.Check);
+      this.issueRepo!.setApprovalState(issue.id, {
+        stage: Stage.Check,
+        status: 'awaiting',
+        output: { recovered: true, reason: 'build completed, auto-advanced to check' },
+        requestedAt: new Date().toISOString(),
+      });
       this.issueRepo!.updateRetryCount(issue.id, 0);
       this.issueRepo!.updateBlockedReason(issue.id, null);
       log.info('Recovered build-stage orphan — all tasks pass, auto-advanced to review', {
         issueNumber: issue.number,
         totalTasks: tasksFile.tasks.length,
-        action: 'stage=review, status remains active',
+        action: 'stage=check, approval_state=awaiting, status remains active',
       });
     } else {
       const passed = tasksFile.tasks.filter(t => t.passes === true).length;
@@ -356,6 +380,15 @@ export class AgentRunnerService {
         error: emitErr instanceof Error ? emitErr.message : String(emitErr),
       });
     }
+  }
+
+  private isStageCompletedInDb(issue: Issue): boolean {
+    if (!this.issueRepo) return false;
+
+    const approvalStages: Stage[] = [Stage.Plan, Stage.Check];
+    if (!approvalStages.includes(issue.stage)) return false;
+
+    return this.issueRepo.hasCompletedCoderSession(issue.id, issue.stage);
   }
 
   getMaxConcurrentAgents(): number {

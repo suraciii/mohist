@@ -440,4 +440,14 @@ export class IssueRepo {
     const row = this.db.get<{ count: number }>('SELECT COUNT(*) as count FROM issues');
     return row?.count || 0;
   }
+
+  hasCompletedCoderSession(issueId: string, stage: string): boolean {
+    const row = this.db.get<{ status: string } | undefined>(
+      `SELECT status FROM coder_session
+       WHERE issue_id = ? AND stage = ? AND status = 'completed'
+       LIMIT 1`,
+      [issueId, stage],
+    );
+    return !!row;
+  }
 }
