@@ -464,6 +464,7 @@ export interface AcpConnectionOptions {
   opencodeBinPath?: string;
   signal?: AbortSignal;
   model?: string;
+  stage?: string;
 }
 
 export interface AcpConnection {
@@ -770,6 +771,7 @@ export async function createAcpConnection(
         acpSessionId: sessionId,
         executionId,
         taskDescription: 'multi-round acp connection',
+        stage: options.stage,
       });
       coderSessionId = coderSession.id;
       log.info('coder_session row created', {
