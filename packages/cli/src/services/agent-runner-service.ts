@@ -100,6 +100,24 @@ export class AgentRunnerService {
 
   shutdown(): void {
     this.eventBus.off('config:providers:changed', this.providersChangedListener);
+
+    for (const [issueId, agent] of this.activeAgents) {
+      try {
+        agent.abortController.abort();
+        log.info('Aborted active agent during shutdown', { issueId, issueNumber: agent.issueNumber });
+      } catch (err) {
+        log.error('Failed to abort agent during shutdown', {
+          issueId,
+          issueNumber: agent.issueNumber,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    this.activeAgents.clear();
+    this.pendingGates.clear();
+    this.waitingQuestions.clear();
+    log.info('AgentRunnerService shutdown complete, all maps cleared');
   }
 
   private handleProvidersChanged(): void {
