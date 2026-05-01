@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api } from '../lib/api'
 import type { AgentRuntimeConfig, GeneralConfig, SystemInfo } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
@@ -105,6 +106,10 @@ export function useCreateProject() {
     mutationFn: (data: { name: string; path: string }) => api.createProject(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      toast.success('Project created')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -115,6 +120,10 @@ export function useDeleteProject() {
     mutationFn: (name: string) => api.deleteProject(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      toast.success('Project deleted')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -127,6 +136,10 @@ export function useSendMessage(issueNumber: number) {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      toast.success('Message sent')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -137,6 +150,10 @@ export function useUseProject() {
     mutationFn: (name: string) => api.useProject(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      toast.success('Switched to project')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -163,6 +180,10 @@ export function useCreateExploreSession() {
     mutationFn: (data: { projectId?: string; title?: string; issueId?: string }) => api.createExploreSession(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['explore-sessions'] })
+      toast.success('Explore session created')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -175,6 +196,10 @@ export function useUpdateExploreSessionTitle() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['explore-sessions'] })
       queryClient.invalidateQueries({ queryKey: ['explore', variables.sessionId] })
+      toast.success('Title updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -227,6 +252,10 @@ export function useUpdateConfig() {
       if (context?.previousConfig) {
         queryClient.setQueryData(['config'], context.previousConfig)
       }
+      toast.error(_err.message || 'Request failed')
+    },
+    onSuccess: () => {
+      toast.success('Setting updated')
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['config'] })
@@ -274,6 +303,10 @@ export function useSaveProvider() {
       if (context?.previousProviders) {
         queryClient.setQueryData(['providers'], context.previousProviders)
       }
+      toast.error(_err.message || 'Request failed')
+    },
+    onSuccess: () => {
+      toast.success('Provider saved')
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['providers'] })
@@ -307,9 +340,11 @@ export function useDeleteProvider() {
       if (context?.previousProviders) {
         queryClient.setQueryData(['providers'], context.previousProviders)
       }
+      toast.error(_err.message || 'Request failed')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['providers'] })
+      toast.success('Provider deleted')
     },
   })
 }
@@ -321,6 +356,12 @@ export interface TestProviderVariables {
 export function useTestProvider() {
   return useMutation<{ success: boolean }, Error, TestProviderVariables>({
     mutationFn: ({ data }) => providerApi.testProvider(data),
+    onSuccess: () => {
+      toast.success('Provider test passed')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
   })
 }
 
@@ -351,6 +392,10 @@ export function useUnarchiveIssue() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+      toast.success('Issue unarchived')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -368,6 +413,10 @@ export function useUpdateOpencodeModel() {
     mutationFn: (model) => api.updateOpencodeModel(model),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode-model'] })
+      toast.success('Model updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -385,6 +434,10 @@ export function useRebuildSystem() {
     mutationFn: () => api.rebuildSystem(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['status'] })
+      toast.success('Rebuild started')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -407,6 +460,10 @@ export function useSetModel() {
     mutationFn: (model: string | null) => api.setModel(model),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['model'] })
+      toast.success('Model updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -424,6 +481,10 @@ export function useSetOpencodeModelConfig() {
     mutationFn: (model: string | null) => api.setOpencodeModel(model),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode-model-config'] })
+      toast.success('Model updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -441,6 +502,10 @@ export function useSetLogLevel() {
     mutationFn: (level: string) => api.setLogLevel(level),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['log-level'] })
+      toast.success('Log level updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -458,6 +523,10 @@ export function useSetAgentRuntime() {
     mutationFn: (data) => api.updateAgentRuntime(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-runtime'] })
+      toast.success('Agent runtime updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -475,6 +544,10 @@ export function useSetStageModels() {
     mutationFn: (stageModels: Record<string, string> | null) => api.setStageModels(stageModels),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stage-models'] })
+      toast.success('Stage models updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
     },
   })
 }
