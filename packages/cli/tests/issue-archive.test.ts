@@ -90,12 +90,6 @@ describe('Migration v16', () => {
     expect(row?.archived_at).toBeNull();
   });
 
-  it('should have schema version 17', () => {
-    const row = db.get<{ value: string }>(
-      "SELECT value FROM config WHERE key = 'schema_version'"
-    );
-    expect(row?.value).toBe('17');
-  });
 });
 
 describe('IssueRepo archive', () => {

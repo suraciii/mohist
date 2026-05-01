@@ -20,6 +20,15 @@ function ensureAgentSkillsTable(db: DatabaseManager): void {
   `);
 }
 
+function ensureTestProject(db: DatabaseManager): void {
+  const now = new Date().toISOString();
+  db.run(
+    `INSERT OR IGNORE INTO projects (id, name, path, base_branch, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    ['test-project', 'test-project', '/tmp/test-project', 'main', now, now],
+  );
+}
+
 function insertTestSkill(db: DatabaseManager, skillId: string): void {
   const now = new Date().toISOString();
   const projectRow = db.get<{ id: string }>('SELECT id FROM projects LIMIT 1');
@@ -48,6 +57,7 @@ describe('SchedulerService', () => {
     db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
     ensureAgentSkillsTable(db);
+    ensureTestProject(db);
     scheduleRepo = new ScheduleRepo(db);
     eventBus = new EventBus();
     runSkillMock = vi.fn().mockResolvedValue(undefined);

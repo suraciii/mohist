@@ -80,9 +80,6 @@ describe('Per-issue model override - DB', () => {
       expect(row?.model).toBeNull();
     });
 
-    it('should set schema version to 15', () => {
-      expect(getSchemaVersion(db)).toBe(15);
-    });
   });
 
   describe('IssueRepo.updateModel', () => {

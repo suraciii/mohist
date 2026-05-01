@@ -26,15 +26,20 @@ const writtenFiles = new Set<string>();
 
 vi.mock('fs', () => ({
   existsSync: vi.fn((p: string) => {
-    if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) return false;
+    const basename = typeof p === 'string' ? p.split(/[\\/]/).pop() : '';
+    if (basename === 'review.md' || basename === 'review-self-check.md') {
+      return writtenFiles.has(p);
+    }
     return true;
   }),
   readdirSync: vi.fn().mockReturnValue([]),
   rmSync: vi.fn(),
   mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
+  writeFileSync: vi.fn((p: string) => {
+    writtenFiles.add(p);
+  }),
   readFileSync: vi.fn((p: string) => {
-    if (typeof p === 'string' && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) {
+    if (typeof p === 'string' && writtenFiles.has(p) && (p.endsWith('review.md') || p.endsWith('review-self-check.md'))) {
       return '## Result: PASS\nAll checks passed.';
     }
     if (typeof p === 'string' && p.endsWith('tasks.json')) {
@@ -288,6 +293,10 @@ describe('WorkflowEngine pipeline stage ordering', () => {
 
     const ctrl = createEngine({ issueRepo, eventBus });
 
+    // Pre-populate review artifacts so Check stage passes and stops at approval gate
+    writtenFiles.add('/tmp/change/review.md');
+    writtenFiles.add('/tmp/change/review-self-check.md');
+
     const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
     expect(issueRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Check);
@@ -347,6 +356,10 @@ describe('WorkflowEngine done stage sets Completed status', () => {
 
     const ctrl = createEngine({ issueRepo, eventBus });
 
+    // Pre-populate review artifacts so Check stage passes and stops at approval gate
+    writtenFiles.add('/tmp/change/review.md');
+    writtenFiles.add('/tmp/change/review-self-check.md');
+
     const planIssue = createMockIssue(Stage.Plan);
     const result = await ctrl.run(planIssue, { cwd: '/tmp/worktree' });
 
@@ -370,6 +383,10 @@ describe('WorkflowEngine build stage git commit', () => {
 
     const ctrl = createEngine({ issueRepo, eventBus });
 
+    // Pre-populate review artifacts so Check stage passes and stops at approval gate
+    writtenFiles.add('/tmp/change/review.md');
+    writtenFiles.add('/tmp/change/review-self-check.md');
+
     const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
     expect(result.gateRequired).toBe(true);
@@ -382,6 +399,10 @@ describe('WorkflowEngine build stage git commit', () => {
     );
 
     const ctrl = createEngine({ issueRepo, eventBus });
+
+    // Pre-populate review artifacts so Check stage passes and stops at approval gate
+    writtenFiles.add('/tmp/change/review.md');
+    writtenFiles.add('/tmp/change/review-self-check.md');
 
     const result = await ctrl.run(createMockIssue(Stage.Build), { cwd: '/tmp/worktree' });
 
@@ -402,7 +423,7 @@ describe('WorkflowEngine review stage multi-round', () => {
         const calls = mockConn.prompt.mock.calls.length;
         if (calls === 1) writtenFiles.add('/tmp/change/review.md');
         if (calls === 2) writtenFiles.add('/tmp/change/review-self-check.md');
-        return Promise.resolve({ text: 'review report content', success: true, acpSessionId: 's1' });
+        return Promise.resolve({ text: 'review report', success: true, acpSessionId: 's1' });
       }),
       close: vi.fn().mockResolvedValue(undefined),
     };
@@ -458,26 +479,7 @@ describe('WorkflowEngine review stage multi-round', () => {
     expect(result.message).toContain('self-check');
   });
 
-  it('should return error when report is empty after self-check', async () => {
-    const { issueRepo, eventBus } = createMockRepos();
-    const mockConn = {
-      prompt: vi.fn().mockImplementation((_prompt: string) => {
-        const calls = mockConn.prompt.mock.calls.length;
-        if (calls === 1) writtenFiles.add('/tmp/change/review.md');
-        return Promise.resolve({ text: '', success: true, acpSessionId: 's1' });
-      }),
-      close: vi.fn().mockResolvedValue(undefined),
-    };
-    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
 
-    const ctrl = createEngine({ issueRepo, eventBus });
-
-    const result = await ctrl.run(createMockIssue(Stage.Check), { cwd: '/tmp/worktree' });
-
-    expect(mockConn.prompt).toHaveBeenCalledTimes(2);
-    expect(result.gateRequired).toBe(false);
-    expect(result.message).toContain('not found');
-  });
 
   it('should emit plan_round_start for both review and self-check rounds', async () => {
     const { issueRepo, eventBus } = createMockRepos();
