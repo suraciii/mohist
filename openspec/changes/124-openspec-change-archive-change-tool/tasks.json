@@ -1,0 +1,108 @@
+{
+  "project": "mohist",
+  "description": "Fix openspec change archive timing and path, remove zombie archive_change tool",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Update archiveChange() with date prefix and conflict handling",
+      "spec": "specs/change-artifacts/spec.md#change-archival",
+      "description": "Modify ChangeArtifactsManager.archiveChange() to use YYYY-MM-DD-<name> archive directory format with conflict handling (-v2, -v3 suffixes). Ensure no spec sync occurs during archive. Also update restoreChange() to find date-prefixed archive entries and strip the date prefix on restore.",
+      "acceptanceCriteria": [
+        "archiveChange() moves directory to openspec/changes/archive/YYYY-MM-DD-<name>/",
+        "Date prefix uses current date in local timezone",
+        "Existing archive with same name triggers -v2, -v3 suffix incrementing",
+        "No files under openspec/specs/ are modified during archive",
+        "session-memories are preserved in the archived directory",
+        "restoreChange() finds archived entries with date prefix (e.g. 2026-05-01-42-fix-auth)",
+        "restoreChange() strips date prefix when restoring (restores to changes/42-fix-auth not changes/2026-05-01-42-fix-auth)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/artifacts/change-artifacts-manager.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Current archiveChange() at line 284 uses plain <name> without date prefix. Reference archive-change.ts conflict handling pattern but target openspec/changes/archive/ not openspec/archive/. CRITICAL: restoreChange() at line 308 uses startsWith('${issueNumber}-') which won't match date-prefixed archives like '2026-05-01-42-fix-auth'. Must update search to handle date prefix AND strip prefix on restore."
+    },
+    {
+      "id": "T-002",
+      "title": "Add archiveChange to StageContext interface and wire into CheckStageRunner",
+      "spec": "specs/workflow-definition/spec.md#check-stage-behavior",
+      "description": "Add archiveChange(issueNumber: number): Promise<void> to the ChangeArtifactsManager interface in stage-context.ts. Then modify CheckStageRunner.run() to call ctx.artifactManager.archiveChange() after all checks pass and before returning requiresApproval:true. Catch archive errors gracefully (log but don't block).",
+      "acceptanceCriteria": [
+        "stage-context.ts ChangeArtifactsManager interface includes archiveChange method",
+        "CheckStageRunner calls archiveChange after all checks pass, before returning approval gate",
+        "Archive failure is caught and logged, does not block check stage",
+        "Archive file changes do not trigger re-evaluation of checks",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/check-stage-runner.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D1: archive in CheckStageRunner between allPassed and requiresApproval. Design D3: extend stage-context.ts interface. Risk mitigation: catch archive errors gracefully per design doc."
+    },
+    {
+      "id": "T-003",
+      "title": "Remove openspec archiving from IssueService.performCleanup()",
+      "spec": "specs/workflow-definition/spec.md#check-stage-behavior",
+      "description": "Remove the ChangeArtifactsManager instantiation and archiveChange() call from IssueService.performCleanup(). Issue archive should only mark archivedAt, clean worktree, and clean checkpoints.",
+      "acceptanceCriteria": [
+        "performCleanup() no longer calls artifactsManager.archiveChange()",
+        "performCleanup() still cleans worktree and checkpoints",
+        "Issue archive does not attempt to move openspec change directory",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/issue-service.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Remove lines 280-287 in issue-service.ts performCleanup(). The ChangeArtifactsManager import can stay if unarchive still uses it (line 226)."
+    },
+    {
+      "id": "T-004",
+      "title": "Delete zombie archive_change tool",
+      "spec": "specs/change-artifacts/spec.md#change-archival",
+      "description": "Delete src/tools/archive-change.ts entirely. Verify no other file imports from it before deletion.",
+      "acceptanceCriteria": [
+        "src/tools/archive-change.ts is deleted",
+        "No import or reference to archive-change.ts exists in the codebase",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/tools/archive-change.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "createArchiveChangeTool is never imported anywhere. Safe to delete entire file."
+    },
+    {
+      "id": "T-005",
+      "title": "Add tests for archive path format and timing",
+      "description": "Write tests covering: archiveChange() produces YYYY-MM-DD-<name> directory format, conflict resolution with -v2/-v3 suffixes, restoreChange() finds and restores date-prefixed archives, CheckStageRunner triggers archive after all checks pass, archive errors don't block check stage, and performCleanup no longer archives openspec.",
+      "acceptanceCriteria": [
+        "Test: archiveChange produces correct YYYY-MM-DD-<name> path",
+        "Test: archiveChange handles naming conflict with -v2, -v3 suffixes",
+        "Test: restoreChange finds date-prefixed archive and strips prefix on restore",
+        "Test: CheckStageRunner calls archiveChange after all checks pass",
+        "Test: archive error does not fail the check stage",
+        "Test: IssueService.performCleanup does not call archiveChange",
+        "All existing tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Check existing test patterns in packages/cli/tests/ before writing. Follow the project's test conventions."
+    }
+  ]
+}
