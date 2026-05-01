@@ -291,7 +291,20 @@ export class ChangeArtifactsManager {
     this.ensureDir(archiveDir);
 
     const changeName = path.basename(changeDir);
-    const destPath = path.join(archiveDir, changeName);
+    const now = new Date();
+    const datePrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const baseArchiveName = `${datePrefix}-${changeName}`;
+
+    let archiveName = baseArchiveName;
+    let destPath = path.join(archiveDir, archiveName);
+    if (fs.existsSync(destPath)) {
+      let version = 2;
+      while (fs.existsSync(path.join(archiveDir, `${baseArchiveName}-v${version}`))) {
+        version++;
+      }
+      archiveName = `${baseArchiveName}-v${version}`;
+      destPath = path.join(archiveDir, archiveName);
+    }
 
     fs.renameSync(changeDir, destPath);
   }
@@ -304,15 +317,17 @@ export class ChangeArtifactsManager {
     }
 
     const entries = fs.readdirSync(archiveDir, { withFileTypes: true });
-    const prefix = `${issueNumber}-`;
-    const match = entries.find(e => e.isDirectory() && e.name.startsWith(prefix));
+    const pattern = `-${issueNumber}-`;
+    const match = entries.find(e => e.isDirectory() && e.name.includes(pattern));
 
     if (!match) {
       throw new Error(`Archived change for issue #${issueNumber} not found`);
     }
 
     const srcPath = path.join(archiveDir, match.name);
-    const destPath = path.join(this.changesDir, match.name);
+    const datePrefixMatch = match.name.match(/^\d{4}-\d{2}-\d{2}-(.+)$/);
+    const restoredName = datePrefixMatch ? datePrefixMatch[1] : match.name;
+    const destPath = path.join(this.changesDir, restoredName);
 
     fs.renameSync(srcPath, destPath);
   }
