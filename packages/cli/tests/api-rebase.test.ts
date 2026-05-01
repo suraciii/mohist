@@ -1,16 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { Hono } from 'hono';
 import request from 'supertest';
 import { DatabaseManager } from '../src/db/database';
-import { ProjectRepo } from '../src/db/project-repo';
-import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
 import { EventBus, AgentRunnerService } from '../src/services';
 import { StateManager } from '../src/server/state-manager';
-import { CommentRepo } from '../src/db/comment-repo';
-import { LabelRepo } from '../src/db/label-repo';
 import { ConfigRepo } from '../src/db/config-repo';
 import { ConfigService } from '../src/services/config-service';
 import { createIssueRoutes } from '../src/api/issues';
@@ -63,17 +59,22 @@ describe('POST /api/issues/:number/rebase', () => {
     issueService = new IssueService(issueRepo, commentRepo);
   });
 
-  function makeServer(opts: { worktreeManager?: any; agentRunner?: AgentRunnerService; mergeQueue?: any } = {}) {
+  function makeServer(opts: { mergeQueue?: any } = {}) {
     const app = new Hono();
     const eventBus = new EventBus();
-    const agentRunner = opts.agentRunner ?? new AgentRunnerService(eventBus);
+    const agentRunner = new AgentRunnerService(eventBus);
+    vi.spyOn(agentRunner, 'enqueue').mockReturnValue({
+      taskId: 'task-123',
+      status: 'pending' as const,
+      queuePosition: 0,
+    });
     app.route('/api/issues', createIssueRoutes(
       issueService, projectService, stateManager,
-      opts.worktreeManager, undefined, undefined, agentRunner,
+      null, undefined, undefined, agentRunner,
       undefined, undefined, undefined, undefined,
       opts.mergeQueue,
     ));
-    return createTestServer(app);
+    return { server: createTestServer(app), agentRunner };
   }
 
   beforeEach(async () => {
@@ -83,12 +84,13 @@ describe('POST /api/issues/:number/rebase', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     db.close();
   });
 
   describe('precondition checks', () => {
     it('should return 404 for non-existent issue', async () => {
-      const server = makeServer();
+      const { server } = makeServer();
       const res = await request(server).post('/api/issues/999/rebase');
       expect(res.status).toBe(404);
       expect(res.body.error).toContain('not found');
@@ -96,7 +98,7 @@ describe('POST /api/issues/:number/rebase', () => {
 
     it('should return 400 for backlog stage', async () => {
       issueService.create({ projectId, title: 'Backlog Issue' });
-      const server = makeServer();
+      const { server } = makeServer();
       const res = await request(server).post('/api/issues/1/rebase');
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('Rebase not available');
@@ -106,43 +108,10 @@ describe('POST /api/issues/:number/rebase', () => {
     it('should return 400 for explore stage', async () => {
       const issue = issueService.create({ projectId, title: 'Explore Issue' });
       issueService.transitionToStage(issue.id, Stage.Explore);
-      const server = makeServer();
+      const { server } = makeServer();
       const res = await request(server).post('/api/issues/1/rebase');
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('Rebase not available');
-    });
-
-    it('should return 400 when worktree does not exist', async () => {
-      const issue = issueService.create({ projectId, title: 'Plan Issue' });
-      issueService.transitionToStage(issue.id, Stage.Plan);
-      issueService.setStatus(issue.id, IssueStatus.Active);
-
-      const wtManager = {
-        exists: vi.fn().mockReturnValue(false),
-      };
-      const server = makeServer({ worktreeManager: wtManager });
-      const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Worktree not found');
-    });
-
-    it('should return 409 when agent is running', async () => {
-      const issue = issueService.create({ projectId, title: 'Build Issue' });
-      issueService.transitionToStage(issue.id, Stage.Build);
-      issueService.setStatus(issue.id, IssueStatus.Active);
-
-      const eventBus = new EventBus();
-      const agentRunner = new AgentRunnerService(eventBus);
-
-      vi.spyOn(agentRunner, 'isRunning').mockReturnValue(true);
-
-      const wtManager = {
-        exists: vi.fn().mockReturnValue(true),
-      };
-      const server = makeServer({ worktreeManager: wtManager, agentRunner });
-      const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(409);
-      expect(res.body.error).toContain('Agent is running');
     });
   });
 
@@ -152,11 +121,12 @@ describe('POST /api/issues/:number/rebase', () => {
       issueService.transitionToStage(issue.id, Stage.Done);
 
       const mergeQueue = { retry: vi.fn().mockReturnValue(true) };
-      const server = makeServer({ mergeQueue });
+      const { server, agentRunner } = makeServer({ mergeQueue });
       const res = await request(server).post('/api/issues/1/rebase');
       expect(res.status).toBe(200);
       expect(res.body.data.rebased).toBe(true);
       expect(mergeQueue.retry).toHaveBeenCalledWith(1);
+      expect(agentRunner.enqueue).not.toHaveBeenCalled();
     });
 
     it('should return 409 when mergeQueue.retry returns false', async () => {
@@ -164,7 +134,7 @@ describe('POST /api/issues/:number/rebase', () => {
       issueService.transitionToStage(issue.id, Stage.Done);
 
       const mergeQueue = { retry: vi.fn().mockReturnValue(false) };
-      const server = makeServer({ mergeQueue });
+      const { server } = makeServer({ mergeQueue });
       const res = await request(server).post('/api/issues/1/rebase');
       expect(res.status).toBe(409);
     });
@@ -173,70 +143,39 @@ describe('POST /api/issues/:number/rebase', () => {
       const issue = issueService.create({ projectId, title: 'Done Issue' });
       issueService.transitionToStage(issue.id, Stage.Done);
 
-      const server = makeServer();
+      const { server } = makeServer();
       const res = await request(server).post('/api/issues/1/rebase');
       expect(res.status).toBe(500);
       expect(res.body.error).toContain('MergeQueue');
     });
   });
 
-  describe('fast-forward check', () => {
-    it('should return "Already up to date" when canFastForward is true', async () => {
+  describe('enqueue', () => {
+    it('should enqueue rebase task and return 202', async () => {
+      const issue = issueService.create({ projectId, title: 'Build Issue' });
+      issueService.transitionToStage(issue.id, Stage.Build);
+      issueService.setStatus(issue.id, IssueStatus.Active);
+
+      const { server, agentRunner } = makeServer();
+      const res = await request(server)
+        .post('/api/issues/1/rebase')
+        .send({ reEvalPlan: true });
+      expect(res.status).toBe(202);
+      expect(res.body.data.taskId).toBe('task-123');
+      expect(res.body.data.status).toBe('pending');
+      expect(res.body.data.queuePosition).toBe(0);
+      expect(agentRunner.enqueue).toHaveBeenCalledWith(issue.id, 'rebase', { reEvalPlan: true });
+    });
+
+    it('should enqueue rebase with empty payload when no body', async () => {
       const issue = issueService.create({ projectId, title: 'Plan Issue' });
       issueService.transitionToStage(issue.id, Stage.Plan);
       issueService.setStatus(issue.id, IssueStatus.Active);
 
-      const wtManager = {
-        exists: vi.fn().mockReturnValue(true),
-        canFastForward: vi.fn().mockResolvedValue(true),
-      };
-      const server = makeServer({ worktreeManager: wtManager });
+      const { server, agentRunner } = makeServer();
       const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(200);
-      expect(res.body.data.rebased).toBe(false);
-      expect(res.body.data.message).toContain('Already up to date');
-    });
-  });
-
-  describe('rebase conflict', () => {
-    it('should return 409 with conflict files when rebase fails', async () => {
-      const issue = issueService.create({ projectId, title: 'Build Issue' });
-      issueService.transitionToStage(issue.id, Stage.Build);
-      issueService.setStatus(issue.id, IssueStatus.Active);
-
-      const wtManager = {
-        exists: vi.fn().mockReturnValue(true),
-        canFastForward: vi.fn().mockResolvedValue(false),
-        rebaseOntoMaster: vi.fn().mockResolvedValue({
-          success: false,
-          conflicts: ['src/foo.ts', 'src/bar.ts'],
-        }),
-      };
-      const server = makeServer({ worktreeManager: wtManager });
-      const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(409);
-      expect(res.body.error).toContain('conflicts');
-      expect(res.body.data.conflicts).toEqual(['src/foo.ts', 'src/bar.ts']);
-    });
-  });
-
-  describe('successful rebase', () => {
-    it('should return rebased: true on successful rebase', async () => {
-      const issue = issueService.create({ projectId, title: 'Build Issue' });
-      issueService.transitionToStage(issue.id, Stage.Build);
-      issueService.setStatus(issue.id, IssueStatus.Active);
-
-      const wtManager = {
-        exists: vi.fn().mockReturnValue(true),
-        canFastForward: vi.fn().mockResolvedValue(false),
-        rebaseOntoMaster: vi.fn().mockResolvedValue({ success: true, conflicts: [] }),
-        getPath: vi.fn().mockReturnValue('/tmp/worktree'),
-      };
-      const server = makeServer({ worktreeManager: wtManager });
-      const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(200);
-      expect(res.body.data.rebased).toBe(true);
-      expect(res.body.data.message).toContain('Rebase successful');
+      expect(res.status).toBe(202);
+      expect(agentRunner.enqueue).toHaveBeenCalledWith(issue.id, 'rebase', {});
     });
   });
 });

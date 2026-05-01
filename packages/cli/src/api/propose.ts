@@ -5,19 +5,17 @@ import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
-import type { LlmConfig } from '../agent-runtime';
-import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { createChange } from '../openspec/change-creator';
 
 export function createProposeRoutes(
   issueService: IssueService,
   projectService: ProjectService,
-  stateManager: StateManager,
+  _stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
   _sessionManager?: unknown,
-  _llmConfig?: LlmConfig,
+  _llmConfig?: unknown,
   agentRunner?: AgentRunnerService,
-  opencodeBinPath?: string,
+  _opencodeBinPath?: string,
 ): Hono {
   const app = new Hono();
 
@@ -83,7 +81,6 @@ export function createProposeRoutes(
       );
 
       issueService.transitionToStage(issue.id, Stage.Plan);
-      const updatedIssue = issueService.getByNumber(projectId, number);
 
       if (!agentRunner) {
         const response: ApiResponse = {
@@ -93,58 +90,22 @@ export function createProposeRoutes(
         return c.json(response, 500);
       }
 
-      if (agentRunner.isRunning(updatedIssue!.id)) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} already has an agent running`
-        };
-        return c.json(response, 409);
-      }
-
-      const status = agentRunner.getStatus();
-      if (status.activeAgents.length >= agentRunner.getMaxConcurrentAgents()) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Concurrent agent limit reached (${agentRunner.getMaxConcurrentAgents()})`
-        };
-        return c.json(response, 429);
-      }
-
-      const acpOptions: AcpConnectionOptions = {
-        cwd: worktreePath,
-        issueId: updatedIssue!.id,
-        projectId,
-        opencodeBinPath,
-      };
-
-      const startResult = agentRunner.startPipeline(
-        updatedIssue!,
-        projectId,
-        stateManager.getIssueRepo(),
-        worktreePath,
-        acpOptions,
-        (issueId, status) => issueService.setStatus(issueId, status),
-      );
-
-      if (startResult.started) {
-        const response: ApiResponse = {
-          success: true,
-          data: {
-            issue: updatedIssue,
-            changePath: changeResult.changePath,
-            changeName: changeResult.changeName,
-            isNew: changeResult.isNew,
-            message: `Issue #${number} proposed, Change "${changeResult.changeName}" created, pipeline is running`
-          }
-        };
-        return c.json(response);
-      }
+      const result = agentRunner.enqueue(issue.id, 'start-pipeline');
 
       const response: ApiResponse = {
-        success: false,
-        error: startResult.error ?? `Issue #${number} could not be started`,
+        success: true,
+        data: {
+          issue: issueService.getByNumber(projectId, number),
+          changePath: changeResult.changePath,
+          changeName: changeResult.changeName,
+          isNew: changeResult.isNew,
+          taskId: result.taskId,
+          status: result.status,
+          queuePosition: result.queuePosition,
+          message: `Issue #${number} proposed, Change "${changeResult.changeName}" created, enqueued for start-pipeline`
+        }
       };
-      return c.json(response, 409);
+      return c.json(response, 202);
     } catch (error) {
       const response: ApiResponse = {
         success: false,

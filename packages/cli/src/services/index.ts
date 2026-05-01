@@ -4,7 +4,7 @@ export { ConfigService } from './config-service';
 export { EventBus, eventBus } from './event-bus';
 export type { EventMap, EventName, EventListener } from './event-bus';
 export { AgentRunnerService } from './agent-runner-service';
-export type { AgentStatus } from './agent-runner-service';
+export type { AgentStatus, EnqueueResult, IssueQueueStatus } from './agent-runner-service';
 export { ExploreService } from './explore-service';
 export type { ExploreSessionWithMessages, CreateExploreSessionInput } from './explore-service';
 export { ExploreAcpService } from './explore-acp-service';
