@@ -98,7 +98,6 @@ import {
   BuildStageRunner,
   CheckStageRunner,
   BuildTestCheck,
-  MergeReadyCheck,
   AiReviewCheck,
   type StageRunner,
   type StageContext,
@@ -175,7 +174,6 @@ function createDefaultRunners(): StageRunner[] {
     new BuildStageRunner({ worktreePath: '/tmp/worktree', projectId: 'proj-1' }),
     new CheckStageRunner([
       new BuildTestCheck({ worktreePath: '/tmp/worktree' }),
-      new MergeReadyCheck({}),
       new AiReviewCheck(),
     ]),
   ];
