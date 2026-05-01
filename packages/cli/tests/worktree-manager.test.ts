@@ -224,7 +224,7 @@ describe('WorktreeManager', () => {
         if (
           cmd === 'git' &&
           args?.[0] === 'rebase' &&
-          typeof args?.[1] === 'string'
+          args?.[1] !== '--abort'
         ) {
           if (rebaseConflicts) {
             cb?.(new Error('CONFLICT') as any, mockStdout(''), '');
