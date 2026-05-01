@@ -17,6 +17,7 @@ import { TaskList } from './TaskList'
 import { CheckResultsPanel } from './CheckResultsPanel'
 import { formatTime, formatTimeAgo } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
+import { DiffViewer } from './DiffViewer'
 
 const STAGES = [Stage.Backlog, Stage.Explore, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
@@ -29,7 +30,7 @@ const STAGE_LABELS: Record<string, string> = {
   [Stage.Done]: 'Done',
 }
 
-const DIFF_STAGES = new Set<string>([Stage.Build, Stage.Check, Stage.Done])
+const DIFF_STAGES = new Set<string>([Stage.Explore, Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
 
 const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
 
@@ -42,34 +43,6 @@ function formatRelativeTime(iso: string): string {
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
   return `${hours}h ago`
-}
-
-function CommitDiffView({ diff }: { diff: string }) {
-  const lines = diff.split('\n')
-  return (
-    <div className="mt-2 rounded-md bg-gray-50 border border-gray-100 overflow-x-auto">
-      <pre className="text-xs font-mono leading-5 p-3">
-        {lines.map((line, i) => {
-          let bg = ''
-          let color = 'text-gray-500'
-          if (line.startsWith('+')) {
-            bg = 'bg-green-50'
-            color = 'text-green-700'
-          } else if (line.startsWith('-')) {
-            bg = 'bg-red-50'
-            color = 'text-red-700'
-          } else if (line.startsWith('@@')) {
-            color = 'text-blue-600'
-          }
-          return (
-            <div key={i} className={`${bg} ${color}`}>
-              {line}
-            </div>
-          )
-        })}
-      </pre>
-    </div>
-  )
 }
 
 function CommitRow({
@@ -108,6 +81,20 @@ function CommitRow({
         <span className="text-green-600 text-xs font-medium flex-shrink-0">+{commit.additions}</span>
         <span className="text-red-500 text-xs font-medium flex-shrink-0">-{commit.deletions}</span>
       </button>
+      {commit.files && commit.files.length > 0 && !expanded && (
+        <div className="ml-5 flex flex-wrap gap-1 px-2 pb-1">
+          {commit.files.slice(0, 5).map((f) => (
+            <span key={f} className="inline-block rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-500">
+              {f}
+            </span>
+          ))}
+          {commit.files.length > 5 && (
+            <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-400">
+              +{commit.files.length - 5} more
+            </span>
+          )}
+        </div>
+      )}
       {expanded && (
         <div className="ml-5">
           {isLoading && (
@@ -116,7 +103,7 @@ function CommitRow({
           {isError && (
             <div className="text-xs text-red-500 py-2">Failed to load diff</div>
           )}
-          {diffData?.diff && <CommitDiffView diff={diffData.diff} />}
+          {diffData?.diff && <DiffViewer diff={diffData.diff} />}
         </div>
       )}
     </div>
@@ -133,8 +120,9 @@ export function IssueDetailPage() {
   const [messageText, setMessageText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
-  const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
+  const [diffTab, setDiffTab] = useState<'files' | 'commits'>('commits')
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
 
 
   useEffect(() => {
@@ -495,12 +483,43 @@ export function IssueDetailPage() {
                           <p className="text-sm text-gray-400">No file changes yet.</p>
                         ) : (
                           files.map((f: DiffFile, i: number) => (
-                            <div key={i} className="flex items-center gap-2 text-sm">
-                              <span className="text-gray-700 font-mono text-xs truncate flex-1">
-                                {f.file}
-                              </span>
-                              <span className="text-green-600 text-xs font-medium">+{f.additions}</span>
-                              <span className="text-red-500 text-xs font-medium">-{f.deletions}</span>
+                            <div key={i}>
+                              <button
+                                onClick={() => {
+                                  setExpandedFiles((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(f.file)) {
+                                      next.delete(f.file)
+                                    } else {
+                                      next.add(f.file)
+                                    }
+                                    return next
+                                  })
+                                }}
+                                className="w-full flex items-center gap-2 text-sm py-1 px-2 rounded hover:bg-gray-50 transition-colors text-left"
+                              >
+                                <svg
+                                  className={`h-3 w-3 text-gray-400 transition-transform flex-shrink-0 ${expandedFiles.has(f.file) ? 'rotate-90' : ''}`}
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                                <span className="text-gray-700 font-mono text-xs truncate flex-1">
+                                  {f.file}
+                                </span>
+                                <span className="text-green-600 text-xs font-medium">+{f.additions}</span>
+                                <span className="text-red-500 text-xs font-medium">-{f.deletions}</span>
+                              </button>
+                              {expandedFiles.has(f.file) && f.diff && (
+                                <div className="ml-5">
+                                  <DiffViewer diff={f.diff} />
+                                </div>
+                              )}
                             </div>
                           ))
                         )}

@@ -107,6 +107,8 @@ export interface DiffFile {
   file: string
   additions: number
   deletions: number
+  diff: string
+  isBinary: boolean
 }
 
 export interface CommitEntry {
@@ -117,6 +119,7 @@ export interface CommitEntry {
   filesChanged: number
   additions: number
   deletions: number
+  files: string[]
 }
 
 export interface CommitDiff {
