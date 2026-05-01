@@ -178,13 +178,17 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "See design.md D2, D3, D5. Follow onAgentEvent pattern from useSessionTimeline.ts.",
-      "attempts": 1,
+      "attempts": 5,
       "order": 999999,
       "error": null,
       "durations": [
-        357282
+        357282,
+        628960,
+        637969,
+        635304,
+        576290
       ]
     },
     {
