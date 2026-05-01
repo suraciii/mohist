@@ -140,11 +140,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Pure cleanup — buildTimeline already ignores the _logs parameter. Do NOT remove getWorkflowLogs from useSessionTimeline (Path B is kept per design D4).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        101874
+      ]
     },
     {
       "id": "T-006",
