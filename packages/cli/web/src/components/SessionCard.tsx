@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { SessionCard as SessionCardType, WaitingCard as WaitingCardType } from '../hooks/useActivityCards'
+import { ActiveSessionAnomalies, WaitingSessionAnomalies } from './AnomalyBadge'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)
@@ -128,6 +129,8 @@ export function ActiveSessionCard({ card, now }: ActiveSessionCardProps) {
             </div>
           </div>
         )}
+
+        <ActiveSessionAnomalies card={card} now={now} />
       </div>
     </Link>
   )
@@ -174,6 +177,8 @@ export function WaitingCard({ card }: WaitingCardProps) {
             {card.questionPreview}
           </p>
         )}
+
+        <WaitingSessionAnomalies card={card} />
       </div>
     </Link>
   )

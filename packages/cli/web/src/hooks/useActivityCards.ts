@@ -23,6 +23,7 @@ export interface WaitingCard {
   label: 'Needs Approval' | 'Question Pending'
   questionPreview?: string
   questionId?: string
+  questionAskedAt?: string
 }
 
 export interface SessionCard {
@@ -176,12 +177,14 @@ export function useActivityCards() {
 
     for (const q of agentStatus.waitingQuestions ?? []) {
       const key = String(q.issueNumber)
+      const existing = waitingRef.current.get(key)
       waitingMap.set(key, {
         issueId: q.issueId,
         issueNumber: key,
         label: 'Question Pending',
         questionPreview: truncate(q.question, MAX_PREVIEW_LENGTH),
         questionId: q.questionId,
+        questionAskedAt: existing?.questionAskedAt ?? new Date().toISOString(),
       })
     }
 
