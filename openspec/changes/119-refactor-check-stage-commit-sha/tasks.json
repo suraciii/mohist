@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Check stage 持久化检查结果 + commit SHA 快照 + 审批校验",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/db/check-suite-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Follow existing repo pattern (CommentRepo). checks column stores JSON stringified object with build-test and ai-review CheckState entries."
+      "passes": true,
+      "notes": "Follow existing repo pattern (CommentRepo). checks column stores JSON stringified object with build-test and ai-review CheckState entries.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        259566
+      ]
     },
     {
       "id": "T-002",
@@ -38,9 +43,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/event-bus.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Keep existing check_started and check_update events unchanged except adding snapshotSha field to check_update."
+      "notes": "Keep existing check_started and check_update events unchanged except adding snapshotSha field to check_update.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -58,9 +68,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "MergeReadyCheck always returned pass (informational only), so removing it does not change check semantics. Merge readiness is already handled by merge queue rebase logic."
+      "notes": "MergeReadyCheck always returned pass (informational only), so removing it does not change check semantics. Merge readiness is already handled by merge queue rebase logic.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -81,9 +96,16 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-controller.ts",
-      "dependsOn": ["T-001", "T-002", "T-003"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Keep existing runBuildTestCheck and runAiReviewCheck internal methods. Add outer loop wrapper that coordinates them. For ai-review auto-fix, spawn a coder agent with fix prompt similar to spawnBuildTestFixAgent. Read HEAD SHA via execFileSync('git', ['rev-parse', 'HEAD']) in worktree dir."
+      "notes": "Keep existing runBuildTestCheck and runAiReviewCheck internal methods. Add outer loop wrapper that coordinates them. For ai-review auto-fix, spawn a coder agent with fix prompt similar to spawnBuildTestFixAgent. Read HEAD SHA via execFileSync('git', ['rev-parse', 'HEAD']) in worktree dir.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -102,9 +124,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001", "T-004"],
+      "dependsOn": [
+        "T-001",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "SHA mismatch rerun: call resumePipeline targeting Check stage. Need to import CheckSuiteRepo via stateManager. For issue detail, join or query CheckSuiteRepo when returning issue data."
+      "notes": "SHA mismatch rerun: call resumePipeline targeting Check stage. Need to import CheckSuiteRepo via stateManager. For issue detail, join or query CheckSuiteRepo when returning issue data.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -124,9 +152,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/webui/src/components/CheckSuitePanel.tsx",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Follow existing SSE subscription pattern in the webui codebase. Use existing UI components (Badge, spinner) for status indicators."
+      "notes": "Follow existing SSE subscription pattern in the webui codebase. Use existing UI components (Badge, spinner) for status indicators.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -144,9 +177,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/check-suite.test.ts",
-      "dependsOn": ["T-004", "T-005"],
+      "dependsOn": [
+        "T-004",
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Use existing test patterns from the codebase (vitest, in-memory SQLite). Mock git SHA reading for deterministic tests."
+      "notes": "Use existing test patterns from the codebase (vitest, in-memory SQLite). Mock git SHA reading for deterministic tests.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
