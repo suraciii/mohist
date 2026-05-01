@@ -9,7 +9,6 @@ import { AgentRunnerService } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
-import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
@@ -18,7 +17,7 @@ import { detectOpenSpecChange, findChangeDir } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Log } from '../util/log';
-import { eventBus } from '../services/event-bus';
+import type { IssueQueueStatus } from '../services/agent-runner-service';
 
 const log = Log.create({ service: 'issue' });
 
@@ -35,7 +34,7 @@ export function createIssueRoutes(
   workflowLogRepo?: WorkflowLogRepo,
   agentSessionMessageRepo?: AgentSessionMessageRepo,
   coderSessionRepo?: CoderSessionRepo,
-  opencodeBinPath?: string,
+  _opencodeBinPath?: string,
   mergeQueue?: MergeQueue,
   checkpointRepo?: PipelineCheckpointRepo,
 ): Hono {
@@ -593,12 +592,15 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      if (agentRunner && agentRunner.isRunning(issue.id)) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} has an agent running. Wait for it to complete or pause first.`
-        };
-        return c.json(response, 409);
+      if (agentRunner) {
+        const queueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
+        if (queueStatus.running) {
+          const response: ApiResponse = {
+            success: false,
+            error: `Issue #${number} has a task running. Wait for it to complete or force-stop first.`
+          };
+          return c.json(response, 409);
+        }
       }
 
       const { cleanup } = await c.req.json().catch(() => ({ cleanup: false }));
@@ -794,38 +796,32 @@ export function createIssueRoutes(
       issueService.setStatus(issue.id, IssueStatus.Active);
 
       if (agentRunner) {
-        const acpOptions: AcpConnectionOptions = {
-          cwd: worktreePath,
-          issueId: issue.id,
-          projectId,
-          workflowLogRepo,
-          coderSessionRepo,
-          eventBus,
-          issueNumber: issue.number,
-          opencodeBinPath,
-          model: issue.model ?? undefined,
-        };
+        const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
 
-        agentRunner.resumePipeline(
-          issue,
-          projectId,
-          stateManager.getIssueRepo(),
-          worktreePath,
-          acpOptions,
-          (issueId, status) => issueService.setStatus(issueId, status),
-        );
+        const updatedIssue = issueService.getByNumber(projectId, number);
+        const response: ApiResponse = {
+          success: true,
+          data: {
+            issue: updatedIssue,
+            taskId: result.taskId,
+            status: result.status,
+            queuePosition: result.queuePosition,
+            message: `Issue #${number} skipping to review stage. Change: ${change.changePath}`
+          }
+        };
+        return c.json(response, 202);
       }
 
-      const updatedIssue = issueService.getByNumber(projectId, number);
+      const updatedIssue2 = issueService.getByNumber(projectId, number);
 
-      const response: ApiResponse = {
+      const response2: ApiResponse = {
         success: true,
         data: {
-          issue: updatedIssue,
-          message: `Issue #${number} resumed, skipping to review stage. Change: ${change.changePath}`
+          issue: updatedIssue2,
+          message: `Issue #${number} stage set to check (no agent runner). Change: ${change.changePath}`
         }
       };
-      return c.json(response);
+      return c.json(response2);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
@@ -874,7 +870,7 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      if (!agentRunner.hasPendingGate(number)) {
+      if (!agentRunner.isIssueAtApprovalGate(issue.id)) {
         const pendingIssue = issueRepo.findPendingApprovalByIssueId(issue.id);
         if (!(pendingIssue?.approvalState?.status === 'awaiting')) {
           const response: ApiResponse = {
@@ -973,20 +969,21 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (agentRunner && agentRunner.isRunning(issue.id)) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} is already running. Wait for it to complete first.`
-        };
-        return c.json(response, 400);
-      }
-
       if (!agentRunner) {
         const response: ApiResponse = {
           success: false,
           error: 'AgentRunnerService not configured'
         };
         return c.json(response, 500);
+      }
+
+      const rejectQueueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
+      if (rejectQueueStatus.running) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} has a running task. Wait for it to complete first.`
+        };
+        return c.json(response, 400);
       }
 
       const issueRepo = stateManager.getIssueRepo();
@@ -1012,56 +1009,23 @@ export function createIssueRoutes(
         respondedAt: new Date().toISOString(),
       });
 
-      let resumedIssue = issue;
       if (rejectedStage === Stage.Check) {
-        resumedIssue = issueRepo.updateStage(issue.id, Stage.Build)!;
+        issueRepo.updateStage(issue.id, Stage.Build);
       }
 
-      const project = projectService.getById(projectId);
-      if (!project) {
-        log.warn('Project not found', { projectId, issueNumber: number });
-        const response: ApiResponse = {
-          success: false,
-          error: 'Project not found'
-        };
-        return c.json(response, 404);
-      }
-
-      let worktreePath = process.cwd();
-      if (worktreeManager) {
-        const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || process.cwd();
-      }
-
-      const acpOptions: AcpConnectionOptions = {
-        cwd: worktreePath,
-        issueId: issue.id,
-        projectId,
-        workflowLogRepo,
-        coderSessionRepo,
-        eventBus,
-        issueNumber: issue.number,
-        opencodeBinPath,
-        model: issue.model ?? undefined,
-      };
-
-      agentRunner.resumePipeline(
-        resumedIssue,
-        projectId,
-        issueRepo,
-        worktreePath,
-        acpOptions,
-        (issueId, status) => issueService.setStatus(issueId, status),
-      );
+      const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
 
       const response: ApiResponse = {
         success: true,
         data: {
-          issue: resumedIssue,
+          issue: issueService.getByNumber(projectId, number),
+          taskId: result.taskId,
+          status: result.status,
+          queuePosition: result.queuePosition,
           message: `Issue #${number} rejected, pipeline restarted from ${rejectedStage === Stage.Check ? 'build' : 'plan'}`
         }
       };
-      return c.json(response);
+      return c.json(response, 202);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
@@ -1110,7 +1074,7 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      if (!agentRunner.hasPendingGate(number)) {
+      if (!agentRunner.isIssueAtApprovalGate(issue.id)) {
         const response: ApiResponse = {
           success: false,
           error: `Pipeline is not paused for issue #${number}`
@@ -1118,53 +1082,21 @@ export function createIssueRoutes(
         return c.json(response, 409);
       }
 
-      const project = projectService.getById(projectId);
-      if (!project) {
-        log.warn('Project not found', { projectId, issueNumber: number });
-        const response: ApiResponse = {
-          success: false,
-          error: 'Project not found'
-        };
-        return c.json(response, 404);
-      }
-
-      let worktreePath = process.cwd();
-      if (worktreeManager) {
-        const existingPath = worktreeManager.getPath(project.name, issue.number);
-        worktreePath = existingPath || process.cwd();
-      }
-
       issueService.createComment(issue.id, message);
 
-      const acpOptions: AcpConnectionOptions = {
-        cwd: worktreePath,
-        issueId: issue.id,
-        projectId,
-        workflowLogRepo,
-        coderSessionRepo,
-        eventBus,
-        issueNumber: issue.number,
-        opencodeBinPath,
-        model: issue.model ?? undefined,
-      };
-
-      agentRunner.resumePipeline(
-        issue,
-        projectId,
-        stateManager.getIssueRepo(),
-        worktreePath,
-        acpOptions,
-        (issueId, status) => issueService.setStatus(issueId, status),
-      );
+      const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
 
       const response: ApiResponse = {
         success: true,
         data: {
-          issue,
+          issue: issueService.getByNumber(projectId, number),
+          taskId: result.taskId,
+          status: result.status,
+          queuePosition: result.queuePosition,
           message: `Message sent to issue #${number}, agent resumed`
         }
       };
-      return c.json(response);
+      return c.json(response, 202);
     } catch (error) {
       const response: ApiResponse = {
         success: false,
@@ -1997,7 +1929,7 @@ export function createIssueRoutes(
         return c.json({ success: false, error: 'AgentRunnerService not configured' } satisfies ApiResponse, 500);
       }
 
-      const queueStatus = agentRunner.getQueueStatus(issue.id) as import('../services/agent-runner-service').IssueQueueStatus;
+      const queueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
 
       return c.json({
         success: true,
@@ -2045,7 +1977,7 @@ export function createIssueRoutes(
         return c.json({ success: false, error: 'AgentRunnerService not configured' } satisfies ApiResponse, 500);
       }
 
-      const queueStatus = agentRunner.getQueueStatus(issue.id) as import('../services/agent-runner-service').IssueQueueStatus;
+      const queueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
 
       const isRunningTask = queueStatus.running?.id === taskId;
       if (isRunningTask) {
@@ -2210,8 +2142,14 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} is not blocked (current: ${issue.status})` } satisfies ApiResponse, 409);
       }
 
-      if (agentRunner && agentRunner.isRunning(issue.id)) {
-        return c.json({ success: false, error: `Issue #${number} already has an agent running` } satisfies ApiResponse, 409);
+      if (agentRunner) {
+        const restartQueueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
+        if (restartQueueStatus.running) {
+          return c.json({ success: false, error: `Issue #${number} already has a running task` } satisfies ApiResponse, 409);
+        }
+        if (restartQueueStatus.pending.length > 0) {
+          agentRunner.cancelAll(issue.id);
+        }
       }
 
       const issueRepo = stateManager.getIssueRepo();

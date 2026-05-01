@@ -86,7 +86,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -120,7 +120,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -275,7 +275,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(recovered?.approvalState).toBeUndefined();
   });
 
-  it('awaiting approval: pendingGate restored, status active', () => {
+  it('awaiting approval: gate restored, status active', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Awaiting' });
 
@@ -305,7 +305,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(recovered?.status).toBe(IssueStatus.Active);
     expect(recovered?.stage).toBe(Stage.Plan);
     expect(recovered?.approvalState?.status).toBe('awaiting');
-    expect(service.hasPendingGate(issue.number)).toBe(true);
+    expect(service.isIssueAtApprovalGate(issue.id)).toBe(true);
   });
 
   it('no ProjectRepo/WorktreeManager: build-stage falls back to interrupted', () => {
@@ -392,13 +392,13 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
     const rAwaiting = issueRepo.findById(awaitingIssue.id);
     expect(rAwaiting?.status).toBe(IssueStatus.Active);
-    expect(service.hasPendingGate(awaitingIssue.number)).toBe(true);
+    expect(service.isIssueAtApprovalGate(awaitingIssue.id)).toBe(true);
 
     const rBuild = issueRepo.findById(buildIssue.id);
     expect(rBuild?.stage).toBe(Stage.Check);
@@ -429,7 +429,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -607,7 +607,7 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -633,7 +633,7 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -658,7 +658,7 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -734,9 +734,8 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'startPipeline').mockReturnValue({
-      started: false,
-      error: 'Concurrent agent limit reached (8)',
+    vi.spyOn(service, 'enqueue').mockImplementation(() => {
+      throw new Error('Concurrent agent limit reached (8)');
     });
 
     const blockedEvents: any[] = [];
@@ -892,7 +891,7 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 

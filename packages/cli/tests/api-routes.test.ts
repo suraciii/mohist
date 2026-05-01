@@ -212,7 +212,7 @@ describe('API Routes', () => {
     beforeEach(async () => {
       const app = new Hono();
       const eventBus = new EventBus();
-      const agentRunner = new AgentRunnerService(eventBus);
+      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, projectRepo, undefined, stateManager.getIssueTaskQueueRepo());
       app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner));
       server = createTestServer(app);
       
@@ -294,14 +294,15 @@ describe('API Routes', () => {
     });
 
     describe('POST /api/issues/:number/start', () => {
-      it('should start processing an issue', async () => {
+      it('should enqueue start-pipeline for an issue', async () => {
         await issueService.create({ projectId, title: 'Test Issue' });
 
         const response = await request(server).post('/api/issues/1/start');
 
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(202);
         expect(response.body.success).toBe(true);
-        expect(response.body.data.issue.stage).toBe('plan');
+        expect(response.body.data.taskId).toBeDefined();
+        expect(response.body.data.status).toBeDefined();
       });
     });
 
@@ -333,7 +334,7 @@ describe('API Routes', () => {
 
         const response = await request(server).post('/api/issues/1/approve');
 
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(202);
         expect(response.body.success).toBe(true);
       });
     });
@@ -353,13 +354,13 @@ describe('API Routes', () => {
 
           const skipApp = new Hono();
           const skipEventBus = new EventBus();
-          const skipAgentRunner = new AgentRunnerService(skipEventBus);
+          const skipAgentRunner = new AgentRunnerService(skipEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
           skipApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, skipAgentRunner));
           const skipServer = createTestServer(skipApp);
 
           const response = await request(skipServer).post(`/api/issues/${issue.number}/skip-to-review`);
 
-          expect(response.status).toBe(200);
+          expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
 
           const issueRepo = stateManager.getIssueRepo();
@@ -380,20 +381,19 @@ describe('API Routes', () => {
 
         const reopenApp = new Hono();
         const reopenEventBus = new EventBus();
-        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8);
-        const resumePipelineSpy = vi.spyOn(reopenAgentRunner, 'resumePipeline');
+        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        const enqueueSpy = vi.spyOn(reopenAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
         reopenApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, reopenAgentRunner));
         const reopenServer = createTestServer(reopenApp);
 
         const response = await request(reopenServer).post(`/api/issues/${issue.number}/reopen`);
 
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(202);
         expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('build');
+        expect(response.body.data.message).toContain('resume-pipeline');
 
-        expect(resumePipelineSpy).toHaveBeenCalledTimes(1);
-        const resumedIssue = resumePipelineSpy.mock.calls[0][0];
-        expect(resumedIssue.stage).toBe(Stage.Build);
+        expect(enqueueSpy).toHaveBeenCalledTimes(1);
+        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
       });
     });
   });
@@ -591,8 +591,8 @@ describe('API Routes', () => {
           fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
 
           const eventBus = new EventBus();
-          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
-          const resumeSpy = vi.spyOn(agentRunner, 'resumePipeline').mockImplementation(() => {});
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
           const mockWm = {
             getPath: () => tmpRetryDir,
@@ -600,12 +600,12 @@ describe('API Routes', () => {
           } as any;
 
           const retryApp = new Hono();
-          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, undefined, agentRunner));
+          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
           const retryServer = createTestServer(retryApp);
 
           const response = await request(retryServer).post(`/api/issues/${issue.number}/retry`);
 
-          expect(response.status).toBe(200);
+          expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
           expect(response.body.data.message).toContain('retrying from checkpoint');
 
@@ -614,7 +614,8 @@ describe('API Routes', () => {
           expect(updated?.blockedReason).toBeUndefined();
           expect(updated?.retryCount).toBe(0);
 
-          expect(resumeSpy).toHaveBeenCalledTimes(1);
+          expect(enqueueSpy).toHaveBeenCalledTimes(1);
+          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
         } finally {
           fs.rmSync(tmpRetryDir, { recursive: true, force: true });
         }
@@ -632,17 +633,18 @@ describe('API Routes', () => {
         expect(response.body.error).toContain('not blocked');
       });
 
-      it('should return 409 when agent is already running', async () => {
+      it('should retry even when issue has a running slot (queue handles concurrency)', async () => {
         const issue = createBlockedIssue('Running Agent');
         const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
-        (agentRunner as any).activeAgents.set(issue.id, { issueId: issue.id });
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        (agentRunner as any).runningSlots.set(issue.id, { id: 'fake-task', issueId: issue.id });
         server = createRetryServer(agentRunner);
 
         const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
-        expect(response.status).toBe(409);
-        expect(response.body.error).toContain('already running');
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.message).toContain('no checkpoint found');
       });
 
       it('should return 404 when issue not found', async () => {
@@ -712,14 +714,14 @@ describe('API Routes', () => {
       it('should return 409 when agent is already running', async () => {
         const issue = createBlockedIssue('Running Restart');
         const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus);
-        (agentRunner as any).activeAgents.set(issue.id, { issueId: issue.id });
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        (agentRunner as any).runningSlots.set(issue.id, { id: 'fake-task', issueId: issue.id });
         server = createRetryServer(agentRunner);
 
         const response = await request(server).post(`/api/issues/${issue.number}/restart`);
 
         expect(response.status).toBe(409);
-        expect(response.body.error).toContain('already running');
+        expect(response.body.error).toContain('already has a running task');
       });
 
       it('should return 404 when issue not found', async () => {

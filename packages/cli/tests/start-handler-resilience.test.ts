@@ -74,7 +74,7 @@ describe('POST /issues/:number/start resilience', () => {
     issueService = new IssueService(issueRepo, commentRepo);
     new ConfigService(configRepo);
     eventBus = new EventBus();
-    agentRunner = new AgentRunnerService(eventBus);
+    agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
   });
 
   afterEach(() => {
@@ -89,28 +89,6 @@ describe('POST /issues/:number/start resilience', () => {
     const issue = issueService.create({ projectId, title: 'Test Issue' });
     return issue;
   }
-
-  it('should keep stage as Draft when worktree creation fails', async () => {
-    const issue = await setupProjectAndIssue();
-    const worktreeManager = createMockWorktreeManager();
-    worktreeManager.create.mockRejectedValue(new Error('git fetch failed: gnutls_handshake error'));
-
-    const app = new Hono();
-    app.route('/api/issues', createIssueRoutes(
-      issueService, projectService, stateManager,
-      worktreeManager as any, undefined, undefined, agentRunner,
-    ));
-    const server = createTestServer(app);
-
-    const response = await request(server).post(`/api/issues/${issue.number}/start`);
-
-    expect(response.status).toBe(500);
-    expect(response.body.success).toBe(false);
-    expect(response.body.error).toContain('git fetch failed');
-
-    const updatedIssue = issueService.getByNumber(projectId, issue.number);
-    expect(updatedIssue?.stage).toBe(Stage.Backlog);
-  });
 
   it('should keep stage as Backlog when agentRunner is not configured', async () => {
     const issue = await setupProjectAndIssue();
@@ -135,11 +113,9 @@ describe('POST /issues/:number/start resilience', () => {
     expect(worktreeManager.create).not.toHaveBeenCalled();
   });
 
-    it('should rollback stage to Backlog when error occurs after stage transition', async () => {
+  it('should return 500 when enqueue throws', async () => {
     const issue = await setupProjectAndIssue();
     const worktreeManager = createMockWorktreeManager();
-
-    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     const app = new Hono();
     app.route('/api/issues', createIssueRoutes(
@@ -148,107 +124,38 @@ describe('POST /issues/:number/start resilience', () => {
     ));
     const server = createTestServer(app);
 
-    vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
-    vi.spyOn(agentRunner, 'startPipeline').mockImplementation((() => {
+    vi.spyOn(agentRunner, 'enqueue').mockImplementation(() => {
       throw new Error('agent start unexpected failure');
-    }) as any);
+    });
 
     const response = await request(server).post(`/api/issues/${issue.number}/start`);
 
     expect(response.status).toBe(500);
     expect(response.body.success).toBe(false);
     expect(response.body.error).toContain('agent start unexpected failure');
-
-    const updatedIssue = issueService.getByNumber(projectId, issue.number);
-    expect(updatedIssue?.stage).toBe(Stage.Backlog);
-
-    stderrSpy.mockRestore();
   });
 
-  it('should log error but return original error when rollback fails', async () => {
+  it('should return 202 when enqueue succeeds', async () => {
     const issue = await setupProjectAndIssue();
     const worktreeManager = createMockWorktreeManager();
 
-    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const app = new Hono();
+    app.route('/api/issues', createIssueRoutes(
+      issueService, projectService, stateManager,
+      worktreeManager as any, undefined, undefined, agentRunner,
+    ));
+    const server = createTestServer(app);
 
-    vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
-    vi.spyOn(agentRunner, 'startPipeline').mockImplementation((() => {
-      throw new Error('agent start failed');
-    }) as any);
-
-    const originalTransition = issueService.transitionToStage.bind(issueService);
-    let transitionCallCount = 0;
-    vi.spyOn(issueService, 'transitionToStage').mockImplementation((id: string, stage: Stage) => {
-      transitionCallCount++;
-      if (transitionCallCount === 1) {
-        return originalTransition(id, stage);
-      }
-      throw new Error('rollback DB locked');
+    vi.spyOn(agentRunner, 'enqueue').mockReturnValue({
+      taskId: 'test-task-id',
+      status: 'pending',
+      queuePosition: 0,
     });
 
-    const app = new Hono();
-    app.route('/api/issues', createIssueRoutes(
-      issueService, projectService, stateManager,
-      worktreeManager as any, undefined, undefined, agentRunner,
-    ));
-    const server = createTestServer(app);
-
     const response = await request(server).post(`/api/issues/${issue.number}/start`);
 
-    expect(response.status).toBe(500);
-    expect(response.body.error).toContain('agent start failed');
-
-    expect(stderrSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to rollback stage to Backlog')
-    );
-
-    stderrSpy.mockRestore();
-  });
-
-  it('should not delete worktree on rollback', async () => {
-    const issue = await setupProjectAndIssue();
-    const worktreeManager = createMockWorktreeManager();
-
-    vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
-    vi.spyOn(agentRunner, 'startPipeline').mockImplementation((() => {
-      throw new Error('agent start failed');
-    }) as any);
-
-    const app = new Hono();
-    app.route('/api/issues', createIssueRoutes(
-      issueService, projectService, stateManager,
-      worktreeManager as any, undefined, undefined, agentRunner,
-    ));
-    const server = createTestServer(app);
-
-    await request(server).post(`/api/issues/${issue.number}/start`);
-
-    expect(worktreeManager.create).toHaveBeenCalledTimes(1);
-    expect(worktreeManager.remove).not.toHaveBeenCalled();
-  });
-
-  it('should succeed normally when worktree and agent work', async () => {
-    const issue = await setupProjectAndIssue();
-    const worktreeManager = createMockWorktreeManager();
-
-    vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
-    vi.spyOn(agentRunner, 'startPipeline').mockReturnValue({
-      started: true,
-    } as any);
-
-    const app = new Hono();
-    app.route('/api/issues', createIssueRoutes(
-      issueService, projectService, stateManager,
-      worktreeManager as any, undefined, undefined, agentRunner,
-    ));
-    const server = createTestServer(app);
-
-    const response = await request(server).post(`/api/issues/${issue.number}/start`);
-
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(response.body.success).toBe(true);
-    expect(response.body.data.issue.stage).toBe(Stage.Plan);
-
-    expect(worktreeManager.create).toHaveBeenCalledTimes(1);
+    expect(response.body.data.taskId).toBe('test-task-id');
   });
 });

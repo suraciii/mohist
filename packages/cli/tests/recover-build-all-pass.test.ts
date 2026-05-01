@@ -60,7 +60,7 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('all-pass tasks.json triggers startPipeline with stage=Review issue', () => {
+  it('all-pass tasks.json auto-advances to Check stage with approval gate', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'All Pass Pipeline' });
 
@@ -88,27 +88,19 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       createWorktreeMock(tmpDir),
     );
 
-    const spy = vi.spyOn(service, 'startPipeline').mockReturnValue({ started: true });
+    const spy = vi.spyOn(service, 'enqueue');
 
     service.recoverIssues();
 
-    expect(spy).toHaveBeenCalledTimes(1);
-
-    const [calledIssue, calledProjectId, calledIssueRepo, calledWorktreePath, calledAcpOptions] = spy.mock.calls[0];
-    expect(calledIssue.stage).toBe(Stage.Check);
-    expect(calledProjectId).toBe(project.id);
-    expect(calledIssueRepo).toBe(issueRepo);
-    expect(calledWorktreePath).toBe(tmpDir);
-    expect(calledAcpOptions.cwd).toBe(tmpDir);
-    expect(calledAcpOptions.issueId).toBe(issue.id);
-    expect(calledAcpOptions.projectId).toBe(project.id);
+    expect(spy).not.toHaveBeenCalled();
 
     const recovered = issueRepo.findById(issue.id);
     expect(recovered?.stage).toBe(Stage.Check);
     expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.approvalState?.status).toBe('awaiting');
   });
 
-  it('startPipeline returning {started:false} falls back to Blocked status', () => {
+  it('all-pass sets Check stage with awaiting approval (enqueue not needed)', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Pipeline Full' });
 
@@ -133,19 +125,15 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'startPipeline').mockReturnValue({
-      started: false,
-      error: 'Concurrent agent limit reached (8)',
-    });
-
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
     expect(recovered?.stage).toBe(Stage.Check);
+    expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.approvalState?.status).toBe('awaiting');
   });
 
-  it('partial-pass does not call startPipeline, sets Blocked', () => {
+  it('partial-pass auto-retries by enqueuing resume-pipeline', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Partial' });
 
@@ -173,14 +161,14 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       createWorktreeMock(tmpDir),
     );
 
-    const spy = vi.spyOn(service, 'startPipeline');
+    const spy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
-    expect(spy).not.toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
     expect(recovered?.stage).toBe(Stage.Build);
+    expect(recovered?.retryCount).toBe(1);
   });
 });

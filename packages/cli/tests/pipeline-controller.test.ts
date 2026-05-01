@@ -263,14 +263,14 @@ describe('WorkflowEngine pipeline stage ordering', () => {
 });
 
 describe('AgentRunnerService pipeline gate management', () => {
-  it('should track pending gates', async () => {
+  it('should return false for approval gate check without issue repo', async () => {
     const { AgentRunnerService } = await import('../src/services/agent-runner-service');
     const { EventBus } = await import('../src/services/event-bus');
     const eventBus = new EventBus();
 
     const service = new AgentRunnerService(eventBus, undefined, undefined, 8);
 
-    expect(service.hasPendingGate(1)).toBe(false);
+    expect(service.isIssueAtApprovalGate('non-existent')).toBe(false);
   });
 });
 

@@ -51,14 +51,6 @@ export interface GlobalQueueStatus {
   issues: Map<string, IssueQueueStatus>;
 }
 
-export interface RunningAgent {
-  issueId: string;
-  issueNumber: number;
-  promise: Promise<void>;
-  projectId: string;
-  abortController: AbortController;
-}
-
 export interface RecoverableIssue {
   issueNumber: number;
   stage: string;
@@ -74,15 +66,13 @@ export interface BlockedIssueInfo {
 }
 
 export interface AgentStatus {
-  running: boolean;
-  issueId: string | null;
-  issueNumber: number | null;
-  activeAgents: Array<{ issueId: string; issueNumber: number; projectId: string }>;
+  running: number;
+  pending: number;
+  maxSlots: number;
+  tasks: Array<{ taskId: string; issueId: string; issueNumber: number; taskType: string; status: string }>;
   waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>;
   recoverableIssues: RecoverableIssue[];
   blockedIssues: BlockedIssueInfo[];
-  queueDepth: number;
-  maxConcurrentAgents: number;
 }
 
 export interface WaitingQuestion {
@@ -94,16 +84,7 @@ const PIPELINE_TIMEOUT_MS = 30 * 60 * 1000;
 
 const log = Log.create({ service: 'agent-runner' });
 
-export interface PipelineGateInfo {
-  issueId: string;
-  issueNumber: number;
-  projectId: string;
-  stage: Stage;
-}
-
 export class AgentRunnerService {
-  private activeAgents = new Map<string, RunningAgent>();
-  private pendingGates = new Map<number, PipelineGateInfo>();
   private waitingQuestions = new Map<string, WaitingQuestion>();
   private readonly maxConcurrentAgents: number;
   private recoverableIssues: RecoverableIssue[];
@@ -112,6 +93,7 @@ export class AgentRunnerService {
   private orphanScanTimer?: ReturnType<typeof setInterval>;
   private runningSlots = new Map<string, IssueTaskQueueRecord>();
   private pendingQueues = new Map<string, IssueTaskQueueRecord[]>();
+  private abortControllers = new Map<string, AbortController>();
 
   constructor(
     private readonly eventBus: EventBus,
@@ -149,21 +131,21 @@ export class AgentRunnerService {
       this.orphanScanTimer = undefined;
     }
 
-    for (const [issueId, agent] of this.activeAgents) {
+    for (const [issueId, ac] of this.abortControllers) {
       try {
-        agent.abortController.abort();
-        log.info('Aborted active agent during shutdown', { issueId, issueNumber: agent.issueNumber });
+        ac.abort();
+        log.info('Aborted agent during shutdown', { issueId });
       } catch (err) {
         log.error('Failed to abort agent during shutdown', {
           issueId,
-          issueNumber: agent.issueNumber,
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
 
-    this.activeAgents.clear();
-    this.pendingGates.clear();
+    this.runningSlots.clear();
+    this.pendingQueues.clear();
+    this.abortControllers.clear();
     this.waitingQuestions.clear();
     log.info('AgentRunnerService shutdown complete, all maps cleared');
   }
@@ -189,21 +171,19 @@ export class AgentRunnerService {
   }
 
   forceStop(issueId: string): { stopped: boolean } {
-    const agent = this.activeAgents.get(issueId);
-    if (!agent) return { stopped: false };
+    const ac = this.abortControllers.get(issueId);
+    if (!ac) return { stopped: false };
 
-    const { issueNumber, abortController } = agent;
-    log.info('Force stopping agent', { issueId, issueNumber });
-    abortController.abort();
+    log.info('Force stopping agent', { issueId });
+    ac.abort();
 
-    this.activeAgents.delete(issueId);
-    this.pendingGates.delete(issueNumber);
+    this.abortControllers.delete(issueId);
     this.waitingQuestions.delete(issueId);
 
     this.eventBus.emit('agent_stopped', {
       issueId,
-      projectId: agent.projectId,
-      issueNumber,
+      projectId: this.runningSlots.get(issueId)?.projectId ?? '',
+      issueNumber: this.runningSlots.get(issueId)?.issueNumber ?? 0,
       reason: 'force_stop',
     });
 
@@ -274,6 +254,8 @@ export class AgentRunnerService {
   }
 
   recoverIssues(): void {
+    this.recoverFromQueue();
+
     if (!this.issueRepo) return;
 
     const orphans = this.issueRepo.findAll({ status: IssueStatus.Active })
@@ -297,8 +279,8 @@ export class AgentRunnerService {
     const activeMergeStates = new Set(['resolving', 'rebasing', 'merging']);
 
     const orphans = activeIssues.filter(issue => {
-      if (this.activeAgents.has(issue.id)) return false;
-      if (this.pendingGates.has(issue.number)) return false;
+      if (this.runningSlots.has(issue.id)) return false;
+      if (issue.approvalState?.status === 'awaiting') return false;
       if (issue.mergeState && activeMergeStates.has(issue.mergeState)) return false;
       return true;
     });
@@ -337,16 +319,10 @@ export class AgentRunnerService {
     if (!this.issueRepo) return;
     try {
       if (issue.approvalState?.status === 'awaiting') {
-        this.pendingGates.set(issue.number, {
-          issueId: issue.id,
-          issueNumber: issue.number,
-          projectId: issue.projectId,
-          stage: issue.approvalState.stage ?? issue.stage,
-        });
-        log.info('Restored pending gate for awaiting issue', {
+        log.info('Restored awaiting issue', {
           issueNumber: issue.number,
           stage: issue.approvalState.stage ?? issue.stage,
-          action: 'pendingGate restored, status remains active',
+          action: 'status remains active',
         });
       } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
         this.recoverBuildStageIssue(issue);
@@ -357,16 +333,10 @@ export class AgentRunnerService {
           output: { recovered: true, reason: 'agent completed but approval_state not written' },
           requestedAt: new Date().toISOString(),
         });
-        this.pendingGates.set(issue.number, {
-          issueId: issue.id,
-          issueNumber: issue.number,
-          projectId: issue.projectId,
-          stage: issue.stage,
-        });
         log.info('Recovered orphaned issue — stage completed, restored approval gate', {
           issueNumber: issue.number,
           stage: issue.stage,
-          action: 'approval_state=awaiting, pendingGate restored',
+          action: 'approval_state=awaiting',
         });
       } else {
         this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
@@ -512,26 +482,19 @@ export class AgentRunnerService {
         this.issueRepo!.updateBlockedReason(issue.id, reason);
         this.issueRepo!.clearApprovalState(issue.id);
 
-        const pipelineResult = this.startPipeline(
-          issue,
-          issue.projectId,
-          this.issueRepo!,
-          worktreePath,
-          { cwd: worktreePath },
-        );
-
-        if (!pipelineResult.started) {
-          const failReason = `自动重试启动失败: ${pipelineResult.error} (${passed}/${tasksFile.tasks.length} 任务完成)`;
-          this.issueRepo!.blockIssue(issue.id, failReason);
-          this.emitBlocked(issue, failReason, newRetryCount);
-          log.info('Recovered build-stage orphan — auto-retry start failed', {
-            issueNumber: issue.number,
-            action: 'status=blocked, pipeline start failed',
-          });
-        } else {
-          log.info('Recovered build-stage orphan — auto-retry started', {
+        try {
+          this.enqueue(issue.id, 'resume-pipeline');
+          log.info('Recovered build-stage orphan — auto-retry enqueued', {
             issueNumber: issue.number,
             action: `retry ${newRetryCount}/${MAX_RETRIES}, ${passed}/${tasksFile.tasks.length} tasks`,
+          });
+        } catch (enqueueErr) {
+          const failReason = `自动重试启动失败: ${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)} (${passed}/${tasksFile.tasks.length} 任务完成)`;
+          this.issueRepo!.blockIssue(issue.id, failReason);
+          this.emitBlocked(issue, failReason, newRetryCount);
+          log.info('Recovered build-stage orphan — auto-retry enqueue failed', {
+            issueNumber: issue.number,
+            action: 'status=blocked, enqueue failed',
           });
         }
       }
@@ -602,10 +565,6 @@ export class AgentRunnerService {
     }
   }
 
-  getMaxConcurrentAgents(): number {
-    return this.maxConcurrentAgents;
-  }
-
   setWaiting(issueId: string, questionId: string, question: string): void {
     this.waitingQuestions.set(issueId, { questionId, question });
   }
@@ -658,12 +617,12 @@ export class AgentRunnerService {
     }
 
     const updatedRecord = this.taskQueueRepo.findById(record.id);
-    const isRunning = updatedRecord?.status === 'running';
-    const position = isRunning ? undefined : queue.findIndex(t => t.id === record.id);
+    const started = updatedRecord?.status === 'running';
+    const position = started ? undefined : queue.findIndex(t => t.id === record.id);
 
     return {
       taskId: record.id,
-      status: isRunning ? 'running' : 'pending',
+      status: started ? 'running' : 'pending',
       queuePosition: position !== undefined && position >= 0 ? position : undefined,
     };
   }
@@ -964,6 +923,7 @@ export class AgentRunnerService {
     log.info('Pipeline started via task queue', { issueNumber: issue.number, taskType: task.taskType, taskId: task.id });
 
     const abortController = new AbortController();
+    this.abortControllers.set(issue.id, abortController);
     const startTime = Date.now();
 
     try {
@@ -975,8 +935,6 @@ export class AgentRunnerService {
           error: statusErr instanceof Error ? statusErr.message : String(statusErr),
         });
       }
-
-      this.pendingGates.delete(issue.number);
 
       const artifactManager = new ChangeArtifactsManager(worktreePath);
       const checkpointManager = this.checkpointRepo
@@ -1030,12 +988,6 @@ export class AgentRunnerService {
       log.info('Pipeline run completed', { issueNumber: issue.number, elapsedMs: duration, completed: result.completed, gateRequired: result.gateRequired });
 
       if (result.gateRequired) {
-        this.pendingGates.set(issue.number, {
-          issueId: issue.id,
-          issueNumber: issue.number,
-          projectId,
-          stage: result.stage,
-        });
         this.eventBus.emit('agent_paused', {
           issueId: issue.id,
           projectId,
@@ -1073,7 +1025,7 @@ export class AgentRunnerService {
       this.handlePipelineFailure(issue, issueRepo, projectId, errorMsg);
       this.completeTask(task.id, 'failed', errorMsg);
     } finally {
-      this.activeAgents.delete(issue.id);
+      this.abortControllers.delete(issue.id);
       this.clearWaiting(issue.id);
     }
   }
@@ -1325,29 +1277,29 @@ export class AgentRunnerService {
     return false;
   }
 
-  private handlePlanRebase(issue: Issue, project: { name: string }, projectId: string, number: number): void {
+  private handlePlanRebase(issue: Issue, _project: { name: string }, _projectId: string, number: number): void {
     if (!this.worktreeManager || !this.issueRepo) return;
-    if (!this.hasPendingGate(number)) {
-      log.info('Skipping re-self-review injection: no pending gate for issue', { issueNumber: number });
+    if (!this.isIssueAtApprovalGate(issue.id)) {
+      log.info('Skipping re-self-review injection: issue not at approval gate', { issueNumber: number });
       return;
     }
     const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
-    const worktreePath = this.worktreeManager.getPath(project.name, issue.number) || process.cwd();
     const commentRepo = (this as any).commentRepo;
     if (commentRepo) {
       commentRepo.create({ issueId: issue.id, body: rebaseMessage });
     }
-    const acpOptions: AcpConnectionOptions = { cwd: worktreePath };
-    this.resumePipeline(
-      issue,
-      projectId,
-      this.issueRepo,
-      worktreePath,
-      acpOptions,
-    );
+    try {
+      this.enqueue(issue.id, 'resume-pipeline');
+      log.info('Enqueued resume-pipeline after plan rebase', { issueNumber: number });
+    } catch (err) {
+      log.error('Failed to enqueue resume-pipeline after plan rebase', {
+        issueNumber: number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
-  private handleBuildRebase(issue: Issue, project: { name: string }, projectId: string, number: number, reEvalPlan = false): void {
+  private handleBuildRebase(issue: Issue, project: { name: string }, _projectId: string, number: number, reEvalPlan = false): void {
     if (!this.worktreeManager || !this.issueRepo) return;
 
     if (reEvalPlan) {
@@ -1358,15 +1310,15 @@ export class AgentRunnerService {
       if (commentRepo) {
         commentRepo.create({ issueId: issue.id, body: rebaseMessage });
       }
-      const worktreePath = this.worktreeManager.getPath(project.name, issue.number) || process.cwd();
-      const acpOptions: AcpConnectionOptions = { cwd: worktreePath };
-      this.startPipeline(
-        issue,
-        projectId,
-        this.issueRepo,
-        worktreePath,
-        acpOptions,
-      );
+      try {
+        this.enqueue(issue.id, 'start-pipeline');
+        log.info('Enqueued start-pipeline after build rebase (reEvalPlan)', { issueNumber: number });
+      } catch (err) {
+        log.error('Failed to enqueue start-pipeline after build rebase', {
+          issueNumber: number,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
       return;
     }
 
@@ -1411,6 +1363,7 @@ export class AgentRunnerService {
     for (const [issueId, running] of this.runningSlots) {
       if (running.id === taskId) {
         this.runningSlots.delete(issueId);
+        this.abortControllers.delete(issueId);
         log.info('Task completed, slot released', { taskId, issueId, status });
         break;
       }
@@ -1423,49 +1376,11 @@ export class AgentRunnerService {
     return this.waitingQuestions;
   }
 
-  isRunning(issueId?: string): boolean {
-    if (issueId !== undefined) {
-      return this.activeAgents.has(issueId);
-    }
-    return this.activeAgents.size > 0;
-  }
-
-  async stop(issueId: string): Promise<boolean> {
-    const agent = this.activeAgents.get(issueId);
-    if (!agent) return false;
-
-    const { issueNumber, projectId, abortController, promise } = agent;
-
-    log.info('Stopping agent', { issueId, issueNumber });
-
-    abortController.abort();
-
-    try {
-      await promise;
-    } catch {
-      // expected — the abort rejection
-    }
-
-    this.activeAgents.delete(issueId);
-    this.pendingGates.delete(issueNumber);
-    this.waitingQuestions.delete(issueId);
-
-    if (this.issueRepo) {
-      try {
-        this.issueRepo.blockIssue(issueId, '用户手动停止 agent');
-        this.issueRepo.clearApprovalState(issueId);
-      } catch (err) {
-        log.error('Failed to update issue status after stop', {
-          issueNumber,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-
-    this.eventBus.emit('agent_stopped', { issueId, projectId, issueNumber, reason: 'user_stop' });
-    log.info('Agent stopped', { issueId, issueNumber });
-
-    return true;
+  isIssueAtApprovalGate(issueId: string): boolean {
+    if (!this.issueRepo) return false;
+    const issue = this.issueRepo.findById(issueId);
+    if (!issue) return false;
+    return issue.approvalState?.status === 'awaiting';
   }
 
   getBlockedIssues(): BlockedIssueInfo[] {
@@ -1482,295 +1397,53 @@ export class AgentRunnerService {
   }
 
   getStatus(): AgentStatus {
-    const agents = Array.from(this.activeAgents.values()).map((a) => ({
-      issueId: a.issueId,
-      issueNumber: a.issueNumber,
-      projectId: a.projectId,
-    }));
+    const tasks: Array<{ taskId: string; issueId: string; issueNumber: number; taskType: string; status: string }> = [];
+    for (const [issueId, record] of this.runningSlots) {
+      tasks.push({
+        taskId: record.id,
+        issueId,
+        issueNumber: record.issueNumber,
+        taskType: record.taskType,
+        status: 'running',
+      });
+    }
+    for (const [, queue] of this.pendingQueues) {
+      for (const record of queue) {
+        tasks.push({
+          taskId: record.id,
+          issueId: record.issueId,
+          issueNumber: record.issueNumber,
+          taskType: record.taskType,
+          status: 'pending',
+        });
+      }
+    }
 
     const waiting = Array.from(this.waitingQuestions.entries()).map(([issueId, wq]) => {
-      const agent = this.activeAgents.get(issueId);
+      const slot = this.runningSlots.get(issueId);
       return {
         issueId,
-        issueNumber: agent?.issueNumber ?? 0,
-        projectId: agent?.projectId ?? '',
+        issueNumber: slot?.issueNumber ?? 0,
+        projectId: slot?.projectId ?? '',
         questionId: wq.questionId,
         question: wq.question,
       };
     });
 
-    const first = agents[0];
-    const blockedIssues = this.getBlockedIssues();
+    let totalPending = 0;
+    for (const queue of this.pendingQueues.values()) {
+      totalPending += queue.length;
+    }
 
     return {
-      running: this.activeAgents.size > 0,
-      issueId: first != null ? first.issueId : null,
-      issueNumber: first != null ? first.issueNumber : null,
-      activeAgents: agents,
+      running: this.runningSlots.size,
+      pending: totalPending,
+      maxSlots: this.maxConcurrentAgents,
+      tasks,
       waitingQuestions: waiting,
       recoverableIssues: this.recoverableIssues,
-      blockedIssues,
-      queueDepth: 0,
-      maxConcurrentAgents: this.maxConcurrentAgents,
+      blockedIssues: this.getBlockedIssues(),
     };
   }
-
-  getActiveIssueId(): string | null {
-    if (this.activeAgents.size === 0) return null;
-    const first = this.activeAgents.values().next().value;
-    return first != null ? first.issueId : null;
-  }
-
-  hasPendingGate(issueNumber: number): boolean {
-    return this.pendingGates.has(issueNumber);
-  }
-
-  startPipeline(
-    issue: Issue,
-    projectId: string,
-    issueRepo: IssueRepo,
-    worktreePath: string,
-    acpOptions: AcpConnectionOptions,
-    _updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
-  ): { started: boolean; error?: string } {
-    if (this.activeAgents.has(issue.id)) {
-      return { started: false, error: `Issue #${issue.number} already has an agent running` };
-    }
-
-    if (this.activeAgents.size >= this.maxConcurrentAgents) {
-      return { started: false, error: `Concurrent agent limit reached (${this.maxConcurrentAgents})` };
-    }
-
-    const pendingApproval = issueRepo.findPendingApprovalByIssueId(issue.id);
-    if (pendingApproval) {
-      return {
-        started: false,
-        error: `Issue #${issue.number} has pending approval.`,
-      };
-    }
-
-    this.executePipeline(issue, projectId, issueRepo, worktreePath, acpOptions);
-    return { started: true };
-  }
-
-  resumePipeline(
-    issue: Issue,
-    projectId: string,
-    issueRepo: IssueRepo,
-    worktreePath: string,
-    acpOptions: AcpConnectionOptions,
-    _updateIssueStatus?: (issueId: string, status: IssueStatus) => void,
-  ): void {
-    if (this.activeAgents.has(issue.id)) {
-      throw new Error(`Issue #${issue.number} is already running`);
-    }
-    this.pendingGates.delete(issue.number);
-    this.executePipeline(issue, projectId, issueRepo, worktreePath, acpOptions);
-  }
-
-  private executePipeline(
-    issue: Issue,
-    projectId: string,
-    issueRepo: IssueRepo,
-    worktreePath: string,
-    acpOptions: AcpConnectionOptions,
-  ): void {
-    this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
-    log.info('Pipeline started', { issueNumber: issue.number, projectId });
-
-    const abortController = new AbortController();
-    const startTime = Date.now();
-    const promise = (async () => {
-      try {
-        try {
-          issueRepo.updateStatus(issue.id, IssueStatus.Active);
-        } catch (statusErr) {
-          log.warn('Failed to set issue status to active before pipeline execution', {
-            issueNumber: issue.number,
-            error: statusErr instanceof Error ? statusErr.message : String(statusErr),
-          });
-        }
-
-        const artifactManager = new ChangeArtifactsManager(worktreePath);
-        const checkpointManager = this.checkpointRepo
-          ? createCheckpointManager(this.checkpointRepo)
-          : createCheckpointManager({ get: () => null, upsert: () => {}, delete: () => {} } as any);
-        const runners = [
-          new PlanStageRunner(),
-          new BuildStageRunner({ worktreePath, projectId }),
-          new CheckStageRunner([
-            new BuildTestCheck({ worktreePath }),
-            new MergeReadyCheck({ worktreeManager: this.worktreeManager, projectRepo: this.projectRepo as any }),
-            new AiReviewCheck(),
-          ]),
-        ];
-        const pipeline = new WorkflowEngine({
-          runners,
-          artifactManager,
-          issueRepo,
-          eventBus: this.eventBus,
-          projectId,
-          checkpointManager,
-          signal: abortController.signal,
-        });
-
-        const abortPromise = new Promise<never>((_resolve, reject) => {
-          abortController.signal.addEventListener('abort', () => {
-            reject(new Error('Agent stopped by user'));
-          });
-        });
-
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        const timeoutPromise = new Promise<never>((_resolve, reject) => {
-          timeoutId = setTimeout(() => {
-            abortController.abort();
-            reject(new Error(`Pipeline timed out after ${PIPELINE_TIMEOUT_MS / 60000} minutes`));
-          }, PIPELINE_TIMEOUT_MS);
-        });
-
-        let result: PipelineResult;
-        try {
-          result = await Promise.race([
-            pipeline.run(issue, acpOptions),
-            abortPromise,
-            timeoutPromise,
-          ]);
-        } finally {
-          if (timeoutId !== undefined) clearTimeout(timeoutId);
-        }
-
-        if (result.gateRequired) {
-          this.pendingGates.set(issue.number, {
-            issueId: issue.id,
-            issueNumber: issue.number,
-            projectId,
-            stage: result.stage,
-          });
-          this.eventBus.emit('agent_paused', {
-            issueId: issue.id,
-            projectId,
-            issueNumber: issue.number,
-          });
-          log.info('Pipeline paused at gate', {
-            issueNumber: issue.number,
-            stage: result.stage,
-          });
-        }
-
-        const duration = Date.now() - startTime;
-        log.info('Pipeline run completed', { issueNumber: issue.number, elapsedMs: duration, completed: result.completed });
-        if (result.completed) {
-          this.eventBus.emit('agent_completed', { issueId: issue.id, projectId, issueNumber: issue.number });
-        } else if (!result.gateRequired) {
-          const failureSummary = result.stage
-            ? `[${result.stage}] ${result.message ?? 'Pipeline 未完成'}`
-            : result.message ?? 'Pipeline 未完成';
-          try {
-            issueRepo.setApprovalState(issue.id, {
-              stage: result.stage,
-              status: 'error',
-              output: { error: failureSummary },
-              requestedAt: new Date().toISOString(),
-            });
-          } catch (stateErr) {
-            log.error('Failed to set error approval state', {
-              issueNumber: issue.number,
-              error: stateErr instanceof Error ? stateErr.message : String(stateErr),
-            });
-          }
-          try {
-            issueRepo.blockIssue(issue.id, failureSummary);
-          } catch (updateErr) {
-            log.error('Failed to block issue', {
-              issueNumber: issue.number,
-              error: updateErr instanceof Error ? updateErr.message : String(updateErr),
-            });
-          }
-          try {
-            this.eventBus.emit('agent_error', {
-              issueId: issue.id,
-              projectId,
-              error: failureSummary,
-            });
-          } catch (emitErr) {
-            log.error('Failed to emit agent_error event', {
-              issueNumber: issue.number,
-              error: emitErr instanceof Error ? emitErr.message : String(emitErr),
-            });
-          }
-        }
-      } catch (err) {
-        const rawErrorMsg = err instanceof Error ? err.message : String(err);
-        const currentIssue = issueRepo.findById(issue.id);
-        const stageLabel = currentIssue?.stage ?? 'unknown';
-        const errorMsg = `[${stageLabel}] Pipeline 异常: ${rawErrorMsg}`;
-        log.error('Pipeline execution failed', {
-          issueNumber: issue.number,
-          stage: stageLabel,
-          error: rawErrorMsg,
-        });
-        try {
-          issueRepo.setApprovalState(issue.id, {
-            stage: currentIssue?.stage ?? Stage.Draft,
-            status: 'error',
-            output: { error: errorMsg },
-            requestedAt: new Date().toISOString(),
-          });
-        } catch (stateErr) {
-          log.error('Failed to set error approval state', {
-            issueNumber: issue.number,
-            error: stateErr instanceof Error ? stateErr.message : String(stateErr),
-          });
-        }
-        try {
-          issueRepo.blockIssue(issue.id, errorMsg);
-        } catch (updateErr) {
-          log.error('Failed to block issue', {
-            issueNumber: issue.number,
-            error: updateErr instanceof Error ? updateErr.message : String(updateErr),
-          });
-        }
-        try {
-          this.eventBus.emit('agent_error', {
-            issueId: issue.id,
-            projectId,
-            error: errorMsg,
-          });
-        } catch (emitErr) {
-          log.error('Failed to emit agent_error event', {
-            issueNumber: issue.number,
-            error: emitErr instanceof Error ? emitErr.message : String(emitErr),
-          });
-        }
-      } finally {
-        this.activeAgents.delete(issue.id);
-        this.clearWaiting(issue.id);
-
-        const activeMergeStates = new Set(['resolving', 'rebasing', 'merging']);
-        const finalIssue = issueRepo.findById(issue.id);
-        if (finalIssue && finalIssue.status === IssueStatus.Active && !this.pendingGates.has(issue.number) && !(finalIssue.mergeState && activeMergeStates.has(finalIssue.mergeState))) {
-          log.warn('Pipeline finished but issue still active without pending gate, forcing to blocked', {
-            issueNumber: issue.number,
-            stage: finalIssue.stage,
-          });
-          try {
-            issueRepo.blockIssue(issue.id, 'Agent 异常退出，状态自动恢复');
-          } catch (blockErr) {
-            log.error('Failed to force-block orphaned issue in finally', {
-              issueNumber: issue.number,
-              error: blockErr instanceof Error ? blockErr.message : String(blockErr),
-            });
-          }
-        }
-      }
-    })();
-
-    this.activeAgents.set(issue.id, {
-      issueId: issue.id,
-      issueNumber: issue.number,
-      promise,
-      projectId,
-      abortController,
-    });
-  }
 }
+

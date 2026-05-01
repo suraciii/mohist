@@ -1,5 +1,6 @@
 import { Issue, Stage, IssueStatus, Comment, Priority } from '../types';
 import { IssueRepo, CommentRepo, ProjectRepo, PipelineCheckpointRepo } from '../db';
+import type { IssueQueueStatus } from './agent-runner-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { Log } from '../util/log';
@@ -34,7 +35,7 @@ export class IssueService {
     private commentRepo: CommentRepo,
     private projectRepo?: ProjectRepo,
     private worktreeManager?: WorktreeManager,
-    private agentRunner?: { isRunning(issueId: string): boolean },
+    private agentRunner?: { getQueueStatus(issueId: string): IssueQueueStatus },
     private checkpointRepo?: PipelineCheckpointRepo,
   ) {}
 
@@ -186,7 +187,7 @@ export class IssueService {
       throw new Error(`Issue #${number} not found`);
     }
 
-    if (this.agentRunner?.isRunning(issue.id)) {
+    if (this.agentRunner?.getQueueStatus(issue.id).running) {
       throw new Error('Cannot archive: issue has a running agent. Force-stop it first.');
     }
 
