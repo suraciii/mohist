@@ -282,11 +282,11 @@ function TimelineStageRow({
       <div className={`min-w-0 flex-1 ${isLast ? '' : 'pb-4'}`}>
         <button
           onClick={expandable ? onToggle : undefined}
-          className={`flex items-center gap-2 w-full text-left overflow-hidden ${
+          className={`flex items-center gap-2 w-full text-left overflow-hidden min-w-0 ${
             expandable ? 'cursor-pointer hover:bg-gray-50 rounded px-0.5 -mx-0.5' : 'cursor-default'
           }`}
         >
-          <span className={`text-sm font-medium ${
+          <span className={`text-sm font-medium min-w-0 shrink ${
             isPending ? 'text-gray-400' :
             isRunning ? 'text-blue-700' :
             isAwaiting ? 'text-amber-700' :
@@ -296,13 +296,13 @@ function TimelineStageRow({
             {stageNode.label}
           </span>
           {stageNode.status === 'awaiting_approval' && (
-            <span className="text-xs text-amber-500 font-medium">Awaiting approval</span>
+            <span className="text-xs text-amber-500 font-medium whitespace-nowrap shrink-0">Awaiting approval</span>
           )}
           {stageNode.status === 'running' && (
-            <span className="text-xs text-blue-500 font-medium">Running</span>
+            <span className="text-xs text-blue-500 font-medium whitespace-nowrap shrink-0">Running</span>
           )}
           {stageNode.durationMs != null && stageNode.status !== 'pending' && (
-            <span className="text-xs text-gray-400">{formatDuration(stageNode.durationMs)}</span>
+            <span className="text-xs text-gray-400 shrink-0">{formatDuration(stageNode.durationMs)}</span>
           )}
           {expandable && hasExpandedContent(stageNode) && (
             <svg
