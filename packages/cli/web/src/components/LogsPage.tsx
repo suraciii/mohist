@@ -3,6 +3,7 @@ import { useLogs } from '../hooks/useLogs'
 import type { ParsedLogEntry } from '../hooks/useLogs'
 import { LEVEL_COLORS, LEVEL_CHIP_COLORS, ALL_LEVELS, type LogLevel } from '../lib/log-levels'
 import { formatLogTime } from '../lib/format-time'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 function LogRow({ entry }: { entry: ParsedLogEntry }) {
   const levelColor = entry.level ? LEVEL_COLORS[entry.level] || 'text-gray-600 bg-gray-50' : 'text-gray-400 bg-gray-50'
@@ -29,6 +30,9 @@ export function LogsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [autoFollow, setAutoFollow] = useState(true)
   const [userPausedAutoFollow, setUserPausedAutoFollow] = useState(false)
+
+  useDocumentTitle('Logs — Mohist')
+
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 

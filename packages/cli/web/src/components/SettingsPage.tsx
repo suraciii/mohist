@@ -3,6 +3,7 @@ import { useNavigate, useParams, Navigate } from 'react-router-dom'
 import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
 import { SystemSettingsSection } from './SystemSettingsSection'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 const VALID_SECTIONS = ['ai', 'agent', 'system'] as const
 type Section = (typeof VALID_SECTIONS)[number]
@@ -55,6 +56,8 @@ function SectionContent({ section }: { section: Section }) {
 export function SettingsPage() {
   const { section } = useParams<{ section: string }>()
   const navigate = useNavigate()
+
+  useDocumentTitle('Settings — Mohist')
 
   if (!section || !isValidSection(section)) {
     return <Navigate to="/settings/ai" replace />

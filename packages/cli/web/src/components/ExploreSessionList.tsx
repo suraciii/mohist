@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ExploreSession } from '../lib/types'
 import { formatTimeAgo } from '../lib/format-time'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 function SessionCard({ session, onDelete }: { session: ExploreSession; onDelete: (s: ExploreSession) => void }) {
   const navigate = useNavigate()
@@ -101,6 +102,8 @@ export function ExploreSessionList() {
   const createSession = useCreateExploreSession()
   const [deleteTarget, setDeleteTarget] = useState<ExploreSession | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  useDocumentTitle('Explore — Mohist')
 
   const handleCreate = () => {
     if (!projectId || createSession.isPending) return

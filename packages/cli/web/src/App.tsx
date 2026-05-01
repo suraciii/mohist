@@ -18,6 +18,7 @@ import { ProjectGuard } from './components/ProjectGuard'
 import { MobileBottomNav } from './components/MobileBottomNav'
 import { FAB } from './components/FAB'
 import { Toaster } from 'sonner'
+import { useDocumentTitle } from './hooks/useDocumentTitle'
 
 function KanbanView() {
   const { projectId } = useProject()
@@ -26,6 +27,8 @@ function KanbanView() {
   const { data: archivedIssues } = useArchivedIssues(projectId ? { projectId } : undefined)
   const { data: agentStatus } = useAgentStatus()
   const [showCreateProject, setShowCreateProject] = useState(false)
+
+  useDocumentTitle('Mohist', agentStatus?.running ?? false)
 
   if (projectsLoading) {
     return null

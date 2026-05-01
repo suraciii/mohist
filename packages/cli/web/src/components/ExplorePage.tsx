@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ExploreChat } from './ExploreChat'
 import { ExploreInput } from './ExploreInput'
 import { ModelSelector } from './ModelSelector'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 function LlmGuidanceCard() {
   const navigate = useNavigate()
@@ -141,6 +142,8 @@ export function ExplorePage() {
     streamUpdatedTitle,
     send,
   } = useExploreStream()
+
+  useDocumentTitle('Explore — Mohist')
 
   const handleSend = useCallback(
     async (content: string) => {
