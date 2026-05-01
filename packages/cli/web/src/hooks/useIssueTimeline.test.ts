@@ -358,9 +358,39 @@ describe('buildTimeline duration formatting helpers', () => {
   })
 })
 
+function installRAFPolyfill() {
+  const callbacks: Array<{ id: number; fn: FrameRequestCallback }> = []
+  let nextId = 1
+
+  const raf = (cb: FrameRequestCallback): number => {
+    const id = nextId++
+    callbacks.push({ id, fn: cb })
+    return id
+  }
+
+  const caf = (id: number) => {
+    const idx = callbacks.findIndex((c) => c.id === id)
+    if (idx >= 0) callbacks.splice(idx, 1)
+  }
+
+  const flush = () => {
+    const pending = [...callbacks]
+    callbacks.length = 0
+    for (const { fn } of pending) fn(Date.now())
+  }
+
+  vi.stubGlobal('requestAnimationFrame', raf)
+  vi.stubGlobal('cancelAnimationFrame', caf)
+
+  return { flush }
+}
+
 describe('RAF throttling behavior', () => {
+  let raf: ReturnType<typeof installRAFPolyfill>
+
   beforeEach(() => {
     vi.useFakeTimers()
+    raf = installRAFPolyfill()
   })
 
   afterEach(() => {
@@ -392,7 +422,7 @@ describe('RAF throttling behavior', () => {
 
     expect(processed).toHaveLength(0)
 
-    vi.advanceTimersByTime(16)
+    raf.flush()
 
     expect(processed).toHaveLength(1)
     expect(processed[0]).toEqual([1, 2, 3])
@@ -418,7 +448,7 @@ describe('RAF throttling behavior', () => {
     }
 
     expect(processed).toHaveLength(0)
-    vi.advanceTimersByTime(16)
+    raf.flush()
     expect(processed).toHaveLength(1)
     expect(processed[0]).toHaveLength(10)
   })
@@ -439,14 +469,51 @@ describe('RAF throttling behavior', () => {
 
     pending.push(1)
     scheduleFlush()
-    vi.advanceTimersByTime(16)
+    raf.flush()
     expect(processed).toEqual([[1]])
 
     pending.push(2)
     pending.push(3)
     scheduleFlush()
-    vi.advanceTimersByTime(16)
+    raf.flush()
     expect(processed).toEqual([[1], [2, 3]])
+  })
+
+  it('throttles updates at 100ms intervals', () => {
+    const processed: string[][] = []
+    const pending: string[] = []
+    let rafId: number | null = null
+    let lastFlush = 0
+    const FLUSH_INTERVAL = 100
+
+    function scheduleFlush() {
+      const now = Date.now()
+      if (now - lastFlush < FLUSH_INTERVAL) return
+      if (rafId !== null) return
+      rafId = requestAnimationFrame(() => {
+        processed.push([...pending])
+        pending.length = 0
+        rafId = null
+        lastFlush = Date.now()
+      })
+    }
+
+    pending.push('event-1')
+    scheduleFlush()
+    raf.flush()
+    expect(processed).toEqual([['event-1']])
+
+    pending.push('event-2')
+    scheduleFlush()
+    raf.flush()
+    expect(processed).toEqual([['event-1']])
+
+    vi.advanceTimersByTime(100)
+
+    pending.push('event-3')
+    scheduleFlush()
+    raf.flush()
+    expect(processed).toEqual([['event-1'], ['event-2', 'event-3']])
   })
 })
 
