@@ -34,7 +34,8 @@ export type EventMap = {
   agent_build_fix_started: { issueId: string; projectId: string; issueNumber: number; attempt: number };
   agent_build_fix_completed: { issueId: string; projectId: string; issueNumber: number; attempt: number };
   check_started: { issueId: string; projectId: string; issueNumber: number };
-  check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string };
+  check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string; snapshotSha?: string };
+  check_suite_status_changed: { issueId: string; projectId: string; issueNumber: number; suiteStatus: string; snapshotSha: string };
   agent_stopped: { issueId: string; projectId: string; issueNumber: number; reason: string };
   coder_recovery_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string };
   coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string };
