@@ -114,14 +114,15 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/App.tsx, packages/cli/web/src/components/Header.tsx, packages/cli/web/src/components/MobileBottomNav.tsx",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Can be done in parallel with T-001 through T-003. Placeholder ActivityPage just renders a div.",
-      "attempts": 2,
+      "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
         175647,
-        167761
+        167761,
+        136105
       ]
     },
     {
