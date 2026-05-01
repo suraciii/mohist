@@ -3,6 +3,7 @@ import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
+import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 
 export interface ChangeArtifactsManager {
@@ -41,6 +42,7 @@ export interface StageContext {
   checkpointManager: CheckpointManager;
   issueRepo: IssueRepo;
   workflowLogRepo?: WorkflowLogRepo;
+  sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
   signal?: AbortSignal;
 }

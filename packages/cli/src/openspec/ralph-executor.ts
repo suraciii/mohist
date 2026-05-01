@@ -124,6 +124,7 @@ export interface RalphExecutorContext {
   onLoopComplete?: (results: RalphLoopResult) => void;
   onAskUser?: (question: string, taskId: string) => Promise<string>;
   workflowLogRepo?: import('../db/workflow-log-repo').WorkflowLogRepo;
+  sessionStreamLogRepo?: import('../db/session-stream-log-repo').SessionStreamLogRepo;
   coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
   issueNumber?: number;
   stageTimeoutMs?: number;
@@ -653,6 +654,7 @@ export async function runRalphLoop(
         executionId: taskExecutionId,
         eventBus: context.eventBus,
         workflowLogRepo: context.workflowLogRepo,
+        sessionStreamLogRepo: context.sessionStreamLogRepo,
         coderSessionRepo: context.coderSessionRepo,
         issueNumber: context.issueNumber,
         onProcessSpawned: context.onProcessSpawned,
