@@ -18,6 +18,7 @@ import { CheckResultsPanel } from './CheckResultsPanel'
 import { formatTime, formatTimeAgo } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 import { DiffViewer } from './DiffViewer'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 const STAGES = [Stage.Backlog, Stage.Explore, Stage.Plan, Stage.Build, Stage.Check, Stage.Done]
 
@@ -147,6 +148,11 @@ export function IssueDetailPage() {
   const { data: tasksData } = useTasks(issueNumber)
   useTaskProgress(issueNumber)
 
+  const activeAgents = agentStatus?.activeAgents ?? []
+  const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
+
+  useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
+
   const mergedTasks = (() => {
     const baseTasks = tasksData?.tasks ?? buildStatus?.tasks
     if (!baseTasks) return []
@@ -257,9 +263,7 @@ export function IssueDetailPage() {
   }
 
   const stageIndex = STAGES.indexOf(issue.stage)
-  const activeAgents = agentStatus?.activeAgents ?? []
   const maxConcurrent = agentStatus?.maxConcurrentAgents ?? Infinity
-  const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
   const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
   const agentProgress = thisAgent?.progress
   const isCapacityFull = activeAgents.length >= maxConcurrent

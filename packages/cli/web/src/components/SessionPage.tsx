@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useIssue } from '../hooks/useQueries'
 import { useCoderSessions } from '../hooks/useCoderSessions'
 import { useSessionTimeline } from '../hooks/useSessionTimeline'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { ToolCallCard } from './ToolCallCard'
 import type { CoderSessionItem } from '../lib/types'
 import type { Round } from '../hooks/useSessionTimeline'
@@ -149,6 +150,8 @@ function SessionNotFound({ issueNumber }: { issueNumber: number }) {
 export function SessionPage() {
   const { number: numberStr, sessionId } = useParams<{ number: string; sessionId: string }>()
   const issueNumber = Number(numberStr)
+
+  useDocumentTitle(`Session — Issue #${issueNumber} — Mohist`)
 
   const { data: issue } = useIssue(issueNumber)
   const { sessions, isLoading: sessionsLoading } = useCoderSessions(issueNumber)

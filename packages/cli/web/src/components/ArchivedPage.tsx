@@ -4,6 +4,7 @@ import { useArchivedIssues, useUnarchiveIssue } from '../hooks/useQueries'
 import { useProject } from '../context/ProjectContext'
 import { getLabelStyle, sortLabels } from '../lib/label-colors'
 import { formatRelativeTime } from '../lib/relative-time'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 export function ArchivedPage() {
   const { projectId } = useProject()
@@ -13,6 +14,8 @@ export function ArchivedPage() {
   )
   const unarchiveMutation = useUnarchiveIssue()
   const [search, setSearch] = useState('')
+
+  useDocumentTitle('Archived — Mohist')
 
   const sorted = useMemo(() => {
     if (!archivedIssues) return []
