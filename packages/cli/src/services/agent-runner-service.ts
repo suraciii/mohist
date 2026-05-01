@@ -231,7 +231,7 @@ export class AgentRunnerService {
         });
       } else {
         this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
-        this.cleanupOrphanedCoderSessions(issue.id);
+        this.cleanupOrphanedCoderSessions(issue.id, issue.number);
         log.info('Recovered orphaned issue', {
           issueNumber: issue.number,
           stage: issue.stage,
@@ -425,23 +425,39 @@ export class AgentRunnerService {
     return this.issueRepo.hasCompletedCoderSession(issue.id, issue.stage);
   }
 
-  private cleanupOrphanedCoderSessions(issueId: string): void {
+  private cleanupOrphanedCoderSessions(issueId: string, issueNumber: number): void {
     if (!this.coderSessionRepo) return;
+
     try {
       const sessions = this.coderSessionRepo.findByIssueId(issueId);
-      let cleaned = 0;
-      for (const session of sessions) {
-        if (session.status === 'running') {
+      const runningSessions = sessions.filter(s => s.status === 'running');
+
+      for (const session of runningSessions) {
+        try {
           this.coderSessionRepo.updateStatus(session.id, 'failed');
-          cleaned++;
+          log.info('Cleaned up orphaned coder_session', {
+            issueNumber,
+            sessionId: session.id,
+            action: 'status=running→failed',
+          });
+        } catch (updateErr) {
+          log.error('Failed to clean up orphaned coder_session', {
+            issueNumber,
+            sessionId: session.id,
+            error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+          });
         }
       }
-      if (cleaned > 0) {
-        log.info('Cleaned up orphaned coder sessions', { issueId, cleaned });
+
+      if (runningSessions.length > 0) {
+        log.info('Cleaned up orphaned coder_sessions for interrupted issue', {
+          issueNumber,
+          count: runningSessions.length,
+        });
       }
     } catch (err) {
-      log.error('Failed to cleanup orphaned coder sessions', {
-        issueId,
+      log.error('Failed to query coder_sessions for cleanup', {
+        issueNumber,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -621,14 +637,15 @@ export class AgentRunnerService {
     const startTime = Date.now();
     const promise = (async () => {
       try {
-        issueRepo.updateStatus(issue.id, IssueStatus.Active);
-      } catch (err) {
-        log.warn('Failed to set issue status to active on pipeline start', {
-          issueNumber: issue.number,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      try {
+        try {
+          issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        } catch (statusErr) {
+          log.warn('Failed to set issue status to active before pipeline execution', {
+            issueNumber: issue.number,
+            error: statusErr instanceof Error ? statusErr.message : String(statusErr),
+          });
+        }
+
         const artifactManager = new ChangeArtifactsManager(worktreePath);
         const checkpointManager = this.checkpointRepo
           ? createCheckpointManager(this.checkpointRepo)
