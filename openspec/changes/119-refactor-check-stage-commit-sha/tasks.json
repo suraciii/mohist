@@ -76,13 +76,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "MergeReadyCheck always returned pass (informational only), so removing it does not change check semantics. Merge readiness is already handled by merge queue rebase logic.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        184946
+        184946,
+        111874
       ]
     },
     {
