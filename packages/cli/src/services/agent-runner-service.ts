@@ -56,6 +56,8 @@ export interface WaitingQuestion {
   question: string;
 }
 
+const PIPELINE_TIMEOUT_MS = 30 * 60 * 1000;
+
 const log = Log.create({ service: 'agent-runner' });
 
 export interface PipelineGateInfo {
@@ -675,10 +677,24 @@ export class AgentRunnerService {
           });
         });
 
-        const result: PipelineResult = await Promise.race([
-          pipeline.run(issue, acpOptions),
-          abortPromise,
-        ]);
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+          timeoutId = setTimeout(() => {
+            abortController.abort();
+            reject(new Error(`Pipeline timed out after ${PIPELINE_TIMEOUT_MS / 60000} minutes`));
+          }, PIPELINE_TIMEOUT_MS);
+        });
+
+        let result: PipelineResult;
+        try {
+          result = await Promise.race([
+            pipeline.run(issue, acpOptions),
+            abortPromise,
+            timeoutPromise,
+          ]);
+        } finally {
+          if (timeoutId !== undefined) clearTimeout(timeoutId);
+        }
 
         if (result.gateRequired) {
           this.pendingGates.set(issue.number, {
