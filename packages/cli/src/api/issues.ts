@@ -1528,7 +1528,7 @@ export function createIssueRoutes(
         { cwd: project.path }
       );
 
-      const commits: Array<{ hash: string; message: string; author: string; date: string; filesChanged: number; additions: number; deletions: number }> = [];
+      const commits: Array<{ hash: string; message: string; author: string; date: string; filesChanged: number; additions: number; deletions: number; files: string[] }> = [];
       const rawOutput = logOutput.stdout.trim();
 
       if (rawOutput) {
@@ -1557,7 +1557,15 @@ export function createIssueRoutes(
             if (del) deletions = parseInt(del[1], 10);
           }
 
-          commits.push({ hash, message, author, date, filesChanged, additions, deletions });
+          const files: string[] = statLines
+            .filter(l => !l.includes('files changed') && !l.includes('file changed'))
+            .map(l => {
+              const m = l.match(/^\s+(.+?)\s*\|/);
+              return m ? m[1].trim() : null;
+            })
+            .filter((f): f is string => f !== null);
+
+          commits.push({ hash, message, author, date, filesChanged, additions, deletions, files });
         }
       }
 
