@@ -195,10 +195,14 @@
         "T-002"
       ],
       "notes": "Also modifies api/propose.ts (isRunning/startPipeline → enqueue). /approve was previously removed (returned 404) — this task creates a new handler. /retry and /rerun keep their pre-processing (synchronous DB operations) in the handler, only replacing the final resumePipeline() call with enqueue(). /rebase is handled separately in T-007.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 2,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        631306,
+        342959
+      ]
     },
     {
       "id": "T-007",
