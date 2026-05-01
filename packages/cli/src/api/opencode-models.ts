@@ -10,9 +10,9 @@ export function createOpencodeModelsRoutes(): Hono {
       const discoveryService = getOpencodeDiscoveryService();
       const models = await discoveryService.getAvailableModels();
 
-      const response: ApiResponse<{ models: string[] }> = {
+      const response: ApiResponse<string[]> = {
         success: true,
-        data: { models },
+        data: models,
       };
       return c.json(response);
     } catch (err) {
