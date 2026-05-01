@@ -170,11 +170,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing test patterns. Check packages/cli/tests/ for test conventions and database test setup helpers.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        256147
+      ]
     }
   ]
 }
