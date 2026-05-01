@@ -10,7 +10,7 @@ import type { CheckpointManager as AcpCheckpointManager } from './checkpoint-man
 
 export class PlanStageRunner implements StageRunner {
   canHandle(stage: Stage): boolean {
-    return stage === Stage.Plan || stage === Stage.Draft;
+    return stage === Stage.Plan || stage === Stage.Draft || stage === Stage.Backlog;
   }
 
   async run(ctx: StageContext): Promise<StageRunResult> {
