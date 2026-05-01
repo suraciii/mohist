@@ -88,14 +88,15 @@
       ],
       "passes": true,
       "notes": "Remove the Fragment + STAGES.map section that renders the horizontal bar",
-      "attempts": 4,
+      "attempts": 5,
       "order": 999999,
       "error": null,
       "durations": [
         98103,
         50916,
         111757,
-        54152
+        54152,
+        105980
       ]
     },
     {
