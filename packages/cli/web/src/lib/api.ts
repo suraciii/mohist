@@ -214,6 +214,9 @@ export const api = {
   retryMerge: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/retry-merge`, { method: 'POST' }),
 
+  rerunIssue: (number: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/rerun`, { method: 'POST' }),
+
   forceStopIssue: (number: number) =>
     request<{ ok: boolean; issueNumber: number }>(`/issues/${number}/force-stop`, { method: 'POST' }),
 
