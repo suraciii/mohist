@@ -9,6 +9,7 @@ import { IssueRepo } from '../src/db/issue-repo';
 import { ConfigRepo } from '../src/db/config-repo';
 import { CommentRepo } from '../src/db/comment-repo';
 import { LabelRepo } from '../src/db/label-repo';
+import { IssueTaskQueueRepo } from '../src/db/issue-task-queue-repo';
 import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
 import { ConfigService } from '../src/services/config-service';
@@ -65,17 +66,18 @@ describe('E2E: Single Issue Complete Flow', () => {
     const configRepo = new ConfigRepo(db);
     const commentRepo = new CommentRepo(db);
     const labelRepo = new LabelRepo(db);
-    
+    const taskQueueRepo = new IssueTaskQueueRepo(db);
+
     const projectService = new ProjectService(projectRepo, configRepo, issueRepo, labelRepo);
     const issueService = new IssueService(issueRepo, commentRepo);
     const configService = new ConfigService(configRepo);
-    
+
     const stateManager = new StateManager(db);
-    
+
     app = new Hono();
     app.route('/api/projects', createProjectRoutes(projectService));
     const eventBus = new EventBus();
-    const agentRunner = new AgentRunnerService(eventBus);
+    const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, undefined, taskQueueRepo);
     const opencodeBinPath = process.env.OPENCODE_BIN_PATH;
     app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner, undefined, undefined, undefined, opencodeBinPath));
     app.route('/api', createStatusRoutes(projectService, issueService));
@@ -111,26 +113,23 @@ describe('E2E: Single Issue Complete Flow', () => {
       expect(createResponse.status).toBe(201);
       expect(createResponse.body.success).toBe(true);
       expect(createResponse.body.data.number).toBe(1);
-      expect(createResponse.body.data.stage).toBe(Stage.Draft);
+      expect(createResponse.body.data.stage).toBe(Stage.Backlog);
 
       const listResponse = await request(baseUrl).get('/api/issues');
       expect(listResponse.status).toBe(200);
       expect(listResponse.body.data).toHaveLength(1);
 
+      // Start endpoint enqueues the issue but does not change stage (pipeline runs async)
       const startResponse = await request(baseUrl).post('/api/issues/1/start');
-      expect(startResponse.status).toBe(200);
+      expect(startResponse.status).toBe(202);
       expect(startResponse.body.success).toBe(true);
-      // With mock opencode, pipeline starts and transitions to Plan
-      expect(startResponse.body.data.issue.stage).toBe(Stage.Plan);
+      expect(startResponse.body.data.message).toContain('enqueued');
+      expect(startResponse.body.data.taskId).toBeDefined();
 
-      // Wait a bit for pipeline to process (mock is fast)
-      await new Promise(resolve => setTimeout(resolve, 100));
-
+      // Issue remains in Draft until pipeline actually runs
       const showResponse1 = await request(baseUrl).get('/api/issues/1');
       expect(showResponse1.status).toBe(200);
-      // Mock opencode doesn't generate artifacts, so plan may fail and rollback
-      // or stay in Plan if pipeline is still running
-      expect([Stage.Plan, Stage.Draft, Stage.Blocked]).toContain(showResponse1.body.data.stage);
+      expect(showResponse1.body.data.stage).toBe(Stage.Backlog);
 
       const statusResponse = await request(baseUrl).get('/api/status');
       expect(statusResponse.status).toBe(200);
@@ -144,11 +143,15 @@ describe('E2E: Single Issue Complete Flow', () => {
         .post('/api/issues')
         .send({ title: 'Start Test Issue' });
 
-      await request(baseUrl).post('/api/issues/1/start');
+      // Manually transition to Plan stage to simulate pipeline progression
+      const stateManager = new StateManager(db);
+      const issueRepo = stateManager.getIssueRepo();
+      const issue = issueRepo.findAll({ projectId })[0];
+      issueRepo.updateStage(issue.id, Stage.Plan);
 
       const startAgainResponse = await request(baseUrl).post('/api/issues/1/start');
       expect(startAgainResponse.status).toBe(400);
-      expect(startAgainResponse.body.error).toMatch(/not in draft stage|blocked/i);
+      expect(startAgainResponse.body.error).toMatch(/not in a startable stage/i);
     });
   });
 
@@ -160,11 +163,10 @@ describe('E2E: Single Issue Complete Flow', () => {
       await request(baseUrl).post('/api/issues').send({ title: 'Issue 2' });
       await request(baseUrl).post('/api/issues').send({ title: 'Issue 3' });
 
-      await request(baseUrl).post('/api/issues/2/start');
+      const startResponse = await request(baseUrl).post('/api/issues/2/start');
+      expect(startResponse.status).toBe(202);
 
-      // Wait for pipeline to process
-      await new Promise(resolve => setTimeout(resolve, 100));
-
+      // All issues remain in Draft since pipeline runs async and mock has no deps
       const response = await request(baseUrl).get('/api/issues');
       const issues = response.body.data;
 
@@ -172,10 +174,9 @@ describe('E2E: Single Issue Complete Flow', () => {
       const issue2 = issues.find((i: any) => i.number === 2);
       const issue3 = issues.find((i: any) => i.number === 3);
 
-      expect(issue1.stage).toBe(Stage.Draft);
-      // Issue 2 may be Plan (if pipeline still running) or Draft/Blocked (if mock failed)
-      expect([Stage.Draft, Stage.Plan, Stage.Blocked]).toContain(issue2.stage);
-      expect(issue3.stage).toBe(Stage.Draft);
+      expect(issue1.stage).toBe(Stage.Backlog);
+      expect(issue2.stage).toBe(Stage.Backlog);
+      expect(issue3.stage).toBe(Stage.Backlog);
 
       // Just verify we can query by stage without errors
       const draftResponse = await request(baseUrl).get('/api/issues?stage=draft');

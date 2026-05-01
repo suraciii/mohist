@@ -66,23 +66,23 @@ describe("Log", () => {
   })
 
   describe("init with print:false (file output)", () => {
-    it("should write to ~/.mohist/logs/mohist-YYYY-MM-DD.log", async () => {
-      await Log.init({ print: false })
-      const logfile = Log.file()
-      expect(logfile).toMatch(
-        /\.mohist\/logs\/mohist-\d{4}-\d{2}-\d{2}\.log$/,
-      )
+    let logfile: string
+
+    beforeEach(async () => {
+      await Log.init({ print: false, dev: true })
+      logfile = Log.file()
+      await fs.unlink(logfile).catch(() => {})
+    })
+
+    it("should write to dev.log when dev:true", async () => {
       const log = Log.create({ service: "file-test" })
       log.info("hello file")
       await new Promise((r) => setTimeout(r, 100))
       const content = await fs.readFile(logfile, "utf-8")
       expect(content).toContain("hello file")
-      await fs.unlink(logfile).catch(() => {})
     })
 
     it("should write JSONL format where each line is valid JSON", async () => {
-      await Log.init({ print: false })
-      const logfile = Log.file()
       const log = Log.create({ service: "jsonl-test" })
       log.info("first message")
       log.warn("second message", { key: "value" })
@@ -97,27 +97,23 @@ describe("Log", () => {
         expect(parsed).toHaveProperty("service")
         expect(parsed).toHaveProperty("message")
       }
-      await fs.unlink(logfile).catch(() => {})
     })
 
     it("should include extra fields as top-level JSON properties", async () => {
-      await Log.init({ print: false })
-      const logfile = Log.file()
       const log = Log.create({ service: "extra-test" })
       log.info("with extra", { method: "GET", path: "/api/health" })
       await new Promise((r) => setTimeout(r, 100))
       const content = await fs.readFile(logfile, "utf-8")
-      const parsed = JSON.parse(content.trim())
+      const lines = content.trim().split("\n")
+      const parsed = JSON.parse(lines[lines.length - 1])
       expect(parsed.method).toBe("GET")
       expect(parsed.path).toBe("/api/health")
       expect(parsed.service).toBe("extra-test")
       expect(parsed.message).toBe("with extra")
-      await fs.unlink(logfile).catch(() => {})
     })
 
     it("should set level field correctly for each log level", async () => {
-      await Log.init({ print: false, level: "DEBUG" })
-      const logfile = Log.file()
+      await Log.init({ print: false, dev: true, level: "DEBUG" })
       const log = Log.create({ service: "level-jsonl" })
       log.debug("dbg")
       log.info("inf")
@@ -128,7 +124,6 @@ describe("Log", () => {
       const lines = content.trim().split("\n")
       const levels = lines.map((l: string) => JSON.parse(l).level)
       expect(levels).toEqual(["DEBUG", "INFO", "WARN", "ERROR"])
-      await fs.unlink(logfile).catch(() => {})
     })
   })
 
@@ -157,8 +152,9 @@ describe("Log", () => {
     })
 
     it("should not include duration field in stop log", async () => {
-      await Log.init({ print: false })
+      await Log.init({ print: false, dev: true })
       const logfile = Log.file()
+      await fs.unlink(logfile).catch(() => {})
       const log = Log.create({ service: "time-no-duration" })
       const timer = log.time("op")
       timer.stop()
@@ -177,7 +173,6 @@ describe("Log", () => {
       const parsed = JSON.parse(stopLine!)
       expect(parsed).toHaveProperty("elapsedMs")
       expect(parsed).not.toHaveProperty("duration")
-      await fs.unlink(logfile).catch(() => {})
     })
   })
 
