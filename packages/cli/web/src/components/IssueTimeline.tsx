@@ -282,7 +282,7 @@ function TimelineStageRow({
       <div className={`min-w-0 flex-1 ${isLast ? '' : 'pb-4'}`}>
         <button
           onClick={expandable ? onToggle : undefined}
-          className={`flex items-center gap-2 w-full text-left ${
+          className={`flex items-center gap-2 w-full text-left overflow-hidden ${
             expandable ? 'cursor-pointer hover:bg-gray-50 rounded px-0.5 -mx-0.5' : 'cursor-default'
           }`}
         >
