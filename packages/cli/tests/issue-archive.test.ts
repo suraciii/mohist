@@ -324,7 +324,7 @@ describe('IssueService archive', () => {
 
     it('should reject archive when agent is running', async () => {
       const issue = issueRepo.create({ number: 1, projectId, title: 'Running Issue' });
-      const runningAgent = { isRunning: vi.fn().mockReturnValue(true) };
+      const runningAgent = { getQueueStatus: vi.fn().mockReturnValue({ running: { id: 't1' }, pending: [], queueLength: 0 }) };
       const svc = new IssueService(issueRepo, commentRepo, projectRepo, undefined, runningAgent);
 
       await expect(svc.archive(projectId, 1)).rejects.toThrow('Cannot archive');
@@ -520,7 +520,11 @@ describe('IssueService archive', () => {
 
       let callCount = 0;
       const runningAgent = {
-        isRunning: vi.fn().mockImplementation((id: string) => id === issue2.id),
+        getQueueStatus: vi.fn().mockImplementation((id: string) => ({
+          running: id === issue2.id ? { id: 't1' } : null,
+          pending: [],
+          queueLength: 0,
+        })),
       };
       const svc = new IssueService(issueRepo, commentRepo, projectRepo, undefined, runningAgent);
 

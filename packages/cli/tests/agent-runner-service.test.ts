@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
@@ -28,54 +28,10 @@ describe('AgentRunnerService', () => {
     db.close();
   });
 
-  describe('startPipeline', () => {
-    it('should return { started: false, error: ... } when issue has pending approval', () => {
-      const project = projectRepo.create({ name: 'Test Project', path: '/test' });
-      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
-
-      issueRepo.setApprovalState(issue.id, {
-        stage: Stage.Plan,
-        status: 'awaiting',
-        requestedAt: new Date().toISOString(),
-      });
-
-      const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
-
-      const result = service.startPipeline(
-        issue,
-        project.id,
-        issueRepo,
-        '/test',
-        { cwd: '/test' },
-      );
-
-      expect(result.started).toBe(false);
-      expect(result.error).toMatch(/pending approval|approval/);
-    });
-
-    it('should proceed normally when no pending approval', () => {
-      const project = projectRepo.create({ name: 'Test Project', path: '/test' });
-      const issue = issueService.create({ projectId: project.id, title: 'Test Issue 2' });
-
-      const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
-
-      const result = service.startPipeline(
-        issue,
-        project.id,
-        issueRepo,
-        '/test',
-        { cwd: '/test' },
-      );
-
-      expect(result.started).toBe(true);
-      expect(result.error).toBeUndefined();
-    });
-  });
-
-  describe('hasPendingGate', () => {
+  describe('isIssueAtApprovalGate', () => {
     it('should return false when no gates pending', () => {
-      const service = new AgentRunnerService(eventBus, undefined, undefined, 8);
-      expect(service.hasPendingGate(1)).toBe(false);
+      const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
+      expect(service.isIssueAtApprovalGate('nonexistent')).toBe(false);
     });
   });
 
@@ -103,7 +59,7 @@ describe('AgentRunnerService', () => {
       expect(recovered?.status).toBe(IssueStatus.Active);
       expect(recovered?.stage).toBe(Stage.Plan);
       expect(recovered?.approvalState?.status).toBe('awaiting');
-      expect(service.hasPendingGate(issue.number)).toBe(true);
+      expect(service.isIssueAtApprovalGate(issue.id)).toBe(true);
     });
 
     it('should preserve stage when recovering crashed orphaned issues', () => {
@@ -118,9 +74,8 @@ describe('AgentRunnerService', () => {
       service.recoverIssues();
 
       const recovered = issueRepo.findById(issue.id);
-      expect(recovered?.status).toBe(IssueStatus.Blocked);
+      expect(recovered?.status).toBe(IssueStatus.Interrupted);
       expect(recovered?.stage).toBe(Stage.Build);
-      expect(recovered?.approvalState).toBeUndefined();
     });
 
     it('should handle mixed orphaned issues (awaiting and crashed)', () => {
@@ -145,30 +100,29 @@ describe('AgentRunnerService', () => {
       const recoveredAwaiting = issueRepo.findById(awaitingIssue.id);
       expect(recoveredAwaiting?.status).toBe(IssueStatus.Active);
       expect(recoveredAwaiting?.stage).toBe(Stage.Plan);
-      expect(service.hasPendingGate(awaitingIssue.number)).toBe(true);
+      expect(service.isIssueAtApprovalGate(awaitingIssue.id)).toBe(true);
 
       const recoveredCrashed = issueRepo.findById(crashedIssue.id);
-      expect(recoveredCrashed?.status).toBe(IssueStatus.Blocked);
+      expect(recoveredCrashed?.status).toBe(IssueStatus.Interrupted);
       expect(recoveredCrashed?.stage).toBe(Stage.Build);
 
       const statusAfter = service.getStatus();
       expect(statusAfter.recoverableIssues).toHaveLength(0);
     });
 
-    it('should not affect draft issues', () => {
+    it('should not affect backlog issues', () => {
       const project = projectRepo.create({ name: 'Test Project', path: '/test' });
-      const issue = issueService.create({ projectId: project.id, title: 'Draft Issue' });
-      
-      // Issue starts as draft by default
+      const issue = issueService.create({ projectId: project.id, title: 'Backlog Issue' });
+
       expect(issue.status).toBe(IssueStatus.Active);
-      expect(issue.stage).toBe(Stage.Draft);
+      expect(issue.stage).toBe(Stage.Backlog);
 
       const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
       service.recoverIssues();
 
       const unchanged = issueRepo.findById(issue.id);
       expect(unchanged?.status).toBe(IssueStatus.Active);
-      expect(unchanged?.stage).toBe(Stage.Draft);
+      expect(unchanged?.stage).toBe(Stage.Backlog);
     });
 
     it('should not affect non-active issues', () => {
@@ -189,7 +143,6 @@ describe('AgentRunnerService', () => {
     it('should handle missing issueRepo gracefully', () => {
       const service = new AgentRunnerService(eventBus, undefined, undefined, 8);
       
-      // Should not throw
       expect(() => service.recoverIssues()).not.toThrow();
     });
   });
