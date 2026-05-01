@@ -140,14 +140,15 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use browser devtools to test. No automated test needed; manual verification sufficient.",
-      "attempts": 2,
+      "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
         322837,
-        539709
+        539709,
+        533598
       ]
     }
   ]
