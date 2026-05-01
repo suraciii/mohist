@@ -770,6 +770,27 @@ export function createIssueRoutes(
         return c.json(response, 409);
       }
 
+      if (issue.stage === Stage.Check) {
+        const issueRepo = stateManager.getIssueRepo();
+        if (issueRepo && issueRepo.hasCompletedCoderSession(issue.id, 'check')) {
+          issueRepo.setApprovalState(issue.id, {
+            stage: Stage.Check,
+            status: 'awaiting',
+            output: { recovered: true, reason: 'check stage completed, review recovery' },
+            requestedAt: new Date().toISOString(),
+          });
+          const updatedIssue = issueService.getByNumber(projectId, number);
+          const response: ApiResponse = {
+            success: true,
+            data: {
+              issue: updatedIssue,
+              message: `Issue #${number} reopened with approval gate set`,
+            }
+          };
+          return c.json(response);
+        }
+      }
+
       const response: ApiResponse = {
         success: true,
         data: {
