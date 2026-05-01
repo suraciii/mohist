@@ -200,7 +200,12 @@
       "notes": "Use existing test patterns from the codebase (vitest, in-memory SQLite). Mock git SHA reading for deterministic tests.",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        631577,
+        124631,
+        607145
+      ]
     }
   ]
 }
