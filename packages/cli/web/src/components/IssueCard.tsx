@@ -97,6 +97,14 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
     },
   })
 
+  const rerunMutation = useMutation({
+    mutationFn: () => api.rerunIssue(issue.number),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
   const archiveMutation = useMutation({
     mutationFn: () => api.archiveIssue(issue.number),
     onSuccess: () => {
@@ -213,6 +221,22 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               className="rounded bg-orange-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
             >
               {reopenMutation.isPending ? 'Resuming...' : 'Resume'}
+            </button>
+          </div>
+        )}
+
+        {!isClosed && !isBlocked && !isInterrupted && issue.stage !== Stage.Backlog && issue.stage !== Stage.Done && !isAgentRunning && (
+          <div className="mt-2 flex justify-end">
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                rerunMutation.mutate()
+              }}
+              disabled={rerunMutation.isPending}
+              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              {rerunMutation.isPending ? 'Rerunning...' : 'Rerun'}
             </button>
           </div>
         )}
