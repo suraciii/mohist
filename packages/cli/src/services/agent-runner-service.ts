@@ -277,8 +277,7 @@ export class AgentRunnerService {
       .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog);
 
     const orphans = activeIssues.filter(issue => {
-      if (this.activeAgents.has(issue.id)) return false;
-      if (this.pendingGates.has(issue.number)) return false;
+      if (this.runningSlots.has(issue.id)) return false;
       if (issue.mergeState) return false;
       return true;
     });

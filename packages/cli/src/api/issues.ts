@@ -6,6 +6,7 @@ import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORI
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
+import type { ConflictResolutionDeps } from '../services/conflict-resolution';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
@@ -923,7 +924,9 @@ export function createIssueRoutes(
           return c.json(response, 500);
         }
 
-        if (checkSuiteRepo) {
+        const project = projectService.getById(projectId);
+
+        if (checkSuiteRepo && project) {
           const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
           if (activeSuite) {
             let headSha: string | null = null;
@@ -943,26 +946,9 @@ export function createIssueRoutes(
               checkSuiteRepo.updateStatus(activeSuite.id, 'running');
               checkSuiteRepo.updateSnapshotSha(activeSuite.id, headSha);
 
-              const acpOptions: AcpConnectionOptions = {
-                cwd: worktreePath,
-                issueId: issue.id,
-                projectId,
-                workflowLogRepo,
-                coderSessionRepo,
-                eventBus,
-                issueNumber: issue.number,
-                opencodeBinPath,
-                model: issue.model ?? undefined,
-              };
-
-              agentRunner.resumePipeline(
-                issue,
-                projectId,
-                issueRepo,
-                worktreePath,
-                acpOptions,
-                (issueId, status) => issueService.setStatus(issueId, status),
-              );
+              if (agentRunner) {
+                agentRunner.enqueue(issue.id, 'resume-pipeline');
+              }
 
               const response: ApiResponse = {
                 success: true,
@@ -2333,8 +2319,11 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} is not blocked` } satisfies ApiResponse, 409);
       }
 
-      if (agentRunner && agentRunner.isRunning(issue.id)) {
-        return c.json({ success: false, error: `Issue #${number} already has an agent running` } satisfies ApiResponse, 409);
+      if (agentRunner) {
+        const queueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
+        if (queueStatus.running) {
+          return c.json({ success: false, error: `Issue #${number} already has an agent running` } satisfies ApiResponse, 409);
+        }
       }
 
       const issueRepo = stateManager.getIssueRepo();
@@ -2359,26 +2348,7 @@ export function createIssueRoutes(
 
       if (hasCheckpoint && agentRunner && project) {
         issueRepo.updateStatus(issue.id, IssueStatus.Active);
-        const worktreePath = worktreeManager!.getPath(project.name, issue.number) || project.path;
-        const acpOptions: AcpConnectionOptions = {
-          cwd: worktreePath,
-          issueId: issue.id,
-          projectId,
-          workflowLogRepo,
-          coderSessionRepo,
-          eventBus,
-          issueNumber: issue.number,
-          opencodeBinPath,
-          model: issue.model ?? undefined,
-        };
-        agentRunner.resumePipeline(
-          issue,
-          projectId,
-          issueRepo,
-          worktreePath,
-          acpOptions,
-          (issueId, status) => issueService.setStatus(issueId, status),
-        );
+        agentRunner.enqueue(issue.id, 'resume-pipeline');
         return c.json({
           success: true,
           data: { issue: issueService.getByNumber(projectId, number), message: `Issue #${number} retrying from checkpoint` },
@@ -2415,8 +2385,11 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} is not blocked` } satisfies ApiResponse, 409);
       }
 
-      if (agentRunner && agentRunner.isRunning(issue.id)) {
-        return c.json({ success: false, error: `Issue #${number} already has an agent running` } satisfies ApiResponse, 409);
+      if (agentRunner) {
+        const queueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
+        if (queueStatus.running) {
+          return c.json({ success: false, error: `Issue #${number} already has an agent running` } satisfies ApiResponse, 409);
+        }
       }
 
       const issueRepo = stateManager.getIssueRepo();
