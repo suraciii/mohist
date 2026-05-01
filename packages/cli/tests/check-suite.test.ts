@@ -495,7 +495,7 @@ describe('Approve endpoint SHA validation', () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
     db.close();
   });
 
@@ -533,7 +533,7 @@ describe('Approve endpoint SHA validation', () => {
 
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus);
-    agentRunner.addPendingGate(number);
+    vi.spyOn(agentRunner, 'hasPendingGate').mockReturnValue(true);
 
     const mergeQueue = {
       enqueue: vi.fn(),
@@ -591,8 +591,9 @@ describe('Approve endpoint SHA validation', () => {
 
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus);
-    agentRunner.addPendingGate(number);
+    vi.spyOn(agentRunner, 'hasPendingGate').mockReturnValue(true);
     vi.spyOn(agentRunner, 'resumePipeline').mockImplementation(() => {});
+    vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
 
     const mergeQueue = {
       enqueue: vi.fn(),
@@ -637,7 +638,7 @@ describe('Approve endpoint SHA validation', () => {
 
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus);
-    agentRunner.addPendingGate(number);
+    vi.spyOn(agentRunner, 'hasPendingGate').mockReturnValue(true);
 
     const mergeQueue = {
       enqueue: vi.fn(),
