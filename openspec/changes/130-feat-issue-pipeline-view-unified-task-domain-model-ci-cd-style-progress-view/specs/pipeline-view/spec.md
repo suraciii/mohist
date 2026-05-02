@@ -1,186 +1,229 @@
 ## ADDED Requirements
 
-### Requirement: PipelineView component replaces fragmented progress components
+### Requirement: PipelineView replaces fragmented issue progress components
 
-The IssueDetailPage SHALL include a PipelineView component that replaces IssueTimeline, TaskList, CheckSuitePanel, CheckResultsPanel, and the approval sidebar. PipelineView SHALL render a CI/CD-style visualization composed of a Stage Bar, Step List, and Inline Approval.
+The IssueDetailPage SHALL use a single `PipelineView` component to display issue progress, replacing IssueTimeline, TaskList, CheckSuitePanel, CheckResultsPanel, Review Report sidebar, and Approval Required sidebar. These replaced components SHALL be deleted from the codebase.
 
-#### Scenario: Active issue shows full Pipeline View
+#### Scenario: IssueDetailPage uses PipelineView
 
-- **WHEN** the user navigates to an active issue in Build stage
-- **THEN** PipelineView renders a Stage Bar showing Plan (completed), Build (running), Check (pending), Done (pending)
-- **AND** below the Stage Bar, a Step List shows Build stage's Tasks and Checks
+- **WHEN** the IssueDetailPage source is inspected
+- **THEN** `PipelineView` is imported and rendered in place of IssueTimeline, TaskList, CheckSuitePanel, and CheckResultsPanel
+- **AND** no imports of IssueTimeline, TaskList, CheckSuitePanel, or CheckResultsPanel exist
 
-#### Scenario: Old components no longer imported
+#### Scenario: Deleted components do not exist
 
-- **WHEN** IssueDetailPage source is inspected
-- **THEN** it SHALL NOT import IssueTimeline, TaskList, CheckSuitePanel, or CheckResultsPanel
-- **AND** those component files SHALL be deleted
+- **WHEN** the component directory is inspected
+- **THEN** `IssueTimeline.tsx`, `TaskList.tsx`, `CheckSuitePanel.tsx`, and `CheckResultsPanel.tsx` do not exist
 
-### Requirement: Stage Bar shows horizontal pipeline progress
+### Requirement: Stage Bar displays pipeline stages horizontally
 
-PipelineView SHALL render a horizontal Stage Bar with 4 stages: Plan → Build → Check → Done. Each stage SHALL display a status icon, label, and timing information.
+PipelineView SHALL render a horizontal Stage Bar showing Plan → Build → Check → Done. Each stage cell SHALL display:
+- Stage name
+- Status icon with color coding
+- Duration (for completed/running stages)
 
-Stage status mapping:
-- `completed`: checkmark icon + elapsed duration
-- `running`: spinner icon + live elapsed timer
-- `failed`: error icon + elapsed duration
-- `awaiting`: hourglass icon (user-approval pending)
-- `pending`: empty circle icon
+Status icon mapping:
+| Status | Icon | Meaning |
+|--------|------|---------|
+| completed | checkmark + duration | All checks passed |
+| running | spinner + elapsed | Currently executing |
+| failed | cross + duration | Check failed, reaction unresolved |
+| awaiting-approval | hourglass | User-approval pending |
+| pending | empty circle | Not yet reached |
 
-#### Scenario: Clicking completed stage shows historical Step List
+#### Scenario: Active issue in Build stage
 
-- **WHEN** the user clicks on the completed Plan stage in the Stage Bar
-- **THEN** the Step List below switches to show Plan stage's completed Tasks and Checks
-- **AND** the Plan stage bar appears visually selected
+- **WHEN** the user views an issue in Build stage
+- **THEN** Stage Bar shows: Plan (completed checkmark + duration) → Build (running spinner + elapsed) → Check (pending circle) → Done (pending circle)
 
-#### Scenario: Clicking current stage returns to live view
+#### Scenario: Issue awaiting approval after Plan
 
-- **WHEN** the user is viewing historical Plan step list
-- **AND** clicks the currently running Build stage in the Stage Bar
-- **THEN** the Step List switches back to live Build stage progress
+- **WHEN** Plan stage completed and user-approval check is pending
+- **THEN** Stage Bar shows: Plan (hourglass) → Build (pending) → Check (pending) → Done (pending)
 
-#### Scenario: Stage elapsed timer updates in real-time
+#### Scenario: All stages completed
 
-- **WHEN** the Build stage is running and has been active for 45 seconds
-- **THEN** the Build stage bar shows a spinner icon and "45s" (or formatted duration)
-- **AND** the duration increments every second without manual refresh
+- **WHEN** the issue is in Done stage with all stages passed
+- **THEN** Stage Bar shows: Plan (checkmark + duration) → Build (checkmark + duration) → Check (checkmark + duration) → Done (checkmark)
 
-### Requirement: Step List shows Tasks and Checks for selected stage
+### Requirement: Stage Bar click selects stage for Step List
 
-Below the Stage Bar, PipelineView SHALL render a Step List divided into two sections: Tasks (Agent-executed work) and Checks (automated verification). The Step List corresponds to the currently selected stage in the Stage Bar.
+Clicking a stage cell in the Stage Bar SHALL select that stage for display in the Step List below. The currently active (running) stage SHALL be selected by default. Clicking a completed stage shows historical task and check results.
 
-#### Scenario: Tasks section renders each task with status
+#### Scenario: Default selection is active stage
 
-- **WHEN** the user views the Step List for a running Build stage with 3 tasks
-- **THEN** the Tasks section shows 3 items, each with: status icon + title + duration
-- **AND** completed tasks show a checkmark and duration
-- **AND** the running task shows a spinner and elapsed time
-- **AND** pending tasks show a grey circle
+- **WHEN** the user views an issue in Build stage
+- **THEN** Build is selected in the Stage Bar and the Step List shows Build's tasks and checks
 
-#### Scenario: Completed task can expand to show artifacts
+#### Scenario: Click completed Plan stage
 
-- **WHEN** the user clicks on a completed Plan task "Write Proposal"
-- **THEN** the task row expands to show the artifact output (proposal.md content summary or file path)
-- **AND** clicking again collapses the detail
+- **WHEN** the user clicks the Plan stage cell in the Stage Bar
+- **THEN** the Step List switches to show Plan's completed tasks and checks
+- **AND** clicking Build again switches back to the current stage
 
-#### Scenario: Failed task shows error summary
+### Requirement: Step List shows Tasks and Checks sections
 
-- **WHEN** a Build task T-002 has status `failed`
-- **THEN** the Step List shows T-002 with an error icon and the error message summary
-- **AND** the row can be expanded to see full error details
+Below the Stage Bar, PipelineView SHALL render a Step List for the selected stage, divided into two sections: "Tasks" (Agent work) and "Checks" (validation).
 
-#### Scenario: Checks section renders each check with status
+#### Scenario: Plan stage Step List
 
-- **WHEN** the Step List shows the Checks section for Plan stage
-- **THEN** checks are listed: proposal-complete, specs-complete, design-complete, tasks-valid, self-review-passed, user-approval
-- **AND** each shows: status icon (pass/fail/pending) + check name
-- **AND** failed checks show the failure reason message
+- **WHEN** Plan stage is selected in the Stage Bar
+- **THEN** Tasks section shows 5 items: Write Proposal, Write Specs, Write Design, Break into Tasks, Self-Review
+- **AND** Checks section shows: proposal-complete, specs-complete, design-complete, tasks-valid, self-review-passed, user-approval
 
-### Requirement: Inline Approval renders in Step List Checks section
+#### Scenario: Build stage Step List
 
-When a `user-approval` check is in `awaiting` status, the Step List SHALL render the approval UI inline within the Checks section, replacing any separate approval sidebar.
+- **WHEN** Build stage is selected in the Stage Bar
+- **THEN** Tasks section shows tasks from tasks.json (e.g., T-001, T-002, T-003)
+- **AND** Checks section shows: all-tasks-complete, code-compiles
 
-#### Scenario: Approval UI appears inline when awaiting
+#### Scenario: Check stage Step List
 
-- **WHEN** Plan stage completes and the `user-approval` check is awaiting
-- **THEN** the user-approval row in the Checks section expands to show:
-  - A list of artifact file paths produced by the stage
-  - An "Approve" button
-  - A "Send back" button with a feedback text input
-  - A link to the ChangesPanel for viewing detailed diffs
+- **WHEN** Check stage is selected in the Stage Bar
+- **THEN** Tasks section shows 2 items: AI Code Review, Review Self-Check
+- **AND** Checks section shows: build-test, ai-review, user-approval
+
+### Requirement: Task items display status, title, and timing
+
+Each Task item in the Step List SHALL display:
+- Status icon (completed: checkmark, running: spinner, failed: cross, pending: empty circle)
+- Task title
+- Duration for completed/running tasks
+
+#### Scenario: Completed task is expandable
+
+- **WHEN** a task with `status: 'completed'` is rendered
+- **THEN** the task row shows a checkmark icon, task title, and duration
+- **AND** clicking the row expands to show the artifact list
+
+#### Scenario: Running task shows live progress
+
+- **WHEN** a task with `status: 'running'` is rendered
+- **THEN** the task row shows a spinner icon, task title, and elapsed time updating in real-time
+
+#### Scenario: Failed task shows error
+
+- **WHEN** a task with `status: 'failed'` is rendered
+- **THEN** the task row shows a cross icon, task title, and failure summary
+- **AND** expanding shows the error details
+
+#### Scenario: Pending task is dimmed
+
+- **WHEN** a task with `status: 'pending'` is rendered
+- **THEN** the task row is styled in a muted/dimmed color
+- **AND** shows an empty circle icon
+
+### Requirement: Check items display status and result
+
+Each Check item in the Step List SHALL display:
+- Status icon (pass: checkmark, fail: cross, pending: empty circle)
+- Check name
+- Result message (for failed checks)
+
+#### Scenario: Passed check
+
+- **WHEN** a check with `status: 'pass'` is rendered
+- **THEN** the check row shows a checkmark icon and check name
+
+#### Scenario: Failed check with reason
+
+- **WHEN** a check with `status: 'fail'` is rendered
+- **THEN** the check row shows a cross icon, check name, and failure message
+- **AND** if the check has a reaction in progress (retry/auto-fix), the reaction status is shown
+
+#### Scenario: Pending check
+
+- **WHEN** a check with `status: 'pending'` is rendered
+- **THEN** the check row shows an empty circle icon and check name in muted style
+
+### Requirement: Inline Approval renders in Step List
+
+When a `user-approval` check is pending (status: fail with ask-user reaction), the PipelineView SHALL render an inline approval panel within the Checks section instead of a separate sidebar panel. The inline panel SHALL display:
+- List of artifacts produced by the current stage
+- "Approve" button and "Send back" button
+- Optional feedback text input
+- Link to the ChangesPanel for detailed file-level review
+
+#### Scenario: Plan stage awaiting approval
+
+- **WHEN** Plan stage is selected and user-approval check is pending
+- **THEN** the Checks section shows the user-approval check with an inline panel
+- **AND** the panel lists Plan artifacts: proposal.md, specs/, design.md, tasks.json, self-review.md
+- **AND** Approve and Send back buttons are visible
 
 #### Scenario: User approves inline
 
-- **WHEN** the user clicks "Approve" on the inline approval UI
-- **THEN** the approval API is called
-- **AND** the Pipeline View transitions to show the next stage as running
+- **WHEN** the user clicks "Approve" in the inline approval panel
+- **THEN** the approval is submitted via the existing approval API
+- **AND** the PipelineView updates to show the check as passed
 
 #### Scenario: User sends back with feedback
 
-- **WHEN** the user enters feedback text "Change the auth approach" and clicks "Send back"
-- **THEN** the reject API is called with the feedback message
-- **AND** the Pipeline View shows the current stage as failed
+- **WHEN** the user enters "Fix the error handling" in the feedback input and clicks "Send back"
+- **THEN** the rejection is submitted via the existing reject API with the feedback message
+- **AND** the pipeline reacts according to the check's reaction configuration
 
-### Requirement: PipelineView handles all issue states
+### Requirement: PipelineView handles special issue states
 
-PipelineView SHALL render correctly for all issue statuses: backlog, active, blocked, interrupted, completed, closed.
+PipelineView SHALL render appropriately for each issue status:
 
-#### Scenario: Backlog issue shows empty pipeline with Start button
+| Issue Status | Pipeline View |
+|-------------|---------------|
+| backlog | All 4 stages show pending (empty circles) with a "Start" button |
+| active | Normal pipeline view with current stage highlighted |
+| blocked | Current stage shows failed icon and failure reason banner |
+| interrupted | Current task shows interrupted icon with a "Resume" button |
+| completed | All stages show completed with Done expanded |
+| closed | Pipeline frozen at pre-close state, all cells non-interactive (dimmed) |
+
+#### Scenario: Backlog issue shows Start button
 
 - **WHEN** the user views a backlog issue
-- **THEN** the Stage Bar shows 4 pending (grey) stages
+- **THEN** Stage Bar shows 4 pending (empty circle) stages
 - **AND** a "Start" button is displayed below the Stage Bar
+- **AND** clicking "Start" triggers the existing start API
 
-#### Scenario: Active issue shows live pipeline
+#### Scenario: Blocked issue shows failure
 
-- **WHEN** the user views an active issue in any running stage
-- **THEN** the Pipeline View renders the full Stage Bar with current stage highlighted
-- **AND** the Step List shows real-time task progress via SSE
+- **WHEN** the user views a blocked issue (Build stage failed)
+- **THEN** Stage Bar shows Build with a failed icon
+- **AND** a banner displays the failure reason
+- **AND** the Step List shows the failed check with error details
 
-#### Scenario: Blocked issue shows failure indicator
-
-- **WHEN** the user views a blocked issue
-- **THEN** the current stage in the Stage Bar shows a failed icon
-- **AND** the Step List shows the failing task/check with the failure reason
-
-#### Scenario: Interrupted issue shows resume option
+#### Scenario: Interrupted issue shows Resume
 
 - **WHEN** the user views an interrupted issue
-- **THEN** the current step shows a lightning bolt icon
+- **THEN** the current task shows an interrupted icon
 - **AND** a "Resume" button is displayed
 
-#### Scenario: Completed issue shows all stages passed
+#### Scenario: Completed issue shows all green
 
 - **WHEN** the user views a completed issue
-- **THEN** all 4 stages in the Stage Bar show completed icons
-- **AND** the Done stage's Step List can be expanded
+- **THEN** all stages show checkmarks with durations
+- **AND** Done is selected by default in the Stage Bar
 
-#### Scenario: Closed issue shows final state greyed out
+#### Scenario: Closed issue is read-only
 
 - **WHEN** the user views a closed issue
-- **THEN** the Pipeline View shows the state at time of closure
-- **AND** all Stage Bar elements are greyed out and non-interactive
+- **THEN** the PipelineView shows the state at time of closure
+- **AND** all interactive elements (buttons, expandable rows) are disabled/dimmed
 
-### Requirement: PipelineView subscribes to stage_task_update SSE events
+### Requirement: PipelineView updates in real-time via SSE
 
-PipelineView SHALL subscribe to `stage_task_update` SSE events to receive real-time task status changes. When a task status changes, the Step List SHALL update immediately without polling.
+PipelineView SHALL subscribe to `stage_task_update` SSE events for the current issue and update task statuses in real-time without requiring a full page refresh. Running task elapsed times SHALL update continuously.
 
-#### Scenario: Task transitions from running to completed via SSE
+#### Scenario: Task starts while viewing
 
-- **WHEN** the user is viewing an active Build stage Step List
-- **AND** a `stage_task_update` event arrives with `{ taskId: 'T-001', status: 'completed' }`
-- **THEN** T-001's status icon changes from spinner to checkmark
-- **AND** T-001's duration is displayed
-- **AND** if T-002 is next, it changes from pending to running
+- **WHEN** the user is viewing the issue page and a `stage_task_update` with `status: 'started'` arrives
+- **THEN** the corresponding task in the Step List changes from pending to running with a spinner
 
-#### Scenario: Task retry detected via SSE
+#### Scenario: Task completes while viewing
 
-- **WHEN** a `stage_task_update` event arrives with `{ taskId: 'T-002', status: 'retrying', attempt: 2 }`
-- **THEN** T-002's row shows a retry indicator and the attempt number
+- **WHEN** the user is viewing and a `stage_task_update` with `status: 'completed'` arrives
+- **THEN** the task status updates to completed with a checkmark and final duration
 
-### Requirement: PipelineView loads historical data from executions API
+#### Scenario: Stage transitions update Stage Bar
 
-When the page loads, PipelineView SHALL fetch historical stage execution data from `GET /api/issues/:number/executions` to populate completed stages' Tasks and Checks without relying on SSE replay.
-
-#### Scenario: Page loads for issue in Build stage
-
-- **WHEN** the user navigates to an issue that has completed Plan and is in Build stage
-- **THEN** PipelineView fetches executions data
-- **AND** the Plan stage Step List is populated with completed task results from the API response
-- **AND** the Build stage Step List shows live SSE data for running tasks
-
-#### Scenario: No executions data for draft issue
-
-- **WHEN** the user views a draft issue with no stage executions
-- **THEN** the Stage Bar shows all stages as pending
-- **AND** the Step List shows a "Start to begin pipeline" message
-
-### Requirement: Frontend uses RAF throttling for high-frequency SSE events
-
-The `usePipelineView` hook SHALL implement requestAnimationFrame-based throttling for `stage_task_update` and related SSE events to prevent UI lockup during rapid streaming. Events SHALL be buffered in a ref and flushed every 100ms.
-
-#### Scenario: Rapid stage_task_update events during Build stage
-
-- **WHEN** 500+ `stage_task_update` events arrive within 5 seconds
-- **THEN** the UI updates in batches (every 100ms) instead of per-event
-- **AND** no frame drops occur
+- **WHEN** the current stage completes and the next stage begins
+- **THEN** the Stage Bar updates to reflect the new stage states
+- **AND** the Step List switches to the new active stage

@@ -96,3 +96,26 @@ import type { CheckpointManager as CheckpointManagerInterface } from './checkpoi
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
 
 export type CheckpointManager = CheckpointManagerInterface;
+
+export interface StageTask {
+  id: string;
+  title: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  order: number;
+  dependsOn: string[];
+  source: 'static' | 'dynamic';
+  artifacts: string[];
+  attempts: number;
+  maxAttempts: number;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface StageTaskResult {
+  taskId: string;
+  title: string;
+  status: 'completed' | 'failed' | 'skipped';
+  artifacts: string[];
+  attempts: number;
+  duration: number;
+}
