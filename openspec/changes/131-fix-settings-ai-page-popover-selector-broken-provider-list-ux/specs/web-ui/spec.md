@@ -1,48 +1,36 @@
 ## MODIFIED Requirements
 
-### Requirement: AI Settings Model Select Popover
+### Requirement: AI Settings 页面布局顺序
 
-ModelSelect 组件 SHALL 使用 Headless UI v2 兼容的 Popover.Panel 渲染方式。Popover.Panel SHALL 在用户点击按钮时正常渲染到 DOM 并显示模型列表。
+AI Settings 页面 SHALL 按以下顺序排列各区域，将最常用的 Model Selection 置于页面顶部：
 
-#### Scenario: Mohist Model 选择器正常打开
-- **WHEN** 用户在 AI Settings 页面点击 Mohist Model 选择器按钮
-- **THEN** Popover.Panel 渲染到 DOM
-- **AND** 显示已配置 provider 的模型列表（按 provider 分组）
-- **AND** 用户可以选择一个模型
+1. **Model Selection** — Mohist Model + Coder Model + Stage Model Overrides
+2. **Connected Providers** — 已配置的内置 provider 列表（展开状态）
+3. **Available Providers** — 未配置的内置 provider 列表（默认折叠）
+4. **Custom Providers** — 自定义 provider 列表
 
-#### Scenario: Coder Model 选择器正常打开
-- **WHEN** 用户在 AI Settings 页面点击 Coder Model 选择器按钮
-- **THEN** Popover.Panel 渲染到 DOM
-- **AND** 显示可用的 coder 模型列表
-- **AND** 用户可以选择一个模型或清除当前选择
+#### Scenario: Model Selection 区域在页面顶部
 
-#### Scenario: Stage Model Override 选择器正常打开
-- **WHEN** 用户展开 Stage Model Overrides 区域
-- **AND** 点击某个 stage 的选择器按钮
-- **THEN** Popover.Panel 渲染到 DOM
-- **AND** 显示可用的 coder 模型列表
-- **AND** 用户可以为该 stage 选择或清除模型
+- **WHEN** 用户打开 Settings AI 页面
+- **THEN** Model Selection 区域（包含 Mohist Model 和 Coder Model 选择器）为第一个可见区域
+- **AND** Provider 列表区域在 Model Selection 下方
 
-#### Scenario: Popover 搜索过滤
-- **WHEN** Popover 打开后用户在搜索框输入文本
-- **THEN** 模型列表实时按名称和 ID 过滤
+#### Scenario: Connected Providers 默认展开
 
-### Requirement: AI Settings Provider 列表布局
+- **WHEN** 用户打开 Settings AI 页面
+- **AND** 存在已配置的 provider
+- **THEN** Connected Providers 区域默认展开，显示所有已连接的 provider 卡片
 
-AI Settings 页面的 Provider 列表 SHALL 有清晰的视觉层次，将已连接的 provider 与未配置的 provider 分开显示，并将 Model Selection 区域放在 Provider 列表之前。
+#### Scenario: Available Providers 默认折叠
 
-#### Scenario: 已连接 provider 与未配置 provider 分开显示
-- **WHEN** 用户打开 AI Settings 页面
-- **THEN** 已连接的 provider 显示在独立分组中
-- **AND** 未配置的 provider 显示在另一个可折叠或分离的分组中
-- **AND** 两个分组有明确的视觉区分
+- **WHEN** 用户打开 Settings AI 页面
+- **AND** 存在未配置的 provider
+- **THEN** Available Providers 区域默认折叠，显示标题和 provider 数量（如 "Available (78)"）
+- **AND** 用户点击标题可展开查看完整列表
 
-#### Scenario: Model Selection 在页面上方
-- **WHEN** 用户打开 AI Settings 页面
-- **THEN** Model Selection 区域（Mohist Model、Coder Model）出现在 Provider 列表之前
-- **AND** 用户无需滚动即可看到并操作模型选择器
+#### Scenario: 无已配置 provider 时 Model Selection 仍可访问
 
-#### Scenario: 未配置 provider 分组可折叠
-- **WHEN** 未配置 provider 列表存在
-- **THEN** 该分组默认折叠或收起
-- **AND** 用户可以展开查看全部未配置 provider
+- **WHEN** 用户打开 Settings AI 页面
+- **AND** 没有任何已配置的 provider
+- **THEN** Model Selection 区域仍然显示在选择器位置
+- **AND** Connected Providers 区域显示空状态或不显示

@@ -1,47 +1,32 @@
-# Self-Review: Issue #131
+## Self-Review: Issue #131
 
-## Verdict: PASS
+### Alignment
+- All 5 issue acceptance criteria trace directly to proposal "What Changes" entries
+- Both problems (Popover bug + UX layout) addressed
 
-All artifacts are consistent, complete, and aligned with the issue requirements.
+### Completeness
+- 2 proposal capabilities → 2 spec files → 2 tasks (full coverage)
+- `settings-ai-model-select`: 4 requirements (popover opens, search, keyboard, grouping)
+- `web-ui`: 1 modified requirement (layout order with 4 scenarios)
+- Edge case covered: "无已配置 provider 时 Model Selection 仍可访问"
 
-## Alignment
-
-| Issue Acceptance Criterion | Spec Requirement | Task |
-|---|---|---|
-| Mohist Model 选择器正常打开 | AI Settings Model Select Popover → Scenario 1 | T-001 |
-| Coder Model 选择器正常打开 | AI Settings Model Select Popover → Scenario 2 | T-001 |
-| Stage Model Overrides 正常工作 | AI Settings Model Select Popover → Scenario 3 | T-001 |
-| Provider 列表有视觉分组或折叠 | AI Settings Provider 列表布局 → Scenario 1, 3 | T-002 |
-| Model Selection 不在页面底部 | AI Settings Provider 列表布局 → Scenario 2 | T-002 |
-
-## Completeness
-
-- Both spec requirements have corresponding tasks
-- All 5 issue acceptance criteria covered by spec scenarios
-- Edge cases (Popover search, collapsible default state, count badge) included in specs/tasks
-
-## Consistency
-
-- Proposal capability `web-ui` → specs directory `specs/web-ui/spec.md` → task spec references — all match
-- Design decisions (D1: remove Transition, D2: reorder sections, D3: collapsible providers) align with task descriptions
+### Consistency
+- T-001 spec ref matches `settings-ai-model-select/spec.md` requirement name
+- T-002 spec ref matches `web-ui/spec.md` requirement name
+- Design D1/D2/D3 align with specs and tasks
 - Naming consistent across all artifacts
 
-## Feasibility
+### Feasibility
+- T-001: Pure removal of Transition wrapper, all deps already installed
+- T-002: JSX reorder + one useState, all memos/components already exist
+- Task granularity appropriate — T-001 is the bug fix, T-002 is the UX restructure
 
-- T-001 is a minimal bug fix (remove Transition wrapper + import) — single-component scope
-- T-002 is a layout restructuring of the same component — depends on T-001 being done first
-- Both tasks are AFK-suitable (pure frontend, no API changes)
+### Dependency Completeness
+- T-001: `dependsOn: []` (first task, correct)
+- T-002: `dependsOn: ["T-001"]` (T-001 priority 1 < T-002 priority 2, correct)
+- No cycles, valid DAG
 
-## Dependency Graph
+### Result
+All checks pass.
 
-```
-T-001 (fix popover) → T-002 (reorder + collapsible)
-```
-
-- DAG is valid, no cycles
-- T-002 depends on T-001 (strictly lower priority)
-- Both tasks output to the same file, ordering is correct
-
-## Issues Found
-
-None.
+<promise>PASS</promise>

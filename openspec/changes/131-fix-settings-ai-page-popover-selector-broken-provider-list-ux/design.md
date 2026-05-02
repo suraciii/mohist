@@ -1,53 +1,74 @@
 ## Context
 
-`AiSettingsSection.tsx` renders the AI Settings tab. The `ModelSelect` component (lines 173–327) uses `Popover` + `Transition` from `@headlessui/react` v2.2.10. The `Transition` wrapper at lines 257–265 omits `show={open}`, so in v2 the panel never mounts — all 7+ popover instances (Mohist Model, Coder Model, 5 Stage Overrides) are completely broken.
+The AI Settings page (`AiSettingsSection.tsx`) has two problems:
 
-The provider list (`sortedProviders`) interleaves configured and unconfigured providers into a single flat list of 80+ cards. Model Selection is the last section before Stage Overrides, requiring a full scroll past the provider list.
+1. **Popover bug**: `ModelSelect` wraps `Popover.Panel` in a bare `<Transition>` (lines 257–265). In `@headlessui/react` v2, `Transition` no longer auto-detects `Popover`'s internal `open` state. Without `show={open}`, it stays in closed state permanently — the Panel never renders to DOM.
+
+2. **Layout**: The page renders sections in order: Providers (flat 80+ items) → Custom Providers → Model Selection → Stage Overrides. The most-used controls (model selection) are buried at the bottom behind a wall of unconfigured providers.
+
+Current page section order in `AiSettingsSection` JSX (lines 448–597):
+- Providers (search + flat list of configured + unconfigured)
+- Custom Providers
+- Model Selection (Mohist + Coder)
+- Stage Model Overrides (collapsible)
+
+Existing data already computed: `configuredProviders`, `unconfiguredProviders`, `customProviders` (lines 354–356).
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Make all ModelSelect popovers functional under Headless UI v2
-- Reorder sections: Model Selection → Connected Providers → Custom Providers → Available Providers (collapsible) → Stage Overrides
-- Give unconfigured providers a collapsible section, defaulting to collapsed
+- Fix all ModelSelect popovers so they open and function correctly with Headless UI v2
+- Promote Model Selection to top of page
+- Split the flat provider list into Connected (expanded) and Available (collapsed) sections
 
 **Non-Goals:**
-- Adding new provider filtering/categorization beyond connected vs. unconfigured
-- Changing the ProviderConnectDialog or CustomProviderDialog
-- Modifying any API endpoints or data layer
+- No changes to backend APIs, data models, or provider connect/disconnect logic
+- No new dependencies — use existing `@headlessui/react` v2
+- No changes to `ProviderConnectDialog`, `CustomProviderDialog`, or `SettingsPage.tsx`
+- No transition animations on Popover (removing Transition is the fix; re-adding animation is a separate concern)
 
 ## Decisions
 
 ### D1: Remove Transition wrapper entirely
 
-Remove the `Transition` wrapper and render `Popover.Panel` directly. Headless UI v2's `Popover.Panel` handles its own enter/leave animation via CSS `data-*` attributes or can use the built-in `transition` prop. This is the simplest fix with zero behavioral regression — the current Transition does nothing (never opens).
+Remove the `<Transition>` wrapper from `Popover.Panel` (lines 257–265). In Headless UI v2, `Popover.Panel` handles its own show/hide via the parent `Popover` context. The v1 pattern of wrapping in `Transition` without `show` is the root cause.
 
 **Alternatives considered:**
-- Add `show={open}` to `Transition` — preserves animation but adds coupling; the `open` slot value from `Popover` render prop works but is fragile if Headless UI internals change
-- Use Headless UI v2 `transition` prop on `Popover.Panel` — more idiomatic but unnecessary complexity for a dropdown that appears/disappears instantly
+- **Add `show={open}` to Transition**: Would work but adds unnecessary complexity. The `Popover.Panel` in v2 already handles open/close transitions internally. Extra wrapper is dead code.
+- **Use `Popover.Panel`'s built-in `transition` prop**: Headless UI v2 supports `transition` and animation class props directly on `Popover.Panel`. This is the cleanest v2-native approach, but adds no functional value beyond what bare `Popover.Panel` provides — skip for now to keep the fix minimal.
 
-### D2: Reorder AiSettingsSection layout
+### D2: Reorder sections: Model Selection first, Providers second
 
-Change the JSX section order in `AiSettingsSection`'s return to: Model Selection → Connected Providers (with search) → Custom Providers → Available Providers (collapsible) → Stage Overrides. This keeps all sections in one component; no extraction needed.
+Move the Model Selection JSX block (lines 532–563) and Stage Model Overrides block (lines 568–597) above the Providers section. New order:
 
-### D3: Collapsible unconfigured provider section
-
-Use a local `useState` boolean (default `false`) to control an expand/collapse toggle on the unconfigured providers list. Reuse the existing `ChevronRightIcon` with rotation for the toggle indicator, matching the Stage Model Overrides pattern already in this file. Show a count badge (e.g., "+78 providers") when collapsed.
+1. Model Selection (Mohist + Coder)
+2. Stage Model Overrides (collapsible)
+3. Connected Providers (expanded)
+4. Available Providers (collapsed, with count badge)
+5. Custom Providers
 
 **Alternatives considered:**
-- Headless UI `Disclosure` component — adds another dependency import for trivial show/hide
-- Virtualized list for 80+ items — over-engineering; the list is hidden by default
+- **Two-column layout**: Would require responsive handling and doesn't solve the "80 items in a list" problem. Over-engineered for a settings page.
+- **Tabs for providers vs models**: Adds navigation complexity; users want to see model selection and connected providers at a glance.
+
+### D3: Available Providers section default-collapsed with count
+
+Add a `useState` for Available Providers collapse state. Render the section header as a clickable toggle showing "Available Providers (N)" with a `ChevronRightIcon`. Default to collapsed (`availableOpen = false`). The search input moves into the Connected Providers section header area, or is removed (available providers are less frequently accessed).
+
+**Alternatives considered:**
+- **Virtual scrolling**: Over-engineered for a settings page; collapsing solves the information density problem.
+- **Category tabs within providers**: Would require grouping logic by provider type/region. Not enough benefit for the complexity.
 
 ## Risks / Trade-offs
 
-- [Popover opens without enter animation] → Acceptable; the panel appears instantly which is standard for select dropdowns
-- [Existing `Transition` import becomes unused] → Remove `Transition` from the import to avoid dead code
-- [Section reorder may confuse existing users] → Mitigated by the fact that Model Selection is the most-used section and users will find it faster
+- [Losing open/close animation on Popover] → Acceptable trade-off. The fix is removing the broken Transition. Animation can be re-added later using v2's `transition` prop on `Popover.Panel` directly.
+- [Users may not discover Available Providers if collapsed] → Mitigated by showing the count badge ("Available (78)") which signals there's more content to expand.
+- [Existing provider search only applies to the flat list] → After reordering, the search input should appear above the combined Connected+Available list. When Available is collapsed, search still filters both and auto-expands Available if matches are found there.
 
 ## Migration Plan
 
-Single PR with two logical commits: (1) fix Transition/Popover bug, (2) reorder sections + add collapsible unconfigured providers. No API changes, no data migration, no rollout needed — purely frontend.
+No migration needed. This is a frontend-only fix with no data or API changes. Deploy by rebuilding the web assets (`cd packages/cli && npm run build`).
 
 ## Open Questions
 
-None.
+None — the fix is straightforward and well-scoped.
