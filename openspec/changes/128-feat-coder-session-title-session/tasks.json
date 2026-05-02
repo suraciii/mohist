@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add human-readable title to coder sessions so each session is identifiable at a glance in the UI.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/db/migrations.ts, packages/cli/src/db/coder-session-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        158379
+      ]
     },
     {
       "id": "T-002",
@@ -41,9 +46,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/acp-session.ts, packages/cli/src/services/event-bus.ts, packages/cli/web/src/lib/types.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -64,9 +74,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts, packages/cli/src/workflow/plan-stage-runner.ts, packages/cli/src/workflow/check-stage-runner.ts, packages/cli/src/workflow/checks/code-compiles-check.ts, packages/cli/src/workflow/checks/build-test-check.ts, packages/cli/src/services/skill-service.ts, packages/cli/src/services/explore-acp-service.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -83,9 +98,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts, packages/cli/src/api/agent.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "T-001 already updates findAllWithIssueInfo to include title in SELECT, so agent.ts may need no change if the return mapping includes it."
+      "notes": "T-001 already updates findAllWithIssueInfo to include title in SELECT, so agent.ts may need no change if the return mapping includes it.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -105,9 +125,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/components/SessionHeader.tsx, packages/cli/web/src/hooks/useCoderSessions.ts, packages/cli/web/src/hooks/useActivityCards.ts, packages/cli/web/src/components/SessionCard.tsx",
-      "dependsOn": ["T-002", "T-004"],
+      "dependsOn": [
+        "T-002",
+        "T-004"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -127,9 +153,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/coder-session-title.test.ts",
-      "dependsOn": ["T-003", "T-005"],
+      "dependsOn": [
+        "T-003",
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Focus on repo-level tests and frontend unit tests for getSessionLabel."
+      "notes": "Focus on repo-level tests and frontend unit tests for getSessionLabel.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
