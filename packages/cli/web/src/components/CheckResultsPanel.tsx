@@ -11,20 +11,30 @@ function parseCheckSuite(output?: Record<string, unknown>): CheckSuiteOutput | n
   const checks = Array.isArray(rawChecks)
     ? rawChecks
         .filter((c): c is Record<string, unknown> => typeof c === 'object' && c !== null)
-        .map((c) => ({
-          name: typeof c.name === 'string' ? c.name : 'unknown',
-          status: (typeof c.status === 'string' ? c.status : 'pending') as CheckResult['status'],
-          duration: typeof c.duration === 'number' ? c.duration : undefined,
-          summary: typeof c.summary === 'string' ? c.summary : undefined,
-          buildLog: typeof c.buildLog === 'string' ? c.buildLog : undefined,
-          reviewReport: typeof c.reviewReport === 'string' ? c.reviewReport : undefined,
-          autoFixed: typeof c.autoFixed === 'boolean' ? c.autoFixed : undefined,
-          verdict: typeof c.verdict === 'string' ? c.verdict : undefined,
-        }))
+        .map((c) => {
+          const rawStatus = typeof c.status === 'string' ? c.status : 'pending'
+          const normalizedStatus = rawStatus === 'pass' ? 'passed' : rawStatus
+          return {
+            name: typeof c.name === 'string' ? c.name : 'unknown',
+            status: normalizedStatus as CheckResult['status'],
+            duration: typeof c.duration === 'number' ? c.duration : undefined,
+            summary: typeof c.summary === 'string' ? c.summary : undefined,
+            buildLog: typeof c.buildLog === 'string' ? c.buildLog : undefined,
+            reviewReport: typeof c.reviewReport === 'string' ? c.reviewReport : undefined,
+            autoFixed: typeof c.autoFixed === 'boolean' ? c.autoFixed : undefined,
+            verdict: typeof c.verdict === 'string' ? c.verdict : undefined,
+          }
+        })
     : []
-  const overallResult =
-    typeof output.overallResult === 'string' ? output.overallResult : 'failed'
-  return { checks, overallResult: overallResult as 'passed' | 'failed' }
+  let overallResult: 'passed' | 'failed'
+  if (typeof output.overallResult === 'string') {
+    overallResult = output.overallResult === 'passed' || output.overallResult === 'pass' ? 'passed' : 'failed'
+  } else if (checks.length > 0) {
+    overallResult = checks.every(c => c.status === 'passed') ? 'passed' : 'failed'
+  } else {
+    overallResult = 'failed'
+  }
+  return { checks, overallResult }
 }
 
 const CHECK_LABELS: Record<string, string> = {
