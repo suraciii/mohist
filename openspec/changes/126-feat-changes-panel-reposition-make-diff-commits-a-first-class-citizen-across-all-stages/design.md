@@ -1,52 +1,54 @@
 ## Context
 
-The Changes panel (diff/commits viewer) in `IssueDetailPage.tsx` is currently rendered at lines 417–524, gated by `DIFF_STAGES` (line 25, line 265), and positioned after Comments in the main column. The data hooks (`useIssueDiff`, `useIssueCommits`) are already unconditionally called at lines 137 and 162 — they fetch regardless of stage. The only gate is the JSX render condition `showDiff && ...` and the early-return `if (files.length === 0 && commits.length === 0) return null` inside the IIFE.
+IssueDetailPage currently has a single 851-line component that renders all sections inline. The Changes panel (lines 417–524) is gated by `DIFF_STAGES` (line 265) and positioned after Comments (line 415). The panel reuses `useIssueDiff` and `useIssueCommits` hooks which already fetch data regardless of stage — the hooks are called unconditionally at lines 137/162. The only stage-dependent part is the render guard `showDiff && ...`.
 
-The entire change is a single-file layout refactor in `IssueDetailPage.tsx` — no new components, no API changes, no state changes.
+Key constraint: no API changes needed. The data is already being fetched for all stages; we just need to render it.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Remove `DIFF_STAGES` constant and `showDiff` variable — Changes panel renders unconditionally
-- Move the Changes JSX block from after Comments (line 417) to after Description (line 352), before TaskList (line 354)
-- Add a one-line summary stats header inside the Changes panel (computed from existing `diffData`/`commitsData`)
-- Show "No changes yet" empty state when both files and commits are empty (instead of returning null)
+- Remove `DIFF_STAGES` gate so Changes panel renders in every stage
+- Move the Changes panel JSX block from after Comments to after Description (before TaskList)
+- Add a summary statistics line above the tabs
+- Show "No changes yet" empty state when no files or commits exist
 
 **Non-Goals:**
-- No new API endpoints or data hooks
-- No changes to DiffViewer, CommitRow, or diff rendering
-- No inline changes summary in approval panels (deferred — marked optional in proposal)
-- No file search/filter additions
+- No new API endpoints or hooks
+- No changes to DiffViewer, CommitRow, or diff rendering logic
+- No inline changes summary in approval panels (optional scope, defer)
+- No extraction of Changes panel into a separate component file (keep it inline like the current implementation)
 
 ## Decisions
 
-### D1: Keep Changes panel inline in IssueDetailPage (don't extract component)
+### D1: Keep Changes panel as inline JSX in IssueDetailPage
 
-The diff/commits JSX block (~100 lines) shares state with the parent (`diffTab`, `expandedCommits`, `expandedFiles`, `diffData`, `commitsData`). Extracting it would require prop-drilling 6+ values or a context. Since this is a layout-only change, the cost of extraction isn't justified.
+The current Changes panel (~100 lines of JSX) is an IIFE block inside IssueDetailPage. Rather than extracting it to a new component file, keep it inline and simply move the block. This minimizes diff size and avoids introducing new component boundaries that need prop-typing.
 
-**Alternatives considered:**
-- Extract to `ChangesPanel` component — cleaner separation but adds props interface for no behavioral gain in this change
+**Alternatives considered:** Extract to `ChangesPanel.tsx` component — cleaner long-term but adds scope (prop interface, new file, import changes) for what is fundamentally a repositioning change. Can be done as a follow-up refactor.
 
-### D2: Replace IIFE null-return with explicit empty state
+### D2: Summary statistics computed from existing data
 
-Current code uses `(() => { ... if (empty) return null ... })()` which silently hides the panel when there's no data. Replace with a direct render that shows an empty state card when no data exists, making the panel always visible.
+Compute summary from `diffData.files` and `commitsData.commits` which are already fetched. Aggregate `additions`/`deletions` from the files array. Display as a single line above the tabs: `N files changed, +X, -Y, M commits`.
 
-**Alternatives considered:**
-- Keep IIFE pattern and just remove the stage gate — would still hide the panel in Backlog, violating the "visible in all stages" requirement
+**Alternatives considered:** Add a server-side summary endpoint — overkill since the data is already on the client.
 
-### D3: Summary stats computed inline from existing data
+### D3: Empty state renders the panel with a message instead of returning null
 
-Total additions/deletions are computed by reducing over `diffData.files`. Commit count is `commitsData.commits.length`. No new queries or memoization needed — the data is already fetched and the reduction is trivial (< 100 files typically).
+Currently the IIFE returns `null` when `files.length === 0 && commits.length === 0` (line 420). Change this to render the panel container with "No changes yet" text. This ensures the panel is visually present in all stages, giving users a consistent anchor point.
 
-### D4: Defer inline changes summary in approval panels
+### D4: Defer inline approval summary to follow-up
 
-The optional acceptance criterion to add a compact summary in PlanApprovalPanel/ReviewApprovalPanel adds cross-component coupling (sidebar components would need diff/commits data). Defer to a follow-up change if user feedback indicates it's needed — the main panel reposition already puts changes in view during approval reviews.
+Adding a compact changes summary to PlanApprovalPanel/ReviewApprovalPanel is marked optional in the acceptance criteria. Deferring keeps this change focused on repositioning.
 
 ## Risks / Trade-offs
 
-- [Extra API calls in Backlog stage] → `useIssueDiff` and `useIssueCommits` already fire unconditionally (lines 137, 162). The queries will 404 or return empty for issues without worktrees, which is the existing behavior. No new load.
-- [Empty state card visual noise in Backlog] → The "No changes yet" card is minimal (single line text, same border style as other sections). Acceptable trade-off for consistent panel presence.
+- [Loading flash in Backlog] `useIssueDiff` and `useIssueCommits` are called unconditionally but will 404 or return empty for Backlog issues. The hooks already handle this gracefully (return empty data), so the panel will just show the empty state. No actual risk.
+- [No visual regression in other sections] Since we're only moving JSX blocks and not changing their internal rendering, other sections (Comments, TaskList, sidebar) are unaffected. Verify by checking layout at each stage.
 
 ## Migration Plan
 
-Single deploy — the change is purely frontend layout. No API contract changes, no database migrations, no config changes. Rollback is reverting the JSX order and restoring `DIFF_STAGES` check.
+No migration needed. This is a pure frontend layout change with no data or API changes. Deploy in a single PR.
+
+## Open Questions
+
+None.
