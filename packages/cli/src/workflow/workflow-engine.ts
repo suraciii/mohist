@@ -114,6 +114,13 @@ export class WorkflowEngine {
         return { completed: false, stage: currentIssue.stage, message: `Pipeline cannot handle stage: ${currentIssue.stage}` };
       }
 
+      if (currentIssue.stage === Stage.Backlog || currentIssue.stage === Stage.Draft) {
+        const updated = this.issueRepo.updateStage(currentIssue.id, Stage.Plan);
+        if (updated) {
+          currentIssue = updated;
+        }
+      }
+
       const ctx = this.buildContext(currentIssue, acpOptions);
       const result = await runner.run(ctx);
 
