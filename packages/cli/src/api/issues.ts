@@ -1771,6 +1771,7 @@ export function createIssueRoutes(
           model: session.model,
           coderType: session.coderType,
           stage: session.stage,
+          title: session.title,
           workflowLogs: logs.map(l => ({
             id: l.id,
             eventType: l.eventType,
