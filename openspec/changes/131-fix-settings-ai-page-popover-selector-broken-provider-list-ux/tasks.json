@@ -1,18 +1,19 @@
 {
   "project": "mohist",
-  "description": "Fix broken model select popovers and improve provider list UX on AI Settings page",
+  "description": "Fix broken ModelSelect popovers (Headless UI v2 incompatibility) and restructure AI Settings page layout",
   "tasks": [
     {
       "id": "T-001",
       "title": "Fix ModelSelect Popover for Headless UI v2",
-      "spec": "specs/web-ui/spec.md#AI Settings Model Select Popover",
-      "description": "Remove the Transition wrapper around Popover.Panel in ModelSelect component (lines 257-265 of AiSettingsSection.tsx). Render Popover.Panel directly so it works with @headlessui/react v2.2.10. Also remove Transition from the import statement.",
+      "spec": "specs/settings-ai-model-select/spec.md#ModelSelect popover opens on click",
+      "description": "Remove the `<Transition>` wrapper from `Popover.Panel` in the `ModelSelect` component (AiSettingsSection.tsx lines 257–322). The bare `Popover.Panel` will handle its own show/hide via Headless UI v2's Popover context. Also remove the unused `Fragment` import if no longer needed.",
       "acceptanceCriteria": [
-        "Transition wrapper removed from ModelSelect Popover.Panel",
-        "Transition removed from @headlessui/react import",
-        "Popover.Panel renders directly without Transition",
-        "Typecheck passes",
-        "Build passes"
+        "Mohist Model 选择器点击后 Popover Panel 渲染到 DOM 并显示模型列表",
+        "Coder Model 选择器点击后 Popover Panel 渲染到 DOM 并显示模型列表",
+        "Stage Model Overrides 中的选择器点击后正常打开",
+        "搜索过滤、键盘导航、Provider 分组功能完整保留",
+        "Transition wrapper 已移除，Popover.Panel 直接作为 Popover 子元素",
+        "Typecheck passes"
       ],
       "priority": 1,
       "mode": "AFK",
@@ -20,22 +21,22 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "This fixes all 7+ popover instances (Mohist Model, Coder Model, 5 Stage Overrides) since they all use the same ModelSelect component."
+      "notes": "The Transition wrapper at lines 257-265 and its closing tag at line 322 are the entire bug. Remove them, keeping Popover.Panel and all its children intact. Remove Fragment from imports if unused."
     },
     {
       "id": "T-002",
-      "title": "Reorder sections and add collapsible unconfigured providers",
-      "spec": "specs/web-ui/spec.md#AI Settings Provider 列表布局",
-      "description": "Reorder AiSettingsSection JSX to: Model Selection → Connected Providers → Custom Providers → Available Providers (collapsible) → Stage Overrides. Split the flat provider list into separate connected and unconfigured groups. Add a collapsible section for unconfigured providers using useState + ChevronRightIcon toggle (matching the Stage Model Overrides pattern), defaulting to collapsed with a count badge.",
+      "title": "Restructure AI Settings page layout and provider sections",
+      "spec": "specs/web-ui/spec.md#AI Settings 页面布局顺序",
+      "description": "Reorder `AiSettingsSection` JSX so sections appear as: Model Selection → Stage Model Overrides → Connected Providers (expanded) → Available Providers (collapsed with count) → Custom Providers. Add a `useState` for Available Providers collapse state. Keep provider search above the combined provider area.",
       "acceptanceCriteria": [
-        "Model Selection section appears before Provider sections",
-        "Connected providers render in their own group",
-        "Unconfigured providers render in a separate collapsible section",
-        "Unconfigured section defaults to collapsed",
-        "Collapsed state shows provider count badge",
-        "ChevronRightIcon rotation toggle works for unconfigured section",
-        "Typecheck passes",
-        "Build passes"
+        "Model Selection 区域是页面第一个可见区域（Mohist Model + Coder Model）",
+        "Stage Model Overrides 紧跟 Model Selection 之后",
+        "Connected Providers 区域默认展开，显示已配置的 provider 卡片",
+        "Available Providers 区域默认折叠，标题显示数量如 'Available (78)'",
+        "点击 Available Providers 标题可展开/折叠列表",
+        "Custom Providers 在 Available Providers 之后",
+        "无已配置 provider 时 Model Selection 仍可访问",
+        "Typecheck passes"
       ],
       "priority": 2,
       "mode": "AFK",
@@ -43,7 +44,7 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "The existing sortedProviders/filteredProviders memos may need to be split into separate memos for configured and unconfigured providers."
+      "notes": "Use existing `configuredProviders`, `unconfiguredProviders`, `customProviders` memos. Add `availableProvidersOpen` useState defaulting to false. Use ChevronRightIcon (already defined) for collapse toggle with rotate-90 when open, same pattern as Stage Model Overrides."
     }
   ]
 }
