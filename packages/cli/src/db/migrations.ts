@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -186,6 +186,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 19) {
     migrateToVersion19(db);
+  }
+
+  if (currentVersion < 20) {
+    migrateToVersion20(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -911,5 +915,33 @@ function migrateToVersion19(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 19);
+  });
+}
+
+const CREATE_STAGE_EXECUTIONS_TABLE = `
+CREATE TABLE IF NOT EXISTS stage_executions (
+  id            TEXT PRIMARY KEY,
+  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  stage         TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'running',
+  task_results  TEXT NOT NULL DEFAULT '[]',
+  check_results TEXT NOT NULL DEFAULT '[]',
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+`;
+
+const CREATE_STAGE_EXECUTIONS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_stage_executions_issue_id ON stage_executions(issue_id);',
+  'CREATE INDEX IF NOT EXISTS idx_stage_executions_issue_status ON stage_executions(issue_id, status);',
+];
+
+function migrateToVersion20(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_STAGE_EXECUTIONS_TABLE);
+    for (const indexSql of CREATE_STAGE_EXECUTIONS_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 20);
   });
 }
