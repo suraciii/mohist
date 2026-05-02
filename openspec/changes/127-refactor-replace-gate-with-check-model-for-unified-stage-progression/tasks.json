@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Replace Gate with Check Model for unified stage progression across all workflow stages",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -22,8 +21,17 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/stage-context.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This is the foundation — all subsequent tasks depend on these types. Temporarily keep backward compat by setting requiresApproval:false in existing runners until they are migrated."
+      "passes": true,
+      "notes": "This is the foundation — all subsequent tasks depend on these types. Temporarily keep backward compat by setting requiresApproval:false in existing runners until they are migrated.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        424130,
+        123694,
+        626976,
+        228773
+      ]
     },
     {
       "id": "T-002",
@@ -46,8 +54,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/base-stage-runner.ts",
-      "dependsOn": ["T-001"],
-      "notes": ""
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -66,8 +80,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/checks/user-approval-check.ts",
-      "dependsOn": ["T-001"],
-      "notes": ""
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -89,8 +109,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/check-stage-runner.ts",
-      "dependsOn": ["T-002", "T-003"],
-      "notes": "AiReviewCheck currently uses AcpRoundRunner internally for the review round. Split this: move the ACP session logic into CheckStageRunner.executeTasks(), and simplify AiReviewCheck to only parse the review output (read review.md, parse verdict). AiReviewCheck becomes a data-only check with no ACP calls."
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "notes": "AiReviewCheck currently uses AcpRoundRunner internally for the review round. Split this: move the ACP session logic into CheckStageRunner.executeTasks(), and simplify AiReviewCheck to only parse the review output (read review.md, parse verdict). AiReviewCheck becomes a data-only check with no ACP calls.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -113,8 +140,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/plan-stage-runner.ts",
-      "dependsOn": ["T-002", "T-003"],
-      "notes": "This is the most complex migration because it absorbs AcpRoundRunner. The ACP connection management, round iteration, artifact verification, and retry logic from AcpRoundRunner must be replicated in executeTasks()."
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "notes": "This is the most complex migration because it absorbs AcpRoundRunner. The ACP connection management, round iteration, artifact verification, and retry logic from AcpRoundRunner must be replicated in executeTasks().",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -139,8 +173,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/build-stage-runner.ts",
-      "dependsOn": ["T-002"],
-      "notes": "RalphExecutor stays intact as the task execution engine — it's just called from within executeTasks(). Do NOT break RalphExecutor into individual task objects."
+      "dependsOn": [
+        "T-002"
+      ],
+      "notes": "RalphExecutor stays intact as the task execution engine — it's just called from within executeTasks(). Do NOT break RalphExecutor into individual task objects.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -163,8 +203,16 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/workflow-engine.ts",
-      "dependsOn": ["T-004", "T-005", "T-006"],
-      "notes": "This task depends on all three runners being migrated because the engine must work with the new result format from all runners."
+      "dependsOn": [
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "notes": "This task depends on all three runners being migrated because the engine must work with the new result format from all runners.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -183,8 +231,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": ["T-007"],
-      "notes": ""
+      "dependsOn": [
+        "T-007"
+      ],
+      "notes": "",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-009",
@@ -204,8 +258,14 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "packages/cli/src/db/stage-execution-repo.ts",
-      "dependsOn": ["T-001"],
-      "notes": "This task can be done in parallel with T-002 and T-003. The repo is wired into runners in T-011."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "This task can be done in parallel with T-002 and T-003. The repo is wired into runners in T-011.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-010",
@@ -225,8 +285,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/index.ts",
-      "dependsOn": ["T-007", "T-008"],
-      "notes": "Must run after T-007 and T-008 to ensure nothing references the deleted files."
+      "dependsOn": [
+        "T-007",
+        "T-008"
+      ],
+      "notes": "Must run after T-007 and T-008 to ensure nothing references the deleted files.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-011",
@@ -246,8 +313,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/base-stage-runner.ts",
-      "dependsOn": ["T-009", "T-007"],
-      "notes": ""
+      "dependsOn": [
+        "T-009",
+        "T-007"
+      ],
+      "notes": "",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-012",
@@ -271,8 +345,15 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/workflow/",
-      "dependsOn": ["T-010", "T-011"],
-      "notes": "This is the final verification task. All previous tasks must be complete."
+      "dependsOn": [
+        "T-010",
+        "T-011"
+      ],
+      "notes": "This is the final verification task. All previous tasks must be complete.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     }
   ]
 }
