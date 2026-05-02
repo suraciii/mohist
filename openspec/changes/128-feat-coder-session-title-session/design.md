@@ -1,67 +1,73 @@
 ## Context
 
-The `coder_session` table has no `title` field. The UI displays `task_description` (raw prompt first 200 chars) for each session, which is always `<mohist-task>\n\n<role>\nYou are implementi...` — useless for distinguishing sessions. The title needs to be set by each caller at session creation time and flow through DB → API → SSE → frontend.
+`coder_session` 表只存了 `task_description`（原始 prompt 截断 200 字符）作为标识信息，导致 UI 上所有 session 显示为 `<mohist-task>\n\n<role>\nYou are implementi...`，完全不可读。当前 `getSessionLabel` 的 fallback 逻辑仅靠 `stage` 和截断的 `taskDescription`，无法区分同一 issue 下的多个 build session。
 
-Current data flow: caller → `AcpSessionOptions`/`AcpConnectionOptions` → `acp-session.ts` (2 sites: `runAcpSession:395`, `createAcpConnection:818`) → `coderSessionRepo.insert()` + `eventBus.emit('coder_session_started')` → API endpoints → frontend.
+Session 通过两条路径创建：
+- `runAcpSession`（`acp-session.ts:395`）— 单次 session，用于 build tasks、auto-fix、skill、explore
+- `createAcpConnection`（`acp-session.ts:818`）— 多轮复用 session，用于 Plan/Check 阶段和 conflict-resolution
+
+当前 schema 版本是 20。`CoderSession` 接口和 `CoderSessionItem` 前端类型都没有 `title` 字段。
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Add nullable `title` column to `coder_session` table
-- Plumb `title` through ACP session options, DB insert, SSE events, API responses, and frontend display
-- All 7+ callers pass meaningful titles
-- Frontend falls back gracefully for old sessions without titles
+- 每个 coder session 有一个人类可读的 `title`，由创建时调用者传入
+- 前端展示优先使用 `title`，保持 fallback chain 兼容无 title 的旧数据
+- SSE `coder_session_started` 事件实时携带 title
+- API 端点返回 title 字段
 
 **Non-Goals:**
-- Backfilling titles for existing sessions (frontend fallback handles this)
-- Session grouping/folding by task
-- Changing the `taskDescription` field semantics
+- Session 分组/折叠（同 task 多次尝试）— 后续 feature
+- 旧数据 backfill — 通过前端 fallback chain（从 executionId 解析 taskId）兼容
+- `conflict-resolution.ts` 的 title — 该调用者使用 `createAcpConnection`，可选传入 `"Conflict resolution"` 作为 title，但不阻塞此变更
 
 ## Decisions
 
-### D1: Nullable column with no data migration
+### D1: 新增 `ALTER TABLE` migration（version 21）
 
-Add `title TEXT` as nullable via schema migration (version 21). Existing rows get `NULL`. Frontend fallback chain (title → executionId task parse → stage → taskDescription) handles old data without a backfill migration.
+在 `migrations.ts` 中新增 `migrateToVersion21`，执行 `ALTER TABLE coder_session ADD COLUMN title TEXT`。列可为 NULL，对现有数据无影响。
 
-**Alternatives considered:** Running an UPDATE to backfill titles from executionId parsing. Rejected — adds complexity, the fallback chain covers it at display time with zero migration risk.
+注册方式与其他版本一致：在 `initializeDatabase` 函数中添加 `if (currentVersion < 21)` 分支。
 
-### D2: title field on both AcpSessionOptions and AcpConnectionOptions
+### D2: title 贯穿 repo → 接口 → 调用者，逐层透传
 
-Both interfaces get `title?: string`. This mirrors existing patterns like `stage`, `issueNumber`, `model` — optional fields that flow from caller through to DB/SSE.
+数据流向：调用者 → `AcpSessionOptions.title` / `AcpConnectionOptions.title` → `coderSessionRepo.insert({ title })` → DB 存储 + SSE 事件发出。
 
-### D3: title passed at caller level, not derived
+不引入中间转换层，title 字符串由各调用者硬编码或从上下文变量拼接，是最简单的方案。
 
-Each caller explicitly constructs the title string. No auto-generation from `taskDescription` or `executionId` in `acp-session.ts` — the caller has the best context (task ID + title, skill name, issue title).
+**Alternatives considered:**
+- AI 生成 title — 增加延迟和成本，且每个调用者已有足够的上下文信息直接构造可读标题
+- 从 taskDescription 后处理提取 — 不可靠（prompt 格式不固定，且包含 XML 标签）
 
-### D4: coder_session_started SSE event gains title field
+### D3: 前端 getSessionLabel 改为 4 级 fallback chain
 
-The `coder_session_started` event in `event-bus.ts` EventMap gains `title?: string`. Both emission sites in `acp-session.ts` (line ~405 for `runAcpSession`, line ~831 for `createAcpConnection`) pass `options.title`.
+更新 `SessionHeader.tsx` 的 `getSessionLabel`：
+1. `session.title`（非 null 非空则直接用）
+2. 从 `executionId` 正则解析 `T-\d+` → `"T-004"`
+3. 从 `executionId` 前缀推导 stage → `"Plan"` / `"Check"`
+4. `taskDescription` 前 24 字符（现有行为）
 
-### D5: Frontend fallback chain in getSessionLabel
+**Alternatives considered:**
+- 仅用 title，无 fallback — 旧数据全部显示空白，不可接受
+- 仅前端解析，不改 DB — 无法为 auto-fix、skill、explore session 提供有意义的标签
 
-Replace the current `stage → taskDescription` logic in `SessionHeader.tsx:getSessionLabel` with a 4-level priority chain:
-1. `session.title` (non-null)
-2. Extract task ID from `executionId` via regex `/^(?:build|check)-\d+-(T-\d+)$/`
-3. Capitalized `stage` name
-4. `taskDescription.slice(0, 24)` (existing behavior)
+### D4: SSE 事件 payload 扩展
 
-### D6: Additional callers beyond the 7 listed
-
-Two more callers use `createAcpConnection` and should pass titles:
-- `conflict-resolution.ts` → `title: "Conflict resolution"`
-- `server/index.ts` build fix → `title: "Auto-fix: build errors"`
+在 `event-bus.ts` 和前端 `types.ts` 的 `coder_session_started` 事件类型中添加 `title?: string | null`。事件发出时携带 `title`（`acp-session.ts:405` 和 `acp-session.ts:831`）。前端 `useCoderSessions.ts` 收到事件时将 title 写入 live session state。
 
 ## Risks / Trade-offs
 
-- [Old sessions show fallback] → Frontend fallback chain handles this transparently. No user action needed.
-- [Caller forgets to pass title] → `title` is optional (`title?: string`), so it degrades to `NULL` with existing fallback behavior. Not a crash risk.
+- [旧数据 title 为 NULL] → 前端 fallback chain 从 executionId 解析 taskId 或显示 stage name，不影响可读性
+- [调用者遗漏传 title] → session 的 title 列为 NULL，fallback chain 兜底，不会报错
+- [ALTER TABLE 在大表上耗时] → coder_session 表数据量小（<1000 rows），ALTER TABLE 瞬间完成
+- [conflict-resolution.ts 未在初始 7 处调用者中列出] → 该调用者使用 `createAcpConnection`，title 列为 NULL，前端通过 stage 或 executionId fallback 兜底。可选补传 `title: "Conflict resolution"`
 
 ## Migration Plan
 
-1. Deploy backend: schema migration v21 (`ALTER TABLE coder_session ADD COLUMN title TEXT`), repo changes, ACP options, callers, API, SSE
-2. Deploy frontend: type updates, fallback chain, SSE handler updates
-3. No rollback concerns — `title` is nullable, absence is handled by fallback
+1. 新增 `migrateToVersion21` — `ALTER TABLE coder_session ADD COLUMN title TEXT`
+2. 部署后新 session 自动写入 title，旧 session 保持 NULL
+3. 无需回滚 — 可空列对新旧代码都兼容。如需回滚，前端 fallback chain 保证展示正常
 
 ## Open Questions
 
-None.
+- `conflict-resolution.ts` 是否应传入 `title: "Conflict resolution"`？该调用者使用 `createAcpConnection`，当前提案未包含，但不阻塞主体实现。可在此 PR 中一并补上。
