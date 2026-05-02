@@ -4,29 +4,27 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'workflow-utils' });
 
-const RESULT_RE = /^##\s*Result\s*:\s*(PASS|FAIL)\s*$/im;
-const LEGACY_VERDICT_RE = /^##\s*Verdict\s*:\s*(PASS|FAIL)\s*$/im;
+const PROMISE_PASS = '<promise>PASS</promise>';
+const PROMISE_FAIL = '<promise>FAIL</promise>';
 
 export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
+  const upper = content.toUpperCase();
+  if (upper.includes(PROMISE_PASS.toUpperCase())) return 'PASS';
+  if (upper.includes(PROMISE_FAIL.toUpperCase())) return 'FAIL';
   const match = RESULT_RE.exec(content);
   if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
   const legacyMatch = LEGACY_VERDICT_RE.exec(content);
   if (legacyMatch) {
-    log.warn('parseVerdict: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"');
+    log.warn('parseVerdict: matched legacy "## Verdict:" header');
     return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
   }
   return null;
 }
+  return null;
+}
 
 export function parseResult(content: string): 'PASS' | 'FAIL' | null {
-  const match = RESULT_RE.exec(content);
-  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
-  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
-  if (legacyMatch) {
-    process.stderr.write('[warn] parseResult: matched legacy "## Verdict:" header, update prompt templates to use "## Result:"\n');
-    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
-  }
-  return null;
+  return parseVerdict(content);
 }
 
 export function extractFixSuggestions(content: string): string {

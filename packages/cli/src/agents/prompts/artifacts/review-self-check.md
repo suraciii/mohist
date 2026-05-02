@@ -6,6 +6,7 @@ Read `{changeDir}/review.md` and check:
 
 - Starts with `# Review Report`
 - Has `## Result: PASS` or `## Result: FAIL`
+- Contains `<promise>PASS</promise>` or `<promise>FAIL</promise>` tag
 - Has `## Dimensions` with Correctness, Complexity, Test Coverage, Security, Spec Compliance
 - Each dimension has PASS/FAIL verdict
 - If any dimension FAILS, overall verdict is FAIL

@@ -28,3 +28,12 @@ Provide specific, actionable fixes:
 - Suggested change
 
 Any error-level issue means overall FAIL. Warnings-only means PASS with warnings.
+
+## Output Format
+
+You MUST include exactly one of these tags in your review.md:
+
+- If review passes: `<promise>PASS</promise>`
+- If review fails: `<promise>FAIL</promise>`
+
+Place the tag on its own line at the end of review.md.
