@@ -1,50 +1,48 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
-### Requirement: Model selection popover renders correctly
+### Requirement: AI Settings Model Select Popover
 
-The `ModelSelect` component SHALL render its dropdown panel when the user clicks the trigger button. Under `@headlessui/react` v2, `Popover.Panel` SHALL NOT be wrapped in a `Transition` without `show={open}`, as v2's `Transition` does not auto-detect Popover's open state.
+ModelSelect 组件 SHALL 使用 Headless UI v2 兼容的 Popover.Panel 渲染方式。Popover.Panel SHALL 在用户点击按钮时正常渲染到 DOM 并显示模型列表。
 
-#### Scenario: Mohist Model selector opens and allows selection
-- **WHEN** user clicks the Mohist Model selector button
-- **THEN** the popover panel renders in the DOM
-- **AND** displays a searchable list of available models grouped by provider
-- **AND** selecting a model updates the Mohist Model setting
+#### Scenario: Mohist Model 选择器正常打开
+- **WHEN** 用户在 AI Settings 页面点击 Mohist Model 选择器按钮
+- **THEN** Popover.Panel 渲染到 DOM
+- **AND** 显示已配置 provider 的模型列表（按 provider 分组）
+- **AND** 用户可以选择一个模型
 
-#### Scenario: Coder Model selector opens and allows selection
-- **WHEN** user clicks the Coder Model selector button
-- **THEN** the popover panel renders in the DOM
-- **AND** displays a searchable list of coder models
-- **AND** selecting a model updates the Coder Model setting
+#### Scenario: Coder Model 选择器正常打开
+- **WHEN** 用户在 AI Settings 页面点击 Coder Model 选择器按钮
+- **THEN** Popover.Panel 渲染到 DOM
+- **AND** 显示可用的 coder 模型列表
+- **AND** 用户可以选择一个模型或清除当前选择
 
-#### Scenario: Stage Model Override selector opens and allows selection
-- **WHEN** user expands Stage Model Overrides
-- **AND** clicks any stage model selector button
-- **THEN** the popover panel renders in the DOM
-- **AND** selecting a model updates that stage's override
+#### Scenario: Stage Model Override 选择器正常打开
+- **WHEN** 用户展开 Stage Model Overrides 区域
+- **AND** 点击某个 stage 的选择器按钮
+- **THEN** Popover.Panel 渲染到 DOM
+- **AND** 显示可用的 coder 模型列表
+- **AND** 用户可以为该 stage 选择或清除模型
 
-### Requirement: AI Settings page surfaces Model Selection prominently
+#### Scenario: Popover 搜索过滤
+- **WHEN** Popover 打开后用户在搜索框输入文本
+- **THEN** 模型列表实时按名称和 ID 过滤
 
-The AI Settings page SHALL display the Model Selection section above the provider list, so users can quickly select models without scrolling past the full provider catalog.
+### Requirement: AI Settings Provider 列表布局
 
-#### Scenario: Model Selection appears above Providers
-- **WHEN** user navigates to the AI Settings page
-- **THEN** the Model Selection section (Mohist Model, Coder Model) renders before the Providers section
+AI Settings 页面的 Provider 列表 SHALL 有清晰的视觉层次，将已连接的 provider 与未配置的 provider 分开显示，并将 Model Selection 区域放在 Provider 列表之前。
 
-### Requirement: Provider list has visual grouping
+#### Scenario: 已连接 provider 与未配置 provider 分开显示
+- **WHEN** 用户打开 AI Settings 页面
+- **THEN** 已连接的 provider 显示在独立分组中
+- **AND** 未配置的 provider 显示在另一个可折叠或分离的分组中
+- **AND** 两个分组有明确的视觉区分
 
-The provider list SHALL visually separate connected providers from available (unconfigured) providers, with the connected section always visible and the available section collapsible.
+#### Scenario: Model Selection 在页面上方
+- **WHEN** 用户打开 AI Settings 页面
+- **THEN** Model Selection 区域（Mohist Model、Coder Model）出现在 Provider 列表之前
+- **AND** 用户无需滚动即可看到并操作模型选择器
 
-#### Scenario: Connected providers display in a dedicated section
-- **WHEN** at least one provider is configured
-- **THEN** connected providers render in a "Connected" section with a green status indicator
-- **AND** each shows provider name, masked API key, and a Remove button
-
-#### Scenario: Available providers are collapsed by default
-- **WHEN** there are unconfigured providers
-- **THEN** available providers render in a collapsible "Available Providers" section
-- **AND** the section is collapsed by default, showing only a summary (e.g., count)
-- **AND** expanding the section reveals the full list with Connect buttons
-
-#### Scenario: Only connected providers when no available providers
-- **WHEN** all builtin providers are configured
-- **THEN** the Available Providers section is not displayed
+#### Scenario: 未配置 provider 分组可折叠
+- **WHEN** 未配置 provider 列表存在
+- **THEN** 该分组默认折叠或收起
+- **AND** 用户可以展开查看全部未配置 provider
