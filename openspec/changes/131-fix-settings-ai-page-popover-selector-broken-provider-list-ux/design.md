@@ -1,44 +1,62 @@
 ## Context
 
-`AiSettingsSection.tsx` is a single 638-line file containing all AI settings UI: provider management, model selection popovers, and stage overrides. The immediate blocker is that `ModelSelect` (line 229–327) wraps `Popover.Panel` in a Headless UI v1 `Transition` (line 257–265), but `@headlessui/react` v2.x dropped implicit open-state detection on `Transition`. Without `show={open}`, the panel never renders. The secondary problem is layout: providers (80+ cards) appear first, pushing Model Selection to the bottom.
+`AiSettingsSection.tsx` (638 lines) is the sole affected component. It uses `@headlessui/react` v2.2.10 but its `ModelSelect` sub-component applies a v1 pattern: wrapping `Popover.Panel` in `Transition` without `show={open}`. In v2, `Transition` no longer auto-detects `Popover`'s open state, so the panel never renders.
+
+The page layout currently renders sections in this order: Providers (flat list of 80+ items) → Custom Providers → Model Selection → Stage Overrides. This buries the most-used controls at the bottom.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Unbreak all `ModelSelect` instances (Mohist Model, Coder Model, 5 stage overrides)
-- Reorder sections: Model Selection → Providers → Custom Providers → Stage Overrides
-- Collapse unconfigured providers into a default-collapsed "Available Providers" group
+- Make all model selection popovers functional (Mohist Model, Coder Model, Stage Overrides)
+- Reorder sections so Model Selection is at the top
+- Split provider list into Connected / Available groups with Available collapsed by default
 
 **Non-Goals:**
-- No new components or files — all changes stay in `AiSettingsSection.tsx`
-- No Headless UI version change — use v2 API as-is
-- No provider filtering by category/region — just connected vs unconfigured split
+- Redesigning the provider card UI (ConnectedProviderCard, AvailableProviderCard, CustomProviderCard stay as-is)
+- Changing the provider search/filter behavior
+- Adding provider categorization (e.g., by vendor, by region)
+- Touching `SettingsPage.tsx` layout or routing
 
 ## Decisions
 
-### D1: Remove `Transition` wrapper entirely (not `show={open}` patch)
+### D1: Remove Transition wrapper entirely
 
-Strip lines 257–265 (`<Transition as={Fragment} ...>`) and the closing `</Transition>` at line 322. `Popover.Panel` in v2 handles its own mount/unmount. Loss of enter/leave CSS transitions is acceptable — the panel appears/disappears instantly, which is standard for dropdown menus.
+Remove the `<Transition as={Fragment}>` wrapper from `Popover.Panel` (lines 257–265, 322). Use `Popover.Panel` directly — Headless UI v2's `Popover.Panel` already handles open/close animation via CSS `transition` classes on the panel element itself if desired.
 
 **Alternatives considered:**
-- `show={open}` on Transition — works but keeps unnecessary abstraction for a simple dropdown; more code, same result
-- CSS-only transition via `data-*` attributes (v2 `transition` prop) — v2 `Popover.Panel` supports a `transition` prop natively, but adds complexity for marginal gain on a utility dropdown
+- Add `show={open}` to Transition — works but keeps unnecessary indirection; the render prop `{({ open }) => ...}` already proves v2's `Popover` exposes open state correctly. The Transition layer adds nothing here.
 
-### D2: Section reorder via JSX block swap
+### D2: Collapsible Available section via local state
 
-Move the "Model Selection" `<div>` block (lines 532–564) to appear as the first section inside the `<div className="space-y-8">` container. Then Providers, Custom Providers, Stage Overrides follow.
+Add a boolean state `availableOpen` (default `false`). Render the Available group header as a clickable button with a chevron icon and count text (e.g., "12 available providers"). Clicking toggles `availableOpen`. When collapsed, only the header renders. This mirrors the existing `stageOverridesOpen` pattern already in the same file.
 
-### D3: Collapsible unconfigured providers via local state
+**Alternatives considered:**
+- Headless UI `Disclosure` component — overkill for a single collapsible; adds another import for no benefit.
+- Virtualized list — premature optimization; 80 items render fine once collapsed by default.
 
-Add `const [availableExpanded, setAvailableExpanded] = useState(false)`. In the Providers section, render configured providers always visible, then render a clickable header like "Available Providers (75)" that toggles the unconfigured list. Reuse `ChevronRightIcon` + `rotate-90` pattern already used for Stage Overrides.
+### D3: Reorder JSX sections in AiSettingsSection
 
-The search bar stays above both groups and filters across them. When search is active, both groups expand to show matching results regardless of `availableExpanded`.
+Move the "Model Selection" `<div>` block (currently lines 532–564) to be the first section. New order:
+1. Model Selection (Mohist Model + Coder Model)
+2. Stage Model Overrides (already collapsible)
+3. Connected Providers (new group header)
+4. Available Providers (collapsed by default)
+5. Custom Providers
+
+This places the most interactive elements at the top and the potentially long provider list at the bottom in a collapsed state.
+
+**Alternatives considered:**
+- Split into sub-components / separate pages — over-engineering for this fix scope.
 
 ## Risks / Trade-offs
 
-- [No transition animation on open/close] → Acceptable trade-off; model selector is a utility, not a showcase component
-- [Search with collapsed group needs special handling] → When `providerSearch` is non-empty, force-expand the available group to show filtered results
+- [Popover.Panel loses enter/exit animation] → Acceptable; the panel appears/disappears instantly. Can add CSS `transition` on `Popover.Panel` later if needed — v2 supports `transition` prop directly on `Popover.Panel`.
+- [Available section default-collapsed means new users may not discover providers] → Mitigated by showing count in the collapsed header (e.g., "12 available providers"), and the search box inside the collapsed section is still accessible once expanded.
 
 ## Migration Plan
 
-Single PR, no data migration. Deploy with build verification.
+No migration needed — this is a UI-only fix with no API or data changes. Deploy via normal web build.
+
+## Open Questions
+
+None.
