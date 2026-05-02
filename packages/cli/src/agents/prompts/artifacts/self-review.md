@@ -33,3 +33,16 @@ If issues found:
 3. Do NOT delete artifacts
 
 If all pass, do nothing.
+
+## Output Format
+
+You MUST include exactly one of these tags in your self-review.md:
+
+- If all checks pass: `<promise>PASS</promise>`
+- If any check fails: `<promise>FAIL</promise>`
+
+Place the tag on its own line at the end of self-review.md. Example:
+
+```
+<promise>PASS</promise>
+```
