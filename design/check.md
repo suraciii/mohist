@@ -48,12 +48,19 @@ CHECK stage 的审查者是**对手**，不是同事。职责是对抗性地检�
 
 ```
 CHECK {
-  jobs: [
-    { agent: "reviewer", task: "对抗性审查（6-pass + 跨切面审计）" }
+  tasks: [
+    { name: "run-build-test", agent: "reviewer" },
+    { name: "run-ai-review",  agent: "reviewer" }
+  ],
+  checks: [
+    { name: "build-test-passed", onFailure: "auto-fix" },
+    { name: "ai-review-passed",  onFailure: "escalate-to-plan" },
+    { name: "user-approval",     onFailure: "ask-user" }
   ]
-  gate_after: human
 }
 ```
+
+Check 是验证型 checks，与 Plan 的生成型 checks、Build 的实现型 checks 遵循同一 Check 接口。
 
 ## 工具集
 
@@ -75,10 +82,17 @@ CHECK 完成后两种路径：
 
 这个循环对应 DevOps pipeline 的反馈周期：CHECK 发现实现与方案的偏差 → 回到 PLAN 重新规划 → BUILD 重新实现 → CHECK 再次检查。
 
-## Gate
+## Checks (验收标准)
 
-默认配置 `gate_after: human`：将审查报告展示给用户，等待批准或反馈。
+Check stage 的完成由 checks 定义，所有 checks 通过后自动进入 DONE。
 
-- 批准 → Issue 完成，`done`
-- 给反馈 → 回到 PLAN 修复
-- 整体评估：是否可以留在生产环境
+| Check | 验证内容 | 失败反应 |
+|-------|---------|---------|
+| **build-test-passed** | 代码编译和测试是否通过 | auto-fix (AI 修复，最多 2 次) → escalate to BUILD |
+| **ai-review-passed** | 代码审查是否通过（6-pass + 跨切面审计） | escalate to PLAN (设计缺陷) |
+| **user-approval** | 用户是否已审批合并 | ask-user (暂停等待) |
+
+**反应策略**:
+- **auto-fix**: 调用 AI 根据错误信息修复代码
+- **escalate**: build-test 修复失败 → 回到 BUILD；ai-review 失败 → 回到 PLAN
+- **ask-user**: 暂停 pipeline，等待用户审批（仅 user-approval check）

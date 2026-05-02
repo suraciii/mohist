@@ -147,6 +147,7 @@ export class PlanStageRunner implements StageRunner {
     return {
       success: true,
       requiresApproval: true,
+      nextStage: Stage.Plan,
       output: {
         stage: Stage.Plan,
         issueNumber: issue.number,

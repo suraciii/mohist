@@ -111,9 +111,10 @@ export class WorkflowEngine {
       }
 
       if (result.requiresApproval) {
-        this.issueRepo.updateStage(currentIssue.id, currentIssue.stage);
+        const approvalStage = result.nextStage ?? currentIssue.stage;
+        this.issueRepo.updateStage(currentIssue.id, approvalStage);
         this.issueRepo.setApprovalState(currentIssue.id, {
-          stage: currentIssue.stage,
+          stage: approvalStage,
           status: 'awaiting',
           output: result.output,
           requestedAt: new Date().toISOString(),
@@ -121,9 +122,9 @@ export class WorkflowEngine {
         this.emitSafe('approval_requested', {
           issueId: currentIssue.id,
           projectId: this.projectId ?? currentIssue.projectId,
-          stage: currentIssue.stage,
+          stage: approvalStage,
         });
-        return { completed: false, stage: currentIssue.stage, gateRequired: true, message: result.message ?? 'Stage completed, awaiting approval' };
+        return { completed: false, stage: approvalStage, gateRequired: true, message: result.message ?? 'Stage completed, awaiting approval' };
       }
 
       const nextStage = result.nextStage;
