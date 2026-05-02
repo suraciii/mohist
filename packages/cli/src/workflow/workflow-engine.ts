@@ -11,7 +11,6 @@ import type { CoderSessionRepo } from '../db/coder-session-repo';
 export interface PipelineResult {
   completed: boolean;
   stage: Stage;
-  gateRequired: boolean;
   message?: string;
 }
 
@@ -82,48 +81,44 @@ export class WorkflowEngine {
 
   async run(issue: Issue, acpOptions: AcpConnectionOptions): Promise<PipelineResult> {
     if (this.signal?.aborted) {
-      return { completed: false, stage: issue.stage, gateRequired: false, message: 'Agent stopped by user' };
+      return { completed: false, stage: issue.stage, message: 'Agent stopped by user' };
     }
 
     let currentIssue = issue;
 
     while (currentIssue.stage !== Stage.Done) {
       if (this.signal?.aborted) {
-        return { completed: false, stage: currentIssue.stage, gateRequired: false, message: 'Agent stopped by user' };
+        return { completed: false, stage: currentIssue.stage, message: 'Agent stopped by user' };
       }
 
       const runner = this.runners.find(r => r.canHandle(currentIssue.stage));
       if (!runner) {
-        return { completed: false, stage: currentIssue.stage, gateRequired: false, message: `Pipeline cannot handle stage: ${currentIssue.stage}` };
+        return { completed: false, stage: currentIssue.stage, message: `Pipeline cannot handle stage: ${currentIssue.stage}` };
       }
 
       const ctx = this.buildContext(currentIssue, acpOptions);
       const result = await runner.run(ctx);
 
-      if (!result.success) {
-        if (result.escalateToStage !== undefined) {
-          return { completed: false, stage: result.escalateToStage, gateRequired: false, message: result.message ?? 'Stage failed, escalating' };
-        }
+      if (result.success) {
         if (result.nextStage !== undefined) {
           const updated = this.issueRepo.updateStage(currentIssue.id, result.nextStage);
           if (updated) {
             currentIssue = updated;
-            continue;
+          } else {
+            return { completed: false, stage: currentIssue.stage, message: `Failed to update stage to ${result.nextStage}` };
           }
+        } else {
+          return { completed: false, stage: currentIssue.stage, message: 'Stage completed but no next stage specified' };
         }
-        return { completed: false, stage: currentIssue.stage, gateRequired: false, message: result.message };
-      }
-
-      const nextStage = result.nextStage;
-      if (nextStage !== undefined) {
-        const updated = this.issueRepo.updateStage(currentIssue.id, nextStage);
+      } else if (result.escalateToStage !== undefined) {
+        const updated = this.issueRepo.updateStage(currentIssue.id, result.escalateToStage);
         if (updated) {
           currentIssue = updated;
         } else {
-          return { completed: false, stage: currentIssue.stage, gateRequired: false, message: `Failed to update stage to ${nextStage}` };
+          return { completed: false, stage: currentIssue.stage, message: `Failed to escalate to stage ${result.escalateToStage}` };
         }
       } else {
-        return { completed: false, stage: currentIssue.stage, gateRequired: false, message: 'Stage completed but no next stage specified' };
+        return { completed: false, stage: currentIssue.stage, message: result.message };
       }
     }
 
@@ -132,6 +127,6 @@ export class WorkflowEngine {
     this.issueRepo.updateStatus(currentIssue.id, IssueStatus.Completed);
     this.checkpointManager.deleteAll(currentIssue.number);
 
-    return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
+    return { completed: true, stage: Stage.Done, message: 'Pipeline completed' };
   }
 }
