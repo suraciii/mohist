@@ -1,6 +1,5 @@
 import { Stage } from '../types';
 import type { StageContext, StageRunResult } from './stage-context';
-import type { StageRunner } from './check-stage-runner';
 import { BaseStageRunner } from './base-stage-runner';
 import type { Check } from './checks';
 import { BuildTestCheck } from './checks/build-test-check';
@@ -20,16 +19,19 @@ export interface StageRunner {
 
 export interface CheckStageRunnerOptions {
   worktreePath: string;
+  checks?: Check[];
 }
 
 export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   private worktreePath: string;
   private checks: Check[];
+  private usesDefaultChecks: boolean;
 
   constructor(options: CheckStageRunnerOptions) {
     super();
     this.worktreePath = options.worktreePath;
-    this.checks = [
+    this.usesDefaultChecks = !options.checks;
+    this.checks = options.checks ?? [
       new BuildTestCheck({ worktreePath: this.worktreePath }),
       new AiReviewCheck(),
       new UserApprovalCheck(Stage.Plan),
@@ -41,6 +43,10 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
+    if (!this.usesDefaultChecks) {
+      return { done: true };
+    }
+
     const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
     if (!changeDir) {
       throw new Error(`Change directory not found for issue #${ctx.issue.number}`);

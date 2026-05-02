@@ -6,7 +6,7 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskType } from '../db/issue-task-queue-repo';
-import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner, BuildTestCheck, AiReviewCheck } from '../workflow';
+import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner } from '../workflow';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue } from '../types';
@@ -941,10 +941,7 @@ export class AgentRunnerService {
       const runners = [
         new PlanStageRunner(),
         new BuildStageRunner({ worktreePath, projectId }),
-        new CheckStageRunner([
-          new BuildTestCheck({ worktreePath }),
-          new AiReviewCheck(),
-        ]),
+        new CheckStageRunner({ worktreePath }),
       ];
       const pipeline = new WorkflowEngine({
         runners,

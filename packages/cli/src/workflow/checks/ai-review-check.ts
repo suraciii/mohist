@@ -18,11 +18,9 @@ export class AiReviewCheck implements Check {
     escalateTarget: Stage.Plan,
   };
   private reviewOutputPath: string;
-  private selfCheckOutputPath: string;
 
   constructor(options?: AiReviewCheckOptions) {
     this.reviewOutputPath = options?.reviewOutputPath ?? 'review.md';
-    this.selfCheckOutputPath = options?.selfCheckOutputPath ?? 'review-self-check.md';
   }
 
   async run(ctx: CheckContext): Promise<CheckResult> {
