@@ -21,8 +21,6 @@ import { statusBadge } from '../lib/status-badge'
 import { ChangesPanel } from './ChangesPanel'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
-const DIFF_STAGES = new Set<string>([Stage.Explore, Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
-
 const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
 
 function formatRelativeTime(iso: string): string {
@@ -196,7 +194,6 @@ export function IssueDetailPage() {
     (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked) &&
     !isAgentRunningOnThis
   const isBacklog = issue.stage === Stage.Backlog
-  const showDiff = DIFF_STAGES.has(issue.stage)
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
@@ -285,6 +282,18 @@ export function IssueDetailPage() {
                 </div>
               )}
 
+              <ChangesPanel
+                files={diffData?.files ?? []}
+                commits={commitsData?.commits ?? []}
+                diffTab={diffTab}
+                setDiffTab={setDiffTab}
+                expandedFiles={expandedFiles}
+                setExpandedFiles={setExpandedFiles}
+                expandedCommits={expandedCommits}
+                setExpandedCommits={setExpandedCommits}
+                issueNumber={issueNumber}
+              />
+
               {TASK_LIST_STAGES.has(issue.stage) && mergedTasks.length > 0 && (
                 <TaskList
                   tasks={mergedTasks}
@@ -347,20 +356,6 @@ export function IssueDetailPage() {
                   </div>
                 </div>
               </div>
-
-              {showDiff && (
-                <ChangesPanel
-                  files={diffData?.files ?? []}
-                  commits={commitsData?.commits ?? []}
-                  diffTab={diffTab}
-                  setDiffTab={setDiffTab}
-                  expandedFiles={expandedFiles}
-                  setExpandedFiles={setExpandedFiles}
-                  expandedCommits={expandedCommits}
-                  setExpandedCommits={setExpandedCommits}
-                  issueNumber={issueNumber}
-                />
-              )}
             </div>
 
             <div className="space-y-4">
