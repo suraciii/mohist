@@ -290,7 +290,7 @@ export class AgentRunnerService {
 
     if (orphans.length === 0) return;
 
-    log.info('Orphan scan detected issues without active agent or pending gate', {
+    log.info('Orphan scan detected issues without active agent or pending approval', {
       count: orphans.length,
       issues: orphans.map(i => `#${i.number} (${i.stage})`).join(', '),
     });

@@ -239,7 +239,7 @@ describe('buildTimeline', () => {
         approvalState: {
           status: 'approved',
           requestedAt: '2026-04-27T10:08:00.000Z',
-          approvedAt: '2026-04-27T10:08:30.000Z',
+          respondedAt: '2026-04-27T10:08:30.000Z',
           stage: 'plan',
         },
       },
@@ -754,7 +754,7 @@ describe('buildTimeline with workflow logs', () => {
         approvalState: {
           status: 'approved',
           requestedAt: '2026-04-27T03:20:30.000Z',
-          approvedAt: '2026-04-27T03:20:45.000Z',
+          respondedAt: '2026-04-27T03:20:45.000Z',
           stage: 'plan',
         },
       },

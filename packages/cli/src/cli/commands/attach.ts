@@ -28,7 +28,7 @@ async function getCurrentProjectId(): Promise<string | null> {
 
 type InteractionState =
   | { type: 'IDLE' }
-  | { type: 'GATE_MODE'; issueId: string; issueNumber: number }
+  | { type: 'APPROVAL_MODE'; issueId: string; issueNumber: number }
   | { type: 'QUESTION_MODE'; questionId: string; question: string; issueId: string };
 
 export function setupAttachCommand(program: Command): void {
@@ -88,7 +88,7 @@ export function setupAttachCommand(program: Command): void {
           return;
         }
 
-        if (interactionState.type === 'GATE_MODE') {
+        if (interactionState.type === 'APPROVAL_MODE') {
           const issueNumber = interactionState.issueNumber;
           lastMessage = trimmed;
           try {
@@ -151,7 +151,7 @@ export function setupAttachCommand(program: Command): void {
         cleanup();
       });
 
-      function showGatePrompt(issueNumber: number) {
+      function showApprovalPrompt(issueNumber: number) {
         console.log(chalk.yellow(`Agent paused for issue #${issueNumber}. Type a message to send, or 'quit' to detach.`));
         rl.prompt();
       }
@@ -206,11 +206,11 @@ export function setupAttachCommand(program: Command): void {
 
             if (eventType === 'agent_paused' && parsed.issueNumber) {
               interactionState = {
-                type: 'GATE_MODE',
+                type: 'APPROVAL_MODE',
                 issueId: parsed.issueId,
                 issueNumber: parsed.issueNumber,
               };
-              showGatePrompt(interactionState.issueNumber);
+              showApprovalPrompt(interactionState.issueNumber);
             }
 
             if (eventType === 'question_asked' && parsed.questionId) {
