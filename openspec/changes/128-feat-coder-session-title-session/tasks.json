@@ -107,11 +107,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "T-001 already updates findAllWithIssueInfo to include title in SELECT, so agent.ts may need no change if the return mapping includes it.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        102457
+      ]
     },
     {
       "id": "T-005",
