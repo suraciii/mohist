@@ -301,12 +301,13 @@
         "T-001"
       ],
       "notes": "This task can be done in parallel with T-002 and T-003. The repo is wired into runners in T-011.",
-      "attempts": 1,
-      "passes": false,
+      "attempts": 2,
+      "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
-        173737
+        173737,
+        102883
       ]
     },
     {
