@@ -1,51 +1,48 @@
 {
   "project": "mohist",
-  "description": "Reposition Changes panel as a first-class section visible in all stages with summary stats and approval panel integration",
+  "description": "Reposition Changes panel after Description, remove DIFF_STAGES gate, add summary stats header",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Extract ChangesPanel component with summary stats and all-stages visibility",
-      "spec": "specs/changes-panel-prominence/spec.md",
-      "description": "Extract the inline diff/commits JSX block from IssueDetailPage (lines 417-524) into a standalone ChangesPanel component. Add summary statistics header (file count, +/- lines, commit count) computed from diffData and commitsData. Remove DIFF_STAGES gate — render in all stages. Show 'No changes yet' empty state when no files and no commits. Position the component after Description, before TaskList.",
+      "title": "Reposition Changes panel and remove stage gate",
+      "spec": "specs/web-ui/spec.md",
+      "description": "In IssueDetailPage.tsx: (1) Remove the DIFF_STAGES constant and showDiff variable. (2) Move the Changes JSX block from after Comments to after Description, before TaskList. (3) Replace the IIFE with a direct render — show 'No changes yet' empty state card when files and commits are both empty, instead of returning null.",
       "acceptanceCriteria": [
-        "ChangesPanel component exists in packages/cli/web/src/components/ChangesPanel.tsx",
-        "DIFF_STAGES constant and showDiff guard removed from IssueDetailPage",
-        "Changes panel renders in Backlog, Explore, Plan, Build, Check, Done stages",
-        "Summary header shows file count, additions/deletions, commit count when changes exist",
-        "Empty state 'No changes yet' shown when no files and no commits",
-        "Section order is: BranchBar → Description → Changes → TaskList → Comments",
-        "Old diff section position (after Comments) removed",
-        "Files/Commits tabs and expandable diff viewer behavior preserved",
-        "Typecheck passes"
+        "DIFF_STAGES constant and showDiff variable are removed",
+        "Changes panel renders in all stages including Backlog and Explore",
+        "Backlog/empty stage shows 'No changes yet' card without Files/Commits tabs",
+        "Layout order is BranchBar → Description → Changes → TaskList → Comments",
+        "No duplicate diff section after Comments",
+        "Existing Files/Commits tabs and expandable diff viewer still work in stages with data",
+        "Build passes (npm run build in packages/cli)"
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/cli/web/src/components/ChangesPanel.tsx",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": ""
+      "notes": "Design D1: keep inline, don't extract component. Design D2: replace IIFE null-return with explicit empty state card."
     },
     {
       "id": "T-002",
-      "title": "Add compact changes summary to PlanApprovalPanel and ReviewApprovalPanel",
-      "spec": "specs/changes-panel-prominence/spec.md",
-      "description": "Add a `changesSummary?: string` prop to PlanApprovalPanel and ReviewApprovalPanel. Render it as a compact one-liner (e.g., '3 files, +50/-12 lines, 2 commits') above the action buttons. IssueDetailPage computes the summary string from diffData/commitsData and passes it to both panels.",
+      "title": "Add summary statistics header to Changes panel",
+      "spec": "specs/changes-summary/spec.md",
+      "description": "Add a one-line summary header inside the Changes panel (above the Files/Commits tabs) showing: N files, +X −Y lines, M commits. Compute totals by reducing over diffData.files for additions/deletions and commitsData.commits.length for commit count. Omit commit count segment when 0. Only show the summary header when there are changes — not in the 'No changes yet' empty state.",
       "acceptanceCriteria": [
-        "PlanApprovalPanel accepts and renders changesSummary prop",
-        "ReviewApprovalPanel accepts and renders changesSummary prop",
-        "IssueDetailPage computes summary and passes to both approval panels",
-        "Compact summary line visible in approval panels during Plan and Check stages",
-        "No changes shown when changesSummary is undefined or empty",
-        "Typecheck passes"
+        "Summary header shows 'N files · +X −Y · M commits' format with green additions, red deletions",
+        "Commit count segment is omitted when 0 commits",
+        "Summary header is not shown in the empty state (no data)",
+        "Stats update when diff/commits data refreshes via React Query",
+        "Build passes (npm run build in packages/cli)"
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/cli/web/src/components/PlanApprovalPanel.tsx",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "ReviewApprovalPanel is also modified in this task"
+      "notes": "Design D3: stats computed inline from existing diffData/commitsData. No new queries or memoization."
     }
   ]
 }

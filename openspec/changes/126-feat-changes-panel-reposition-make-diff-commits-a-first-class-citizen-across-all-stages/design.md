@@ -1,84 +1,52 @@
 ## Context
 
-IssueDetailPage renders the Changes section (diff/commits viewer) as the last item in the main content column, gated by `DIFF_STAGES = new Set([Explore, Plan, Build, Check, Done])`. The data is already fetched unconditionally via `useIssueDiff` and `useIssueCommits` hooks (both `enabled: number > 0` with no stage check). The stage gate only controls rendering (`showDiff = DIFF_STAGES.has(issue.stage)` at line 265). This means the change is purely a JSX restructuring — no data fetching changes needed.
+The Changes panel (diff/commits viewer) in `IssueDetailPage.tsx` is currently rendered at lines 417–524, gated by `DIFF_STAGES` (line 25, line 265), and positioned after Comments in the main column. The data hooks (`useIssueDiff`, `useIssueCommits`) are already unconditionally called at lines 137 and 162 — they fetch regardless of stage. The only gate is the JSX render condition `showDiff && ...` and the early-return `if (files.length === 0 && commits.length === 0) return null` inside the IIFE.
 
-Current JSX order in the main column (`lg:col-span-2`):
-1. `BranchBar` (line 346)
-2. Description (line 347–352)
-3. TaskList (line 354–364)
-4. Comments + comment input (line 366–415)
-5. Diff/Commits section (line 417–524, gated by `showDiff`)
-
-Target order:
-1. BranchBar
-2. Description
-3. **Changes** (with summary stats header, always visible)
-4. TaskList
-5. Comments + comment input
+The entire change is a single-file layout refactor in `IssueDetailPage.tsx` — no new components, no API changes, no state changes.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Remove `DIFF_STAGES` gate so Changes renders in all stages
-- Move Changes section from after-Comments to after-Description
-- Add summary statistics header (file count, +/- lines, commit count)
-- Show "No changes yet" empty state when no data
-- Add compact changes summary to PlanApprovalPanel and ReviewApprovalPanel
+- Remove `DIFF_STAGES` constant and `showDiff` variable — Changes panel renders unconditionally
+- Move the Changes JSX block from after Comments (line 417) to after Description (line 352), before TaskList (line 354)
+- Add a one-line summary stats header inside the Changes panel (computed from existing `diffData`/`commitsData`)
+- Show "No changes yet" empty state when both files and commits are empty (instead of returning null)
 
 **Non-Goals:**
-- No new API endpoints or data fetching changes
-- No changes to DiffViewer, CommitRow, or diff rendering logic
-- No commit comparison or diff algorithm changes
+- No new API endpoints or data hooks
+- No changes to DiffViewer, CommitRow, or diff rendering
+- No inline changes summary in approval panels (deferred — marked optional in proposal)
+- No file search/filter additions
 
 ## Decisions
 
-### D1: Extract ChangesPanel as a standalone component
+### D1: Keep Changes panel inline in IssueDetailPage (don't extract component)
 
-Move the inline JSX block (lines 417–524) into a dedicated `ChangesPanel` component. This reduces IssueDetailPage complexity and makes the summary stats header self-contained.
-
-**Props**: `issueNumber`, `diffData`, `commitsData`, `diffTab`, `setDiffTab`, `expandedFiles`, `setExpandedFiles`, `expandedCommits`, `setExpandedCommits`
+The diff/commits JSX block (~100 lines) shares state with the parent (`diffTab`, `expandedCommits`, `expandedFiles`, `diffData`, `commitsData`). Extracting it would require prop-drilling 6+ values or a context. Since this is a layout-only change, the cost of extraction isn't justified.
 
 **Alternatives considered:**
-- Keep inline in IssueDetailPage — would work but the block is ~100 lines and will grow with the summary header, making the already large component harder to navigate
-- Lift diff/commits state into the component — would require moving hooks and breaking the existing `CommitRow` pattern that uses `useCommitDiff` internally
+- Extract to `ChangesPanel` component — cleaner separation but adds props interface for no behavioral gain in this change
 
-### D2: Summary statistics computed from existing API responses
+### D2: Replace IIFE null-return with explicit empty state
 
-Compute summary stats in `ChangesPanel` from `diffData.files` and `commitsData.commits`:
-- File count: `files.length`
-- Additions/deletions: sum of `file.additions` / `file.deletions` across all files
-- Commit count: `commits.length`
-
-No new API call needed. The data is already fetched.
+Current code uses `(() => { ... if (empty) return null ... })()` which silently hides the panel when there's no data. Replace with a direct render that shows an empty state card when no data exists, making the panel always visible.
 
 **Alternatives considered:**
-- Dedicated backend summary endpoint — over-engineering for data already on the client
-- Compute from commits API `--stat` output — diff API already has precise `--numstat` numbers
+- Keep IIFE pattern and just remove the stage gate — would still hide the panel in Backlog, violating the "visible in all stages" requirement
 
-### D3: Empty state shown via a simple conditional
+### D3: Summary stats computed inline from existing data
 
-When `files.length === 0 && commits.length === 0`, render a compact card with "No changes yet" text instead of the full panel with tabs. This avoids showing empty tabs UI.
+Total additions/deletions are computed by reducing over `diffData.files`. Commit count is `commitsData.commits.length`. No new queries or memoization needed — the data is already fetched and the reduction is trivial (< 100 files typically).
 
-### D4: Changes summary in approval panels passed as props
+### D4: Defer inline changes summary in approval panels
 
-Add `changesSummary?: string` prop to both `PlanApprovalPanel` and `ReviewApprovalPanel`. IssueDetailPage computes the summary string and passes it down. The panels render it as a compact one-liner above the action buttons.
-
-This avoids coupling the approval panels to diff/commits hooks.
-
-**Alternatives considered:**
-- Approval panels fetch data independently — duplicate fetches, unnecessary coupling
-- Context/provider pattern — over-engineering for a single string
+The optional acceptance criterion to add a compact summary in PlanApprovalPanel/ReviewApprovalPanel adds cross-component coupling (sidebar components would need diff/commits data). Defer to a follow-up change if user feedback indicates it's needed — the main panel reposition already puts changes in view during approval reviews.
 
 ## Risks / Trade-offs
 
-- [Backlog/early Explore stages make API calls that return empty] → Acceptable: hooks already fetch unconditionally (`enabled: number > 0`), no change in network behavior
-- [Summary stats may be briefly stale during active agent work] → Acceptable: existing refetch intervals handle this, summary updates on next refetch
-- [Moving section may cause visual jump for users accustomed to old position] → Low risk: the change improves discoverability, which outweighs muscle memory
+- [Extra API calls in Backlog stage] → `useIssueDiff` and `useIssueCommits` already fire unconditionally (lines 137, 162). The queries will 404 or return empty for issues without worktrees, which is the existing behavior. No new load.
+- [Empty state card visual noise in Backlog] → The "No changes yet" card is minimal (single line text, same border style as other sections). Acceptable trade-off for consistent panel presence.
 
 ## Migration Plan
 
-Single deploy — purely frontend JSX restructuring. No API changes, no database changes, no config changes. Rollback by reverting the commit.
-
-## Open Questions
-
-None.
+Single deploy — the change is purely frontend layout. No API contract changes, no database migrations, no config changes. Rollback is reverting the JSX order and restoring `DIFF_STAGES` check.

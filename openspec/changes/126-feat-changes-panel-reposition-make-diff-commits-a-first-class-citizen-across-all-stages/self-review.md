@@ -1,70 +1,50 @@
-## Self-Review: Issue #126 — Changes panel reposition
+## Self-Review Report
+
+**Change**: 126-feat-changes-panel-reposition-make-diff-commits-a-first-class-citizen-across-all-stages
+**Date**: 2026-05-02
+**Verdict**: PASS
+
+---
 
 ### Completeness
 
-| Check | Status |
-|-------|--------|
-| All proposal capabilities have specs | PASS |
-| All spec requirements have tasks | PASS |
-| Edge cases covered in specs | PASS |
-| Issue acceptance criteria covered by specs+tasks | PASS |
+| Acceptance Criterion | Spec Coverage |
+|---|---|
+| Remove DIFF_STAGES restriction | `specs/web-ui/spec.md` — "Changes panel visible in all workflow stages" (6 scenarios) |
+| Backlog: show "No changes yet" | `specs/web-ui/spec.md` + `specs/changes-tab/spec.md` — Backlog empty state scenarios |
+| Reposition after Description | `specs/web-ui/spec.md` — "Changes panel positioned after Description" (3 scenarios) |
+| Summary statistics | `specs/changes-summary/spec.md` — 4 scenarios (with data, empty, no commits, refresh) |
+| Keep existing tabs/diff | `specs/changes-tab/spec.md` — preserved existing requirements unchanged |
+| Optional approval panel summary | Deferred per design D4 (explicitly documented) |
 
-**Capability → Spec mapping:**
-- `changes-panel-prominence` (new) → `specs/changes-panel-prominence/spec.md` — 5 requirements, 10 scenarios
-- `changes-commits-first` (modified) → `specs/changes-commits-first/spec.md` — 1 modified requirement, 3 scenarios
-
-**Acceptance criteria coverage:**
-- Remove DIFF_STAGES restriction → T-001 AC: "DIFF_STAGES constant and showDiff guard removed" ✅
-- Backlog empty state → T-001 AC: "Empty state 'No changes yet' shown" ✅
-- Reposition after Description → T-001 AC: "Section order is: BranchBar → Description → Changes → TaskList → Comments" ✅
-- Summary statistics → T-001 AC: "Summary header shows file count, additions/deletions, commit count" ✅
-- Keep tabs/diff behavior → T-001 AC: "Files/Commits tabs and expandable diff viewer behavior preserved" ✅
-- Approval panel summaries → T-002 AC: "PlanApprovalPanel accepts and renders changesSummary prop" ✅
-- No visual regressions → T-001 AC: "Old diff section position removed" ✅
+All 3 proposal capabilities have corresponding spec directories. All spec scenarios have corresponding task acceptance criteria.
 
 ### Consistency
 
-| Check | Status |
-|-------|--------|
-| Spec headers use ADDED/MODIFIED correctly | PASS |
-| Proposal capabilities match spec directories | PASS |
-| Tasks reference correct spec paths | PASS |
-| Design decisions align with specs | PASS |
-| Naming consistent across artifacts | PASS |
-
-**Details:**
-- `changes-panel-prominence` spec uses `## ADDED Requirements` (new capability) ✅
-- `changes-commits-first` spec uses `## MODIFIED Requirements` (existing capability from change #120) ✅
-- Design D1 (extract ChangesPanel) → T-001 (extract component) ✅
-- Design D2 (compute stats from API data) → T-001 (summary header) ✅
-- Design D3 (empty state conditional) → T-001 (empty state AC) ✅
-- Design D4 (changesSummary prop) → T-002 (add prop to approval panels) ✅
+- Proposal lists 3 capabilities (`changes-summary`, `web-ui`, `changes-tab`) → 3 spec directories created
+- T-001 references `specs/web-ui/spec.md` — correct
+- T-002 references `specs/changes-summary/spec.md` — correct
+- Design decisions (D1–D4) align with specs and tasks
+- Naming consistent across all artifacts
 
 ### Feasibility
 
-| Check | Status |
-|-------|--------|
-| Task granularity appropriate | PASS |
-| Dependencies available or created by earlier tasks | PASS |
-| No circular dependencies | PASS |
-| Each task completable in one agent session | PASS |
+- Both tasks modify `IssueDetailPage.tsx` only — single-file scope matches design
+- T-001: structural refactor (remove gate, reposition JSX, add empty state) — completable in one session
+- T-002: additive enhancement (summary header) — completable in one session
+- No new components, no API changes, no state changes — low risk
 
-**Details:**
-- T-001 is a coherent unit: extract component + reposition + add summary + remove gate. All changes are in the same file pair (IssueDetailPage → ChangesPanel). Estimated 15-20 min.
-- T-002 depends on T-001 because IssueDetailPage must be restructured first before it can compute and pass the summary string to approval panels.
-- Both tasks are AFK — no human judgment needed.
+### Dependency Completeness
 
-### Dependency Validation
+| Task | dependsOn | Priority | Valid? |
+|---|---|---|---|
+| T-001 | `[]` | 1 | Yes — first task, no dependencies |
+| T-002 | `["T-001"]` | 2 | Yes — needs repositioned JSX to add summary header into |
 
-| Task | dependsOn | References valid? | Priority order correct? |
-|------|-----------|-------------------|------------------------|
-| T-001 | [] | N/A (first task) | priority 1 ✅ |
-| T-002 | ["T-001"] | T-001 exists ✅ | 2 > 1 ✅ |
+- All `dependsOn` reference existing IDs with lower priority numbers
+- No cycles
+- DAG is linear: T-001 → T-002
 
-- DAG is valid (linear chain) ✅
-- No cycles ✅
-- Every non-first task has at least one dependsOn ✅
+### Issues Found
 
-### Verdict
-
-**PASS** — All artifacts are complete, consistent, and feasible. No issues found. Ready for implementation.
+None. All artifacts pass review.
