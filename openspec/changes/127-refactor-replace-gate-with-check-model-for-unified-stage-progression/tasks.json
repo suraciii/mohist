@@ -1,406 +1,404 @@
-{
-  "version": 1,
-  "tasks": [
-    {
-      "id": "T-001",
-      "title": "Add ReactionConfig type and update core interfaces",
-      "spec": "specs/unified-check-model/spec.md#Check interface with Reaction",
-      "description": "Add the `ReactionConfig` type to `stage-context.ts`. Update the `Check` interface in `checks/index.ts` to include a `reaction: ReactionConfig` field. Update `StageRunResult` to remove `requiresApproval` and add `checkResults: CheckResult[]`. Update `PipelineResult` to remove `gateRequired`. Update `CheckResult` to add `pending` status. All existing code using the old fields should be updated to compile — set `requiresApproval: false` temporarily where needed.",
-      "acceptanceCriteria": [
-        "ReactionConfig type exists with type, maxAttempts, escalateTarget, fallbackReaction fields",
-        "Check interface has reaction: ReactionConfig field",
-        "StageRunResult has no requiresApproval field, has checkResults field",
-        "PipelineResult.gateRequired is kept temporarily (set to false everywhere) — removed in T-007",
-        "CheckResult status union includes 'pending'",
-        "All existing code referencing gateRequired or requiresApproval updated to compile (set to false)",
-        "Typecheck passes with all existing code updated for new types",
-        "Existing tests pass"
-      ],
-      "priority": 1,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/stage-context.ts",
-      "dependsOn": [],
-      "passes": true,
-      "notes": "This is the foundation — all subsequent tasks depend on these types. Temporarily keep backward compat by setting requiresApproval:false in existing runners until they are migrated.",
-      "attempts": 6,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        424130,
-        123694,
-        626976,
-        228773,
-        631896,
-        634926,
-        626917,
-        202202
-      ]
-    },
-    {
-      "id": "T-002",
-      "title": "Create BaseStageRunner abstract class",
-      "spec": "specs/unified-check-model/spec.md#BaseStageRunner provides unified execution loop",
-      "description": "Create `BaseStageRunner` in a new file `workflow/base-stage-runner.ts`. It implements the `StageRunner` interface with a concrete `run()` method that: (1) calls abstract `executeTasks(ctx)` to run the stage's task phase, (2) runs checks serially, (3) on first check failure, dispatches the check's reaction (retry-task, auto-fix, escalate, ask-user), (4) on all-pass, returns success with nextStage. Subclasses override `executeTasks()`, `getChecks()`, `getNextStage()`, and `canHandle()`.",
-      "acceptanceCriteria": [
-        "BaseStageRunner implements StageRunner interface",
-        "run() executes tasks → checks → reactions in sequence",
-        "Serial check execution: on first failure, remaining checks are skipped",
-        "retry-task reaction re-invokes executeTasks and re-runs checks, with max retry count",
-        "auto-fix reaction runs the check's fix logic then re-runs the check",
-        "escalate reaction returns { success: false, escalateToStage: target }",
-        "ask-user reaction calls issueRepo.setApprovalState(id, { status: 'awaiting' }) before emitting approval_requested event",
-        "ask-user reaction returns { success: false } (pipeline pauses)",
-        "Typecheck passes",
-        "Unit tests for BaseStageRunner loop covering: all-pass, retry-task, escalate, ask-user scenarios"
-      ],
-      "priority": 2,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/base-stage-runner.ts",
-      "dependsOn": [
-        "T-001"
-      ],
-      "notes": "",
-      "attempts": 2,
-      "passes": true,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        611206,
-        152964,
-        329414
-      ]
-    },
-    {
-      "id": "T-003",
-      "title": "Implement UserApprovalCheck",
-      "spec": "specs/unified-check-model/spec.md#user-approval is a Check, not a Gate",
-      "description": "Create `UserApprovalCheck` class in `checks/user-approval-check.ts` implementing the `Check` interface. Its `run()` method checks `issue.approvalState?.status === 'approved'` — returns pass if approved, returns pending if not. Its reaction config is `{ type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: <prior stage> } }`. The escalateTarget is set per-stage via constructor parameter.",
-      "acceptanceCriteria": [
-        "UserApprovalCheck implements Check interface with reaction field",
-        "run() returns { status: 'pass' } when issue.approvalState?.status === 'approved'",
-        "run() returns { status: 'pending' } when not yet approved",
-        "reaction config is ask-user with fallback escalate",
-        "escalateTarget is configurable per stage via constructor",
-        "Typecheck passes"
-      ],
-      "priority": 3,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/checks/user-approval-check.ts",
-      "dependsOn": [
-        "T-001"
-      ],
-      "notes": "",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        65546
-      ]
-    },
-    {
-      "id": "T-004",
-      "title": "Add reaction configs to existing checks and migrate CheckStageRunner",
-      "spec": "specs/workflow-definition/spec.md#Check stage behavior",
-      "description": "Add `reaction` field to `BuildTestCheck` (reaction: auto-fix, max 2, fallback escalate to Build) and `AiReviewCheck` (reaction: escalate to Plan). Then rewrite `CheckStageRunner` to extend `BaseStageRunner`: override `executeTasks()` to run the AI review ACP round (copy the AcpRoundRunner logic from AiReviewCheck into executeTasks — the review ACP session becomes the task phase), override `getChecks()` to return [BuildTestCheck, AiReviewCheck (now parses review output only, no ACP round), UserApprovalCheck], override `getNextStage()` to return Stage.Done. Remove all `requiresApproval` and approval gate logic from CheckStageRunner.",
-      "acceptanceCriteria": [
-        "BuildTestCheck has reaction config: { type: 'auto-fix', maxAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build } }",
-        "AiReviewCheck has reaction config: { type: 'escalate', escalateTarget: Stage.Plan }",
-        "CheckStageRunner extends BaseStageRunner",
-        "CheckStageRunner no longer checks issue.approvalState directly",
-        "CheckStageRunner no longer returns requiresApproval: true",
-        "UserApprovalCheck is included in CheckStageRunner's check list",
-        "archiveChange is called after all checks pass",
-        "Typecheck passes",
-        "Existing check-stage tests updated and pass"
-      ],
-      "priority": 4,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/check-stage-runner.ts",
-      "dependsOn": [
-        "T-002",
-        "T-003"
-      ],
-      "notes": "AiReviewCheck currently uses AcpRoundRunner internally for the review round. Split this: move the ACP session logic into CheckStageRunner.executeTasks(), and simplify AiReviewCheck to only parse the review output (read review.md, parse verdict). AiReviewCheck becomes a data-only check with no ACP calls.",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        224829,
-        189662,
-        145192,
-        622678,
-        196567,
-        139142
-      ]
-    },
-    {
-      "id": "T-005",
-      "title": "Create Plan artifact checks and migrate PlanStageRunner",
-      "spec": "specs/workflow-definition/spec.md#Plan stage behavior",
-      "description": "Create individual artifact verification checks in `checks/` for Plan stage: `ProposalCompleteCheck`, `SpecsCompleteCheck`, `DesignCompleteCheck`, `TasksValidCheck`, `SelfReviewPassedCheck` — each verifies the corresponding file exists and is non-empty in the change directory. Then rewrite `PlanStageRunner` to extend `BaseStageRunner`: move the AcpRoundRunner round logic into `executeTasks()` (the round configs become the task phase), set `getChecks()` to return the artifact checks + UserApprovalCheck, set `getNextStage()` to return Stage.Build. Remove `requiresApproval` logic. Delete the dependency on `AcpRoundRunner`.",
-      "acceptanceCriteria": [
-        "5 artifact checks exist (proposal-complete, specs-complete, design-complete, tasks-valid, self-review-passed) each implementing Check with reaction",
-        "Artifact checks with reaction: { type: 'retry-task', maxAttempts: 3, fallbackReaction: { type: 'escalate' } }",
-        "PlanStageRunner extends BaseStageRunner",
-        "AcpRoundRunner round logic absorbed into PlanStageRunner.executeTasks()",
-        "PlanStageRunner no longer returns requiresApproval: true",
-        "UserApprovalCheck included in Plan check list",
-        "Checkpoint resume logic preserved in executeTasks()",
-        "Plan artifact commit logic preserved",
-        "Backward compat: non-OpenSpec issues (no openspec/changes/) still work — createChangeDir handles both paths",
-        "Typecheck passes"
-      ],
-      "priority": 5,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/plan-stage-runner.ts",
-      "dependsOn": [
-        "T-002",
-        "T-003"
-      ],
-      "notes": "This is the most complex migration because it absorbs AcpRoundRunner. The ACP connection management, round iteration, artifact verification, and retry logic from AcpRoundRunner must be replicated in executeTasks().",
-      "attempts": 2,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        621414,
-        175364
-      ]
-    },
-    {
-      "id": "T-006",
-      "title": "Create Build stage checks and migrate BuildStageRunner",
-      "spec": "specs/workflow-definition/spec.md#Build stage behavior",
-      "description": "Create `AllTasksCompleteCheck` (verifies all tasks in tasks.json have passes:true) and `CodeCompilesCheck` (runs `npm run build` or equivalent, returns pass/fail). Then rewrite `BuildStageRunner` to extend `BaseStageRunner`: wrap RalphExecutor call in `executeTasks()`, set `getChecks()` to return [AllTasksCompleteCheck, CodeCompilesCheck], set `getNextStage()` to return Stage.Check. Remove `requiresApproval` from all results. Build stage has no UserApprovalCheck.",
-      "acceptanceCriteria": [
-        "AllTasksCompleteCheck reads tasks.json and verifies all tasks have passes:true",
-        "AllTasksCompleteCheck has reaction: { type: 'retry-task', maxAttempts: 3, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } }",
-        "CodeCompilesCheck runs build command and returns pass/fail",
-        "CodeCompilesCheck has reaction: { type: 'auto-fix', maxAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } }",
-        "BuildStageRunner extends BaseStageRunner",
-        "RalphExecutor called inside executeTasks()",
-        "BuildStageRunner check list does NOT include user-approval",
-        "BuildStageRunner no longer returns requiresApproval",
-        "Git commit logic preserved after successful task execution",
-        "Zero-work detection logic preserved",
-        "Backward compat: non-OpenSpec issues (no openspec/changes/) still handled gracefully",
-        "Typecheck passes"
-      ],
-      "priority": 6,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/build-stage-runner.ts",
-      "dependsOn": [
-        "T-002"
-      ],
-      "notes": "RalphExecutor stays intact as the task execution engine — it's just called from within executeTasks(). Do NOT break RalphExecutor into individual task objects.",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        621155
-      ]
-    },
-    {
-      "id": "T-007",
-      "title": "Simplify WorkflowEngine — remove gate logic",
-      "spec": "specs/unified-check-model/spec.md#WorkflowEngine executes checks and advances without gate logic",
-      "description": "Rewrite `WorkflowEngine.run()` to use the simplified loop: find runner → run → check success → advance or escalate. Remove all `requiresApproval` branching, `setApprovalState` calls, `gateRequired` returns, and `approval_requested` event emissions. The engine should be a pure stage-advancement loop with no knowledge of approvals.",
-      "acceptanceCriteria": [
-        "WorkflowEngine.run() contains no references to requiresApproval or gateRequired (gateRequired field removed from PipelineResult)",
-        "No setApprovalState calls in WorkflowEngine (moved to BaseStageRunner ask-user reaction in T-002)",
-        "clearApprovalState remains in WorkflowEngine for Done stage cleanup only",
-        "No approval_requested event emission in WorkflowEngine (moved to BaseStageRunner)",
-        "Engine handles result.success: updateStage(result.nextStage) and continue",
-        "Engine handles result.escalateToStage: updateStage(escalateToStage) and continue",
-        "Engine handles failure without escalation: return { completed: false, stage, message }",
-        "Done stage handling preserved (updateStatus Completed, clearApprovalState, deleteAll checkpoints)",
-        "PipelineResult.gateRequired field removed from interface",
-        "Typecheck passes"
-      ],
-      "priority": 7,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/workflow-engine.ts",
-      "dependsOn": [
-        "T-004",
-        "T-005",
-        "T-006"
-      ],
-      "notes": "This task depends on all three runners being migrated because the engine must work with the new result format from all runners.",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        545855
-      ]
-    },
-    {
-      "id": "T-008",
-      "title": "Update AgentRunnerService for new PipelineResult format",
-      "spec": "specs/unified-check-model/spec.md#WorkflowEngine executes checks and advances without gate logic",
-      "description": "Update `AgentRunnerService.runPipelineToCompletion()` and related methods to handle the new `PipelineResult` (no `gateRequired`). Replace `result.gateRequired` checks with detection of whether the pipeline paused at a user-approval check (check `issue.approvalState?.status === 'awaiting'`). Update `recoverFromQueue()` orphan detection and gate recovery to use the same check. Update `handlePipelineFailure()` to not call `setApprovalState` with error status.",
-      "acceptanceCriteria": [
-        "No references to result.gateRequired in agent-runner-service.ts",
-        "Pipeline pause detection uses issue.approvalState?.status === 'awaiting' instead of gateRequired",
-        "recoverFromQueue() still correctly identifies issues at approval checkpoints",
-        "handlePipelineFailure() no longer calls setApprovalState with error status",
-        "Task queue completion still works (completed, failed states)",
-        "Typecheck passes"
-      ],
-      "priority": 8,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/services/agent-runner-service.ts",
-      "dependsOn": [
-        "T-007"
-      ],
-      "notes": "",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        204233
-      ]
-    },
-    {
-      "id": "T-009",
-      "title": "Create stage_executions table and StageExecutionRepo",
-      "spec": "specs/unified-check-model/spec.md#All stages persist execution state uniformly",
-      "description": "Add a DB migration creating the `stage_executions` table (id, issue_id, stage, status, task_results JSON, check_results JSON, created_at, updated_at). Create `StageExecutionRepo` with methods: create(issueId, stage), updateCheckResults(id, results), updateStatus(id, status), findActiveByIssueId(issueId). The repo stores check results for every stage, not just Check stage.",
-      "acceptanceCriteria": [
-        "Migration creates stage_executions table with correct schema",
-        "Migration runs without errors on existing DB",
-        "StageExecutionRepo.create() inserts a new record with status 'running'",
-        "StageExecutionRepo.updateCheckResults() updates check_results JSON",
-        "StageExecutionRepo.findActiveByIssueId() returns latest running/awaiting-approval record",
-        "check_suites table remains intact (not dropped) for backward compat",
-        "Typecheck passes"
-      ],
-      "priority": 3,
-      "mode": "AFK",
-      "type": "MIGRATE",
-      "output": "packages/cli/src/db/stage-execution-repo.ts",
-      "dependsOn": [
-        "T-001"
-      ],
-      "notes": "This task can be done in parallel with T-002 and T-003. The repo is wired into runners in T-011.",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        173737
-      ]
-    },
-    {
-      "id": "T-010",
-      "title": "Delete WorkflowController and AcpRoundRunner, update exports",
-      "spec": "specs/pipeline-model/spec.md#REMOVED Requirements",
-      "description": "Delete `workflow-controller.ts` and `acp-round-runner.ts`. Remove their exports from `workflow/index.ts`. Update any remaining imports across the codebase. Search for and remove any references to `WorkflowController`, `AcpRoundRunner`, `gate_after`, `gateRequired`, `requiresApproval` in all source files (not just workflow/).",
-      "acceptanceCriteria": [
-        "workflow-controller.ts file deleted",
-        "acp-round-runner.ts file deleted",
-        "No imports of WorkflowController or AcpRoundRunner anywhere in codebase",
-        "No references to gate_after, gateRequired, or requiresApproval in any .ts source file",
-        "workflow/index.ts exports updated (removed deleted files, added new ones)",
-        "Typecheck passes",
-        "All existing tests pass"
-      ],
-      "priority": 9,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/index.ts",
-      "dependsOn": [
-        "T-007",
-        "T-008"
-      ],
-      "notes": "Must run after T-007 and T-008 to ensure nothing references the deleted files.",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        380792
-      ]
-    },
-    {
-      "id": "T-011",
-      "title": "Wire StageExecutionRepo into all runners for unified persistence",
-      "spec": "specs/unified-check-model/spec.md#All stages persist execution state uniformly",
-      "description": "Add `stageExecutionRepo` to `StageContext`. In `BaseStageRunner.run()`, create a stage_execution record on entry, update check_results after checks complete. Pass the repo through `WorkflowEngine` constructor and `AgentRunnerService` instantiation. Each stage now persists its check results to the same table.",
-      "acceptanceCriteria": [
-        "StageContext has optional stageExecutionRepo field",
-        "BaseStageRunner.run() creates a stage_execution record at start",
-        "BaseStageRunner.run() updates check_results after checks complete",
-        "WorkflowEngine passes stageExecutionRepo through buildContext()",
-        "AgentRunnerService instantiates and passes StageExecutionRepo to engine",
-        "Check results from Plan, Build, Check stages all stored in stage_executions",
-        "Typecheck passes"
-      ],
-      "priority": 10,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/src/workflow/base-stage-runner.ts",
-      "dependsOn": [
-        "T-009",
-        "T-007"
-      ],
-      "notes": "",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        538256
-      ]
-    },
-    {
-      "id": "T-012",
-      "title": "Update and verify all workflow tests",
-      "spec": "specs/unified-check-model/spec.md",
-      "description": "Update all existing workflow tests to use the new types (no requiresApproval, no gateRequired). Add new tests covering: (1) full pipeline Plan→Build→Check→Done with all checks passing, (2) escalation paths (Check→Build, Check→Plan, Build→Plan), (3) user-approval check pausing and resuming, (4) retry-task reaction with max retry exceeded, (5) auto-fix reaction with fallback escalate. Run full test suite and verify typecheck.",
-      "acceptanceCriteria": [
-        "All existing workflow tests updated and passing",
-        "New test: full pipeline Plan→Build→Check→Done",
-        "New test: CHECK build-test failure escalates to BUILD",
-        "New test: CHECK ai-review failure escalates to PLAN",
-        "New test: user-approval check pauses pipeline and resumes on approval",
-        "New test: retry-task reaction stops after max retries",
-        "New test: auto-fix reaction falls back to escalate after max attempts",
-        "New test: non-OpenSpec issue (no openspec/changes/) still completes full pipeline",
-        "No test references requiresApproval or gateRequired",
-        "npm test passes",
-        "npm run build (typecheck) passes"
-      ],
-      "priority": 11,
-      "mode": "AFK",
-      "type": "TEST",
-      "output": "packages/cli/tests/workflow/",
-      "dependsOn": [
-        "T-010",
-        "T-011"
-      ],
-      "notes": "This is the final verification task. All previous tasks must be complete.",
-      "attempts": 1,
-      "passes": false,
-      "order": 999999,
-      "error": null,
-      "durations": [
-        282899,
-        449854,
-        137757
-      ]
-    }
-  ]
-}
+[
+  {
+    "id": "T-001",
+    "title": "Add ReactionConfig type and update core interfaces",
+    "spec": "specs/unified-check-model/spec.md#Check interface with Reaction",
+    "description": "Add the `ReactionConfig` type to `stage-context.ts`. Update the `Check` interface in `checks/index.ts` to include a `reaction: ReactionConfig` field. Update `StageRunResult` to remove `requiresApproval` and add `checkResults: CheckResult[]`. Update `PipelineResult` to remove `gateRequired`. Update `CheckResult` to add `pending` status. All existing code using the old fields should be updated to compile \u2014 set `requiresApproval: false` temporarily where needed.",
+    "acceptanceCriteria": [
+      "ReactionConfig type exists with type, maxAttempts, escalateTarget, fallbackReaction fields",
+      "Check interface has reaction: ReactionConfig field",
+      "StageRunResult has no requiresApproval field, has checkResults field",
+      "PipelineResult.gateRequired is kept temporarily (set to false everywhere) \u2014 removed in T-007",
+      "CheckResult status union includes 'pending'",
+      "All existing code referencing gateRequired or requiresApproval updated to compile (set to false)",
+      "Typecheck passes with all existing code updated for new types",
+      "Existing tests pass"
+    ],
+    "priority": 1,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/stage-context.ts",
+    "dependsOn": [],
+    "passes": true,
+    "notes": "This is the foundation \u2014 all subsequent tasks depend on these types. Temporarily keep backward compat by setting requiresApproval:false in existing runners until they are migrated.",
+    "attempts": 6,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      424130,
+      123694,
+      626976,
+      228773,
+      631896,
+      634926,
+      626917,
+      202202
+    ]
+  },
+  {
+    "id": "T-002",
+    "title": "Create BaseStageRunner abstract class",
+    "spec": "specs/unified-check-model/spec.md#BaseStageRunner provides unified execution loop",
+    "description": "Create `BaseStageRunner` in a new file `workflow/base-stage-runner.ts`. It implements the `StageRunner` interface with a concrete `run()` method that: (1) calls abstract `executeTasks(ctx)` to run the stage's task phase, (2) runs checks serially, (3) on first check failure, dispatches the check's reaction (retry-task, auto-fix, escalate, ask-user), (4) on all-pass, returns success with nextStage. Subclasses override `executeTasks()`, `getChecks()`, `getNextStage()`, and `canHandle()`.",
+    "acceptanceCriteria": [
+      "BaseStageRunner implements StageRunner interface",
+      "run() executes tasks \u2192 checks \u2192 reactions in sequence",
+      "Serial check execution: on first failure, remaining checks are skipped",
+      "retry-task reaction re-invokes executeTasks and re-runs checks, with max retry count",
+      "auto-fix reaction runs the check's fix logic then re-runs the check",
+      "escalate reaction returns { success: false, escalateToStage: target }",
+      "ask-user reaction calls issueRepo.setApprovalState(id, { status: 'awaiting' }) before emitting approval_requested event",
+      "ask-user reaction returns { success: false } (pipeline pauses)",
+      "Typecheck passes",
+      "Unit tests for BaseStageRunner loop covering: all-pass, retry-task, escalate, ask-user scenarios"
+    ],
+    "priority": 2,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/base-stage-runner.ts",
+    "dependsOn": [
+      "T-001"
+    ],
+    "notes": "",
+    "attempts": 2,
+    "passes": true,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      611206,
+      152964,
+      329414
+    ]
+  },
+  {
+    "id": "T-003",
+    "title": "Implement UserApprovalCheck",
+    "spec": "specs/unified-check-model/spec.md#user-approval is a Check, not a Gate",
+    "description": "Create `UserApprovalCheck` class in `checks/user-approval-check.ts` implementing the `Check` interface. Its `run()` method checks `issue.approvalState?.status === 'approved'` \u2014 returns pass if approved, returns pending if not. Its reaction config is `{ type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: <prior stage> } }`. The escalateTarget is set per-stage via constructor parameter.",
+    "acceptanceCriteria": [
+      "UserApprovalCheck implements Check interface with reaction field",
+      "run() returns { status: 'pass' } when issue.approvalState?.status === 'approved'",
+      "run() returns { status: 'pending' } when not yet approved",
+      "reaction config is ask-user with fallback escalate",
+      "escalateTarget is configurable per stage via constructor",
+      "Typecheck passes"
+    ],
+    "priority": 3,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/checks/user-approval-check.ts",
+    "dependsOn": [
+      "T-001"
+    ],
+    "notes": "",
+    "attempts": 2,
+    "passes": true,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      65546,
+      30000
+    ]
+  },
+  {
+    "id": "T-004",
+    "title": "Add reaction configs to existing checks and migrate CheckStageRunner",
+    "spec": "specs/workflow-definition/spec.md#Check stage behavior",
+    "description": "Add `reaction` field to `BuildTestCheck` (reaction: auto-fix, max 2, fallback escalate to Build) and `AiReviewCheck` (reaction: escalate to Plan). Then rewrite `CheckStageRunner` to extend `BaseStageRunner`: override `executeTasks()` to run the AI review ACP round (copy the AcpRoundRunner logic from AiReviewCheck into executeTasks \u2014 the review ACP session becomes the task phase), override `getChecks()` to return [BuildTestCheck, AiReviewCheck (now parses review output only, no ACP round), UserApprovalCheck], override `getNextStage()` to return Stage.Done. Remove all `requiresApproval` and approval gate logic from CheckStageRunner.",
+    "acceptanceCriteria": [
+      "BuildTestCheck has reaction config: { type: 'auto-fix', maxAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build } }",
+      "AiReviewCheck has reaction config: { type: 'escalate', escalateTarget: Stage.Plan }",
+      "CheckStageRunner extends BaseStageRunner",
+      "CheckStageRunner no longer checks issue.approvalState directly",
+      "CheckStageRunner no longer returns requiresApproval: true",
+      "UserApprovalCheck is included in CheckStageRunner's check list",
+      "archiveChange is called after all checks pass",
+      "Typecheck passes",
+      "Existing check-stage tests updated and pass"
+    ],
+    "priority": 4,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/check-stage-runner.ts",
+    "dependsOn": [
+      "T-002",
+      "T-003"
+    ],
+    "notes": "AiReviewCheck currently uses AcpRoundRunner internally for the review round. Split this: move the ACP session logic into CheckStageRunner.executeTasks(), and simplify AiReviewCheck to only parse the review output (read review.md, parse verdict). AiReviewCheck becomes a data-only check with no ACP calls.",
+    "attempts": 1,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      224829,
+      189662,
+      145192,
+      622678,
+      196567,
+      139142
+    ]
+  },
+  {
+    "id": "T-005",
+    "title": "Create Plan artifact checks and migrate PlanStageRunner",
+    "spec": "specs/workflow-definition/spec.md#Plan stage behavior",
+    "description": "Create individual artifact verification checks in `checks/` for Plan stage: `ProposalCompleteCheck`, `SpecsCompleteCheck`, `DesignCompleteCheck`, `TasksValidCheck`, `SelfReviewPassedCheck` \u2014 each verifies the corresponding file exists and is non-empty in the change directory. Then rewrite `PlanStageRunner` to extend `BaseStageRunner`: move the AcpRoundRunner round logic into `executeTasks()` (the round configs become the task phase), set `getChecks()` to return the artifact checks + UserApprovalCheck, set `getNextStage()` to return Stage.Build. Remove `requiresApproval` logic. Delete the dependency on `AcpRoundRunner`.",
+    "acceptanceCriteria": [
+      "5 artifact checks exist (proposal-complete, specs-complete, design-complete, tasks-valid, self-review-passed) each implementing Check with reaction",
+      "Artifact checks with reaction: { type: 'retry-task', maxAttempts: 3, fallbackReaction: { type: 'escalate' } }",
+      "PlanStageRunner extends BaseStageRunner",
+      "AcpRoundRunner round logic absorbed into PlanStageRunner.executeTasks()",
+      "PlanStageRunner no longer returns requiresApproval: true",
+      "UserApprovalCheck included in Plan check list",
+      "Checkpoint resume logic preserved in executeTasks()",
+      "Plan artifact commit logic preserved",
+      "Backward compat: non-OpenSpec issues (no openspec/changes/) still work \u2014 createChangeDir handles both paths",
+      "Typecheck passes"
+    ],
+    "priority": 5,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/plan-stage-runner.ts",
+    "dependsOn": [
+      "T-002",
+      "T-003"
+    ],
+    "notes": "This is the most complex migration because it absorbs AcpRoundRunner. The ACP connection management, round iteration, artifact verification, and retry logic from AcpRoundRunner must be replicated in executeTasks().",
+    "attempts": 2,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      621414,
+      175364
+    ]
+  },
+  {
+    "id": "T-006",
+    "title": "Create Build stage checks and migrate BuildStageRunner",
+    "spec": "specs/workflow-definition/spec.md#Build stage behavior",
+    "description": "Create `AllTasksCompleteCheck` (verifies all tasks in tasks.json have passes:true) and `CodeCompilesCheck` (runs `npm run build` or equivalent, returns pass/fail). Then rewrite `BuildStageRunner` to extend `BaseStageRunner`: wrap RalphExecutor call in `executeTasks()`, set `getChecks()` to return [AllTasksCompleteCheck, CodeCompilesCheck], set `getNextStage()` to return Stage.Check. Remove `requiresApproval` from all results. Build stage has no UserApprovalCheck.",
+    "acceptanceCriteria": [
+      "AllTasksCompleteCheck reads tasks.json and verifies all tasks have passes:true",
+      "AllTasksCompleteCheck has reaction: { type: 'retry-task', maxAttempts: 3, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } }",
+      "CodeCompilesCheck runs build command and returns pass/fail",
+      "CodeCompilesCheck has reaction: { type: 'auto-fix', maxAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } }",
+      "BuildStageRunner extends BaseStageRunner",
+      "RalphExecutor called inside executeTasks()",
+      "BuildStageRunner check list does NOT include user-approval",
+      "BuildStageRunner no longer returns requiresApproval",
+      "Git commit logic preserved after successful task execution",
+      "Zero-work detection logic preserved",
+      "Backward compat: non-OpenSpec issues (no openspec/changes/) still handled gracefully",
+      "Typecheck passes"
+    ],
+    "priority": 6,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/build-stage-runner.ts",
+    "dependsOn": [
+      "T-002"
+    ],
+    "notes": "RalphExecutor stays intact as the task execution engine \u2014 it's just called from within executeTasks(). Do NOT break RalphExecutor into individual task objects.",
+    "attempts": 1,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      621155
+    ]
+  },
+  {
+    "id": "T-007",
+    "title": "Simplify WorkflowEngine \u2014 remove gate logic",
+    "spec": "specs/unified-check-model/spec.md#WorkflowEngine executes checks and advances without gate logic",
+    "description": "Rewrite `WorkflowEngine.run()` to use the simplified loop: find runner \u2192 run \u2192 check success \u2192 advance or escalate. Remove all `requiresApproval` branching, `setApprovalState` calls, `gateRequired` returns, and `approval_requested` event emissions. The engine should be a pure stage-advancement loop with no knowledge of approvals.",
+    "acceptanceCriteria": [
+      "WorkflowEngine.run() contains no references to requiresApproval or gateRequired (gateRequired field removed from PipelineResult)",
+      "No setApprovalState calls in WorkflowEngine (moved to BaseStageRunner ask-user reaction in T-002)",
+      "clearApprovalState remains in WorkflowEngine for Done stage cleanup only",
+      "No approval_requested event emission in WorkflowEngine (moved to BaseStageRunner)",
+      "Engine handles result.success: updateStage(result.nextStage) and continue",
+      "Engine handles result.escalateToStage: updateStage(escalateToStage) and continue",
+      "Engine handles failure without escalation: return { completed: false, stage, message }",
+      "Done stage handling preserved (updateStatus Completed, clearApprovalState, deleteAll checkpoints)",
+      "PipelineResult.gateRequired field removed from interface",
+      "Typecheck passes"
+    ],
+    "priority": 7,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/workflow-engine.ts",
+    "dependsOn": [
+      "T-004",
+      "T-005",
+      "T-006"
+    ],
+    "notes": "This task depends on all three runners being migrated because the engine must work with the new result format from all runners.",
+    "attempts": 1,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      545855
+    ]
+  },
+  {
+    "id": "T-008",
+    "title": "Update AgentRunnerService for new PipelineResult format",
+    "spec": "specs/unified-check-model/spec.md#WorkflowEngine executes checks and advances without gate logic",
+    "description": "Update `AgentRunnerService.runPipelineToCompletion()` and related methods to handle the new `PipelineResult` (no `gateRequired`). Replace `result.gateRequired` checks with detection of whether the pipeline paused at a user-approval check (check `issue.approvalState?.status === 'awaiting'`). Update `recoverFromQueue()` orphan detection and gate recovery to use the same check. Update `handlePipelineFailure()` to not call `setApprovalState` with error status.",
+    "acceptanceCriteria": [
+      "No references to result.gateRequired in agent-runner-service.ts",
+      "Pipeline pause detection uses issue.approvalState?.status === 'awaiting' instead of gateRequired",
+      "recoverFromQueue() still correctly identifies issues at approval checkpoints",
+      "handlePipelineFailure() no longer calls setApprovalState with error status",
+      "Task queue completion still works (completed, failed states)",
+      "Typecheck passes"
+    ],
+    "priority": 8,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/services/agent-runner-service.ts",
+    "dependsOn": [
+      "T-007"
+    ],
+    "notes": "",
+    "attempts": 1,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      204233
+    ]
+  },
+  {
+    "id": "T-009",
+    "title": "Create stage_executions table and StageExecutionRepo",
+    "spec": "specs/unified-check-model/spec.md#All stages persist execution state uniformly",
+    "description": "Add a DB migration creating the `stage_executions` table (id, issue_id, stage, status, task_results JSON, check_results JSON, created_at, updated_at). Create `StageExecutionRepo` with methods: create(issueId, stage), updateCheckResults(id, results), updateStatus(id, status), findActiveByIssueId(issueId). The repo stores check results for every stage, not just Check stage.",
+    "acceptanceCriteria": [
+      "Migration creates stage_executions table with correct schema",
+      "Migration runs without errors on existing DB",
+      "StageExecutionRepo.create() inserts a new record with status 'running'",
+      "StageExecutionRepo.updateCheckResults() updates check_results JSON",
+      "StageExecutionRepo.findActiveByIssueId() returns latest running/awaiting-approval record",
+      "check_suites table remains intact (not dropped) for backward compat",
+      "Typecheck passes"
+    ],
+    "priority": 3,
+    "mode": "AFK",
+    "type": "MIGRATE",
+    "output": "packages/cli/src/db/stage-execution-repo.ts",
+    "dependsOn": [
+      "T-001"
+    ],
+    "notes": "This task can be done in parallel with T-002 and T-003. The repo is wired into runners in T-011.",
+    "attempts": 1,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      173737
+    ]
+  },
+  {
+    "id": "T-010",
+    "title": "Delete WorkflowController and AcpRoundRunner, update exports",
+    "spec": "specs/pipeline-model/spec.md#REMOVED Requirements",
+    "description": "Delete `workflow-controller.ts` and `acp-round-runner.ts`. Remove their exports from `workflow/index.ts`. Update any remaining imports across the codebase. Search for and remove any references to `WorkflowController`, `AcpRoundRunner`, `gate_after`, `gateRequired`, `requiresApproval` in all source files (not just workflow/).",
+    "acceptanceCriteria": [
+      "workflow-controller.ts file deleted",
+      "acp-round-runner.ts file deleted",
+      "No imports of WorkflowController or AcpRoundRunner anywhere in codebase",
+      "No references to gate_after, gateRequired, or requiresApproval in any .ts source file",
+      "workflow/index.ts exports updated (removed deleted files, added new ones)",
+      "Typecheck passes",
+      "All existing tests pass"
+    ],
+    "priority": 9,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/index.ts",
+    "dependsOn": [
+      "T-007",
+      "T-008"
+    ],
+    "notes": "Must run after T-007 and T-008 to ensure nothing references the deleted files.",
+    "attempts": 1,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      380792
+    ]
+  },
+  {
+    "id": "T-011",
+    "title": "Wire StageExecutionRepo into all runners for unified persistence",
+    "spec": "specs/unified-check-model/spec.md#All stages persist execution state uniformly",
+    "description": "Add `stageExecutionRepo` to `StageContext`. In `BaseStageRunner.run()`, create a stage_execution record on entry, update check_results after checks complete. Pass the repo through `WorkflowEngine` constructor and `AgentRunnerService` instantiation. Each stage now persists its check results to the same table.",
+    "acceptanceCriteria": [
+      "StageContext has optional stageExecutionRepo field",
+      "BaseStageRunner.run() creates a stage_execution record at start",
+      "BaseStageRunner.run() updates check_results after checks complete",
+      "WorkflowEngine passes stageExecutionRepo through buildContext()",
+      "AgentRunnerService instantiates and passes StageExecutionRepo to engine",
+      "Check results from Plan, Build, Check stages all stored in stage_executions",
+      "Typecheck passes"
+    ],
+    "priority": 10,
+    "mode": "AFK",
+    "type": "WRITE",
+    "output": "packages/cli/src/workflow/base-stage-runner.ts",
+    "dependsOn": [
+      "T-009",
+      "T-007"
+    ],
+    "notes": "",
+    "attempts": 1,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      538256
+    ]
+  },
+  {
+    "id": "T-012",
+    "title": "Update and verify all workflow tests",
+    "spec": "specs/unified-check-model/spec.md",
+    "description": "Update all existing workflow tests to use the new types (no requiresApproval, no gateRequired). Add new tests covering: (1) full pipeline Plan\u2192Build\u2192Check\u2192Done with all checks passing, (2) escalation paths (Check\u2192Build, Check\u2192Plan, Build\u2192Plan), (3) user-approval check pausing and resuming, (4) retry-task reaction with max retry exceeded, (5) auto-fix reaction with fallback escalate. Run full test suite and verify typecheck.",
+    "acceptanceCriteria": [
+      "All existing workflow tests updated and passing",
+      "New test: full pipeline Plan\u2192Build\u2192Check\u2192Done",
+      "New test: CHECK build-test failure escalates to BUILD",
+      "New test: CHECK ai-review failure escalates to PLAN",
+      "New test: user-approval check pauses pipeline and resumes on approval",
+      "New test: retry-task reaction stops after max retries",
+      "New test: auto-fix reaction falls back to escalate after max attempts",
+      "New test: non-OpenSpec issue (no openspec/changes/) still completes full pipeline",
+      "No test references requiresApproval or gateRequired",
+      "npm test passes",
+      "npm run build (typecheck) passes"
+    ],
+    "priority": 11,
+    "mode": "AFK",
+    "type": "TEST",
+    "output": "packages/cli/tests/workflow/",
+    "dependsOn": [
+      "T-010",
+      "T-011"
+    ],
+    "notes": "This is the final verification task. All previous tasks must be complete.",
+    "attempts": 1,
+    "passes": false,
+    "order": 999999,
+    "error": null,
+    "durations": [
+      282899,
+      449854,
+      137757
+    ]
+  }
+]
