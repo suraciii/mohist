@@ -13,6 +13,7 @@ export interface CoderSession {
   model: string | null;
   coderType: string | null;
   stage: string | null;
+  title: string | null;
 }
 
 interface CoderSessionRow {
@@ -27,6 +28,7 @@ interface CoderSessionRow {
   model: string | null;
   coder_type: string | null;
   stage: string | null;
+  title: string | null;
 }
 
 function rowToCoderSession(row: CoderSessionRow): CoderSession {
@@ -42,6 +44,7 @@ function rowToCoderSession(row: CoderSessionRow): CoderSession {
     model: row.model,
     coderType: row.coder_type,
     stage: row.stage,
+    title: row.title,
   };
 }
 
@@ -53,6 +56,7 @@ export interface CreateCoderSessionData {
   model?: string;
   coderType?: string;
   stage?: string;
+  title?: string;
 }
 
 export interface SessionWithIssueInfo {
@@ -66,6 +70,7 @@ export interface SessionWithIssueInfo {
   createdAt: string;
   completedAt: string | null;
   lastActivityAt: string | null;
+  title: string | null;
 }
 
 interface SessionWithIssueInfoRow {
@@ -79,6 +84,7 @@ interface SessionWithIssueInfoRow {
   created_at: string;
   completed_at: string | null;
   last_activity_at: string | null;
+  title: string | null;
 }
 
 export class CoderSessionRepo {
@@ -93,7 +99,7 @@ export class CoderSessionRepo {
     const rows = this.db.all<SessionWithIssueInfoRow>(
       `SELECT i.number AS issue_number, i.title AS issue_title, i.stage AS issue_stage,
         cs.id AS session_id, cs.status, cs.model, cs.task_description,
-        cs.created_at, cs.completed_at,
+        cs.created_at, cs.completed_at, cs.title,
         (SELECT wl.created_at FROM workflow_log wl WHERE wl.session_id = cs.acp_session_id ORDER BY wl.created_at DESC LIMIT 1) AS last_activity_at
       FROM coder_session cs
       JOIN issues i ON cs.issue_id = i.id
@@ -114,6 +120,7 @@ export class CoderSessionRepo {
       createdAt: row.created_at,
       completedAt: row.completed_at,
       lastActivityAt: row.last_activity_at,
+      title: row.title,
     }));
   }
 
@@ -122,9 +129,9 @@ export class CoderSessionRepo {
     const now = new Date().toISOString();
 
     this.db.run(
-      `INSERT INTO coder_session (id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at, model, coder_type, stage)
-       VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?)`,
-      [id, data.issueId, data.acpSessionId, data.executionId ?? null, data.taskDescription ?? null, now, data.model ?? null, data.coderType ?? null, data.stage ?? null]
+      `INSERT INTO coder_session (id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at, model, coder_type, stage, title)
+       VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?, ?)`,
+      [id, data.issueId, data.acpSessionId, data.executionId ?? null, data.taskDescription ?? null, now, data.model ?? null, data.coderType ?? null, data.stage ?? null, data.title ?? null]
     );
 
     const row = this.db.get<CoderSessionRow>(

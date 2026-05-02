@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -190,6 +190,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 20) {
     migrateToVersion20(db);
+  }
+
+  if (currentVersion < 21) {
+    migrateToVersion21(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -943,5 +947,18 @@ function migrateToVersion20(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 20);
+  });
+}
+
+function migrateToVersion21(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>("PRAGMA table_info(coder_session)");
+    const hasTitle = tableInfo.some(col => col.name === 'title');
+
+    if (!hasTitle) {
+      db.exec("ALTER TABLE coder_session ADD COLUMN title TEXT");
+    }
+
+    setSchemaVersion(db, 21);
   });
 }
