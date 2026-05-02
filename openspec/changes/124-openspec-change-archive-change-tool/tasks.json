@@ -77,11 +77,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Remove lines 280-287 in issue-service.ts performCleanup(). The ChangeArtifactsManager import can stay if unarchive still uses it (line 226).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        40337
+      ]
     },
     {
       "id": "T-004",
