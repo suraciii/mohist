@@ -110,23 +110,44 @@ Task 类型：WRITE / TEST / MIGRATE / CONFIG / REVIEW
 
 最多 3 轮迭代。未通过的问题自动修复后重新审查。
 
-## Gate
+## Checks (验收标准)
 
-默认配置 `gate_after: human`：自审查通过后，将方案 + 自审查报告展示给用户，等待批准或反馈。
+Plan stage 的完成由一组 checks 定义，所有 checks 通过后自动进入 BUILD。
 
-- 批准 → 进入 BUILD
-- 给反馈 → AI 修改后重新自审查，再展示
-- 标记大问题 → blocked，退回 Explore Mode
+| Check | 验证内容 | 失败反应 |
+|-------|---------|---------|
+| **proposal-complete** | proposal.md 是否存在且完整 | retry-task (重新生成) |
+| **specs-complete** | specs/ 目录是否覆盖所有需求 | retry-task (重新生成) |
+| **design-complete** | design.md 技术方案是否合理 | retry-task (重新生成) |
+| **tasks-valid** | tasks.json 是否可执行且 DAG 无环 | retry-task (重新生成) |
+| **self-review-passed** | 自审查是否通过 | escalate to Explore (设计问题) |
+| **user-approval** | 用户是否已审批 | ask-user (暂停等待) |
+
+**反应策略**:
+- **retry-task**: 调用 AI 重新生成/修复交付物，最多 3 次
+- **escalate**: 设计有根本问题，回到 Explore 重新梳理需求
+- **ask-user**: 暂停 pipeline，等待用户审批（仅 user-approval check）
 
 ## Stage 结构
 
 ```
 PLAN {
-  jobs: [
-    { agent: "planner", task: "设计方案+拆分任务" }
+  tasks: [
+    { name: "generate-proposal",  agent: "planner" },
+    { name: "generate-specs",     agent: "planner" },
+    { name: "generate-design",    agent: "planner" },
+    { name: "generate-tasks",     agent: "planner" },
+    { name: "self-review",        agent: "planner" }
+  ],
+  checks: [
+    { name: "proposal-complete",    onFailure: "retry-task" },
+    { name: "specs-complete",       onFailure: "retry-task" },
+    { name: "design-complete",      onFailure: "retry-task" },
+    { name: "tasks-valid",          onFailure: "retry-task" },
+    { name: "self-review-passed",   onFailure: "escalate-to-explore" },
+    { name: "user-approval",        onFailure: "ask-user" }
   ]
-  gate_after: human
 }
 ```
 
-M1/M2 阶段只有单个 planner-agent Job。M3 可扩展为多 Job（如 architect 设计 + reviewer 审查并行）。
+M1/M2 阶段 tasks 串行执行（AI agent 成本意识，不并行）。M3 可扩展为可配置 checks。

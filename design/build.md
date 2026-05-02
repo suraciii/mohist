@@ -72,21 +72,36 @@ Task 描述是自包含的 prompt（包含文件范围、模式引用、完成�
 - 代码变更（文件修改、新增文件）
 - 测试结果
 
-## Gate
+## Checks (验收标准)
 
-默认配置 `gate_after: none`：BUILD 完成后自动进入 CHECK，无需人工确认。
+Build stage 的完成由 checks 定义，所有 checks 通过后自动进入 CHECK。
 
-BUILD 的产出由 CHECK stage 独立审查，不需要中间人工节点。
+| Check | 验证内容 | 失败反应 |
+|-------|---------|---------|
+| **all-tasks-complete** | 所有 tasks 是否已完成（passes=true） | retry-task (重新执行) |
+| **code-compiles** | 代码是否能编译通过 | auto-fix (AI 修复) |
+| **user-approval** | (Build 阶段无用户审批) | — |
+
+**反应策略**:
+- **retry-task**: 重新执行失败的 task
+- **auto-fix**: 调用 AI 修复编译错误，最多 2 次
+- **escalate**: 所有 tasks 失败 → 回到 PLAN 重新设计
 
 ## Stage 结构
 
 ```
 BUILD {
-  jobs: [
-    { agent: "coder", task: "执行 tasks.json" }
+  tasks: [
+    { name: "execute-tasks", agent: "coder" }
+    // 内部按 DAG 顺序执行 Task 001, Task 002, ...
+  ],
+  checks: [
+    { name: "all-tasks-complete", onFailure: "retry-task" },
+    { name: "code-compiles",      onFailure: "auto-fix" }
   ]
-  gate_after: none
 }
 ```
 
-M1/M2 阶段只有单个 coder-agent Job。
+Task 之间有依赖关系（DAG），由 execute-tasks task 内部管理。
+
+M1/M2 阶段 tasks 串行执行（AI agent 成本意识，不并行）。

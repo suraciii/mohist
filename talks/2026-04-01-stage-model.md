@@ -95,32 +95,42 @@ Pipeline 内遇到需求问题的两级机制：
 
 审查不是一个人的活，是一组专业角色的并行工作。且架构师在 PLAN 阶段也参与审查方案。
 
-### 6. 参考 DevOps Pipeline
+### 6. 参考 DevOps Pipeline（已修正：无 Job 层）
 
-直接映射 DevOps pipeline 模型：
+mohist 采用 Stage → Checks 结构，而非 Stage → Job → Task：
 
 ```
 Stage: 串行，有严格顺序
-Job:   并行，全部通过 stage 才算通过
-Gate:  stage 之间的 manual approval
+Check: 串行执行（AI agent 有成本，不并行）
+Gate:  stage 之间的 approval
 
 Stage: PLAN
-  ├── Job: design (plan-agent)
-  └── Job: arch-review (architect-agent, needs: design)
+  ├── Check: proposal (生成+验证 proposal.md)
+  ├── Check: specs (生成+验证 specs/)
+  ├── Check: design (生成+验证 design.md)
+  ├── Check: tasks (生成+验证 tasks.json)
+  └── Check: self-review (自审查)
   Gate: human
 
 Stage: BUILD
-  └── Job: implement (code-agent)
+  └── Check: task-graph (执行+验证所有 tasks)
   Gate: none (自动进入 CHECK)
 
 Stage: CHECK
-  ├── Job: arch-review (architect-agent)
-  ├── Job: qa-review (qa-agent)
-  └── Job: code-review (reviewer-agent)
+  ├── Check: build-test (验证编译+测试)
+  ├── Check: ai-review (验证代码质量)
+  └── Check: user-approval (验证用户已批准)
   Gate: human
 ```
 
-## 最终决策
+**2026-05-02 修正**：移除 Job 层。
+- 原因：AI agent 无法并行，Job 的核心价值（并行）不存在
+- 所有阶段统一用 Check 推进，Check 语义：验证交付物是否达标，不达标则 auto-fix
+- Plan 的 checks 是"生成型"（AI 生成交付物后自检）
+- Build 的 checks 是"实现型"（AI 实现功能后自检）
+- Check 的 checks 是"验证型"（纯验证，无生成副作用）
+
+## 最终决策（2026-05-02 更新）
 
 ```
 Issue state: draft | plan | build | check | done
@@ -129,13 +139,23 @@ Pipeline: PLAN → BUILD → CHECK (循环)
   - CHECK 失败 → 回到 PLAN
   - CHECK 通过 → DONE
 
-Stage 内部: Stage { jobs: Job[], gate_after: none | human }
-Job:        Job { agent, needs?: Job[] }
+Stage 内部: Stage { checks: Check[], gate_after: none | human }
+Check:      Check { name, run(ctx) → CheckResult, autoFix? }
+
+推进标准: 本阶段所有 checks 通过后，自动进入下一阶段
 
 Draft 不是 stage，是 issue 创建状态
 Explore 是 Pipeline 外的交互模式，不是 stage
 Gate 是 stage 属性，不是独立 stage
 ```
+
+### 核心设计理念（2026-05-02 确立）
+
+1. **不用人来守护执行**：mohist 应该持续不停地推进 issue，只有需要人类介入时才暂停
+2. **AI Agent 成本意识**：不并行执行 AI agent，每次运行都要有价值
+3. **审批与推进分离**：Approve 是用户行为，Stage 推进是 mohist 行为
+4. **统一 Check 推进**：所有阶段都用 Check 推进，Check 语义 = 验证交付物是否达标，不达标则 auto-fix
+5. **统一基础设施**：Plan/Build/Check 各自保留领域概念（Rounds/Tasks/Checks），但统一 CheckpointManager、EventBus、WorkflowEngine
 
 ## 演进路径
 

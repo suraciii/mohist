@@ -116,9 +116,9 @@ export class AgentRunnerService {
 - 注入到 Issue routes (`src/api/issues.ts:26`)
 - 提供 `GET /api/agent/status` endpoint
 
-### 5. Approval Gate: Stop & Resume 模式
+### 5. Approval Check: Stop & Resume 模式
 
-**实现**: Agent 到达 approval gate 时 session 自然结束，用户 Approve 后启动新 session。
+**实现**: Agent 到达 user-approval check 时 session 自然结束，用户 Approve 后启动新 session。
 
 **关键流程**:
 
