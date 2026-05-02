@@ -90,10 +90,23 @@ export class WorkflowEngine {
     }
 
     let currentIssue = issue;
+    const stageVisitCounts = new Map<Stage, number>();
+    const MAX_STAGE_VISITS = 5;
 
     while (currentIssue.stage !== Stage.Done) {
       if (this.signal?.aborted) {
         return { completed: false, stage: currentIssue.stage, message: 'Agent stopped by user' };
+      }
+
+      const visitCount = (stageVisitCounts.get(currentIssue.stage) ?? 0) + 1;
+      stageVisitCounts.set(currentIssue.stage, visitCount);
+
+      if (visitCount > MAX_STAGE_VISITS) {
+        return {
+          completed: false,
+          stage: currentIssue.stage,
+          message: `Stage ${currentIssue.stage} reached max visit limit (${MAX_STAGE_VISITS}) — possible escalation loop`,
+        };
       }
 
       const runner = this.runners.find(r => r.canHandle(currentIssue.stage));

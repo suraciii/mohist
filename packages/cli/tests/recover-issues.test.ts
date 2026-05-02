@@ -248,7 +248,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(recovered?.blockedReason).toContain('tasks 数组');
   });
 
-  it('plan-stage orphan: interrupted (non-build stage)', () => {
+  it('plan-stage orphan: restored to awaiting approval (non-build stage)', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Plan Orphan' });
 
@@ -270,9 +270,9 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Interrupted);
+    expect(recovered?.status).toBe(IssueStatus.Active);
     expect(recovered?.stage).toBe(Stage.Plan);
-    expect(recovered?.approvalState).toBeUndefined();
+    expect(recovered?.approvalState?.status).toBe('awaiting');
   });
 
   it('awaiting approval: gate restored, status active', () => {
@@ -305,7 +305,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(recovered?.status).toBe(IssueStatus.Active);
     expect(recovered?.stage).toBe(Stage.Plan);
     expect(recovered?.approvalState?.status).toBe('awaiting');
-    expect(service.isIssueAtApprovalGate(issue.id)).toBe(true);
+    expect(service.isIssueAwaitingApproval(issue.id)).toBe(true);
   });
 
   it('no ProjectRepo/WorktreeManager: build-stage falls back to interrupted', () => {
@@ -398,14 +398,15 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
 
     const rAwaiting = issueRepo.findById(awaitingIssue.id);
     expect(rAwaiting?.status).toBe(IssueStatus.Active);
-    expect(service.isIssueAtApprovalGate(awaitingIssue.id)).toBe(true);
+    expect(service.isIssueAwaitingApproval(awaitingIssue.id)).toBe(true);
 
     const rBuild = issueRepo.findById(buildIssue.id);
     expect(rBuild?.stage).toBe(Stage.Check);
 
     const rPlan = issueRepo.findById(planIssue.id);
-    expect(rPlan?.status).toBe(IssueStatus.Interrupted);
+    expect(rPlan?.status).toBe(IssueStatus.Active);
     expect(rPlan?.stage).toBe(Stage.Plan);
+    expect(rPlan?.approvalState?.status).toBe('awaiting');
   });
 
   it('build-stage empty tasks array: all-pass edge case advances to review', () => {

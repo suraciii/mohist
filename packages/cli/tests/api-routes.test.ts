@@ -313,7 +313,7 @@ describe('API Routes', () => {
         const response = await request(server).post('/api/issues/1/approve');
 
         expect(response.status).toBe(400);
-        expect(response.body.error).toMatch(/No pending gate/);
+        expect(response.body.error).toMatch(/No pending approval/);
       });
 
       it('should fall back to DB when hasPendingGate returns false but DB has awaiting state', async () => {

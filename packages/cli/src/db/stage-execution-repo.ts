@@ -73,6 +73,15 @@ export class StageExecutionRepo {
     return this.findById(id);
   }
 
+  updateTaskResults(id: string, taskResults: unknown): StageExecution | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE stage_executions SET task_results = ?, updated_at = ? WHERE id = ?',
+      [JSON.stringify(taskResults), now, id]
+    );
+    return this.findById(id);
+  }
+
   updateStatus(id: string, status: StageExecutionStatus): StageExecution | null {
     const now = new Date().toISOString();
     this.db.run(
