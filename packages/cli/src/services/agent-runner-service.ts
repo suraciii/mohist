@@ -1,6 +1,8 @@
 import type { IssueRepo } from '../db/issue-repo';
 import type { ProjectRepo } from '../db/project-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
+import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
+import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskType } from '../db/issue-task-queue-repo';
@@ -97,7 +99,7 @@ export class AgentRunnerService {
 
   constructor(
     private readonly eventBus: EventBus,
-    _workflowLogRepo?: unknown,
+    private readonly workflowLogRepo?: WorkflowLogRepo,
     private readonly issueRepo?: IssueRepo,
     maxConcurrentAgents: number = 8,
     _agentSessionMessageRepo?: unknown,
@@ -107,6 +109,7 @@ export class AgentRunnerService {
     private readonly worktreeManager?: WorktreeManager,
     private readonly taskQueueRepo?: IssueTaskQueueRepo,
     private readonly conflictResolutionDeps?: ConflictResolutionDeps,
+    private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -952,6 +955,8 @@ export class AgentRunnerService {
         checkpointManager,
         signal: abortController.signal,
         coderSessionRepo: this.coderSessionRepo,
+        workflowLogRepo: this.workflowLogRepo,
+        sessionStreamLogRepo: this.sessionStreamLogRepo,
       });
 
       const abortPromise = new Promise<never>((_resolve, reject) => {
