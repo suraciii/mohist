@@ -1,21 +1,18 @@
 {
   "project": "mohist",
-  "description": "Fix ModelSelect popover (Headless UI v2 compat) and improve AI settings page UX with section reorder and provider grouping",
+  "description": "Fix ModelSelect Popover broken by Headless UI v2 mismatch + improve AI Settings page layout and provider list UX",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Fix ModelSelect popover, reorder sections, add provider grouping",
-      "spec": "specs/web-ui/spec.md#Model Select Popover renders and is interactive, specs/ai-settings-provider-ux/spec.md#Provider list visual grouping",
-      "description": "In AiSettingsSection.tsx: (1) Remove the Transition wrapper from ModelSelect (lines 257–265), let Popover.Panel render directly for Headless UI v2 compat. (2) Reorder the JSX so Model Selection and Stage Model Overrides appear above the Providers section. (3) Split the flat provider list into two visually distinct groups — \"Connected\" (always expanded) and \"Available\" (collapsible, collapsed by default when connected providers exist, expanded when none connected) — with a clickable header showing a count badge and chevron toggle.",
+      "title": "Fix ModelSelect Popover — remove Transition wrapper",
+      "spec": "specs/web-ui/spec.md#modelselect-popover",
+      "description": "In AiSettingsSection.tsx, remove the `Transition` wrapper around `Popover.Panel` (line 257–265 and closing line 322). Render `Popover.Panel` directly as a child of `Popover`. Remove the unused `Transition` import from `@headlessui/react` and `Fragment` import from React if only used by `Transition as={Fragment}`.",
       "acceptanceCriteria": [
-        "Popover.Panel renders in DOM when any ModelSelect button is clicked (Mohist Model, Coder Model, Stage overrides)",
-        "Model search, selection, and clear work in all ModelSelect instances",
-        "Model Selection section renders before Providers section",
-        "Connected providers display in an always-expanded group at top",
-        "Available providers display in a collapsible group below Connected, collapsed by default when connected providers exist",
-        "Available group is expanded by default when zero connected providers",
-        "Clicking Available group header toggles expand/collapse",
-        "Unused Transition/Fragment imports removed if no longer needed",
+        "Mohist Model selector button click renders the Popover.Panel DOM with model list",
+        "Coder Model selector opens and displays selectable models",
+        "Stage Model Override selectors open after expanding the section",
+        "Clear button (X) appears when allowClear is set and a value is selected, and clears the value on click",
+        "No Transition import remains in the file",
         "Typecheck passes"
       ],
       "priority": 1,
@@ -24,7 +21,30 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "All three changes (bug fix, reorder, grouping) are in one file and interleave — splitting would create artificial partial-edit dependencies. The Transition removal is lines 257–265 and the closing tag at line 322. Reorder moves the Model Selection div block (currently ~line 530–563) and Stage Overrides block (~line 568–597) above the Providers block (~line 449–496). Provider grouping replaces the flat filteredProviders.map with separate connected/available sections using a useState for collapse state. Also remove unused Fragment import if Transition is removed."
+      "notes": "Root cause fix. This alone unblocks all model selection on the AI Settings page."
+    },
+    {
+      "id": "T-002",
+      "title": "Restructure AI Settings layout and add collapsible provider groups",
+      "spec": "specs/web-ui/spec.md#ai-settings-layout + specs/ai-settings-provider-list-ux/spec.md#provider-list-visual-grouping",
+      "description": "In AiSettingsSection.tsx, reorder sections so Model Selection and Stage Model Overrides appear above Providers (per web-ui layout spec). Split the provider list into two visual groups: configured providers (always expanded) and unconfigured providers (default collapsed with count badge). Add a `unconfiguredExpanded` state (default false). The existing `providerSearch` and `filteredProviders` logic continues to filter across both groups.",
+      "acceptanceCriteria": [
+        "Model Selection section renders at the top of the page, Providers section below it",
+        "Configured providers display under a 'Configured' group header, always expanded",
+        "Unconfigured providers display under an 'Available Providers (N)' header, collapsed by default",
+        "Clicking the 'Available Providers' header toggles expand/collapse",
+        "Empty 'Configured' group is hidden when no providers are configured",
+        "Provider search filters both groups correctly",
+        "Clearing search restores all providers",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "All changes are in the same file. T-001 fixes the popover first so layout changes are verifiable."
     }
   ]
 }
