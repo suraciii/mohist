@@ -1,20 +1,18 @@
 {
   "project": "mohist",
-  "description": "Fix ModelSelect popover broken by Headless UI v2 incompatibility and improve AI Settings page layout",
+  "description": "Fix broken model select popovers and improve provider list UX on AI Settings page",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Fix ModelSelect Popover.Panel rendering under Headless UI v2",
-      "spec": "specs/web-ui/spec.md#model-selection-popover-renders-correctly",
-      "description": "Remove the `<Transition>` wrapper around `<Popover.Panel>` in the ModelSelect component (AiSettingsSection.tsx lines 257-265). Replace with Popover.Panel using its built-in `transition` prop for animation. This fixes all three selectors (Mohist Model, Coder Model, Stage Overrides) since they share the same ModelSelect component.",
+      "title": "Fix ModelSelect Popover for Headless UI v2",
+      "spec": "specs/web-ui/spec.md#AI Settings Model Select Popover",
+      "description": "Remove the Transition wrapper around Popover.Panel in ModelSelect component (lines 257-265 of AiSettingsSection.tsx). Render Popover.Panel directly so it works with @headlessui/react v2.2.10. Also remove Transition from the import statement.",
       "acceptanceCriteria": [
-        "Popover.Panel renders in the DOM when the Mohist Model selector button is clicked",
-        "Popover.Panel renders in the DOM when the Coder Model selector button is clicked",
-        "Popover.Panel renders in the DOM when any Stage Model Override selector is clicked",
-        "Selecting a model from the dropdown updates the corresponding setting",
-        "Enter/leave transition animation is preserved using Popover.Panel's transition prop",
-        "Fragment import can be removed if no longer needed",
-        "Typecheck passes"
+        "Transition wrapper removed from ModelSelect Popover.Panel",
+        "Transition removed from @headlessui/react import",
+        "Popover.Panel renders directly without Transition",
+        "Typecheck passes",
+        "Build passes"
       ],
       "priority": 1,
       "mode": "AFK",
@@ -22,22 +20,22 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "The fix is in ModelSelect component only (lines 257-265). All three selectors share this component so fixing it once fixes all instances."
+      "notes": "This fixes all 7+ popover instances (Mohist Model, Coder Model, 5 Stage Overrides) since they all use the same ModelSelect component."
     },
     {
       "id": "T-002",
-      "title": "Reorder AI Settings sections and add provider list visual grouping",
-      "spec": "specs/web-ui/spec.md#ai-settings-page-surfaces-model-selection-prominently specs/web-ui/spec.md#provider-list-has-visual-grouping",
-      "description": "Restructure AiSettingsSection JSX to render sections in new order: Model Selection → Stage Overrides → Connected Providers → Available Providers (collapsed) → Custom Providers. Split the flat provider list into connected (always visible) and available (collapsed by default with count summary). Add an `availableProvidersOpen` state for the collapsible available providers section. Remove the provider search input.",
+      "title": "Reorder sections and add collapsible unconfigured providers",
+      "spec": "specs/web-ui/spec.md#AI Settings Provider 列表布局",
+      "description": "Reorder AiSettingsSection JSX to: Model Selection → Connected Providers → Custom Providers → Available Providers (collapsible) → Stage Overrides. Split the flat provider list into separate connected and unconfigured groups. Add a collapsible section for unconfigured providers using useState + ChevronRightIcon toggle (matching the Stage Model Overrides pattern), defaulting to collapsed with a count badge.",
       "acceptanceCriteria": [
-        "Model Selection section (Mohist Model + Coder Model) is the first section on the page",
-        "Connected providers render in their own always-visible section",
-        "Available providers render in a collapsible section that is collapsed by default",
-        "Collapsed available providers section shows a summary with provider count",
-        "Expanding available providers reveals the full list with Connect buttons",
-        "When no unconfigured providers exist, the Available Providers section is not displayed",
-        "Provider search input is removed",
-        "Typecheck passes"
+        "Model Selection section appears before Provider sections",
+        "Connected providers render in their own group",
+        "Unconfigured providers render in a separate collapsible section",
+        "Unconfigured section defaults to collapsed",
+        "Collapsed state shows provider count badge",
+        "ChevronRightIcon rotation toggle works for unconfigured section",
+        "Typecheck passes",
+        "Build passes"
       ],
       "priority": 2,
       "mode": "AFK",
@@ -45,7 +43,7 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Depends on T-001 since the popover fix must be in place to verify Model Selection works after reordering."
+      "notes": "The existing sortedProviders/filteredProviders memos may need to be split into separate memos for configured and unconfigured providers."
     }
   ]
 }

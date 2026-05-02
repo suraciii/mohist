@@ -1,13 +1,12 @@
 ## Why
 
-The AI Settings page has a critical bug that makes all model selectors completely non-functional — `ModelSelect` wraps `Popover.Panel` in a `Transition` without passing `show={open}`, which is required by Headless UI v2. Additionally, the provider list UX is poor: 80+ providers in a flat list with no visual hierarchy, burying the model selection section at the bottom of the page.
+The AI Settings page is partially broken: all model selector popovers (Mohist Model, Coder Model, Stage Overrides) fail to open because `Transition` wraps `Popover.Panel` without passing `show={open}` — a Headless UI v1 pattern that doesn't work with the project's v2.2.10. Additionally, 80+ providers render as a flat ungrouped list with no visual hierarchy, burying Model Selection at the page bottom.
 
 ## What Changes
 
-- Fix `ModelSelect` component to render `Popover.Panel` correctly under Headless UI v2 (remove `Transition` wrapper or pass `show={open}`)
-- Reorganize AI Settings page layout to surface Model Selection above the provider list
-- Add visual grouping/collapsing to the provider list (connected vs. available)
-- Improve provider list information density with section headers and collapsed available providers
+- Fix `ModelSelect` component: remove `Transition` wrapper from `Popover.Panel` (or add `show={open}`), making popovers functional under Headless UI v2
+- Restructure provider list: separate connected providers from unconfigured ones with visual grouping or collapsible sections
+- Move Model Selection section higher in the page layout so it's accessible without scrolling past the full provider list
 
 ## Capabilities
 
@@ -15,10 +14,10 @@ The AI Settings page has a critical bug that makes all model selectors completel
 
 ### Modified Capabilities
 
-- `web-ui` — Model selection popover must render and function; provider list must have visual grouping with connected/available sections
+- `web-ui` — Model selector popover interaction and provider list layout within AI Settings section
 
 ## Impact
 
-- `packages/cli/web/src/components/AiSettingsSection.tsx` — ModelSelect fix (line 257-265 Transition wrapper), provider list layout restructure
-- `packages/cli/web/src/components/SettingsPage.tsx` — minor if layout order changes
-- `@headlessui/react` v2 API usage pattern (Transition + Popover compatibility)
+- `packages/cli/web/src/components/AiSettingsSection.tsx` — `ModelSelect` component (lines 173–327): remove `Transition` wrapper at lines 257–265; provider list rendering and layout reordering
+- `packages/cli/web/src/components/SettingsPage.tsx` — minor if section ordering changes
+- Dependency: `@headlessui/react` v2.2.10 (already installed, no version change needed)
