@@ -16,3 +16,4 @@ export { PipelineCheckpointRepo, type PipelineCheckpoint } from './pipeline-chec
 export { ScheduleRepo, type SkillSchedule, type CreateScheduleData } from './schedule-repo';
 export { IssueTaskQueueRepo, type IssueTaskQueueRecord, type CreateTaskQueueEntryData, type UpdateTaskStatusFields, type TaskType, type TaskStatus } from './issue-task-queue-repo';
 export { CheckSuiteRepo, type CreateCheckSuiteData } from './check-suite-repo';
+export { StageExecutionRepo, type StageExecution, type StageExecutionStatus } from './stage-execution-repo';
