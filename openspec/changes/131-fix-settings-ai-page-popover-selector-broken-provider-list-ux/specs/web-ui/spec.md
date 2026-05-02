@@ -1,35 +1,50 @@
 ## ADDED Requirements
 
-### Requirement: ModelSelect Popover 可正常打开
+### Requirement: Model selection popover renders correctly
 
-AI Settings 页面的 `ModelSelect` 组件 SHALL 使用 Headless UI v2 兼容的方式渲染 `Popover.Panel`，确保所有模型选择器（Mohist Model、Coder Model、Stage Model Overrides）可以正常打开和选择模型。
+The `ModelSelect` component SHALL render its dropdown panel when the user clicks the trigger button. Under `@headlessui/react` v2, `Popover.Panel` SHALL NOT be wrapped in a `Transition` without `show={open}`, as v2's `Transition` does not auto-detect Popover's open state.
 
-#### Scenario: Mohist Model 选择器打开
-- **WHEN** 用户点击 Mohist Model 选择器按钮
-- **THEN** Popover Panel 渲染到 DOM 并显示可选模型列表
-- **AND** 用户可以搜索、高亮和选择一个模型
+#### Scenario: Mohist Model selector opens and allows selection
+- **WHEN** user clicks the Mohist Model selector button
+- **THEN** the popover panel renders in the DOM
+- **AND** displays a searchable list of available models grouped by provider
+- **AND** selecting a model updates the Mohist Model setting
 
-#### Scenario: Coder Model 选择器打开
-- **WHEN** 用户点击 Coder Model 选择器按钮
-- **THEN** Popover Panel 渲染到 DOM 并显示可选模型列表
-- **AND** 用户可以搜索、高亮和选择一个模型
+#### Scenario: Coder Model selector opens and allows selection
+- **WHEN** user clicks the Coder Model selector button
+- **THEN** the popover panel renders in the DOM
+- **AND** displays a searchable list of coder models
+- **AND** selecting a model updates the Coder Model setting
 
-#### Scenario: Stage Model Override 选择器打开
-- **WHEN** 用户展开 Stage Model Overrides
-- **AND** 点击某个 stage 的模型选择器按钮
-- **THEN** Popover Panel 渲染到 DOM 并显示可选模型列表
-- **AND** 用户可以搜索、高亮和选择一个模型
+#### Scenario: Stage Model Override selector opens and allows selection
+- **WHEN** user expands Stage Model Overrides
+- **AND** clicks any stage model selector button
+- **THEN** the popover panel renders in the DOM
+- **AND** selecting a model updates that stage's override
 
-#### Scenario: 清除已选模型
-- **WHEN** ModelSelect 配置了 `allowClear` 且已有选中值
-- **THEN** 显示清除按钮（X 图标）
-- **AND** 点击清除按钮后值被清空
+### Requirement: AI Settings page surfaces Model Selection prominently
 
-### Requirement: AI Settings 页面布局 Model Selection 在上
+The AI Settings page SHALL display the Model Selection section above the provider list, so users can quickly select models without scrolling past the full provider catalog.
 
-AI Settings 页面 SHALL 将 Model Selection 区域（Mohist Model、Coder Model、Stage Model Overrides）放在页面顶部、Provider 列表之前。
+#### Scenario: Model Selection appears above Providers
+- **WHEN** user navigates to the AI Settings page
+- **THEN** the Model Selection section (Mohist Model, Coder Model) renders before the Providers section
 
-#### Scenario: 页面布局顺序
-- **WHEN** 用户打开 AI Settings 页面
-- **THEN** Model Selection 区域（包括 Mohist Model、Coder Model 选择器）显示在页面顶部
-- **AND** Provider 列表显示在 Model Selection 下方
+### Requirement: Provider list has visual grouping
+
+The provider list SHALL visually separate connected providers from available (unconfigured) providers, with the connected section always visible and the available section collapsible.
+
+#### Scenario: Connected providers display in a dedicated section
+- **WHEN** at least one provider is configured
+- **THEN** connected providers render in a "Connected" section with a green status indicator
+- **AND** each shows provider name, masked API key, and a Remove button
+
+#### Scenario: Available providers are collapsed by default
+- **WHEN** there are unconfigured providers
+- **THEN** available providers render in a collapsible "Available Providers" section
+- **AND** the section is collapsed by default, showing only a summary (e.g., count)
+- **AND** expanding the section reveals the full list with Connect buttons
+
+#### Scenario: Only connected providers when no available providers
+- **WHEN** all builtin providers are configured
+- **THEN** the Available Providers section is not displayed
