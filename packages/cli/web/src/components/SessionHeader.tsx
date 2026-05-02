@@ -17,7 +17,7 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function getSessionLabel(session: CoderSessionItem): string {
+export function getSessionLabel(session: CoderSessionItem): string {
   if (session.title) return session.title
 
   if (session.executionId) {
