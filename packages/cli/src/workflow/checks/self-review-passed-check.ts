@@ -3,8 +3,7 @@ import type { ReactionConfig } from '../stage-context';
 import { parseVerdict, readReportFile } from '../utils';
 
 const ARTIFACT_REACTION: ReactionConfig = {
-  type: 'retry-task',
-  maxAttempts: 3,
+  type: 'ask-user',
   fallbackReaction: { type: 'escalate' },
 };
 
