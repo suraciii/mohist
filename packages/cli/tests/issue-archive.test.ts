@@ -94,7 +94,7 @@ describe('Migration v16', () => {
     const row = db.get<{ value: string }>(
       "SELECT value FROM config WHERE key = 'schema_version'"
     );
-    expect(row?.value).toBe('18');
+    expect(row?.value).toBe('19');
   });
 });
 
