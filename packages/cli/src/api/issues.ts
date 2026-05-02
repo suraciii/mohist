@@ -895,12 +895,12 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      if (!agentRunner.isIssueAtApprovalGate(issue.id)) {
+      if (!agentRunner.isIssueAwaitingApproval(issue.id)) {
         const pendingIssue = issueRepo.findPendingApprovalByIssueId(issue.id);
         if (!(pendingIssue?.approvalState?.status === 'awaiting')) {
           const response: ApiResponse = {
             success: false,
-            error: `No pending gate for issue #${number}. The pipeline may have completed or not been started. Try: mo issue start ${number}`
+            error: `No pending approval for issue #${number}. The pipeline may have completed or not been started. Try: mo issue start ${number}`
           };
           return c.json(response, 400);
         }
@@ -1173,7 +1173,7 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      if (!agentRunner.isIssueAtApprovalGate(issue.id)) {
+      if (!agentRunner.isIssueAwaitingApproval(issue.id)) {
         const response: ApiResponse = {
           success: false,
           error: `Pipeline is not paused for issue #${number}`

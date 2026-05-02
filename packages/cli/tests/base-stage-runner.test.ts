@@ -267,6 +267,7 @@ describe('BaseStageRunner', () => {
       const approvalCheck = new FailCheck(
         'user-approval',
         { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } },
+        async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
       );
 
       const runner = new TestStageRunner({
@@ -290,6 +291,7 @@ describe('BaseStageRunner', () => {
       const approvalCheck = new FailCheck(
         'user-approval',
         { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } },
+        async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
       );
 
       const runner = new TestStageRunner({
@@ -311,6 +313,7 @@ describe('BaseStageRunner', () => {
       const approvalCheck = new FailCheck(
         'user-approval',
         { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } },
+        async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
       );
 
       const runner = new TestStageRunner({
@@ -329,6 +332,7 @@ describe('BaseStageRunner', () => {
       const approvalCheck = new FailCheck(
         'user-approval',
         { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } },
+        async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
       );
 
       const runner = new TestStageRunner({

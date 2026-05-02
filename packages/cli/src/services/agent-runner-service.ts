@@ -217,7 +217,7 @@ export class AgentRunnerService {
 
       if (issue?.approvalState?.status === 'awaiting') {
         this.taskQueueRepo.updateStatus(task.id, 'completed', {
-          result: 'approval_gate',
+          result: 'awaiting_approval',
           completedAt: new Date().toISOString(),
         });
         log.info('Recovered running task — at approval gate, marked completed', {
@@ -999,7 +999,7 @@ export class AgentRunnerService {
           stage: result.stage,
           taskId: task.id,
         });
-        this.completeTask(task.id, 'completed', 'approval_gate');
+        this.completeTask(task.id, 'completed', 'awaiting_approval');
         return;
       }
 
@@ -1266,7 +1266,7 @@ export class AgentRunnerService {
 
   private handlePlanRebase(issue: Issue, _project: { name: string }, _projectId: string, number: number): void {
     if (!this.worktreeManager || !this.issueRepo) return;
-    if (!this.isIssueAtApprovalGate(issue.id)) {
+    if (!this.isIssueAwaitingApproval(issue.id)) {
       log.info('Skipping re-self-review injection: issue not at approval gate', { issueNumber: number });
       return;
     }
@@ -1363,7 +1363,7 @@ export class AgentRunnerService {
     return this.waitingQuestions;
   }
 
-  isIssueAtApprovalGate(issueId: string): boolean {
+  isIssueAwaitingApproval(issueId: string): boolean {
     if (!this.issueRepo) return false;
     const issue = this.issueRepo.findById(issueId);
     if (!issue) return false;

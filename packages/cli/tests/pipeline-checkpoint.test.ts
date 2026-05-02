@@ -399,6 +399,11 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
 
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
+    vi.mocked(fs.readdirSync).mockImplementation((p: unknown) => {
+      if (typeof p === 'string' && p.endsWith('specs')) return ['spec.md'];
+      return [];
+    });
+
     const result = await runPlanStage(createMockIssue({
       approvalState: { stage: Stage.Plan, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' },
     }), artifactManager);

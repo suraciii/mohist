@@ -90,11 +90,11 @@ describe('Migration v16', () => {
     expect(row?.archived_at).toBeNull();
   });
 
-  it('should have schema version 18', () => {
+  it('should have schema version 20', () => {
     const row = db.get<{ value: string }>(
       "SELECT value FROM config WHERE key = 'schema_version'"
     );
-    expect(row?.value).toBe('19');
+    expect(row?.value).toBe('20');
   });
 });
 

@@ -28,10 +28,10 @@ describe('AgentRunnerService', () => {
     db.close();
   });
 
-  describe('isIssueAtApprovalGate', () => {
-    it('should return false when no gates pending', () => {
+  describe('isIssueAwaitingApproval', () => {
+    it('should return false when no approval pending', () => {
       const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
-      expect(service.isIssueAtApprovalGate('nonexistent')).toBe(false);
+      expect(service.isIssueAwaitingApproval('nonexistent')).toBe(false);
     });
   });
 
@@ -59,7 +59,7 @@ describe('AgentRunnerService', () => {
       expect(recovered?.status).toBe(IssueStatus.Active);
       expect(recovered?.stage).toBe(Stage.Plan);
       expect(recovered?.approvalState?.status).toBe('awaiting');
-      expect(service.isIssueAtApprovalGate(issue.id)).toBe(true);
+      expect(service.isIssueAwaitingApproval(issue.id)).toBe(true);
     });
 
     it('should preserve stage when recovering crashed orphaned issues', () => {
@@ -100,7 +100,7 @@ describe('AgentRunnerService', () => {
       const recoveredAwaiting = issueRepo.findById(awaitingIssue.id);
       expect(recoveredAwaiting?.status).toBe(IssueStatus.Active);
       expect(recoveredAwaiting?.stage).toBe(Stage.Plan);
-      expect(service.isIssueAtApprovalGate(awaitingIssue.id)).toBe(true);
+      expect(service.isIssueAwaitingApproval(awaitingIssue.id)).toBe(true);
 
       const recoveredCrashed = issueRepo.findById(crashedIssue.id);
       expect(recoveredCrashed?.status).toBe(IssueStatus.Interrupted);

@@ -19,11 +19,21 @@ export class UserApprovalCheck implements Check {
   }
 
   async run(ctx: CheckContext): Promise<CheckResult> {
-    if (ctx.issue.approvalState?.status === 'approved') {
+    const status = ctx.issue.approvalState?.status;
+
+    if (status === 'approved') {
       return {
         name: this.name,
         status: 'pass',
         message: 'User approved',
+      };
+    }
+
+    if (status === 'rejected') {
+      return {
+        name: this.name,
+        status: 'fail',
+        message: 'User rejected — escalating to prior stage',
       };
     }
 

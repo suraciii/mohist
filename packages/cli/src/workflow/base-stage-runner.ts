@@ -24,6 +24,7 @@ export abstract class BaseStageRunner implements StageRunner {
     let taskOutput: unknown;
     try {
       taskOutput = await this.executeTasks(ctx);
+      this.persistTaskResults(ctx, taskOutput);
     } catch (err: any) {
       const checkResults: CheckResult[] = [];
       this.persistCheckResults(ctx, checkResults);
@@ -99,6 +100,9 @@ export abstract class BaseStageRunner implements StageRunner {
           message: result.message ?? `Check "${check.name}" failed, escalating`,
         };
       case 'ask-user':
+        if (result.status === 'fail' && check.reaction.fallbackReaction) {
+          return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount);
+        }
         return this.handleAskUser(ctx, check, result, allResults, taskOutput);
     }
   }
@@ -165,8 +169,8 @@ export abstract class BaseStageRunner implements StageRunner {
 
     const checkCtx = this.buildCheckContext(ctx);
 
-    if (typeof (check as any).fix === 'function') {
-      await (check as any).fix(checkCtx);
+    if ('fix' in check && typeof check.fix === 'function') {
+      await check.fix(checkCtx);
     }
 
     const recheckResult = await check.run(checkCtx);
@@ -246,6 +250,13 @@ export abstract class BaseStageRunner implements StageRunner {
     if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
     try {
       ctx.stageExecutionRepo.updateCheckResults(this.stageExecutionId, checkResults);
+    } catch {}
+  }
+
+  private persistTaskResults(ctx: StageContext, taskOutput: unknown): void {
+    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
+    try {
+      ctx.stageExecutionRepo.updateTaskResults(this.stageExecutionId, taskOutput);
     } catch {}
   }
 }

@@ -370,7 +370,7 @@ describe('IssueTaskQueue', () => {
 
       const recovered = taskQueueRepo.findById(record.id);
       expect(recovered!.status).toBe('completed');
-      expect(recovered!.result).toBe('approval_gate');
+      expect(recovered!.result).toBe('awaiting_approval');
 
       const recoveredIssue = issueRepo.findById(issue.id);
       expect(recoveredIssue!.stage).toBe(Stage.Plan);

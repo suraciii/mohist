@@ -121,94 +121,83 @@ export class BuildTestCheck implements Check {
     this.worktreePath = options.worktreePath;
   }
 
-  async run(ctx: CheckContext): Promise<CheckResult> {
+  async run(_ctx: CheckContext): Promise<CheckResult> {
     const workflow = loadWorkflow(this.worktreePath);
     const config = typeof workflow === 'string'
       ? DEFAULT_CHECKS_CONFIG.buildTest
       : loadChecksConfig(workflow).buildTest;
 
-    const { command, timeout, autoFix, maxFixAttempts } = config;
+    const { command, timeout } = config;
     const startTime = Date.now();
 
-    let lastBuildLog = '';
+    log.info('Build & Test check running', { command, timeout });
 
-    for (let attempt = 0; attempt <= (autoFix ? maxFixAttempts : 0); attempt++) {
-      log.info('Build & Test check running', {
-        command,
+    try {
+      const { stdout, stderr } = await execFileAsync(command, [], {
+        cwd: this.worktreePath,
         timeout,
-        attempt: attempt + 1,
-        autoFix,
+        maxBuffer: 10 * 1024 * 1024,
+        shell: true,
       });
 
-      try {
-        const { stdout, stderr } = await execFileAsync(command, [], {
-          cwd: this.worktreePath,
-          timeout,
-          maxBuffer: 10 * 1024 * 1024,
-          shell: true,
-        });
+      const duration = Date.now() - startTime;
+      log.info('Build & Test check passed', { duration });
 
-        const duration = Date.now() - startTime;
-        log.info('Build & Test check passed', { duration, attempt: attempt + 1 });
+      return {
+        name: this.name,
+        status: 'pass',
+        message: 'Build & test 通过',
+        output: {
+          duration,
+          buildLog: truncateLog(stdout + '\n' + stderr, 50000),
+        },
+      };
+    } catch (err: any) {
+      const output = [err.stdout, err.stderr, err.message].filter(Boolean).join('\n');
+      const isTimeout = err.killed === true;
 
-        return {
-          name: this.name,
-          status: 'pass',
-          message: `Build & test 通过${attempt > 0 ? ` (第 ${attempt + 1} 次尝试自动修复成功)` : ''}`,
-          output: {
-            duration,
-            autoFixed: attempt > 0,
-            buildLog: truncateLog(stdout + '\n' + stderr, 50000),
-          },
-        };
-      } catch (err: any) {
-        const output = [err.stdout, err.stderr, err.message].filter(Boolean).join('\n');
-        lastBuildLog = output;
-        const isTimeout = err.killed === true;
+      log.warn('Build & Test check failed', { isTimeout });
 
-        if (!autoFix || attempt >= maxFixAttempts) {
-          log.warn('Build & Test check failed, no more attempts', {
-            attempt: attempt + 1,
-            isTimeout,
-          });
-
-          return {
-            name: this.name,
-            status: 'fail',
-            message: formatBuildErrorMessage(err),
-            output: {
-              duration: Date.now() - startTime,
-              buildLog: truncateLog(output, 50000),
-            },
-          };
-        }
-
-        log.info('Build & Test check failed, spawning coder agent to auto-fix', {
-          attempt: attempt + 1,
-          maxFixAttempts,
-          issueNumber: ctx.issue.number,
-        });
-
-        const fixResult = await this.runAutoFixAgent(ctx, output);
-        if (!fixResult) {
-          log.warn('Auto-fix agent failed or unavailable, retrying build without fix', {
-            issueNumber: ctx.issue.number,
-            attempt: attempt + 1,
-          });
-        }
-      }
+      return {
+        name: this.name,
+        status: 'fail',
+        message: formatBuildErrorMessage(err),
+        output: {
+          duration: Date.now() - startTime,
+          buildLog: truncateLog(output, 50000),
+        },
+      };
     }
-
-    const duration = Date.now() - startTime;
-    return {
-      name: this.name,
-      status: 'fail',
-      message: `Build & test 失败 — ${maxFixAttempts} 次自动修复尝试均未成功`,
-      output: { duration, buildLog: truncateLog(lastBuildLog, 50000) },
-    };
   }
 
-  private async runAutoFixAgent(ctx: CheckContext, buildLog: string): Promise<boolean> {
+  async fix(ctx: CheckContext): Promise<void> {
+    const workflow = loadWorkflow(this.worktreePath);
+    const config = typeof workflow === 'string'
+      ? DEFAULT_CHECKS_CONFIG.buildTest
+      : loadChecksConfig(workflow).buildTest;
+
+    // Run build once to capture the error log for the auto-fix prompt
+    let buildLog = '';
+    try {
+      await execFileAsync(config.command, [], {
+        cwd: this.worktreePath,
+        timeout: config.timeout,
+        maxBuffer: 10 * 1024 * 1024,
+        shell: true,
+      });
+      // Build passed unexpectedly — nothing to fix
+      log.info('BuildTestCheck auto-fix: build passed unexpectedly', {
+        issueNumber: ctx.issue.number,
+      });
+      return;
+    } catch (err: any) {
+      buildLog = [err.stdout, err.stderr, err.message].filter(Boolean).join('\n');
+    }
+
+    log.info('BuildTestCheck auto-fix: spawning coder agent', {
+      issueNumber: ctx.issue.number,
+    });
+
     try {
       const { runAcpSession } = await import('../../agent-runtime/acp-session');
       const prompt = buildCheckAutoFixPrompt(buildLog);
@@ -234,14 +223,11 @@ export class BuildTestCheck implements Check {
         success: result.success,
         textLength: result.text?.length ?? 0,
       });
-
-      return result.success;
     } catch (err) {
       log.error('Auto-fix agent failed', {
         issueNumber: ctx.issue.number,
         error: err instanceof Error ? err.message : String(err),
       });
-      return false;
     }
   }
 }
