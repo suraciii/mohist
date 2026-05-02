@@ -660,6 +660,7 @@ export async function runRalphLoop(
         onProcessSpawned: context.onProcessSpawned,
         stage: context.stage,
         model: context.model,
+        title: `${nextTask.id}: ${nextTask.title}`,
         onBeforeKill: context.worktreeManager
           ? async (cwd: string) => {
               const hash = await context.worktreeManager!.createWipCommit(cwd, nextTask.id, attempt);

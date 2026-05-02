@@ -96,6 +96,7 @@ export class PlanStageRunner extends BaseStageRunner {
       ...acpOptions,
       executionId: `plan-${issue.number}`,
       stage: 'plan',
+      title: 'Plan stage',
       onSessionUpdate: (_notification) => {
         if (!eventBus) return;
         try {
