@@ -2319,6 +2319,8 @@ export function createIssueRoutes(
         checkpointRepo.delete(issue.number, issue.stage);
       }
 
+      agentRunner.cancelAll(issue.id);
+
       const issueRepo = stateManager.getIssueRepo();
       issueRepo.clearApprovalState(issue.id);
       issueRepo.updateBlockedReason(issue.id, null);

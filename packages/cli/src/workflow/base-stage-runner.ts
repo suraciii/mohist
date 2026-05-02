@@ -2,6 +2,7 @@ import { Stage } from '../types';
 import type { StageContext, StageRunResult, CheckResult } from './stage-context';
 import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
+import type { StageExecutionStatus } from '../db/stage-execution-repo';
 
 export abstract class BaseStageRunner implements StageRunner {
   abstract canHandle(stage: Stage): boolean;
@@ -28,6 +29,7 @@ export abstract class BaseStageRunner implements StageRunner {
     } catch (err: any) {
       const checkResults: CheckResult[] = [];
       this.persistCheckResults(ctx, checkResults);
+      this.updateStageExecutionStatus(ctx, 'failed');
       return {
         success: false,
         output: null,
@@ -36,7 +38,23 @@ export abstract class BaseStageRunner implements StageRunner {
       };
     }
 
-    return this.runAllChecks(ctx, taskOutput, 0);
+    const result = await this.runAllChecks(ctx, taskOutput, 0);
+    if (result.success) {
+      this.updateStageExecutionStatus(ctx, 'passed');
+    } else {
+      const hasApproval = result.checkResults?.some(
+        (cr: CheckResult) => cr.status === 'fail' && result.message?.includes('approval')
+      );
+      this.updateStageExecutionStatus(ctx, hasApproval ? 'awaiting-approval' : 'failed');
+    }
+    return result;
+  }
+
+  private updateStageExecutionStatus(ctx: StageContext, status: StageExecutionStatus): void {
+    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
+    try {
+      ctx.stageExecutionRepo.updateStatus(this.stageExecutionId, status);
+    } catch {}
   }
 
   private async runAllChecks(

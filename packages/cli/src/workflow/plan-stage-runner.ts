@@ -94,6 +94,9 @@ export class PlanStageRunner extends BaseStageRunner {
 
     const connectionOptions: AcpConnectionOptions = {
       ...acpOptions,
+      issueId: issue.id,
+      projectId: issue.projectId,
+      issueNumber: issue.number,
       executionId: `plan-${issue.number}`,
       stage: 'plan',
       title: 'Plan stage',
