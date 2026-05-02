@@ -951,6 +951,7 @@ export class AgentRunnerService {
         projectId,
         checkpointManager,
         signal: abortController.signal,
+        coderSessionRepo: this.coderSessionRepo,
       });
 
       const abortPromise = new Promise<never>((_resolve, reject) => {
