@@ -277,15 +277,6 @@ export class IssueService {
       }
     }
 
-    if (project) {
-      const artifactsManager = new ChangeArtifactsManager(project.path);
-      try {
-        await artifactsManager.archiveChange(issueNumber);
-      } catch {
-        // change dir doesn't exist, skip gracefully
-      }
-    }
-
     if (this.checkpointRepo) {
       try {
         this.checkpointRepo.deleteAll(issueNumber);
