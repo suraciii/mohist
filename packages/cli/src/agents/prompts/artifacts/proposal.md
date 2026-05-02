@@ -2,6 +2,11 @@
 
 Create the proposal document that establishes WHY this change is needed.
 
+## Before Writing
+
+1. **Read the issue thoroughly.** Understand the problem, user intent, and scope. Do not skim — re-read until the requirement is clear.
+2. **Explore the codebase.** Find related files, existing implementations, and patterns. Search for relevant modules, types, APIs, and utilities. You need enough context to write an accurate Impact section and realistic Capabilities.
+
 ## Sections
 
 - **Why**: 1-2 sentences on the problem or opportunity. What problem does this solve? Why now?

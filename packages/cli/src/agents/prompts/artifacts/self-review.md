@@ -1,5 +1,9 @@
 ## Review Criteria
 
+### Alignment
+- Proposal addresses the actual issue — every "What Changes" entry traces back to an issue requirement
+- No requirements from the issue are missing or misinterpreted
+
 ### Completeness
 - All requirements covered by specs
 - All specs have tasks
