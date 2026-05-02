@@ -12,7 +12,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
-interface RoundConfig {
+interface TaskConfig {
   type: string;
   label: string;
   outputPath: string;
@@ -63,7 +63,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     const reviewOutputPath = 'review.md';
     const selfCheckOutputPath = 'review-self-check.md';
 
-    const rounds: RoundConfig[] = [
+    const tasks: TaskConfig[] = [
       {
         type: 'review',
         label: 'review',
@@ -116,92 +116,129 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     try {
       conn = await createAcpConnection(connectionOptions);
 
-      for (const [index, round] of rounds.entries()) {
-        roundState.type = round.type;
+      for (const [index, task] of tasks.entries()) {
+        roundState.type = task.type;
         roundState.index = index;
 
-        if (completedSteps.includes(round.type)) {
-          if (round.verifyArtifact()) {
-            log.info('Review round skipped (checkpoint + artifact exists)', {
-              artifact: round.type,
+        if (completedSteps.includes(task.type)) {
+          if (task.verifyArtifact()) {
+            log.info('Review task skipped (checkpoint + artifact exists)', {
+              artifact: task.type,
               issueNumber: ctx.issue.number,
+            });
+            this.appendTaskResult(ctx, {
+              taskId: task.type,
+              title: task.label,
+              status: 'skipped',
+              artifacts: [],
+              attempts: 0,
+              duration: 0,
             });
             continue;
           }
-          log.info('Review round in checkpoint but artifact missing, re-running', {
-            artifact: round.type,
+          log.info('Review task in checkpoint but artifact missing, re-running', {
+            artifact: task.type,
             issueNumber: ctx.issue.number,
           });
-          const idx = completedSteps.indexOf(round.type);
+          const idx = completedSteps.indexOf(task.type);
           completedSteps.splice(idx);
-        } else if (round.verifyArtifact()) {
+        } else if (task.verifyArtifact()) {
           log.info('Review artifact exists but not in checkpoint, marking complete', {
-            artifact: round.type,
+            artifact: task.type,
             issueNumber: ctx.issue.number,
           });
-          completedSteps.push(round.type);
+          completedSteps.push(task.type);
           ctx.checkpointManager?.markStepComplete(
             ctx.issue.number,
             'review',
-            round.type,
-            rounds[index + 1]?.type ?? null,
+            task.type,
+            tasks[index + 1]?.type ?? null,
           );
+          this.appendTaskResult(ctx, {
+            taskId: task.type,
+            title: task.label,
+            status: 'skipped',
+            artifacts: [task.outputPath],
+            attempts: 0,
+            duration: 0,
+          });
           continue;
         }
 
-        log.info('Review round', { artifact: round.type, issueNumber: ctx.issue.number });
+        log.info('Review task', { artifact: task.type, issueNumber: ctx.issue.number });
 
-        emitReviewRoundStart(ctx.eventBus, round.type, index, ctx.acpOptions, ctx.issue.projectId ?? '');
+        emitReviewRoundStart(ctx.eventBus, task.type, index, ctx.acpOptions, ctx.issue.projectId ?? '');
+        emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'started', 1, []);
 
-        const prompt = round.buildPrompt(ctx.issue, changeDir);
+        const taskStartTime = Date.now();
+        let attempts = 1;
+
+        const prompt = task.buildPrompt(ctx.issue, changeDir);
         const result = await conn.prompt(prompt);
 
         if (!result.success) {
-          log.error('Review round failed', { artifact: round.type, error: result.error });
+          log.error('Review task failed', { artifact: task.type, error: result.error });
+          emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'failed', attempts, []);
           await conn.close();
-          throw new Error(`Round "${round.label}" failed: ${result.error ?? 'unknown error'}`);
+          throw new Error(`Task "${task.label}" failed: ${result.error ?? 'unknown error'}`);
         }
 
-        if (!round.verifyArtifact()) {
-          log.warn('Review artifact not found after round, sending retry', {
-            artifact: round.label,
-            roundIndex: index,
+        if (!task.verifyArtifact()) {
+          log.warn('Review artifact not found after task, sending retry', {
+            artifact: task.label,
+            taskIndex: index,
           });
 
           const retryPrompt = [
-            `The artifact file ${round.outputPath} was not found. You MUST create it now.`,
+            `The artifact file ${task.outputPath} was not found. You MUST create it now.`,
             '',
-            `Use the write_file tool to write the ${round.type} artifact to:`,
-            round.outputPath,
+            `Use the write_file tool to write the ${task.type} artifact to:`,
+            task.outputPath,
             '',
             'This is a retry. The pipeline cannot continue without this file.',
           ].join('\n');
 
-          log.info('Review retry prompt sent', { artifact: round.type, roundIndex: index });
+          log.info('Review retry prompt sent', { artifact: task.type, taskIndex: index });
+          attempts++;
+          emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'retrying', attempts, []);
 
           const retryResult = await conn.prompt(retryPrompt);
 
           if (!retryResult.success) {
-            log.error('Review retry prompt failed', { artifact: round.type, error: retryResult.error });
+            log.error('Review retry prompt failed', { artifact: task.type, error: retryResult.error });
+            emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'failed', attempts, []);
             await conn.close();
-            throw new Error(`Round "${round.label}" retry failed: ${retryResult.error ?? 'unknown error'}`);
+            throw new Error(`Task "${task.label}" retry failed: ${retryResult.error ?? 'unknown error'}`);
           }
 
-          if (!round.verifyArtifact()) {
-            log.error('Review artifact still missing after retry', { artifact: round.label });
+          if (!task.verifyArtifact()) {
+            log.error('Review artifact still missing after retry', { artifact: task.label });
+            emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'failed', attempts, []);
             await conn.close();
-            throw new Error(`Artifact "${round.label}" not found after retry`);
+            throw new Error(`Artifact "${task.label}" not found after retry`);
           }
 
-          log.info('Review retry succeeded', { artifact: round.label });
+          log.info('Review retry succeeded', { artifact: task.label });
         }
 
-        completedSteps.push(round.type);
+        const taskDuration = Date.now() - taskStartTime;
+        const taskArtifacts = task.verifyArtifact() ? [task.label] : [];
+        emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'completed', attempts, taskArtifacts);
+        this.appendTaskResult(ctx, {
+          taskId: task.type,
+          title: task.label,
+          status: 'completed',
+          artifacts: taskArtifacts,
+          attempts,
+          duration: taskDuration,
+        });
+
+        completedSteps.push(task.type);
         ctx.checkpointManager?.markStepComplete(
           ctx.issue.number,
           'review',
-          round.type,
-          rounds[index + 1]?.type ?? null,
+          task.type,
+          tasks[index + 1]?.type ?? null,
         );
       }
 
@@ -265,6 +302,37 @@ function emitReviewRoundStart(
   } catch (e) {
     log.warn('eventBus.emit failed for plan_round_start', {
       roundType,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+function emitStageTaskUpdate(
+  eventBus: import('../services/event-bus').EventBus | undefined,
+  issueId: string,
+  projectId: string,
+  stage: string,
+  taskId: string,
+  taskTitle: string,
+  status: 'started' | 'completed' | 'failed' | 'retrying',
+  attempt: number,
+  artifacts: string[],
+): void {
+  if (!eventBus) return;
+  try {
+    eventBus.emit('stage_task_update', {
+      issueId,
+      projectId,
+      stage,
+      taskId,
+      taskTitle,
+      status,
+      attempt,
+      artifacts,
+    });
+  } catch (e) {
+    log.warn('eventBus.emit failed for stage_task_update', {
+      taskId,
       error: e instanceof Error ? e.message : String(e),
     });
   }

@@ -1,5 +1,5 @@
 import { Stage } from '../types';
-import type { StageContext, StageRunResult, CheckResult } from './stage-context';
+import type { StageContext, StageRunResult, CheckResult, StageTaskResult } from './stage-context';
 import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
@@ -11,6 +11,17 @@ export abstract class BaseStageRunner implements StageRunner {
   protected abstract getNextStage(): Stage;
 
   private stageExecutionId?: string;
+
+  protected getStageExecutionId(): string | undefined {
+    return this.stageExecutionId;
+  }
+
+  protected appendTaskResult(ctx: StageContext, result: StageTaskResult): void {
+    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
+    try {
+      ctx.stageExecutionRepo.appendTaskResult(this.stageExecutionId, result);
+    } catch {}
+  }
 
   async run(ctx: StageContext): Promise<StageRunResult> {
     this.stageExecutionId = undefined;
@@ -271,10 +282,10 @@ export abstract class BaseStageRunner implements StageRunner {
     } catch {}
   }
 
-  private persistTaskResults(ctx: StageContext, taskOutput: unknown): void {
+  private persistTaskResults(ctx: StageContext, taskResults: StageTaskResult[]): void {
     if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
     try {
-      ctx.stageExecutionRepo.updateTaskResults(this.stageExecutionId, taskOutput);
+      ctx.stageExecutionRepo.updateTaskResults(this.stageExecutionId, taskResults);
     } catch {}
   }
 }

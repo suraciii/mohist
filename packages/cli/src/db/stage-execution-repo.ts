@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseManager } from './database';
 import { Stage } from '../types';
+import type { StageTaskResult } from '../workflow/stage-context';
 
 export type StageExecutionStatus = 'running' | 'awaiting-approval' | 'passed' | 'failed';
 
@@ -9,7 +10,7 @@ export interface StageExecution {
   issueId: string;
   stage: Stage;
   status: StageExecutionStatus;
-  taskResults: unknown[];
+  taskResults: StageTaskResult[];
   checkResults: unknown[];
   createdAt: string;
   updatedAt: string;
@@ -73,13 +74,20 @@ export class StageExecutionRepo {
     return this.findById(id);
   }
 
-  updateTaskResults(id: string, taskResults: unknown): StageExecution | null {
+  updateTaskResults(id: string, taskResults: StageTaskResult[]): StageExecution | null {
     const now = new Date().toISOString();
     this.db.run(
       'UPDATE stage_executions SET task_results = ?, updated_at = ? WHERE id = ?',
       [JSON.stringify(taskResults), now, id]
     );
     return this.findById(id);
+  }
+
+  appendTaskResult(id: string, result: StageTaskResult): StageExecution | null {
+    const current = this.findById(id);
+    if (!current) return null;
+    const updated = [...current.taskResults, result];
+    return this.updateTaskResults(id, updated);
   }
 
   updateStatus(id: string, status: StageExecutionStatus): StageExecution | null {
@@ -107,5 +115,15 @@ export class StageExecutionRepo {
       [id]
     );
     return row ? rowToStageExecution(row) : null;
+  }
+
+  findByIssueId(issueId: string): StageExecution[] {
+    const rows = this.db.all<StageExecutionRow>(
+      `SELECT * FROM stage_executions
+       WHERE issue_id = ?
+       ORDER BY created_at ASC`,
+      [issueId]
+    );
+    return rows.map(rowToStageExecution);
   }
 }
