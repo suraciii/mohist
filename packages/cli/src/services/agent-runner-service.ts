@@ -1030,20 +1030,6 @@ export class AgentRunnerService {
 
   private handlePipelineFailure(issue: Issue, issueRepo: IssueRepo, projectId: string, errorMsg: string): void {
     try {
-      const currentIssue = issueRepo.findById(issue.id);
-      issueRepo.setApprovalState(issue.id, {
-        stage: currentIssue?.stage ?? Stage.Draft,
-        status: 'error',
-        output: { error: errorMsg },
-        requestedAt: new Date().toISOString(),
-      });
-    } catch (stateErr) {
-      log.error('Failed to set error approval state', {
-        issueNumber: issue.number,
-        error: stateErr instanceof Error ? stateErr.message : String(stateErr),
-      });
-    }
-    try {
       issueRepo.blockIssue(issue.id, errorMsg);
     } catch (updateErr) {
       log.error('Failed to block issue', {
