@@ -91,6 +91,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       ...ctx.acpOptions,
       executionId: `review-${ctx.issue.number}`,
       stage: 'review',
+      title: 'Check stage',
       onSessionUpdate: (_notification) => {
         if (!ctx.eventBus) return;
         try {

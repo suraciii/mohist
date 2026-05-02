@@ -178,6 +178,7 @@ export class SkillService {
       eventBus: this.eventBus,
       projectId,
       opencodeBinPath: this.opencodeBinPath,
+      title: `Skill: ${skill.name}`,
     })
       .then((result) => {
         if (result.success) {

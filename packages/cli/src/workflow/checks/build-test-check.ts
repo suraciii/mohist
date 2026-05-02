@@ -216,6 +216,7 @@ export class BuildTestCheck implements Check {
         model: ctx.acpOptions?.model,
         stage: 'check',
         timeout: 10 * 60 * 1000,
+        title: 'Auto-fix: test failures',
       });
 
       log.info('Auto-fix agent completed', {

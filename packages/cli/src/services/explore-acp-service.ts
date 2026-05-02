@@ -63,6 +63,7 @@ export class ExploreAcpService {
       task: prompt,
       issueId: issue.id,
       projectId,
+      title: `Explore: ${issueTitle}`,
     });
 
     return this.buildResult(result, issue.number, changeDir);
@@ -94,6 +95,7 @@ export class ExploreAcpService {
       task: prompt,
       issueId: issue.id,
       projectId: issue.projectId,
+      title: `Explore: ${issue.title}`,
     });
 
     return this.buildResult(result, issue.number, changeDir);

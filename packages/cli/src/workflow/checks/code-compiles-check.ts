@@ -102,6 +102,7 @@ export class CodeCompilesCheck implements Check {
         model: ctx.acpOptions?.model,
         stage: 'build',
         timeout: 10 * 60 * 1000,
+        title: 'Auto-fix: compilation errors',
       });
     } catch (err) {
       log.error('Auto-fix agent failed', {
