@@ -52,6 +52,7 @@ export interface StageContext {
   workflowLogRepo?: WorkflowLogRepo;
   sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
+  stageExecutionRepo?: StageExecutionRepo;
   signal?: AbortSignal;
 }
 
@@ -92,5 +93,6 @@ export interface ProjectRepo {
 }
 
 import type { CheckpointManager as CheckpointManagerInterface } from './checkpoint-manager';
+import type { StageExecutionRepo } from '../db/stage-execution-repo';
 
 export type CheckpointManager = CheckpointManagerInterface;

@@ -7,6 +7,7 @@ import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
+import type { StageExecutionRepo } from '../db/stage-execution-repo';
 
 export interface PipelineResult {
   completed: boolean;
@@ -27,6 +28,7 @@ export interface WorkflowEngineOptions {
   workflowLogRepo?: WorkflowLogRepo;
   sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
+  stageExecutionRepo?: StageExecutionRepo;
 }
 
 export class WorkflowEngine {
@@ -41,6 +43,7 @@ export class WorkflowEngine {
   private workflowLogRepo?: WorkflowLogRepo;
   private sessionStreamLogRepo?: SessionStreamLogRepo;
   private coderSessionRepo?: CoderSessionRepo;
+  private stageExecutionRepo?: StageExecutionRepo;
 
   constructor(options: WorkflowEngineOptions) {
     this.runners = options.runners;
@@ -54,6 +57,7 @@ export class WorkflowEngine {
     this.workflowLogRepo = options.workflowLogRepo;
     this.sessionStreamLogRepo = options.sessionStreamLogRepo;
     this.coderSessionRepo = options.coderSessionRepo;
+    this.stageExecutionRepo = options.stageExecutionRepo;
   }
 
   private buildContext(issue: Issue, acpOptions: AcpConnectionOptions): StageContext {
@@ -75,6 +79,7 @@ export class WorkflowEngine {
       workflowLogRepo: this.workflowLogRepo,
       sessionStreamLogRepo: this.sessionStreamLogRepo,
       coderSessionRepo: this.coderSessionRepo,
+      stageExecutionRepo: this.stageExecutionRepo,
       signal: this.signal,
     };
   }

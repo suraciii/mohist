@@ -16,6 +16,7 @@ import { load } from '../config/config-loader';
 import { maskSensitiveData } from '../utils/sensitive-data';
 import { Log } from '../util/log';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
+import { StageExecutionRepo } from '../db/stage-execution-repo';
 import { findChangeDir } from '../openspec/detector';
 import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
@@ -110,6 +111,7 @@ export class AgentRunnerService {
     private readonly taskQueueRepo?: IssueTaskQueueRepo,
     private readonly conflictResolutionDeps?: ConflictResolutionDeps,
     private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
+    private readonly stageExecutionRepo?: StageExecutionRepo,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -954,6 +956,7 @@ export class AgentRunnerService {
         coderSessionRepo: this.coderSessionRepo,
         workflowLogRepo: this.workflowLogRepo,
         sessionStreamLogRepo: this.sessionStreamLogRepo,
+        stageExecutionRepo: this.stageExecutionRepo,
       });
 
       const abortPromise = new Promise<never>((_resolve, reject) => {
