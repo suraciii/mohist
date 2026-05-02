@@ -160,12 +160,13 @@
         "T-003"
       ],
       "notes": "This is the most complex migration because it absorbs AcpRoundRunner. The ACP connection management, round iteration, artifact verification, and retry logic from AcpRoundRunner must be replicated in executeTasks().",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 2,
+      "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
-        621414
+        621414,
+        175364
       ]
     },
     {
