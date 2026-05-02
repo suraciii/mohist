@@ -1,28 +1,35 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
-### Requirement: Model Select Popover renders and is interactive
+### Requirement: ModelSelect Popover 可正常打开
 
-Settings AI page SHALL provide a `ModelSelect` component that opens a popover panel when clicked, allowing users to search and select a model. The `Popover.Panel` SHALL render directly without a `Transition` wrapper, compatible with `@headlessui/react` v2.
+AI Settings 页面的 `ModelSelect` 组件 SHALL 使用 Headless UI v2 兼容的方式渲染 `Popover.Panel`，确保所有模型选择器（Mohist Model、Coder Model、Stage Model Overrides）可以正常打开和选择模型。
 
-#### Scenario: Mohist Model selector opens and allows selection
-- **WHEN** user clicks the Mohist Model selector button
-- **THEN** a popover panel appears showing available models grouped by provider
-- **AND** user can type to filter models by name or id
-- **AND** user can click a model to select it
-- **AND** the popover closes after selection
+#### Scenario: Mohist Model 选择器打开
+- **WHEN** 用户点击 Mohist Model 选择器按钮
+- **THEN** Popover Panel 渲染到 DOM 并显示可选模型列表
+- **AND** 用户可以搜索、高亮和选择一个模型
 
-#### Scenario: Coder Model selector opens and allows selection
-- **WHEN** user clicks the Coder Model selector button
-- **THEN** a popover panel appears showing available coder models
-- **AND** user can search, select, and clear the selection
+#### Scenario: Coder Model 选择器打开
+- **WHEN** 用户点击 Coder Model 选择器按钮
+- **THEN** Popover Panel 渲染到 DOM 并显示可选模型列表
+- **AND** 用户可以搜索、高亮和选择一个模型
 
-#### Scenario: Stage Model Override selectors work
-- **WHEN** user expands "Stage Model Overrides"
-- **AND** clicks a stage model selector
-- **THEN** a popover panel appears showing available coder models for that stage
-- **AND** user can select a model override for the stage
+#### Scenario: Stage Model Override 选择器打开
+- **WHEN** 用户展开 Stage Model Overrides
+- **AND** 点击某个 stage 的模型选择器按钮
+- **THEN** Popover Panel 渲染到 DOM 并显示可选模型列表
+- **AND** 用户可以搜索、高亮和选择一个模型
 
-#### Scenario: Popover Panel is present in DOM when opened
-- **WHEN** user clicks any ModelSelect button on the AI settings page
-- **THEN** the `Popover.Panel` element is rendered in the DOM
-- **AND** the panel is visible and interactive
+#### Scenario: 清除已选模型
+- **WHEN** ModelSelect 配置了 `allowClear` 且已有选中值
+- **THEN** 显示清除按钮（X 图标）
+- **AND** 点击清除按钮后值被清空
+
+### Requirement: AI Settings 页面布局 Model Selection 在上
+
+AI Settings 页面 SHALL 将 Model Selection 区域（Mohist Model、Coder Model、Stage Model Overrides）放在页面顶部、Provider 列表之前。
+
+#### Scenario: 页面布局顺序
+- **WHEN** 用户打开 AI Settings 页面
+- **THEN** Model Selection 区域（包括 Mohist Model、Coder Model 选择器）显示在页面顶部
+- **AND** Provider 列表显示在 Model Selection 下方

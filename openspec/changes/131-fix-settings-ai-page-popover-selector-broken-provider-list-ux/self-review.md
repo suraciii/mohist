@@ -1,54 +1,51 @@
-# Self-Review: #131 fix: Settings AI page — Popover selector broken + provider list UX
+## Self-Review: 131-fix-settings-ai-page-popover-selector-broken-provider-list-ux
 
-## Verdict: PASS
+**Reviewer**: Agent (self-review)
+**Date**: 2026-05-03
 
-All artifacts are consistent, complete, and feasible. One fix was applied during review.
+### Completeness
 
-## Completeness
+| Check | Status |
+|-------|--------|
+| All proposal capabilities have specs | PASS — 2 capabilities (ai-settings-provider-list-ux new, web-ui modified), 2 spec files |
+| All spec requirements have tasks | PASS — T-001 covers web-ui ModelSelect Popover fix (4 scenarios), T-002 covers layout reorder + all provider-list-ux requirements (grouping, collapsible, search — 7 scenarios total) |
+| Edge cases considered | PASS — empty configured group hidden (spec scenario), search clears correctly (spec scenario), clear button behavior (spec scenario) |
+| Acceptance criteria are verifiable | PASS — all criteria are testable by visual inspection or DOM verification |
 
-| Spec | Covered by Task | Status |
-|------|----------------|--------|
-| `ai-settings-provider-ux/spec.md` (2 requirements) | T-001 | OK |
-| `web-ui/spec.md` (1 requirement) | T-001 | OK |
+### Consistency
 
-Issue acceptance criteria coverage:
-- Mohist Model selector opens → web-ui spec scenario 1 → T-001 AC 1,2
-- Coder Model selector opens → web-ui spec scenario 2 → T-001 AC 1,2
-- Stage Model Overrides selectors work → web-ui spec scenario 3 → T-001 AC 1,2
-- Provider list visual grouping → ai-settings-provider-ux spec requirement 1 → T-001 AC 4–7
-- Model Selection not buried at bottom → ai-settings-provider-ux spec requirement 2 → T-001 AC 3
+| Check | Status |
+|-------|--------|
+| Specs align with proposal Capabilities | PASS — ai-settings-provider-list-ux (new) + web-ui (modified) match proposal |
+| Tasks reference correct spec files | PASS — T-001 → web-ui/spec.md, T-002 → web-ui/spec.md + ai-settings-provider-list-ux/spec.md (fixed during review) |
+| Design aligns with specs | PASS — D1 maps to ModelSelect fix, D2 maps to layout reorder, D3 maps to collapsible groups |
+| Naming consistent | PASS — unconfiguredExpanded state, "Available Providers" label, configured/unconfigured terminology consistent across all artifacts |
 
-## Consistency
+### Feasibility
 
-- Proposal capabilities (1 new: `ai-settings-provider-ux`, 1 modified: `web-ui`) map to 2 spec directories
-- Design decisions D1–D3 align with task description
-- Naming consistent across all artifacts
-- Task acceptance criteria enumerate all spec scenarios
+| Check | Status |
+|-------|--------|
+| Dependencies available or created by earlier tasks | PASS — no new dependencies; @headlessui/react v2.2.10 already installed |
+| No circular dependencies | PASS — linear: T-001 → T-002 |
+| Task granularity appropriate | PASS — T-001 is the critical bug fix (must land first), T-002 is UX improvement (depends on T-001 for verifiability) |
 
-## Feasibility
+### Dependency Completeness
 
-- Single file change (`AiSettingsSection.tsx`) — no cross-file dependencies
-- No API/backend changes needed
-- No dependency version changes needed
-- No circular dependencies (single task)
+| Check | Status |
+|-------|--------|
+| Every non-first task has dependsOn | PASS — T-002 depends on T-001 |
+| All dependsOn point to lower priority | PASS — T-002 (priority 2) → T-001 (priority 1) |
+| No cycles | PASS — verified DAG |
 
-## Dependency Graph
+### Issues Found and Fixed
 
-```
-T-001 (single task) — no dependencies
-```
+**Issue 1: T-002 spec reference incomplete**
+- T-002 implements layout reorder (from web-ui/spec.md "AI Settings 页面布局 Model Selection 在上") but only referenced `specs/ai-settings-provider-list-ux/spec.md#provider-list-visual-grouping`.
+- **Fix applied**: Updated T-002 spec field to `specs/web-ui/spec.md#ai-settings-layout + specs/ai-settings-provider-list-ux/spec.md#provider-list-visual-grouping` and clarified description.
 
-- DAG: valid (trivial)
-- No `dependsOn` issues
+### Notes
 
-## Issues Found and Fixed
-
-### 1. Task spec reference incomplete (FIXED)
-
-**Problem:** T-001 `spec` field only referenced `specs/web-ui/spec.md` but the task also covers `specs/ai-settings-provider-ux/spec.md` requirements.
-
-**Fix:** Updated `spec` field to reference both: `specs/web-ui/spec.md#Model Select Popover renders and is interactive, specs/ai-settings-provider-ux/spec.md#Provider list visual grouping`.
-
-## No Issues Remaining
-
-Single task is appropriate for a single-file change with interleaved concerns. Acceptance criteria are verifiable.
+- Verified `@headlessui/react` v2.2.10 in `packages/cli/web/package.json`.
+- Verified `Fragment` import is only used for `Transition as={Fragment}` (line 258), confirming D4 cleanup is safe.
+- `Fragment` is also a React import name — codebase uses `<>` syntax elsewhere, so removing the named import is safe.
+- All changes are in a single file (`AiSettingsSection.tsx`), minimizing merge conflict risk.
