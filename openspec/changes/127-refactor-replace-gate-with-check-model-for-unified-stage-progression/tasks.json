@@ -321,10 +321,13 @@
         "T-008"
       ],
       "notes": "Must run after T-007 and T-008 to ensure nothing references the deleted files.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        380792
+      ]
     },
     {
       "id": "T-011",
