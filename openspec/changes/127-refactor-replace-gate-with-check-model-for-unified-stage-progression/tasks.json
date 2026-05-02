@@ -21,11 +21,11 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/stage-context.ts",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "This is the foundation — all subsequent tasks depend on these types. Temporarily keep backward compat by setting requiresApproval:false in existing runners until they are migrated.",
-      "attempts": 5,
+      "attempts": 6,
       "order": 999999,
-      "error": "Auto-skipped (no onAskUser): Timed out after 600s",
+      "error": null,
       "durations": [
         424130,
         123694,
@@ -33,7 +33,8 @@
         228773,
         631896,
         634926,
-        626917
+        626917,
+        202202
       ]
     },
     {
