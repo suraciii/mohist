@@ -72,7 +72,7 @@ describe('POST /api/issues/:number/rebase', () => {
       issueService, projectService, stateManager,
       null, undefined, undefined, agentRunner,
       undefined, undefined, undefined, undefined,
-      opts.mergeQueue,
+      undefined, opts.mergeQueue,
     ));
     return { server: createTestServer(app), agentRunner };
   }

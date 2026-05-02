@@ -600,7 +600,7 @@ describe('API Routes', () => {
           } as any;
 
           const retryApp = new Hono();
-          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
+          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
           const retryServer = createTestServer(retryApp);
 
           const response = await request(retryServer).post(`/api/issues/${issue.number}/retry`);
