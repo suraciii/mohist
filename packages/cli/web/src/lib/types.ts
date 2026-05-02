@@ -302,6 +302,7 @@ export interface CoderSessionItem {
   model: string | null
   coderType: string | null
   stage: string | null
+  title: string | null
   workflowLogs: WorkflowLogItem[]
 }
 

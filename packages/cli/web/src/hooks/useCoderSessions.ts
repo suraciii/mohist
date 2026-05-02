@@ -71,6 +71,7 @@ export function useCoderSessions(issueNumber: number) {
           model: detail.model ?? null,
           coderType: detail.coderType ?? null,
           stage: detail.stage ?? null,
+          title: detail.title ?? null,
           workflowLogs: [],
         }
         setLiveSessions((prev) => [...prev, newSession])

@@ -71,12 +71,12 @@ export function ActiveSessionCard({ card, now }: ActiveSessionCardProps) {
             WebkitBoxOrient: 'vertical',
             overflow: 'hidden',
           }}
-          title={card.issueTitle}
+          title={card.title ?? card.issueTitle}
         >
-          {card.issueTitle}
+          {card.title ?? card.issueTitle}
         </h3>
 
-        {card.taskDescription && (
+        {!card.title && card.taskDescription && (
           <p
             className="text-xs text-gray-500 mb-2"
             style={{

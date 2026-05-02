@@ -18,8 +18,20 @@ function formatTime(iso: string): string {
 }
 
 function getSessionLabel(session: CoderSessionItem): string {
+  if (session.title) return session.title
+
+  if (session.executionId) {
+    const taskMatch = session.executionId.match(/\b(T-\d+)\b/)
+    if (taskMatch) return taskMatch[1]
+
+    const stagePrefix = session.executionId.split('-')[0]
+    const stageName = stagePrefix.charAt(0).toUpperCase() + stagePrefix.slice(1)
+    if (stageName === 'Plan' || stageName === 'Check' || stageName === 'Build') return stageName
+  }
+
   if (session.stage === 'plan') return 'Plan'
   if (session.stage === 'check') return 'Check'
+
   if (session.taskDescription) {
     const truncated = session.taskDescription.length > 24
       ? session.taskDescription.slice(0, 21) + '...'
