@@ -699,9 +699,9 @@ export function createIssueRoutes(
       }
 
       const refreshedIssue = issueService.getByNumber(projectId, number);
-      const isAtApprovalGate = refreshedIssue?.approvalState?.status === 'awaiting';
+      const isAwaitingApproval = refreshedIssue?.approvalState?.status === 'awaiting';
 
-      if (agentRunner && !isAtApprovalGate) {
+      if (agentRunner && !isAwaitingApproval) {
         const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
         const response: ApiResponse = {
           success: true,

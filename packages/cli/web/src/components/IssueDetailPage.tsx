@@ -189,7 +189,7 @@ export function IssueDetailPage() {
   const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
   const agentProgress = thisAgent?.progress
   const isCapacityFull = activeAgents.length >= maxConcurrent
-  const isApprovalGate =
+  const isAwaitingApproval =
     issue.approvalState?.status === 'awaiting' &&
     (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked) &&
     !isAgentRunningOnThis
@@ -572,7 +572,7 @@ export function IssueDetailPage() {
 
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
 
-              {isApprovalGate && issue.stage === Stage.Check && (
+              {isAwaitingApproval && issue.stage === Stage.Check && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-3 text-xs text-amber-700">
                   <span>{changesSummary.fileCount} file{changesSummary.fileCount !== 1 ? 's' : ''}</span>
                   <span className="text-green-600 font-medium">+{changesSummary.additions}</span>
@@ -581,14 +581,14 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {issue.stage === Stage.Check && (issue.checkSuite || isApprovalGate) && (
+              {issue.stage === Stage.Check && (issue.checkSuite || isAwaitingApproval) && (
                 <CheckSuitePanel
                   issueNumber={issueNumber}
                   checkSuite={issue.checkSuite ?? null}
                 />
               )}
 
-              {isApprovalGate && issue.stage === Stage.Check && !issue.checkSuite && (
+              {isAwaitingApproval && issue.stage === Stage.Check && !issue.checkSuite && (
                 <CheckResultsPanel
                   output={issue.approvalState?.output}
                   issueNumber={issueNumber}
@@ -596,7 +596,7 @@ export function IssueDetailPage() {
                 />
               )}
 
-              {isApprovalGate && issue.stage !== Stage.Check && reviewOutput && (
+              {isAwaitingApproval && issue.stage !== Stage.Check && reviewOutput && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h2 className="text-sm font-semibold text-amber-800 mb-2">
                     Review Report
@@ -609,7 +609,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {isApprovalGate && issue.stage !== Stage.Check && (
+              {isAwaitingApproval && issue.stage !== Stage.Check && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h2 className="text-sm font-semibold text-amber-800 mb-2">
                     Approval Required
@@ -645,7 +645,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {isApprovalGate && issue.stage !== Stage.Check && (
+              {isAwaitingApproval && issue.stage !== Stage.Check && (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
                   <h2 className="text-sm font-semibold text-blue-800 mb-2">Send Message</h2>
                   <p className="text-xs text-blue-600 mb-3">

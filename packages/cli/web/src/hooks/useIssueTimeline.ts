@@ -16,7 +16,7 @@ const STAGE_ORDER: Stage[] = ['plan', 'build', 'check', 'done'] as Stage[]
 const TIMELINE_LABEL_MAP: Record<string, string> = {
   plan: 'Plan',
   build: 'Build',
-  check: 'Review',
+  check: 'Check',
   done: 'Done',
 }
 
@@ -129,7 +129,7 @@ function buildRoundsFromSession(session: CoderSessionItem): TimelineRound[] {
 }
 
 export function buildTimeline(
-  issueData: { createdAt: string; stage: string; approvalState?: { status: string; requestedAt: string; approvedAt?: string; stage?: string } | null } | null | undefined,
+  issueData: { createdAt: string; stage: string; approvalState?: { status: string; requestedAt: string; respondedAt?: string; stage?: string } | null } | null | undefined,
   sessions: CoderSessionItem[],
   _logs: WorkflowLogItem[],
   taskProgress: Map<string, TaskProgressEntry>,
@@ -209,12 +209,12 @@ export function buildTimeline(
     if (
       stage === 'plan' &&
       issueData.approvalState?.status === 'approved' &&
-      issueData.approvalState.approvedAt
+      issueData.approvalState.respondedAt
     ) {
       nodes.push({
         stage: 'approved',
         label: 'Approved',
-        timestamp: issueData.approvalState.approvedAt,
+        timestamp: issueData.approvalState.respondedAt,
         status: 'completed',
       })
     }

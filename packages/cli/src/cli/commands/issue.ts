@@ -454,7 +454,7 @@ export function setupIssueCommands(program: Command): void {
 
   issue
     .command('approve <number>')
-    .description('Approve an issue at an approval gate')
+    .description('Approve an issue awaiting approval')
     .action(async (number) => {
       try {
         const response = await apiClient<ApiResponse>(
@@ -474,7 +474,7 @@ export function setupIssueCommands(program: Command): void {
 
   issue
     .command('reject <number>')
-    .description('Reject an issue at an approval gate')
+    .description('Reject an issue awaiting approval')
     .option('-m, --message <message>', 'Rejection reason')
     .action(async (number, options) => {
       try {

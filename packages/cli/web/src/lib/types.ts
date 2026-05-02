@@ -1,4 +1,5 @@
 export enum Stage {
+  Draft = 'draft',
   Backlog = 'backlog',
   Explore = 'explore',
   Plan = 'plan',
@@ -17,11 +18,11 @@ export enum IssueStatus {
 }
 
 export interface ApprovalState {
-  status: 'awaiting' | 'approved' | 'rejected'
+  status: 'pending' | 'awaiting' | 'approved' | 'rejected' | 'error'
   stage?: string
   output?: Record<string, unknown>
   requestedAt: string
-  approvedAt?: string
+  respondedAt?: string
 }
 
 export interface Issue {
@@ -39,7 +40,7 @@ export interface Issue {
   projectPath?: string
   comments?: Comment[]
   approvalState?: ApprovalState
-  mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | null
+  mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | 'rebasing' | 'resolving' | 'blocked' | null
   priority?: string | null
   model?: string | null
   archivedAt?: string
@@ -407,7 +408,7 @@ export interface CheckResult {
 
 export interface CheckSuiteOutput {
   checks: CheckResult[]
-  overallResult: 'passed' | 'failed'
+  overallResult: 'passed' | 'failed' | 'blocked'
 }
 
 export type CheckSuiteStatus = 'running' | 'awaiting-approval' | 'passed' | 'failed'
