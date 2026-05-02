@@ -1,0 +1,49 @@
+{
+  "project": "mohist",
+  "description": "Fix broken ModelSelect popover and improve AI Settings page UX",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix ModelSelect popover for Headless UI v2",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Remove the `<Transition>` wrapper around `<Popover.Panel>` in the ModelSelect component (lines 257-322 of AiSettingsSection.tsx). Replace with Popover.Panel using v2's native `transition` prop for enter/leave animation classes. Remove the unused `Transition` and `Fragment` imports if no longer needed.",
+      "acceptanceCriteria": [
+        "Popover.Panel renders to DOM when clicking Mohist Model selector button",
+        "Popover.Panel renders to DOM when clicking Coder Model selector button",
+        "Popover.Panel renders to DOM when clicking any Stage Model Override selector",
+        "Model list is visible and searchable after popover opens",
+        "Selecting a model closes the popover and updates the displayed value",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Root cause: Transition in Headless UI v2 does not auto-detect Popover open state. The v2 Popover.Panel supports transition classes natively via its `transition` prop."
+    },
+    {
+      "id": "T-002",
+      "title": "Reorder AI Settings layout and add provider grouping",
+      "spec": "specs/settings-ai-page-ux/spec.md",
+      "description": "Reorder the AiSettingsSection JSX so Model Selection appears first. Split the flat provider list into two groups: Connected Providers (always open) and Available Providers (collapsed by default with count badge). Add a `useState` toggle for the Available Providers section. Show empty-state guidance when no providers are connected.",
+      "acceptanceCriteria": [
+        "Model Selection section is the first interactive section on the page",
+        "Connected providers appear in an always-open section after Model Selection",
+        "Unconfigured providers appear in a collapsed section titled 'Available Providers (N)'",
+        "Clicking 'Available Providers' header toggles the section open/closed",
+        "Section is not shown when there are no unconfigured providers",
+        "Connected section shows guidance text when no providers are configured",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuse the existing useState pattern (like stageOverridesOpen) for the available providers toggle. Layout order: Model Selection → Connected Providers → Available Providers → Custom Providers → Stage Model Overrides."
+    }
+  ]
+}
