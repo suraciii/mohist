@@ -19,6 +19,8 @@ Error handling is thorough.
 
 ### Spec Compliance: PASS
 All spec requirements satisfied.
+
+<promise>PASS</promise>
 `;
 
 const REVIEW_MIXED = `# Code Review
@@ -40,6 +42,8 @@ Code style is uniform.
 
 ### Spec Compliance: PASS
 All spec requirements satisfied.
+
+<promise>FAIL</promise>
 `;
 
 const REVIEW_FAIL_WITH_ISSUES = `# Code Review
@@ -66,6 +70,8 @@ Code style is uniform.
 ### Spec Compliance: FAIL
 - Color value should be #E85D3A but used #E85D3B
 - Month format should be MMMM but used MMM
+
+<promise>FAIL</promise>
 `;
 
 const NO_DIMENSIONS = `# Code Review
@@ -200,20 +206,17 @@ describe('parseDimensions', () => {
 });
 
 describe('parseVerdict', () => {
-  it('returns PASS for ## Result: PASS', () => {
-    expect(parseVerdict('## Result: PASS')).toBe('PASS');
+  it('returns PASS for <promise>PASS</promise>', () => {
+    expect(parseVerdict('<promise>PASS</promise>')).toBe('PASS');
   });
 
-  it('returns FAIL for ## Result: FAIL', () => {
-    expect(parseVerdict('## Result: FAIL')).toBe('FAIL');
+  it('returns FAIL for <promise>FAIL</promise>', () => {
+    expect(parseVerdict('<promise>FAIL</promise>')).toBe('FAIL');
   });
 
-  it('returns PASS for legacy ## Verdict: PASS', () => {
-    expect(parseVerdict('## Verdict: PASS')).toBe('PASS');
-  });
-
-  it('returns FAIL for legacy ## Verdict: FAIL', () => {
-    expect(parseVerdict('## Verdict: FAIL')).toBe('FAIL');
+  it('is case-insensitive', () => {
+    expect(parseVerdict('<PROMISE>pass</PROMISE>')).toBe('PASS');
+    expect(parseVerdict('<Promise>Fail</Promise>')).toBe('FAIL');
   });
 
   it('returns null for content with no verdict', () => {
@@ -224,9 +227,9 @@ describe('parseVerdict', () => {
     expect(parseVerdict('')).toBeNull();
   });
 
-  it('prefers ## Result: over ## Verdict: when both present', () => {
-    const content = '## Result: PASS\n## Verdict: FAIL';
-    expect(parseVerdict(content)).toBe('PASS');
+  it('returns null for legacy ## Result: and ## Verdict: formats', () => {
+    expect(parseVerdict('## Result: PASS')).toBeNull();
+    expect(parseVerdict('## Verdict: FAIL')).toBeNull();
   });
 });
 
@@ -276,7 +279,7 @@ describe('backend output enrichment', () => {
   });
 
   it('plan output shape includes verdict but no dimensions', () => {
-    const selfReviewNotes = '## Result: PASS\n\nAll artifacts are complete.';
+    const selfReviewNotes = '<promise>PASS</promise>\n\nAll artifacts are complete.';
     const verdict = parseVerdict(selfReviewNotes);
 
     const output = {

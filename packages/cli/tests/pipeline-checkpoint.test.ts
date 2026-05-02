@@ -45,7 +45,7 @@ vi.mock('fs', () => ({
       return JSON.stringify({ version: 1, tasks: [{ id: 'T-001', title: 'Test task', passes: true, attempts: 0 }] });
     }
     if (typeof p === 'string' && p.endsWith('self-review.md')) {
-      return '## Result: PASS\nAll good';
+      return '<promise>PASS</promise>';
     }
     return 'artifact content';
   }),
@@ -259,7 +259,7 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
       artifactManager,
       worktreeManager: {} as any,
       projectRepo: {} as any,
-      eventBus: {} as any,
+      eventBus: { emit: vi.fn() } as any,
       checkpointManager,
       issueRepo: { setApprovalState: vi.fn() } as any,
     };
@@ -372,7 +372,7 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
 
   it('should call cleanChangeDir when no checkpoint exists', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
-      if (typeof p === 'string' && p === CHANGE_DIR) return true;
+      if (typeof p === 'string' && existingArtifacts.has(p)) return true;
       return false;
     });
 
