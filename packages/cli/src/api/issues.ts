@@ -970,16 +970,11 @@ export function createIssueRoutes(
 
         mergeQueue.enqueue(projectId, number);
 
-        const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
-
         const response: ApiResponse = {
           success: true,
           data: {
             issue: issueService.getByNumber(projectId, number),
-            taskId: result.taskId,
-            status: result.status,
-            queuePosition: result.queuePosition,
-            message: `Issue #${number} approved, enqueued for merge and resuming pipeline`,
+            message: `Issue #${number} approved, enqueued for merge`,
           }
         };
         return c.json(response, 202);

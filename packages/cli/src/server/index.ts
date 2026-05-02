@@ -213,6 +213,21 @@ async function main(): Promise<void> {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
+    onMergeSuccess: (entry) => {
+      const issue = issueRepo.findById(entry.issueId);
+      if (issue && issue.stage === Stage.Check) {
+        log.info('onMergeSuccess: advancing issue to Done', { issueNumber: entry.issueNumber });
+        issueRepo.updateStage(entry.issueId, Stage.Done);
+        issueRepo.clearApprovalState(entry.issueId);
+        issueRepo.updateStatus(entry.issueId, IssueStatus.Completed);
+        issueRepo.updateBlockedReason(entry.issueId, null);
+        eventBus.emit('agent_completed', {
+          issueId: entry.issueId,
+          projectId: entry.projectId,
+          issueNumber: entry.issueNumber,
+        });
+      }
+    },
   });
 
   mergeQueue.recoverFromDB();
