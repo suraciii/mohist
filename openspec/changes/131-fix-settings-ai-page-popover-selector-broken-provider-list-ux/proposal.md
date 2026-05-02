@@ -1,25 +1,25 @@
 ## Why
 
-The AI Settings page is partially broken and partially unusable: all model selector popovers fail to open due to a Headless UI v1→v2 API mismatch, and the 80+ provider list is an unstructured wall of "Connect" buttons that buries the important Model Selection section at the page bottom.
+The AI Settings page is currently broken — all model selection popovers (Mohist Model, Coder Model, Stage Model Overrides) fail to open because `ModelSelect` wraps `Popover.Panel` in a Headless UI v1 `Transition` without `show={open}`, and the installed v2 `Transition` defaults to closed. Separately, 80+ unconfigured providers render as a flat list, burying the Model Selection section at the bottom with no visual hierarchy.
 
 ## What Changes
 
-- Fix ModelSelect popover: remove the `Transition` wrapper around `Popover.Panel` (or add `show={open}`) to restore compatibility with `@headlessui/react` v2.2.10, where `Transition` no longer auto-detects `Popover` open state
-- Restructure the AI Settings layout: move Model Selection above the provider list so the most-used controls are immediately visible
-- Add visual grouping to the provider list: separate connected/configured providers from unconfigured ones with clear section headers, and collapse unconfigured providers into an expandable "Available Providers" section
+- Fix `ModelSelect` component: remove `Transition` wrapper from `Popover.Panel` (line 257–265) to use Headless UI v2 native popover animation, restoring all model selectors
+- Restructure the Provider list: group providers into "Connected" and "Available" sections, collapse unconfigured providers by default
+- Reorder AI Settings sections: move Model Selection above the full Provider list so it's immediately accessible
 
 ## Capabilities
 
 ### New Capabilities
 
-- `settings-ai-page-ux` — visual grouping and layout of the AI settings section (provider list organization, Model Selection prominence)
+- `model-select-popover` — functional model selection popover component with search, keyboard navigation, and grouped results
 
 ### Modified Capabilities
 
-- `web-ui` — ModelSelect component must render a functional popover panel under Headless UI v2
+- `web-ui` — AI Settings page layout and provider list UX changes
 
 ## Impact
 
-- `packages/cli/web/src/components/AiSettingsSection.tsx` — ModelSelect component (Transition/Popover fix), layout reordering, provider list grouping
-- `packages/cli/web/src/components/SettingsPage.tsx` — no structural changes expected; section layout driven by AiSettingsSection
-- Dependency: `@headlessui/react` v2.2.10 (already installed, no version change needed)
+- `packages/cli/web/src/components/AiSettingsSection.tsx` — `ModelSelect` component (Transition removal), provider list restructuring, section reordering
+- `packages/cli/web/src/components/SettingsPage.tsx` — no structural changes expected
+- Dependency: `@headlessui/react` v2 API (already installed)

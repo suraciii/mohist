@@ -1,25 +1,27 @@
 ## MODIFIED Requirements
 
-### Requirement: ModelSelect Popover 兼容 Headless UI v2
+### Requirement: AI Settings 页面布局结构
 
-ModelSelect 组件 SHALL 在 `@headlessui/react` v2 下正确渲染可交互的 Popover 下拉面板。Popover.Panel SHALL 在用户点击触发按钮后出现在 DOM 中并可见。
+AI Settings 页面 SHALL 按以下顺序排列各区域：Model Selection → Providers → Custom Providers → Stage Model Overrides。Provider 列表 SHALL 将已连接的 provider 和未连接的 provider 分为两个视觉分组，未连接 provider 分组 SHALL 默认折叠。
 
-#### Scenario: 点击 ModelSelect 按钮后下拉面板渲染
+#### Scenario: Model Selection 位于页面顶部
 
-- **WHEN** 用户点击 ModelSelect 的触发按钮
-- **THEN** Popover.Panel SHALL 渲染到 DOM 中
-- **AND** 面板 SHALL 可见且不被 `opacity-0` 或 `hidden` 样式隐藏
-- **AND** 面板 SHALL 包含搜索输入框和模型列表
+- **WHEN** 用户打开 Settings AI 页面
+- **THEN** Model Selection 区域（包含 Mohist Model 和 Coder Model 选择器）在 Providers 列表之前显示
 
-#### Scenario: 选择模型后面板关闭
+#### Scenario: 已连接 Provider 分组
 
-- **WHEN** 下拉面板已打开
-- **AND** 用户点击列表中的某个模型
-- **THEN** 面板 SHALL 关闭
-- **AND** 选中的模型 SHALL 显示在触发按钮中
+- **WHEN** 存在已配置的内置 provider
+- **THEN** 这些 provider 在 "Connected" 分组中显示，带有连接状态标记和 Remove 操作
 
-#### Scenario: Stage Model Overrides 中的 ModelSelect 正常工作
+#### Scenario: 未连接 Provider 分组默认折叠
 
-- **WHEN** 用户展开 Stage Model Overrides 区域
-- **AND** 点击某个 stage 的 ModelSelect 触发按钮
-- **THEN** 该 stage 的 Popover.Panel SHALL 正常渲染并可选择模型
+- **WHEN** 存在未配置的内置 provider
+- **THEN** 这些 provider 显示在可折叠的 "Available Providers" 分组中
+- **AND** 该分组默认折叠，仅显示分组标题和 provider 数量
+- **AND** 用户点击标题可展开查看完整列表
+
+#### Scenario: Provider 搜索保留
+
+- **WHEN** 用户在 Provider 搜索框输入文本
+- **THEN** 按名称或 ID 过滤 provider 列表（跨分组）
