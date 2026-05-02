@@ -76,11 +76,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "PlanApprovalPanel and ReviewApprovalPanel are orphaned components not used in IssueDetailPage. The approval UI is inline JSX, so the summary is added directly there.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        201645
+      ]
     }
   ]
 }
