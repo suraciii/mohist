@@ -1,104 +1,117 @@
 import { Stage } from '../types';
 import type { StageContext, StageRunResult } from './stage-context';
-import type { Check, CheckContext } from './checks';
+import type { StageRunner } from './check-stage-runner';
+import { BaseStageRunner } from './base-stage-runner';
+import type { Check } from './checks';
+import { BuildTestCheck } from './checks/build-test-check';
+import { AiReviewCheck } from './checks/ai-review-check';
+import { UserApprovalCheck } from './checks/user-approval-check';
+import { AcpRoundRunner, type AcpRoundRunnerOptions, type RoundConfig } from './acp-round-runner';
+import { buildReviewerPrompt, buildReviewSelfCheckPrompt } from '../agents/artifact-prompt';
+import { readReportFile } from './utils';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'check-stage-runner' });
 
 export interface StageRunner {
   canHandle(stage: Stage): boolean;
   run(ctx: StageContext): Promise<StageRunResult>;
 }
 
-export class CheckStageRunner implements StageRunner {
+export interface CheckStageRunnerOptions {
+  worktreePath: string;
+}
+
+export class CheckStageRunner extends BaseStageRunner implements StageRunner {
+  private worktreePath: string;
   private checks: Check[];
 
-  constructor(checks: Check[]) {
-    this.checks = checks;
+  constructor(options: CheckStageRunnerOptions) {
+    super();
+    this.worktreePath = options.worktreePath;
+    this.checks = [
+      new BuildTestCheck({ worktreePath: this.worktreePath }),
+      new AiReviewCheck(),
+      new UserApprovalCheck(Stage.Plan),
+    ];
   }
 
   canHandle(stage: Stage): boolean {
     return stage === Stage.Check;
   }
 
-  async run(ctx: StageContext): Promise<StageRunResult> {
+  protected async executeTasks(ctx: StageContext): Promise<unknown> {
     const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
     if (!changeDir) {
-      return {
-        success: false,
-        output: null,
-        checkResults: [],
-        message: `Change directory not found for issue #${ctx.issue.number}`,
-      };
+      throw new Error(`Change directory not found for issue #${ctx.issue.number}`);
     }
 
-    const checkContext: CheckContext = {
+    const reviewOutputPath = 'review.md';
+    const selfCheckOutputPath = 'review-self-check.md';
+
+    const rounds: RoundConfig[] = [
+      {
+        type: 'review',
+        label: 'review',
+        outputPath: changeDir + '/' + reviewOutputPath,
+        verifyArtifact: () => readReportFile(changeDir, reviewOutputPath) !== null,
+        buildPrompt: (issue, dir) => buildReviewerPrompt(issue, dir),
+      },
+      {
+        type: 'review-self-check',
+        label: 'review-self-check',
+        outputPath: changeDir + '/' + selfCheckOutputPath,
+        verifyArtifact: () => readReportFile(changeDir, selfCheckOutputPath) !== null,
+        buildPrompt: (issue, dir) => buildReviewSelfCheckPrompt(issue, dir),
+      },
+    ];
+
+    const runnerOptions: AcpRoundRunnerOptions = {
       issue: ctx.issue,
       changeDir,
-      eventBus: ctx.eventBus,
+      rounds,
+      acpOptions: {
+        ...ctx.acpOptions,
+        executionId: `review-${ctx.issue.number}`,
+      },
+      stage: 'review',
       projectId: ctx.issue.projectId,
-      acpOptions: ctx.acpOptions,
+      eventBus: ctx.eventBus,
+      checkpointManager: ctx.checkpointManager,
     };
 
-    const results = [];
+    const runner = new AcpRoundRunner(runnerOptions);
+    const result = await runner.execute();
 
-    for (const check of this.checks) {
-      const result = await check.run(checkContext);
-      results.push(result);
+    if (!result.success) {
+      throw new Error(result.message ?? 'Review round execution failed');
+    }
 
-      if (result.status === 'fail' && check.name === 'build-test') {
-        return {
-          success: false,
-          output: { checkResults: results },
-          checkResults: results,
-          message: result.message ?? 'Build test failed',
-          nextStage: Stage.Build,
-        };
+    return result;
+  }
+
+  protected getChecks(): Check[] {
+    return this.checks;
+  }
+
+  protected getNextStage(): Stage {
+    return Stage.Done;
+  }
+
+  async run(ctx: StageContext): Promise<StageRunResult> {
+    const result = await super.run(ctx);
+
+    if (result.success) {
+      try {
+        await ctx.artifactManager.archiveChange(ctx.issue.number);
+      } catch (err) {
+        log.error('Failed to archive change', {
+          issueNumber: ctx.issue.number,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
-    const allPassed = results.every((r) => r.status === 'pass');
-    const anyError = results.some((r) => r.status === 'error');
-
-    if (anyError) {
-      const errorMessages = results.filter((r) => r.status === 'error').map((r) => r.message).filter(Boolean);
-      return {
-        success: false,
-        output: { checkResults: results },
-        checkResults: results,
-        message: errorMessages.length > 0 ? `Check stage encountered errors: ${errorMessages.join('; ')}` : 'Check stage encountered errors',
-      };
-    }
-
-    if (!allPassed) {
-      const failMessages = results.filter((r) => r.status === 'fail').map((r) => r.message).filter(Boolean);
-      return {
-        success: false,
-        output: { checkResults: results },
-        checkResults: results,
-        message: failMessages.length > 0 ? `One or more checks failed: ${failMessages.join('; ')}` : 'One or more checks failed',
-      };
-    }
-
-    try {
-      await ctx.artifactManager.archiveChange(ctx.issue.number);
-    } catch (err) {
-      console.error(`[CheckStageRunner] Failed to archive change for issue #${ctx.issue.number}:`, err);
-    }
-
-    const isUserApproved = ctx.issue.approvalState?.status === 'approved';
-    if (!isUserApproved) {
-      return {
-        success: true,
-        output: { checkResults: results, userApproved: false },
-        checkResults: results,
-        message: 'All checks passed, awaiting user approval',
-      };
-    }
-
-    return {
-      success: true,
-      nextStage: Stage.Done,
-      output: { checkResults: results, userApproved: true },
-      checkResults: results,
-      message: 'All checks passed and approved, advancing to done',
-    };
+    return result;
   }
 }
