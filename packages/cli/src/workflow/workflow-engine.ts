@@ -127,7 +127,6 @@ export class WorkflowEngine {
       }
     }
 
-    this.issueRepo.updateStage(currentIssue.id, Stage.Done);
     this.issueRepo.clearApprovalState(currentIssue.id);
     this.issueRepo.updateStatus(currentIssue.id, IssueStatus.Completed);
     this.checkpointManager.deleteAll(currentIssue.number);

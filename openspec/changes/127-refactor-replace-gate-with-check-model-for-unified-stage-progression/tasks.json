@@ -390,7 +390,12 @@
       "attempts": 0,
       "passes": false,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        282899,
+        449854,
+        137757
+      ]
     }
   ]
 }
