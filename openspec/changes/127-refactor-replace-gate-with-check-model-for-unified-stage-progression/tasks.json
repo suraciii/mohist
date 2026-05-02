@@ -63,14 +63,15 @@
         "T-001"
       ],
       "notes": "",
-      "attempts": 2,
-      "passes": false,
+      "attempts": 3,
+      "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
         611206,
         152964,
-        329414
+        329414,
+        130950
       ]
     },
     {
