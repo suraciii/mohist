@@ -372,6 +372,7 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
 
   it('should call cleanChangeDir when no checkpoint exists', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      if (typeof p === 'string' && p === CHANGE_DIR) return true;
       if (typeof p === 'string' && existingArtifacts.has(p)) return true;
       return false;
     });
