@@ -328,10 +328,11 @@ export class AgentRunnerService {
           action: 'status remains active',
         });
       } else if (issue.stage === Stage.Check || issue.stage === Stage.Plan) {
+        const recoveredOutput = this.recoverApprovalOutput(issue);
         this.issueRepo.setApprovalState(issue.id, {
           stage: issue.stage,
           status: 'awaiting',
-          output: null,
+          output: recoveredOutput,
           requestedAt: new Date().toISOString(),
         });
         log.info('Recovered review-stage issue', {
@@ -356,6 +357,34 @@ export class AgentRunnerService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  private recoverApprovalOutput(issue: Issue): Record<string, unknown> | null {
+    if (!this.projectRepo || !this.worktreeManager) return null;
+    const project = this.projectRepo.findById(issue.projectId);
+    if (!project) return null;
+    const worktreePath = this.worktreeManager.getPath(project.name, issue.number);
+    if (!worktreePath) return null;
+    const changeDir = findChangeDir(worktreePath, issue.number);
+    if (!changeDir) return null;
+
+    if (issue.stage === Stage.Plan) {
+      const selfReviewPath = path.join(changeDir, 'self-review.md');
+      try {
+        if (fs.existsSync(selfReviewPath)) {
+          const content = fs.readFileSync(selfReviewPath, 'utf-8').trim();
+          if (content) {
+            return {
+              stage: Stage.Plan,
+              issueNumber: issue.number,
+              selfReviewNotes: content,
+            };
+          }
+        }
+      } catch {}
+    }
+
+    return null;
   }
 
   private recoverBuildStageIssue(issue: Issue): void {
