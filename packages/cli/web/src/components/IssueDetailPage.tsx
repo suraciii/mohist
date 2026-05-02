@@ -19,6 +19,7 @@ import { CheckSuitePanel } from './CheckSuitePanel'
 import { formatTime } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 import { ChangesPanel } from './ChangesPanel'
+import { PlanApprovalPanel } from './PlanApprovalPanel'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
@@ -596,7 +597,17 @@ export function IssueDetailPage() {
                 />
               )}
 
-              {isAwaitingApproval && issue.stage !== Stage.Check && reviewOutput && (
+              {isAwaitingApproval && issue.stage === Stage.Plan && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+                  <h2 className="text-sm font-semibold text-amber-800">Plan Review</h2>
+                  <PlanApprovalPanel
+                    issueNumber={issueNumber}
+                    output={issue.approvalState?.output ?? {}}
+                  />
+                </div>
+              )}
+
+              {isAwaitingApproval && issue.stage !== Stage.Check && issue.stage !== Stage.Plan && reviewOutput && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h2 className="text-sm font-semibold text-amber-800 mb-2">
                     Review Report
@@ -609,7 +620,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {isAwaitingApproval && issue.stage !== Stage.Check && (
+              {isAwaitingApproval && issue.stage !== Stage.Check && issue.stage !== Stage.Plan && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h2 className="text-sm font-semibold text-amber-800 mb-2">
                     Approval Required
@@ -645,7 +656,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {isAwaitingApproval && issue.stage !== Stage.Check && (
+              {isAwaitingApproval && issue.stage !== Stage.Check && issue.stage !== Stage.Plan && (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
                   <h2 className="text-sm font-semibold text-blue-800 mb-2">Send Message</h2>
                   <p className="text-xs text-blue-600 mb-3">
