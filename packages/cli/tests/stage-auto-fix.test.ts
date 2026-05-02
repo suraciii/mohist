@@ -17,17 +17,17 @@ const mockIssue: Issue = {
 };
 
 describe('parseVerdict', () => {
-  it('should return PASS for explicit PASS verdict', () => {
-    const content = '# Review\n\n## Verdict: PASS\n\nAll checks passed.';
+  it('should return PASS for <promise>PASS</promise>', () => {
+    const content = '# Review\n\n<promise>PASS</promise>\n\nAll checks passed.';
     expect(parseVerdict(content)).toBe('PASS');
   });
 
-  it('should return FAIL for explicit FAIL verdict', () => {
-    const content = '# Review\n\n## Verdict: FAIL\n\nMissing spec compliance.';
+  it('should return FAIL for <promise>FAIL</promise>', () => {
+    const content = '# Review\n\n<promise>FAIL</promise>\n\nMissing spec compliance.';
     expect(parseVerdict(content)).toBe('FAIL');
   });
 
-  it('should return null when verdict line is missing', () => {
+  it('should return null when verdict tag is missing', () => {
     const content = '# Review\n\nSome content without a verdict.';
     expect(parseVerdict(content)).toBeNull();
   });
@@ -36,14 +36,9 @@ describe('parseVerdict', () => {
     expect(parseVerdict('')).toBeNull();
   });
 
-  it('should handle extra whitespace after colon', () => {
-    const content = '## Verdict:   PASS';
-    expect(parseVerdict(content)).toBe('PASS');
-  });
-
-  it('should handle extra whitespace before verdict', () => {
-    const content = '## Verdict: FAIL';
-    expect(parseVerdict(content)).toBe('FAIL');
+  it('should be case-insensitive', () => {
+    expect(parseVerdict('<PROMISE>pass</PROMISE>')).toBe('PASS');
+    expect(parseVerdict('<Promise>Fail</Promise>')).toBe('FAIL');
   });
 
   it('should match verdict mid-document', () => {
@@ -51,7 +46,7 @@ describe('parseVerdict', () => {
 
 Some review content here.
 
-## Verdict: PASS
+<promise>PASS</promise>
 
 ## Summary
 Everything looks good.`;
@@ -59,13 +54,13 @@ Everything looks good.`;
   });
 
   it('should return null for partial match like FAILURE', () => {
-    const content = '## Verdict: FAILURE';
+    const content = '<promise>FAILURE</promise>';
     expect(parseVerdict(content)).toBeNull();
   });
 
-  it('should be case-sensitive — lowercase pass does not match', () => {
+  it('should return null for legacy ## Verdict: format', () => {
     const content = '## Verdict: pass';
-    expect(parseVerdict(content)).toBe('PASS');
+    expect(parseVerdict(content)).toBeNull();
   });
 });
 
