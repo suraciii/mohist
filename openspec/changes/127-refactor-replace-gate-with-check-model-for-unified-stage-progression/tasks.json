@@ -240,12 +240,13 @@
         "T-006"
       ],
       "notes": "This task depends on all three runners being migrated because the engine must work with the new result format from all runners.",
-      "attempts": 1,
-      "passes": false,
+      "attempts": 2,
+      "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
-        545855
+        545855,
+        42000
       ]
     },
     {
