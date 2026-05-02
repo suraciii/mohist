@@ -47,13 +47,6 @@ export class HttpServer {
     this.app.get('/api/health', (c) => {
       return c.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
-
-    this.app.get('/api/status', (c) => {
-      return c.json({
-        success: true,
-        data: this.state
-      });
-    });
   }
 
   public addRouter(path: string, router: Hono): void {

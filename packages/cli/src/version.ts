@@ -1,4 +1,3 @@
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { detectInstallMode } from './cli/commands/server-systemd';
@@ -20,12 +19,9 @@ export function getVersionInfo(): VersionInfo {
 
   let gitHash: string | null = null;
   try {
-    const repoRoot = path.join(__dirname, '..', '..');
-    gitHash = execSync('git rev-parse --short HEAD', {
-      cwd: repoRoot,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const buildInfoPath = path.join(__dirname, 'build-info.json');
+    const buildInfo = JSON.parse(fs.readFileSync(buildInfoPath, 'utf-8'));
+    gitHash = buildInfo.gitHash || null;
   } catch {
     gitHash = null;
   }
@@ -41,6 +37,7 @@ export function getSourceHead(): string | null {
   if (!mode.workingDir) return null;
 
   try {
+    const { execSync } = require('child_process');
     return execSync('git rev-parse --short HEAD', {
       cwd: mode.workingDir,
       encoding: 'utf-8',
