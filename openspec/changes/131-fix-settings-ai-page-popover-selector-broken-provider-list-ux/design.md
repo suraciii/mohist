@@ -1,64 +1,47 @@
 ## Context
 
-`AiSettingsSection.tsx` has two problems: (1) the `ModelSelect` component wraps `Popover.Panel` in a `Transition` without `show={open}`, which in Headless UI v2 keeps the panel permanently hidden; (2) the page layout renders Providers first (80+ flat items), burying Model Selection at the bottom. The existing `Transition` import from `@headlessui/react` and the `Fragment` import from React are only used by this broken wrapper.
+`AiSettingsSection.tsx` renders the AI settings tab. The `ModelSelect` component (lines 173–327) wraps `Popover.Panel` in a `Transition` from `@headlessui/react`, which is the v1 API pattern. The project runs `@headlessui/react ^2.2.10`, where `Transition` no longer auto-detects `Popover`'s open state — without `show={open}`, the panel never renders. The provider list displays 80+ items in a flat sequence, pushing Model Selection off-screen.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Fix all ModelSelect popovers so they open and close correctly under Headless UI v2
-- Reorder the AI settings page: Model Selection first, then Providers
-- Collapse unconfigured providers behind a toggle to reduce visual noise
+- Fix ModelSelect popover so panels render and are interactive
+- Reorder AI settings page: Model Selection first, Providers second
+- Group providers into "Connected" (expanded) and "Available" (collapsible, collapsed by default)
 
 **Non-Goals:**
-- Redesigning the provider connection flow or dialog
-- Changing any API endpoints or data structures
-- Adding animation/transition effects to the popover (the current Transition was broken, and Popover.Panel in v2 has built-in enter/leave handling via `transition` prop if desired later)
+- Adding search/filter within the provider list (already exists)
+- Changing the provider connect/disconnect API or dialog
+- Adding animation/transition effects to the popover (removing Transition is intentional)
+- Changing `SettingsPage.tsx` layout or routing
 
 ## Decisions
 
-### D1: Remove `Transition` wrapper entirely
+### D1: Remove Transition wrapper, use Popover.Panel directly
 
-Replace lines 257–265 (`<Transition as={Fragment} ...>`) and its closing tag (line 322) with nothing — `Popover.Panel` renders directly as a child of the render-prop fragment.
-
-In Headless UI v2, `Popover.Panel` manages its own open/close state via the `Popover` context. The `Transition` component in v2 does not auto-detect this context; it requires an explicit `show` prop. Passing `show={open}` would also work, but removing `Transition` entirely is simpler, matches the v2 recommended pattern, and eliminates the unnecessary `Fragment` wrapper.
-
-After this change the `Transition` and `Fragment` imports become unused and should be removed.
+Strip the `<Transition>` block (lines 257–265) entirely. In Headless UI v2, `Popover.Panel` manages its own open/close visibility via the `Popover` context — no `Transition` needed. The panel will appear/disappear instantly without animation, which is acceptable for a dropdown selector.
 
 **Alternatives considered:**
-- Pass `show={open}` to `Transition` — works but adds an unnecessary wrapper for no benefit in v2
-- Use `Popover.Panel`'s built-in `transition` prop (v2 feature) — possible future enhancement, but out of scope
+- Pass `show={open}` to `Transition` — works but keeps unnecessary wrapper complexity; the render function already provides `{ open }`, so this is a one-line fix, but it perpetuates a v1 pattern that could break again in future upgrades.
+- Use a completely different library (e.g., Radix) — overkill for this scope; Headless UI v2's native `Popover` is sufficient.
 
-### D2: Reorder page sections in `AiSettingsSection`
+### D2: Reorder sections — Model Selection before Providers
 
-Change the JSX order inside the `AiSettingsSection` return to:
-1. **Model Selection** (Mohist Model + Coder Model)
-2. **Stage Model Overrides** (existing collapsible section, stays as-is)
-3. **Providers** — split into two subsections:
-   - Connected providers (full list, always visible)
-   - Unconfigured providers (collapsed by default)
-4. **Custom Providers** (existing section, stays as-is)
+Move the "Model Selection" `<div>` block and "Stage Model Overrides" block above the "Providers" block in the JSX. This is a pure reorder with no logic changes. Users interact with model selection more frequently than provider setup.
 
-This places the most-used controls first without changing any logic — purely a JSX reorder within the same component.
+### D3: Collapsible "Available Providers" section
 
-### D3: Unconfigured providers collapsed by default
-
-Add a `showUnconfigured` state (boolean, default `false`). When collapsed, render a single clickable row showing "N providers available — click to expand". When expanded, render the existing `AvailableProviderCard` list plus a search input.
-
-Use the existing `unconfiguredProviders` memo — no new data fetching needed.
+Add a `useState<boolean>` for the available providers section. Render a clickable section header with a chevron icon. When collapsed, show only the header with a count badge (e.g., "Available (78)"). The "Connected" section remains always-expanded (no collapse toggle) since it's short.
 
 **Alternatives considered:**
-- Two-column layout (connected left, unconfigured right) — too cramped on mobile
-- Pagination — overkill for a settings page
+- Tab-based layout (Connected | Available tabs) — adds navigation complexity for little gain when connected providers are few.
+- Virtualized list for 80+ items — over-engineering; collapsible section avoids the scroll problem entirely.
 
 ## Risks / Trade-offs
 
-- [Lost enter/leave animation] → Popover appears/disappears instantly instead of fading. Acceptable for a bug fix; can add `Popover.Panel transition` prop later if desired.
-- [Unconfigured providers hidden by default] → Users may not discover all providers. Mitigated by showing count and a clear "expand" affordance.
+- [Loss of enter/exit animation] → Acceptable trade-off. The popover appears instantly, which is standard for dropdown selectors. Can re-add CSS transitions later if needed.
+- [Available section hidden by default means new users won't see providers] → Mitigated: when zero providers are connected, the Available section defaults to expanded.
 
 ## Migration Plan
 
-Single deploy — this is a frontend-only bug fix + UX improvement with no API or data changes. No rollback needed beyond a git revert.
-
-## Open Questions
-
-None.
+Single deploy — no API or data changes. Pure frontend component refactor. No rollback needed beyond reverting the commit.
