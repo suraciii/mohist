@@ -217,7 +217,7 @@ describe('buildTimeline', () => {
       [],
     )
     const checkNode = nodes.find((n) => n.stage === 'check') as TimelineStageNode
-    expect(checkNode.label).toBe('Review')
+    expect(checkNode.label).toBe('Check')
   })
 
   it('maps done stage to Done label', () => {
