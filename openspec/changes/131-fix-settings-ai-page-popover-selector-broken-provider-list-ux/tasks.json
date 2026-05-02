@@ -1,18 +1,19 @@
 {
   "project": "mohist",
-  "description": "Fix ModelSelect Popover broken by Headless UI v2 mismatch + improve AI Settings page layout and provider list UX",
+  "description": "Fix ModelSelect popover broken by Headless UI v2 incompatibility and improve AI Settings page layout",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Fix ModelSelect Popover — remove Transition wrapper",
-      "spec": "specs/web-ui/spec.md#modelselect-popover",
-      "description": "In AiSettingsSection.tsx, remove the `Transition` wrapper around `Popover.Panel` (line 257–265 and closing line 322). Render `Popover.Panel` directly as a child of `Popover`. Remove the unused `Transition` import from `@headlessui/react` and `Fragment` import from React if only used by `Transition as={Fragment}`.",
+      "title": "Fix ModelSelect Popover.Panel rendering under Headless UI v2",
+      "spec": "specs/web-ui/spec.md#model-selection-popover-renders-correctly",
+      "description": "Remove the `<Transition>` wrapper around `<Popover.Panel>` in the ModelSelect component (AiSettingsSection.tsx lines 257-265). Replace with Popover.Panel using its built-in `transition` prop for animation. This fixes all three selectors (Mohist Model, Coder Model, Stage Overrides) since they share the same ModelSelect component.",
       "acceptanceCriteria": [
-        "Mohist Model selector button click renders the Popover.Panel DOM with model list",
-        "Coder Model selector opens and displays selectable models",
-        "Stage Model Override selectors open after expanding the section",
-        "Clear button (X) appears when allowClear is set and a value is selected, and clears the value on click",
-        "No Transition import remains in the file",
+        "Popover.Panel renders in the DOM when the Mohist Model selector button is clicked",
+        "Popover.Panel renders in the DOM when the Coder Model selector button is clicked",
+        "Popover.Panel renders in the DOM when any Stage Model Override selector is clicked",
+        "Selecting a model from the dropdown updates the corresponding setting",
+        "Enter/leave transition animation is preserved using Popover.Panel's transition prop",
+        "Fragment import can be removed if no longer needed",
         "Typecheck passes"
       ],
       "priority": 1,
@@ -21,21 +22,21 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "Root cause fix. This alone unblocks all model selection on the AI Settings page."
+      "notes": "The fix is in ModelSelect component only (lines 257-265). All three selectors share this component so fixing it once fixes all instances."
     },
     {
       "id": "T-002",
-      "title": "Restructure AI Settings layout and add collapsible provider groups",
-      "spec": "specs/web-ui/spec.md#ai-settings-layout + specs/ai-settings-provider-list-ux/spec.md#provider-list-visual-grouping",
-      "description": "In AiSettingsSection.tsx, reorder sections so Model Selection and Stage Model Overrides appear above Providers (per web-ui layout spec). Split the provider list into two visual groups: configured providers (always expanded) and unconfigured providers (default collapsed with count badge). Add a `unconfiguredExpanded` state (default false). The existing `providerSearch` and `filteredProviders` logic continues to filter across both groups.",
+      "title": "Reorder AI Settings sections and add provider list visual grouping",
+      "spec": "specs/web-ui/spec.md#ai-settings-page-surfaces-model-selection-prominently specs/web-ui/spec.md#provider-list-has-visual-grouping",
+      "description": "Restructure AiSettingsSection JSX to render sections in new order: Model Selection → Stage Overrides → Connected Providers → Available Providers (collapsed) → Custom Providers. Split the flat provider list into connected (always visible) and available (collapsed by default with count summary). Add an `availableProvidersOpen` state for the collapsible available providers section. Remove the provider search input.",
       "acceptanceCriteria": [
-        "Model Selection section renders at the top of the page, Providers section below it",
-        "Configured providers display under a 'Configured' group header, always expanded",
-        "Unconfigured providers display under an 'Available Providers (N)' header, collapsed by default",
-        "Clicking the 'Available Providers' header toggles expand/collapse",
-        "Empty 'Configured' group is hidden when no providers are configured",
-        "Provider search filters both groups correctly",
-        "Clearing search restores all providers",
+        "Model Selection section (Mohist Model + Coder Model) is the first section on the page",
+        "Connected providers render in their own always-visible section",
+        "Available providers render in a collapsible section that is collapsed by default",
+        "Collapsed available providers section shows a summary with provider count",
+        "Expanding available providers reveals the full list with Connect buttons",
+        "When no unconfigured providers exist, the Available Providers section is not displayed",
+        "Provider search input is removed",
         "Typecheck passes"
       ],
       "priority": 2,
@@ -44,7 +45,7 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "All changes are in the same file. T-001 fixes the popover first so layout changes are verifiable."
+      "notes": "Depends on T-001 since the popover fix must be in place to verify Model Selection works after reordering."
     }
   ]
 }
