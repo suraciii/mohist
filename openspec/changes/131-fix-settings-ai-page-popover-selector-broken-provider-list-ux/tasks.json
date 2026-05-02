@@ -1,17 +1,22 @@
 {
   "project": "mohist",
-  "description": "Fix ModelSelect popover rendering (Headless UI v2 compat) and restructure provider list UX",
+  "description": "Fix broken ModelSelect popover (Headless UI v2 Transition issue) and improve AI settings page layout",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Fix ModelSelect popover rendering for Headless UI v2",
+      "title": "Fix ModelSelect popover and reorder AI settings layout",
       "spec": "specs/web-ui/spec.md",
-      "description": "Remove the `<Transition as={Fragment}>` wrapper around `Popover.Panel` in the `ModelSelect` component (AiSettingsSection.tsx lines 257-265, 322). In Headless UI v2, Transition no longer auto-detects Popover's open state, so the panel never renders. Use `Popover.Panel` directly without the Transition wrapper.",
+      "description": "In AiSettingsSection.tsx: (1) Remove the Transition wrapper around Popover.Panel in ModelSelect (lines 257-265, 322), remove unused Transition and Fragment imports. (2) Reorder the AiSettingsSection JSX so Model Selection and Stage Model Overrides appear before Providers. (3) Split the Providers section: show connected providers always, collapse unconfigured providers behind a toggle with count (e.g. '80 providers available'). Add a showUnconfigured state variable for the toggle.",
       "acceptanceCriteria": [
-        "Popover.Panel renders directly without Transition wrapper",
-        "Fragment import can be removed if no longer used elsewhere in the file",
-        "Typecheck passes",
-        "Build passes"
+        "ModelSelect popover opens when clicking the button (Popover.Panel renders to DOM)",
+        "Search and model selection work inside the popover",
+        "Stage Model Override selectors open and function correctly",
+        "Model Selection section renders before the Providers section on the page",
+        "Connected providers display with Remove buttons at the top of the Providers section",
+        "Unconfigured providers are collapsed by default with a count label",
+        "Clicking the collapsed row expands to show unconfigured providers with search",
+        "No unused imports (Transition, Fragment) remain",
+        "Typecheck passes"
       ],
       "priority": 1,
       "mode": "AFK",
@@ -19,30 +24,7 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "The Transition wrapper (lines 257-265) and its closing tag (line 322) must be removed. Popover.Panel already supports its own CSS transition classes in v2 if needed later."
-    },
-    {
-      "id": "T-002",
-      "title": "Restructure provider list into grouped sections with collapsible Available",
-      "spec": "specs/ai-settings-provider-list/spec.md",
-      "description": "Restructure the AI Settings page: (1) Split the flat provider list into Connected and Available groups with visual headers. (2) Make the Available group collapsible by default (using the same pattern as `stageOverridesOpen`), showing a count summary (e.g., '12 available providers'). (3) Reorder page sections to: Model Selection → Stage Model Overrides → Connected Providers → Available Providers (collapsed) → Custom Providers.",
-      "acceptanceCriteria": [
-        "Providers split into Connected group (configured builtin) and Available group (unconfigured builtin)",
-        "Available group is collapsed by default with a clickable header showing provider count",
-        "No Connected group header when zero connected providers",
-        "No Available group when all builtin providers are connected",
-        "Page section order: Model Selection → Stage Overrides → Connected → Available → Custom",
-        "Model Selection section is visible without scrolling on 1080p viewport",
-        "Typecheck passes",
-        "Build passes"
-      ],
-      "priority": 2,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
-      "dependsOn": ["T-001"],
-      "passes": false,
-      "notes": "Use existing `stageOverridesOpen` pattern for the collapsible Available section. Add `availableOpen` boolean state (default false). The existing `configuredProviders`, `unconfiguredProviders`, and `customProviders` memos already provide the data needed for grouping. Move the provider search input into the Available collapsible section."
+      "notes": "All three changes are in the same file and tightly coupled — layout reorder affects the same JSX that references the fixed ModelSelect, and the provider grouping is part of the same section reorder."
     }
   ]
 }
