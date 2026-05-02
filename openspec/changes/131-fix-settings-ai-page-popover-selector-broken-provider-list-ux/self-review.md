@@ -1,41 +1,34 @@
-## Self-Review: Issue #131 — Settings AI Page Popover + Provider List UX
+## Self-Review: Issue #131 — Settings AI page Popover + Provider UX
 
 ### Alignment
 
-All 5 issue acceptance criteria are traced to tasks:
-
-| Criterion | Task | Status |
-|---|---|---|
-| Mohist Model selector opens and selects | T-001 (criteria 1+5) | Covered |
-| Coder Model selector opens and selects | T-001 (criteria 2+5) | Covered |
-| Stage Model Overrides selectors work | T-001 (criteria 3) | Covered |
-| Provider list has visual grouping/folding | T-002 (criteria 2-4) | Covered |
-| Model Selection not buried at bottom | T-002 (criteria 1) | Covered |
+- Proposal "What Changes" (3 items) trace directly to issue requirements: (1) remove Transition wrapper → bug fix, (2) restructure provider list → UX issue, (3) reorder sections → UX issue.
+- All 5 issue acceptance criteria are covered across specs and tasks.
 
 ### Completeness
 
-- Both capabilities from proposal have spec files: `settings-ai-page-ux` (new), `web-ui` (modified)
-- Both specs have corresponding tasks: T-001 → web-ui, T-002 → settings-ai-page-ux
-- Edge cases covered: no unconfigured providers (spec scenario + T-002 criteria 5), no configured providers (spec scenario + T-002 criteria 6)
+- `model-select-popover` spec: 4 requirements (open/close, search, keyboard nav, grouping) — covers the broken popover functionality.
+- `web-ui` spec: 1 modified requirement with 4 scenarios (section order, connected group, collapsible unconfigured, search preservation) — covers layout and provider UX.
+- Both specs have corresponding tasks (T-001 → model-select-popover, T-002 → web-ui).
 
 ### Consistency
 
-- Capability names match across proposal, specs directories, and task `spec` refs
-- Design decisions D1/D2/D3 map directly to spec requirements
-- No naming mismatches found
+- Proposal lists `model-select-popover` (new) and `web-ui` (modified) — spec directory names match exactly.
+- T-001 references `specs/model-select-popover/spec.md`, T-002 references `specs/web-ui/spec.md` — correct.
+- Design D1 maps to T-001, D2+D3 map to T-002 — consistent.
 
 ### Feasibility
 
-- No new dependencies required — `@headlessui/react` v2.2.10 already installed
-- `Popover.Panel` `transition` prop is valid in Headless UI v2 (confirmed)
-- Both tasks target a single file (`AiSettingsSection.tsx`) — appropriate granularity
+- Both tasks target `AiSettingsSection.tsx` only — single-file change, well-scoped.
+- T-002 depends on T-001 so no merge conflict (sequential edits to same file).
+- No new dependencies, no new files — uses existing Headless UI v2 API.
 
 ### Dependency Completeness
 
-- T-001 (priority 1): `dependsOn: []` — correct, first task
-- T-002 (priority 2): `dependsOn: ["T-001"]` — correct, same file, lower priority
-- No cycles. Valid DAG.
+- T-001: `dependsOn: []` — first task, no dependencies needed.
+- T-002: `dependsOn: ["T-001"]` — references lower priority task.
+- Graph is a DAG, no cycles.
 
-### Issues Found
+### Verdict
 
-None. All artifacts pass review.
+All artifacts pass. No issues found.

@@ -1,63 +1,44 @@
 ## Context
 
-The AI Settings page (`AiSettingsSection.tsx`) has two problems:
-
-1. **Broken popover**: `ModelSelect` wraps `Popover.Panel` in a `<Transition>` component. In `@headlessui/react` v2.x, `Transition` no longer auto-detects the `Popover`'s internal `open` state — without an explicit `show` prop it defaults to closed, so `Popover.Panel` never enters the DOM.
-
-2. **Poor layout**: The page renders ~80 unconfigured providers as a flat list above Model Selection. Users must scroll past all of them to reach the controls they interact with most.
-
-The component is self-contained in `AiSettingsSection.tsx` (638 lines). No backend or API changes are needed.
+`AiSettingsSection.tsx` is a single 638-line file containing all AI settings UI: provider management, model selection popovers, and stage overrides. The immediate blocker is that `ModelSelect` (line 229–327) wraps `Popover.Panel` in a Headless UI v1 `Transition` (line 257–265), but `@headlessui/react` v2.x dropped implicit open-state detection on `Transition`. Without `show={open}`, the panel never renders. The secondary problem is layout: providers (80+ cards) appear first, pushing Model Selection to the bottom.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Make all ModelSelect popover instances functional (Mohist Model, Coder Model, Stage Overrides)
-- Reorder the page so Model Selection is the first section
-- Collapse unconfigured providers into an expandable section to reduce visual noise
+- Unbreak all `ModelSelect` instances (Mohist Model, Coder Model, 5 stage overrides)
+- Reorder sections: Model Selection → Providers → Custom Providers → Stage Overrides
+- Collapse unconfigured providers into a default-collapsed "Available Providers" group
 
 **Non-Goals:**
-- Redesigning the provider connection flow or dialog
-- Adding provider categorization tags or favorites
-- Changing any backend API or data model
-- Upgrading or downgrading `@headlessui/react` version
+- No new components or files — all changes stay in `AiSettingsSection.tsx`
+- No Headless UI version change — use v2 API as-is
+- No provider filtering by category/region — just connected vs unconfigured split
 
 ## Decisions
 
-### D1: Remove `<Transition>` wrapper entirely
+### D1: Remove `Transition` wrapper entirely (not `show={open}` patch)
 
-Remove the `<Transition>` wrapper from around `<Popover.Panel>` (lines 257-265 and the closing tag at line 322). Use `Popover.Panel` directly with its built-in v2 transition support via the `transition` prop.
-
-In Headless UI v2, `Popover.Panel` supports a `transition` prop and `enter`/`enterFrom`/`enterTo`/`leave`/`leaveFrom`/`leaveTo` classes directly — no separate `Transition` component needed.
+Strip lines 257–265 (`<Transition as={Fragment} ...>`) and the closing `</Transition>` at line 322. `Popover.Panel` in v2 handles its own mount/unmount. Loss of enter/leave CSS transitions is acceptable — the panel appears/disappears instantly, which is standard for dropdown menus.
 
 **Alternatives considered:**
-- Adding `show={open}` to the existing `<Transition>` — works but keeps an unnecessary wrapper; the v2 `Popover.Panel` already handles this natively
-- Wrapping in `<Transition show={open}>` — adds a prop that Headless UI v2 Popover.Panel already manages internally
+- `show={open}` on Transition — works but keeps unnecessary abstraction for a simple dropdown; more code, same result
+- CSS-only transition via `data-*` attributes (v2 `transition` prop) — v2 `Popover.Panel` supports a `transition` prop natively, but adds complexity for marginal gain on a utility dropdown
 
-### D2: Reorder sections — Model Selection first
+### D2: Section reorder via JSX block swap
 
-Reorder the JSX in `AiSettingsSection` return block to: Model Selection → Connected Providers → Available Providers (collapsed) → Custom Providers → Stage Model Overrides.
+Move the "Model Selection" `<div>` block (lines 532–564) to appear as the first section inside the `<div className="space-y-8">` container. Then Providers, Custom Providers, Stage Overrides follow.
 
-This is a pure JSX reorder, no state logic changes.
+### D3: Collapsible unconfigured providers via local state
 
-### D3: Collapsible "Available Providers" section
+Add `const [availableExpanded, setAvailableExpanded] = useState(false)`. In the Providers section, render configured providers always visible, then render a clickable header like "Available Providers (75)" that toggles the unconfigured list. Reuse `ChevronRightIcon` + `rotate-90` pattern already used for Stage Overrides.
 
-Split `filteredProviders` into `configuredProviders` (already computed) and `unconfiguredProviders` (already computed). Render configured providers in an always-open section. Render unconfigured providers inside a `<details>`/`<summary>` HTML element (or a simple `useState` toggle) with header text "Available Providers (N)" that defaults to collapsed.
-
-Use a simple `useState<boolean>` toggle (matching the existing `stageOverridesOpen` pattern in the same component) rather than introducing a new dependency.
-
-**Alternatives considered:**
-- Native `<details>`/`<summary>` — works but can't easily animate; style control is limited
-- Headless UI `Disclosure` — adds import for a one-off use; `useState` is simpler and consistent with the component's existing patterns
+The search bar stays above both groups and filters across them. When search is active, both groups expand to show matching results regardless of `availableExpanded`.
 
 ## Risks / Trade-offs
 
-- [Popover loses enter/leave animation] → Acceptable; the panel appears/disappears instantly which is standard for dropdowns. The `transition` prop on `Popover.Panel` in v2 can restore animation without the `Transition` wrapper if desired later.
-- [Reordering may confuse users accustomed to current layout] → Low risk; the new order matches the expected task flow (pick models first, then manage providers).
+- [No transition animation on open/close] → Acceptable trade-off; model selector is a utility, not a showcase component
+- [Search with collapsed group needs special handling] → When `providerSearch` is non-empty, force-expand the available group to show filtered results
 
 ## Migration Plan
 
-Single PR, no migration needed. Changes are purely frontend UI with no data model or API impact. No rollout strategy required.
-
-## Open Questions
-
-None.
+Single PR, no data migration. Deploy with build verification.
