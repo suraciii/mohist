@@ -331,7 +331,7 @@ export class AgentRunnerService {
         this.issueRepo.setApprovalState(issue.id, {
           stage: issue.stage,
           status: 'awaiting',
-          output: { recovered: true, reason: `reopened at ${issue.stage} stage, restored to awaiting approval` },
+          output: null,
           requestedAt: new Date().toISOString(),
         });
         log.info('Recovered review-stage issue', {
