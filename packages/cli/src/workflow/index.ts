@@ -5,13 +5,13 @@ export {
 } from './workflow-engine';
 
 export {
+  BaseStageRunner,
+} from './base-stage-runner';
+
+export {
   type StageRunner,
   CheckStageRunner,
 } from './check-stage-runner';
-
-export {
-  BaseStageRunner,
-} from './base-stage-runner';
 
 export {
   type StageContext,
@@ -40,11 +40,6 @@ export {
   AiReviewCheck,
   type AiReviewCheckOptions,
 } from './checks/ai-review-check';
-
-export {
-  AcpRoundRunner,
-  type RoundConfig,
-} from './acp-round-runner';
 
 export {
   ProposalCompleteCheck,
