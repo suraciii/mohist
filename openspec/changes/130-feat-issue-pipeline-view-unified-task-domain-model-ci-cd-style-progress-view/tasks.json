@@ -1,0 +1,167 @@
+{
+  "project": "mohist",
+  "description": "Unified Task domain model + CI/CD-style Pipeline View for issue detail page",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Backend unified task model — types, repo, event registration, recordTaskResult helper",
+      "spec": "specs/unified-stage-task-model/spec.md",
+      "description": "Define StageTask and StageTaskResult interfaces in stage-context.ts. Narrow StageExecutionRepo.taskResults from unknown[] to StageTaskResult[], add findByIssueId() method. Register stage_task_update in EventBus EventMap and ALL_EVENT_TYPES. Add protected recordTaskResult(ctx, result) to BaseStageRunner that reads current taskResults, appends the new StageTaskResult, and writes back.",
+      "acceptanceCriteria": [
+        "StageTask and StageTaskResult types are defined and exported from stage-context.ts",
+        "StageExecutionRepo.taskResults is typed as StageTaskResult[]",
+        "StageExecutionRepo.findByIssueId returns records ordered by created_at ASC",
+        "stage_task_update is in EventMap with correct payload shape",
+        "stage_task_update is in ALL_EVENT_TYPES array in events.ts",
+        "BaseStageRunner.recordTaskResult appends a StageTaskResult and persists to DB",
+        "npm run build passes",
+        "npm test passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/stage-context.ts, packages/cli/src/db/stage-execution-repo.ts, packages/cli/src/workflow/base-stage-runner.ts, packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the foundation task. Types, repo method, event registration, and the base runner helper are all needed before any stage runner or frontend can use them."
+    },
+    {
+      "id": "T-002",
+      "title": "Plan and Check stage runners emit stage_task_update + record results incrementally",
+      "spec": "specs/pipeline-session-events/spec.md",
+      "description": "Rename RoundConfig to TaskConfig in PlanStageRunner and CheckStageRunner. At each task start, emit stage_task_update with status='started' (alongside existing plan_round_start). At each task completion, call recordTaskResult and emit stage_task_update with status='completed'. For skipped tasks (checkpoint hit), record with status='skipped'. Track per-task start time to compute duration. Keep all old event emissions unchanged.",
+      "acceptanceCriteria": [
+        "PlanStageRunner emits stage_task_update for each of 5 tasks on start and completion",
+        "CheckStageRunner emits stage_task_update for each of 2 tasks on start and completion",
+        "After Plan stage completes, stage_executions.task_results contains 5 StageTaskResult entries",
+        "After Check stage completes, stage_executions.task_results contains 2 StageTaskResult entries",
+        "Skipped tasks (checkpoint) produce StageTaskResult with status='skipped'",
+        "Old events (plan_round_start, plan_session_update) still emit unchanged",
+        "Each StageTaskResult has correct taskId, duration > 0, and artifacts array",
+        "npm run build passes",
+        "npm test passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/plan-stage-runner.ts, packages/cli/src/workflow/check-stage-runner.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Both Plan and Check use the same pattern: iterate tasks, emit on start/complete, record result. They share the TaskConfig shape so implement them together."
+    },
+    {
+      "id": "T-003",
+      "title": "Build stage runner (RalphExecutor) emits stage_task_update + records results",
+      "spec": "specs/pipeline-session-events/spec.md",
+      "description": "In RalphExecutor, add stage_task_update emission alongside existing ralph_task_update at task start, completion, failure, and retry points. In BuildStageRunner, extend the onTaskCompleted callback to also call recordTaskResult with the task's StageTaskResult. Pass stage context through RalphExecutorContext so it can access stageExecutionId and stageExecutionRepo.",
+      "acceptanceCriteria": [
+        "RalphExecutor emits stage_task_update alongside ralph_task_update for started/completed/failed/retrying",
+        "BuildStageRunner records StageTaskResult for each completed Build task via onTaskCompleted",
+        "stage_task_update payload includes stage='build', taskId from tasks.json, taskTitle, and correct attempt count",
+        "Old ralph_task_update and ralph_loop_progress events still emit unchanged",
+        "npm run build passes",
+        "npm test passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts, packages/cli/src/workflow/build-stage-runner.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "RalphExecutor already has the task lifecycle hooks (emit at start/complete/fail/retry). Add parallel stage_task_update emission at each point. BuildStageRunner's onTaskCompleted is the integration point for recordTaskResult."
+    },
+    {
+      "id": "T-004",
+      "title": "GET /api/issues/:number/executions endpoint",
+      "spec": "specs/http-api/spec.md",
+      "description": "Add a new route GET /api/issues/:number/executions to api/issues.ts. Look up the issue by number, then call StageExecutionRepo.findByIssueId to get all execution records. Return them as { data: StageExecution[] } with taskResults as StageTaskResult[] and checkResults as CheckResult[]. Return 404 if issue not found. Return { data: [] } for issues with no executions.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/executions returns 200 with array of stage execution records",
+        "Each record includes id, stage, status, taskResults (StageTaskResult[]), checkResults, createdAt, updatedAt",
+        "Records are ordered by createdAt ascending",
+        "Returns 404 for non-existent issue",
+        "Returns { data: [] } for draft issue with no executions",
+        "npm run build passes",
+        "npm test passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Needs access to StageExecutionRepo. The stateManager.getStageExecutionRepo() is already available in the route factory. Issue lookup uses existing issueService.getByNumber or the issue repo."
+    },
+    {
+      "id": "T-005",
+      "title": "Frontend types + usePipelineView hook + API client + SSE subscription",
+      "spec": "specs/pipeline-view/spec.md",
+      "description": "Add frontend types for StageTaskResult, StageExecution (API response shape), and StageTaskUpdateEvent to lib/types.ts. Add stage_task_update to AgentDetailEventMap and AGENT_DETAIL_EVENTS. Add useIssueExecutions query hook calling GET /api/issues/:number/executions. Create usePipelineView hook that merges API data (completed stages) with live stage_task_update SSE events (running stage), using RAF-throttled event batching at 100ms. Expose the merged pipeline state: stages with their task/check statuses.",
+      "acceptanceCriteria": [
+        "Frontend StageTaskResult and StageExecution types match backend API response shape",
+        "stage_task_update is in AgentDetailEventMap with correct payload type",
+        "stage_task_update is in AGENT_DETAIL_EVENTS array",
+        "useIssueExecutions fetches from GET /api/issues/:number/executions",
+        "usePipelineView merges API history with live SSE events",
+        "RAF throttling batches rapid stage_task_update events at 100ms intervals",
+        "npm run build passes (frontend)"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/agent-events.ts, packages/cli/web/src/hooks/usePipelineView.ts, packages/cli/web/src/hooks/useQueries.ts",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "The usePipelineView hook is the data layer for all Pipeline View components. It must handle: initial API fetch, SSE subscription for live updates, RAF throttling, and merging historical + live data."
+    },
+    {
+      "id": "T-006",
+      "title": "PipelineView + StageBar + StepList + InlineApproval components",
+      "spec": "specs/pipeline-view/spec.md",
+      "description": "Create PipelineView component composing StageBar, StepList, and InlineApproval. StageBar renders horizontal Plan→Build→Check→Done with status icons and elapsed timers, clickable to select stage. StepList shows Tasks section (expandable rows with status icon + title + duration + artifacts) and Checks section (pass/fail/pending rows). InlineApproval renders inside Checks when user-approval is awaiting, with Approve/Send back buttons and feedback input. Handle all issue states: backlog (grey + Start), active (live), blocked (failed icon), interrupted (resume button), completed (all passed), closed (greyed out).",
+      "acceptanceCriteria": [
+        "StageBar renders 4 stages with correct status icons for each issue state",
+        "Clicking a completed stage in StageBar switches StepList to that stage's history",
+        "Clicking the current stage returns to live view",
+        "StepList Tasks section shows each task with status icon, title, duration, expandable artifacts",
+        "StepList Checks section shows each check with pass/fail/pending icon and name",
+        "InlineApproval shows Approve/Send back buttons with feedback input when user-approval is awaiting",
+        "Backlog issue shows 4 grey stages + Start button",
+        "Blocked issue shows failed icon on current stage + failure reason",
+        "Interrupted issue shows resume button",
+        "Completed issue shows all stages passed",
+        "Closed issue shows greyed out non-interactive pipeline",
+        "Running stage elapsed timer updates every second"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/PipelineView.tsx, packages/cli/web/src/components/StageBar.tsx, packages/cli/web/src/components/StepList.tsx, packages/cli/web/src/components/InlineApproval.tsx",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "These are pure presentation components that consume data from usePipelineView hook. Use Tailwind CSS classes matching existing IssueDetailPage styling. Status icons can use simple unicode/emoji or SVG — keep it minimal."
+    },
+    {
+      "id": "T-007",
+      "title": "IssueDetailPage integration + old component deletion",
+      "spec": "specs/pipeline-view/spec.md, specs/session-timeline-ui/spec.md",
+      "description": "Replace IssueTimeline, TaskList, CheckSuitePanel, CheckResultsPanel, and approval sidebar in IssueDetailPage with the new PipelineView component. Delete the old component files (IssueTimeline.tsx, TaskList.tsx, CheckSuitePanel.tsx, CheckResultsPanel.tsx). Delete or mark deprecated useIssueTimeline.ts and useSessionTimeline.ts hooks. Keep BranchBar, Description, ChangesPanel, Comments, SessionList, and Details sidebar unchanged.",
+      "acceptanceCriteria": [
+        "IssueDetailPage imports PipelineView instead of IssueTimeline, TaskList, CheckSuitePanel, CheckResultsPanel",
+        "IssueTimeline.tsx, TaskList.tsx, CheckSuitePanel.tsx, CheckResultsPanel.tsx are deleted",
+        "PipelineView renders at the top of the issue detail content area, above ChangesPanel",
+        "BranchBar, Description, ChangesPanel, Comments, SessionList are preserved unchanged",
+        "No import errors or TypeScript errors in IssueDetailPage",
+        "npm run build passes (frontend + backend)",
+        "npm test passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "This is the final integration task. Verify that the issue detail page renders correctly for all issue states (backlog, active, blocked, interrupted, completed, closed). The old components have no other consumers so deletion is safe."
+    }
+  ]
+}
