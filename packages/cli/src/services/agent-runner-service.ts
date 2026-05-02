@@ -9,7 +9,7 @@ import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskTyp
 import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner } from '../workflow';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
-import { IssueStatus, type Issue } from '../types';
+import { IssueStatus, type Issue, MergeState } from '../types';
 import { EventBus } from './event-bus';
 import { Stage } from '../types';
 import { load } from '../config/config-loader';
@@ -892,6 +892,17 @@ export class AgentRunnerService {
     if (issue.stage === Stage.Done) {
       log.info('Skipping resume-pipeline: issue already done', { issueNumber: issue.number });
       this.completeTask(task.id, 'completed', 'skipped');
+      return;
+    }
+
+    if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
+      log.info('Advancing merged issue to Done', { issueNumber: issue.number });
+      this.issueRepo!.updateStage(issue.id, Stage.Done);
+      this.issueRepo!.clearApprovalState(issue.id);
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Completed);
+      this.issueRepo!.updateBlockedReason(issue.id, null);
+      this.eventBus.emit('agent_completed', { issueId: issue.id, projectId: issue.projectId, issueNumber: issue.number });
+      this.completeTask(task.id, 'completed', 'success');
       return;
     }
 
