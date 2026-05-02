@@ -23,8 +23,8 @@ export class CheckStageRunner implements StageRunner {
     if (!changeDir) {
       return {
         success: false,
-        requiresApproval: false,
         output: null,
+        checkResults: [],
         message: `Change directory not found for issue #${ctx.issue.number}`,
       };
     }
@@ -46,8 +46,8 @@ export class CheckStageRunner implements StageRunner {
       if (result.status === 'fail' && check.name === 'build-test') {
         return {
           success: false,
-          requiresApproval: false,
           output: { checkResults: results },
+          checkResults: results,
           message: result.message ?? 'Build test failed',
           nextStage: Stage.Build,
         };
@@ -61,8 +61,8 @@ export class CheckStageRunner implements StageRunner {
       const errorMessages = results.filter((r) => r.status === 'error').map((r) => r.message).filter(Boolean);
       return {
         success: false,
-        requiresApproval: false,
         output: { checkResults: results },
+        checkResults: results,
         message: errorMessages.length > 0 ? `Check stage encountered errors: ${errorMessages.join('; ')}` : 'Check stage encountered errors',
       };
     }
@@ -71,8 +71,8 @@ export class CheckStageRunner implements StageRunner {
       const failMessages = results.filter((r) => r.status === 'fail').map((r) => r.message).filter(Boolean);
       return {
         success: false,
-        requiresApproval: false,
         output: { checkResults: results },
+        checkResults: results,
         message: failMessages.length > 0 ? `One or more checks failed: ${failMessages.join('; ')}` : 'One or more checks failed',
       };
     }
@@ -87,17 +87,17 @@ export class CheckStageRunner implements StageRunner {
     if (!isUserApproved) {
       return {
         success: true,
-        requiresApproval: true,
         output: { checkResults: results, userApproved: false },
+        checkResults: results,
         message: 'All checks passed, awaiting user approval',
       };
     }
 
     return {
       success: true,
-      requiresApproval: false,
       nextStage: Stage.Done,
       output: { checkResults: results, userApproved: true },
+      checkResults: results,
       message: 'All checks passed and approved, advancing to done',
     };
   }

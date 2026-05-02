@@ -65,8 +65,8 @@ export class BuildStageRunner implements StageRunner {
 
       return {
         success: false,
-        requiresApproval: false,
         output: null,
+        checkResults: [],
         message: `No OpenSpec change found for issue #${issue.number}`,
       };
     }
@@ -182,7 +182,6 @@ export class BuildStageRunner implements StageRunner {
 
       return {
         success: false,
-        requiresApproval: false,
         output: {
           stage: Stage.Build,
           issueNumber: issue.number,
@@ -190,6 +189,7 @@ export class BuildStageRunner implements StageRunner {
           failedTasks: result.failed,
           totalTasks: result.total,
         },
+        checkResults: [],
         message: `Build completed with 0 tasks executed out of ${result.total} total — tasks may have been pre-marked as passed`,
       };
     }
@@ -233,8 +233,8 @@ export class BuildStageRunner implements StageRunner {
 
     return {
       success: result.success,
-      requiresApproval: false,
       nextStage: result.success ? Stage.Check : undefined,
+      checkResults: [],
       output: {
         stage: Stage.Build,
         issueNumber: issue.number,

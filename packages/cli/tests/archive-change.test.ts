@@ -258,7 +258,7 @@ describe('CheckStageRunner archive integration', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(true);
-    expect(result.requiresApproval).toBe(true);
+    expect(result.nextStage).toBeUndefined();
     expect(archiveChange).toHaveBeenCalledWith(42);
   });
 
@@ -289,7 +289,7 @@ describe('CheckStageRunner archive integration', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(true);
-    expect(result.requiresApproval).toBe(true);
+    expect(result.nextStage).toBeUndefined();
     expect(archiveChange).toHaveBeenCalledWith(42);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('Failed to archive change'),

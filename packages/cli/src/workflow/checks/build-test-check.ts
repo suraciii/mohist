@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { Check, CheckContext, CheckResult } from './index';
+import type { ReactionConfig } from '../stage-context';
 import { loadChecksConfig, DEFAULT_CHECKS_CONFIG, loadWorkflow } from '../workflow-loader';
 import { Log } from '../../util/log';
 
@@ -108,6 +109,11 @@ export interface BuildTestCheckOptions {
 
 export class BuildTestCheck implements Check {
   public readonly name = 'build-test';
+  public readonly reaction: ReactionConfig = {
+    type: 'auto-fix',
+    maxAttempts: 2,
+    fallbackReaction: { type: 'escalate' as const },
+  };
   private worktreePath: string;
 
   constructor(options: BuildTestCheckOptions) {
