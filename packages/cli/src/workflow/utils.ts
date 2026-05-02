@@ -11,15 +11,6 @@ export function parseVerdict(content: string): 'PASS' | 'FAIL' | null {
   const upper = content.toUpperCase();
   if (upper.includes(PROMISE_PASS.toUpperCase())) return 'PASS';
   if (upper.includes(PROMISE_FAIL.toUpperCase())) return 'FAIL';
-  const match = RESULT_RE.exec(content);
-  if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
-  const legacyMatch = LEGACY_VERDICT_RE.exec(content);
-  if (legacyMatch) {
-    log.warn('parseVerdict: matched legacy "## Verdict:" header');
-    return legacyMatch[1].toUpperCase() as 'PASS' | 'FAIL';
-  }
-  return null;
-}
   return null;
 }
 
