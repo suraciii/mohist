@@ -1,26 +1,29 @@
 ## Why
 
-The diff/commits viewer is buried at the bottom of IssueDetailPage (below Comments) and gated behind a `DIFF_STAGES` whitelist, making it invisible in Backlog and hard to find in all other stages. Users reviewing agent work must scroll past Description, TaskList, and Comments to answer their most pressing question: "what did the agent change?" — and during Plan/Review approvals, the file changes are spatially disconnected from the approval buttons in the sidebar.
+The diff/commits viewer is buried at the bottom of IssueDetailPage, hidden behind a `DIFF_STAGES` gate that excludes Backlog entirely. Users must scroll past Description, TaskList, and Comments to see what the agent changed — and during approval reviews, the changes are spatially disconnected from the Approve button in the sidebar. Repositioning Changes to appear immediately after Description and removing the stage restriction makes code review a first-class interaction across every workflow stage.
 
 ## What Changes
 
-- **Remove `DIFF_STAGES` stage restriction** — Changes panel visible in all workflow stages (Backlog shows empty state)
-- **Reposition Changes panel** from bottom of main column (after Comments) to after Description, before TaskList
-- **Add summary statistics** at the top of Changes panel: file count, +X/-Y lines, commit count
-- **Add compact changes summary** inline in PlanApprovalPanel and ReviewApprovalPanel (optional, to connect approval context with actual scope)
+- Remove `DIFF_STAGES` stage restriction — Changes panel visible in all stages (Backlog shows "No changes yet" empty state)
+- Reposition Changes panel from bottom of main column (after Comments) to immediately after Description, before TaskList
+- Add summary statistics header to Changes panel: file count, total additions/deletions, commit count
+- Keep existing Files/Commits tabs and expandable DiffViewer behavior unchanged
+- Optionally add compact changes summary inline in approval panels (PlanApprovalPanel, ReviewApprovalPanel) so reviewers see scope without scrolling
 
 ## Capabilities
 
 ### New Capabilities
 
-- `changes-panel-prominence`: Changes panel repositioned as a first-class section with summary stats, visible across all stages
+- `changes-summary`: Summary statistics header for the Changes panel — displays file count, +/- line counts, and commit count at a glance
 
 ### Modified Capabilities
 
-- `changes-commits-first`: Remove `DIFF_STAGES` restriction; add summary statistics header; reposition from bottom to after Description
+- `web-ui`: IssueDetailPage layout changes — Changes panel repositioned after Description (before TaskList), `DIFF_STAGES` restriction removed, visible in all stages with Backlog empty state
+- `changes-tab`: Existing Changes panel gains a summary statistics header and all-stage visibility
 
 ## Impact
 
-- **Frontend** (`packages/cli/web/src/components/IssueDetailPage.tsx`): Remove `DIFF_STAGES` constant and `showDiff` guard; restructure JSX to move Changes section above TaskList
-- **Frontend** (`packages/cli/web/src/components/PlanApprovalPanel.tsx`, `ReviewApprovalPanel.tsx`): Optionally add inline changes summary
-- **No backend changes** — reuses existing `getIssueDiff` and `getIssueCommits` APIs
+- **Frontend** (`packages/cli/web/src/components/IssueDetailPage.tsx`): Layout restructure — move diff/commits block up, remove `DIFF_STAGES` check, add summary stats
+- **Frontend** (optional: `PlanApprovalPanel.tsx`, `ReviewApprovalPanel.tsx`): Compact inline changes summary during approval
+- **No API changes** — reuses existing `getIssueDiff`, `getIssueCommits` endpoints
+- **No diff rendering changes** — existing `DiffViewer` component untouched
