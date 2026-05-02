@@ -279,6 +279,7 @@ export class AgentRunnerService {
     const orphans = activeIssues.filter(issue => {
       if (this.runningSlots.has(issue.id)) return false;
       if (issue.mergeState) return false;
+      if (issue.approvalState?.status === 'awaiting') return false;
       return true;
     });
 
@@ -320,6 +321,18 @@ export class AgentRunnerService {
           issueNumber: issue.number,
           stage: issue.approvalState.stage ?? issue.stage,
           action: 'status remains active',
+        });
+      } else if (issue.stage === Stage.Check || issue.stage === Stage.Plan) {
+        this.issueRepo.setApprovalState(issue.id, {
+          stage: issue.stage,
+          status: 'awaiting',
+          output: { recovered: true, reason: `reopened at ${issue.stage} stage, restored to awaiting approval` },
+          requestedAt: new Date().toISOString(),
+        });
+        log.info('Recovered review-stage issue', {
+          issueNumber: issue.number,
+          stage: issue.stage,
+          action: 'status=active, approval restored',
         });
       } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
         this.recoverBuildStageIssue(issue);

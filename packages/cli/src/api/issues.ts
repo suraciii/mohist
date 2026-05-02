@@ -698,12 +698,15 @@ export function createIssueRoutes(
         agentRunner.recoverSingleIssueById(issue.id);
       }
 
-      if (agentRunner) {
+      const refreshedIssue = issueService.getByNumber(projectId, number);
+      const isAtApprovalGate = refreshedIssue?.approvalState?.status === 'awaiting';
+
+      if (agentRunner && !isAtApprovalGate) {
         const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
         const response: ApiResponse = {
           success: true,
           data: {
-            issue: issueService.getByNumber(projectId, number),
+            issue: refreshedIssue,
             taskId: result.taskId,
             status: result.status,
             queuePosition: result.queuePosition,
@@ -716,8 +719,8 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: {
-          issue,
-          message: `Issue #${number} reopened at stage ${issue.stage}. Use start to continue.`,
+          issue: refreshedIssue ?? issue,
+          message: `Issue #${number} reopened at stage ${issue.stage}. Awaiting approval.`,
         }
       };
       return c.json(response);
