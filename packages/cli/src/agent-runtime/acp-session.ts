@@ -254,21 +254,23 @@ export async function runAcpSession(
             }
           }
 
-          if (SESSION_STREAM_EVENT_TYPES.has(eventType)) {
-            sessionStreamLogRepo?.insert(
-              issueId ?? '',
-              sessionId,
-              eventType,
-              update as unknown as Record<string, unknown>,
-            );
-          } else if (workflowLogRepo) {
-            workflowLogRepo.insert(
-              issueId ?? '',
-              sessionId || null,
-              eventType,
-              update as unknown as Record<string, unknown>,
-            );
-          }
+          try {
+            if (SESSION_STREAM_EVENT_TYPES.has(eventType)) {
+              sessionStreamLogRepo?.insert(
+                issueId ?? '',
+                sessionId,
+                eventType,
+                update as unknown as Record<string, unknown>,
+              );
+            } else if (workflowLogRepo) {
+              workflowLogRepo.insert(
+                issueId ?? '',
+                sessionId || null,
+                eventType,
+                update as unknown as Record<string, unknown>,
+              );
+            }
+          } catch {}
 
           if (
             eventType === 'tool_call' &&
@@ -680,21 +682,23 @@ export async function createAcpConnection(
             onSessionUpdate(notification);
           }
 
-          if (SESSION_STREAM_EVENT_TYPES.has(eventType)) {
-            sessionStreamLogRepo?.insert(
-              issueId ?? '',
-              sessionId,
-              eventType,
-              update as unknown as Record<string, unknown>
-            );
-          } else if (workflowLogRepo) {
-            workflowLogRepo.insert(
-              issueId ?? '',
-              sessionId || null,
-              eventType,
-              update as unknown as Record<string, unknown>
-            );
-          }
+          try {
+            if (SESSION_STREAM_EVENT_TYPES.has(eventType)) {
+              sessionStreamLogRepo?.insert(
+                issueId ?? '',
+                sessionId,
+                eventType,
+                update as unknown as Record<string, unknown>
+              );
+            } else if (workflowLogRepo) {
+              workflowLogRepo.insert(
+                issueId ?? '',
+                sessionId || null,
+                eventType,
+                update as unknown as Record<string, unknown>
+              );
+            }
+          } catch {}
 
           if (!onSessionUpdate && eventType === 'tool_call' && eventBus && executionId) {
             const toolData = update as Record<string, unknown>;
