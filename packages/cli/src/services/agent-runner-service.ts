@@ -220,7 +220,7 @@ export class AgentRunnerService {
           result: 'awaiting_approval',
           completedAt: new Date().toISOString(),
         });
-        log.info('Recovered running task — at approval gate, marked completed', {
+        log.info('Recovered running task — at approval checkpoint, marked completed', {
           taskId: task.id,
           issueNumber: task.issueNumber,
           stage: issue.stage,
@@ -1267,7 +1267,7 @@ export class AgentRunnerService {
   private handlePlanRebase(issue: Issue, _project: { name: string }, _projectId: string, number: number): void {
     if (!this.worktreeManager || !this.issueRepo) return;
     if (!this.isIssueAwaitingApproval(issue.id)) {
-      log.info('Skipping re-self-review injection: issue not at approval gate', { issueNumber: number });
+      log.info('Skipping re-self-review injection: issue not at approval checkpoint', { issueNumber: number });
       return;
     }
     const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
