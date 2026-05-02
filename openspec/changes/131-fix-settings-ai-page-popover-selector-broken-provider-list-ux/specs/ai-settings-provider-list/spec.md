@@ -49,7 +49,7 @@ AI Settings 页面的「Model Selection」区域 SHALL 排列在 Provider 列表
 #### Scenario: 页面布局顺序
 
 - **WHEN** 用户访问 Settings AI 页面
-- **THEN** 页面自上而下的顺序为：Model Selection → Connected Providers → Available Providers（折叠）→ Custom Providers → Stage Model Overrides
+- **THEN** 页面自上而下的顺序为：Model Selection → Stage Model Overrides → Connected Providers → Available Providers（折叠）→ Custom Providers
 
 #### Scenario: Model Selection 可见性
 
