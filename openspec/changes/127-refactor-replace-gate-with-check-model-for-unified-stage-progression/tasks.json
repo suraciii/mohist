@@ -127,8 +127,8 @@
         "T-003"
       ],
       "notes": "AiReviewCheck currently uses AcpRoundRunner internally for the review round. Split this: move the ACP session logic into CheckStageRunner.executeTasks(), and simplify AiReviewCheck to only parse the review output (read review.md, parse verdict). AiReviewCheck becomes a data-only check with no ACP calls.",
-      "attempts": 1,
-      "passes": false,
+      "attempts": 2,
+      "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
