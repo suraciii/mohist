@@ -58,10 +58,14 @@
         "T-001"
       ],
       "notes": "",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        611206,
+        152964
+      ]
     },
     {
       "id": "T-003",
