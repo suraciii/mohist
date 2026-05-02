@@ -1,71 +1,66 @@
 ## Context
 
-`coder_session` table (v13, migration v15) has `task_description` but no `title`. All session labels are derived from truncated raw prompts, producing unreadable text like `<mohist-task>\n\n<role>\nYou are implementi...`. Each session's caller already has structured context (task ID, stage name, skill name, issue title) available at creation time — the field just doesn't exist to carry it.
+The `coder_session` table has no `title` field. The UI displays `task_description` (raw prompt first 200 chars) for each session, which is always `<mohist-task>\n\n<role>\nYou are implementi...` — useless for distinguishing sessions. The title needs to be set by each caller at session creation time and flow through DB → API → SSE → frontend.
 
-Current schema version is **v20**. Next migration is **v21**.
-
-Two code paths create sessions: `runAcpSession` (single-shot, ~line 393) and `createAcpConnection` (multi-round, ~line 816). Both emit `coder_session_started` SSE events. Frontend displays labels via `getSessionLabel()` in `SessionHeader.tsx:20`.
+Current data flow: caller → `AcpSessionOptions`/`AcpConnectionOptions` → `acp-session.ts` (2 sites: `runAcpSession:395`, `createAcpConnection:818`) → `coderSessionRepo.insert()` + `eventBus.emit('coder_session_started')` → API endpoints → frontend.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Every new coder session gets a human-readable `title` supplied by its caller
-- Frontend uses `title` as the primary display label, with fallback chain for old sessions
-- Backward compatible — no data migration needed
+- Add nullable `title` column to `coder_session` table
+- Plumb `title` through ACP session options, DB insert, SSE events, API responses, and frontend display
+- All 7+ callers pass meaningful titles
+- Frontend falls back gracefully for old sessions without titles
 
 **Non-Goals:**
-- Session grouping/folding (same task, multiple attempts)
-- Backfilling titles for existing sessions
-- Changing the `task_description` field behavior
+- Backfilling titles for existing sessions (frontend fallback handles this)
+- Session grouping/folding by task
+- Changing the `taskDescription` field semantics
 
 ## Decisions
 
-### D1: Nullable `title TEXT` column with no default
+### D1: Nullable column with no data migration
 
-Add `title TEXT` (nullable, no default) via `ALTER TABLE coder_session ADD COLUMN title TEXT` in migration v21. Old rows remain `NULL`, handled by frontend fallback chain.
+Add `title TEXT` as nullable via schema migration (version 21). Existing rows get `NULL`. Frontend fallback chain (title → executionId task parse → stage → taskDescription) handles old data without a backfill migration.
 
-**Alternatives considered:**
-- `DEFAULT ''` — hides the distinction between "no title" and "empty title", complicates fallback logic
-- Backfill migration — unnecessary complexity; frontend fallback chain covers it
+**Alternatives considered:** Running an UPDATE to backfill titles from executionId parsing. Rejected — adds complexity, the fallback chain covers it at display time with zero migration risk.
 
-### D2: `title` flows through options interfaces, not a separate parameter
+### D2: title field on both AcpSessionOptions and AcpConnectionOptions
 
-Add `title?: string` to `AcpSessionOptions` and `AcpConnectionOptions`. Both `runAcpSession` and `createAcpConnection` pass it to `coderSessionRepo.insert()` and the `coder_session_started` SSE event.
+Both interfaces get `title?: string`. This mirrors existing patterns like `stage`, `issueNumber`, `model` — optional fields that flow from caller through to DB/SSE.
 
-**Alternatives considered:**
-- Separate parameter on insert only — breaks the established pattern where all session metadata flows through options
-- Derive title from existing fields — no reliable derivation possible for all callers
+### D3: title passed at caller level, not derived
 
-### D3: Caller-supplied static titles for stage runners
+Each caller explicitly constructs the title string. No auto-generation from `taskDescription` or `executionId` in `acp-session.ts` — the caller has the best context (task ID + title, skill name, issue title).
 
-Plan/Check/auto-fix callers use hardcoded strings (`"Plan stage"`, `"Auto-fix: compilation errors"`) because each stage creates exactly one session. RalphExecutor uses dynamic `${task.id}: ${task.title}`.
+### D4: coder_session_started SSE event gains title field
 
-**Alternatives considered:**
-- Auto-derive from first LLM output — adds latency, unreliable, over-engineered for this scope
+The `coder_session_started` event in `event-bus.ts` EventMap gains `title?: string`. Both emission sites in `acp-session.ts` (line ~405 for `runAcpSession`, line ~831 for `createAcpConnection`) pass `options.title`.
 
-### D4: Frontend fallback chain in `getSessionLabel`
+### D5: Frontend fallback chain in getSessionLabel
 
-Priority: `session.title` → taskId from `executionId` → `stage` name → first 24 chars of `taskDescription`. This matches the spec and handles both new sessions (with title) and legacy sessions (without).
+Replace the current `stage → taskDescription` logic in `SessionHeader.tsx:getSessionLabel` with a 4-level priority chain:
+1. `session.title` (non-null)
+2. Extract task ID from `executionId` via regex `/^(?:build|check)-\d+-(T-\d+)$/`
+3. Capitalized `stage` name
+4. `taskDescription.slice(0, 24)` (existing behavior)
 
-**Alternatives considered:**
-- Server-side default in API response — violates single source of truth; DB stores NULL, display logic is a frontend concern
+### D6: Additional callers beyond the 7 listed
 
-### D5: Additional callers discovered during exploration
-
-`conflict-resolution.ts` also creates sessions via `createAcpConnection` — should receive `title: "Conflict resolution"`. `skill-service.ts` does NOT pass `coderSessionRepo`, so it doesn't create `coder_session` rows — no title needed there.
+Two more callers use `createAcpConnection` and should pass titles:
+- `conflict-resolution.ts` → `title: "Conflict resolution"`
+- `server/index.ts` build fix → `title: "Auto-fix: build errors"`
 
 ## Risks / Trade-offs
 
-- **[Old sessions show fallback labels forever]** → Acceptable; fallback chain provides reasonable labels from executionId/stage. No user complaint expected since these are historical.
-- **[Skill sessions don't get titles]** → `skill-service.ts` doesn't create `coder_session` rows (no `coderSessionRepo` passed), so no change needed. If skills later get session tracking, `title` should be added then.
-- **[conflict-resolution.ts missed in original scope]** → Add it with `title: "Conflict resolution"` — same pattern, minimal cost.
+- [Old sessions show fallback] → Frontend fallback chain handles this transparently. No user action needed.
+- [Caller forgets to pass title] → `title` is optional (`title?: string`), so it degrades to `NULL` with existing fallback behavior. Not a crash risk.
 
 ## Migration Plan
 
-1. Add migration v21 (`ALTER TABLE coder_session ADD COLUMN title TEXT`)
-2. Deploy backend changes (repo, acp-session, callers, API) — all additive, no breaking changes
-3. Deploy frontend changes — `title` is nullable, fallback chain handles absence
-4. No rollback needed — column is nullable, frontend ignores missing field
+1. Deploy backend: schema migration v21 (`ALTER TABLE coder_session ADD COLUMN title TEXT`), repo changes, ACP options, callers, API, SSE
+2. Deploy frontend: type updates, fallback chain, SSE handler updates
+3. No rollback concerns — `title` is nullable, absence is handled by fallback
 
 ## Open Questions
 

@@ -1,82 +1,113 @@
 ## ADDED Requirements
 
-### Requirement: Coder session title stored on creation
-The `coder_session` table SHALL include a nullable `title TEXT` column. When a caller passes a `title` value via `AcpSessionOptions.title` or `AcpConnectionOptions.title`, the system SHALL persist it in the `coder_session` row at insert time. Both `runAcpSession` and `createAcpConnection` code paths SHALL accept and store `title`.
+### Requirement: coder_session table has title column
+The `coder_session` table SHALL include a `title TEXT` column. The column SHALL be nullable to maintain backward compatibility with existing rows.
 
-#### Scenario: Session created with title via runAcpSession
-- **WHEN** `runAcpSession` is called with `title: "T-004: Create Plan and CheckStageRunner"`
-- **THEN** the `coder_session` row has `title = "T-004: Create Plan and CheckStageRunner"`
+#### Scenario: New session row with title
+- **WHEN** a coder_session row is inserted with `title: "T-004: Create Plan and CheckStageRunner"`
+- **THEN** the row is stored with `title` = `"T-004: Create Plan and CheckStageRunner"`
 
-#### Scenario: Session created with title via createAcpConnection
-- **WHEN** `createAcpConnection` is called with `title: "Plan stage"`
-- **THEN** the `coder_session` row has `title = "Plan stage"`
+#### Scenario: New session row without title
+- **WHEN** a coder_session row is inserted without a title
+- **THEN** the row is stored with `title` = `NULL`
 
-#### Scenario: Session created without title
-- **WHEN** a caller does not pass `title` in options
-- **THEN** the `coder_session` row has `title = NULL`
+#### Scenario: Existing rows unaffected by migration
+- **WHEN** the migration adds the `title` column
+- **THEN** all existing coder_session rows have `title` = `NULL`
+- **AND** no data is lost or corrupted
 
-### Requirement: Each caller supplies a descriptive session title
-All callers that create coder sessions SHALL supply a human-readable `title`:
+### Requirement: CreateCoderSessionData accepts title
+The `CreateCoderSessionData` interface SHALL include an optional `title?: string` field. The `CoderSessionRepo.insert()` method SHALL persist the `title` value when provided.
 
-| Caller | Title format |
-|--------|-------------|
-| RalphExecutor | `{task.id}: {task.title}` (e.g. `T-004: Create Plan and CheckStageRunner`) |
-| PlanStageRunner | `Plan stage` |
-| CheckStageRunner | `Check stage` |
-| CodeCompilesCheck | `Auto-fix: compilation errors` |
-| BuildTestCheck | `Auto-fix: test failures` |
-| SkillService | `Skill: {skill.name}` |
-| ExploreACPService | `Explore: {issue.title}` |
+#### Scenario: Insert with title
+- **WHEN** `coderSessionRepo.insert({ issueId, acpSessionId, title: "Plan stage" })` is called
+- **THEN** the returned `CoderSession` has `title: "Plan stage"`
 
-#### Scenario: RalphExecutor passes task title
+#### Scenario: Insert without title
+- **WHEN** `coderSessionRepo.insert({ issueId, acpSessionId })` is called
+- **THEN** the returned `CoderSession` has `title: null`
+
+### Requirement: Callers pass meaningful session titles
+Each caller of `runAcpSession` or `createAcpConnection` SHALL pass a `title` in the options:
+
+| Caller | Interface | Title pattern |
+|--------|-----------|---------------|
+| RalphExecutor (per-task) | runAcpSession | `${task.id}: ${task.title}` |
+| PlanStageRunner | createAcpConnection | `"Plan stage"` |
+| CheckStageRunner | createAcpConnection | `"Check stage"` |
+| CodeCompilesCheck (auto-fix) | runAcpSession | `"Auto-fix: compilation errors"` |
+| BuildTestCheck (auto-fix) | runAcpSession | `"Auto-fix: test failures"` |
+| SkillService | runAcpSession | `` `Skill: ${skill.name}` `` |
+| ExploreACPService | runAcpSession | `` `Explore: ${issue.title}` `` |
+| ConflictResolution | createAcpConnection | `"Conflict resolution"` |
+| Server build fix | createAcpConnection | `"Auto-fix: build errors"` |
+
+#### Scenario: RalphExecutor creates Build task session
 - **WHEN** RalphExecutor runs task T-004 with title "Create Plan and CheckStageRunner"
-- **THEN** it calls `runAcpSession` with `title: "T-004: Create Plan and CheckStageRunner"`
+- **THEN** `runAcpSession` is called with `title: "T-004: Create Plan and CheckStageRunner"`
 
-#### Scenario: SkillService passes skill name
-- **WHEN** SkillService runs skill named "debug-helper"
-- **THEN** it calls `runAcpSession` with `title: "Skill: debug-helper"`
+#### Scenario: PlanStageRunner creates Plan session
+- **WHEN** PlanStageRunner creates an ACP connection for Plan stage
+- **THEN** `createAcpConnection` is called with `title: "Plan stage"`
 
-#### Scenario: ExploreACPService passes issue title
-- **WHEN** ExploreACPService explores issue titled "Fix login bug"
-- **THEN** it calls `runAcpSession` with `title: "Explore: Fix login bug"`
+#### Scenario: CheckStageRunner creates Check session
+- **WHEN** CheckStageRunner creates an ACP connection for Check stage
+- **THEN** `createAcpConnection` is called with `title: "Check stage"`
 
-### Requirement: SSE coder_session_started event carries title
-The `coder_session_started` SSE event payload SHALL include the session's `title` field (nullable string).
+#### Scenario: CodeCompilesCheck auto-fix session
+- **WHEN** CodeCompilesCheck runs an auto-fix session for compilation errors
+- **THEN** `runAcpSession` is called with `title: "Auto-fix: compilation errors"`
 
-#### Scenario: Session started event with title
-- **WHEN** a coder session is created with `title: "Plan stage"`
-- **THEN** the `coder_session_started` SSE event payload includes `title: "Plan stage"`
+#### Scenario: BuildTestCheck auto-fix session
+- **WHEN** BuildTestCheck runs an auto-fix session for test failures
+- **THEN** `runAcpSession` is called with `title: "Auto-fix: test failures"`
 
-#### Scenario: Session started event without title (legacy)
-- **WHEN** a coder session is created without a title
-- **THEN** the `coder_session_started` SSE event payload includes `title: null`
+#### Scenario: SkillService session
+- **WHEN** SkillService runs a skill named "walkthrough"
+- **THEN** `runAcpSession` is called with `title: "Skill: walkthrough"`
 
-### Requirement: API responses include session title
-The `GET /api/issues/:number/coder-sessions` and `GET /api/agent/sessions` endpoints SHALL return the `title` field on each session object.
+#### Scenario: ExploreACPService session
+- **WHEN** ExploreACPService runs for issue titled "Add login page"
+- **THEN** `runAcpSession` is called with `title: "Explore: Add login page"`
 
-#### Scenario: Issue coder sessions response includes title
-- **WHEN** `GET /api/issues/42/coder-sessions` returns sessions
-- **THEN** each session object includes a `title` field (string or null)
+#### Scenario: ConflictResolution session
+- **WHEN** ConflictResolution creates an ACP connection to resolve merge conflicts
+- **THEN** `createAcpConnection` is called with `title: "Conflict resolution"`
 
-#### Scenario: Agent sessions response includes title
-- **WHEN** `GET /api/agent/sessions` returns sessions
-- **THEN** each session object includes a `title` field (string or null)
+#### Scenario: Server build fix session
+- **WHEN** the server auto-fix handler creates an ACP connection to fix build errors
+- **THEN** `createAcpConnection` is called with `title: "Auto-fix: build errors"`
 
-### Requirement: Frontend displays session title with priority fallback chain
-The frontend SHALL display a session label using the following priority: (1) `session.title` if present, (2) taskId parsed from `executionId`, (3) stage name, (4) first 24 characters of `taskDescription`.
+### Requirement: API endpoints return title field
+The `GET /api/issues/:number/coder-sessions` endpoint SHALL include `title` in the returned session objects. The `GET /api/agent/sessions` endpoint SHALL include `title` in the returned session objects via `findAllWithIssueInfo`.
+
+#### Scenario: Issue coder-sessions includes title
+- **WHEN** `GET /api/issues/5/coder-sessions` is called
+- **THEN** each session object in the response includes `title: string | null`
+
+#### Scenario: Agent sessions list includes title
+- **WHEN** `GET /api/agent/sessions` is called
+- **THEN** each session object in the response includes `title: string | null`
+
+### Requirement: Frontend displays session title with fallback chain
+The frontend SHALL display a human-readable label for each coder session using the following priority:
+1. `session.title` — use directly if non-null
+2. Parse `taskId` from `executionId` — `build-127-T-004` → display `"T-004"`
+3. `stage` name — display as-is (e.g., `"Plan"`, `"Check"`)
+4. `taskDescription` first 24 characters — fallback (existing behavior)
 
 #### Scenario: Session with title displays title
 - **WHEN** a session has `title: "T-004: Create Plan and CheckStageRunner"`
-- **THEN** the UI displays "T-004: Create Plan and CheckStageRunner"
+- **THEN** the frontend displays `"T-004: Create Plan and CheckStageRunner"`
 
-#### Scenario: Session without title falls back to taskId
+#### Scenario: Session without title falls back to executionId
 - **WHEN** a session has `title: null` and `executionId: "build-127-T-004"`
-- **THEN** the UI displays "T-004" (parsed from executionId)
+- **THEN** the frontend extracts and displays `"T-004"`
 
-#### Scenario: Session without title or taskId falls back to stage
-- **WHEN** a session has `title: null`, no parseable executionId, and `stage: "Plan"`
-- **THEN** the UI displays "Plan"
+#### Scenario: Session without title or parseable executionId falls back to stage
+- **WHEN** a session has `title: null` and `executionId: "plan-5"` and `stage: "Plan"`
+- **THEN** the frontend displays `"Plan"`
 
-#### Scenario: All fallbacks exhausted uses taskDescription
-- **WHEN** a session has `title: null`, no executionId, no stage, and `taskDescription: "Implement the feature that..."`
-- **THEN** the UI displays "Implement the feature tha" (first 24 chars)
+#### Scenario: Session with no identifiers falls back to taskDescription
+- **WHEN** a session has `title: null`, `executionId: null`, `stage: null`, and `taskDescription: "<mohist-task>\n\n<role>\nYou ar"`
+- **THEN** the frontend displays `taskDescription` truncated to 24 characters
