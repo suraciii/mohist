@@ -163,7 +163,10 @@
       "attempts": 0,
       "passes": false,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        621414
+      ]
     },
     {
       "id": "T-006",
