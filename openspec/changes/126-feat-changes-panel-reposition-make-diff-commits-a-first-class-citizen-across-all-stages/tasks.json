@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Reposition Changes panel to be a first-class citizen visible in all stages, with summary statistics and inline approval context",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ChangesPanel.tsx",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This is a pure extract refactor — no behavior change yet. The panel is used in-place of the old inline JSX in IssueDetailPage."
+      "passes": true,
+      "notes": "This is a pure extract refactor — no behavior change yet. The panel is used in-place of the old inline JSX in IssueDetailPage.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        456813
+      ]
     },
     {
       "id": "T-002",
@@ -40,9 +45,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": ""
+      "notes": "",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -60,9 +70,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "PlanApprovalPanel and ReviewApprovalPanel are orphaned components not used in IssueDetailPage. The approval UI is inline JSX, so the summary is added directly there."
+      "notes": "PlanApprovalPanel and ReviewApprovalPanel are orphaned components not used in IssueDetailPage. The approval UI is inline JSX, so the summary is added directly there.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
