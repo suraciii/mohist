@@ -1,20 +1,21 @@
 {
   "project": "mohist",
-  "description": "Reposition Changes panel after Description, remove DIFF_STAGES gate, add summary stats header",
+  "description": "Reposition Changes panel to be a first-class citizen in IssueDetailPage, visible in all stages with summary statistics",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Reposition Changes panel and remove stage gate",
-      "spec": "specs/web-ui/spec.md",
-      "description": "In IssueDetailPage.tsx: (1) Remove the DIFF_STAGES constant and showDiff variable. (2) Move the Changes JSX block from after Comments to after Description, before TaskList. (3) Replace the IIFE with a direct render — show 'No changes yet' empty state card when files and commits are both empty, instead of returning null.",
+      "title": "Reposition and ungate Changes panel in IssueDetailPage",
+      "spec": "specs/changes-panel-prominence/spec.md",
+      "description": "In IssueDetailPage.tsx: remove the DIFF_STAGES constant and the `showDiff` guard (line 25, 265). Move the Changes panel JSX block (lines 417-524) from after Comments to after Description, before TaskList. Replace the early-return null (line 420) with an empty state ('No changes yet') so the panel renders in all stages. Add a summary statistics line above the Files/Commits tabs showing file count, +/- line totals, and commit count, computed from diffData.files and commitsData.commits.",
       "acceptanceCriteria": [
-        "DIFF_STAGES constant and showDiff variable are removed",
-        "Changes panel renders in all stages including Backlog and Explore",
-        "Backlog/empty stage shows 'No changes yet' card without Files/Commits tabs",
-        "Layout order is BranchBar → Description → Changes → TaskList → Comments",
-        "No duplicate diff section after Comments",
-        "Existing Files/Commits tabs and expandable diff viewer still work in stages with data",
-        "Build passes (npm run build in packages/cli)"
+        "DIFF_STAGES constant removed from IssueDetailPage.tsx",
+        "No stage-based conditional wraps the Changes panel render block",
+        "Changes panel JSX appears between Description and TaskList in source order",
+        "No Changes/Diff section appears after Comments in main content column",
+        "Summary line shows N files, +X/-Y totals, M commits when data exists",
+        "Panel shows 'No changes yet' empty state when no files and no commits",
+        "Existing Files/Commits tabs and expandable diff viewer still work unchanged",
+        "Build passes (cd packages/cli && npm run build)"
       ],
       "priority": 1,
       "mode": "AFK",
@@ -22,27 +23,7 @@
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "Design D1: keep inline, don't extract component. Design D2: replace IIFE null-return with explicit empty state card."
-    },
-    {
-      "id": "T-002",
-      "title": "Add summary statistics header to Changes panel",
-      "spec": "specs/changes-summary/spec.md",
-      "description": "Add a one-line summary header inside the Changes panel (above the Files/Commits tabs) showing: N files, +X −Y lines, M commits. Compute totals by reducing over diffData.files for additions/deletions and commitsData.commits.length for commit count. Omit commit count segment when 0. Only show the summary header when there are changes — not in the 'No changes yet' empty state.",
-      "acceptanceCriteria": [
-        "Summary header shows 'N files · +X −Y · M commits' format with green additions, red deletions",
-        "Commit count segment is omitted when 0 commits",
-        "Summary header is not shown in the empty state (no data)",
-        "Stats update when diff/commits data refreshes via React Query",
-        "Build passes (npm run build in packages/cli)"
-      ],
-      "priority": 2,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-001"],
-      "passes": false,
-      "notes": "Design D3: stats computed inline from existing diffData/commitsData. No new queries or memoization."
+      "notes": "All changes are in a single file. No API or hook changes needed — useIssueDiff and useIssueCommits already fetch unconditionally."
     }
   ]
 }

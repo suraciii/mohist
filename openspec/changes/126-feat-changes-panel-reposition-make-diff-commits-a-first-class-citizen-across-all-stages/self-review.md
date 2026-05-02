@@ -1,50 +1,47 @@
 ## Self-Review Report
 
-**Change**: 126-feat-changes-panel-reposition-make-diff-commits-a-first-class-citizen-across-all-stages
+**Change**: #126 — Changes panel reposition
 **Date**: 2026-05-02
-**Verdict**: PASS
+**Reviewer**: self-review (agent)
+
+### Artifacts Reviewed
+
+- `proposal.md`
+- `design.md`
+- `specs/changes-panel-prominence/spec.md`
+- `specs/web-ui/spec.md`
+- `tasks.json`
+
+### Verdict: PASS
+
+No issues found. All artifacts are consistent, complete, and feasible.
 
 ---
 
 ### Completeness
 
-| Acceptance Criterion | Spec Coverage |
-|---|---|
-| Remove DIFF_STAGES restriction | `specs/web-ui/spec.md` — "Changes panel visible in all workflow stages" (6 scenarios) |
-| Backlog: show "No changes yet" | `specs/web-ui/spec.md` + `specs/changes-tab/spec.md` — Backlog empty state scenarios |
-| Reposition after Description | `specs/web-ui/spec.md` — "Changes panel positioned after Description" (3 scenarios) |
-| Summary statistics | `specs/changes-summary/spec.md` — 4 scenarios (with data, empty, no commits, refresh) |
-| Keep existing tabs/diff | `specs/changes-tab/spec.md` — preserved existing requirements unchanged |
-| Optional approval panel summary | Deferred per design D4 (explicitly documented) |
-
-All 3 proposal capabilities have corresponding spec directories. All spec scenarios have corresponding task acceptance criteria.
+- All 5 spec requirements (3 in `changes-panel-prominence`, 2 in `web-ui`) are covered by T-001's acceptance criteria.
+- Edge cases covered: empty state (Backlog), no body text, only commits no diff files.
+- All acceptance criteria from the issue description map to spec scenarios.
 
 ### Consistency
 
-- Proposal lists 3 capabilities (`changes-summary`, `web-ui`, `changes-tab`) → 3 spec directories created
-- T-001 references `specs/web-ui/spec.md` — correct
-- T-002 references `specs/changes-summary/spec.md` — correct
-- Design decisions (D1–D4) align with specs and tasks
-- Naming consistent across all artifacts
+- Proposal lists `changes-panel-prominence` (new) and `web-ui` (modified) — both have matching spec directories with correct content.
+- Task `spec` field references `specs/changes-panel-prominence/spec.md` — valid path.
+- Design decisions (D1–D4) align with specs: inline JSX (D1), client-side summary (D2), empty state instead of null (D3), defer approval summary (D4).
+- `web-ui` spec uses `## ADDED Requirements` — correct, since no existing web-ui requirement addresses layout ordering or DIFF_STAGES gating.
 
 ### Feasibility
 
-- Both tasks modify `IssueDetailPage.tsx` only — single-file scope matches design
-- T-001: structural refactor (remove gate, reposition JSX, add empty state) — completable in one session
-- T-002: additive enhancement (summary header) — completable in one session
-- No new components, no API changes, no state changes — low risk
+- Single-file change (IssueDetailPage.tsx), single task — appropriate granularity.
+- `dependsOn: []` correct for the only task; no circular dependencies possible.
+- `useIssueDiff` and `useIssueCommits` already fetch unconditionally (confirmed in design context, lines 137/162 of current source).
+- No new API endpoints, hooks, or dependencies needed — matches proposal Non-Goals.
 
-### Dependency Completeness
+### Dependency Graph
 
-| Task | dependsOn | Priority | Valid? |
-|---|---|---|---|
-| T-001 | `[]` | 1 | Yes — first task, no dependencies |
-| T-002 | `["T-001"]` | 2 | Yes — needs repositioned JSX to add summary header into |
-
-- All `dependsOn` reference existing IDs with lower priority numbers
-- No cycles
-- DAG is linear: T-001 → T-002
+- One task (T-001), no dependencies — graph is valid trivially.
 
 ### Issues Found
 
-None. All artifacts pass review.
+None.
