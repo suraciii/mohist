@@ -24,10 +24,17 @@ export interface IssueRepo {
   updateStatus(id: string, status: IssueStatus): Issue | null;
 }
 
+export interface ReactionConfig {
+  type: 'retry-task' | 'auto-fix' | 'escalate' | 'ask-user';
+  maxAttempts?: number;
+  escalateTarget?: Stage;
+  fallbackReaction?: ReactionConfig;
+}
+
 export interface StageRunResult {
   success: boolean;
-  requiresApproval: boolean;
   output: unknown;
+  checkResults: CheckResult[];
   message?: string;
   nextStage?: Stage;
   escalateToStage?: Stage;
@@ -50,7 +57,7 @@ export interface StageContext {
 
 export interface CheckResult {
   name: string;
-  status: 'pass' | 'fail' | 'error';
+  status: 'pass' | 'fail' | 'error' | 'pending';
   message?: string;
   output?: unknown;
 }

@@ -14,6 +14,7 @@ export {
   type StageRunResult,
   type CheckResult,
   type CheckContext,
+  type ReactionConfig,
   type ChangeArtifactsManager,
   type IssueRepo,
   type WorktreeManager,

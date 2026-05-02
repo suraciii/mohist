@@ -27,8 +27,8 @@ export class PlanStageRunner implements StageRunner {
     if (!changeDir) {
       return {
         success: false,
-        requiresApproval: false,
         output: null,
+        checkResults: [],
         message: `Failed to get or create change directory for issue #${issue.number}`,
       };
     }
@@ -37,8 +37,8 @@ export class PlanStageRunner implements StageRunner {
     if (issue.approvalState?.status === 'approved' && verifyPlanArtifacts(changeDir).length === 0) {
       return {
         success: true,
-        requiresApproval: false,
         output: null,
+        checkResults: [],
         nextStage: Stage.Build,
         message: 'Plan already approved, advancing to build',
       };
@@ -107,8 +107,8 @@ export class PlanStageRunner implements StageRunner {
     if (!result.success) {
       return {
         success: false,
-        requiresApproval: false,
         output: null,
+        checkResults: [],
         message: result.message,
       };
     }
@@ -122,8 +122,8 @@ export class PlanStageRunner implements StageRunner {
       });
       return {
         success: false,
-        requiresApproval: false,
         output: null,
+        checkResults: [],
         message: `Plan artifacts missing: ${missingArtifacts.join(', ')}`,
       };
     }
@@ -136,8 +136,8 @@ export class PlanStageRunner implements StageRunner {
       });
       return {
         success: false,
-        requiresApproval: false,
         output: null,
+        checkResults: [],
         message: `Failed to commit plan artifacts for issue #${issue.number}`,
       };
     }
@@ -148,8 +148,8 @@ export class PlanStageRunner implements StageRunner {
 
     return {
       success: true,
-      requiresApproval: true,
       nextStage: Stage.Plan,
+      checkResults: [],
       output: {
         stage: Stage.Plan,
         issueNumber: issue.number,

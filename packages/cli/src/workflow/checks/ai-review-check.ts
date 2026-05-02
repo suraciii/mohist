@@ -1,4 +1,5 @@
 import type { Check, CheckContext, CheckResult } from './index';
+import type { ReactionConfig } from '../stage-context';
 import { AcpRoundRunner, type AcpRoundRunnerOptions, type RoundConfig } from '../acp-round-runner';
 import { buildReviewerPrompt, buildReviewSelfCheckPrompt } from '../../agents/artifact-prompt';
 import { parseVerdict, extractFixSuggestions, readReportFile } from '../utils';
@@ -13,6 +14,9 @@ export interface AiReviewCheckOptions {
 
 export class AiReviewCheck implements Check {
   public readonly name = 'ai-review';
+  public readonly reaction: ReactionConfig = {
+    type: 'escalate',
+  };
   private reviewOutputPath: string;
   private selfCheckOutputPath: string;
 

@@ -2,7 +2,7 @@ import { Stage, IssueStatus, type Issue } from '../types';
 import type { StageRunner } from './check-stage-runner';
 import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo } from './stage-context';
 import type { CheckpointManager } from './checkpoint-manager';
-import type { EventBus, EventMap } from '../services/event-bus';
+import type { EventBus } from '../services/event-bus';
 import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
@@ -38,7 +38,6 @@ export class WorkflowEngine {
   private artifactManager: ChangeArtifactsManager;
   private worktreeManager?: WorktreeManager;
   private projectRepo?: ProjectRepo;
-  private projectId?: string;
   private signal?: AbortSignal;
   private workflowLogRepo?: WorkflowLogRepo;
   private sessionStreamLogRepo?: SessionStreamLogRepo;
@@ -52,7 +51,6 @@ export class WorkflowEngine {
     this.artifactManager = options.artifactManager;
     this.worktreeManager = options.worktreeManager;
     this.projectRepo = options.projectRepo;
-    this.projectId = options.projectId;
     this.signal = options.signal;
     this.workflowLogRepo = options.workflowLogRepo;
     this.sessionStreamLogRepo = options.sessionStreamLogRepo;
@@ -116,23 +114,6 @@ export class WorkflowEngine {
         return { completed: false, stage: currentIssue.stage, gateRequired: false, message: result.message };
       }
 
-      if (result.requiresApproval) {
-        const approvalStage = result.nextStage ?? currentIssue.stage;
-        this.issueRepo.updateStage(currentIssue.id, approvalStage);
-        this.issueRepo.setApprovalState(currentIssue.id, {
-          stage: approvalStage,
-          status: 'awaiting',
-          output: result.output,
-          requestedAt: new Date().toISOString(),
-        });
-        this.emitSafe('approval_requested', {
-          issueId: currentIssue.id,
-          projectId: this.projectId ?? currentIssue.projectId,
-          stage: approvalStage,
-        });
-        return { completed: false, stage: approvalStage, gateRequired: true, message: result.message ?? 'Stage completed, awaiting approval' };
-      }
-
       const nextStage = result.nextStage;
       if (nextStage !== undefined) {
         const updated = this.issueRepo.updateStage(currentIssue.id, nextStage);
@@ -152,13 +133,5 @@ export class WorkflowEngine {
     this.checkpointManager.deleteAll(currentIssue.number);
 
     return { completed: true, stage: Stage.Done, gateRequired: false, message: 'Pipeline completed' };
-  }
-
-  private emitSafe<T extends keyof EventMap>(event: T, data: EventMap[T]): void {
-    try {
-      this.eventBus.emit(event, data);
-    } catch {
-      // swallow emit errors
-    }
   }
 }
