@@ -906,6 +906,11 @@ export function createIssueRoutes(
         }
       }
 
+      if (issue.status === IssueStatus.Blocked) {
+        issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        issueRepo.updateBlockedReason(issue.id, null);
+      }
+
       const approvalStage = issue.approvalState?.stage;
 
       if (approvalStage === Stage.Check) {

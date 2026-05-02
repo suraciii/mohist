@@ -873,9 +873,15 @@ export class AgentRunnerService {
     }
 
     if (issue.status === IssueStatus.Blocked) {
-      log.info('Skipping resume-pipeline: issue is blocked', { issueNumber: issue.number });
-      this.completeTask(task.id, 'completed', 'skipped');
-      return;
+      if (issue.approvalState?.status === 'approved') {
+        log.info('Unblocking approved issue before resume', { issueNumber: issue.number });
+        this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        this.issueRepo.updateBlockedReason(issue.id, null);
+      } else {
+        log.info('Skipping resume-pipeline: issue is blocked', { issueNumber: issue.number });
+        this.completeTask(task.id, 'completed', 'skipped');
+        return;
+      }
     }
 
     if (issue.stage === Stage.Done) {
