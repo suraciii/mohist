@@ -196,10 +196,13 @@
         "T-002"
       ],
       "notes": "RalphExecutor stays intact as the task execution engine — it's just called from within executeTasks(). Do NOT break RalphExecutor into individual task objects.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        621155
+      ]
     },
     {
       "id": "T-007",
