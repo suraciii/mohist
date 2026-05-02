@@ -62,7 +62,13 @@ export class WorkflowEngine {
   private buildContext(issue: Issue, acpOptions: AcpConnectionOptions): StageContext {
     return {
       issue,
-      acpOptions: { ...acpOptions, signal: this.signal },
+      acpOptions: {
+        ...acpOptions,
+        signal: this.signal,
+        ...(this.coderSessionRepo ? { coderSessionRepo: this.coderSessionRepo } : {}),
+        ...(this.workflowLogRepo ? { workflowLogRepo: this.workflowLogRepo } : {}),
+        ...(this.sessionStreamLogRepo ? { sessionStreamLogRepo: this.sessionStreamLogRepo } : {}),
+      },
       artifactManager: this.artifactManager,
       worktreeManager: this.worktreeManager as WorktreeManager,
       projectRepo: this.projectRepo as ProjectRepo,
