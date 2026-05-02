@@ -194,6 +194,16 @@ export function IssueDetailPage() {
     (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked) &&
     !isAgentRunningOnThis
   const isBacklog = issue.stage === Stage.Backlog
+  const changesSummary = (() => {
+    const files = diffData?.files ?? []
+    const commits = commitsData?.commits ?? []
+    return {
+      fileCount: files.length,
+      additions: files.reduce((s, f) => s + f.additions, 0),
+      deletions: files.reduce((s, f) => s + f.deletions, 0),
+      commitCount: commits.length,
+    }
+  })()
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
@@ -562,6 +572,15 @@ export function IssueDetailPage() {
 
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
 
+              {isApprovalGate && issue.stage === Stage.Check && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-3 text-xs text-amber-700">
+                  <span>{changesSummary.fileCount} file{changesSummary.fileCount !== 1 ? 's' : ''}</span>
+                  <span className="text-green-600 font-medium">+{changesSummary.additions}</span>
+                  <span className="text-red-500 font-medium">-{changesSummary.deletions}</span>
+                  <span>{changesSummary.commitCount} commit{changesSummary.commitCount !== 1 ? 's' : ''}</span>
+                </div>
+              )}
+
               {issue.stage === Stage.Check && (issue.checkSuite || isApprovalGate) && (
                 <CheckSuitePanel
                   issueNumber={issueNumber}
@@ -599,6 +618,12 @@ export function IssueDetailPage() {
                     The agent completed the previous stage. Review the output above and approve
                     to continue.
                   </p>
+                  <div className="flex items-center gap-3 text-xs text-amber-700 mb-3">
+                    <span>{changesSummary.fileCount} file{changesSummary.fileCount !== 1 ? 's' : ''}</span>
+                    <span className="text-green-600 font-medium">+{changesSummary.additions}</span>
+                    <span className="text-red-500 font-medium">-{changesSummary.deletions}</span>
+                    <span>{changesSummary.commitCount} commit{changesSummary.commitCount !== 1 ? 's' : ''}</span>
+                  </div>
                   <div className="flex gap-2">
                     <button
                       onClick={() => approveMutation.mutate()}
