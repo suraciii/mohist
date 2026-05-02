@@ -55,8 +55,8 @@ describe('SchedulerService', () => {
 
   beforeEach(() => {
     db = new DatabaseManager({ inMemory: true });
-    initializeDatabase(db);
     ensureAgentSkillsTable(db);
+    initializeDatabase(db);
     ensureTestProject(db);
     scheduleRepo = new ScheduleRepo(db);
     eventBus = new EventBus();

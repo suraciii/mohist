@@ -26,9 +26,10 @@ const writtenFiles = new Set<string>();
 
 vi.mock('fs', () => ({
   existsSync: vi.fn((p: string) => {
+    if (typeof p === 'string' && writtenFiles.has(p)) return true;
     const basename = typeof p === 'string' ? p.split(/[\\/]/).pop() : '';
     if (basename === 'review.md' || basename === 'review-self-check.md') {
-      return writtenFiles.has(p);
+      return false;
     }
     return true;
   }),
