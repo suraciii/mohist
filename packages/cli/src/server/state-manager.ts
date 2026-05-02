@@ -16,7 +16,8 @@ import {
   PipelineCheckpointRepo,
   ScheduleRepo,
   IssueTaskQueueRepo,
-  CheckSuiteRepo
+  CheckSuiteRepo,
+  StageExecutionRepo
 } from '../db';
 import { initializeDefaultConfig } from '../db/config-repo';
 
@@ -37,6 +38,7 @@ export class StateManager {
   private scheduleRepo: ScheduleRepo;
   private issueTaskQueueRepo: IssueTaskQueueRepo;
   private checkSuiteRepo: CheckSuiteRepo;
+  private stageExecutionRepo: StageExecutionRepo;
   private initialized: boolean = false;
 
   constructor(db: DatabaseManager) {
@@ -58,6 +60,7 @@ export class StateManager {
     this.scheduleRepo = new ScheduleRepo(db);
     this.issueTaskQueueRepo = new IssueTaskQueueRepo(db);
     this.checkSuiteRepo = new CheckSuiteRepo(db);
+    this.stageExecutionRepo = new StageExecutionRepo(db);
     
     initializeDefaultConfig(this.configRepo);
     this.initialized = true;
@@ -129,5 +132,9 @@ export class StateManager {
 
   getCheckSuiteRepo(): CheckSuiteRepo {
     return this.checkSuiteRepo;
+  }
+
+  getStageExecutionRepo(): StageExecutionRepo {
+    return this.stageExecutionRepo;
   }
 }

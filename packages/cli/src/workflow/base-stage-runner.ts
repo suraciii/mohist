@@ -9,15 +9,28 @@ export abstract class BaseStageRunner implements StageRunner {
   protected abstract getChecks(): Check[];
   protected abstract getNextStage(): Stage;
 
+  private stageExecutionId?: string;
+
   async run(ctx: StageContext): Promise<StageRunResult> {
+    this.stageExecutionId = undefined;
+
+    if (ctx.stageExecutionRepo) {
+      try {
+        const execution = ctx.stageExecutionRepo.create(ctx.issue.id, ctx.issue.stage);
+        this.stageExecutionId = execution.id;
+      } catch {}
+    }
+
     let taskOutput: unknown;
     try {
       taskOutput = await this.executeTasks(ctx);
     } catch (err: any) {
+      const checkResults: CheckResult[] = [];
+      this.persistCheckResults(ctx, checkResults);
       return {
         success: false,
         output: null,
-        checkResults: [],
+        checkResults,
         message: `Task execution failed: ${err.message}`,
       };
     }
@@ -39,10 +52,12 @@ export abstract class BaseStageRunner implements StageRunner {
       results.push(result);
 
       if (result.status !== 'pass') {
+        this.persistCheckResults(ctx, results);
         return this.dispatchReaction(ctx, check, result, results, taskOutput, taskRetryCount);
       }
     }
 
+    this.persistCheckResults(ctx, results);
     return {
       success: true,
       nextStage: this.getNextStage(),
@@ -225,5 +240,12 @@ export abstract class BaseStageRunner implements StageRunner {
       run: async () => result,
     };
     return this.dispatchReaction(ctx, fallbackCheck, result, allResults, taskOutput, taskRetryCount);
+  }
+
+  private persistCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {
+    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
+    try {
+      ctx.stageExecutionRepo.updateCheckResults(this.stageExecutionId, checkResults);
+    } catch {}
   }
 }
