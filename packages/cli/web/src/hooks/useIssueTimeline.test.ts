@@ -19,6 +19,7 @@ function makeSession(overrides: Partial<CoderSessionItem> = {}): CoderSessionIte
     model: null,
     coderType: null,
     stage: 'plan',
+    title: null,
     workflowLogs: [],
     ...overrides,
   }

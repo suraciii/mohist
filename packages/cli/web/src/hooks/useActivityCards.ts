@@ -34,6 +34,7 @@ export interface SessionCard {
   status: string
   model: string | null
   taskDescription: string | null
+  title: string | null
   createdAt: string
   completedAt: string | null
   lastActivityAt: string | null
@@ -69,6 +70,7 @@ function sessionToCard(s: AgentSessionInfo): SessionCard {
     status: s.status,
     model: s.model,
     taskDescription: s.taskDescription,
+    title: null,
     createdAt: s.createdAt,
     completedAt: s.completedAt,
     lastActivityAt: s.lastActivityAt,
@@ -240,6 +242,7 @@ export function useActivityCards() {
           status: 'running',
           model: detail.model ?? null,
           taskDescription: detail.taskDescription ?? null,
+          title: detail.title ?? null,
           createdAt: new Date().toISOString(),
           completedAt: null,
           lastActivityAt: new Date().toISOString(),
