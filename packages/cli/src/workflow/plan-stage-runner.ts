@@ -37,6 +37,8 @@ export class PlanStageRunner implements StageRunner {
     if (issue.approvalState?.status === 'approved' && verifyPlanArtifacts(changeDir).length === 0) {
       return {
         success: true,
+        requiresApproval: false,
+        output: null,
         nextStage: Stage.Build,
         message: 'Plan already approved, advancing to build',
       };
