@@ -472,6 +472,212 @@ describe('Check stage creates CheckSuite and persists check states', () => {
 }, 30000);
 
 
+describe('Check stage approval API with CheckSuite SHA verification', () => {
+  let db: DatabaseManager;
+  let stateManager: StateManager;
+  let projectService: ProjectService;
+  let issueService: IssueService;
+  let checkSuiteRepo: CheckSuiteRepo;
+  let projectId: string;
+
+  beforeEach(() => {
+    db = new DatabaseManager({ inMemory: true });
+    stateManager = new StateManager(db);
+
+    const projectRepo = stateManager.getProjectRepo();
+    const issueRepo = stateManager.getIssueRepo();
+    const configRepo = stateManager.getConfigRepo();
+    const commentRepo = stateManager.getCommentRepo();
+    const labelRepo = stateManager.getLabelRepo();
+
+    projectService = new ProjectService(projectRepo, configRepo, issueRepo, labelRepo);
+    issueService = new IssueService(issueRepo, commentRepo);
+    checkSuiteRepo = new CheckSuiteRepo(db);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    db.close();
+  });
+
+  async function setupIssueWithApproval(approvalStage: Stage): Promise<{ issueId: string; number: number }> {
+    const project = await projectService.create({ name: 'Test ' + Date.now(), path: '/test-' + Date.now() });
+    projectId = project.id;
+    projectService.setCurrent(project);
+
+    const issue = issueService.create({ projectId, title: 'Test Issue' });
+    issueService.transitionToStage(issue.id, approvalStage);
+    const issueRepo = stateManager.getIssueRepo();
+    issueRepo.setApprovalState(issue.id, {
+      stage: approvalStage,
+      status: 'awaiting',
+      output: {},
+      requestedAt: new Date().toISOString(),
+    });
+
+    return { issueId: issue.id, number: issue.number };
+  }
+
+  it('should return 200 on SHA match and enqueue for merge', async () => {
+    const { number, issueId } = await setupIssueWithApproval(Stage.Check);
+    const sha = 'a'.repeat(40);
+
+    checkSuiteRepo.create({ issueId, snapshotSha: sha });
+
+    vi.mocked(cpExecFile).mockImplementation(
+      (...args: unknown[]) => {
+        const lastArg = args[args.length - 1];
+        const callback = typeof lastArg === 'function' ? lastArg : undefined;
+        if (callback) callback(null, { stdout: sha, stderr: '' });
+      }
+    );
+
+    const eventBus = new EventBus();
+    const agentRunner = new AgentRunnerService(eventBus);
+    vi.spyOn(agentRunner, 'isIssueAtApprovalGate').mockReturnValue(true);
+
+    const mergeQueue = {
+      enqueue: vi.fn(),
+      getStatus: vi.fn().mockReturnValue([]),
+    };
+
+    const worktreeManager = {
+      getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+    };
+
+    const app = new Hono();
+    app.route('/api/issues', createIssueRoutes(
+      issueService,
+      projectService,
+      stateManager,
+      worktreeManager as any,
+      undefined,
+      undefined,
+      agentRunner,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      mergeQueue as any,
+      undefined,
+      undefined,
+      checkSuiteRepo,
+    ));
+
+    const server = createTestServer(app);
+
+    const response = await request(server)
+      .post(`/api/issues/${number}/approve`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(mergeQueue.enqueue).toHaveBeenCalledWith(projectId, number);
+  }, 15000);
+
+  it('should return 202 on SHA mismatch and trigger rerun', async () => {
+    const { number, issueId } = await setupIssueWithApproval(Stage.Check);
+
+    const oldSha = 'a'.repeat(40);
+    const newSha = 'b'.repeat(40);
+
+    checkSuiteRepo.create({ issueId, snapshotSha: oldSha });
+
+    vi.mocked(cpExecFile).mockImplementation(
+      (...args: unknown[]) => {
+        const lastArg = args[args.length - 1];
+        const callback = typeof lastArg === 'function' ? lastArg : undefined;
+        if (callback) callback(null, { stdout: newSha, stderr: '' });
+      }
+    );
+
+    const eventBus = new EventBus();
+    const agentRunner = new AgentRunnerService(eventBus);
+    vi.spyOn(agentRunner, 'isIssueAtApprovalGate').mockReturnValue(true);
+    vi.spyOn(agentRunner, 'resumePipeline').mockImplementation(() => {});
+    vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
+
+    const mergeQueue = {
+      enqueue: vi.fn(),
+      getStatus: vi.fn().mockReturnValue([]),
+    };
+
+    const worktreeManager = {
+      getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+    };
+
+    const app = new Hono();
+    app.route('/api/issues', createIssueRoutes(
+      issueService,
+      projectService,
+      stateManager,
+      worktreeManager as any,
+      undefined,
+      undefined,
+      agentRunner,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      mergeQueue as any,
+      undefined,
+      undefined,
+      checkSuiteRepo,
+    ));
+
+    const server = createTestServer(app);
+
+    const response = await request(server)
+      .post(`/api/issues/${number}/approve`);
+
+    expect(response.status).toBe(202);
+    expect(response.body.data.message).toContain('changed');
+    expect(mergeQueue.enqueue).not.toHaveBeenCalled();
+  }, 15000);
+
+  it('should return 200 with no active CheckSuite (recovery path)', async () => {
+    const { number } = await setupIssueWithApproval(Stage.Check);
+
+    const eventBus = new EventBus();
+    const agentRunner = new AgentRunnerService(eventBus);
+    vi.spyOn(agentRunner, 'isIssueAtApprovalGate').mockReturnValue(true);
+
+    const mergeQueue = {
+      enqueue: vi.fn(),
+      getStatus: vi.fn().mockReturnValue([]),
+    };
+
+    const worktreeManager = {
+      getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+    };
+
+    const app = new Hono();
+    app.route('/api/issues', createIssueRoutes(
+      issueService,
+      projectService,
+      stateManager,
+      worktreeManager as any,
+      undefined,
+      undefined,
+      agentRunner,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      mergeQueue as any,
+      undefined,
+      undefined,
+      checkSuiteRepo,
+    ));
+
+    const server = createTestServer(app);
+
+    const response = await request(server)
+      .post(`/api/issues/${number}/approve`);
+
+    expect(response.status).toBe(200);
+    expect(mergeQueue.enqueue).toHaveBeenCalledWith(projectId, number);
+  }, 15000);
+});
 
 describe('Check stage loop maxRetries=3', () => {
   let db: DatabaseManager;
