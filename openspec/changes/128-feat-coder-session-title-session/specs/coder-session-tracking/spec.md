@@ -7,6 +7,10 @@ When `spawn_coder` tool executes and creates an ACP session, the system SHALL re
 - **WHEN** runAcpSession successfully initializes ACP and obtains a sessionId (after `connection.newSession` succeeds)
 - **THEN** a coder_session row is created with issue_id (UUID), acp_session_id, execution_id, title, truncated task (max 200 chars), status='running', and created_at
 
-#### Scenario: createAcpConnection creates ACP session
-- **WHEN** createAcpConnection successfully initializes ACP and obtains a sessionId
-- **THEN** a coder_session row is created with issue_id (UUID), acp_session_id, title, truncated task (max 200 chars), status='running', and created_at
+#### Scenario: Spawn coder creates ACP session with title
+- **WHEN** runAcpSession is called with `title: "T-004: Create Plan"` and successfully creates a session
+- **THEN** the coder_session row has `title: "T-004: Create Plan"`
+
+#### Scenario: createAcpConnection creates session with title
+- **WHEN** createAcpConnection is called with `title: "Plan stage"` and successfully creates a session
+- **THEN** the coder_session row has `title: "Plan stage"`

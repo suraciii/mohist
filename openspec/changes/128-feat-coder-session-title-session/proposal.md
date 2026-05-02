@@ -1,33 +1,31 @@
 ## Why
 
-All coder sessions display as truncated raw prompt text (e.g. `<mohist-task>\n\n<role>\nYou are implementi...`), making the session list and activity cards unreadable when managing multiple concurrent agents. The `coder_session` table has no `title` field — each caller already has enough context to name the session at creation time.
+Coder sessions display `task_description` (raw prompt prefix) in the UI, making all 48 sessions show identical `<mohist-task>\n\n<role>\nYou are implementi...` — completely unreadable. Each session needs a human-readable title set by the caller at creation time, so users can distinguish sessions at a glance.
 
 ## What Changes
 
-- Add `title TEXT` column to `coder_session` table (DB migration)
-- Add `title?: string` to `AcpSessionOptions` and `AcpConnectionOptions` interfaces; pass through to coder_session insert in both `runAcpSession` and `createAcpConnection`
-- All 8 callers supply a human-readable title at session creation (RalphExecutor, PlanStageRunner, CheckStageRunner, CodeCompilesCheck, BuildTestCheck, SkillService, ExploreACPService, ConflictResolution)
-- SSE `coder_session_started` event carries `title`
-- API endpoints (`GET /:number/coder-sessions`, `GET /api/agent/sessions`) return `title` field
-- Frontend session display prioritizes `title` over executionId-derived taskId, stage name, or truncated taskDescription
+- Add `title TEXT` column to `coder_session` table
+- Extend `AcpSessionOptions` and `AcpConnectionOptions` with `title?: string`
+- 7 callers pass meaningful titles (e.g., `"T-004: Create Plan"`, `"Plan stage"`, `"Auto-fix: compilation errors"`)
+- `coder_session_started` SSE event carries `title`
+- API endpoints return `title` field for coder sessions
+- Frontend uses `title` as primary display label with fallback chain (title → executionId task parse → stage name → taskDescription prefix)
 
 ## Capabilities
 
 ### New Capabilities
 
-- `coder-session-title`: Named coder sessions — DB field, caller-provided titles, SSE transport, API exposure, and frontend display priority chain (title > taskId > stage > taskDescription fallback).
+- `coder-session-title`: Session titles set at creation time by callers, stored in DB, returned via API, displayed in frontend with fallback chain.
 
 ### Modified Capabilities
 
-- `coder-session-tracking`: `coder_session` table gains `title` column; SSE `coder_session_started` event payload gains `title` field
-- `agent-activity-page`: Session cards display `title` as primary label instead of truncated taskDescription
-- `session-list-ui`: SessionHeader uses `title` in the session display priority chain
+- `coder-session-tracking`: `CreateCoderSessionData` interface and insert logic extended to persist `title`.
+- `pipeline-session-events`: `AcpSessionOptions` and `AcpConnectionOptions` gain `title` field; `coder_session_started` SSE event includes `title`.
+- `agent-session-ui`: Frontend `CoderSessionItem` type gains `title`; `SessionHeader` and active session cards use title as primary label.
 
 ## Impact
 
-- **DB**: New nullable `title` column on `coder_session` table via migration
-- **Backend**: `acp-session.ts` (2 insert sites), `coder-session-repo.ts`, `migrations.ts`
-- **Callers** (8 files): `ralph-executor.ts`, `plan-stage-runner.ts`, `check-stage-runner.ts`, `code-compiles-check.ts`, `build-test-check.ts`, `skill-service.ts`, `explore-acp-service.ts`, `conflict-resolution.ts`
-- **API**: `issues.ts` and `agent.ts` route handlers return `title`
+- **DB**: New nullable `title` column in `coder_session` table (migration)
+- **Backend**: `acp-session.ts` (2 creation sites), 7 caller files, 2 API route files, `coder-session-repo.ts`, `migrations.ts`
 - **Frontend**: `types.ts`, `SessionHeader.tsx`, `useCoderSessions.ts`, `useActivityCards.ts`, `SessionCard.tsx`
-- **Backward compatibility**: No breaking changes — `title` is nullable; old sessions without title use existing fallback display logic
+- **Backward compatible**: No breaking changes; `title` is nullable, frontend falls back to existing heuristics for old data

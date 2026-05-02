@@ -1,19 +1,20 @@
 {
   "project": "mohist",
-  "description": "Add human-readable title to coder sessions for better UX in session list and activity cards",
+  "description": "Add human-readable title to coder sessions — DB column, ACP options plumbing, caller titles, API/SSE exposure, frontend fallback chain",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Add title column to coder_session table and repo",
-      "spec": "specs/coder-session-title/spec.md#Coder session title stored on creation",
-      "description": "Add DB migration v21 to add nullable `title TEXT` column to `coder_session` table. Update `CoderSession`, `CoderSessionRow`, `CreateCoderSessionData`, and `SessionWithIssueInfo` interfaces in `coder-session-repo.ts`. Update `insert()` SQL, `rowToCoderSession()` mapper, and `findAllWithIssueInfo()` query to include `title`.",
+      "title": "Add title column to coder_session table and update repo",
+      "spec": "specs/coder-session-title/spec.md#coder_session-table-has-title-column",
+      "description": "Add schema migration v21 to add nullable `title TEXT` column to `coder_session` table. Update `CoderSession`/`CoderSessionRow` interfaces, `rowToCoderSession` mapping, `CreateCoderSessionData` interface (add `title?: string`), `CoderSessionRepo.insert()` to persist title, and `findAllWithIssueInfo` query to SELECT and return title.",
       "acceptanceCriteria": [
-        "Migration v21 adds `title TEXT` column to `coder_session` without errors",
-        "`CreateCoderSessionData` includes optional `title` field",
-        "`insert()` persists title when provided, stores NULL when omitted",
-        "`CoderSession` interface and row mapper include `title`",
-        "`SessionWithIssueInfo` and `findAllWithIssueInfo` include `title`",
-        "Typecheck passes"
+        "Migration v21 adds `title TEXT` column to coder_session without errors",
+        "Insert with title stores the title value",
+        "Insert without title stores NULL",
+        "CoderSession type has `title: string | null`",
+        "SessionWithIssueInfo query returns title field",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 1,
       "mode": "AFK",
@@ -21,20 +22,20 @@
       "output": "packages/cli/src/db/migrations.ts, packages/cli/src/db/coder-session-repo.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": ""
+      "notes": "Files: src/db/migrations.ts (migrateToVersion21), src/db/coder-session-repo.ts (CoderSession, CreateCoderSessionData, rowToCoderSession, insert, findAllWithIssueInfo, row mappers)"
     },
     {
       "id": "T-002",
-      "title": "Add title to ACP session options and creation paths",
-      "spec": "specs/coder-session-tracking/spec.md#Coder session mapping persisted on spawn",
-      "description": "Add `title?: string` to `AcpSessionOptions` and `AcpConnectionOptions` interfaces in `acp-session.ts`. Pass `options.title` to `coderSessionRepo.insert()` in both `runAcpSession` (~line 395) and `createAcpConnection` (~line 818). Include `title` in `coder_session_started` SSE event payloads from both code paths. Add `title` to the event bus type definition.",
+      "title": "Plumb title through ACP session options and SSE events",
+      "spec": "specs/pipeline-session-events/spec.md#AcpConnectionOptions-extended-with-issueNumber-and-onSessionUpdate",
+      "description": "Add `title?: string` to both `AcpSessionOptions` and `AcpConnectionOptions` in acp-session.ts. Update both coder_session creation sites (runAcpSession ~line 395, createAcpConnection ~line 818) to pass `options.title` to `coderSessionRepo.insert()`. Add `title` field to `coder_session_started` event in event-bus.ts EventMap. Update both `eventBus.emit('coder_session_started')` call sites to include `title: options.title`.",
       "acceptanceCriteria": [
-        "`AcpSessionOptions` has `title?: string` field",
-        "`AcpConnectionOptions` has `title?: string` field",
-        "`runAcpSession` passes `options.title` to `coderSessionRepo.insert()`",
-        "`createAcpConnection` passes `options.title` to `coderSessionRepo.insert()`",
-        "`coder_session_started` SSE event includes `title` from both paths",
-        "Event bus type for `coder_session_started` includes `title`",
+        "AcpSessionOptions has `title?: string` field",
+        "AcpConnectionOptions has `title?: string` field",
+        "runAcpSession passes options.title to coderSessionRepo.insert()",
+        "createAcpConnection passes options.title to coderSessionRepo.insert()",
+        "coder_session_started event in EventMap includes `title?: string`",
+        "Both emit sites pass title in the event payload",
         "Typecheck passes"
       ],
       "priority": 2,
@@ -43,40 +44,42 @@
       "output": "packages/cli/src/agent-runtime/acp-session.ts, packages/cli/src/services/event-bus.ts",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": ""
+      "notes": "Files: src/agent-runtime/acp-session.ts (AcpSessionOptions, AcpConnectionOptions, runAcpSession, createAcpConnection), src/services/event-bus.ts (EventMap.coder_session_started)"
     },
     {
       "id": "T-003",
-      "title": "All callers supply session title",
-      "spec": "specs/coder-session-title/spec.md#Each caller supplies a descriptive session title",
-      "description": "Add `title` to the `runAcpSession` / `createAcpConnection` call options in all 8 callers: RalphExecutor (`${task.id}: ${task.title}`), PlanStageRunner (`Plan stage`), CheckStageRunner (`Check stage`), CodeCompilesCheck (`Auto-fix: compilation errors`), BuildTestCheck (`Auto-fix: test failures`), SkillService (`Skill: ${skill.name}`), ExploreACPService (`Explore: ${issue.title}`), and conflict-resolution (`Conflict resolution`).",
+      "title": "Add title to all 9 ACP session callers",
+      "spec": "specs/coder-session-title/spec.md#Callers-pass-meaningful-session-titles",
+      "description": "Add `title` to the options object in all callers: ralph-executor.ts (`${task.id}: ${task.title}`), plan-stage-runner.ts (`\"Plan stage\"`), check-stage-runner.ts (`\"Check stage\"`), code-compiles-check.ts (`\"Auto-fix: compilation errors\"`), build-test-check.ts (`\"Auto-fix: test failures\"`), skill-service.ts (`Skill: ${skill.name}`), explore-acp-service.ts (`Explore: ${issue.title}`), conflict-resolution.ts (`\"Conflict resolution\"`), server/index.ts (`\"Auto-fix: build errors\"`).",
       "acceptanceCriteria": [
-        "RalphExecutor passes `title: \\`${task.id}: ${task.title}\\``",
-        "PlanStageRunner passes `title: 'Plan stage'`",
-        "CheckStageRunner passes `title: 'Check stage'`",
-        "CodeCompilesCheck passes `title: 'Auto-fix: compilation errors'`",
-        "BuildTestCheck passes `title: 'Auto-fix: test failures'`",
-        "SkillService passes `title: \\`Skill: ${skill.name}\\``",
-        "ExploreACPService passes `title: \\`Explore: ${issue.title}\\``",
-        "conflict-resolution passes `title: 'Conflict resolution'`",
+        "ralph-executor.ts passes `title: \\`${task.id}: ${task.title}\\``",
+        "plan-stage-runner.ts passes `title: \"Plan stage\"`",
+        "check-stage-runner.ts passes `title: \"Check stage\"`",
+        "code-compiles-check.ts passes `title: \"Auto-fix: compilation errors\"`",
+        "build-test-check.ts passes `title: \"Auto-fix: test failures\"`",
+        "skill-service.ts passes `title: \\`Skill: ${skill.name}\\``",
+        "explore-acp-service.ts passes `title: \\`Explore: ${issue.title}\\`` in both runAcpSession calls",
+        "conflict-resolution.ts passes `title: \"Conflict resolution\"`",
+        "server/index.ts passes `title: \"Auto-fix: build errors\"`",
         "Typecheck passes"
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/cli/src/openspec/ralph-executor.ts, packages/cli/src/workflow/plan-stage-runner.ts, packages/cli/src/workflow/check-stage-runner.ts, packages/cli/src/workflow/checks/code-compiles-check.ts, packages/cli/src/workflow/checks/build-test-check.ts, packages/cli/src/services/skill-service.ts, packages/cli/src/services/explore-acp-service.ts, packages/cli/src/services/conflict-resolution.ts",
+      "output": "packages/cli/src/openspec/ralph-executor.ts, packages/cli/src/workflow/plan-stage-runner.ts, packages/cli/src/workflow/check-stage-runner.ts, packages/cli/src/workflow/checks/code-compiles-check.ts, packages/cli/src/workflow/checks/build-test-check.ts, packages/cli/src/services/skill-service.ts, packages/cli/src/services/explore-acp-service.ts, packages/cli/src/services/conflict-resolution.ts, packages/cli/src/server/index.ts",
       "dependsOn": ["T-002"],
       "passes": false,
-      "notes": "SkillService doesn't pass coderSessionRepo so it doesn't create coder_session rows, but adding title to options is still correct for forward compatibility."
+      "notes": "9 caller sites total. Each adds a single `title` field to the existing options object passed to runAcpSession or createAcpConnection."
     },
     {
       "id": "T-004",
-      "title": "API endpoints return session title",
-      "spec": "specs/coder-session-title/spec.md#API responses include session title",
-      "description": "Add `title` field to the response objects in `GET /:number/coder-sessions` (issues.ts) and ensure `GET /api/agent/sessions` (agent.ts) returns `title` via `findAllWithIssueInfo` (already updated in T-001).",
+      "title": "Expose title in API endpoints",
+      "spec": "specs/coder-session-title/spec.md#API-endpoints-return-title-field",
+      "description": "Update `GET /:number/coder-sessions` in issues.ts to include `title: session.title` in the response mapping. Update `GET /sessions` in agent.ts — the `findAllWithIssueInfo` already returns title from T-001's repo changes, but verify the response serializes it correctly.",
       "acceptanceCriteria": [
-        "`GET /api/issues/:number/coder-sessions` response includes `title` field on each session",
-        "`GET /api/agent/sessions` response includes `title` field on each session",
+        "GET /api/issues/:number/coder-sessions response includes `title: string | null` per session",
+        "GET /api/agent/sessions response includes `title: string | null` per session",
+        "Existing tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
@@ -85,50 +88,72 @@
       "output": "packages/cli/src/api/issues.ts, packages/cli/src/api/agent.ts",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": ""
+      "notes": "issues.ts ~line 1763: add `title: session.title` to the session mapping object. agent.ts: findAllWithIssueInfo already returns title from repo, just needs verification."
     },
     {
       "id": "T-005",
-      "title": "Frontend types and session label with priority fallback",
-      "spec": "specs/session-list-ui/spec.md#SessionHeader component renders session metadata bar",
-      "description": "Add `title: string | null` to `CoderSessionItem` in `types.ts`. Update `getSessionLabel()` in `SessionHeader.tsx` to use the priority chain: `session.title` > taskId from `executionId` > stage name > first 24 chars of `taskDescription`. Add `title` to the `coder_session_started` event type in the frontend event types.",
+      "title": "Update frontend types and SSE handlers for title",
+      "spec": "specs/agent-session-ui/spec.md#WebUI-subscribes-to-agent-detail-SSE-events",
+      "description": "Add `title: string | null` to `CoderSessionItem` and `AgentSessionInfo` types. Update `coder_session_started` event type in EventMap to include `title?: string`. Update `useCoderSessions.ts` SSE handler to map `detail.title` to the new session. Update `useActivityCards.ts` SSE handler to include `title` in SessionCard. Add `title` to `SessionCard` interface.",
       "acceptanceCriteria": [
-        "`CoderSessionItem` type includes `title: string | null`",
-        "`getSessionLabel` returns `session.title` when present",
-        "`getSessionLabel` falls back to taskId parsed from executionId (e.g. `build-127-T-004` -> `T-004`)",
-        "`getSessionLabel` falls back to capitalized stage name",
-        "`getSessionLabel` falls back to first 24 chars of taskDescription",
-        "SSE event type for `coder_session_started` includes `title`",
+        "CoderSessionItem has `title: string | null`",
+        "AgentSessionInfo has `title: string | null`",
+        "SessionCard interface has `title: string | null`",
+        "coder_session_started EventMap type includes `title?: string`",
+        "useCoderSessions SSE handler maps detail.title to newSession.title",
+        "useActivityCards SSE handler maps detail.title to card.title",
         "Typecheck passes"
       ],
       "priority": 5,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/components/SessionHeader.tsx",
+      "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/hooks/useCoderSessions.ts, packages/cli/web/src/hooks/useActivityCards.ts",
       "dependsOn": ["T-004"],
       "passes": false,
-      "notes": ""
+      "notes": "Files: web/src/lib/types.ts (CoderSessionItem, AgentSessionInfo, EventMap.coder_session_started), web/src/hooks/useCoderSessions.ts (~line 63), web/src/hooks/useActivityCards.ts (~line 35 SessionCard, ~line 242 handler)"
     },
     {
       "id": "T-006",
-      "title": "Frontend hooks and activity cards display title",
-      "spec": "specs/agent-activity-page/spec.md#Active session card display",
-      "description": "Update `useCoderSessions.ts` to include `title` from SSE `coder_session_started` event when constructing live session objects. Update `useActivityCards.ts` `SessionCard` interface to include `title` and pass it through from SSE events. Update `SessionCard.tsx` `ActiveSessionCard` to display `title` as primary label with fallback to `taskDescription`.",
+      "title": "Implement frontend fallback chain and display title",
+      "spec": "specs/coder-session-title/spec.md#Frontend-displays-session-title-with-fallback-chain",
+      "description": "Update `getSessionLabel` in SessionHeader.tsx with 4-level fallback: title → executionId task parse (`/^(?:build|check)-\\d+-(T-\\d+)$/`) → stage capitalize → taskDescription.slice(0,24). Update SessionCard.tsx ActiveSessionCard to prefer `card.title` over `card.taskDescription`. Update SessionPage.tsx to prefer `session.title` over `session.taskDescription`.",
       "acceptanceCriteria": [
-        "`useCoderSessions` includes `detail.title` when constructing new CoderSessionItem from SSE event",
-        "`SessionCard` interface in `useActivityCards.ts` has `title: string | null` field",
-        "`useActivityCards` passes `detail.title` from `coder_session_started` event",
-        "`ActiveSessionCard` displays `card.title` as primary label when present",
-        "`ActiveSessionCard` falls back to truncated `taskDescription` when title is null",
+        "getSessionLabel returns session.title when non-null",
+        "getSessionLabel extracts T-XXX from executionId when title is null",
+        "getSessionLabel falls back to capitalized stage name",
+        "getSessionLabel falls back to taskDescription truncated to 24 chars",
+        "ActiveSessionCard shows card.title when available",
+        "SessionPage h1 shows session.title when available",
         "Typecheck passes"
       ],
       "priority": 6,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/cli/web/src/hooks/useCoderSessions.ts, packages/cli/web/src/hooks/useActivityCards.ts, packages/cli/web/src/components/SessionCard.tsx",
+      "output": "packages/cli/web/src/components/SessionHeader.tsx, packages/cli/web/src/components/SessionCard.tsx, packages/cli/web/src/components/SessionPage.tsx",
       "dependsOn": ["T-005"],
       "passes": false,
-      "notes": ""
+      "notes": "SessionHeader.tsx: rewrite getSessionLabel. SessionCard.tsx ~line 79: check card.title first. SessionPage.tsx ~line 235: check session.title first."
+    },
+    {
+      "id": "T-007",
+      "title": "Update existing tests for title field",
+      "spec": "specs/coder-session-title/spec.md#coder_session-table-has-title-column",
+      "description": "Update existing tests in tests/api/agent-sessions.test.ts to account for the new `title` field. Add test cases for: insert with title, insert without title, API response includes title, findAllWithIssueInfo returns title. Ensure all existing tests still pass.",
+      "acceptanceCriteria": [
+        "Existing agent-sessions tests updated for title field",
+        "Test covers insert with title returns title in result",
+        "Test covers insert without title returns null",
+        "Test covers API response includes title field",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/api/agent-sessions.test.ts",
+      "dependsOn": ["T-001", "T-004"],
+      "passes": false,
+      "notes": "Focus on tests/api/agent-sessions.test.ts which already tests coder session creation and API responses. Update helper factories and assertions for the new title field."
     }
   ]
 }
