@@ -23,7 +23,7 @@
       "dependsOn": [],
       "passes": true,
       "notes": "This is the foundation — all subsequent tasks depend on these types. Temporarily keep backward compat by setting requiresApproval:false in existing runners until they are migrated.",
-      "attempts": 6,
+      "attempts": 7,
       "order": 999999,
       "error": null,
       "durations": [
@@ -34,7 +34,8 @@
         631896,
         634926,
         626917,
-        202202
+        202202,
+        246019
       ]
     },
     {
@@ -62,14 +63,15 @@
         "T-001"
       ],
       "notes": "",
-      "attempts": 2,
+      "attempts": 3,
       "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
         611206,
         152964,
-        329414
+        329414,
+        130950
       ]
     },
     {
@@ -93,13 +95,14 @@
         "T-001"
       ],
       "notes": "",
-      "attempts": 2,
+      "attempts": 3,
       "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
         65546,
-        92685
+        92685,
+        256025
       ]
     },
     {
@@ -128,7 +131,7 @@
       ],
       "notes": "AiReviewCheck currently uses AcpRoundRunner internally for the review round. Split this: move the ACP session logic into CheckStageRunner.executeTasks(), and simplify AiReviewCheck to only parse the review output (read review.md, parse verdict). AiReviewCheck becomes a data-only check with no ACP calls.",
       "attempts": 2,
-      "passes": true,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -167,14 +170,13 @@
         "T-003"
       ],
       "notes": "This is the most complex migration because it absorbs AcpRoundRunner. The ACP connection management, round iteration, artifact verification, and retry logic from AcpRoundRunner must be replicated in executeTasks().",
-      "attempts": 3,
-      "passes": true,
+      "attempts": 2,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
         621414,
-        175364,
-        368256
+        175364
       ]
     },
     {
@@ -204,13 +206,12 @@
         "T-002"
       ],
       "notes": "RalphExecutor stays intact as the task execution engine — it's just called from within executeTasks(). Do NOT break RalphExecutor into individual task objects.",
-      "attempts": 2,
-      "passes": true,
+      "attempts": 1,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
-        621155,
-        212248
+        621155
       ]
     },
     {
@@ -240,13 +241,12 @@
         "T-006"
       ],
       "notes": "This task depends on all three runners being migrated because the engine must work with the new result format from all runners.",
-      "attempts": 2,
-      "passes": true,
+      "attempts": 1,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
-        545855,
-        193422
+        545855
       ]
     },
     {
