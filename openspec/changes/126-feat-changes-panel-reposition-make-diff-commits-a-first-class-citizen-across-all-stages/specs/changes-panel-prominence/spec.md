@@ -2,71 +2,57 @@
 
 ### Requirement: Changes panel visible in all workflow stages
 
-IssueDetailPage SHALL render the Changes panel in all workflow stages (Backlog, Explore, Plan, Build, Check, Done) without stage-based gating. The panel SHALL NOT be conditionally hidden based on `DIFF_STAGES` or similar sets.
+IssueDetailPage SHALL display the Changes panel in every workflow stage (Backlog, Explore, Plan, Build, Check, Done) without stage-based gating. The `DIFF_STAGES` constant and its associated conditional check SHALL be removed.
 
-#### Scenario: Backlog stage shows Changes panel
-
+#### Scenario: Backlog stage shows empty state
 - **WHEN** user views an issue in Backlog stage
-- **THEN** the Changes panel is visible after the Description section
-- **AND** it displays an empty state (e.g., "No changes yet")
+- **THEN** the Changes panel is visible
+- **AND** it displays an empty state message (e.g., "No changes yet")
 
-#### Scenario: Explore stage shows Changes panel
-
+#### Scenario: Explore stage shows changes
 - **WHEN** user views an issue in Explore stage
-- **THEN** the Changes panel is visible after the Description section
-- **AND** if the agent has created/modified files, those changes are displayed
+- **THEN** the Changes panel is visible
+- **AND** it shows any file changes or commits made during exploration
 
-#### Scenario: Plan stage shows Changes panel
+#### Scenario: All other stages show changes
+- **WHEN** user views an issue in Plan, Build, Check, or Done stage
+- **THEN** the Changes panel is visible with the same behavior as before (files, commits, expandable diff)
 
-- **WHEN** user views an issue in Plan stage
-- **THEN** the Changes panel is visible after the Description section
-- **AND** openspec file changes and any other modifications are displayed
+### Requirement: Changes panel positioned after Description
 
-### Requirement: Changes panel positioned after Description, before TaskList
+The Changes section SHALL appear immediately after the Description section and before the TaskList in the IssueDetailPage main content area. The previous position (after Comments) SHALL be removed.
 
-IssueDetailPage main content column SHALL render sections in this order: BranchBar, Description (if present), Changes panel, TaskList (if applicable), Comments. The Changes panel SHALL NOT appear after Comments.
+#### Scenario: Changes section appears in correct order
+- **WHEN** user views an issue that has a description and changes
+- **THEN** the page layout order in the main content column is: BranchBar, Description, Changes, TaskList, Comments
+- **AND** no duplicate Changes section exists below Comments
 
-#### Scenario: Full content layout order
-
-- **WHEN** user views an issue with a body, tasks, and comments
-- **THEN** the page renders in order: BranchBar, Description, Changes panel, TaskList, Comments
-
-#### Scenario: Issue without body
-
-- **WHEN** user views an issue with no body text
-- **THEN** the Changes panel appears directly after BranchBar, before TaskList
+#### Scenario: Changes section appears when Description is absent
+- **WHEN** user views an issue that has no description but has changes
+- **THEN** the Changes section still appears after the Description area (which is empty) and before TaskList
 
 ### Requirement: Changes panel shows summary statistics
 
-The Changes panel SHALL display a summary header with file count, total additions, total deletions, and commit count.
+The Changes panel SHALL display a summary header with aggregate statistics: file count, total additions, total deletions, and commit count.
 
-#### Scenario: Changes exist
+#### Scenario: Summary displays when changes exist
+- **WHEN** the Changes panel renders with file changes and/or commits
+- **THEN** a summary line is displayed showing the count of changed files, total additions (+X), total deletions (-Y), and number of commits
+- **AND** the summary uses data already available from the existing `getIssueDiff` and `getIssueCommits` API responses
 
-- **WHEN** the issue has 3 changed files with +120/-45 lines and 2 commits
-- **THEN** the Changes panel header shows "3 files changed, +120, -45, 2 commits" (or equivalent compact format)
+#### Scenario: Summary displays zero-state
+- **WHEN** the Changes panel renders with no file changes and no commits
+- **THEN** the summary shows zero values (e.g., "0 files, 0 commits")
 
-#### Scenario: No changes exist
+### Requirement: Approval sections show compact changes summary
 
-- **WHEN** the issue has no file changes and no commits
-- **THEN** the Changes panel shows an empty state message (e.g., "No changes yet")
+The approval gate sections in IssueDetailPage's sidebar SHALL display a compact inline changes summary so users can see the scope of changes without scrolling the main content area. The summary SHALL be computed from the same diff/commits data already fetched by the page.
 
-#### Scenario: Only commits, no diff files
+#### Scenario: Plan approval shows changes summary
+- **WHEN** user views an issue in Plan stage awaiting approval
+- **THEN** the approval gate section in the sidebar displays a compact summary (file count, +/- lines, commit count)
+- **AND** the summary data comes from the same diff/commits data already fetched by the page
 
-- **WHEN** the issue has commits but diff data is empty or loading
-- **THEN** the summary shows commit count and indicates files are loading or unavailable
-
-### Requirement: Existing Files/Commits tabs and diff viewer preserved
-
-The Changes panel SHALL continue to provide Files and Commits tabs with the same expandable diff viewer behavior. This requirement does not change existing tab or diff rendering logic.
-
-#### Scenario: Files tab displays expandable diffs
-
-- **WHEN** user clicks the Files tab
-- **THEN** files are listed with change indicators
-- **AND** clicking a file expands to show the inline diff using DiffViewer
-
-#### Scenario: Commits tab displays commit list
-
-- **WHEN** user clicks the Commits tab
-- **THEN** commits are listed with hash, message, and metadata
-- **AND** clicking a commit expands to show its file changes
+#### Scenario: Review approval shows changes summary
+- **WHEN** user views an issue in Check/Done stage awaiting review
+- **THEN** the approval gate section in the sidebar displays a compact summary (file count, +/- lines, commit count)

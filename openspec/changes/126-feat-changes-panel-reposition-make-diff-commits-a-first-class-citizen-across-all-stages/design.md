@@ -1,54 +1,81 @@
 ## Context
 
-IssueDetailPage currently has a single 851-line component that renders all sections inline. The Changes panel (lines 417–524) is gated by `DIFF_STAGES` (line 265) and positioned after Comments (line 415). The panel reuses `useIssueDiff` and `useIssueCommits` hooks which already fetch data regardless of stage — the hooks are called unconditionally at lines 137/162. The only stage-dependent part is the render guard `showDiff && ...`.
+IssueDetailPage renders a two-column layout (main 2/3 + sidebar 1/3). The diff/commits section currently lives at the bottom of the main column (after Comments), gated by `DIFF_STAGES = {Explore, Plan, Build, Check, Done}`. The `useIssueDiff` and `useIssueCommits` hooks already fetch data unconditionally (no stage-based `enabled` flag), so the data is always available — only the rendering is gated.
 
-Key constraint: no API changes needed. The data is already being fetched for all stages; we just need to render it.
+The diff section JSX (lines 417–525 in `IssueDetailPage.tsx`) is a single inline block with Files/Commits tabs and expandable diff. It uses `diffData?.files` (type `DiffFile[]`) and `commitsData?.commits` (type `CommitEntry[]`), both already fetched at the component top level (lines 137, 162).
+
+The approval UI in IssueDetailPage's sidebar is rendered inline (not via separate panel components). `PlanApprovalPanel` and `ReviewApprovalPanel` components exist but are not imported — the approval gates are generic inline JSX blocks controlled by `isApprovalGate`.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Remove `DIFF_STAGES` gate so Changes panel renders in every stage
-- Move the Changes panel JSX block from after Comments to after Description (before TaskList)
-- Add a summary statistics line above the tabs
-- Show "No changes yet" empty state when no files or commits exist
+- Remove `DIFF_STAGES` gate so Changes renders in all stages
+- Move Changes section from after-Comments to after-Description (before TaskList)
+- Add summary statistics line (file count, +/- lines, commit count) above the tabs
+- Show empty state for stages with no changes
+- (Optional) Compact changes summary in sidebar approval panels
 
 **Non-Goals:**
-- No new API endpoints or hooks
-- No changes to DiffViewer, CommitRow, or diff rendering logic
-- No inline changes summary in approval panels (optional scope, defer)
-- No extraction of Changes panel into a separate component file (keep it inline like the current implementation)
+- No new API endpoints — reuse `getIssueDiff` / `getIssueCommits`
+- No changes to DiffViewer component
+- No commit comparison feature
+- No changes to how `useIssueDiff` / `useIssueCommits` fetch data (they already run unconditionally)
 
 ## Decisions
 
-### D1: Keep Changes panel as inline JSX in IssueDetailPage
+### D1: Extract Changes section into its own component
 
-The current Changes panel (~100 lines of JSX) is an IIFE block inside IssueDetailPage. Rather than extracting it to a new component file, keep it inline and simply move the block. This minimizes diff size and avoids introducing new component boundaries that need prop-typing.
+The diff/commits JSX block (~110 lines) will be extracted into a `ChangesPanel` component. This keeps `IssueDetailPage.tsx` manageable and makes the summary header, empty state, and tab logic self-contained.
 
-**Alternatives considered:** Extract to `ChangesPanel.tsx` component — cleaner long-term but adds scope (prop interface, new file, import changes) for what is fundamentally a repositioning change. Can be done as a follow-up refactor.
+**Props:** `files: DiffFile[]`, `commits: CommitEntry[]`, `diffTab` / `setDiffTab`, `expandedFiles` / `setExpandedFiles`, `expandedCommits` / `setExpandedCommits`, `onCommitExpand`.
+
+**Alternatives considered:**
+- Keep inline in IssueDetailPage — already 851 lines, adding summary logic makes it harder to follow
+- Make it a pure render component with no state — would require lifting more state up, not worth it for a single concern
 
 ### D2: Summary statistics computed from existing data
 
-Compute summary from `diffData.files` and `commitsData.commits` which are already fetched. Aggregate `additions`/`deletions` from the files array. Display as a single line above the tabs: `N files changed, +X, -Y, M commits`.
+The summary line ("N files, +X/-Y, M commits") will be computed inline from `diffData.files` and `commitsData.commits` using `reduce`. No new data fetching needed — `DiffFile` already has `additions`/`deletions`, `CommitEntry` has `filesChanged`/`additions`/`deletions`.
 
-**Alternatives considered:** Add a server-side summary endpoint — overkill since the data is already on the client.
+**Alternatives considered:**
+- Add a server-side summary endpoint — overkill; the data is already on the client
+- Compute from commits rather than files — files array gives accurate per-file counts directly
 
-### D3: Empty state renders the panel with a message instead of returning null
+### D3: Add changes summary to inline approval UI in IssueDetailPage
 
-Currently the IIFE returns `null` when `files.length === 0 && commits.length === 0` (line 420). Change this to render the panel container with "No changes yet" text. This ensures the panel is visually present in all stages, giving users a consistent anchor point.
+Note: `PlanApprovalPanel` and `ReviewApprovalPanel` components exist but are NOT imported/used in IssueDetailPage. The approval UI is rendered inline (lines 746–824) as generic approval gates. The changes summary will be added directly into the inline approval sections in IssueDetailPage's sidebar, above the "Approve & Continue" / "Approve & Build" buttons.
 
-### D4: Defer inline approval summary to follow-up
+A compact summary block (file count, +/- lines, commit count) will be computed from `diffData`/`commitsData` and rendered inside the approval gate sections when `isApprovalGate` is true.
 
-Adding a compact changes summary to PlanApprovalPanel/ReviewApprovalPanel is marked optional in the acceptance criteria. Deferring keeps this change focused on repositioning.
+**Alternatives considered:**
+- Add `changesSummary` prop to orphaned PlanApprovalPanel/ReviewApprovalPanel — these components aren't used in IssueDetailPage, so this wouldn't deliver value
+- Use React context — overkill for a single numeric summary used in one component
+
+### D4: Always render ChangesPanel (no early-return null)
+
+Remove the `if (files.length === 0 && commits.length === 0) return null` guard. Instead, the panel always renders — showing the summary (with zeros) and the empty state message "No changes yet" when there's nothing.
+
+**Alternatives considered:**
+- Conditionally render with a wrapper check — the old pattern; defeats the goal of always-visible changes
+- Hide the entire panel when empty — contradicts the Backlog "No changes yet" requirement
 
 ## Risks / Trade-offs
 
-- [Loading flash in Backlog] `useIssueDiff` and `useIssueCommits` are called unconditionally but will 404 or return empty for Backlog issues. The hooks already handle this gracefully (return empty data), so the panel will just show the empty state. No actual risk.
-- [No visual regression in other sections] Since we're only moving JSX blocks and not changing their internal rendering, other sections (Comments, TaskList, sidebar) are unaffected. Verify by checking layout at each stage.
+- [Backlog stage will trigger diff/commits API calls that return empty] → Already happens because `useIssueDiff`/`useIssueCommits` have `enabled: number > 0` with no stage filter. No new API load.
+- [Moving a large UI block may introduce layout regressions] → The ChangesPanel component uses the same `rounded-lg border border-gray-200 bg-white p-4` card style as the surrounding sections. Visual diff testing recommended.
+- [Extra inline summary in approval sections adds complexity] → The summary is a simple computed block (~5 lines of JSX), rendered conditionally when `isApprovalGate` is true. Low risk.
 
 ## Migration Plan
 
-No migration needed. This is a pure frontend layout change with no data or API changes. Deploy in a single PR.
+1. Extract `ChangesPanel` component from inline JSX
+2. Remove `DIFF_STAGES` constant and `showDiff` variable
+3. Place `<ChangesPanel>` after Description, before TaskList
+4. Remove old diff section (after Comments)
+5. Compute `changesSummary` and render inline in approval gate sections in IssueDetailPage sidebar
+6. Build and visually verify all stages
+
+No rollback strategy needed — this is a pure frontend layout change with no data migration.
 
 ## Open Questions
 
-None.
+- Should the summary line be clickable (e.g., to scroll to or expand the panel)? → Start with static text; interactivity can be added later if users request it.
