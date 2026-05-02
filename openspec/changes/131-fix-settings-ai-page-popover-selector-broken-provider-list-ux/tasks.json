@@ -1,21 +1,21 @@
 {
   "project": "mohist",
-  "description": "Fix broken ModelSelect popover (Headless UI v2 Transition issue) and improve AI settings page layout",
+  "description": "Fix ModelSelect popover (Headless UI v2 compat) and improve AI settings page UX with section reorder and provider grouping",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Fix ModelSelect popover and reorder AI settings layout",
-      "spec": "specs/web-ui/spec.md",
-      "description": "In AiSettingsSection.tsx: (1) Remove the Transition wrapper around Popover.Panel in ModelSelect (lines 257-265, 322), remove unused Transition and Fragment imports. (2) Reorder the AiSettingsSection JSX so Model Selection and Stage Model Overrides appear before Providers. (3) Split the Providers section: show connected providers always, collapse unconfigured providers behind a toggle with count (e.g. '80 providers available'). Add a showUnconfigured state variable for the toggle.",
+      "title": "Fix ModelSelect popover, reorder sections, add provider grouping",
+      "spec": "specs/web-ui/spec.md#Model Select Popover renders and is interactive, specs/ai-settings-provider-ux/spec.md#Provider list visual grouping",
+      "description": "In AiSettingsSection.tsx: (1) Remove the Transition wrapper from ModelSelect (lines 257–265), let Popover.Panel render directly for Headless UI v2 compat. (2) Reorder the JSX so Model Selection and Stage Model Overrides appear above the Providers section. (3) Split the flat provider list into two visually distinct groups — \"Connected\" (always expanded) and \"Available\" (collapsible, collapsed by default when connected providers exist, expanded when none connected) — with a clickable header showing a count badge and chevron toggle.",
       "acceptanceCriteria": [
-        "ModelSelect popover opens when clicking the button (Popover.Panel renders to DOM)",
-        "Search and model selection work inside the popover",
-        "Stage Model Override selectors open and function correctly",
-        "Model Selection section renders before the Providers section on the page",
-        "Connected providers display with Remove buttons at the top of the Providers section",
-        "Unconfigured providers are collapsed by default with a count label",
-        "Clicking the collapsed row expands to show unconfigured providers with search",
-        "No unused imports (Transition, Fragment) remain",
+        "Popover.Panel renders in DOM when any ModelSelect button is clicked (Mohist Model, Coder Model, Stage overrides)",
+        "Model search, selection, and clear work in all ModelSelect instances",
+        "Model Selection section renders before Providers section",
+        "Connected providers display in an always-expanded group at top",
+        "Available providers display in a collapsible group below Connected, collapsed by default when connected providers exist",
+        "Available group is expanded by default when zero connected providers",
+        "Clicking Available group header toggles expand/collapse",
+        "Unused Transition/Fragment imports removed if no longer needed",
         "Typecheck passes"
       ],
       "priority": 1,
@@ -24,7 +24,7 @@
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": [],
       "passes": false,
-      "notes": "All three changes are in the same file and tightly coupled — layout reorder affects the same JSX that references the fixed ModelSelect, and the provider grouping is part of the same section reorder."
+      "notes": "All three changes (bug fix, reorder, grouping) are in one file and interleave — splitting would create artificial partial-edit dependencies. The Transition removal is lines 257–265 and the closing tag at line 322. Reorder moves the Model Selection div block (currently ~line 530–563) and Stage Overrides block (~line 568–597) above the Providers block (~line 449–496). Provider grouping replaces the flat filteredProviders.map with separate connected/available sections using a useState for collapse state. Also remove unused Fragment import if Transition is removed."
     }
   ]
 }

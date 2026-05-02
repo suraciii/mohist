@@ -1,38 +1,54 @@
-## Self-Review: Issue #131
+# Self-Review: #131 fix: Settings AI page — Popover selector broken + provider list UX
 
-**Change:** fix: Settings AI page — Popover selector broken + provider list UX
+## Verdict: PASS
 
-### Alignment
+All artifacts are consistent, complete, and feasible. One fix was applied during review.
 
-- Proposal "What Changes" maps 1:1 to issue requirements: (1) fix Transition bug, (2) reorder layout, (3) provider grouping
-- All 5 issue acceptance criteria are covered across specs and task acceptance criteria
-- No issue requirements are missing or misinterpreted
+## Completeness
 
-### Completeness
+| Spec | Covered by Task | Status |
+|------|----------------|--------|
+| `ai-settings-provider-ux/spec.md` (2 requirements) | T-001 | OK |
+| `web-ui/spec.md` (1 requirement) | T-001 | OK |
 
-- All 3 spec requirements (popover fix, layout reorder, provider grouping) have corresponding acceptance criteria in T-001
-- Edge cases covered in specs: "all connected → no collapse area", stage override selectors, search+select flow
-- All specs trace back to proposal capabilities (`web-ui` modified)
+Issue acceptance criteria coverage:
+- Mohist Model selector opens → web-ui spec scenario 1 → T-001 AC 1,2
+- Coder Model selector opens → web-ui spec scenario 2 → T-001 AC 1,2
+- Stage Model Overrides selectors work → web-ui spec scenario 3 → T-001 AC 1,2
+- Provider list visual grouping → ai-settings-provider-ux spec requirement 1 → T-001 AC 4–7
+- Model Selection not buried at bottom → ai-settings-provider-ux spec requirement 2 → T-001 AC 3
 
-### Consistency
+## Consistency
 
-- Proposal lists `web-ui` as modified capability → spec at `specs/web-ui/spec.md` — correct
-- Tasks reference `specs/web-ui/spec.md` — correct
-- Design decisions D1/D2/D3 map directly to the 3 spec requirements
-- Naming is consistent across all artifacts
+- Proposal capabilities (1 new: `ai-settings-provider-ux`, 1 modified: `web-ui`) map to 2 spec directories
+- Design decisions D1–D3 align with task description
+- Naming consistent across all artifacts
+- Task acceptance criteria enumerate all spec scenarios
 
-### Feasibility
+## Feasibility
 
-- Single task is appropriate: all changes are in `AiSettingsSection.tsx`, tightly coupled, and deliverable in one agent iteration
-- AFK mode is correct — purely code changes, no human judgment required
-- No new dependencies needed; existing `@headlessui/react` v2.2.10 is already installed
+- Single file change (`AiSettingsSection.tsx`) — no cross-file dependencies
+- No API/backend changes needed
+- No dependency version changes needed
+- No circular dependencies (single task)
 
-### Dependency Completeness
+## Dependency Graph
 
-- T-001 is the only task with `dependsOn: []` — correct for the first/only task
-- No cycles possible in a single-task graph
-- All referenced IDs exist
+```
+T-001 (single task) — no dependencies
+```
 
-### Result
+- DAG: valid (trivial)
+- No `dependsOn` issues
 
-**PASS** — All artifacts are consistent, complete, and feasible. No fixes needed.
+## Issues Found and Fixed
+
+### 1. Task spec reference incomplete (FIXED)
+
+**Problem:** T-001 `spec` field only referenced `specs/web-ui/spec.md` but the task also covers `specs/ai-settings-provider-ux/spec.md` requirements.
+
+**Fix:** Updated `spec` field to reference both: `specs/web-ui/spec.md#Model Select Popover renders and is interactive, specs/ai-settings-provider-ux/spec.md#Provider list visual grouping`.
+
+## No Issues Remaining
+
+Single task is appropriate for a single-file change with interleaved concerns. Acceptance criteria are verifiable.
