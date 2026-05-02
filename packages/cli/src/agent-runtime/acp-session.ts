@@ -53,6 +53,7 @@ export interface AcpSessionOptions {
   stage?: string;
   model?: string;
   onBeforeKill?: (cwd: string) => Promise<boolean>;
+  title?: string;
 }
 
 export interface AcpSessionResult {
@@ -400,6 +401,7 @@ export async function runAcpSession(
           executionId,
           taskDescription: task.slice(0, 200),
           stage: options.stage,
+          title: options.title,
         });
         coderSessionId = coderSession.id;
         log.info('coder_session row created', { coderSessionId, acpSessionId: sessionId });
@@ -413,6 +415,7 @@ export async function runAcpSession(
             model,
             stage: options.stage,
             taskDescription: task.slice(0, 200),
+            title: options.title ?? null,
           });
         }
       } catch (err) {
@@ -497,6 +500,7 @@ export interface AcpConnectionOptions {
   signal?: AbortSignal;
   model?: string;
   stage?: string;
+  title?: string;
 }
 
 export interface AcpConnection {
@@ -530,6 +534,7 @@ export async function createAcpConnection(
     signal,
     model,
     stage,
+    title,
   } = options;
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
@@ -825,6 +830,7 @@ export async function createAcpConnection(
         executionId,
         taskDescription: 'multi-round acp connection',
         stage,
+        title,
       });
       coderSessionId = coderSession.id;
       log.info('coder_session row created', {
@@ -841,6 +847,7 @@ export async function createAcpConnection(
           model,
           stage,
           taskDescription: 'multi-round acp connection',
+          title: title ?? null,
         });
       }
     } catch (err) {
