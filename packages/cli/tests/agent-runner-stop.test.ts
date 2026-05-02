@@ -259,7 +259,6 @@ describe('AbortSignal propagation through WorkflowEngine', () => {
     const result = await engine.run(planIssue, { cwd: '/test' });
 
     expect(result.completed).toBe(false);
-    expect(result.gateRequired).toBe(false);
     expect(result.message).toContain('stopped by user');
   });
 });

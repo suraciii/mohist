@@ -982,15 +982,16 @@ export class AgentRunnerService {
       }
 
       const duration = Date.now() - startTime;
-      log.info('Pipeline run completed', { issueNumber: issue.number, elapsedMs: duration, completed: result.completed, gateRequired: result.gateRequired });
+      const isPaused = !result.completed && (issueRepo.findById(issue.id)?.approvalState?.status === 'awaiting');
+      log.info('Pipeline run completed', { issueNumber: issue.number, elapsedMs: duration, completed: result.completed, paused: isPaused });
 
-      if (result.gateRequired) {
+      if (isPaused) {
         this.eventBus.emit('agent_paused', {
           issueId: issue.id,
           projectId,
           issueNumber: issue.number,
         });
-        log.info('Pipeline paused at gate, marking task completed', {
+        log.info('Pipeline paused at approval, marking task completed', {
           issueNumber: issue.number,
           stage: result.stage,
           taskId: task.id,
