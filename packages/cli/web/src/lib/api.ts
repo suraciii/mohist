@@ -284,46 +284,46 @@ export const api = {
     request<string[]>('/opencode/models'),
 
   getModel: () =>
-    request<{ model: string | null }>('/config/model'),
+    request<{ model: string | null }>('/model'),
 
   setModel: (model: string | null) =>
-    request<{ model: string | null }>('/config/model', {
+    request<{ model: string | null }>('/model', {
       method: 'PUT',
       body: JSON.stringify({ model }),
     }),
 
   getOpencodeModelConfig: () =>
-    request<{ model: string | null }>('/config/opencode-model'),
+    request<{ model: string | null }>('/opencode-model'),
 
   setOpencodeModel: (model: string | null) =>
-    request<{ model: string | null }>('/config/opencode-model', {
+    request<{ model: string | null }>('/opencode-model', {
       method: 'PUT',
       body: JSON.stringify({ model }),
     }),
 
   getLogLevel: () =>
-    request<{ level: string }>('/config/log-level'),
+    request<{ level: string }>('/log-level'),
 
   setLogLevel: (level: string) =>
-    request<{ level: string }>('/config/log-level', {
+    request<{ level: string }>('/log-level', {
       method: 'PUT',
       body: JSON.stringify({ level }),
     }),
 
   getAgentRuntime: () =>
-    request<import('./types').AgentRuntimeConfig>('/config/agent-runtime'),
+    request<import('./types').AgentRuntimeConfig>('/agent-runtime'),
 
   updateAgentRuntime: (data: Partial<import('./types').AgentRuntimeConfig>) =>
-    request<import('./types').AgentRuntimeConfig>('/config/agent-runtime', {
+    request<import('./types').AgentRuntimeConfig>('/agent-runtime', {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
 
   getStageModels: () =>
-    request<{ stageModels: Record<string, string> | null }>('/config/stage-models'),
+    request<{ stageModels: Record<string, string> | null }>('/stage-models'),
 
   setStageModels: (stageModels: Record<string, string> | null) =>
-    request<{ stageModels: Record<string, string> | null }>('/config/stage-models', {
+    request<{ stageModels: Record<string, string> | null }>('/stage-models', {
       method: 'PUT',
       body: JSON.stringify({ stageModels }),
     }),
