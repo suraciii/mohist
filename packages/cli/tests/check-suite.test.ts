@@ -518,7 +518,7 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
     return { issueId: issue.id, number: issue.number };
   }
 
-  it('should return 200 on SHA match and enqueue for merge', async () => {
+  it('should return 202 on SHA match and enqueue for merge', async () => {
     const { number, issueId } = await setupIssueWithApproval(Stage.Check);
     const sha = 'a'.repeat(40);
 
@@ -535,6 +535,7 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus);
     vi.spyOn(agentRunner, 'isIssueAtApprovalGate').mockReturnValue(true);
+    vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 't1', status: 'queued', queuePosition: 0 });
 
     const mergeQueue = {
       enqueue: vi.fn(),
@@ -558,6 +559,7 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       mergeQueue as any,
       undefined,
       undefined,
@@ -569,7 +571,7 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
     const response = await request(server)
       .post(`/api/issues/${number}/approve`);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(response.body.success).toBe(true);
     expect(mergeQueue.enqueue).toHaveBeenCalledWith(projectId, number);
   }, 15000);
@@ -593,8 +595,7 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus);
     vi.spyOn(agentRunner, 'isIssueAtApprovalGate').mockReturnValue(true);
-    vi.spyOn(agentRunner, 'resumePipeline').mockImplementation(() => {});
-    vi.spyOn(agentRunner, 'isRunning').mockReturnValue(false);
+    vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 't1', status: 'queued', queuePosition: 0 });
 
     const mergeQueue = {
       enqueue: vi.fn(),
@@ -614,6 +615,7 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
       undefined,
       undefined,
       agentRunner,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -634,12 +636,13 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
     expect(mergeQueue.enqueue).not.toHaveBeenCalled();
   }, 15000);
 
-  it('should return 200 with no active CheckSuite (recovery path)', async () => {
+  it('should return 202 with no active CheckSuite (recovery path)', async () => {
     const { number } = await setupIssueWithApproval(Stage.Check);
 
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus);
     vi.spyOn(agentRunner, 'isIssueAtApprovalGate').mockReturnValue(true);
+    vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 't1', status: 'queued', queuePosition: 0 });
 
     const mergeQueue = {
       enqueue: vi.fn(),
@@ -663,6 +666,7 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       mergeQueue as any,
       undefined,
       undefined,
@@ -674,7 +678,7 @@ describe('Check stage approval API with CheckSuite SHA verification', () => {
     const response = await request(server)
       .post(`/api/issues/${number}/approve`);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(mergeQueue.enqueue).toHaveBeenCalledWith(projectId, number);
   }, 15000);
 });
