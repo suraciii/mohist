@@ -1108,7 +1108,7 @@ export function createIssueRoutes(
 
       if (rejectedStage === Stage.Plan) {
         if (checkpointRepo) {
-          checkpointRepo.delete(issue.id, 'plan');
+          checkpointRepo.delete(issue.number, 'plan');
         }
       }
 
