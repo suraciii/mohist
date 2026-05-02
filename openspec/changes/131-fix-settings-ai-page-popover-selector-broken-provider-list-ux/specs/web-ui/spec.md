@@ -1,27 +1,37 @@
 ## MODIFIED Requirements
 
-### Requirement: AI Settings 页面布局结构
+### Requirement: Model Select Popover 正确渲染
 
-AI Settings 页面 SHALL 按以下顺序排列各区域：Model Selection → Providers → Custom Providers → Stage Model Overrides。Provider 列表 SHALL 将已连接的 provider 和未连接的 provider 分为两个视觉分组，未连接 provider 分组 SHALL 默认折叠。
+Settings AI 页面的 ModelSelect 组件 SHALL 使用与 `@headlessui/react` v2 兼容的 API。`Popover.Panel` SHALL 在用户点击按钮时正确渲染到 DOM 中，支持模型搜索、键盘导航和选择。
 
-#### Scenario: Model Selection 位于页面顶部
+#### Scenario: 点击按钮打开 Mohist Model 选择器
 
-- **WHEN** 用户打开 Settings AI 页面
-- **THEN** Model Selection 区域（包含 Mohist Model 和 Coder Model 选择器）在 Providers 列表之前显示
+- **WHEN** 用户点击 Mohist Model 选择器按钮
+- **THEN** Popover Panel 渲染到 DOM 并显示模型列表
+- **AND** 搜索输入框自动获得焦点
 
-#### Scenario: 已连接 Provider 分组
+#### Scenario: 点击按钮打开 Coder Model 选择器
 
-- **WHEN** 存在已配置的内置 provider
-- **THEN** 这些 provider 在 "Connected" 分组中显示，带有连接状态标记和 Remove 操作
+- **WHEN** 用户点击 Coder Model 选择器按钮
+- **THEN** Popover Panel 渲染到 DOM 并显示模型列表
+- **AND** 搜索输入框自动获得焦点
 
-#### Scenario: 未连接 Provider 分组默认折叠
+#### Scenario: Stage Model Overrides 选择器正常工作
 
-- **WHEN** 存在未配置的内置 provider
-- **THEN** 这些 provider 显示在可折叠的 "Available Providers" 分组中
-- **AND** 该分组默认折叠，仅显示分组标题和 provider 数量
-- **AND** 用户点击标题可展开查看完整列表
+- **WHEN** 用户展开 Stage Model Overrides
+- **AND** 点击任一 stage 的模型选择器按钮
+- **THEN** Popover Panel 渲染到 DOM 并显示模型列表
 
-#### Scenario: Provider 搜索保留
+#### Scenario: 选择模型后关闭 Popover
 
-- **WHEN** 用户在 Provider 搜索框输入文本
-- **THEN** 按名称或 ID 过滤 provider 列表（跨分组）
+- **WHEN** Popover Panel 已打开
+- **AND** 用户点击一个模型选项
+- **THEN** 选择器更新为所选模型
+- **AND** Popover Panel 关闭
+
+#### Scenario: 键盘导航选择模型
+
+- **WHEN** Popover Panel 已打开
+- **AND** 用户按 ArrowDown / ArrowUp 键
+- **THEN** 高亮在模型列表中移动
+- **AND** 用户按 Enter 键选中当前高亮的模型
