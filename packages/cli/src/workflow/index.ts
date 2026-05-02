@@ -10,6 +10,10 @@ export {
 } from './check-stage-runner';
 
 export {
+  BaseStageRunner,
+} from './base-stage-runner';
+
+export {
   type StageContext,
   type StageRunResult,
   type CheckResult,
