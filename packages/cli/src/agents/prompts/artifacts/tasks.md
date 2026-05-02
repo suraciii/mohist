@@ -56,28 +56,14 @@ In addition to the standard fields above, mohist tasks include:
 
 - `dependsOn`: Array of task IDs this task depends on (must reference lower-priority tasks)
 
-## Tasking Principle
+## Tasking Rules — Mandatory
 
-Each task should be the **smallest deliverable unit that is both complete and valuable**:
-- **Smallest**: Do not bundle unrelated concerns into one task
-- **Deliverable**: Produces something that can be independently verified
-- **Complete**: Not a half-finished artifact — the task's output should work on its own
-- **Valuable**: Not so granular that it delivers no independent value (e.g., a single import statement)
+You MUST follow these rules. Violations MUST be fixed before outputting.
 
-When in doubt, ask: "If only this task were completed and nothing else, would it still be a useful, testable increment?"
-
-## Granularity
-
-A well-sized task:
-- Can be completed in a single agent session (typically 5-30 minutes)
-- Produces a coherent, testable unit of work
-- Has clear start and end conditions
-- Can be verified by its acceptance criteria alone
-
-Avoid:
-- Tasks that are too large (multiple unrelated concerns)
-- Tasks that are too small (single line changes that don't deliver value independently)
-- Tasks with vague acceptance criteria
+- **One task, one outcome.** A description like "do A and do B" with two unrelated outcomes → split into two tasks.
+- **Complete and deliverable.** A task that only defines types or interfaces with nothing using them is incomplete — combine it into the task that first uses those definitions.
+- **Split by value, not by code.** Do NOT split by files, modules, or code layers. Ask: "What capability exists after this task is done?" — that is one task. The coder agent handles its own implementation plan.
+- **Outcome first, steps optional.** State WHAT the task achieves as the primary focus. Implementation hints are welcome as supplementary detail, but the goal must be clear and prominent.
 
 ## Dependency Analysis
 
