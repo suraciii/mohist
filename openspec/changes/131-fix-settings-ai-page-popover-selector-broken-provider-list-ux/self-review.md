@@ -1,33 +1,38 @@
-# Self-Review Report
+## Self-Review: Issue #131
 
-## Verdict: PASS (1 fix applied)
+**Change:** fix: Settings AI page — Popover selector broken + provider list UX
 
-## Alignment: PASS
-- All issue requirements traced to proposal "What Changes": Popover bug fix (item 1), provider list restructuring (item 2), page reordering (item 3)
-- All 5 issue acceptance criteria covered by specs: Model selectors (web-ui spec), provider grouping (ai-settings-provider-list spec), page ordering (ai-settings-provider-list spec)
+### Alignment
 
-## Completeness: PASS
-- All requirements covered by specs: 2 spec dirs for 2 capabilities (1 new, 1 modified)
-- All specs have tasks: web-ui/spec.md → T-001, ai-settings-provider-list/spec.md → T-002
-- Edge cases covered: all providers connected (no Available group), all unconnected (no Connected group), zero-state handling
+- Proposal "What Changes" maps 1:1 to issue requirements: (1) fix Transition bug, (2) reorder layout, (3) provider grouping
+- All 5 issue acceptance criteria are covered across specs and task acceptance criteria
+- No issue requirements are missing or misinterpreted
 
-## Consistency: PASS (after fix)
-- Proposal Capabilities (1 new `ai-settings-provider-list`, 1 modified `web-ui`) → 2 matching spec dirs exist
-- T-001 → specs/web-ui/spec.md, T-002 → specs/ai-settings-provider-list/spec.md
-- Design decisions D1-D3 align with spec requirements
-- Naming consistent across all artifacts
+### Completeness
 
-## Feasibility: PASS
-- T-001: Single edit removing Transition wrapper — all imports already present, Fragment removal is safe
-- T-002: Uses existing memos (`configuredProviders`, `unconfiguredProviders`, `customProviders`) and existing pattern (`stageOverridesOpen`) — no new dependencies needed
-- No circular dependencies: T-001 → [], T-002 → [T-001], valid DAG
-- Task granularity appropriate: 2 tasks for 2 distinct capabilities (bug fix vs UX restructure)
+- All 3 spec requirements (popover fix, layout reorder, provider grouping) have corresponding acceptance criteria in T-001
+- Edge cases covered in specs: "all connected → no collapse area", stage override selectors, search+select flow
+- All specs trace back to proposal capabilities (`web-ui` modified)
 
-## Dependency Completeness: PASS
-- T-001 (priority 1): `dependsOn: []` — correct, first task
-- T-002 (priority 2): `dependsOn: ["T-001"]` — correct, references lower-priority task
-- All `dependsOn` reference existing task IDs
-- No cycles
+### Consistency
 
-## Fixes Applied
-1. **specs/ai-settings-provider-list/spec.md line 52**: Fixed page section ordering — spec had "Model Selection → Connected → Available → Custom → Stage Model Overrides" but design (D3) and tasks (T-002) both specify "Model Selection → Stage Model Overrides → Connected → Available → Custom". Updated spec to match. The design ordering is correct because Stage Model Overrides is an extension of Model Selection and should be adjacent to it, not buried after providers.
+- Proposal lists `web-ui` as modified capability → spec at `specs/web-ui/spec.md` — correct
+- Tasks reference `specs/web-ui/spec.md` — correct
+- Design decisions D1/D2/D3 map directly to the 3 spec requirements
+- Naming is consistent across all artifacts
+
+### Feasibility
+
+- Single task is appropriate: all changes are in `AiSettingsSection.tsx`, tightly coupled, and deliverable in one agent iteration
+- AFK mode is correct — purely code changes, no human judgment required
+- No new dependencies needed; existing `@headlessui/react` v2.2.10 is already installed
+
+### Dependency Completeness
+
+- T-001 is the only task with `dependsOn: []` — correct for the first/only task
+- No cycles possible in a single-task graph
+- All referenced IDs exist
+
+### Result
+
+**PASS** — All artifacts are consistent, complete, and feasible. No fixes needed.
