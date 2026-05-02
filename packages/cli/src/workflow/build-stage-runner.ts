@@ -5,30 +5,38 @@ import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
 import { loadWorkflow } from './workflow-loader';
 import { GitCommitter } from './git-committer';
-import type { StageRunner } from './check-stage-runner';
+import { BaseStageRunner } from './base-stage-runner';
 import type { StageContext, StageRunResult } from './stage-context';
+import type { Check } from './checks';
+import { AllTasksCompleteCheck } from './checks/all-tasks-complete-check';
+import { CodeCompilesCheck } from './checks/code-compiles-check';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'workflow' });
 
-export class BuildStageRunner implements StageRunner {
+export class BuildStageRunner extends BaseStageRunner {
   private worktreePath: string;
   private projectId?: string;
   private gitCommitter: GitCommitter;
+  private checks: Check[];
 
   constructor(opts: { worktreePath: string; projectId?: string }) {
+    super();
     this.worktreePath = opts.worktreePath;
     this.projectId = opts.projectId;
     this.gitCommitter = new GitCommitter(this.worktreePath);
+    this.checks = [
+      new AllTasksCompleteCheck(),
+      new CodeCompilesCheck({ worktreePath: this.worktreePath }),
+    ];
   }
 
   canHandle(stage: Stage): boolean {
     return stage === Stage.Build;
   }
 
-  async run(ctx: StageContext): Promise<StageRunResult> {
+  protected async executeTasks(ctx: StageContext): Promise<unknown> {
     const { issue, acpOptions, eventBus, checkpointManager } = ctx;
-    const buildStartTime = Date.now();
     const issueId = issue.id;
     const projectId = this.projectId ?? issue.projectId;
     const workflowLogRepo = acpOptions.workflowLogRepo;
@@ -63,12 +71,7 @@ export class BuildStageRunner implements StageRunner {
         issueNumber: issue.number,
       });
 
-      return {
-        success: false,
-        output: null,
-        checkResults: [],
-        message: `No OpenSpec change found for issue #${issue.number}`,
-      };
+      throw new Error(`No OpenSpec change found for issue #${issue.number}`);
     }
 
     log.info('detectOpenSpecChange found change', {
@@ -147,7 +150,6 @@ export class BuildStageRunner implements StageRunner {
         checkpointManager.markStepComplete(issue.number, 'build', taskId);
       },
     });
-    const duration = Date.now() - buildStartTime;
 
     log.info('Ralph loop completed', {
       issueNumber: issue.number,
@@ -155,7 +157,6 @@ export class BuildStageRunner implements StageRunner {
       failed: result.failed,
       total: result.total,
       success: result.success,
-      elapsedMs: duration,
     });
 
     const hadCheckpoint = activeCompletedTaskIds.length > 0;
@@ -177,26 +178,15 @@ export class BuildStageRunner implements StageRunner {
         reason: 'zero_work',
         completed: result.completed,
         total: result.total,
-        duration,
       });
 
-      return {
-        success: false,
-        output: {
-          stage: Stage.Build,
-          issueNumber: issue.number,
-          completedTasks: result.completed,
-          failedTasks: result.failed,
-          totalTasks: result.total,
-        },
-        checkResults: [],
-        message: `Build completed with 0 tasks executed out of ${result.total} total — tasks may have been pre-marked as passed`,
-      };
+      throw new Error(
+        `Build completed with 0 tasks executed out of ${result.total} total — tasks may have been pre-marked as passed`,
+      );
     }
 
     if (result.success) {
       await this.gitCommitter.commitBuildChanges(issue);
-
       checkpointManager.delete(issue.number, 'build');
 
       this.emitSafe(eventBus, 'build_stage_completed', {
@@ -205,14 +195,12 @@ export class BuildStageRunner implements StageRunner {
         completed: result.completed,
         failed: result.failed,
         total: result.total,
-        duration,
         timestamp: new Date().toISOString(),
       });
       this.writeLog(workflowLogRepo, issueId, 'build_completed', {
         completed: result.completed,
         failed: result.failed,
         total: result.total,
-        duration,
       });
     } else {
       this.emitSafe(eventBus, 'build_stage_failed', {
@@ -227,24 +215,35 @@ export class BuildStageRunner implements StageRunner {
         completed: result.completed,
         failed: result.failed,
         total: result.total,
-        duration,
       });
     }
 
     return {
-      success: result.success,
-      nextStage: result.success ? Stage.Check : undefined,
-      checkResults: [],
-      output: {
+      stage: Stage.Build,
+      issueNumber: issue.number,
+      completedTasks: result.completed,
+      failedTasks: result.failed,
+      totalTasks: result.total,
+    };
+  }
+
+  protected getChecks(): Check[] {
+    return this.checks;
+  }
+
+  protected getNextStage(): Stage {
+    return Stage.Check;
+  }
+
+  async run(ctx: StageContext): Promise<StageRunResult> {
+    const result = await super.run(ctx);
+
+    return {
+      ...result,
+      output: result.output ?? {
         stage: Stage.Build,
-        issueNumber: issue.number,
-        completedTasks: result.completed,
-        failedTasks: result.failed,
-        totalTasks: result.total,
+        issueNumber: ctx.issue.number,
       },
-      message: result.success
-        ? `Build completed - ${result.completed}/${result.total} tasks executed`
-        : `Build completed with ${result.failed} failed task(s)`,
     };
   }
 

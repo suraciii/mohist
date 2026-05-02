@@ -71,6 +71,15 @@ export {
 } from './checks/user-approval-check';
 
 export {
+  AllTasksCompleteCheck,
+} from './checks/all-tasks-complete-check';
+
+export {
+  CodeCompilesCheck,
+  type CodeCompilesCheckOptions,
+} from './checks/code-compiles-check';
+
+export {
   CheckpointManager,
   createCheckpointManager,
 } from './checkpoint-manager';

@@ -25,6 +25,17 @@ import type { IssueRepo } from '../src/db/issue-repo';
 
 vi.mock('../src/agent-runtime/acp-session', () => ({
   createAcpConnection: vi.fn(),
+  runAcpSession: vi.fn().mockResolvedValue({ success: true, text: '' }),
+}));
+
+vi.mock('child_process', () => ({
+  execFile: vi.fn().mockImplementation((_cmd: string, _args: string[], opts: any, cb: any) => {
+    if (typeof opts === 'function') {
+      cb(null, { stdout: '', stderr: '' });
+    } else if (typeof cb === 'function') {
+      cb(null, { stdout: '', stderr: '' });
+    }
+  }),
 }));
 
 let mockDetectResult: OpenSpecChange | null = null;
@@ -245,7 +256,7 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
       const tasksJson = JSON.stringify({
         version: 1,
         tasks: [
-          { id: 'T-001', order: 1, title: 'Task 1', passes: false, attempts: 0 },
+          { id: 'T-001', order: 1, title: 'Task 1', passes: true, attempts: 1 },
         ],
       });
       (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(tasksJson);
