@@ -47,6 +47,30 @@ export {
 } from './acp-round-runner';
 
 export {
+  ProposalCompleteCheck,
+} from './checks/proposal-complete-check';
+
+export {
+  SpecsCompleteCheck,
+} from './checks/specs-complete-check';
+
+export {
+  DesignCompleteCheck,
+} from './checks/design-complete-check';
+
+export {
+  TasksValidCheck,
+} from './checks/tasks-valid-check';
+
+export {
+  SelfReviewPassedCheck,
+} from './checks/self-review-passed-check';
+
+export {
+  UserApprovalCheck,
+} from './checks/user-approval-check';
+
+export {
   CheckpointManager,
   createCheckpointManager,
 } from './checkpoint-manager';
