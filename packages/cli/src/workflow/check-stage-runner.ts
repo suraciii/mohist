@@ -1,5 +1,6 @@
 import { Stage } from '../types';
 import type { StageContext, StageRunResult } from './stage-context';
+import { emitStageTaskUpdate } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
 import type { Check } from './checks';
 import { BuildTestCheck } from './checks/build-test-check';
@@ -326,37 +327,6 @@ function emitReviewRoundStart(
   } catch (e) {
     log.warn('eventBus.emit failed for plan_round_start', {
       roundType,
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
-}
-
-function emitStageTaskUpdate(
-  eventBus: import('../services/event-bus').EventBus | undefined,
-  issueId: string,
-  projectId: string,
-  stage: string,
-  taskId: string,
-  taskTitle: string,
-  status: 'started' | 'completed' | 'failed' | 'retrying',
-  attempt: number,
-  artifacts: string[],
-): void {
-  if (!eventBus) return;
-  try {
-    eventBus.emit('stage_task_update', {
-      issueId,
-      projectId,
-      stage,
-      taskId,
-      taskTitle,
-      status,
-      attempt,
-      artifacts,
-    });
-  } catch (e) {
-    log.warn('eventBus.emit failed for stage_task_update', {
-      taskId,
       error: e instanceof Error ? e.message : String(e),
     });
   }

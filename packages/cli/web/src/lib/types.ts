@@ -399,9 +399,10 @@ export type ApprovalOutput = {
 
 export interface CheckResult {
   name: string
-  status: 'pending' | 'running' | 'passed' | 'failed'
+  status: 'pending' | 'running' | 'pass' | 'fail' | 'error'
   duration?: number
   summary?: string
+  message?: string
   buildLog?: string
   reviewReport?: string
   autoFixed?: boolean
@@ -413,9 +414,9 @@ export interface CheckSuiteOutput {
   overallResult: 'passed' | 'failed' | 'blocked'
 }
 
-export type CheckSuiteStatus = 'running' | 'awaiting-approval' | 'passed' | 'failed'
+export type CheckSuiteStatus = 'running' | 'awaiting-approval' | 'pass' | 'fail'
 
-export type CheckStateStatus = 'pending' | 'running' | 'passed' | 'failed'
+export type CheckStateStatus = 'pending' | 'running' | 'pass' | 'fail'
 
 export interface CheckState {
   status: CheckStateStatus

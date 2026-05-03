@@ -128,17 +128,17 @@ describe('Ralph executor logging', () => {
 
     expect(eventBus.emit).toHaveBeenCalledWith(
       'ralph_task_update',
-      expect.objectContaining({ issueId: '42', taskId: 'T-001', status: 'started' }),
+      expect.objectContaining({ issueId: 'uuid-42', taskId: 'T-001', status: 'started' }),
     );
 
     expect(eventBus.emit).toHaveBeenCalledWith(
       'ralph_task_update',
-      expect.objectContaining({ issueId: '42', taskId: 'T-001', status: 'completed' }),
+      expect.objectContaining({ issueId: 'uuid-42', taskId: 'T-001', status: 'completed' }),
     );
 
     expect(eventBus.emit).toHaveBeenCalledWith(
       'ralph_loop_progress',
-      expect.objectContaining({ issueId: '42', completed: 1, failed: 0, total: 1 }),
+      expect.objectContaining({ issueId: 'uuid-42', completed: 1, failed: 0, total: 1 }),
     );
   });
 
