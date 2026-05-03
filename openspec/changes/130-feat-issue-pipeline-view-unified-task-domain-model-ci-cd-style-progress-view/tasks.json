@@ -52,12 +52,13 @@
         "T-001"
       ],
       "notes": "D4 (each runner emits directly). EventMap entry added by T-001.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
-        264978
+        264978,
+        396907
       ]
     },
     {
