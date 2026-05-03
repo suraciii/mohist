@@ -43,14 +43,26 @@ export class BuildStageRunner extends BaseStageRunner {
 
     const completedTaskIds = checkpointManager.getResumeSteps(issue.number, 'build');
 
+    const change = detectOpenSpecChange(this.worktreePath, issue);
+
+    if (change) {
+      try {
+        const tasksContent = fs.readFileSync(change.tasksPath, 'utf-8');
+        const tasksFile = JSON.parse(tasksContent) as TasksFile;
+        for (const t of tasksFile.tasks) {
+          if (t.passes && !completedTaskIds.includes(t.id)) {
+            completedTaskIds.push(t.id);
+          }
+        }
+      } catch {}
+    }
+
     if (completedTaskIds.length > 0) {
-      log.info('Build stage resuming from checkpoint', {
+      log.info('Build stage resuming', {
         issueNumber: issue.number,
         completedTaskIds,
       });
     }
-
-    const change = detectOpenSpecChange(this.worktreePath, issue);
 
     if (!change) {
       log.warn('detectOpenSpecChange returned null', {

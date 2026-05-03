@@ -193,7 +193,7 @@ describe('runRalphLoop', () => {
     expect(updated.tasks[0].id).toBe('T-001');
   });
 
-  it('should reset all passes=true tasks when all tasks have passes=true (corrupted state)', async () => {
+  it('should return success immediately when all tasks have passes=true', async () => {
     change = createMinimalChange();
 
     const tasksFile = {
@@ -214,8 +214,10 @@ describe('runRalphLoop', () => {
 
     const result = await runRalphLoop(change, context, { maxRetries: 0 });
 
-    expect(onTaskStart).toHaveBeenCalled();
+    expect(onTaskStart).not.toHaveBeenCalled();
     expect(result.completed).toBe(2);
+    expect(result.success).toBe(true);
+    expect(result.skipped).toBe(2);
 
     const updated = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
     expect(updated.tasks.every((t: any) => t.passes === true)).toBe(true);
@@ -294,7 +296,7 @@ describe('runRalphLoop', () => {
       expect(updated.tasks.every((t: any) => t.passes === true)).toBe(true);
     });
 
-    it('still resets corrupted all-pass when skipTaskIds is empty', async () => {
+    it('returns success immediately when all tasks passed and skipTaskIds is empty', async () => {
       change = createMinimalChange();
 
       const tasksFile = {
@@ -315,9 +317,10 @@ describe('runRalphLoop', () => {
 
       const result = await runRalphLoop(change, context, { maxRetries: 0 });
 
-      expect(onTaskStart).toHaveBeenCalled();
+      expect(onTaskStart).not.toHaveBeenCalled();
       expect(result.completed).toBe(2);
       expect(result.success).toBe(true);
+      expect(result.skipped).toBe(2);
     });
 
     it('partial skipTaskIds still enters main loop for remaining tasks', async () => {

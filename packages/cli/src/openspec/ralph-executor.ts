@@ -437,16 +437,21 @@ export async function runRalphLoop(
 
   const skipTaskIds = new Set(options.skipTaskIds ?? []);
 
-  const allTasksPassed = tasks.length > 0 && tasks.every(t => t.passes);
-  if (allTasksPassed && skipTaskIds.size === 0) {
-    log.info('All tasks have passes=true (corrupted), resetting to false', {
+  if (tasks.length > 0 && tasks.every(t => t.passes)) {
+    log.info('All tasks already passed, returning success', {
       issueId: context.issueId || '',
       total: tasks.length,
     });
-    for (const task of tasks) {
-      task.passes = false;
-    }
-    writeTasksFile(change.tasksPath, tasks);
+    const alreadyPassedResult: RalphLoopResult = {
+      completed: tasks.length,
+      failed: 0,
+      skipped: tasks.length,
+      total: tasks.length,
+      taskResults: [],
+      success: true,
+    };
+    context.onLoopComplete?.(alreadyPassedResult);
+    return alreadyPassedResult;
   }
 
   for (const task of tasks) {

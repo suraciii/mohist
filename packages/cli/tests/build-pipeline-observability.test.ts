@@ -217,7 +217,7 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
   });
 
   describe('Zero-work detection', () => {
-    it('should return success:false when completed===0 and total>0', async () => {
+    it('should return success:true when all tasks already passed (resume from tasks.json)', async () => {
       const { issueRepo, eventBus } = createMockRepos();
       const workflowLogRepo = { insert: vi.fn() } as any;
 
@@ -232,11 +232,12 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
 
       mockDetectResult = FAKE_CHANGE;
       mockRalphExecuteResult = {
-        completed: 0,
+        completed: 2,
         failed: 0,
         total: 2,
         taskResults: [],
         success: true,
+        skipped: 2,
       };
 
       const result = await runBuildStage(
@@ -244,9 +245,7 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
         { issueRepo, eventBus, workflowLogRepo },
       );
 
-      expect(result.success).toBe(false);
-      expect(result.message).toContain('0 tasks executed');
-      expect(result.message).toContain('2 total');
+      expect(result.success).toBe(true);
     });
 
     it('should return success:true when completed>0', async () => {
@@ -498,7 +497,7 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
       );
     });
 
-    it('should emit build_stage_failed SSE with reason zero_work on zero-work', async () => {
+    it('should emit build_stage_completed SSE when all tasks already passed', async () => {
       const { issueRepo, eventBus } = createMockRepos();
       const workflowLogRepo = { insert: vi.fn() } as any;
 
@@ -512,11 +511,12 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
 
       mockDetectResult = FAKE_CHANGE;
       mockRalphExecuteResult = {
-        completed: 0,
+        completed: 1,
         failed: 0,
         total: 1,
         taskResults: [],
         success: true,
+        skipped: 1,
       };
 
       await runBuildStage(
@@ -525,8 +525,8 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
       );
 
       expect(eventBus.emit).toHaveBeenCalledWith(
-        'build_stage_failed',
-        expect.objectContaining({ reason: 'zero_work' }),
+        'build_stage_completed',
+        expect.anything(),
       );
     });
   });
@@ -592,7 +592,7 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
     );
   });
 
-  it('should write build_failed to workflow_log on zero-work detection', async () => {
+  it('should write build_completed to workflow_log when all tasks already passed', async () => {
     const { issueRepo, eventBus } = createMockRepos();
     const workflowLogRepo = { insert: vi.fn() } as any;
 
@@ -607,11 +607,12 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
 
     mockDetectResult = FAKE_CHANGE;
     mockRalphExecuteResult = {
-      completed: 0,
+      completed: 2,
       failed: 0,
       total: 2,
       taskResults: [],
       success: true,
+      skipped: 2,
     };
 
     await runBuildStage(
@@ -622,8 +623,8 @@ describe('Build Pipeline Observability - BuildStageRunner', () => {
     expect(workflowLogRepo.insert).toHaveBeenCalledWith(
       'issue-1',
       null,
-      'build_failed',
-      expect.objectContaining({ reason: 'zero_work', total: 2 }),
+      'build_completed',
+      expect.objectContaining({ total: 2 }),
     );
   });
 
