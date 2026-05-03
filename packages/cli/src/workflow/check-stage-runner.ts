@@ -179,6 +179,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         if (!result.success) {
           log.error('Review task failed', { artifact: task.type, error: result.error });
           emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'failed', attempts, []);
+          this.appendTaskResult(ctx, {
+            taskId: task.type,
+            title: task.label,
+            status: 'failed',
+            artifacts: [],
+            attempts,
+            duration: Date.now() - taskStartTime,
+          });
           await conn.close();
           throw new Error(`Task "${task.label}" failed: ${result.error ?? 'unknown error'}`);
         }
@@ -207,6 +215,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
           if (!retryResult.success) {
             log.error('Review retry prompt failed', { artifact: task.type, error: retryResult.error });
             emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'failed', attempts, []);
+            this.appendTaskResult(ctx, {
+              taskId: task.type,
+              title: task.label,
+              status: 'failed',
+              artifacts: [],
+              attempts,
+              duration: Date.now() - taskStartTime,
+            });
             await conn.close();
             throw new Error(`Task "${task.label}" retry failed: ${retryResult.error ?? 'unknown error'}`);
           }
@@ -214,6 +230,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
           if (!task.verifyArtifact()) {
             log.error('Review artifact still missing after retry', { artifact: task.label });
             emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'failed', attempts, []);
+            this.appendTaskResult(ctx, {
+              taskId: task.type,
+              title: task.label,
+              status: 'failed',
+              artifacts: [],
+              attempts,
+              duration: Date.now() - taskStartTime,
+            });
             await conn.close();
             throw new Error(`Artifact "${task.label}" not found after retry`);
           }

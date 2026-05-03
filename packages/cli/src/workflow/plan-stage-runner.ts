@@ -181,6 +181,14 @@ export class PlanStageRunner extends BaseStageRunner {
         if (!result.success) {
           log.error('Plan task failed', { artifact: task.type, error: result.error });
           emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'failed', attempts, []);
+          this.appendTaskResult(ctx, {
+            taskId: task.type,
+            title: task.label,
+            status: 'failed',
+            artifacts: [],
+            attempts,
+            duration: Date.now() - taskStartTime,
+          });
           await conn.close();
           throw new Error(`Task "${task.label}" failed: ${result.error ?? 'unknown error'}`);
         }
@@ -209,6 +217,14 @@ export class PlanStageRunner extends BaseStageRunner {
           if (!retryResult.success) {
             log.error('Plan retry prompt failed', { artifact: task.type, error: retryResult.error });
             emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'failed', attempts, []);
+            this.appendTaskResult(ctx, {
+              taskId: task.type,
+              title: task.label,
+              status: 'failed',
+              artifacts: [],
+              attempts,
+              duration: Date.now() - taskStartTime,
+            });
             await conn.close();
             throw new Error(`Task "${task.label}" retry failed: ${retryResult.error ?? 'unknown error'}`);
           }
@@ -216,6 +232,14 @@ export class PlanStageRunner extends BaseStageRunner {
           if (!task.verifyArtifact()) {
             log.error('Plan artifact still missing after retry', { artifact: task.label });
             emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'failed', attempts, []);
+            this.appendTaskResult(ctx, {
+              taskId: task.type,
+              title: task.label,
+              status: 'failed',
+              artifacts: [],
+              attempts,
+              duration: Date.now() - taskStartTime,
+            });
             await conn.close();
             throw new Error(`Artifact "${task.label}" not found after retry`);
           }
