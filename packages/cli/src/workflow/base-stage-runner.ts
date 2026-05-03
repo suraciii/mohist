@@ -36,7 +36,6 @@ export abstract class BaseStageRunner implements StageRunner {
     let taskOutput: unknown;
     try {
       taskOutput = await this.executeTasks(ctx);
-      this.persistTaskResults(ctx, taskOutput);
     } catch (err: any) {
       const checkResults: CheckResult[] = [];
       this.persistCheckResults(ctx, checkResults);
@@ -282,10 +281,4 @@ export abstract class BaseStageRunner implements StageRunner {
     } catch {}
   }
 
-  private persistTaskResults(ctx: StageContext, taskResults: StageTaskResult[]): void {
-    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
-    try {
-      ctx.stageExecutionRepo.updateTaskResults(this.stageExecutionId, taskResults);
-    } catch {}
-  }
 }
