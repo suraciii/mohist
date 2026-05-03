@@ -333,6 +333,7 @@ export function AiSettingsSection() {
   const [showCustomProvider, setShowCustomProvider] = useState(false)
   const [providerSearch, setProviderSearch] = useState('')
   const [stageOverridesOpen, setStageOverridesOpen] = useState(false)
+  const [availableProvidersOpen, setAvailableProvidersOpen] = useState(false)
   const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -345,17 +346,21 @@ export function AiSettingsSection() {
   const customProviders = useMemo(() => (providers?.filter((p) => p.configured && !p.isBuiltin) ?? []), [providers])
   const unconfiguredProviders = useMemo(() => (providers?.filter((p) => p.isBuiltin && !p.configured) ?? []), [providers])
 
-  const sortedProviders = useMemo(() => {
-    return [...configuredProviders, ...unconfiguredProviders]
-  }, [configuredProviders, unconfiguredProviders])
-
-  const filteredProviders = useMemo(() => {
-    if (!providerSearch.trim()) return sortedProviders
+  const filteredConfigured = useMemo(() => {
+    if (!providerSearch.trim()) return configuredProviders
     const q = providerSearch.toLowerCase()
-    return sortedProviders.filter(
+    return configuredProviders.filter(
       (p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
     )
-  }, [sortedProviders, providerSearch])
+  }, [configuredProviders, providerSearch])
+
+  const filteredUnconfigured = useMemo(() => {
+    if (!providerSearch.trim()) return unconfiguredProviders
+    const q = providerSearch.toLowerCase()
+    return unconfiguredProviders.filter(
+      (p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
+    )
+  }, [unconfiguredProviders, providerSearch])
 
   const availableModels = useMemo(() => {
     if (!modelProviders) return []
@@ -437,89 +442,6 @@ export function AiSettingsSection() {
     <>
       <div className="space-y-8">
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-gray-900">Providers</h3>
-            <button
-              onClick={() => setShowCustomProvider(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-              Add
-            </button>
-          </div>
-
-          <div className="relative">
-            <div className="absolute left-3 top-1/2 -translate-y-1/2">
-              <SearchIcon className="h-4 w-4 text-gray-400" />
-            </div>
-            <input
-              type="text"
-              value={providerSearch}
-              onChange={(e) => setProviderSearch(e.target.value)}
-              placeholder="Search providers..."
-              className="w-full rounded-md border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-
-          {filteredProviders.length === 0 && providerSearch.trim() && (
-            <div className="text-center py-6 border border-dashed border-gray-300 rounded-lg">
-              <p className="text-sm text-gray-500">No providers match your search</p>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {filteredProviders.map((provider) =>
-              provider.configured ? (
-                <ConnectedProviderCard
-                  key={provider.id}
-                  provider={provider}
-                  onRemove={setConfirmRemove}
-                />
-              ) : (
-                <AvailableProviderCard
-                  key={provider.id}
-                  provider={provider}
-                  onConnect={setConnectProvider}
-                />
-              ),
-            )}
-          </div>
-        </div>
-
-        <hr className="border-gray-100" />
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-gray-900">Custom Providers</h3>
-            <button
-              onClick={() => setShowCustomProvider(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-              Add
-            </button>
-          </div>
-
-          {customProviders.length === 0 && (
-            <p className="text-xs text-gray-500">
-              Configure a custom OpenAI-compatible provider
-            </p>
-          )}
-
-          <div className="space-y-2">
-            {customProviders.map((provider) => (
-              <CustomProviderCard
-                key={provider.id}
-                provider={provider}
-                onRemove={setConfirmRemove}
-              />
-            ))}
-          </div>
-        </div>
-
-        <hr className="border-gray-100" />
-
-        <div className="space-y-4">
           <h3 className="text-sm font-medium text-gray-900">Model Selection</h3>
 
           <div className="space-y-4">
@@ -584,6 +506,101 @@ export function AiSettingsSection() {
               ))}
             </div>
           )}
+        </div>
+
+        <hr className="border-gray-100" />
+
+        {(configuredProviders.length > 0 || unconfiguredProviders.length > 0) && (
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2">
+              <SearchIcon className="h-4 w-4 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              value={providerSearch}
+              onChange={(e) => setProviderSearch(e.target.value)}
+              placeholder="Search providers..."
+              className="w-full rounded-md border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+        )}
+
+        {filteredConfigured.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium text-gray-900">Connected Providers</h3>
+            <div className="space-y-2">
+              {filteredConfigured.map((provider) => (
+                <ConnectedProviderCard
+                  key={provider.id}
+                  provider={provider}
+                  onRemove={setConfirmRemove}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {filteredUnconfigured.length > 0 && (
+          <div>
+            <button
+              onClick={() => setAvailableProvidersOpen(!availableProvidersOpen)}
+              className="flex items-center gap-2 w-full text-left"
+            >
+              <ChevronRightIcon className={`h-4 w-4 text-gray-400 transition-transform ${availableProvidersOpen ? 'rotate-90' : ''}`} />
+              <span className="text-sm font-medium text-gray-900">
+                Available ({filteredUnconfigured.length})
+              </span>
+            </button>
+
+            {availableProvidersOpen && (
+              <div className="mt-3 space-y-2">
+                {filteredUnconfigured.map((provider) => (
+                  <AvailableProviderCard
+                    key={provider.id}
+                    provider={provider}
+                    onConnect={setConnectProvider}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {providerSearch.trim() && filteredConfigured.length === 0 && filteredUnconfigured.length === 0 && (
+          <div className="text-center py-6 border border-dashed border-gray-300 rounded-lg">
+            <p className="text-sm text-gray-500">No providers match your search</p>
+          </div>
+        )}
+
+        <hr className="border-gray-100" />
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-gray-900">Custom Providers</h3>
+            <button
+              onClick={() => setShowCustomProvider(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+            >
+              <PlusIcon className="h-3.5 w-3.5" />
+              Add
+            </button>
+          </div>
+
+          {customProviders.length === 0 && (
+            <p className="text-xs text-gray-500">
+              Configure a custom OpenAI-compatible provider
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {customProviders.map((provider) => (
+              <CustomProviderCard
+                key={provider.id}
+                provider={provider}
+                onRemove={setConfirmRemove}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
