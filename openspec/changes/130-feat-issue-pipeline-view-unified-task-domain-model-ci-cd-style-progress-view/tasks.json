@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Unified Task domain model + CI/CD style Pipeline View replacing fragmented issue progress components",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/stage-context.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "D1 (types in stage-context.ts), D2 (appendTaskResult), D8 (cosmetic rename). EventMap registration included here so all subsequent tasks (T-002, T-003, T-004) can reference the event type without ordering conflicts. This is the foundation all other tasks depend on."
+      "passes": true,
+      "notes": "D1 (types in stage-context.ts), D2 (appendTaskResult), D8 (cosmetic rename). EventMap registration included here so all subsequent tasks (T-002, T-003, T-004) can reference the event type without ordering conflicts. This is the foundation all other tasks depend on.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        385883
+      ]
     },
     {
       "id": "T-002",
@@ -42,8 +47,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/plan-stage-runner.ts",
-      "dependsOn": ["T-001"],
-      "notes": "D4 (each runner emits directly). EventMap entry added by T-001."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "D4 (each runner emits directly). EventMap entry added by T-001.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -61,8 +72,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/openspec/ralph-executor.ts",
-      "dependsOn": ["T-001"],
-      "notes": "The emitTaskUpdate helper at line ~502 is the central emission point. Add stage_task_update right next to ralph_task_update. Also need to thread stageExecutionId through BuildStageRunner into RalphExecutorContext."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "The emitTaskUpdate helper at line ~502 is the central emission point. Add stage_task_update right next to ralph_task_update. Also need to thread stageExecutionId through BuildStageRunner into RalphExecutorContext.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -80,8 +97,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
-      "notes": "EventMap entry added by T-001. This task adds ALL_EVENT_TYPES (backend SSE relay) and the API endpoint. Frontend SSE registration (useSSE.tsx, agent-events.ts) is in T-005."
+      "dependsOn": [
+        "T-001"
+      ],
+      "notes": "EventMap entry added by T-001. This task adds ALL_EVENT_TYPES (backend SSE relay) and the API endpoint. Frontend SSE registration (useSSE.tsx, agent-events.ts) is in T-005.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -100,8 +123,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-004"],
-      "notes": "D6 (data from useIssueExecutions + SSE overlay). The SSE invalidation follows the existing pattern in useSSE.tsx handleEvent switch."
+      "dependsOn": [
+        "T-004"
+      ],
+      "notes": "D6 (data from useIssueExecutions + SSE overlay). The SSE invalidation follows the existing pattern in useSSE.tsx handleEvent switch.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -127,8 +156,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/PipelineView.tsx",
-      "dependsOn": ["T-005"],
-      "notes": "D5 (single component with sub-components), D7 (derive stage status from execution records). Stage status derivation logic: use execution.status for completed/running/awaiting-approval/failed, use issue.stage ordering for pending. For task status mapping from StageTaskResult: completed→checkmark, failed→cross, skipped→checkmark (dimmed). Running tasks tracked via SSE stage_task_update started events."
+      "dependsOn": [
+        "T-005"
+      ],
+      "notes": "D5 (single component with sub-components), D7 (derive stage status from execution records). Stage status derivation logic: use execution.status for completed/running/awaiting-approval/failed, use issue.stage ordering for pending. For task status mapping from StageTaskResult: completed→checkmark, failed→cross, skipped→checkmark (dimmed). Running tasks tracked via SSE stage_task_update started events.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -149,8 +184,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-006"],
-      "notes": "Atomic swap — delete old components and wire up PipelineView in one task. The approval mutations (approveMutation, rejectMutation) and sendMessageMutation move from IssueDetailPage into PipelineView's InlineApproval."
+      "dependsOn": [
+        "T-006"
+      ],
+      "notes": "Atomic swap — delete old components and wire up PipelineView in one task. The approval mutations (approveMutation, rejectMutation) and sendMessageMutation move from IssueDetailPage into PipelineView's InlineApproval.",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -168,8 +209,16 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "Verification report",
-      "dependsOn": ["T-002", "T-003", "T-007"],
-      "notes": ""
+      "dependsOn": [
+        "T-002",
+        "T-003",
+        "T-007"
+      ],
+      "notes": "",
+      "attempts": 0,
+      "passes": false,
+      "order": 999999,
+      "error": null
     }
   ]
 }
