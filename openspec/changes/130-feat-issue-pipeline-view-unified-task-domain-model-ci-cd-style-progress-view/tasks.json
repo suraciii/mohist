@@ -26,7 +26,8 @@
       "order": 999999,
       "error": null,
       "durations": [
-        385883
+        385883,
+        293192
       ]
     },
     {
@@ -51,8 +52,8 @@
         "T-001"
       ],
       "notes": "D4 (each runner emits directly). EventMap entry added by T-001.",
-      "attempts": 1,
-      "passes": true,
+      "attempts": 0,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -79,8 +80,8 @@
         "T-001"
       ],
       "notes": "The emitTaskUpdate helper at line ~502 is the central emission point. Add stage_task_update right next to ralph_task_update. Also need to thread stageExecutionId through BuildStageRunner into RalphExecutorContext.",
-      "attempts": 1,
-      "passes": true,
+      "attempts": 0,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -107,8 +108,8 @@
         "T-001"
       ],
       "notes": "EventMap entry added by T-001. This task adds ALL_EVENT_TYPES (backend SSE relay) and the API endpoint. Frontend SSE registration (useSSE.tsx, agent-events.ts) is in T-005.",
-      "attempts": 1,
-      "passes": true,
+      "attempts": 0,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -136,8 +137,8 @@
         "T-004"
       ],
       "notes": "D6 (data from useIssueExecutions + SSE overlay). The SSE invalidation follows the existing pattern in useSSE.tsx handleEvent switch.",
-      "attempts": 1,
-      "passes": true,
+      "attempts": 0,
+      "passes": false,
       "order": 999999,
       "error": null,
       "durations": [
@@ -175,10 +176,7 @@
       "attempts": 0,
       "passes": false,
       "order": 999999,
-      "error": null,
-      "durations": [
-        632031
-      ]
+      "error": null
     },
     {
       "id": "T-007",
