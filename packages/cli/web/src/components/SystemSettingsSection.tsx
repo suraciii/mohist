@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useLogLevel, useSetLogLevel, useSystemInfo, useStatus, useRebuildSystem } from '../hooks/useQueries'
+import { useLogLevel, useSetLogLevel, useSystemInfo, useRebuildSystem } from '../hooks/useQueries'
 
 const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const
 const DEFAULT_LOG_LEVEL = 'INFO'
@@ -76,7 +76,6 @@ export function SystemSettingsSection() {
   const { data: logLevelData, isLoading: logLevelLoading } = useLogLevel()
   const setLogLevel = useSetLogLevel()
   const { data: systemInfo, isLoading: infoLoading, isError: infoError, refetch: refetchInfo } = useSystemInfo()
-  const { data: statusData, refetch: refetchStatus } = useStatus()
   const rebuildSystem = useRebuildSystem()
 
   const [currentLevel, setCurrentLevel] = useState(DEFAULT_LOG_LEVEL)
@@ -158,15 +157,14 @@ export function SystemSettingsSection() {
         clearTimers()
         setReconnectState('idle')
         refetchInfo()
-        refetchStatus()
       }
     }, 5000)
-  }, [reconnectState, rebuildSystem, clearTimers, refetchInfo, refetchStatus])
+  }, [reconnectState, rebuildSystem, clearTimers, refetchInfo])
 
   const serverRunning = !infoError && systemInfo?.server?.status === 'running'
   const isLoading = logLevelLoading || infoLoading
 
-  const sourceHead = statusData?.sourceHead ?? null
+  const sourceHead = systemInfo?.sourceHead ?? null
   const gitHash = systemInfo?.gitHash ?? null
   const upToDate = sourceHead === null || sourceHead === gitHash
   const showRebuildButton = sourceHead !== null && !upToDate && reconnectState === 'idle'

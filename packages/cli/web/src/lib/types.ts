@@ -469,6 +469,7 @@ export interface AgentSessionInfo {
 export interface SystemInfo {
   version: string
   gitHash: string
+  sourceHead: string | null
   server: {
     host: string
     port: number
