@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '../lib/api'
-import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, SystemInfo } from '../lib/types'
+import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, StageExecution, SystemInfo } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
@@ -563,5 +563,13 @@ export function useSystemInfo() {
   return useQuery<SystemInfo>({
     queryKey: ['system-info'],
     queryFn: () => api.getSystemInfo(),
+  })
+}
+
+export function useIssueExecutions(number: number) {
+  return useQuery<StageExecution[]>({
+    queryKey: ['issues', number, 'executions'],
+    queryFn: () => api.getIssueExecutions(number),
+    enabled: number > 0,
   })
 }

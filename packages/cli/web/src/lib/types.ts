@@ -178,6 +178,7 @@ export type AgentDetailEventMap = {
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
   check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string; snapshotSha?: string }
   check_suite_status_changed: { issueId: string; projectId: string; issueNumber: number; suiteStatus: string; snapshotSha: string }
+  stage_task_update: { issueId: string; projectId: string; stage: string; taskId: string; taskTitle: string; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt: number; artifacts: string[] }
 }
 
 export type EventMap = {
@@ -481,4 +482,26 @@ export interface SystemInfo {
     opencode: string | null
     logs: string
   }
+}
+
+export interface StageTaskResult {
+  taskId: string
+  title: string
+  status: 'completed' | 'failed' | 'skipped'
+  artifacts: string[]
+  attempts: number
+  duration: number
+}
+
+export type StageExecutionStatus = 'running' | 'awaiting-approval' | 'passed' | 'failed'
+
+export interface StageExecution {
+  id: string
+  issueId: string
+  stage: string
+  status: StageExecutionStatus
+  taskResults: StageTaskResult[]
+  checkResults: CheckResult[]
+  createdAt: string
+  updatedAt: string
 }
