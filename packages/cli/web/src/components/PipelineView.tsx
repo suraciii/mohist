@@ -1,0 +1,692 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '../lib/api'
+import { useIssueExecutions, useSendMessage } from '../hooks/useQueries'
+import { onAgentEvent } from '../lib/agent-events'
+import { Stage, IssueStatus } from '../lib/types'
+import type { Issue, StageExecution, StageTaskResult, CheckResult, AgentDetailEventMap } from '../lib/types'
+
+const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done] as const
+type PipelineStage = (typeof PIPELINE_STAGES)[number]
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60000)
+  const s = Math.floor((ms % 60000) / 1000)
+  return `${m}m ${s}s`
+}
+
+function getStageStatus(
+  stage: PipelineStage,
+  executions: StageExecution[],
+  issue: Issue,
+): 'pending' | 'running' | 'completed' | 'failed' | 'awaiting-approval' {
+  const execution = executions.find((e) => e.stage === stage)
+  const stageOrder = PIPELINE_STAGES.indexOf(stage)
+  const currentStageIdx = PIPELINE_STAGES.indexOf(issue.stage as PipelineStage)
+
+  if (execution) {
+    if (execution.status === 'running') return 'running'
+    if (execution.status === 'awaiting-approval') return 'awaiting-approval'
+    if (execution.status === 'passed') return 'completed'
+    if (execution.status === 'failed') return 'failed'
+  }
+
+  if (issue.stage === stage && !execution) return 'running'
+
+  if (issue.status === IssueStatus.Completed && stage === Stage.Done) return 'completed'
+
+  if (currentStageIdx < 0 || stageOrder > currentStageIdx) return 'pending'
+
+  return 'pending'
+}
+
+function getStageDuration(stage: PipelineStage, executions: StageExecution[]): number | null {
+  const execution = executions.find((e) => e.stage === stage)
+  if (!execution) return null
+  if (execution.taskResults.length === 0) return null
+  const total = execution.taskResults.reduce((sum, t) => sum + (t.duration || 0), 0)
+  return total > 0 ? total : null
+}
+
+function CheckmarkIcon({ className = 'h-5 w-5 text-green-500' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
+
+function CrossIcon({ className = 'h-5 w-5 text-red-500' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
+
+function SpinnerIcon({ className = 'h-5 w-5 text-blue-500 animate-spin' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  )
+}
+
+function EmptyCircleIcon({ className = 'h-5 w-5 text-gray-300' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12z"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
+
+function HourglassIcon({ className = 'h-5 w-5 text-amber-500' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h3a.75.75 0 000-1.5h-2.25V5z"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
+
+function InterruptedIcon({ className = 'h-5 w-5 text-orange-500' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.25V15a.75.75 0 001.5 0v-4a.75.75 0 00-.75-.75H9z"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
+
+function StageStatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case 'completed':
+      return <CheckmarkIcon />
+    case 'running':
+      return <SpinnerIcon />
+    case 'failed':
+      return <CrossIcon />
+    case 'awaiting-approval':
+      return <HourglassIcon />
+    default:
+      return <EmptyCircleIcon />
+  }
+}
+
+function StageBarCell({
+  stage,
+  status,
+  duration,
+  selected,
+  readOnly,
+  onClick,
+}: {
+  stage: PipelineStage
+  status: string
+  duration: number | null
+  selected: boolean
+  readOnly: boolean
+  onClick: () => void
+}) {
+  const bgColor = selected ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-200'
+  const stageLabel = stage.charAt(0).toUpperCase() + stage.slice(1)
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={readOnly && status === 'pending'}
+      className={`flex-1 min-w-0 rounded-lg border p-3 text-left transition-colors ${bgColor} ${
+        !readOnly && status !== 'pending' ? 'cursor-pointer hover:bg-gray-100' : ''
+      } ${status === 'pending' && !selected ? 'opacity-60' : ''}`}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <StageStatusIcon status={status} />
+        <span className="text-sm font-medium text-gray-900 truncate">{stageLabel}</span>
+      </div>
+      {status === 'completed' && duration != null && (
+        <span className="text-xs text-gray-400 ml-7">{formatDuration(duration)}</span>
+      )}
+      {status === 'running' && duration != null && (
+        <span className="text-xs text-blue-500 ml-7">{formatDuration(duration)}</span>
+      )}
+    </button>
+  )
+}
+
+function StageBar({
+  executions,
+  issue,
+  selectedStage,
+  onSelectStage,
+  readOnly,
+  runningDurations,
+}: {
+  executions: StageExecution[]
+  issue: Issue
+  selectedStage: PipelineStage
+  onSelectStage: (stage: PipelineStage) => void
+  readOnly: boolean
+  runningDurations: Map<string, number>
+}) {
+  return (
+    <div className="flex items-stretch gap-2">
+      {PIPELINE_STAGES.map((stage, idx) => {
+        const status = getStageStatus(stage, executions, issue)
+        let duration = getStageDuration(stage, executions)
+        if (status === 'running' && runningDurations.has(stage)) {
+          duration = runningDurations.get(stage)!
+        }
+        return (
+          <div key={stage} className="flex items-stretch flex-1 min-w-0">
+            {idx > 0 && (
+              <div className="flex items-center px-1">
+                <svg className="h-4 w-4 text-gray-300 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+            )}
+            <StageBarCell
+              stage={stage}
+              status={status}
+              duration={duration}
+              selected={selectedStage === stage}
+              readOnly={readOnly}
+              onClick={() => onSelectStage(stage)}
+            />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function TaskItem({
+  task,
+  readOnly,
+  liveElapsed,
+}: {
+  task: StageTaskResult | { taskId: string; title: string; status: 'pending'; artifacts: never[]; attempts: 0; duration: 0 }
+  readOnly: boolean
+  liveElapsed?: number | null
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const isPending = task.status === 'pending' || task.status === 'skipped'
+
+  let icon: React.ReactNode
+  if (task.status === 'completed') {
+    icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
+  } else if (task.status === 'failed') {
+    icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
+  } else if (task.status === 'pending') {
+    icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
+  } else {
+    icon = <SpinnerIcon className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
+  }
+
+  const duration =
+    task.status === 'completed' || task.status === 'failed'
+      ? task.duration
+      : liveElapsed
+
+  return (
+    <div
+      className={`rounded-md border border-gray-200 overflow-hidden ${isPending ? 'opacity-50' : ''}`}
+    >
+      <button
+        onClick={() => !readOnly && task.artifacts.length > 0 && setExpanded(!expanded)}
+        disabled={readOnly}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+      >
+        {icon}
+        <span className="text-sm text-gray-900 flex-1 truncate">{task.title}</span>
+        {duration != null && duration > 0 && (
+          <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(duration)}</span>
+        )}
+        {task.status === 'failed' && (
+          <span className="text-xs text-red-500 flex-shrink-0">failed</span>
+        )}
+        {task.artifacts.length > 0 && !readOnly && (
+          <svg
+            className={`h-3 w-3 text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.23 8.27a.75.75 0 01.02-1.06z"
+              clipRule="evenodd"
+            />
+          </svg>
+        )}
+      </button>
+      {expanded && task.artifacts.length > 0 && (
+        <div className="px-3 pb-2 border-t border-gray-100 bg-gray-50">
+          <div className="mt-2 space-y-1">
+            {task.artifacts.map((a) => (
+              <div key={a} className="flex items-center gap-1.5 text-xs text-gray-500">
+                <svg className="h-3 w-3 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
+                </svg>
+                <span className="font-mono truncate">{a}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CheckItem({ check }: { check: CheckResult }) {
+  const isPending = check.status === 'pending'
+  const isFailed = check.status === 'failed'
+
+  let icon: React.ReactNode
+  if (check.status === 'passed') {
+    icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
+  } else if (isFailed) {
+    icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
+  } else if (check.status === 'running') {
+    icon = <SpinnerIcon className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
+  } else {
+    icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
+  }
+
+  return (
+    <div
+      className={`flex items-center gap-2 px-3 py-2 rounded-md border border-gray-200 ${isPending ? 'opacity-50' : ''}`}
+    >
+      {icon}
+      <span className="text-sm text-gray-900 flex-1 truncate">{check.name}</span>
+      {isFailed && check.summary && (
+        <span className="text-xs text-red-500 flex-shrink-0 truncate max-w-48">{check.summary}</span>
+      )}
+      {check.duration != null && (
+        <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(check.duration)}</span>
+      )}
+    </div>
+  )
+}
+
+function InlineApproval({
+  issueNumber,
+  stage,
+  readOnly,
+}: {
+  issueNumber: number
+  stage: PipelineStage
+  readOnly: boolean
+}) {
+  const queryClient = useQueryClient()
+  const [feedback, setFeedback] = useState('')
+
+  const approveMutation = useMutation({
+    mutationFn: () => api.approveIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
+    },
+  })
+
+  const rejectMutation = useMutation({
+    mutationFn: () => api.rejectIssue(issueNumber, { message: feedback.trim() || undefined }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
+      setFeedback('')
+    },
+  })
+
+  const sendMessageMutation = useSendMessage(issueNumber)
+
+  const handleSendBack = () => {
+    if (feedback.trim()) {
+      sendMessageMutation.mutate(feedback.trim(), {
+        onSuccess: () => setFeedback(''),
+      })
+    } else {
+      rejectMutation.mutate()
+    }
+  }
+
+  if (readOnly) return null
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+      <h3 className="text-sm font-semibold text-amber-800">Approval Required</h3>
+      <p className="text-xs text-amber-600">
+        Review the {stage} stage output and approve to continue, or send back with feedback.
+      </p>
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <button
+            onClick={() => approveMutation.mutate()}
+            disabled={approveMutation.isPending}
+            className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {approveMutation.isPending ? 'Approving...' : 'Approve'}
+          </button>
+          <button
+            onClick={handleSendBack}
+            disabled={rejectMutation.isPending || sendMessageMutation.isPending}
+            className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            {rejectMutation.isPending || sendMessageMutation.isPending ? 'Sending...' : 'Send back'}
+          </button>
+        </div>
+        <textarea
+          value={feedback}
+          onChange={(e) => setFeedback(e.target.value)}
+          placeholder="Optional feedback..."
+          rows={2}
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+        />
+      </div>
+          {(approveMutation.error || rejectMutation.error || sendMessageMutation.error) && (
+            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+              {approveMutation.error?.message || rejectMutation.error?.message || sendMessageMutation.error?.message}
+            </div>
+          )}
+    </div>
+  )
+}
+
+function StepList({
+  stage,
+  executions,
+  issue,
+  readOnly,
+  liveElapsedByTask,
+}: {
+  stage: PipelineStage
+  executions: StageExecution[]
+  issue: Issue
+  readOnly: boolean
+  liveElapsedByTask: Map<string, number>
+}) {
+  const execution = executions.find((e) => e.stage === stage)
+  const taskResults: StageTaskResult[] = execution?.taskResults ?? []
+  const checkResults: CheckResult[] = execution?.checkResults ?? []
+  const stageStatus = getStageStatus(stage, executions, issue)
+
+  const isAwaitingApproval =
+    issue.approvalState?.status === 'awaiting' &&
+    issue.stage === stage &&
+    (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked)
+
+  return (
+    <div className="space-y-4">
+      {stage !== Stage.Done && (
+        <div>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Tasks</h3>
+          <div className="space-y-1.5">
+            {taskResults.length > 0 ? (
+              taskResults.map((task) => (
+                <TaskItem
+                  key={task.taskId}
+                  task={task}
+                  readOnly={readOnly}
+                  liveElapsed={liveElapsedByTask.get(task.taskId)}
+                />
+              ))
+            ) : stageStatus === 'pending' ? (
+              <div className="text-sm text-gray-400 py-2">No tasks yet</div>
+            ) : (
+              <div className="text-sm text-gray-400 py-2">Loading tasks...</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {(checkResults.length > 0 || stage === Stage.Done) && stage !== Stage.Done && (
+        <div>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Checks</h3>
+          <div className="space-y-1.5">
+            {checkResults.map((check) => (
+              <CheckItem key={check.name} check={check} />
+            ))}
+          </div>
+          {isAwaitingApproval && (
+            <div className="mt-3">
+              <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SpecialStatePanel({
+  issue,
+  issueNumber,
+  readOnly,
+}: {
+  issue: Issue
+  issueNumber: number
+  readOnly: boolean
+}) {
+  const queryClient = useQueryClient()
+
+  const startMutation = useMutation({
+    mutationFn: () => api.startIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
+  const reopenMutation = useMutation({
+    mutationFn: () => api.reopenIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
+  if (readOnly) return null
+
+  if (issue.stage === Stage.Backlog || issue.stage === Stage.Draft) {
+    return (
+      <div className="flex justify-center py-4">
+        <button
+          onClick={() => startMutation.mutate()}
+          disabled={startMutation.isPending}
+          className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {startMutation.isPending ? 'Starting...' : 'Start'}
+        </button>
+      </div>
+    )
+  }
+
+  if (issue.status === IssueStatus.Blocked) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <CrossIcon className="h-4 w-4 text-red-500" />
+          <span className="text-sm font-semibold text-red-800">Blocked</span>
+        </div>
+        {issue.blockedReason && (
+          <p className="text-sm text-red-600">{issue.blockedReason}</p>
+        )}
+      </div>
+    )
+  }
+
+  if (issue.status === IssueStatus.Interrupted) {
+    return (
+      <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <InterruptedIcon />
+          <span className="text-sm font-semibold text-orange-800">Pipeline Interrupted</span>
+        </div>
+        <p className="text-xs text-orange-600">
+          The pipeline was interrupted. Click &quot;Resume&quot; to continue from where it left off.
+        </p>
+        <button
+          onClick={() => reopenMutation.mutate()}
+          disabled={reopenMutation.isPending}
+          className="rounded-md bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+        >
+          {reopenMutation.isPending ? 'Resuming...' : 'Resume'}
+        </button>
+      </div>
+    )
+  }
+
+  return null
+}
+
+export function PipelineView({ issue }: { issue: Issue }) {
+  const { data: executions = [] } = useIssueExecutions(issue.number)
+
+  const isClosed = issue.status === IssueStatus.Closed
+  const isCompleted = issue.status === IssueStatus.Completed
+  const isBacklog = issue.stage === Stage.Backlog || issue.stage === Stage.Draft
+  const readOnly = isClosed
+
+  const getDefaultStage = useCallback((): PipelineStage => {
+    if (isBacklog) return Stage.Plan
+    if (isCompleted) return Stage.Done
+    const currentIdx = PIPELINE_STAGES.indexOf(issue.stage as PipelineStage)
+    if (currentIdx >= 0) return PIPELINE_STAGES[currentIdx]
+    return Stage.Plan
+  }, [issue.stage, isBacklog, isCompleted])
+
+  const [selectedStage, setSelectedStage] = useState<PipelineStage>(getDefaultStage)
+
+  useEffect(() => {
+    setSelectedStage(getDefaultStage())
+  }, [getDefaultStage])
+
+  const [runningTaskStarts, setRunningTaskStarts] = useState<Map<string, number>>(new Map())
+  const [liveElapsed, setLiveElapsed] = useState<Map<string, number>>(new Map())
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    const off = onAgentEvent('stage_task_update', (evt: AgentDetailEventMap['stage_task_update']) => {
+      if (evt.status === 'started') {
+        setRunningTaskStarts((prev) => {
+          const next = new Map(prev)
+          next.set(evt.taskId, Date.now())
+          return next
+        })
+      } else if (evt.status === 'completed' || evt.status === 'failed') {
+        setRunningTaskStarts((prev) => {
+          const next = new Map(prev)
+          next.delete(evt.taskId)
+          return next
+        })
+        setLiveElapsed((prev) => {
+          const next = new Map(prev)
+          next.delete(evt.taskId)
+          return next
+        })
+      }
+    })
+    return off
+  }, [])
+
+  useEffect(() => {
+    if (runningTaskStarts.size === 0) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+      return
+    }
+    if (intervalRef.current) return
+
+    intervalRef.current = setInterval(() => {
+      setLiveElapsed((prev) => {
+        const next = new Map(prev)
+        const now = Date.now()
+        for (const [taskId, start] of runningTaskStarts) {
+          next.set(taskId, now - start)
+        }
+        return next
+      })
+    }, 500)
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+  }, [runningTaskStarts])
+
+  const runningDurations = new Map<string, number>()
+  for (const [taskId, elapsed] of liveElapsed) {
+    const taskExec = executions.find((e) =>
+      e.taskResults.some((t) => t.taskId === taskId),
+    )
+    if (taskExec) {
+      const existing = runningDurations.get(taskExec.stage) ?? 0
+      runningDurations.set(taskExec.stage, existing + elapsed)
+    }
+  }
+
+  const handleSelectStage = useCallback(
+    (stage: PipelineStage) => {
+      if (readOnly) return
+      setSelectedStage(stage)
+    },
+    [readOnly],
+  )
+
+  return (
+    <div className="space-y-4">
+      <StageBar
+        executions={executions}
+        issue={issue}
+        selectedStage={selectedStage}
+        onSelectStage={handleSelectStage}
+        readOnly={readOnly}
+        runningDurations={runningDurations}
+      />
+
+      {(isBacklog || issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (
+        <SpecialStatePanel issue={issue} issueNumber={issue.number} readOnly={readOnly} />
+      )}
+
+      {!isBacklog && (
+        <StepList
+          stage={selectedStage}
+          executions={executions}
+          issue={issue}
+          readOnly={readOnly}
+          liveElapsedByTask={liveElapsed}
+        />
+      )}
+    </div>
+  )
+}
