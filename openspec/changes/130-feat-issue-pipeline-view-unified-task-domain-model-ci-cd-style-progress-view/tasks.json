@@ -136,10 +136,13 @@
         "T-004"
       ],
       "notes": "D6 (data from useIssueExecutions + SSE overlay). The SSE invalidation follows the existing pattern in useSSE.tsx handleEvent switch.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        276384
+      ]
     },
     {
       "id": "T-006",
