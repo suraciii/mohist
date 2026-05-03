@@ -8,10 +8,9 @@ import {
   getServerConfig,
   clearConfigCache,
 } from '../config/config-loader';
-import { execSync } from 'node:child_process';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import * as fs from 'node:fs';
+import { getVersionInfo, getSourceHead } from '../version';
 
 const VALID_LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const;
 
@@ -44,28 +43,6 @@ function validateModel(value: unknown): string | null {
   return null;
 }
 
-function getGitHash(): string {
-  try {
-    return execSync('git rev-parse --short HEAD', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 3000,
-    }).trim();
-  } catch {
-    return 'unknown';
-  }
-}
-
-function getVersion(): string {
-  try {
-    const pkgPath = path.join(__dirname, '..', '..', 'package.json');
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-    return pkg.version ?? 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
-
 export function createSettingsConfigRoutes(serverConfig?: { host: string; port: number }): Hono {
   const app = new Hono();
 
@@ -78,8 +55,9 @@ export function createSettingsConfigRoutes(serverConfig?: { host: string; port: 
     const mohistDir = path.join(homeDir, '.mohist');
 
     const info = {
-      version: getVersion(),
-      gitHash: getGitHash(),
+      version: getVersionInfo().version,
+      gitHash: getVersionInfo().gitHash,
+      sourceHead: getSourceHead(),
       server: {
         host: serverCfg.host,
         port: serverCfg.port,
