@@ -6,10 +6,11 @@
       "id": "T-001",
       "title": "Add StageTask/StageTaskResult types and StageExecutionRepo methods",
       "spec": "specs/unified-stage-task/spec.md",
-      "description": "Define StageTask and StageTaskResult interfaces in stage-context.ts. Add appendTaskResult(executionId, result) and findByIssueId(issueId) methods to StageExecutionRepo. Rename RoundConfig to TaskConfig in plan-stage-runner.ts and check-stage-runner.ts (interface name and local variable names only, no logic changes). Update StageExecution.taskResults type from unknown[] to StageTaskResult[].",
+      "description": "Define StageTask and StageTaskResult interfaces in stage-context.ts. Add stage_task_update event type to EventMap in event-bus.ts. Add appendTaskResult(executionId, result) and findByIssueId(issueId) methods to StageExecutionRepo. Rename RoundConfig to TaskConfig in plan-stage-runner.ts and check-stage-runner.ts (interface name and local variable names only, no logic changes). Update StageExecution.taskResults type from unknown[] to StageTaskResult[].",
       "acceptanceCriteria": [
         "StageTask interface exists in stage-context.ts with id, title, status, order, dependsOn, source, artifacts, attempts, maxAttempts, startedAt, completedAt fields",
         "StageTaskResult interface exists in stage-context.ts with taskId, title, status, artifacts, attempts, duration fields",
+        "stage_task_update listed in EventMap type in event-bus.ts with correct payload shape",
         "StageExecutionRepo.appendTaskResult reads current task_results, appends new StageTaskResult, writes back",
         "StageExecutionRepo.findByIssueId returns all executions for an issue ordered by created_at ASC",
         "No RoundConfig interface exists in plan-stage-runner.ts or check-stage-runner.ts — both use TaskConfig",
@@ -21,7 +22,7 @@
       "output": "packages/cli/src/workflow/stage-context.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "D1 (types in stage-context.ts), D2 (appendTaskResult), D8 (cosmetic rename). This is the foundation all other tasks depend on."
+      "notes": "D1 (types in stage-context.ts), D2 (appendTaskResult), D8 (cosmetic rename). EventMap registration included here so all subsequent tasks (T-002, T-003, T-004) can reference the event type without ordering conflicts. This is the foundation all other tasks depend on."
     },
     {
       "id": "T-002",
@@ -42,7 +43,7 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/plan-stage-runner.ts",
       "dependsOn": ["T-001"],
-      "notes": "D4 (each runner emits directly). Add stage_task_update to EventMap in event-bus.ts so TypeScript compiles."
+      "notes": "D4 (each runner emits directly). EventMap entry added by T-001."
     },
     {
       "id": "T-003",
@@ -67,11 +68,9 @@
       "id": "T-004",
       "title": "Register stage_task_update in SSE event relay and add executions API endpoint",
       "spec": "specs/stage-executions-api/spec.md, specs/http-api/spec.md, specs/pipeline-session-events/spec.md",
-      "description": "Add stage_task_update to EventMap in event-bus.ts and to ALL_EVENT_TYPES in api/events.ts. Add GET /:number/executions route in api/issues.ts that calls stageExecutionRepo.findByIssueId(), returns { data: StageExecution[] }. Handle 404 for non-existent issues. Update StageExecutionRepo imports in the route factory. This task covers the backend half of pipeline-session-events (EventMap + ALL_EVENT_TYPES) and the http-api spec (new executions endpoint).",
+      "description": "Add stage_task_update to ALL_EVENT_TYPES in api/events.ts. Add GET /:number/executions route in api/issues.ts that calls stageExecutionRepo.findByIssueId(), returns { data: StageExecution[] }. Handle 404 for non-existent issues. Update StageExecutionRepo imports in the route factory. This task covers the backend half of pipeline-session-events (ALL_EVENT_TYPES) and the http-api spec (new executions endpoint). EventMap registration was done in T-001.",
       "acceptanceCriteria": [
-        "stage_task_update listed in EventMap type in event-bus.ts",
         "stage_task_update listed in ALL_EVENT_TYPES in api/events.ts",
-        "stage_task_update listed in useSSE.tsx eventTypes (frontend SSE registration)",
         "GET /api/issues/:number/executions returns { data: StageExecution[] } ordered by createdAt ASC",
         "GET /api/issues/999/executions returns 404 for non-existent issue",
         "GET /api/issues/1/executions returns { data: [] } for draft issue with no executions",
@@ -82,12 +81,12 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": ["T-001"],
-      "notes": "T-002 and T-003 must define the event payload in EventMap first (T-002 adds it as part of the emit call). This task ensures the SSE relay actually forwards the event and the API endpoint works."
+      "notes": "EventMap entry added by T-001. This task adds ALL_EVENT_TYPES (backend SSE relay) and the API endpoint. Frontend SSE registration (useSSE.tsx, agent-events.ts) is in T-005."
     },
     {
       "id": "T-005",
       "title": "Frontend API client, hooks, and SSE registration for PipelineView",
-      "spec": "specs/stage-executions-api/spec.md",
+      "spec": "specs/stage-executions-api/spec.md, specs/pipeline-session-events/spec.md",
       "description": "Add getIssueExecutions(issueNumber) method to api.ts. Add useIssueExecutions(issueNumber) React Query hook to useQueries.ts with query key ['issues', number, 'executions']. Add stage_task_update to eventTypes in useSSE.tsx and to AGENT_DETAIL_EVENTS in agent-events.ts. Wire up SSE invalidation: when stage_task_update arrives for an issue, invalidate the ['issues', number, 'executions'] query key.",
       "acceptanceCriteria": [
         "api.getIssueExecutions(5) sends GET /api/issues/5/executions and returns the data array",
@@ -137,10 +136,10 @@
       "spec": "specs/pipeline-view/spec.md#PipelineView-replaces-fragmented-issue-progress-components, specs/session-timeline-ui/spec.md",
       "description": "In IssueDetailPage.tsx: replace IssueTimeline, TaskList, CheckSuitePanel, CheckResultsPanel, PlanApprovalPanel, and inline Approval Required / Review Report / Send Message blocks with a single PipelineView component. Move approval mutations and send message logic into PipelineView's InlineApproval sub-component. Delete IssueTimeline.tsx, TaskList.tsx, CheckSuitePanel.tsx, CheckResultsPanel.tsx. Remove useIssueTimeline hook and related imports. This task enforces the session-timeline-ui REMOVED requirements by deleting the replaced components. Keep BranchBar, Description, ChangesPanel, Comments, SessionList, Details sidebar, QuestionPanel, MergeStatePanel unchanged.",
       "acceptanceCriteria": [
-        "IssueDetailPage.tsx imports and renders PipelineView, not IssueTimeline/TaskList/CheckSuitePanel/CheckResultsPanel",
+        "IssueDetailPage.tsx imports and renders PipelineView, not IssueTimeline/TaskList/CheckSuitePanel/CheckResultsPanel/PlanApprovalPanel",
         "IssueTimeline.tsx, TaskList.tsx, CheckSuitePanel.tsx, CheckResultsPanel.tsx do not exist in the component directory",
         "useIssueTimeline.ts and useIssueTimeline.test.ts hooks are deleted",
-        "No imports of IssueTimeline, TaskList, CheckSuitePanel, CheckResultsPanel remain anywhere",
+        "No imports of IssueTimeline, TaskList, CheckSuitePanel, CheckResultsPanel, PlanApprovalPanel remain anywhere",
         "Approval and reject functionality works through PipelineView's inline approval",
         "Send message to agent functionality is accessible from PipelineView",
         "BranchBar, Description, ChangesPanel, Comments, SessionList, QuestionPanel, MergeStatePanel still render correctly",
@@ -169,7 +168,7 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "Verification report",
-      "dependsOn": ["T-007"],
+      "dependsOn": ["T-002", "T-003", "T-007"],
       "notes": ""
     }
   ]
