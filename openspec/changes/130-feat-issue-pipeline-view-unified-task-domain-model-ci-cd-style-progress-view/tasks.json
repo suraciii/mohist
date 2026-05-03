@@ -79,10 +79,13 @@
         "T-001"
       ],
       "notes": "The emitTaskUpdate helper at line ~502 is the central emission point. Add stage_task_update right next to ralph_task_update. Also need to thread stageExecutionId through BuildStageRunner into RalphExecutorContext.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        398484
+      ]
     },
     {
       "id": "T-004",
