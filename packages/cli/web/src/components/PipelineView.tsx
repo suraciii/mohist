@@ -1,13 +1,61 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { useIssueExecutions, useSendMessage } from '../hooks/useQueries'
+import { useIssueExecutions } from '../hooks/useQueries'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
 import type { Issue, StageExecution, StageTaskResult, CheckResult, AgentDetailEventMap } from '../lib/types'
 
 const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done] as const
 type PipelineStage = (typeof PIPELINE_STAGES)[number]
+
+interface PendingTask {
+  taskId: string
+  title: string
+  status: 'pending' | 'running'
+  artifacts: never[]
+  attempts: 0
+  duration: 0
+}
+
+const PLAN_TASK_DEFS: { taskId: string; title: string }[] = [
+  { taskId: 'proposal', title: 'Write Proposal' },
+  { taskId: 'specs', title: 'Write Specs' },
+  { taskId: 'design', title: 'Write Design' },
+  { taskId: 'tasks', title: 'Break into Tasks' },
+  { taskId: 'self-review', title: 'Self-Review' },
+]
+
+const CHECK_TASK_DEFS: { taskId: string; title: string }[] = [
+  { taskId: 'review', title: 'AI Code Review' },
+  { taskId: 'review-self-check', title: 'Review Self-Check' },
+]
+
+function mergeTasksForStage(
+  stage: PipelineStage,
+  taskResults: StageTaskResult[],
+  runningTaskIds: Set<string>,
+): (StageTaskResult | PendingTask)[] {
+  if (stage === Stage.Done) return taskResults
+
+  const defs = stage === Stage.Plan ? PLAN_TASK_DEFS : stage === Stage.Check ? CHECK_TASK_DEFS : null
+  if (!defs) return taskResults
+
+  const resultById = new Map(taskResults.map((t) => [t.taskId, t]))
+  return defs.map((def) => {
+    const result = resultById.get(def.taskId)
+    if (result) return result
+    const isRunning = runningTaskIds.has(def.taskId)
+    return {
+      taskId: def.taskId,
+      title: def.title,
+      status: isRunning ? 'running' as const : 'pending' as const,
+      artifacts: [] as never[],
+      attempts: 0,
+      duration: 0,
+    }
+  })
+}
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -230,22 +278,23 @@ function TaskItem({
   readOnly,
   liveElapsed,
 }: {
-  task: StageTaskResult | { taskId: string; title: string; status: 'pending'; artifacts: never[]; attempts: 0; duration: 0 }
+  task: StageTaskResult | PendingTask
   readOnly: boolean
   liveElapsed?: number | null
 }) {
   const [expanded, setExpanded] = useState(false)
-  const isPending = task.status === 'pending' || task.status === 'skipped'
+  const isPending = task.status === 'pending'
+  const isRunning = task.status === 'running'
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
     icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
   } else if (task.status === 'failed') {
     icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
-  } else if (task.status === 'pending') {
-    icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
-  } else {
+  } else if (isRunning) {
     icon = <SpinnerIcon className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
+  } else {
+    icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
   }
 
   const duration =
@@ -364,18 +413,6 @@ function InlineApproval({
     },
   })
 
-  const sendMessageMutation = useSendMessage(issueNumber)
-
-  const handleSendBack = () => {
-    if (feedback.trim()) {
-      sendMessageMutation.mutate(feedback.trim(), {
-        onSuccess: () => setFeedback(''),
-      })
-    } else {
-      rejectMutation.mutate()
-    }
-  }
-
   if (readOnly) return null
 
   return (
@@ -394,11 +431,11 @@ function InlineApproval({
             {approveMutation.isPending ? 'Approving...' : 'Approve'}
           </button>
           <button
-            onClick={handleSendBack}
-            disabled={rejectMutation.isPending || sendMessageMutation.isPending}
+            onClick={() => rejectMutation.mutate()}
+            disabled={rejectMutation.isPending}
             className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
           >
-            {rejectMutation.isPending || sendMessageMutation.isPending ? 'Sending...' : 'Send back'}
+            {rejectMutation.isPending ? 'Sending...' : 'Send back'}
           </button>
         </div>
         <textarea
@@ -409,9 +446,9 @@ function InlineApproval({
           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
         />
       </div>
-          {(approveMutation.error || rejectMutation.error || sendMessageMutation.error) && (
+          {(approveMutation.error || rejectMutation.error) && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-              {approveMutation.error?.message || rejectMutation.error?.message || sendMessageMutation.error?.message}
+              {approveMutation.error?.message || rejectMutation.error?.message}
             </div>
           )}
     </div>
@@ -424,17 +461,19 @@ function StepList({
   issue,
   readOnly,
   liveElapsedByTask,
+  runningTaskIds,
 }: {
   stage: PipelineStage
   executions: StageExecution[]
   issue: Issue
   readOnly: boolean
   liveElapsedByTask: Map<string, number>
+  runningTaskIds: Set<string>
 }) {
   const execution = executions.find((e) => e.stage === stage)
-  const taskResults: StageTaskResult[] = execution?.taskResults ?? []
+  const rawTaskResults: StageTaskResult[] = execution?.taskResults ?? []
   const checkResults: CheckResult[] = execution?.checkResults ?? []
-  const stageStatus = getStageStatus(stage, executions, issue)
+  const taskResults = mergeTasksForStage(stage, rawTaskResults, runningTaskIds)
 
   const isAwaitingApproval =
     issue.approvalState?.status === 'awaiting' &&
@@ -456,10 +495,8 @@ function StepList({
                   liveElapsed={liveElapsedByTask.get(task.taskId)}
                 />
               ))
-            ) : stageStatus === 'pending' ? (
-              <div className="text-sm text-gray-400 py-2">No tasks yet</div>
             ) : (
-              <div className="text-sm text-gray-400 py-2">Loading tasks...</div>
+              <div className="text-sm text-gray-400 py-2">No tasks yet</div>
             )}
           </div>
         </div>
@@ -593,6 +630,7 @@ export function PipelineView({ issue }: { issue: Issue }) {
 
   useEffect(() => {
     const off = onAgentEvent('stage_task_update', (evt: AgentDetailEventMap['stage_task_update']) => {
+      if (evt.issueId !== issue.id) return
       if (evt.status === 'started') {
         setRunningTaskStarts((prev) => {
           const next = new Map(prev)
@@ -613,7 +651,7 @@ export function PipelineView({ issue }: { issue: Issue }) {
       }
     })
     return off
-  }, [])
+  }, [issue.id])
 
   useEffect(() => {
     if (runningTaskStarts.size === 0) {
@@ -655,6 +693,8 @@ export function PipelineView({ issue }: { issue: Issue }) {
     }
   }
 
+  const runningTaskIds = new Set(runningTaskStarts.keys())
+
   const handleSelectStage = useCallback(
     (stage: PipelineStage) => {
       if (readOnly) return
@@ -685,6 +725,7 @@ export function PipelineView({ issue }: { issue: Issue }) {
           issue={issue}
           readOnly={readOnly}
           liveElapsedByTask={liveElapsed}
+          runningTaskIds={runningTaskIds}
         />
       )}
     </div>
