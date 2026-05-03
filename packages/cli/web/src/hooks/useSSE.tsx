@@ -226,6 +226,20 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
+          case 'stage_task_update': {
+            const d = parsed as AgentDetailEventMap['stage_task_update']
+            const matches = queryClient.getQueriesData<Issue[]>({ queryKey: ['issues'] })
+            for (const [, data] of matches) {
+              if (Array.isArray(data)) {
+                const found = data.find((i) => i.id === d.issueId)
+                if (found) {
+                  queryClient.invalidateQueries({ queryKey: ['issues', found.number, 'executions'] })
+                  break
+                }
+              }
+            }
+            break
+          }
         }
       } catch {
         // ignore malformed events
@@ -283,6 +297,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'check_started',
       'check_update',
       'check_suite_status_changed',
+      'stage_task_update',
     ]
 
     for (const type of eventTypes) {

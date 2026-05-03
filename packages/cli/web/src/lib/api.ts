@@ -262,6 +262,9 @@ export const api = {
       conflictingFiles?: string[]
     }>(`/issues/${number}/worktree-status`),
 
+  getIssueExecutions: (number: number) =>
+    request<import('./types').StageExecution[]>(`/issues/${number}/executions`),
+
   archiveIssue: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/archive`, { method: 'POST' }),
 
