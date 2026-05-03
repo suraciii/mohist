@@ -53,15 +53,16 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use existing `configuredProviders`, `unconfiguredProviders`, `customProviders` memos. Add `availableProvidersOpen` useState defaulting to false. Use ChevronRightIcon (already defined) for collapse toggle with rotate-90 when open, same pattern as Stage Model Overrides.",
-      "attempts": 3,
+      "attempts": 4,
       "order": 999999,
       "error": null,
       "durations": [
         366489,
         113432,
-        278504
+        278504,
+        248629
       ]
     }
   ]
