@@ -25,6 +25,8 @@ export function resetAcpSessionRunner(): void {
   _acpSessionRunner = _runAcpSession;
 }
 import type { EventBus } from '../services/event-bus';
+import type { StageTaskResult } from '../workflow/stage-context';
+import type { StageExecutionRepo } from '../db/stage-execution-repo';
 
 export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip' | 'hang_unrecoverable';
 
@@ -133,6 +135,8 @@ export interface RalphExecutorContext {
   stage?: string;
   model?: string;
   agentConfig?: AgentConfig;
+  stageExecutionId?: string;
+  stageExecutionRepo?: StageExecutionRepo;
 }
 
 export interface RalphLoopResult {
@@ -507,6 +511,7 @@ export async function runRalphLoop(
   const emitTaskUpdate = (
     taskExecutionId: string,
     taskId: string,
+    taskTitle: string,
     taskIndex: number,
     totalTasks: number,
     status: 'started' | 'completed' | 'failed' | 'retrying',
@@ -529,6 +534,20 @@ export async function runRalphLoop(
     } catch (e) {
       log.warn('eventBus.emit failed for ralph_task_update', { taskId, status, error: e instanceof Error ? e.message : String(e) });
     }
+    try {
+      context.eventBus.emit('stage_task_update', {
+        issueId: sseIssueId,
+        projectId: context.projectId ?? '',
+        stage: 'build',
+        taskId,
+        taskTitle,
+        status,
+        attempt: attempt ?? 1,
+        artifacts: [] as string[],
+      });
+    } catch (e) {
+      log.warn('eventBus.emit failed for stage_task_update', { taskId, status, error: e instanceof Error ? e.message : String(e) });
+    }
   };
 
   const emitLoopProgress = (completedCount: number, failedCount: number, total: number) => {
@@ -544,6 +563,29 @@ export async function runRalphLoop(
       });
     } catch (e) {
       log.warn('eventBus.emit failed for ralph_loop_progress', { error: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const appendStageTaskResult = (
+    taskId: string,
+    title: string,
+    status: 'completed' | 'failed',
+    attempts: number,
+    duration: number,
+  ) => {
+    if (!context.stageExecutionId || !context.stageExecutionRepo) return;
+    try {
+      const result: StageTaskResult = {
+        taskId,
+        title,
+        status,
+        artifacts: [],
+        attempts,
+        duration,
+      };
+      context.stageExecutionRepo.appendTaskResult(context.stageExecutionId, result);
+    } catch (e) {
+      log.warn('appendStageTaskResult failed', { taskId, status, error: e instanceof Error ? e.message : String(e) });
     }
   };
 
@@ -617,8 +659,8 @@ export async function runRalphLoop(
     let wipResumeContext: string | undefined;
 
     const maxRetries = options.maxRetries ?? 3;
-    // Total attempts = 1 (initial) + maxRetries (retries). Ensure at least 1 attempt.
     const totalAttempts = Math.max(1, maxRetries + 1);
+    const taskStartTime = Date.now();
 
     for (let attempt = nextTask.attempts + 1; attempt <= nextTask.attempts + totalAttempts; attempt++) {
       const prompt = attempt > 1
@@ -633,7 +675,7 @@ export async function runRalphLoop(
           }).fullPrompt
         : assembledContext.fullPrompt;
 
-      emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'started', attempt);
+      emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'started', attempt);
 
       log.info('Task attempt started', {
         issueId: logIssueId,
@@ -682,7 +724,7 @@ export async function runRalphLoop(
         updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null, durations: [attemptDuration] });
         writeTasksFile(change.tasksPath, tasks);
         await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
-        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'completed', attempt);
+        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'completed', attempt);
         completed++;
         emitLoopProgress(completed, failed, sortedTasks.length);
         context.onTaskComplete?.(nextTask, true, result.text);
@@ -700,6 +742,8 @@ export async function runRalphLoop(
         });
 
         options.onTaskCompleted?.(nextTask.id);
+
+        appendStageTaskResult(nextTask.id, nextTask.title, 'completed', attempt, Date.now() - taskStartTime);
 
         break;
       } else {
@@ -765,7 +809,7 @@ export async function runRalphLoop(
         updateTaskInList(tasks, nextTask.id, { durations: [attemptDuration] });
         writeTasksFile(change.tasksPath, tasks);
 
-        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'retrying', attempt);
+        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'retrying', attempt);
 
         writeTaskLog(context.workflowLogRepo, logIssueId, 'task_retrying', {
           taskId: nextTask.id,
@@ -790,7 +834,8 @@ export async function runRalphLoop(
         attempts: attemptsUsed,
         error: lastError,
       });
-      emitTaskUpdate(taskExecutionId ?? '', nextTask.id, attemptsUsed, sortedTasks.length, 'failed', attemptsUsed, lastError);
+      emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'failed', attemptsUsed, lastError);
+      appendStageTaskResult(nextTask.id, nextTask.title, 'failed', attemptsUsed, Date.now() - taskStartTime);
       context.onTaskComplete?.(nextTask, false, lastError ?? 'Max retries exceeded');
 
       if (shouldPause && context.onAskUser) {
