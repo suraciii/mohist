@@ -207,10 +207,13 @@
         "T-006"
       ],
       "notes": "Atomic swap — delete old components and wire up PipelineView in one task. The approval mutations (approveMutation, rejectMutation) and sendMessageMutation move from IssueDetailPage into PipelineView's InlineApproval.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        96669
+      ]
     },
     {
       "id": "T-008",
