@@ -285,11 +285,13 @@ function TaskItem({
   const [expanded, setExpanded] = useState(false)
   const isPending = task.status === 'pending'
   const isRunning = task.status === 'running'
+  const isFailed = task.status === 'failed'
+  const canExpand = task.artifacts.length > 0 || isFailed
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
     icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
-  } else if (task.status === 'failed') {
+  } else if (isFailed) {
     icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
   } else if (isRunning) {
     icon = <SpinnerIcon className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
@@ -304,10 +306,10 @@ function TaskItem({
 
   return (
     <div
-      className={`rounded-md border border-gray-200 overflow-hidden ${isPending ? 'opacity-50' : ''}`}
+      className={`rounded-md border border-gray-200 overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-red-200' : ''}`}
     >
       <button
-        onClick={() => !readOnly && task.artifacts.length > 0 && setExpanded(!expanded)}
+        onClick={() => !readOnly && canExpand && setExpanded(!expanded)}
         disabled={readOnly}
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
       >
@@ -316,10 +318,10 @@ function TaskItem({
         {duration != null && duration > 0 && (
           <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(duration)}</span>
         )}
-        {task.status === 'failed' && (
+        {isFailed && (
           <span className="text-xs text-red-500 flex-shrink-0">failed</span>
         )}
-        {task.artifacts.length > 0 && !readOnly && (
+        {canExpand && !readOnly && (
           <svg
             className={`h-3 w-3 text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}
             viewBox="0 0 20 20"
@@ -333,7 +335,7 @@ function TaskItem({
           </svg>
         )}
       </button>
-      {expanded && task.artifacts.length > 0 && (
+      {expanded && canExpand && (
         <div className="px-3 pb-2 border-t border-gray-100 bg-gray-50">
           <div className="mt-2 space-y-1">
             {task.artifacts.map((a) => (
@@ -393,6 +395,8 @@ function InlineApproval({
 }) {
   const queryClient = useQueryClient()
   const [feedback, setFeedback] = useState('')
+  const [messageText, setMessageText] = useState('')
+  const [showSendMessage, setShowSendMessage] = useState(false)
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveIssue(issueNumber),
@@ -410,6 +414,17 @@ function InlineApproval({
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
       setFeedback('')
+    },
+  })
+
+  const sendMessageMutation = useMutation({
+    mutationFn: (message: string) => api.sendMessage(issueNumber, message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      setMessageText('')
+      setShowSendMessage(false)
     },
   })
 
@@ -446,11 +461,57 @@ function InlineApproval({
           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
         />
       </div>
-          {(approveMutation.error || rejectMutation.error) && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-              {approveMutation.error?.message || rejectMutation.error?.message}
+      {(approveMutation.error || rejectMutation.error) && (
+        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+          {approveMutation.error?.message || rejectMutation.error?.message}
+        </div>
+      )}
+      <div className="border-t border-amber-200 pt-3">
+        {!showSendMessage ? (
+          <button
+            onClick={() => setShowSendMessage(true)}
+            className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            Send a message to the agent instead
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold text-blue-800">Send Message</h4>
+            <p className="text-xs text-blue-600">
+              Send a free-text message to the agent. The agent will decide the next step based on your message.
+            </p>
+            <textarea
+              value={messageText}
+              onChange={(e) => setMessageText(e.target.value)}
+              placeholder="Type a message to the agent..."
+              rows={2}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+            />
+            <div className="flex items-center justify-between">
+              {sendMessageMutation.error && (
+                <span className="text-xs text-red-500">
+                  {sendMessageMutation.error.message}
+                </span>
+              )}
+              <div className="ml-auto flex gap-2">
+                <button
+                  onClick={() => setShowSendMessage(false)}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => sendMessageMutation.mutate(messageText)}
+                  disabled={!messageText.trim() || sendMessageMutation.isPending}
+                  className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
+                </button>
+              </div>
             </div>
-          )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

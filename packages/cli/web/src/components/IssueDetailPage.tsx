@@ -3,26 +3,19 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useSendMessage, useExploreSessions, useCreateExploreSession, useBuildStatus, useTasks } from '../hooks/useQueries'
-import { useTaskProgress } from '../hooks/useTaskProgress'
+import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSessions, useCreateExploreSession } from '../hooks/useQueries'
 import { EditIssueDialog } from './EditIssueDialog'
 import { NotFoundPage } from './NotFoundPage'
 import { IssueModelSelector } from './IssueModelSelector'
 import { BranchBar } from './BranchBar'
-import { IssueTimeline } from './IssueTimeline'
+import { PipelineView } from './PipelineView'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
-import { TaskList } from './TaskList'
-import { CheckResultsPanel } from './CheckResultsPanel'
-import { CheckSuitePanel } from './CheckSuitePanel'
 import { formatTime } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 import { ChangesPanel } from './ChangesPanel'
-import { PlanApprovalPanel } from './PlanApprovalPanel'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
-
-const TASK_LIST_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
 
 function formatRelativeTime(iso: string): string {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime())
@@ -42,7 +35,6 @@ export function IssueDetailPage() {
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
-  const [messageText, setMessageText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
   const [diffTab, setDiffTab] = useState<'files' | 'commits'>('commits')
@@ -68,39 +60,13 @@ export function IssueDetailPage() {
   const { data: issue, isLoading, isError } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
-  const { data: buildStatus } = useBuildStatus(issueNumber)
-  const { data: tasksData } = useTasks(issueNumber)
-  useTaskProgress(issueNumber)
 
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
 
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
-  const mergedTasks = (() => {
-    const baseTasks = tasksData?.tasks ?? buildStatus?.tasks
-    if (!baseTasks) return []
-    const statusMap = new Map<string, { passes?: boolean; error?: string | null; attempts?: number }>()
-    if (buildStatus?.tasks) {
-      for (const t of buildStatus.tasks) {
-        statusMap.set(t.id, { passes: t.passes, error: t.error, attempts: t.attempts })
-      }
-    }
-    return baseTasks.map((t) => {
-      const status = statusMap.get(t.id)
-      return status ? { ...t, ...status } : t
-    })
-  })()
-
   const { data: commitsData } = useIssueCommits(issueNumber)
-
-  const approveMutation = useMutation({
-    mutationFn: () => api.approveIssue(issueNumber),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
 
   const startMutation = useMutation({
     mutationFn: () => api.startIssue(issueNumber),
@@ -149,8 +115,6 @@ export function IssueDetailPage() {
     },
   })
 
-  const sendMessageMutation = useSendMessage(issueNumber)
-
   const { data: exploreSessions } = useExploreSessions(issue?.projectId ?? '')
   const createExploreMutation = useCreateExploreSession()
   const [exploreError, setExploreError] = useState<string | null>(null)
@@ -190,37 +154,10 @@ export function IssueDetailPage() {
   const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
   const agentProgress = thisAgent?.progress
   const isCapacityFull = activeAgents.length >= maxConcurrent
-  const isAwaitingApproval =
-    issue.approvalState?.status === 'awaiting' &&
-    (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked) &&
-    !isAgentRunningOnThis
   const isBacklog = issue.stage === Stage.Backlog
-  const changesSummary = (() => {
-    const files = diffData?.files ?? []
-    const commits = commitsData?.commits ?? []
-    return {
-      fileCount: files.length,
-      additions: files.reduce((s, f) => s + f.additions, 0),
-      deletions: files.reduce((s, f) => s + f.deletions, 0),
-      commitCount: commits.length,
-    }
-  })()
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
-  const reviewOutput = (() => {
-    const output = issue.approvalState?.output
-    if (output) {
-      const extracted = output.selfReviewNotes || output.reviewReport
-      if (typeof extracted === 'string' && extracted.trim()) return extracted
-      const json = JSON.stringify(output, null, 2)
-      if (json !== '{}') return json
-    }
-    const lastComment = [...(issue.comments ?? [])].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    )[0]
-    return lastComment?.body || ''
-  })()
 
   return (
     <>
@@ -281,7 +218,7 @@ export function IssueDetailPage() {
             )}
           </div>
 
-          <IssueTimeline issueNumber={issueNumber} />
+          <PipelineView issue={issue} />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
@@ -304,18 +241,6 @@ export function IssueDetailPage() {
                 setExpandedCommits={setExpandedCommits}
                 issueNumber={issueNumber}
               />
-
-              {TASK_LIST_STAGES.has(issue.stage) && mergedTasks.length > 0 && (
-                <TaskList
-                  tasks={mergedTasks}
-                  currentTask={buildStatus?.progress.currentTask ?? null}
-                  progress={{
-                    completed: buildStatus?.progress.completed ?? 0,
-                    failed: buildStatus?.progress.failed ?? 0,
-                    total: buildStatus?.progress.total ?? mergedTasks.length,
-                  }}
-                />
-              )}
 
               <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">
@@ -572,126 +497,6 @@ export function IssueDetailPage() {
               </div>
 
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
-
-              {isAwaitingApproval && issue.stage === Stage.Check && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-3 text-xs text-amber-700">
-                  <span>{changesSummary.fileCount} file{changesSummary.fileCount !== 1 ? 's' : ''}</span>
-                  <span className="text-green-600 font-medium">+{changesSummary.additions}</span>
-                  <span className="text-red-500 font-medium">-{changesSummary.deletions}</span>
-                  <span>{changesSummary.commitCount} commit{changesSummary.commitCount !== 1 ? 's' : ''}</span>
-                </div>
-              )}
-
-              {issue.stage === Stage.Check && (issue.checkSuite || isAwaitingApproval) && (
-                <CheckSuitePanel
-                  issueNumber={issueNumber}
-                  checkSuite={issue.checkSuite ?? null}
-                />
-              )}
-
-              {isAwaitingApproval && issue.stage === Stage.Check && !issue.checkSuite && (
-                <CheckResultsPanel
-                  output={issue.approvalState?.output}
-                  issueNumber={issueNumber}
-                  onViewFiles={() => setDiffTab('files')}
-                />
-              )}
-
-              {isAwaitingApproval && issue.stage === Stage.Plan && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
-                  <h2 className="text-sm font-semibold text-amber-800">Plan Review</h2>
-                  <PlanApprovalPanel
-                    issueNumber={issueNumber}
-                    output={issue.approvalState?.output ?? {}}
-                  />
-                </div>
-              )}
-
-              {isAwaitingApproval && issue.stage !== Stage.Check && issue.stage !== Stage.Plan && reviewOutput && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <h2 className="text-sm font-semibold text-amber-800 mb-2">
-                    Review Report
-                  </h2>
-                  <div className="rounded bg-white p-3 max-h-64 overflow-y-auto">
-                    <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                      {reviewOutput}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {isAwaitingApproval && issue.stage !== Stage.Check && issue.stage !== Stage.Plan && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <h2 className="text-sm font-semibold text-amber-800 mb-2">
-                    Approval Required
-                  </h2>
-                  <p className="text-xs text-amber-600 mb-3">
-                    The agent completed the previous stage. Review the output above and approve
-                    to continue.
-                  </p>
-                  <div className="flex items-center gap-3 text-xs text-amber-700 mb-3">
-                    <span>{changesSummary.fileCount} file{changesSummary.fileCount !== 1 ? 's' : ''}</span>
-                    <span className="text-green-600 font-medium">+{changesSummary.additions}</span>
-                    <span className="text-red-500 font-medium">-{changesSummary.deletions}</span>
-                    <span>{changesSummary.commitCount} commit{changesSummary.commitCount !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => approveMutation.mutate()}
-                      disabled={approveMutation.isPending || isAgentRunningOnThis}
-                      className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                    >
-                      {approveMutation.isPending
-                        ? 'Approving...'
-                        : isAgentRunningOnThis
-                          ? 'Agent running...'
-                          : 'Approve & Continue'}
-                    </button>
-                  </div>
-                  {approveMutation.error && (
-                    <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-                      {approveMutation.error.message}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {isAwaitingApproval && issue.stage !== Stage.Check && issue.stage !== Stage.Plan && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                  <h2 className="text-sm font-semibold text-blue-800 mb-2">Send Message</h2>
-                  <p className="text-xs text-blue-600 mb-3">
-                    Send a free-text message to the agent. The agent will decide the next step
-                    based on your message.
-                  </p>
-                  <textarea
-                    value={messageText}
-                    onChange={(e) => setMessageText(e.target.value)}
-                    placeholder="Type a message to the agent..."
-                    rows={3}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                  />
-                  <div className="flex items-center justify-between mt-2">
-                    {sendMessageMutation.error && (
-                      <span className="text-xs text-red-500">
-                        {sendMessageMutation.error.message}
-                      </span>
-                    )}
-                    <div className="ml-auto">
-                      <button
-                        onClick={() => {
-                          sendMessageMutation.mutate(messageText, {
-                            onSuccess: () => setMessageText(''),
-                          })
-                        }}
-                        disabled={!messageText.trim() || sendMessageMutation.isPending}
-                        className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                      >
-                        {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {isAgentRunningOnThis && (
                 <QuestionPanel issueId={issue.id} />
