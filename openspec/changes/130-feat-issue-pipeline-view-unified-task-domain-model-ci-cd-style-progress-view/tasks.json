@@ -175,7 +175,10 @@
       "attempts": 0,
       "passes": false,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        632031
+      ]
     },
     {
       "id": "T-007",
