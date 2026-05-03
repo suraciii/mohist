@@ -5,7 +5,7 @@ import { promisify } from 'util';
 import { Stage } from '../types';
 import { buildArtifactPrompt, buildSelfReviewPrompt } from '../agents/artifact-prompt';
 import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
-import { cleanChangeDir, readReportFile } from './utils';
+import { readReportFile } from './utils';
 import { Log } from '../util/log';
 import { BaseStageRunner } from './base-stage-runner';
 import type { StageContext, StageRunResult } from './stage-context';
@@ -48,9 +48,6 @@ export class PlanStageRunner extends BaseStageRunner {
     }
 
     const resumeSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
-    if (resumeSteps.length === 0) {
-      cleanChangeDir(changeDir);
-    }
 
     const rounds: RoundConfig[] = [
       {

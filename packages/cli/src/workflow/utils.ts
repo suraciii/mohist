@@ -1,8 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Log } from '../util/log';
-
-const log = Log.create({ service: 'workflow-utils' });
 
 const PROMISE_PASS = '<promise>PASS</promise>';
 const PROMISE_FAIL = '<promise>FAIL</promise>';

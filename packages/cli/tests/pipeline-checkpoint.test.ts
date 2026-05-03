@@ -350,7 +350,7 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
     expect(roundTypes).toContain('proposal');
   });
 
-  it('should not call cleanChangeDir when checkpoint has completedSteps', async () => {
+  it('should not clean artifacts when checkpoint has completedSteps', async () => {
     checkpointRepo.upsert(1, 'plan', ['proposal'], 'specs');
 
     vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
@@ -366,11 +366,10 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
 
     await runPlanStage(createMockIssue(), artifactManager);
 
-    expect(fs.readdirSync).not.toHaveBeenCalledWith(CHANGE_DIR);
     expect(fs.rmSync).not.toHaveBeenCalled();
   });
 
-  it('should call cleanChangeDir when no checkpoint exists', async () => {
+  it('should not clean artifacts when no checkpoint exists', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
       if (typeof p === 'string' && p === CHANGE_DIR) return true;
       if (typeof p === 'string' && existingArtifacts.has(p)) return true;
@@ -382,7 +381,7 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
 
     await runPlanStage(createMockIssue(), artifactManager);
 
-    expect(fs.readdirSync).toHaveBeenCalledWith(CHANGE_DIR);
+    expect(fs.rmSync).not.toHaveBeenCalled();
   });
 
   it('should delete checkpoint on stage success', async () => {
