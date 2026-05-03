@@ -26,8 +26,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        385883,
-        293192
+        385883
       ]
     },
     {
@@ -57,8 +56,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        264978,
-        396907
+        264978
       ]
     },
     {
@@ -86,8 +84,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        398484,
-        203289
+        398484
       ]
     },
     {
@@ -115,8 +112,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        233232,
-        52301
+        233232
       ]
     },
     {
@@ -145,8 +141,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        276384,
-        175237
+        276384
       ]
     },
     {
@@ -177,12 +172,16 @@
         "T-005"
       ],
       "notes": "D5 (single component with sub-components), D7 (derive stage status from execution records). Stage status derivation logic: use execution.status for completed/running/awaiting-approval/failed, use issue.stage ordering for pending. For task status mapping from StageTaskResult: completed→checkmark, failed→cross, skipped→checkmark (dimmed). Running tasks tracked via SSE stage_task_update started events.",
-      "attempts": 1,
+      "attempts": 5,
       "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
-        361229
+        632031,
+        622265,
+        632096,
+        641034,
+        542658
       ]
     },
     {
@@ -208,14 +207,10 @@
         "T-006"
       ],
       "notes": "Atomic swap — delete old components and wire up PipelineView in one task. The approval mutations (approveMutation, rejectMutation) and sendMessageMutation move from IssueDetailPage into PipelineView's InlineApproval.",
-      "attempts": 2,
-      "passes": true,
+      "attempts": 0,
+      "passes": false,
       "order": 999999,
-      "error": null,
-      "durations": [
-        640837,
-        131126
-      ]
+      "error": null
     },
     {
       "id": "T-008",
@@ -239,13 +234,10 @@
         "T-007"
       ],
       "notes": "",
-      "attempts": 1,
-      "passes": true,
+      "attempts": 0,
+      "passes": false,
       "order": 999999,
-      "error": null,
-      "durations": [
-        114068
-      ]
+      "error": null
     }
   ]
 }
