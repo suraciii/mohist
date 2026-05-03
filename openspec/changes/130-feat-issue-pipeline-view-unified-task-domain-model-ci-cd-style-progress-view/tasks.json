@@ -110,12 +110,13 @@
         "T-001"
       ],
       "notes": "EventMap entry added by T-001. This task adds ALL_EVENT_TYPES (backend SSE relay) and the API endpoint. Frontend SSE registration (useSSE.tsx, agent-events.ts) is in T-005.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
       "error": null,
       "durations": [
-        233232
+        233232,
+        52301
       ]
     },
     {
