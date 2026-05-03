@@ -16,6 +16,7 @@ import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { CheckSuiteRepo } from '../db/check-suite-repo';
+import { StageExecutionRepo } from '../db/stage-execution-repo';
 import { detectOpenSpecChange, findChangeDir } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -43,6 +44,7 @@ export function createIssueRoutes(
   checkpointRepo?: PipelineCheckpointRepo,
   _resolveConflictsDeps?: ConflictResolutionDeps,
   checkSuiteRepo?: CheckSuiteRepo,
+  stageExecutionRepo?: StageExecutionRepo,
 ): Hono {
   const app = new Hono();
 
@@ -277,6 +279,31 @@ export function createIssueRoutes(
 
       const checkSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
       return c.json({ success: true, data: checkSuite } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.get('/:number/executions', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (!stageExecutionRepo) {
+        return c.json({ success: false, error: 'StageExecutionRepo not configured' } satisfies ApiResponse, 500);
+      }
+
+      const executions = stageExecutionRepo.findByIssueId(issue.id);
+      return c.json({ success: true, data: executions } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
