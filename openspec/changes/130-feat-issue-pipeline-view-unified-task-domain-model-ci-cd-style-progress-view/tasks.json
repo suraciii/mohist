@@ -177,10 +177,13 @@
         "T-005"
       ],
       "notes": "D5 (single component with sub-components), D7 (derive stage status from execution records). Stage status derivation logic: use execution.status for completed/running/awaiting-approval/failed, use issue.stage ordering for pending. For task status mapping from StageTaskResult: completed→checkmark, failed→cross, skipped→checkmark (dimmed). Running tasks tracked via SSE stage_task_update started events.",
-      "attempts": 0,
-      "passes": false,
+      "attempts": 1,
+      "passes": true,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        361229
+      ]
     },
     {
       "id": "T-007",
