@@ -19,14 +19,15 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "The Transition wrapper at lines 257-265 and its closing tag at line 322 are the entire bug. Remove them, keeping Popover.Panel and all its children intact. Remove Fragment from imports if unused.",
-      "attempts": 2,
+      "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
         229894,
-        50916
+        50916,
+        110879
       ]
     },
     {
