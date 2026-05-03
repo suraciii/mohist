@@ -151,6 +151,8 @@ export class BuildStageRunner extends BaseStageRunner {
       coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
+      stageExecutionId: this.getStageExecutionId(),
+      stageExecutionRepo: ctx.stageExecutionRepo,
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
