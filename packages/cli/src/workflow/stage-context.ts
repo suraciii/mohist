@@ -119,3 +119,31 @@ export interface StageTaskResult {
   attempts: number;
   duration: number;
 }
+
+export function emitStageTaskUpdate(
+  eventBus: import('../services/event-bus').EventBus | undefined,
+  issueId: string,
+  projectId: string,
+  stage: string,
+  taskId: string,
+  taskTitle: string,
+  status: 'started' | 'completed' | 'failed' | 'retrying',
+  attempt: number,
+  artifacts: string[],
+): void {
+  if (!eventBus) return;
+  try {
+    eventBus.emit('stage_task_update', {
+      issueId,
+      projectId,
+      stage,
+      taskId,
+      taskTitle,
+      status,
+      attempt,
+      artifacts,
+    });
+  } catch {
+    // fire-and-forget
+  }
+}

@@ -496,7 +496,7 @@ export async function runRalphLoop(
 
   let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
 
-  const sseIssueId = String(context.issueNumber ?? '');
+  const sseIssueId = context.issueId || String(context.issueNumber ?? '');
   const logIssueId = context.issueId || '';
 
   const pending = tasks.filter(t => !t.passes).length;

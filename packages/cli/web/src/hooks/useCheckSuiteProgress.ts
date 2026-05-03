@@ -31,7 +31,7 @@ export function useCheckSuiteProgress(issueNumber: number) {
       onAgentEvent('check_update', (event) => {
         if (event.issueId !== issueId) return
 
-        const validStatuses: CheckStateStatus[] = ['pending', 'running', 'passed', 'failed']
+        const validStatuses: CheckStateStatus[] = ['pending', 'running', 'pass', 'fail']
         const checkStatus: CheckStateStatus = validStatuses.includes(event.status as CheckStateStatus)
           ? (event.status as CheckStateStatus)
           : 'pending'

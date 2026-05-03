@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useIssueExecutions } from '../hooks/useQueries'
@@ -355,10 +355,10 @@ function TaskItem({
 
 function CheckItem({ check }: { check: CheckResult }) {
   const isPending = check.status === 'pending'
-  const isFailed = check.status === 'failed'
+  const isFailed = check.status === 'fail' || check.status === 'error'
 
   let icon: React.ReactNode
-  if (check.status === 'passed') {
+  if (check.status === 'pass') {
     icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
   } else if (isFailed) {
     icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
@@ -374,8 +374,8 @@ function CheckItem({ check }: { check: CheckResult }) {
     >
       {icon}
       <span className="text-sm text-gray-900 flex-1 truncate">{check.name}</span>
-      {isFailed && check.summary && (
-        <span className="text-xs text-red-500 flex-shrink-0 truncate max-w-48">{check.summary}</span>
+      {isFailed && (check.summary || check.message) && (
+        <span className="text-xs text-red-500 flex-shrink-0 truncate max-w-48">{check.summary || check.message}</span>
       )}
       {check.duration != null && (
         <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(check.duration)}</span>
@@ -743,16 +743,19 @@ export function PipelineView({ issue }: { issue: Issue }) {
     }
   }, [runningTaskStarts])
 
-  const runningDurations = new Map<string, number>()
-  for (const [taskId, elapsed] of liveElapsed) {
-    const taskExec = executions.find((e) =>
-      e.taskResults.some((t) => t.taskId === taskId),
-    )
-    if (taskExec) {
-      const existing = runningDurations.get(taskExec.stage) ?? 0
-      runningDurations.set(taskExec.stage, existing + elapsed)
+  const runningDurations = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const [taskId, elapsed] of liveElapsed) {
+      const taskExec = executions.find((e) =>
+        e.taskResults.some((t) => t.taskId === taskId),
+      )
+      if (taskExec) {
+        const existing = map.get(taskExec.stage) ?? 0
+        map.set(taskExec.stage, existing + elapsed)
+      }
     }
-  }
+    return map
+  }, [liveElapsed, executions])
 
   const runningTaskIds = new Set(runningTaskStarts.keys())
 

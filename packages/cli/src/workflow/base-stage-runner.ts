@@ -3,6 +3,9 @@ import type { StageContext, StageRunResult, CheckResult, StageTaskResult } from 
 import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
+import { Log } from '../util/log';
+
+const log = Log.create({ service: 'base-stage-runner' });
 
 export abstract class BaseStageRunner implements StageRunner {
   abstract canHandle(stage: Stage): boolean;
@@ -20,7 +23,9 @@ export abstract class BaseStageRunner implements StageRunner {
     if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
     try {
       ctx.stageExecutionRepo.appendTaskResult(this.stageExecutionId, result);
-    } catch {}
+    } catch (e) {
+      log.warn('appendTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   async run(ctx: StageContext): Promise<StageRunResult> {
@@ -30,7 +35,9 @@ export abstract class BaseStageRunner implements StageRunner {
       try {
         const execution = ctx.stageExecutionRepo.create(ctx.issue.id, ctx.issue.stage);
         this.stageExecutionId = execution.id;
-      } catch {}
+      } catch (e) {
+        log.warn('create stage execution failed', { error: e instanceof Error ? e.message : String(e) });
+      }
     }
 
     let taskOutput: unknown;
@@ -64,7 +71,9 @@ export abstract class BaseStageRunner implements StageRunner {
     if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
     try {
       ctx.stageExecutionRepo.updateStatus(this.stageExecutionId, status);
-    } catch {}
+    } catch (e) {
+      log.warn('updateStageExecutionStatus failed', { error: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   private async runAllChecks(
@@ -278,7 +287,9 @@ export abstract class BaseStageRunner implements StageRunner {
     if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
     try {
       ctx.stageExecutionRepo.updateCheckResults(this.stageExecutionId, checkResults);
-    } catch {}
+    } catch (e) {
+      log.warn('persistCheckResults failed', { error: e instanceof Error ? e.message : String(e) });
+    }
   }
 
 }
