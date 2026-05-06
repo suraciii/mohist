@@ -1,6 +1,6 @@
 import type { Stage, Issue, Project, IssueStatus } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
-import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
+import type { AgentSessionOptions } from '../agent-runtime/acp-session';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
@@ -42,7 +42,7 @@ export interface StageRunResult {
 
 export interface StageContext {
   issue: Issue;
-  acpOptions: AcpConnectionOptions;
+  acpOptions: AgentSessionOptions;
   artifactManager: ChangeArtifactsManager;
   worktreeManager: WorktreeManager;
   projectRepo: ProjectRepo;
@@ -68,7 +68,7 @@ export interface CheckContext {
   changeDir: string;
   eventBus?: EventBus;
   projectId?: string;
-  acpOptions: AcpConnectionOptions;
+  acpOptions: AgentSessionOptions;
 }
 
 export interface WorktreeManager {

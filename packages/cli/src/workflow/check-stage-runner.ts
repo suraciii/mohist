@@ -7,7 +7,7 @@ import { BuildTestCheck } from './checks/build-test-check';
 import { AiReviewCheck } from './checks/ai-review-check';
 import { UserApprovalCheck } from './checks/user-approval-check';
 import { buildReviewerPrompt, buildReviewSelfCheckPrompt } from '../agents/artifact-prompt';
-import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
+import { createAcpConnection, type AcpConnection, type AgentSessionOptions } from '../agent-runtime/acp-session';
 import { readReportFile } from './utils';
 import { Log } from '../util/log';
 
@@ -88,7 +88,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
     const roundState = { type: '', index: 0 };
 
-    const connectionOptions: AcpConnectionOptions = {
+    const connectionOptions: AgentSessionOptions = {
       ...ctx.acpOptions,
       executionId: `review-${ctx.issue.number}`,
       stage: 'review',
@@ -312,7 +312,7 @@ function emitReviewRoundStart(
   eventBus: import('../services/event-bus').EventBus | undefined,
   roundType: string,
   roundIndex: number,
-  acpOptions: AcpConnectionOptions,
+  acpOptions: AgentSessionOptions,
   projectId: string,
 ): void {
   if (!eventBus) return;

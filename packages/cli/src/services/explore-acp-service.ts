@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { runAcpSession, type AcpSessionOptions, type AcpSessionResult } from '../agent-runtime/acp-session';
+import { runAcpSession, type AgentSessionOptions, type AcpSessionResult } from '../agent-runtime/acp-session';
 import { buildExplorePrompt } from '../agents/artifact-prompt';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueService } from './issue-service';
@@ -23,7 +23,7 @@ export interface ExploreResult {
   error?: string;
 }
 
-type ExploreAcpOptions = Omit<AcpSessionOptions, 'cwd' | 'task'>;
+type ExploreAcpOptions = Omit<AgentSessionOptions, 'cwd' | 'task'>;
 
 export class ExploreAcpService {
   private worktreePath: string;

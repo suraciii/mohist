@@ -4,7 +4,7 @@ import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { LlmConfig } from '../agent-runtime';
-import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
+import type { AgentSessionOptions } from '../agent-runtime/acp-session';
 import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskType } from '../db/issue-task-queue-repo';
 import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner } from '../workflow';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';
@@ -895,7 +895,7 @@ export class AgentRunnerService {
       return;
     }
 
-    const acpOptions: AcpConnectionOptions = { cwd: worktreePath };
+    const acpOptions: AgentSessionOptions = { cwd: worktreePath };
     await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
   }
 
@@ -946,7 +946,7 @@ export class AgentRunnerService {
       return;
     }
 
-    const acpOptions: AcpConnectionOptions = { cwd: worktreePath };
+    const acpOptions: AgentSessionOptions = { cwd: worktreePath };
     await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
   }
 
@@ -956,7 +956,7 @@ export class AgentRunnerService {
     projectId: string,
     issueRepo: IssueRepo,
     worktreePath: string,
-    acpOptions: AcpConnectionOptions,
+    acpOptions: AgentSessionOptions,
   ): Promise<void> {
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
     log.info('Pipeline started via task queue', { issueNumber: issue.number, taskType: task.taskType, taskId: task.id });
