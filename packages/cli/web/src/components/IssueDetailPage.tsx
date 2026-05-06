@@ -12,6 +12,7 @@ import { PipelineView } from './PipelineView'
 import { MergeStatePanel } from './MergeStatePanel'
 import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
+import { TaskProgressPanel } from './TaskProgressPanel'
 import { formatTime } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 import { ChangesPanel } from './ChangesPanel'
@@ -500,6 +501,14 @@ export function IssueDetailPage() {
 
               {isAgentRunningOnThis && (
                 <QuestionPanel issueId={issue.id} />
+              )}
+
+              {!isBacklog && (
+                <TaskProgressPanel
+                  issueNumber={issueNumber}
+                  currentStage={issue.stage}
+                  isAgentRunning={isAgentRunningOnThis}
+                />
               )}
 
               {!isBacklog && (
