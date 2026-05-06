@@ -449,7 +449,7 @@ export function AiSettingsSection() {
               <label className="block text-xs font-medium text-gray-700">
                 Mohist Model
               </label>
-              <p className="text-xs text-gray-500">Used for explore/plan stages</p>
+              <p className="text-xs text-gray-500">Used for explore stage</p>
               <ModelSelect
                 value={modelData?.model ?? DEFAULT_MODEL}
                 placeholder={DEFAULT_MODEL}
@@ -462,7 +462,7 @@ export function AiSettingsSection() {
               <label className="block text-xs font-medium text-gray-700">
                 Coder Model
               </label>
-              <p className="text-xs text-gray-500">Used for build/review/fix stages</p>
+              <p className="text-xs text-gray-500">Used for plan/build/review/fix stages</p>
               <ModelSelect
                 value={opencodeModelData?.model ?? null}
                 placeholder="Same as Mohist Model"
