@@ -1,0 +1,156 @@
+{
+  "project": "mohist",
+  "description": "Unify Agent Session architecture — eliminate concept fragmentation and code duplication across 5 session abstractions",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Remove SessionManager and agent_session_message dead code",
+      "description": "Delete the unused SessionManager class (session.ts), AgentSessionMessageRepo, agent_session_message table, and all references. Remove SessionManager from server/index.ts instantiation, remove the _agentSessionMessageRepo parameter from AgentRunnerService constructor, remove exports from agent-runtime/index.ts and db/index.ts, remove the agentSessionMessageRepo field/getter from StateManager, and add a migration to DROP TABLE agent_session_message.",
+      "acceptanceCriteria": [
+        "No file imports or references SessionManager or AgentSessionMessageRepo",
+        "agent-runtime/session.ts is deleted",
+        "db/agent-session-message-repo.ts is deleted",
+        "server/index.ts no longer instantiates SessionManager",
+        "AgentRunnerService constructor no longer takes _agentSessionMessageRepo parameter",
+        "Migration drops agent_session_message table",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Pure deletion task. The AgentSessionMessageRepo.insert() has zero callers in the codebase. The SessionManager manages in-memory sessions unconnected to real ACP sessions."
+    },
+    {
+      "id": "T-002",
+      "title": "Merge AcpSessionOptions and AcpConnectionOptions into unified type",
+      "description": "Replace the two near-identical option interfaces (AcpSessionOptions with 19 fields, AcpConnectionOptions with 15 fields, 14 shared) with a single AgentSessionOptions type. Add `task?: string` (for withSession), `signal?: AbortSignal` (from AcpConnectionOptions), `observers?: SessionObserver[]` (new). Keep `onSessionUpdate` for backward compatibility during migration. Update all 11 consumer files to use the new type name. Keep `AcpSessionResult` and `AcpConnection` interfaces unchanged for now.",
+      "acceptanceCriteria": [
+        "Single AgentSessionOptions type exported from agent-runtime",
+        "AcpSessionOptions and AcpConnectionOptions are removed",
+        "All 11 consumer files compile with the new type",
+        "runAcpSession and createAcpConnection accept AgentSessionOptions",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-session.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "This is a type-level refactor only. No behavior change. The SessionObserver interface can be a placeholder (just the interface definition) at this stage — it gets implemented in T-004."
+    },
+    {
+      "id": "T-003",
+      "title": "Extract AcpProcess from acp-session.ts",
+      "description": "Extract subprocess spawn/kill/lifecycle logic from both runAcpSession and createAcpConnection into a new acp-process.ts module. AcpProcess handles: spawn with env sanitization (filter OPENCODE_SERVER_PASSWORD/USERNAME), SIGTERM→SIGKILL escalation with 5s delay, stdin/stdout stream lifecycle, error/exit event handling, and provide WritableStream/ReadableStream for ndJsonStream. The existing functions delegate to AcpProcess but keep their current signatures and behavior.",
+      "acceptanceCriteria": [
+        "New acp-process.ts exports AcpProcess class",
+        "AcpProcess handles spawn, kill (SIGTERM→SIGKILL), stdin/stdout lifecycle, error/exit events",
+        "runAcpSession and createAcpConnection both use AcpProcess internally",
+        "No behavior change — all existing tests pass",
+        "acp-process.ts is under 200 lines",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/acp-process.ts",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "This is structural extraction only. The two functions still exist but delegate process management to AcpProcess. No consumer-facing API change."
+    },
+    {
+      "id": "T-004",
+      "title": "Implement SessionObserver interface and WorkflowSessionObserver",
+      "description": "Define the SessionObserver interface with onSessionStart, onTextChunk, onToolCall, onSessionEvent, onStateChange, and onRawNotification (for PlanStageRunner's plan_session_update forwarding). Implement WorkflowSessionObserver that encapsulates all current inline side-effects: EventBus emission (coder_text_chunk, coder_tool_call, coder_session_started, coder_session_completed), sessionStreamLogRepo.insert, workflowLogRepo.insert, coderSessionRepo.insert/updateStatus. Wire WorkflowSessionObserver into runAcpSession and createAcpConnection so they dispatch events through observers instead of inline code.",
+      "acceptanceCriteria": [
+        "SessionObserver interface exported from agent-runtime with typed methods",
+        "WorkflowSessionObserver implements all observer methods matching current inline behavior",
+        "runAcpSession and createAcpConnection no longer directly call eventBus.emit, sessionStreamLogRepo.insert, workflowLogRepo.insert, or coderSessionRepo.insert/updateStatus",
+        "SSE events (coder_text_chunk, coder_tool_call, coder_session_started) still emitted with identical payloads",
+        "coder_session rows still created and status updated on completion/failure",
+        "session_stream_log rows still written for all SESSION_STREAM_EVENT_TYPES",
+        "PlanStageRunner's onSessionUpdate → plan_session_update forwarding works via onRawNotification",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/session-observer.ts",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "This is the critical decoupling step. The observer pattern must produce identical side-effects to current inline code. Test by verifying SSE event payloads are unchanged and coder_session rows have correct status transitions."
+    },
+    {
+      "id": "T-005",
+      "title": "Implement AgentSession class replacing runAcpSession and createAcpConnection",
+      "description": "Create the AgentSession class with static create() factory, execute(prompt), cancel(), close(), and state getter. Implement withSession(options, fn) that auto-manages create→execute→close in a try/finally. AgentSession composes AcpProcess + the ACP protocol logic (initialize, newSession, prompt, cancel, setSessionConfigOption) and dispatches all events through SessionObserver[]. Update all 11 consumer files: skill-service, explore-acp-service, code-compiles-check, build-test-check, ralph-executor → use withSession; conflict-resolution, server/index.ts → use AgentSession.create with single execute+close; plan-stage-runner, check-stage-runner → use AgentSession.create with multi-execute loop. Delete runAcpSession and createAcpConnection functions. Delete the old acp-session.ts.",
+      "acceptanceCriteria": [
+        "AgentSession.create() and withSession() are the only public session APIs",
+        "runAcpSession and createAcpConnection no longer exist",
+        "acp-session.ts is deleted",
+        "All 11 consumer files use new API and compile",
+        "ralph-executor's setAcpSessionRunner/resetAcpSessionRunner DI pattern works with new API",
+        "PlanStageRunner multi-prompt loop works with AgentSession.create + multiple execute() calls",
+        "SkillService fire-and-forget works with withSession",
+        "SSE events (coder_text_chunk, coder_tool_call, coder_session_started) still emitted identically",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/agent-session.ts",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "This is the largest task. The AgentSession class should be under 300 lines. The ACP protocol logic (ClientSideConnection, ndJsonStream, initialize/newSession/prompt/cancel) can stay inline in AgentSession or be extracted to acp-protocol.ts per design D2 — agent decides."
+    },
+    {
+      "id": "T-006",
+      "title": "Update tests to use new AgentSession API",
+      "description": "Update all 6 test files that reference runAcpSession, createAcpConnection, or AcpConnection to use withSession, AgentSession.create, and AgentSession class. Tests: ralph-executor.test.ts, skill-service.test.ts, pipeline-checkpoint.test.ts, acp-hang-recovery.test.ts, acp-connection.test.ts, acp-session-taskid.test.ts. Ensure all mock patterns work with the new API shape.",
+      "acceptanceCriteria": [
+        "No test file imports runAcpSession or createAcpConnection",
+        "All test mocks/stubs use withSession or AgentSession.create",
+        "npm test passes with all tests green",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-007",
+      "title": "Implement SessionStateMachine with coder_session as source of truth",
+      "description": "Define SessionState type and VALID_TRANSITIONS map. Implement SessionStateMachine.transition() that validates transitions and writes to coder_session table via CoderSessionRepo.updateStatus(). Integrate state machine into AgentSession so all state changes go through transition(). Add process_pid INTEGER column to coder_session via migration; AgentSession.create() writes proc.pid. Refactor AgentRunnerService to query coder_session for running sessions instead of relying on in-memory runningSlots Map as primary source.",
+      "acceptanceCriteria": [
+        "SessionStateMachine enforces valid state transitions (initializing→running→completed/failed/timeout→closed)",
+        "Invalid transitions throw descriptive errors",
+        "Every state change writes to coder_session.status in DB",
+        "Migration adds process_pid column (nullable) to coder_session",
+        "AgentSession.create() writes process.pid to coder_session.process_pid",
+        "AgentRunnerService.cleanupOrphanedCoderSessions queries coder_session WHERE status='running'",
+        "npm run build succeeds",
+        "npm test passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/session-state.ts",
+      "dependsOn": ["T-005", "T-006"],
+      "passes": false,
+      "notes": "The runningSlots Map in AgentRunnerService can remain as a performance cache, but the DB becomes the authoritative source. Orphan detection should work from DB queries alone."
+    }
+  ]
+}
