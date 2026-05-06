@@ -115,11 +115,15 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is the critical decoupling step. The observer pattern must produce identical side-effects to current inline code. Test by verifying SSE event payloads are unchanged and coder_session rows have correct status transitions.",
-      "attempts": 0,
+      "attempts": 2,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        636468,
+        512536
+      ]
     },
     {
       "id": "T-005",
