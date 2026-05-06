@@ -206,6 +206,14 @@ export async function runAcpSession(
   const stream = ndJsonStream(input, output);
 
   const cleanup = async () => {
+    if (options.onBeforeKill) {
+      try {
+        await options.onBeforeKill(cwd);
+      } catch (err) {
+        log.warn('onBeforeKill failed', { cwd, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     const results = await Promise.allSettled([
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
@@ -634,6 +642,14 @@ export async function createAcpConnection(
   const stream = ndJsonStream(input, output);
 
   const cleanup = async () => {
+    if (options.onBeforeKill) {
+      try {
+        await options.onBeforeKill(cwd);
+      } catch (err) {
+        log.warn('onBeforeKill failed', { cwd, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     const results = await Promise.allSettled([
       stream.readable.cancel().catch(() => {}),
       stream.writable.abort().catch(() => {}),
