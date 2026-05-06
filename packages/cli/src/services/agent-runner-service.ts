@@ -103,7 +103,6 @@ export class AgentRunnerService {
     private readonly workflowLogRepo?: WorkflowLogRepo,
     private readonly issueRepo?: IssueRepo,
     maxConcurrentAgents: number = 8,
-    _agentSessionMessageRepo?: unknown,
     private readonly coderSessionRepo?: CoderSessionRepo,
     private readonly checkpointRepo?: PipelineCheckpointRepo,
     private readonly projectRepo?: ProjectRepo,

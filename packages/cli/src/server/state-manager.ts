@@ -11,7 +11,6 @@ import {
   QuestionRepo,
   ExploreSessionRepo,
   ExploreMessageRepo,
-  AgentSessionMessageRepo,
   CoderSessionRepo,
   PipelineCheckpointRepo,
   ScheduleRepo,
@@ -32,7 +31,6 @@ export class StateManager {
   private questionRepo: QuestionRepo;
   private exploreSessionRepo: ExploreSessionRepo;
   private exploreMessageRepo: ExploreMessageRepo;
-  private agentSessionMessageRepo: AgentSessionMessageRepo;
   private coderSessionRepo: CoderSessionRepo;
   private pipelineCheckpointRepo: PipelineCheckpointRepo;
   private scheduleRepo: ScheduleRepo;
@@ -54,7 +52,6 @@ export class StateManager {
     this.questionRepo = new QuestionRepo(db);
     this.exploreSessionRepo = new ExploreSessionRepo(db);
     this.exploreMessageRepo = new ExploreMessageRepo(db);
-    this.agentSessionMessageRepo = new AgentSessionMessageRepo(db);
     this.coderSessionRepo = new CoderSessionRepo(db);
     this.pipelineCheckpointRepo = new PipelineCheckpointRepo(db);
     this.scheduleRepo = new ScheduleRepo(db);
@@ -108,10 +105,6 @@ export class StateManager {
 
   getExploreMessageRepo(): ExploreMessageRepo {
     return this.exploreMessageRepo;
-  }
-
-  getAgentSessionMessageRepo(): AgentSessionMessageRepo {
-    return this.agentSessionMessageRepo;
   }
 
   getCoderSessionRepo(): CoderSessionRepo {

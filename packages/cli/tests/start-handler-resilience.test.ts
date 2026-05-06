@@ -74,7 +74,7 @@ describe('POST /issues/:number/start resilience', () => {
     issueService = new IssueService(issueRepo, commentRepo);
     new ConfigService(configRepo);
     eventBus = new EventBus();
-    agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+    agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
   });
 
   afterEach(() => {

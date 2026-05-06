@@ -12,7 +12,6 @@ import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { SessionStreamLogRepo } from '../db/session-stream-log-repo';
-import { AgentSessionMessageRepo } from '../db/agent-session-message-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { CheckSuiteRepo } from '../db/check-suite-repo';
@@ -32,12 +31,10 @@ export function createIssueRoutes(
   projectService: ProjectService,
   stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
-  _sessionManager?: unknown,
   _llmConfig?: LlmConfig,
   agentRunner?: AgentRunnerService,
   workflowLogRepo?: WorkflowLogRepo,
   sessionStreamLogRepo?: SessionStreamLogRepo,
-  agentSessionMessageRepo?: AgentSessionMessageRepo,
   coderSessionRepo?: CoderSessionRepo,
   _opencodeBinPath?: string,
   mergeQueue?: MergeQueue,
@@ -1664,63 +1661,6 @@ export function createIssueRoutes(
           nextStep: cp.nextStep,
           updatedAt: cp.updatedAt,
         }));
-
-      const response: ApiResponse = {
-        success: true,
-        data
-      };
-      return c.json(response);
-    } catch (error) {
-      const response: ApiResponse = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-      return c.json(response, 500);
-    }
-  });
-
-  app.get('/:number/agent-session', async (c) => {
-    try {
-      const number = parseInt(c.req.param('number'));
-      const projectId = getCurrentProjectId();
-
-      if (!projectId) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'No active project. Use: mo project use <name>'
-        };
-        return c.json(response, 400);
-      }
-
-      const issue = issueService.getByNumber(projectId, number);
-      if (!issue) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} not found`
-        };
-        return c.json(response, 404);
-      }
-
-      if (!agentSessionMessageRepo) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'AgentSessionMessageRepo not configured'
-        };
-        return c.json(response, 500);
-      }
-
-      const messages = agentSessionMessageRepo.findByIssueId(issue.id);
-      const data = messages.map(m => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        toolCalls: m.toolCalls,
-        toolCallId: m.toolCallId,
-        toolName: m.toolName,
-        toolResult: m.toolResult,
-        stepIndex: m.stepIndex,
-        createdAt: m.createdAt,
-      }));
 
       const response: ApiResponse = {
         success: true,

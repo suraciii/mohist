@@ -12,7 +12,6 @@ export function createProposeRoutes(
   projectService: ProjectService,
   _stateManager: StateManager,
   worktreeManager: WorktreeManager | null = null,
-  _sessionManager?: unknown,
   _llmConfig?: unknown,
   agentRunner?: AgentRunnerService,
   _opencodeBinPath?: string,
