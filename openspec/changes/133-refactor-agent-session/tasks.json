@@ -87,7 +87,10 @@
       "notes": "This is structural extraction only. The two functions still exist but delegate process management to AcpProcess. No consumer-facing API change.",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        634190
+      ]
     },
     {
       "id": "T-004",

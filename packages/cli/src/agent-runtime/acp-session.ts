@@ -1,10 +1,8 @@
-import { spawn } from 'child_process';
-import { Writable, Readable } from 'stream';
 import {
   ClientSideConnection,
-  ndJsonStream,
   PROTOCOL_VERSION,
 } from '@agentclientprotocol/sdk';
+import { AcpProcess } from './acp-process';
 import type {
   SessionNotification,
   RequestPermissionRequest,
@@ -15,7 +13,6 @@ import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
-import { resolveOpencodeBinPath } from '../config/config-loader';
 
 const log = Log.create({ service: 'acp-session' });
 
@@ -120,14 +117,6 @@ export function truncateAgentText(text: string): string {
   return `${head}\n\n...[truncated ${truncated} characters]...\n\n${tail}`;
 }
 
-function killProc(proc: import('child_process').ChildProcess): void {
-  try {
-    proc.kill('SIGTERM');
-  } catch {
-    // already exited
-  }
-}
-
 export async function runAcpSession(
   options: AgentSessionOptions
 ): Promise<AcpSessionResult> {
@@ -157,108 +146,23 @@ export async function runAcpSession(
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: taskText.slice(0, 100) });
   writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: taskText.slice(0, 100), timestamp: new Date().toISOString() });
 
-  const resolvedBinPath = opencodeBinPath || resolveOpencodeBinPath() || 'opencode';
-
-  const proc = spawn(resolvedBinPath, ['acp'], {
+  const acpProcess = new AcpProcess({
     cwd,
-    stdio: ['pipe', 'pipe', 'inherit'],
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key]) =>
-          key !== 'OPENCODE_SERVER_PASSWORD' &&
-          key !== 'OPENCODE_SERVER_USERNAME'
-      )
-    ),
+    opencodeBinPath,
+    onError: (err) => {
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, timestamp: new Date().toISOString() });
+    },
+    onExit: ({ exitCode, phase }) => {
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode, phase, mode: 'single', timestamp: new Date().toISOString() });
+    },
   });
 
-  let initialized = false;
-  let rejectOnSpawn: ((err: Error) => void) | undefined;
-  const spawnFailure = new Promise<never>((_, reject) => {
-    rejectOnSpawn = reject;
-  });
-
-  let rejectOnExit: ((err: Error) => void) | undefined;
-  const exitFailure = new Promise<never>((_, reject) => {
-    rejectOnExit = reject;
-  });
-
-  proc.on('error', (err) => {
-    log.error('opencode acp subprocess error', { error: err.message });
-    writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, timestamp: new Date().toISOString() });
-    if (!initialized && rejectOnSpawn) {
-      rejectOnSpawn(new Error(`[SPAWN_FAILED] ${err.message}`));
-    }
-  });
-
-  proc.on('exit', () => {
-    try { proc.stdin.destroy(); } catch {}
-    try { proc.stdout.destroy(); } catch {}
-  });
-
-  proc.on('exit', (code) => {
-    const phase = initialized ? 'running' : 'init';
-    writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode: code, phase, mode: 'single', timestamp: new Date().toISOString() });
-    if (!initialized && code !== 0) {
-      log.error('opencode acp subprocess exited before initialize', { exitCode: code });
-      if (rejectOnSpawn) {
-        rejectOnSpawn(new Error(`[SPAWN_FAILED] opencode process exited before initialize (exit code: ${code ?? 'signal'})`));
-      }
-    }
-    if (initialized && code !== 0 && rejectOnExit) {
-      log.error('opencode acp subprocess exited unexpectedly during session', { exitCode: code });
-      rejectOnExit(new Error(`[PROCESS_EXIT] opencode process exited unexpectedly (exit code: ${code ?? 'killed by signal'})`));
-      rejectOnExit = undefined;
-    }
-  });
-
-  proc.stdin.on('error', () => {});
-  proc.stdout.on('error', () => {});
-
-  let procExited = false;
   let agentText = '';
   let agentTextTruncated = false;
   let sessionId = '';
   let coderToolCallCounter = 0;
   const coderToolCallIds = new Map<string, string[]>();
 
-  const ensureKill = () => {
-    if (!procExited) {
-      procExited = true;
-      killProc(proc);
-      setTimeout(() => {
-        try {
-          proc.kill('SIGKILL');
-        } catch {
-          // already exited
-        }
-      }, 5000);
-    }
-  };
-
-  const input = Writable.toWeb(proc.stdin) as WritableStream<Uint8Array>;
-  const output = Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>;
-  const stream = ndJsonStream(input, output);
-
-  const cleanup = async () => {
-    if (options.onBeforeKill) {
-      try {
-        await options.onBeforeKill(cwd);
-      } catch (err) {
-        log.warn('onBeforeKill failed', { cwd, error: err instanceof Error ? err.message : String(err) });
-      }
-    }
-
-    const results = await Promise.allSettled([
-      stream.readable.cancel().catch(() => {}),
-      stream.writable.abort().catch(() => {}),
-    ]);
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        log.error('Cleanup failed', { index, reason: String(result.reason) });
-      }
-    });
-    ensureKill();
-  };
 
   const connection = new ClientSideConnection(
     (_agent) => ({
@@ -371,7 +275,7 @@ export async function runAcpSession(
         return { outcome: { outcome: 'cancelled' } };
       },
     }),
-    stream
+    acpProcess.stream
   );
 
   const timeoutPromise = new Promise<'timeout'>((resolve) =>
@@ -387,17 +291,16 @@ export async function runAcpSession(
         clientInfo: { name: 'mohist', version: '0.1.0' },
       }),
       timeoutPromise,
-      spawnFailure,
+      acpProcess.spawnFailure,
     ]);
 
-    initialized = true;
-    rejectOnSpawn = undefined;
+    acpProcess.markInitialized();
 
     if (initResult === 'timeout') {
       const duration = Date.now() - sessionStartTime;
       log.error('ACP initialize timed out', { timeout, elapsedMs: duration });
       writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'initialize', timeout, duration, timestamp: new Date().toISOString() });
-      await cleanup();
+      await acpProcess.cleanup();
       return { text: agentText, success: false, error: `Timed out during initialize` };
     }
 
@@ -415,7 +318,7 @@ export async function runAcpSession(
       const duration = Date.now() - sessionStartTime;
       log.error('ACP newSession timed out', { timeout, elapsedMs: duration });
       writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'newSession', timeout, duration, timestamp: new Date().toISOString() });
-      await cleanup();
+      await acpProcess.cleanup();
       return { text: agentText, success: false, error: `Timed out during newSession` };
     }
 
@@ -471,7 +374,7 @@ export async function runAcpSession(
         prompt: [{ type: 'text', text: taskText }],
       }),
       timeoutPromise,
-      exitFailure,
+      acpProcess.exitFailure,
     ]);
 
     if (promptResult === 'timeout') {
@@ -490,7 +393,7 @@ export async function runAcpSession(
       } catch {
         // cancel may fail if session already ended
       }
-      await cleanup();
+      await acpProcess.cleanup();
       return { text: agentText, success: false, error: `Timed out after ${timeout / 1000}s` };
     }
 
@@ -517,11 +420,11 @@ export async function runAcpSession(
         log.error('Failed to update coder_session status', { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
       }
     }
-    await cleanup();
+    await acpProcess.cleanup();
     const message = err instanceof Error ? err.message : String(err);
     return { text: agentText, success: false, error: message };
   } finally {
-    ensureKill();
+    acpProcess.ensureKill();
   }
 }
 
@@ -561,7 +464,6 @@ export async function createAcpConnection(
 
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
-  let procExited = false;
   let agentText = '';
   let agentTextTruncated = false;
   let roundStartIndex = 0;
@@ -570,7 +472,6 @@ export async function createAcpConnection(
   let coderSessionId: string | undefined;
   let sessionId = '';
   let closed = false;
-  let initialized = false;
   const connectionStartTime = Date.now();
 
   log.info('Spawning opencode acp subprocess for multi-round connection', {
@@ -580,101 +481,17 @@ export async function createAcpConnection(
   });
   writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), mode: 'multi-round', timestamp: new Date().toISOString() });
 
-  const resolvedBinPath = opencodeBinPath || resolveOpencodeBinPath() || 'opencode';
-
-  const proc = spawn(resolvedBinPath, ['acp'], {
+  const acpProcess = new AcpProcess({
     cwd,
-    stdio: ['pipe', 'pipe', 'inherit'],
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key]) =>
-          key !== 'OPENCODE_SERVER_PASSWORD' &&
-          key !== 'OPENCODE_SERVER_USERNAME'
-      )
-    ),
+    opencodeBinPath,
+    onError: (err) => {
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, mode: 'multi-round', timestamp: new Date().toISOString() });
+    },
+    onExit: ({ exitCode, phase }) => {
+      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode, phase, mode: 'multi-round', timestamp: new Date().toISOString() });
+    },
   });
 
-  let rejectOnInit: ((err: Error) => void) | undefined;
-  const spawnFailure = new Promise<never>((_, reject) => {
-    rejectOnInit = reject;
-  });
-
-  let rejectOnExit: ((err: Error) => void) | undefined;
-  const exitFailure = new Promise<never>((_, reject) => {
-    rejectOnExit = reject;
-  });
-
-  proc.on('error', (err) => {
-    log.error('opencode acp subprocess error', { error: err.message });
-    writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, mode: 'multi-round', timestamp: new Date().toISOString() });
-    if (!initialized && rejectOnInit) {
-      rejectOnInit(new Error(`[SPAWN_FAILED] ${err.message}`));
-    }
-  });
-
-  proc.on('exit', () => {
-    try { proc.stdin.destroy(); } catch {}
-    try { proc.stdout.destroy(); } catch {}
-  });
-
-  proc.on('exit', (code) => {
-    const phase = initialized ? 'running' : 'init';
-    writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode: code, phase, mode: 'multi-round', timestamp: new Date().toISOString() });
-    if (!initialized && code !== 0) {
-      log.error('opencode acp subprocess exited before initialize', { exitCode: code, mode: 'multi-round' });
-      if (rejectOnInit) {
-        rejectOnInit(new Error(`[SPAWN_FAILED] opencode process exited before initialize (exit code: ${code ?? 'signal'})`));
-      }
-    }
-    if (initialized && code !== 0 && rejectOnExit) {
-      log.error('opencode acp subprocess exited unexpectedly during multi-round session', { exitCode: code });
-      rejectOnExit(new Error(`[PROCESS_EXIT] opencode process exited unexpectedly (exit code: ${code ?? 'killed by signal'})`));
-      rejectOnExit = undefined;
-    }
-  });
-
-  // Close streams immediately on spawn failure to prevent EPIPE errors
-  proc.stdin.on('error', () => {});
-  proc.stdout.on('error', () => {});
-
-  const ensureKill = () => {
-    if (!procExited) {
-      procExited = true;
-      killProc(proc);
-      setTimeout(() => {
-        try {
-          proc.kill('SIGKILL');
-        } catch {
-          // already exited
-        }
-      }, 5000);
-    }
-  };
-
-  const input = Writable.toWeb(proc.stdin) as WritableStream<Uint8Array>;
-  const output = Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>;
-  const stream = ndJsonStream(input, output);
-
-  const cleanup = async () => {
-    if (options.onBeforeKill) {
-      try {
-        await options.onBeforeKill(cwd);
-      } catch (err) {
-        log.warn('onBeforeKill failed', { cwd, error: err instanceof Error ? err.message : String(err) });
-      }
-    }
-
-    const results = await Promise.allSettled([
-      stream.readable.cancel().catch(() => {}),
-      stream.writable.abort().catch(() => {}),
-    ]);
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        log.error('Cleanup failed', { index, reason: String(result.reason) });
-      }
-    });
-    ensureKill();
-  };
 
   const connection = new ClientSideConnection(
     (_agent) => ({
@@ -795,7 +612,7 @@ export async function createAcpConnection(
         return { outcome: { outcome: 'cancelled' } };
       },
     }),
-    stream
+    acpProcess.stream
   );
 
   const initResult = await Promise.race([
@@ -804,20 +621,19 @@ export async function createAcpConnection(
       clientInfo: { name: 'mohist', version: '0.1.0' },
     }),
     createTimeout(timeout),
-    spawnFailure,
+    acpProcess.spawnFailure,
   ]).catch(async (err: unknown) => {
-    await cleanup();
+    await acpProcess.cleanup();
     throw err;
   });
 
-  initialized = true;
-  rejectOnInit = undefined;
+  acpProcess.markInitialized();
 
   if (initResult === 'timeout') {
     const duration = Date.now() - connectionStartTime;
     log.error('ACP initialize timed out', { timeout, elapsedMs: duration });
     writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'initialize', timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
-    await cleanup();
+    await acpProcess.cleanup();
     throw new Error('Timed out during initialize');
   }
 
@@ -832,7 +648,7 @@ export async function createAcpConnection(
     const duration = Date.now() - connectionStartTime;
     log.error('ACP newSession timed out', { timeout, elapsedMs: duration });
     writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'newSession', timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
-    await cleanup();
+    await acpProcess.cleanup();
     throw new Error('Timed out during newSession');
   }
 
@@ -913,7 +729,7 @@ export async function createAcpConnection(
         }),
         createTimeout(timeout),
         abortPromise,
-        exitFailure,
+        acpProcess.exitFailure,
       ]);
 
       if (promptResult === 'aborted') {
@@ -924,7 +740,7 @@ export async function createAcpConnection(
         } catch {
           // cancel may fail
         }
-        await cleanup();
+        await acpProcess.cleanup();
         closed = true;
         return {
           text: agentText.slice(roundStartIndex),
@@ -978,7 +794,7 @@ export async function createAcpConnection(
           // ignore
         }
       }
-      await cleanup();
+      await acpProcess.cleanup();
     },
   };
 }
