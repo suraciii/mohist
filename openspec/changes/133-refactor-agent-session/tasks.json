@@ -83,13 +83,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is structural extraction only. The two functions still exist but delegate process management to AcpProcess. No consumer-facing API change.",
-      "attempts": 0,
+      "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        634190
+        634190,
+        416122
       ]
     },
     {
