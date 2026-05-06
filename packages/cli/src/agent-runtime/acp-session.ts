@@ -13,52 +13,18 @@ import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
+import type { SessionObserver, SessionContext, SessionState, ToolCallEvent } from './session-observer';
+import { WorkflowSessionObserver } from './session-observer';
+
+export type { SessionObserver, SessionContext, SessionState, ToolCallEvent };
 
 const log = Log.create({ service: 'acp-session' });
 
-function writeSessionLog(
-  workflowLogRepo: WorkflowLogRepo | undefined,
-  issueId: string | undefined,
-  eventType: string,
-  data: Record<string, unknown>
-): void {
-  if (!workflowLogRepo || !issueId) return;
-  try {
-    workflowLogRepo.insert(issueId, null, eventType, data);
-  } catch (e) {
-    log.warn('workflowLogRepo.insert failed', { eventType, issueId, error: e instanceof Error ? e.message : String(e) });
+class RawNotificationBridge implements SessionObserver {
+  constructor(private callback: (notification: SessionNotification) => void) {}
+  onRawNotification(_ctx: SessionContext, notification: SessionNotification): void {
+    this.callback(notification);
   }
-}
-
-export interface SessionObserver {
-  onSessionStart?(ctx: SessionContext): void;
-  onTextChunk?(ctx: SessionContext, text: string): void;
-  onToolCall?(ctx: SessionContext, event: ToolCallEvent): void;
-  onSessionEvent?(ctx: SessionContext, eventType: string, data: unknown): void;
-  onStateChange?(ctx: SessionContext, from: SessionState, to: SessionState): void;
-  onRawNotification?(ctx: SessionContext, notification: SessionNotification): void;
-}
-
-export interface SessionContext {
-  readonly issueId: string;
-  readonly issueNumber: number | undefined;
-  readonly projectId: string;
-  readonly executionId: string | undefined;
-  readonly acpSessionId: string;
-  readonly coderSessionId: string | undefined;
-  readonly stage: string | undefined;
-  readonly model: string | undefined;
-}
-
-export type SessionState = 'initializing' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'closed';
-
-export interface ToolCallEvent {
-  toolName: string;
-  state: 'started' | 'completed';
-  toolCallId: string;
-  title?: string;
-  rawInput?: unknown;
-  rawOutput?: unknown;
 }
 
 export interface AgentSessionOptions {
@@ -117,6 +83,74 @@ export function truncateAgentText(text: string): string {
   return `${head}\n\n...[truncated ${truncated} characters]...\n\n${tail}`;
 }
 
+function buildWorkflowObserver(
+  options: AgentSessionOptions,
+  meta?: { taskDescription?: string; title?: string; stage?: string },
+): WorkflowSessionObserver | undefined {
+  if (!options.eventBus && !options.workflowLogRepo && !options.sessionStreamLogRepo && !options.coderSessionRepo) {
+    return undefined;
+  }
+  return new WorkflowSessionObserver({
+    eventBus: options.eventBus,
+    workflowLogRepo: options.workflowLogRepo,
+    sessionStreamLogRepo: options.sessionStreamLogRepo,
+    coderSessionRepo: options.coderSessionRepo,
+    throttleMs: options.throttleMs,
+    taskDescription: meta?.taskDescription,
+    title: meta?.title,
+    stage: meta?.stage,
+  });
+}
+
+function makeCtx(options: AgentSessionOptions, acpSessionId: string, coderSessionId?: string): SessionContext {
+  return {
+    issueId: options.issueId ?? '',
+    issueNumber: options.issueNumber,
+    projectId: options.projectId ?? '',
+    executionId: options.executionId,
+    acpSessionId,
+    coderSessionId,
+    stage: options.stage,
+    model: options.model,
+  };
+}
+
+function dispatchSessionStart(observers: SessionObserver[], ctx: SessionContext): void {
+  for (const obs of observers) {
+    try { obs.onSessionStart?.(ctx); } catch {}
+  }
+}
+
+function dispatchTextChunk(observers: SessionObserver[], ctx: SessionContext, text: string): void {
+  for (const obs of observers) {
+    try { obs.onTextChunk?.(ctx, text); } catch {}
+  }
+}
+
+function dispatchSessionEvent(observers: SessionObserver[], ctx: SessionContext, eventType: string, data: unknown): void {
+  for (const obs of observers) {
+    try { obs.onSessionEvent?.(ctx, eventType, data); } catch {}
+  }
+}
+
+function dispatchStateChange(observers: SessionObserver[], ctx: SessionContext, from: SessionState, to: SessionState): void {
+  for (const obs of observers) {
+    try { obs.onStateChange?.(ctx, from, to); } catch {}
+  }
+}
+
+function dispatchRawNotification(observers: SessionObserver[], ctx: SessionContext, notification: SessionNotification): void {
+  for (const obs of observers) {
+    try { obs.onRawNotification?.(ctx, notification); } catch {}
+  }
+}
+
+function dispatchToolCall(observers: SessionObserver[], ctx: SessionContext, event: ToolCallEvent): void {
+  for (const obs of observers) {
+    try { obs.onToolCall?.(ctx, event); } catch {}
+  }
+}
+
 export async function runAcpSession(
   options: AgentSessionOptions
 ): Promise<AcpSessionResult> {
@@ -126,42 +160,38 @@ export async function runAcpSession(
     taskId,
     timeout = DEFAULT_TIMEOUT,
     issueId,
-    projectId,
-    executionId,
-    workflowLogRepo,
-    sessionStreamLogRepo,
-    eventBus,
-    throttleMs = 100,
-    coderSessionRepo,
-    issueNumber,
     opencodeBinPath,
     model,
   } = options;
 
   const taskText = task ?? '';
-  const sseIssueId = String(issueNumber ?? issueId ?? '');
-  let lastTextChunkTime = 0;
   const sessionStartTime = Date.now();
 
+  const wfObserver = buildWorkflowObserver(options, {
+    taskDescription: taskText.slice(0, 200),
+    title: options.title,
+    stage: options.stage,
+  });
+  const extraObservers = options.observers ?? [];
+  const observers: SessionObserver[] = wfObserver ? [wfObserver, ...extraObservers] : [...extraObservers];
+
   log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: taskText.slice(0, 100) });
-  writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: taskText.slice(0, 100), timestamp: new Date().toISOString() });
+  wfObserver?.writeSessionLog(issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: taskText.slice(0, 100), timestamp: new Date().toISOString() });
 
   const acpProcess = new AcpProcess({
     cwd,
     opencodeBinPath,
     onError: (err) => {
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, timestamp: new Date().toISOString() });
+      wfObserver?.writeSessionLog(issueId, 'acp_session_process_error', { error: err.message, timestamp: new Date().toISOString() });
     },
     onExit: ({ exitCode, phase }) => {
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode, phase, mode: 'single', timestamp: new Date().toISOString() });
+      wfObserver?.writeSessionLog(issueId, 'acp_session_process_exit', { exitCode, phase, mode: 'single', timestamp: new Date().toISOString() });
     },
   });
 
   let agentText = '';
   let agentTextTruncated = false;
   let sessionId = '';
-  let coderToolCallCounter = 0;
-  const coderToolCallIds = new Map<string, string[]>();
 
 
   const connection = new ClientSideConnection(
@@ -172,7 +202,6 @@ export async function runAcpSession(
           const eventType = update.sessionUpdate;
 
           if (eventType === 'agent_thought_chunk') {
-            // excluded from agentText — only agent_message_chunk contributes
           } else if (
             eventType === 'agent_message_chunk' &&
             update.content &&
@@ -186,71 +215,26 @@ export async function runAcpSession(
                 agentTextTruncated = true;
               }
             }
-            if (eventBus && executionId) {
-              const now = Date.now();
-              if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
-                eventBus.emit('coder_text_chunk', {
-                  issueId: sseIssueId,
-                  projectId: projectId ?? '',
-                  executionId,
-                  acpSessionId: sessionId,
-                  text: textChunk,
-                });
-                lastTextChunkTime = now;
-              }
-            }
+            const ctx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+            dispatchTextChunk(observers, ctx, textChunk);
           }
 
-          try {
-            if (SESSION_STREAM_EVENT_TYPES.has(eventType)) {
-              sessionStreamLogRepo?.insert(
-                issueId ?? '',
-                sessionId,
-                eventType,
-                update as unknown as Record<string, unknown>,
-              );
-            } else if (workflowLogRepo) {
-              workflowLogRepo.insert(
-                issueId ?? '',
-                sessionId || null,
-                eventType,
-                update as unknown as Record<string, unknown>,
-              );
-            }
-          } catch {}
+          {
+            const ctx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+            dispatchSessionEvent(observers, ctx, eventType, update);
+          }
 
-          if (
-            eventType === 'tool_call' &&
-            eventBus &&
-            executionId
-          ) {
+          if (eventType === 'tool_call') {
             const toolData = update as Record<string, unknown>;
             const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
             const toolStatus = (toolCallData?.status as string) ?? '';
-            const state = toolStatus === 'completed' ? 'completed' : 'started';
+            const state = toolStatus === 'completed' ? 'completed' as const : 'started' as const;
             const toolName = (toolCallData?.toolName as string) ?? '';
-            let toolCallId: string;
-            if (state === 'started') {
-              toolCallId = `${sessionId}-${toolName}-${coderToolCallCounter++}`;
-              const key = `${sessionId}-${toolName}`;
-              const list = coderToolCallIds.get(key) ?? [];
-              list.push(toolCallId);
-              coderToolCallIds.set(key, list);
-            } else {
-              const key = `${sessionId}-${toolName}`;
-              const list = coderToolCallIds.get(key) ?? [];
-              toolCallId = list.shift() ?? `${sessionId}-${toolName}-${coderToolCallCounter++}`;
-              if (list.length > 0) {
-                coderToolCallIds.set(key, list);
-              } else {
-                coderToolCallIds.delete(key);
-              }
-            }
-            eventBus.emit('coder_tool_call', {
-              issueId: sseIssueId,
-              projectId: projectId ?? '',
-              executionId,
-              acpSessionId: sessionId,
+            const toolCallId = wfObserver
+              ? wfObserver.nextToolCallId(sessionId, toolName, state)
+              : `${sessionId}-${toolName}-0`;
+            const ctx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+            dispatchToolCall(observers, ctx, {
               toolName,
               state,
               toolCallId,
@@ -282,8 +266,6 @@ export async function runAcpSession(
     setTimeout(() => resolve('timeout'), timeout)
   );
 
-  let coderSessionId: string | undefined;
-
   try {
     const initResult = await Promise.race([
       connection.initialize({
@@ -299,7 +281,7 @@ export async function runAcpSession(
     if (initResult === 'timeout') {
       const duration = Date.now() - sessionStartTime;
       log.error('ACP initialize timed out', { timeout, elapsedMs: duration });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'initialize', timeout, duration, timestamp: new Date().toISOString() });
+      wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', { phase: 'initialize', timeout, duration, timestamp: new Date().toISOString() });
       await acpProcess.cleanup();
       return { text: agentText, success: false, error: `Timed out during initialize` };
     }
@@ -317,7 +299,7 @@ export async function runAcpSession(
     if (sessionResult === 'timeout') {
       const duration = Date.now() - sessionStartTime;
       log.error('ACP newSession timed out', { timeout, elapsedMs: duration });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'newSession', timeout, duration, timestamp: new Date().toISOString() });
+      wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', { phase: 'newSession', timeout, duration, timestamp: new Date().toISOString() });
       await acpProcess.cleanup();
       return { text: agentText, success: false, error: `Timed out during newSession` };
     }
@@ -338,35 +320,8 @@ export async function runAcpSession(
       }
     }
 
-    if (coderSessionRepo && issueId) {
-      try {
-        const coderSession = coderSessionRepo.insert({
-          issueId,
-          acpSessionId: sessionId,
-          executionId,
-            taskDescription: taskText.slice(0, 200),
-          stage: options.stage,
-          title: options.title,
-        });
-        coderSessionId = coderSession.id;
-        log.info('coder_session row created', { coderSessionId, acpSessionId: sessionId });
-        if (eventBus) {
-          eventBus.emit('coder_session_started', {
-            issueId: sseIssueId,
-            projectId: projectId ?? '',
-            coderSessionId,
-            acpSessionId: sessionId,
-            executionId,
-            model,
-            stage: options.stage,
-          taskDescription: taskText.slice(0, 200),
-            title: options.title ?? null,
-          });
-        }
-      } catch (err) {
-        log.error('Failed to create coder_session row', { error: err instanceof Error ? err.message : String(err) });
-      }
-    }
+    const startCtx = makeCtx(options, sessionId);
+    dispatchSessionStart(observers, startCtx);
 
     const promptResult = await Promise.race([
       connection.prompt({
@@ -380,46 +335,30 @@ export async function runAcpSession(
     if (promptResult === 'timeout') {
       const duration = Date.now() - sessionStartTime;
       log.error('ACP prompt timed out', { sessionId, timeout, elapsedMs: duration });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, timestamp: new Date().toISOString() });
-      if (coderSessionRepo && coderSessionId) {
-        try {
-          coderSessionRepo.updateStatus(coderSessionId, 'failed');
-        } catch (err) {
-          log.error('Failed to update coder_session status', { error: err instanceof Error ? err.message : String(err) });
-        }
-      }
+      wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, timestamp: new Date().toISOString() });
+      const failCtx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+      dispatchStateChange(observers, failCtx, 'running', 'failed');
       try {
         await connection.cancel({ sessionId });
       } catch {
-        // cancel may fail if session already ended
       }
       await acpProcess.cleanup();
       return { text: agentText, success: false, error: `Timed out after ${timeout / 1000}s` };
     }
 
-    if (coderSessionRepo && coderSessionId) {
-      try {
-        coderSessionRepo.updateStatus(coderSessionId, 'completed');
-      } catch (err) {
-        log.error('Failed to update coder_session status to completed', { error: err instanceof Error ? err.message : String(err) });
-      }
-    }
+    const completedCtx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+    dispatchStateChange(observers, completedCtx, 'running', 'completed');
 
     const successDuration = Date.now() - sessionStartTime;
     log.info('ACP session completed successfully', { sessionId, elapsedMs: successDuration });
-    writeSessionLog(workflowLogRepo, issueId, 'acp_session_completed', { sessionId, success: true, duration: successDuration, timestamp: new Date().toISOString() });
+    wfObserver?.writeSessionLog(issueId, 'acp_session_completed', { sessionId, success: true, duration: successDuration, timestamp: new Date().toISOString() });
     return { text: agentText, success: true, acpSessionId: sessionId };
   } catch (err) {
     const failDuration = Date.now() - sessionStartTime;
     log.error('ACP session failed', { sessionId, elapsedMs: failDuration, error: err instanceof Error ? err.message : String(err) });
-    writeSessionLog(workflowLogRepo, issueId, 'acp_session_completed', { sessionId, success: false, duration: failDuration, error: err instanceof Error ? err.message : String(err), timestamp: new Date().toISOString() });
-    if (coderSessionRepo && coderSessionId) {
-      try {
-        coderSessionRepo.updateStatus(coderSessionId, 'failed');
-      } catch (updateErr) {
-        log.error('Failed to update coder_session status', { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
-      }
-    }
+    wfObserver?.writeSessionLog(issueId, 'acp_session_completed', { sessionId, success: false, duration: failDuration, error: err instanceof Error ? err.message : String(err), timestamp: new Date().toISOString() });
+    const failCtx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+    dispatchStateChange(observers, failCtx, 'running', 'failed');
     await acpProcess.cleanup();
     const message = err instanceof Error ? err.message : String(err);
     return { text: agentText, success: false, error: message };
@@ -446,13 +385,7 @@ export async function createAcpConnection(
     cwd,
     timeout = PER_ROUND_TIMEOUT,
     issueId,
-    projectId,
     executionId,
-    workflowLogRepo,
-    sessionStreamLogRepo,
-    eventBus,
-    throttleMs = 100,
-    coderSessionRepo,
     issueNumber,
     onSessionUpdate,
     opencodeBinPath,
@@ -462,33 +395,40 @@ export async function createAcpConnection(
     title,
   } = options;
 
-  const sseIssueId = String(issueNumber ?? issueId ?? '');
-  let lastTextChunkTime = 0;
   let agentText = '';
   let agentTextTruncated = false;
   let roundStartIndex = 0;
-  let coderToolCallCounter = 0;
-  const coderToolCallIds = new Map<string, string[]>();
-  let coderSessionId: string | undefined;
   let sessionId = '';
   let closed = false;
   const connectionStartTime = Date.now();
+
+  const wfObserver = buildWorkflowObserver(options, {
+    taskDescription: 'multi-round acp connection',
+    title,
+    stage,
+  });
+  const extraObservers: SessionObserver[] = [];
+  if (onSessionUpdate) {
+    extraObservers.push(new RawNotificationBridge(onSessionUpdate));
+  }
+  extraObservers.push(...(options.observers ?? []));
+  const observers: SessionObserver[] = wfObserver ? [wfObserver, ...extraObservers] : [...extraObservers];
 
   log.info('Spawning opencode acp subprocess for multi-round connection', {
     cwd,
     timeout,
     issueId: issueId?.slice(0, 8),
   });
-  writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), mode: 'multi-round', timestamp: new Date().toISOString() });
+  wfObserver?.writeSessionLog(issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), mode: 'multi-round', timestamp: new Date().toISOString() });
 
   const acpProcess = new AcpProcess({
     cwd,
     opencodeBinPath,
     onError: (err) => {
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_error', { error: err.message, mode: 'multi-round', timestamp: new Date().toISOString() });
+      wfObserver?.writeSessionLog(issueId, 'acp_session_process_error', { error: err.message, mode: 'multi-round', timestamp: new Date().toISOString() });
     },
     onExit: ({ exitCode, phase }) => {
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_process_exit', { exitCode, phase, mode: 'multi-round', timestamp: new Date().toISOString() });
+      wfObserver?.writeSessionLog(issueId, 'acp_session_process_exit', { exitCode, phase, mode: 'multi-round', timestamp: new Date().toISOString() });
     },
   });
 
@@ -501,7 +441,6 @@ export async function createAcpConnection(
           const eventType = update.sessionUpdate;
 
           if (eventType === 'agent_thought_chunk') {
-            // excluded from agentText — only agent_message_chunk contributes
           } else if (
             eventType === 'agent_message_chunk' &&
             update.content &&
@@ -515,75 +454,33 @@ export async function createAcpConnection(
                 agentTextTruncated = true;
               }
             }
+            const ctx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
             if (onSessionUpdate) {
-              onSessionUpdate(notification);
-            } else if (eventBus && executionId) {
-              const now = Date.now();
-              if (throttleMs === 0 || now - lastTextChunkTime >= throttleMs) {
-                eventBus.emit('coder_text_chunk', {
-                  issueId: sseIssueId,
-                  projectId: projectId ?? '',
-                  executionId,
-                  acpSessionId: sessionId,
-                  text: textChunk,
-                });
-                lastTextChunkTime = now;
-              }
+              dispatchRawNotification(observers, ctx, notification);
+            } else {
+              dispatchTextChunk(observers, ctx, textChunk);
             }
           } else if (onSessionUpdate) {
-            onSessionUpdate(notification);
+            const ctx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+            dispatchRawNotification(observers, ctx, notification);
           }
 
-          try {
-            if (SESSION_STREAM_EVENT_TYPES.has(eventType)) {
-              sessionStreamLogRepo?.insert(
-                issueId ?? '',
-                sessionId,
-                eventType,
-                update as unknown as Record<string, unknown>
-              );
-            } else if (workflowLogRepo) {
-              workflowLogRepo.insert(
-                issueId ?? '',
-                sessionId || null,
-                eventType,
-                update as unknown as Record<string, unknown>
-              );
-            }
-          } catch {}
+          {
+            const ctx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+            dispatchSessionEvent(observers, ctx, eventType, update);
+          }
 
-          if (!onSessionUpdate && eventType === 'tool_call' && eventBus && executionId) {
+          if (!onSessionUpdate && eventType === 'tool_call') {
             const toolData = update as Record<string, unknown>;
-            const toolCallData = toolData.toolCall as
-              | Record<string, unknown>
-              | undefined;
+            const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
             const toolStatus = (toolCallData?.status as string) ?? '';
-            const state = toolStatus === 'completed' ? 'completed' : 'started';
+            const state = toolStatus === 'completed' ? 'completed' as const : 'started' as const;
             const toolName = (toolCallData?.toolName as string) ?? '';
-            let toolCallId: string;
-            if (state === 'started') {
-              toolCallId = `${sessionId}-${toolName}-${coderToolCallCounter++}`;
-              const key = `${sessionId}-${toolName}`;
-              const list = coderToolCallIds.get(key) ?? [];
-              list.push(toolCallId);
-              coderToolCallIds.set(key, list);
-            } else {
-              const key = `${sessionId}-${toolName}`;
-              const list = coderToolCallIds.get(key) ?? [];
-              toolCallId =
-                list.shift() ??
-                `${sessionId}-${toolName}-${coderToolCallCounter++}`;
-              if (list.length > 0) {
-                coderToolCallIds.set(key, list);
-              } else {
-                coderToolCallIds.delete(key);
-              }
-            }
-            eventBus.emit('coder_tool_call', {
-              issueId: sseIssueId,
-              projectId: projectId ?? '',
-              executionId,
-              acpSessionId: sessionId,
+            const toolCallId = wfObserver
+              ? wfObserver.nextToolCallId(sessionId, toolName, state)
+              : `${sessionId}-${toolName}-0`;
+            const ctx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+            dispatchToolCall(observers, ctx, {
               toolName,
               state,
               toolCallId,
@@ -632,7 +529,7 @@ export async function createAcpConnection(
   if (initResult === 'timeout') {
     const duration = Date.now() - connectionStartTime;
     log.error('ACP initialize timed out', { timeout, elapsedMs: duration });
-    writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'initialize', timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
+    wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', { phase: 'initialize', timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
     await acpProcess.cleanup();
     throw new Error('Timed out during initialize');
   }
@@ -647,7 +544,7 @@ export async function createAcpConnection(
   if (sessionResult === 'timeout') {
     const duration = Date.now() - connectionStartTime;
     log.error('ACP newSession timed out', { timeout, elapsedMs: duration });
-    writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'newSession', timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
+    wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', { phase: 'newSession', timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
     await acpProcess.cleanup();
     throw new Error('Timed out during newSession');
   }
@@ -668,40 +565,8 @@ export async function createAcpConnection(
     }
   }
 
-  if (coderSessionRepo && issueId) {
-    try {
-      const coderSession = coderSessionRepo.insert({
-        issueId,
-        acpSessionId: sessionId,
-        executionId,
-        taskDescription: 'multi-round acp connection',
-        stage,
-        title,
-      });
-      coderSessionId = coderSession.id;
-      log.info('coder_session row created', {
-        coderSessionId,
-        acpSessionId: sessionId,
-      });
-      if (eventBus) {
-        eventBus.emit('coder_session_started', {
-          issueId: issueNumber ? String(issueNumber) : (issueId ?? ''),
-          projectId: projectId ?? '',
-          coderSessionId,
-          acpSessionId: sessionId,
-          executionId,
-          model,
-          stage,
-          taskDescription: 'multi-round acp connection',
-          title: title ?? null,
-        });
-      }
-    } catch (err) {
-      log.error('Failed to create coder_session row', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const startCtx = makeCtx(options, sessionId);
+  dispatchSessionStart(observers, startCtx);
 
   return {
     async prompt(text: string): Promise<AcpSessionResult> {
@@ -734,11 +599,10 @@ export async function createAcpConnection(
 
       if (promptResult === 'aborted') {
         log.info('ACP prompt aborted by signal', { sessionId });
-        writeSessionLog(workflowLogRepo, issueId, 'acp_session_aborted', { sessionId, mode: 'multi-round', timestamp: new Date().toISOString() });
+        wfObserver?.writeSessionLog(issueId, 'acp_session_aborted', { sessionId, mode: 'multi-round', timestamp: new Date().toISOString() });
         try {
           await connection.cancel({ sessionId });
         } catch {
-          // cancel may fail
         }
         await acpProcess.cleanup();
         closed = true;
@@ -753,18 +617,12 @@ export async function createAcpConnection(
       if (promptResult === 'timeout') {
         const duration = Date.now() - connectionStartTime;
         log.error('ACP prompt timed out', { sessionId, timeout, elapsedMs: duration });
-        writeSessionLog(workflowLogRepo, issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
-        if (coderSessionRepo && coderSessionId) {
-          try {
-            coderSessionRepo.updateStatus(coderSessionId, 'failed');
-          } catch {
-            // ignore
-          }
-        }
+        wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', { phase: 'prompt', sessionId, timeout, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
+        const failCtx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+        dispatchStateChange(observers, failCtx, 'running', 'failed');
         try {
           await connection.cancel({ sessionId });
         } catch {
-          // cancel may fail
         }
         return {
           text: agentText.slice(roundStartIndex),
@@ -786,14 +644,9 @@ export async function createAcpConnection(
       closed = true;
       const duration = Date.now() - connectionStartTime;
       log.info('ACP connection closed', { sessionId, elapsedMs: duration });
-      writeSessionLog(workflowLogRepo, issueId, 'acp_session_completed', { sessionId, success: true, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
-      if (coderSessionRepo && coderSessionId) {
-        try {
-          coderSessionRepo.updateStatus(coderSessionId, 'completed');
-        } catch {
-          // ignore
-        }
-      }
+      wfObserver?.writeSessionLog(issueId, 'acp_session_completed', { sessionId, success: true, duration, mode: 'multi-round', timestamp: new Date().toISOString() });
+      const closeCtx = makeCtx(options, sessionId, wfObserver?.coderSessionId);
+      dispatchStateChange(observers, closeCtx, 'running', 'completed');
       await acpProcess.cleanup();
     },
   };
