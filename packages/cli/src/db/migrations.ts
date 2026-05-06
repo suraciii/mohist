@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 22;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -156,10 +156,6 @@ export function initializeDatabase(db: DatabaseManager): void {
     migrateToVersion11(db);
   }
 
-  if (currentVersion < 12) {
-    migrateToVersion12(db);
-  }
-
   if (currentVersion < 13) {
     migrateToVersion13(db);
   }
@@ -194,6 +190,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 21) {
     migrateToVersion21(db);
+  }
+
+  if (currentVersion < 22) {
+    migrateToVersion22(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -458,37 +458,6 @@ function migrateToVersion11(db: DatabaseManager): void {
       }
     }
     setSchemaVersion(db, 11);
-  });
-}
-
-const CREATE_AGENT_SESSION_MESSAGE_TABLE = `
-CREATE TABLE IF NOT EXISTS agent_session_message (
-  id            TEXT PRIMARY KEY,
-  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
-  session_id    TEXT NOT NULL,
-  role          TEXT NOT NULL,
-  content       TEXT,
-  tool_calls    TEXT,
-  tool_call_id  TEXT,
-  tool_name     TEXT,
-  tool_result   TEXT,
-  step_index    INTEGER NOT NULL,
-  message_index INTEGER NOT NULL,
-  created_at    TEXT NOT NULL
-);
-`;
-
-const CREATE_AGENT_SESSION_MESSAGE_INDEXES = [
-  'CREATE INDEX IF NOT EXISTS idx_agent_session_message_issue_step ON agent_session_message(issue_id, step_index, message_index);',
-];
-
-function migrateToVersion12(db: DatabaseManager): void {
-  db.transaction(() => {
-    db.exec(CREATE_AGENT_SESSION_MESSAGE_TABLE);
-    for (const indexSql of CREATE_AGENT_SESSION_MESSAGE_INDEXES) {
-      db.exec(indexSql);
-    }
-    setSchemaVersion(db, 12);
   });
 }
 
@@ -960,5 +929,13 @@ function migrateToVersion21(db: DatabaseManager): void {
     }
 
     setSchemaVersion(db, 21);
+  });
+}
+
+function migrateToVersion22(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec('DROP INDEX IF EXISTS idx_agent_session_message_issue_step');
+    db.exec('DROP TABLE IF EXISTS agent_session_message');
+    setSchemaVersion(db, 22);
   });
 }
