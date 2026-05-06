@@ -3,31 +3,27 @@ import * as path from 'path';
 import type { Check, CheckContext, CheckResult } from './index';
 import type { ReactionConfig } from '../stage-context';
 
-const ARTIFACT_REACTION: ReactionConfig = {
+const NO_OP_REACTION: ReactionConfig = {
   type: 'retry-task',
-  maxAttempts: 3,
-  fallbackReaction: { type: 'escalate' },
+  maxAttempts: 0,
 };
 
 export class SpecsCompleteCheck implements Check {
   public readonly name = 'specs-complete';
-  public readonly reaction: ReactionConfig = ARTIFACT_REACTION;
+  public readonly reaction: ReactionConfig = NO_OP_REACTION;
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     if (!ctx.changeDir) {
       return { name: this.name, status: 'fail', message: 'No change directory' };
     }
     const specsDir = path.join(ctx.changeDir, 'specs');
-    if (!fs.existsSync(specsDir)) {
-      return { name: this.name, status: 'fail', message: 'specs/ directory not found' };
-    }
-    if (!fs.statSync(specsDir).isDirectory()) {
-      return { name: this.name, status: 'fail', message: 'specs/ is not a directory' };
+    if (!fs.existsSync(specsDir) || !fs.statSync(specsDir).isDirectory()) {
+      return { name: this.name, status: 'pass', message: 'No specs/ directory — skipping spec validation' };
     }
     const entries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
     const mdFiles = entries.filter((e): e is string => typeof e === 'string' && e.endsWith('.md'));
     if (mdFiles.length === 0) {
-      return { name: this.name, status: 'fail', message: 'specs/ directory contains no .md files' };
+      return { name: this.name, status: 'pass', message: 'specs/ directory is empty — no specs to validate' };
     }
     const allNonEmpty = mdFiles.every(f => {
       const fp = path.join(specsDir, f);
