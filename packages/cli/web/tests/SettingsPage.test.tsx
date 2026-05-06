@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from './test-utils'
 import { SettingsPage } from '../src/components/SettingsPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import React from 'react'
 
 const mockProviders = [
@@ -38,10 +38,45 @@ vi.mock('../src/hooks/useQueries', async () => {
     useDeleteProvider: vi.fn(),
     useSaveProvider: vi.fn(),
     useTestProvider: vi.fn(),
+    useModel: vi.fn(),
+    useSetModel: vi.fn(),
+    useOpencodeModel: vi.fn(),
+    useUpdateOpencodeModel: vi.fn(),
+    useStageModels: vi.fn(),
+    useSetStageModels: vi.fn(),
+    useOpencodeModels: vi.fn(),
+    useLogLevel: vi.fn(),
+    useSetLogLevel: vi.fn(),
+    useSystemInfo: vi.fn(),
+    useRebuildSystem: vi.fn(),
+    useAgentRuntime: vi.fn(),
+    useSetAgentRuntime: vi.fn(),
   }
 })
 
-const { useProviders, useDeleteProvider, useSaveProvider, useTestProvider } = await import('../src/hooks/useQueries')
+vi.mock('../src/hooks/useModels', () => ({
+  useModels: vi.fn(() => ({ data: [], isLoading: false, error: null })),
+}))
+
+const {
+  useProviders,
+  useDeleteProvider,
+  useSaveProvider,
+  useTestProvider,
+  useModel,
+  useSetModel,
+  useOpencodeModel,
+  useUpdateOpencodeModel,
+  useStageModels,
+  useSetStageModels,
+  useOpencodeModels,
+  useLogLevel,
+  useSetLogLevel,
+  useSystemInfo,
+  useRebuildSystem,
+  useAgentRuntime,
+  useSetAgentRuntime,
+} = await import('../src/hooks/useQueries')
 
 function createMockQueryClient() {
   return new QueryClient({
@@ -52,12 +87,20 @@ function createMockQueryClient() {
   })
 }
 
-function renderWithQueryClient(ui: React.ReactElement) {
+function renderWithQueryClient(
+  ui: React.ReactElement,
+  initialEntries = ['/settings/ai'],
+) {
   const queryClient = createMockQueryClient()
   return render(
-    <MemoryRouter>
-      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-    </MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
+      <QueryClientProvider client={queryClient}>
+        <Routes>
+          <Route path="/settings/:section" element={ui} />
+          <Route path="/settings" element={ui} />
+        </Routes>
+      </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 
@@ -80,66 +123,135 @@ beforeEach(() => {
     mutate: vi.fn(),
     isPending: false,
   })
+  ;(useModel as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { model: 'openai/gpt-4' },
+    isLoading: false,
+    error: null,
+  })
+  ;(useSetModel as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  })
+  ;(useOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { model: null },
+    isLoading: false,
+    error: null,
+  })
+  ;(useUpdateOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  })
+  ;(useStageModels as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { stageModels: null },
+    isLoading: false,
+    error: null,
+  })
+  ;(useSetStageModels as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  })
+  ;(useOpencodeModels as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: ['openai/gpt-4', 'anthropic/claude-3-opus'],
+    isLoading: false,
+    error: null,
+  })
+  ;(useLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { level: 'INFO' },
+    isLoading: false,
+    error: null,
+  })
+  ;(useSetLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  })
+  ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: null,
+    isLoading: false,
+    error: null,
+  })
+  ;(useRebuildSystem as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  })
+  ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: {
+      timeout: 1800000,
+      stageTimeout: 3600000,
+      taskTimeout: 600000,
+      maxConcurrent: 8,
+      maxGracePeriods: 2,
+      pollInterval: 30000,
+    },
+    isLoading: false,
+    error: null,
+  })
+  ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  })
 })
 
 describe('SettingsPage', () => {
-  describe('Providers Tab', () => {
-    it('should render Providers tab by default', () => {
+  describe('AI Tab', () => {
+    it('should render AI tab by default', () => {
       renderWithQueryClient(<SettingsPage />)
 
       expect(screen.getByText('Settings')).toBeInTheDocument()
-      expect(screen.getByText('Providers')).toBeInTheDocument()
-      expect(screen.getByText('General')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'AI' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Agent' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'System' })).toBeInTheDocument()
     })
 
-    it('should display Connected group with provider count', () => {
+    it('should display Connected Providers group', () => {
       renderWithQueryClient(<SettingsPage />)
-      expect(screen.getByText(/Connected \(1\)/)).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Connected Providers' })[0]).toBeInTheDocument()
     })
 
-    it('should display Recommended group with provider count', () => {
+    it('should display Available providers count', () => {
       renderWithQueryClient(<SettingsPage />)
-      expect(screen.getByText(/Recommended \(\d+\)/)).toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: /Available/ })[0]).toBeInTheDocument()
     })
 
-    it('should display Add Custom Provider button', () => {
+    it('should display Add button for custom providers', () => {
       renderWithQueryClient(<SettingsPage />)
-      expect(screen.getByText('Add Custom Provider')).toBeInTheDocument()
+      expect(screen.getAllByText('Add')[0]).toBeInTheDocument()
     })
   })
 
   describe('Tab switching', () => {
-    it('should switch to General tab when clicked', () => {
+    it('should switch to Agent tab when clicked', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      fireEvent.click(screen.getByText('General'))
+      fireEvent.click(screen.getByRole('button', { name: 'Agent' }))
 
-      expect(screen.getByText('General settings coming soon.')).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Agent Runtime' })[0]).toBeInTheDocument()
     })
 
-    it('should switch back to Providers tab when clicked', () => {
+    it('should switch back to AI tab when clicked', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      fireEvent.click(screen.getByText('General'))
-      expect(screen.getByText('General settings coming soon.')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Agent' }))
+      expect(screen.getAllByRole('heading', { name: 'Agent Runtime' })[0]).toBeInTheDocument()
 
-      fireEvent.click(screen.getByText('Providers'))
-      expect(screen.getByText(/Connected \(1\)/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'AI' }))
+      expect(screen.getAllByRole('heading', { name: 'Connected Providers' })[0]).toBeInTheDocument()
     })
 
     it('should highlight active tab', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      const generalTab = screen.getByText('General')
-      const providersTab = screen.getByText('Providers')
+      const aiTab = screen.getByRole('button', { name: 'AI' })
+      const agentTab = screen.getByRole('button', { name: 'Agent' })
 
-      expect(providersTab.closest('button')).toHaveClass('border-blue-600', 'text-blue-600')
-      expect(generalTab.closest('button')).not.toHaveClass('border-blue-600')
+      expect(aiTab).toHaveClass('bg-blue-50')
+      expect(aiTab).toHaveClass('text-blue-700')
+      expect(agentTab).not.toHaveClass('bg-blue-50')
 
-      fireEvent.click(generalTab)
+      fireEvent.click(agentTab)
 
-      expect(generalTab.closest('button')).toHaveClass('border-blue-600', 'text-blue-600')
-      expect(providersTab.closest('button')).not.toHaveClass('border-blue-600')
+      expect(agentTab).toHaveClass('bg-blue-50')
+      expect(agentTab).toHaveClass('text-blue-700')
+      expect(aiTab).not.toHaveClass('bg-blue-50')
     })
   })
 
