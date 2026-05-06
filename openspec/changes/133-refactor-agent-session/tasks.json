@@ -53,11 +53,15 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is a type-level refactor only. No behavior change. The SessionObserver interface can be a placeholder (just the interface definition) at this stage — it gets implemented in T-004.",
-      "attempts": 0,
+      "attempts": 2,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        626138,
+        432469
+      ]
     },
     {
       "id": "T-003",
