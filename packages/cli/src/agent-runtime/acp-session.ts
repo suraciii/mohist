@@ -33,9 +33,40 @@ function writeSessionLog(
   }
 }
 
-export interface AcpSessionOptions {
+export interface SessionObserver {
+  onSessionStart?(ctx: SessionContext): void;
+  onTextChunk?(ctx: SessionContext, text: string): void;
+  onToolCall?(ctx: SessionContext, event: ToolCallEvent): void;
+  onSessionEvent?(ctx: SessionContext, eventType: string, data: unknown): void;
+  onStateChange?(ctx: SessionContext, from: SessionState, to: SessionState): void;
+  onRawNotification?(ctx: SessionContext, notification: SessionNotification): void;
+}
+
+export interface SessionContext {
+  readonly issueId: string;
+  readonly issueNumber: number | undefined;
+  readonly projectId: string;
+  readonly executionId: string | undefined;
+  readonly acpSessionId: string;
+  readonly coderSessionId: string | undefined;
+  readonly stage: string | undefined;
+  readonly model: string | undefined;
+}
+
+export type SessionState = 'initializing' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'closed';
+
+export interface ToolCallEvent {
+  toolName: string;
+  state: 'started' | 'completed';
+  toolCallId: string;
+  title?: string;
+  rawInput?: unknown;
+  rawOutput?: unknown;
+}
+
+export interface AgentSessionOptions {
   cwd: string;
-  task: string;
+  task?: string;
   taskId?: string;
   timeout?: number;
   issueId?: string;
@@ -49,6 +80,8 @@ export interface AcpSessionOptions {
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
+  signal?: AbortSignal;
+  observers?: SessionObserver[];
   onProcessSpawned?: (proc: import('child_process').ChildProcess) => void;
   stage?: string;
   model?: string;
@@ -96,7 +129,7 @@ function killProc(proc: import('child_process').ChildProcess): void {
 }
 
 export async function runAcpSession(
-  options: AcpSessionOptions
+  options: AgentSessionOptions
 ): Promise<AcpSessionResult> {
   const {
     cwd,
@@ -116,12 +149,13 @@ export async function runAcpSession(
     model,
   } = options;
 
+  const taskText = task ?? '';
   const sseIssueId = String(issueNumber ?? issueId ?? '');
   let lastTextChunkTime = 0;
   const sessionStartTime = Date.now();
 
-  log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: task.slice(0, 100) });
-  writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: task.slice(0, 100), timestamp: new Date().toISOString() });
+  log.info('Spawning opencode acp subprocess', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: taskText.slice(0, 100) });
+  writeSessionLog(workflowLogRepo, issueId, 'acp_session_start', { cwd, timeout, issueId: issueId?.slice(0, 8), taskId, promptPreview: taskText.slice(0, 100), timestamp: new Date().toISOString() });
 
   const resolvedBinPath = opencodeBinPath || resolveOpencodeBinPath() || 'opencode';
 
@@ -407,7 +441,7 @@ export async function runAcpSession(
           issueId,
           acpSessionId: sessionId,
           executionId,
-          taskDescription: task.slice(0, 200),
+            taskDescription: taskText.slice(0, 200),
           stage: options.stage,
           title: options.title,
         });
@@ -422,7 +456,7 @@ export async function runAcpSession(
             executionId,
             model,
             stage: options.stage,
-            taskDescription: task.slice(0, 200),
+          taskDescription: taskText.slice(0, 200),
             title: options.title ?? null,
           });
         }
@@ -434,7 +468,7 @@ export async function runAcpSession(
     const promptResult = await Promise.race([
       connection.prompt({
         sessionId,
-        prompt: [{ type: 'text', text: task }],
+        prompt: [{ type: 'text', text: taskText }],
       }),
       timeoutPromise,
       exitFailure,
@@ -491,26 +525,6 @@ export async function runAcpSession(
   }
 }
 
-export interface AcpConnectionOptions {
-  cwd: string;
-  timeout?: number;
-  issueId?: string;
-  projectId?: string;
-  executionId?: string;
-  workflowLogRepo?: WorkflowLogRepo;
-  sessionStreamLogRepo?: SessionStreamLogRepo;
-  eventBus?: EventBus;
-  throttleMs?: number;
-  coderSessionRepo?: CoderSessionRepo;
-  issueNumber?: number;
-  onSessionUpdate?: (notification: SessionNotification) => void;
-  opencodeBinPath?: string;
-  signal?: AbortSignal;
-  model?: string;
-  stage?: string;
-  title?: string;
-}
-
 export interface AcpConnection {
   prompt(text: string): Promise<AcpSessionResult>;
   close(): Promise<void>;
@@ -523,7 +537,7 @@ function createTimeout(ms: number): Promise<'timeout'> {
 }
 
 export async function createAcpConnection(
-  options: AcpConnectionOptions
+  options: AgentSessionOptions
 ): Promise<AcpConnection> {
   const {
     cwd,

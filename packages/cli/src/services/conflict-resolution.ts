@@ -1,5 +1,5 @@
 import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
-import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
+import { createAcpConnection, type AgentSessionOptions } from '../agent-runtime/acp-session';
 import type { IssueRepo } from '../db/issue-repo';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
@@ -30,7 +30,7 @@ export async function resolveConflictsViaAgent(
     return { success: false, error: 'Issue not found for conflict resolution' };
   }
 
-  const acpOptions: AcpConnectionOptions = {
+  const acpOptions: AgentSessionOptions = {
     cwd: worktreePath,
     issueId: issue.id,
     projectId,

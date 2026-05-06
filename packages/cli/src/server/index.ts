@@ -23,7 +23,7 @@ import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import { Stage, IssueStatus } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
-import { createAcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
+import { createAcpConnection, type AgentSessionOptions } from '../agent-runtime/acp-session';
 import type { MergeEntry } from '../git/merge-queue';
 import { Log } from '../util/log';
 import { getVersionInfo } from '../version';
@@ -159,7 +159,7 @@ async function main(): Promise<void> {
         return { success: false, error: 'Issue not found for build fix' };
       }
 
-      const acpOptions: AcpConnectionOptions = {
+      const acpOptions: AgentSessionOptions = {
         cwd: worktreePath,
         issueId: refreshedIssue.id,
         projectId: entry.projectId,

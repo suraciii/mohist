@@ -4,7 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Stage } from '../types';
 import { buildArtifactPrompt, buildSelfReviewPrompt } from '../agents/artifact-prompt';
-import { createAcpConnection, type AcpConnection, type AcpConnectionOptions } from '../agent-runtime/acp-session';
+import { createAcpConnection, type AcpConnection, type AgentSessionOptions } from '../agent-runtime/acp-session';
 import { readReportFile } from './utils';
 import { Log } from '../util/log';
 import { BaseStageRunner } from './base-stage-runner';
@@ -90,7 +90,7 @@ export class PlanStageRunner extends BaseStageRunner {
 
     const completedSteps = [...resumeSteps];
 
-    const connectionOptions: AcpConnectionOptions = {
+    const connectionOptions: AgentSessionOptions = {
       ...acpOptions,
       issueId: issue.id,
       projectId: issue.projectId,
@@ -330,7 +330,7 @@ function emitRoundStart(
   eventBus: import('../services/event-bus').EventBus | undefined,
   roundType: string,
   roundIndex: number,
-  acpOptions: AcpConnectionOptions,
+  acpOptions: AgentSessionOptions,
   projectId: string,
 ): void {
   if (!eventBus) return;

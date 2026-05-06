@@ -3,7 +3,7 @@ import type { StageRunner } from './check-stage-runner';
 import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo } from './stage-context';
 import type { CheckpointManager } from './checkpoint-manager';
 import type { EventBus } from '../services/event-bus';
-import type { AcpConnectionOptions } from '../agent-runtime/acp-session';
+import type { AgentSessionOptions } from '../agent-runtime/acp-session';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
@@ -60,7 +60,7 @@ export class WorkflowEngine {
     this.stageExecutionRepo = options.stageExecutionRepo;
   }
 
-  private buildContext(issue: Issue, acpOptions: AcpConnectionOptions): StageContext {
+  private buildContext(issue: Issue, acpOptions: AgentSessionOptions): StageContext {
     return {
       issue,
       acpOptions: {
@@ -84,7 +84,7 @@ export class WorkflowEngine {
     };
   }
 
-  async run(issue: Issue, acpOptions: AcpConnectionOptions): Promise<PipelineResult> {
+  async run(issue: Issue, acpOptions: AgentSessionOptions): Promise<PipelineResult> {
     if (this.signal?.aborted) {
       return { completed: false, stage: issue.stage, message: 'Agent stopped by user' };
     }
