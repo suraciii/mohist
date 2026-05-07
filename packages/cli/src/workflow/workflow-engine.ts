@@ -8,6 +8,8 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
+import type { ConfigInfo } from '../config/config-schema';
+import { resolveStageModel } from '../config/model-resolution';
 
 export interface PipelineResult {
   completed: boolean;
@@ -29,6 +31,7 @@ export interface WorkflowEngineOptions {
   sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
   stageExecutionRepo?: StageExecutionRepo;
+  config?: ConfigInfo;
 }
 
 export class WorkflowEngine {
@@ -44,6 +47,7 @@ export class WorkflowEngine {
   private sessionStreamLogRepo?: SessionStreamLogRepo;
   private coderSessionRepo?: CoderSessionRepo;
   private stageExecutionRepo?: StageExecutionRepo;
+  private config?: ConfigInfo;
 
   constructor(options: WorkflowEngineOptions) {
     this.runners = options.runners;
@@ -58,14 +62,17 @@ export class WorkflowEngine {
     this.sessionStreamLogRepo = options.sessionStreamLogRepo;
     this.coderSessionRepo = options.coderSessionRepo;
     this.stageExecutionRepo = options.stageExecutionRepo;
+    this.config = options.config;
   }
 
   private buildContext(issue: Issue, acpOptions: AgentSessionOptions): StageContext {
+    const resolvedModel = this.config ? resolveStageModel(issue.stage, this.config) : undefined;
     return {
       issue,
       acpOptions: {
         ...acpOptions,
         signal: this.signal,
+        ...(resolvedModel !== undefined ? { model: resolvedModel } : {}),
         ...(this.coderSessionRepo ? { coderSessionRepo: this.coderSessionRepo } : {}),
         ...(this.workflowLogRepo ? { workflowLogRepo: this.workflowLogRepo } : {}),
         ...(this.sessionStreamLogRepo ? { sessionStreamLogRepo: this.sessionStreamLogRepo } : {}),

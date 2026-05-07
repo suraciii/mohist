@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement resolveStageModel utility",
+      "spec": "openspec/changes/135-fix-coder-model-stage-models-pipeline/proposal.md",
+      "description": "Create a pure function resolveStageModel(stage, config) that implements the priority chain: config.opencode.stageModels[stage] > config.opencode.model > undefined. Export it from the config layer so both pipeline and non-pipeline code can use it.",
+      "acceptanceCriteria": [
+        "resolveStageModel('plan', { opencode: { model: 'm1', stageModels: { plan: 'm2' } } }) returns 'm2'",
+        "resolveStageModel('build', { opencode: { model: 'm1', stageModels: { plan: 'm2' } } }) returns 'm1'",
+        "resolveStageModel('check', {}) returns undefined",
+        "resolveStageModel('plan', { opencode: { model: 'm1' } }) returns 'm1'",
+        "resolveStageModel('Plan', { opencode: { model: 'm1', stageModels: { plan: 'm2' } } }) returns undefined (case-sensitive)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/config/model-resolution.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Place next to config-loader.ts. Keep it a pure function with no side effects. Stage key must match exactly (case-sensitive). Issue.stage enum values are capitalized ('Plan', 'Build', 'Check') but stageModels keys should use lowercase ('plan', 'build', 'check') for consistency. The resolver should normalize or the caller should ensure correct casing.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        276217
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Wire ConfigInfo into WorkflowEngine and resolve model in buildContext",
+      "spec": "openspec/specs/workflow-engine/spec.md",
+      "description": "Add optional config: ConfigInfo to WorkflowEngineOptions. In buildContext, call resolveStageModel(issue.stage, config) and write the result into acpOptions.model before passing the context to stage runners.",
+      "acceptanceCriteria": [
+        "WorkflowEngineOptions accepts optional config field",
+        "buildContext injects resolved model into acpOptions.model when config is provided",
+        "buildContext leaves acpOptions.model unchanged when config is absent (backward compatible)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/workflow/workflow-engine.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Config field must be optional so existing tests continue to work.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        114138
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Pass config through AgentRunnerService pipeline entry points",
+      "spec": "openspec/specs/agent-runtime/spec.md",
+      "description": "In executeStartPipelineTask and executeResumePipelineTask, pass this.llmConfig (ConfigInfo) into the WorkflowEngine constructor so buildContext can resolve the stage model.",
+      "acceptanceCriteria": [
+        "executeStartPipelineTask passes this.llmConfig as config to WorkflowEngine",
+        "executeResumePipelineTask passes this.llmConfig as config to WorkflowEngine",
+        "When llmConfig is undefined, WorkflowEngine is constructed without config (graceful fallback)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/services/agent-runner-service.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "AgentRunnerService already holds llmConfig; just forward it. Note: llmConfig is a legacy name — it is actually the full ConfigInfo, not just LLM config. Future refactor may rename it to config.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        68160
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Forward model into RalphExecutorContext in build-stage-runner",
+      "spec": "openspec/specs/ralph-task-execution/spec.md",
+      "description": "When constructing RalphExecutor in build-stage-runner.ts, pass model: acpOptions.model into the RalphExecutorContext so each build task uses the resolved stage model.",
+      "acceptanceCriteria": [
+        "RalphExecutor is constructed with model: acpOptions.model",
+        "When acpOptions.model is undefined, RalphExecutorContext.model remains undefined (backward compatible)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/workflow/build-stage-runner.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "RalphExecutorContext.model is already defined as optional; just wire the value.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        59308
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Wire model into non-pipeline ACP sessions",
+      "spec": "openspec/specs/pipeline-model/spec.md",
+      "description": "In server/index.ts fixBuildErrors callback and conflict-resolution.ts resolveConflictsViaAgent, call load() to read ConfigInfo, extract config.opencode.model, and inject it into the AgentSessionOptions so merge-queue fixes and conflict resolution use the configured model.",
+      "acceptanceCriteria": [
+        "fixBuildErrors callback passes model into acpOptions",
+        "resolveConflictsViaAgent passes model into acpOptions",
+        "When config.opencode.model is absent, model is undefined (backward compatible)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/server/index.ts, src/services/conflict-resolution.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "These paths are outside WorkflowEngine so they read config directly. load() is cached; no I/O overhead. Recovery pipeline (recoverBuildStageIssue) does not need separate wiring — it enqueues resume-pipeline which will naturally go through executeResumePipelineTask (T-003).",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        153312
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Add runtime visibility: populate coder_session.model and log model_selected",
+      "spec": "openspec/specs/coder-session-tracking/spec.md",
+      "description": "In WorkflowSessionObserver.onSessionStart, pass ctx.model into coderSessionRepo.insert so the DB record includes the resolved model. In AgentSession.create, after setSessionConfigOption('model') succeeds, call wfObserver.writeSessionLog with eventType 'model_selected' so workflow_log captures which model was chosen.",
+      "acceptanceCriteria": [
+        "coderSessionRepo.insert receives model: ctx.model",
+        "AgentSession.create writes 'model_selected' to workflow_log after successful setSessionConfigOption",
+        "When model is undefined, no model_selected log is written and coder_session.model is null",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "src/agent-runtime/session-observer.ts, src/agent-runtime/agent-session.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Both changes are in the observer/session layer; no changes to DB schema needed.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        83291
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Write tests for model resolution and pipeline wiring",
+      "spec": "openspec/specs/workflow-engine/spec.md",
+      "description": "Add unit tests for resolveStageModel covering all priority combinations. Add integration tests verifying that WorkflowEngine.buildContext injects the correct model into acpOptions for each stage, and that AgentRunnerService forwards config to WorkflowEngine.",
+      "acceptanceCriteria": [
+        "resolveStageModel unit tests cover stage override, global fallback, and undefined cases",
+        "WorkflowEngine.buildContext test verifies model injection for each stage",
+        "All new tests pass",
+        "Existing test suite still passes",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "tests/config/model-resolution.test.ts, tests/workflow/workflow-engine.test.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "Follow existing test conventions in packages/cli/tests/.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        381759
+      ]
+    }
+  ]
+}

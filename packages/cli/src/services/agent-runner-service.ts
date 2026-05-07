@@ -1009,6 +1009,7 @@ export class AgentRunnerService {
         workflowLogRepo: this.workflowLogRepo,
         sessionStreamLogRepo: this.sessionStreamLogRepo,
         stageExecutionRepo: this.stageExecutionRepo,
+        config: load(),
       });
 
       const abortPromise = new Promise<never>((_resolve, reject) => {
@@ -1485,4 +1486,3 @@ export class AgentRunnerService {
     };
   }
 }
-
