@@ -174,11 +174,14 @@
         "T-002",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "These tests protect the highest-risk non-visibility behavior: no zombie ACP processes and no silent model override regression.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        314889
+      ]
     },
     {
       "id": "T-007",
