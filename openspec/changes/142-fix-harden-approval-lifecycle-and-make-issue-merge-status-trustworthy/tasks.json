@@ -106,9 +106,9 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Do not backfill historical rows to merged; the goal is to expose untrusted completion state.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
