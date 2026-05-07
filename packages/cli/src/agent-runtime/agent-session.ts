@@ -301,7 +301,7 @@ export class AgentSession {
           }
         }
         await acpProcess.cleanup();
-        throw new Error('Timed out during initialize');
+        throw new Error('[INIT_TIMEOUT] ACP initialize timed out');
       }
 
       log.info('ACP initialized, creating session');
@@ -323,7 +323,7 @@ export class AgentSession {
           }
         }
         await acpProcess.cleanup();
-        throw new Error('Timed out during newSession');
+        throw new Error('[NEWSESSION_TIMEOUT] ACP newSession timed out');
       }
 
       session._sessionId = sessionResult.sessionId;
@@ -353,9 +353,8 @@ export class AgentSession {
       }
     }
 
-    if (session._wfObserver?.coderSessionId) {
-      session._stateMachine = new SessionStateMachine(
-        'running',
+    if (session._wfObserver?.coderSessionId && options.coderSessionRepo) {
+      session._stateMachine.attachDb(
         options.coderSessionRepo,
         session._wfObserver.coderSessionId,
       );
