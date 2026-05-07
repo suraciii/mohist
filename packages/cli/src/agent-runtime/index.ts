@@ -9,3 +9,4 @@ export { WorkflowSessionObserver } from './session-observer';
 export type { WorkflowSessionObserverDeps } from './session-observer';
 export { AcpProcess } from './acp-process';
 export type { AcpProcessOptions } from './acp-process';
+export { SessionStateMachine, VALID_TRANSITIONS } from './session-state';

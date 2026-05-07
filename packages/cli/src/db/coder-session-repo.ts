@@ -14,6 +14,7 @@ export interface CoderSession {
   coderType: string | null;
   stage: string | null;
   title: string | null;
+  processPid: number | null;
 }
 
 interface CoderSessionRow {
@@ -29,6 +30,7 @@ interface CoderSessionRow {
   coder_type: string | null;
   stage: string | null;
   title: string | null;
+  process_pid: number | null;
 }
 
 function rowToCoderSession(row: CoderSessionRow): CoderSession {
@@ -45,6 +47,7 @@ function rowToCoderSession(row: CoderSessionRow): CoderSession {
     coderType: row.coder_type,
     stage: row.stage,
     title: row.title,
+    processPid: row.process_pid,
   };
 }
 
@@ -57,6 +60,7 @@ export interface CreateCoderSessionData {
   coderType?: string;
   stage?: string;
   title?: string;
+  processPid?: number | null;
 }
 
 export interface SessionWithIssueInfo {
@@ -129,9 +133,9 @@ export class CoderSessionRepo {
     const now = new Date().toISOString();
 
     this.db.run(
-      `INSERT INTO coder_session (id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at, model, coder_type, stage, title)
-       VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?, ?)`,
-      [id, data.issueId, data.acpSessionId, data.executionId ?? null, data.taskDescription ?? null, now, data.model ?? null, data.coderType ?? null, data.stage ?? null, data.title ?? null]
+      `INSERT INTO coder_session (id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at, model, coder_type, stage, title, process_pid)
+       VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?, ?, ?)`,
+      [id, data.issueId, data.acpSessionId, data.executionId ?? null, data.taskDescription ?? null, now, data.model ?? null, data.coderType ?? null, data.stage ?? null, data.title ?? null, data.processPid ?? null]
     );
 
     const row = this.db.get<CoderSessionRow>(
@@ -181,5 +185,20 @@ export class CoderSessionRepo {
       [issueId]
     );
     return rows.map(rowToCoderSession);
+  }
+
+  findAllRunning(): CoderSession[] {
+    const rows = this.db.all<CoderSessionRow>(
+      "SELECT * FROM coder_session WHERE status = 'running' ORDER BY created_at ASC",
+      []
+    );
+    return rows.map(rowToCoderSession);
+  }
+
+  updateProcessPid(id: string, pid: number): void {
+    this.db.run(
+      'UPDATE coder_session SET process_pid = ? WHERE id = ?',
+      [pid, id]
+    );
   }
 }

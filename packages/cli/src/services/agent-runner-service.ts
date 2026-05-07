@@ -280,8 +280,21 @@ export class AgentRunnerService {
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active })
       .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog);
 
+    const runningSessionIssueIds = new Set<string>();
+    try {
+      const runningSessions = this.coderSessionRepo.findAllRunning();
+      for (const session of runningSessions) {
+        runningSessionIssueIds.add(session.issueId);
+      }
+    } catch (err) {
+      log.error('Failed to query running coder_sessions during orphan scan', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     const orphans = activeIssues.filter(issue => {
       if (this.runningSlots.has(issue.id)) return false;
+      if (runningSessionIssueIds.has(issue.id)) return false;
       if (issue.mergeState) return false;
       if (issue.approvalState?.status === 'awaiting') return false;
       return true;

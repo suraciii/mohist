@@ -10,6 +10,7 @@ import type {
 import { AcpProcess } from './acp-process';
 import type { SessionObserver, SessionContext, SessionState, ToolCallEvent } from './session-observer';
 import { WorkflowSessionObserver } from './session-observer';
+import { SessionStateMachine } from './session-state';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
@@ -93,14 +94,14 @@ export class AgentSession {
   private _connection!: ClientSideConnection;
   private _observers: SessionObserver[];
   private _wfObserver: WorkflowSessionObserver | undefined;
+  private _stateMachine: SessionStateMachine;
   private _sessionId = '';
   private _agentText = '';
   private _agentTextTruncated = false;
-  private _state: SessionState = 'initializing';
   private _closed = false;
   private _sessionStartTime: number;
 
-  get state(): SessionState { return this._state; }
+  get state(): SessionState { return this._stateMachine.current; }
   get acpSessionId(): string { return this._sessionId; }
 
   private constructor(
@@ -114,6 +115,7 @@ export class AgentSession {
     this._observers = observers;
     this._wfObserver = wfObserver;
     this._sessionStartTime = Date.now();
+    this._stateMachine = new SessionStateMachine('initializing');
   }
 
   private setupConnection(): void {
@@ -198,6 +200,7 @@ export class AgentSession {
       coderSessionId: this._wfObserver?.coderSessionId,
       stage: this._options.stage,
       model: this._options.model,
+      processPid: this._acpProcess.process.pid ?? undefined,
     };
   }
 
@@ -316,9 +319,17 @@ export class AgentSession {
       throw err;
     }
 
-    session._state = 'running';
+    session._stateMachine.transition('running');
     const startCtx = session.makeCtx();
     for (const obs of observers) { try { obs.onSessionStart?.(startCtx); } catch {} }
+
+    if (session._wfObserver?.coderSessionId) {
+      session._stateMachine = new SessionStateMachine(
+        'running',
+        options.coderSessionRepo,
+        session._wfObserver.coderSessionId,
+      );
+    }
 
     return session;
   }
@@ -372,8 +383,9 @@ export class AgentSession {
         this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_timeout', {
           phase: 'prompt', sessionId: this._sessionId, timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
         });
+        try { this._stateMachine.transition('timeout'); } catch {}
         const failCtx = this.makeCtx();
-        for (const obs of this._observers) { try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch {} }
+        for (const obs of this._observers) { try { obs.onStateChange?.(failCtx, 'running', 'timeout'); } catch {} }
         try { await this._connection.cancel({ sessionId: this._sessionId }); } catch {}
         return {
           text: this._agentText.slice(roundStartIndex),
@@ -397,6 +409,7 @@ export class AgentSession {
         sessionId: this._sessionId, success: false, duration,
         error: err instanceof Error ? err.message : String(err), mode: 'agent-session', timestamp: new Date().toISOString(),
       });
+      try { this._stateMachine.transition('failed'); } catch {}
       const failCtx = this.makeCtx();
       for (const obs of this._observers) { try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch {} }
       await this._acpProcess.cleanup();
@@ -408,6 +421,7 @@ export class AgentSession {
   async cancel(): Promise<void> {
     if (this._closed) return;
     try { await this._connection.cancel({ sessionId: this._sessionId }); } catch {}
+    try { this._stateMachine.transition('cancelled'); } catch {}
     const ctx = this.makeCtx();
     for (const obs of this._observers) { try { obs.onStateChange?.(ctx, 'running', 'cancelled'); } catch {} }
   }
@@ -420,6 +434,7 @@ export class AgentSession {
     this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_completed', {
       sessionId: this._sessionId, success: true, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
     });
+    try { this._stateMachine.transition('completed'); } catch {}
     const ctx = this.makeCtx();
     for (const obs of this._observers) { try { obs.onStateChange?.(ctx, 'running', 'completed'); } catch {} }
     await this._acpProcess.cleanup();
