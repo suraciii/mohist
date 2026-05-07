@@ -99,11 +99,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Single attribute addition to the div wrapping ChangesPanel at IssueDetailPage.tsx line 234 area.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        36126
+      ]
     }
   ]
 }
