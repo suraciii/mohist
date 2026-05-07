@@ -3,6 +3,7 @@ import type { ReactionConfig } from '../stage-context';
 import { Stage } from '../../types';
 import { parseVerdict, extractFixSuggestions, readReportFile } from '../utils';
 import { Log } from '../../util/log';
+import { buildAutoFixPrompt, buildReVerifyPrompt } from '../../agents/artifact-prompt';
 
 const log = Log.create({ service: 'ai-review-check' });
 
@@ -14,8 +15,9 @@ export interface AiReviewCheckOptions {
 export class AiReviewCheck implements Check {
   public readonly name = 'ai-review';
   public readonly reaction: ReactionConfig = {
-    type: 'escalate',
-    escalateTarget: Stage.Plan,
+    type: 'auto-fix',
+    maxAttempts: 1,
+    fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build },
   };
   private reviewOutputPath: string;
 
@@ -58,5 +60,72 @@ export class AiReviewCheck implements Check {
         fixSuggestions,
       },
     };
+  }
+
+  async fix(ctx: CheckContext): Promise<void> {
+    const reviewReport = readReportFile(ctx.changeDir, this.reviewOutputPath);
+    if (!reviewReport) {
+      log.warn('AiReviewCheck auto-fix skipped: review report missing', {
+        issueNumber: ctx.issue.number,
+      });
+      return;
+    }
+
+    try {
+      const { withSession } = await import('../../agent-runtime/agent-session');
+      const autoFixPrompt = buildAutoFixPrompt(ctx.issue, ctx.changeDir, reviewReport, this.reviewOutputPath);
+
+      log.info('AiReviewCheck auto-fix: spawning coder agent', {
+        issueNumber: ctx.issue.number,
+      });
+
+      await withSession({
+        cwd: ctx.acpOptions.cwd,
+        task: autoFixPrompt,
+        taskId: `review-auto-fix-${ctx.issue.number}`,
+        issueId: ctx.issue.id,
+        projectId: ctx.projectId,
+        workflowLogRepo: ctx.acpOptions?.workflowLogRepo,
+        eventBus: ctx.eventBus,
+        coderSessionRepo: ctx.acpOptions?.coderSessionRepo,
+        sessionStreamLogRepo: ctx.acpOptions?.sessionStreamLogRepo,
+        issueNumber: ctx.issue.number,
+        opencodeBinPath: ctx.acpOptions?.opencodeBinPath,
+        model: ctx.acpOptions?.model,
+        stage: 'check',
+        timeout: 10 * 60 * 1000,
+        title: 'Auto-fix: review findings',
+      });
+
+      const reVerifyPrompt = buildReVerifyPrompt(ctx.issue, ctx.changeDir, reviewReport);
+      const reVerifyResult = await withSession({
+        cwd: ctx.acpOptions.cwd,
+        task: reVerifyPrompt,
+        taskId: `review-reverify-${ctx.issue.number}`,
+        issueId: ctx.issue.id,
+        projectId: ctx.projectId,
+        workflowLogRepo: ctx.acpOptions?.workflowLogRepo,
+        eventBus: ctx.eventBus,
+        coderSessionRepo: ctx.acpOptions?.coderSessionRepo,
+        sessionStreamLogRepo: ctx.acpOptions?.sessionStreamLogRepo,
+        issueNumber: ctx.issue.number,
+        opencodeBinPath: ctx.acpOptions?.opencodeBinPath,
+        model: ctx.acpOptions?.model,
+        stage: 'check',
+        timeout: 10 * 60 * 1000,
+        title: 'Re-review after auto-fix',
+      });
+
+      log.info('AiReviewCheck auto-fix completed', {
+        issueNumber: ctx.issue.number,
+        success: reVerifyResult.success,
+        textLength: reVerifyResult.text?.length ?? 0,
+      });
+    } catch (err) {
+      log.error('AiReviewCheck auto-fix failed', {
+        issueNumber: ctx.issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }

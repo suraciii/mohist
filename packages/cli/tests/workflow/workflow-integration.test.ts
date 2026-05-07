@@ -280,14 +280,16 @@ describe('Workflow Integration Tests', () => {
       expect(result.escalateToStage).toBe(Stage.Build);
     });
 
-    it('CHECK ai-review failure escalates to PLAN', async () => {
+    it('CHECK ai-review failure auto-fixes before falling back to BUILD', async () => {
+      let fixCalled = false;
       const checkRunner = new SimpleRunner({
         checks: [
           new PassCheck('build-test-passed'),
           new FailCheck('ai-review-passed', {
-            type: 'escalate',
-            escalateTarget: Stage.Plan,
-          }),
+            type: 'auto-fix',
+            maxAttempts: 1,
+            fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build },
+          }, undefined, async () => { fixCalled = true; }),
         ],
         nextStage: Stage.Done,
         stage: Stage.Check,
@@ -296,7 +298,8 @@ describe('Workflow Integration Tests', () => {
       const result = await checkRunner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Plan);
+      expect(result.escalateToStage).toBe(Stage.Build);
+      expect(fixCalled).toBe(true);
     });
 
     it('engine handles CHECK→Build escalation and continues pipeline', async () => {
