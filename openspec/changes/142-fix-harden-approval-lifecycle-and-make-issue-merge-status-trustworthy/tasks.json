@@ -108,11 +108,12 @@
       ],
       "passes": true,
       "notes": "Do not backfill historical rows to merged; the goal is to expose untrusted completion state.",
-      "attempts": 1,
+      "attempts": 2,
       "order": 999999,
       "error": null,
       "durations": [
-        1896896
+        1896896,
+        267006
       ]
     },
     {
