@@ -194,6 +194,9 @@ export const api = {
   getCoderSessions: (number: number) =>
     request<import('./types').CoderSessionItem[]>(`/issues/${number}/coder-sessions`),
 
+  getCoderSessionDetail: (number: number, sessionId: string) =>
+    request<import('./types').CoderSessionDetail>(`/issues/${number}/coder-sessions/${sessionId}`),
+
   getCurrentProject: async () => {
     const res = await fetch(`${BASE}/projects/current`, {
       headers: { 'Content-Type': 'application/json' },
