@@ -195,6 +195,14 @@ export class CoderSessionRepo {
     return rows.map(rowToCoderSession);
   }
 
+  findById(id: string): CoderSession | null {
+    const row = this.db.get<CoderSessionRow>(
+      'SELECT * FROM coder_session WHERE id = ?',
+      [id]
+    );
+    return row ? rowToCoderSession(row) : null;
+  }
+
   findAllRunning(): CoderSession[] {
     const rows = this.db.all<CoderSessionRow>(
       "SELECT * FROM coder_session WHERE status = 'running' ORDER BY created_at ASC",

@@ -307,6 +307,96 @@ export interface CoderSessionItem {
   workflowLogs: WorkflowLogItem[]
 }
 
+export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' | 'legacy-missing'
+
+export interface SessionMetadata {
+  sessionId: string
+  issueId: string
+  acpSessionId: string
+  executionId: string | null
+  title: string | null
+  status: string
+  model: string | null
+  stage: string | null
+  createdAt: string
+  completedAt: string | null
+}
+
+export interface TextPart {
+  id: string
+  type: 'text'
+  text: string
+  startedAt: string
+  completedAt: string | null
+}
+
+export interface ReasoningPart {
+  id: string
+  type: 'reasoning'
+  text: string
+  startedAt: string
+  completedAt: string | null
+}
+
+export interface ToolPart {
+  id: string
+  type: 'tool'
+  tool: {
+    toolCallId: string
+    toolName: string
+    status: 'started' | 'completed' | 'failed'
+    title?: string
+    target?: string
+    input?: string
+    output?: string
+    error?: string
+    startedAt: string
+    completedAt?: string | null
+  }
+}
+
+export interface ErrorPart {
+  id: string
+  type: 'error'
+  message: string
+  kind: 'timeout' | 'failed' | 'cancelled' | 'recovery'
+  at: string
+}
+
+export type SessionPart = TextPart | ReasoningPart | ToolPart | ErrorPart
+
+export interface SessionTurn {
+  id: string
+  startedAt: string
+  completedAt: string | null
+  incomplete?: boolean
+  user: {
+    role: 'mohist'
+    text: string
+    kind: PromptKind
+    sentAt: string
+  }
+  assistant: SessionPart[]
+}
+
+export interface CoderSessionDetail {
+  id: string
+  acpSessionId: string
+  executionId: string | null
+  taskDescription: string | null
+  status: string
+  createdAt: string
+  completedAt: string | null
+  model: string | null
+  coderType: string | null
+  stage: string | null
+  title: string | null
+  metadata: SessionMetadata
+  turns: SessionTurn[]
+  incomplete: boolean
+  workflowLogs?: WorkflowLogItem[]
+}
+
 export interface ToolCallEntry {
   executionId: string
   toolName: string

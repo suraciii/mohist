@@ -11,7 +11,7 @@ import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
-import { SessionStreamLogRepo } from '../db/session-stream-log-repo';
+import { SessionStreamLogRepo, type SessionStreamLogEntry } from '../db/session-stream-log-repo';
 import { CoderSessionRepo } from '../db/coder-session-repo';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { CheckSuiteRepo } from '../db/check-suite-repo';
@@ -22,6 +22,7 @@ import { promisify } from 'util';
 import { Log } from '../util/log';
 import type { IssueQueueStatus } from '../services/agent-runner-service';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
+import { assembleSessionTranscript } from '../services/session-transcript-service';
 
 const log = Log.create({ service: 'issue' });
 
@@ -1748,6 +1749,119 @@ export function createIssueRoutes(
           })),
         };
       });
+
+      const response: ApiResponse = {
+        success: true,
+        data
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/coder-sessions/:sessionId', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const sessionId = c.req.param('sessionId');
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      if (!coderSessionRepo || !workflowLogRepo) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'CoderSessionRepo or WorkflowLogRepo not configured'
+        };
+        return c.json(response, 500);
+      }
+
+      const session = coderSessionRepo.findById(sessionId);
+      if (!session || session.issueId !== issue.id) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Coder session ${sessionId} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      let streamEvents: SessionStreamLogEntry[] = [];
+      if (sessionStreamLogRepo) {
+        streamEvents = sessionStreamLogRepo.findBySessionId(session.acpSessionId);
+      }
+
+      let fallbackLogs: Array<{ id: string; eventType: string; data: unknown; createdAt: string }> = [];
+      if (streamEvents.length === 0) {
+        const SESSION_STREAM_EVENT_TYPES = new Set([
+          'agent_thought_chunk',
+          'agent_message_chunk',
+          'tool_call',
+          'tool_call_update',
+          'user_message_chunk',
+        ]);
+        const rawFallbackLogs = workflowLogRepo.findBySessionId(session.acpSessionId);
+        fallbackLogs = rawFallbackLogs
+          .filter(l => SESSION_STREAM_EVENT_TYPES.has(l.eventType))
+          .map(l => ({
+            id: l.id,
+            eventType: l.eventType,
+            data: (() => { try { return JSON.parse(l.data); } catch { return l.data; } })(),
+            createdAt: l.createdAt,
+          }));
+      }
+
+      const transcript = assembleSessionTranscript(session, streamEvents);
+
+      const terminalStatuses = new Set(['completed', 'failed', 'timeout', 'cancelled']);
+      const isTerminal = terminalStatuses.has(session.status);
+
+      const data = {
+        id: session.id,
+        acpSessionId: session.acpSessionId,
+        executionId: session.executionId,
+        taskDescription: session.taskDescription,
+        status: session.status,
+        createdAt: session.createdAt,
+        completedAt: session.completedAt,
+        model: session.model,
+        coderType: session.coderType,
+        stage: session.stage,
+        title: session.title,
+        metadata: {
+          sessionId: session.id,
+          issueId: session.issueId,
+          acpSessionId: session.acpSessionId,
+          executionId: session.executionId,
+          title: session.title,
+          status: session.status,
+          model: session.model,
+          stage: session.stage,
+          createdAt: session.createdAt,
+          completedAt: isTerminal ? session.completedAt : null,
+        },
+        turns: transcript.turns,
+        incomplete: transcript.incomplete,
+        workflowLogs: fallbackLogs.length > 0 ? fallbackLogs : undefined,
+      };
 
       const response: ApiResponse = {
         success: true,
