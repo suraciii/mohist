@@ -4,7 +4,7 @@ import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { LlmConfig } from '../agent-runtime';
-import type { AgentSessionOptions } from '../agent-runtime/acp-session';
+import type { AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskType } from '../db/issue-task-queue-repo';
 import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner } from '../workflow';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';

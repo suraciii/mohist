@@ -23,9 +23,9 @@ import type { ChangeArtifactsManager } from '../src/workflow';
 import type { OpenSpecChange } from '../src/openspec/detector';
 import type { IssueRepo } from '../src/db/issue-repo';
 
-vi.mock('../src/agent-runtime/acp-session', () => ({
-  createAcpConnection: vi.fn(),
-  runAcpSession: vi.fn().mockResolvedValue({ success: true, text: '' }),
+vi.mock('../src/agent-runtime/agent-session', () => ({
+  AgentSession: { create: vi.fn() },
+  withSession: vi.fn().mockResolvedValue({ success: true, text: '' }),
 }));
 
 vi.mock('child_process', () => ({

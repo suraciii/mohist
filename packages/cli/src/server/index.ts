@@ -23,7 +23,7 @@ import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import { Stage, IssueStatus } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
-import { createAcpConnection, type AgentSessionOptions } from '../agent-runtime/acp-session';
+import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { MergeEntry } from '../git/merge-queue';
 import { Log } from '../util/log';
 import { getVersionInfo } from '../version';
@@ -197,15 +197,15 @@ async function main(): Promise<void> {
       ].join('\n');
 
       try {
-        const connection = await createAcpConnection(acpOptions);
+        const session = await AgentSession.create(acpOptions);
         try {
-          const result = await connection.prompt(prompt);
+          const result = await session.execute(prompt);
           if (!result.success) {
             return { success: false, error: result.error || 'Agent build fix session failed' };
           }
           return { success: true };
         } finally {
-          await connection.close().catch(() => {});
+          await session.close().catch(() => {});
         }
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

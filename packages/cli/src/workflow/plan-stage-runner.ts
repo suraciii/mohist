@@ -4,7 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Stage } from '../types';
 import { buildArtifactPrompt, buildSelfReviewPrompt } from '../agents/artifact-prompt';
-import { createAcpConnection, type AcpConnection, type AgentSessionOptions } from '../agent-runtime/acp-session';
+import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import { readReportFile } from './utils';
 import { Log } from '../util/log';
 import { BaseStageRunner } from './base-stage-runner';
@@ -117,10 +117,10 @@ export class PlanStageRunner extends BaseStageRunner {
       },
     };
 
-    let conn: AcpConnection | undefined;
+    let session: AgentSession | undefined;
 
     try {
-      conn = await createAcpConnection(connectionOptions);
+      session = await AgentSession.create(connectionOptions);
 
       for (const [index, task] of tasks.entries()) {
         if (completedSteps.includes(task.type)) {
@@ -177,7 +177,7 @@ export class PlanStageRunner extends BaseStageRunner {
         let attempts = 1;
 
         const prompt = task.buildPrompt(issue, changeDir);
-        const result = await conn.prompt(prompt);
+        const result = await session.execute(prompt);
 
         if (!result.success) {
           log.error('Plan task failed', { artifact: task.type, error: result.error });
@@ -190,7 +190,7 @@ export class PlanStageRunner extends BaseStageRunner {
             attempts,
             duration: Date.now() - taskStartTime,
           });
-          await conn.close();
+          await session.close();
           throw new Error(`Task "${task.label}" failed: ${result.error ?? 'unknown error'}`);
         }
 
@@ -213,7 +213,7 @@ export class PlanStageRunner extends BaseStageRunner {
           attempts++;
           emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'retrying', attempts, []);
 
-          const retryResult = await conn.prompt(retryPrompt);
+          const retryResult = await session.execute(retryPrompt);
 
           if (!retryResult.success) {
             log.error('Plan retry prompt failed', { artifact: task.type, error: retryResult.error });
@@ -226,7 +226,7 @@ export class PlanStageRunner extends BaseStageRunner {
               attempts,
               duration: Date.now() - taskStartTime,
             });
-            await conn.close();
+            await session.close();
             throw new Error(`Task "${task.label}" retry failed: ${retryResult.error ?? 'unknown error'}`);
           }
 
@@ -241,7 +241,7 @@ export class PlanStageRunner extends BaseStageRunner {
               attempts,
               duration: Date.now() - taskStartTime,
             });
-            await conn.close();
+            await session.close();
             throw new Error(`Artifact "${task.label}" not found after retry`);
           }
 
@@ -269,11 +269,11 @@ export class PlanStageRunner extends BaseStageRunner {
         );
       }
 
-      await conn.close();
+      await session.close();
     } catch (err) {
-      if (conn) {
+      if (session) {
         try {
-          await conn.close();
+          await session.close();
         } catch {
           // ignore cleanup errors
         }

@@ -5,8 +5,10 @@ import { PipelineCheckpointRepo } from '../src/db/pipeline-checkpoint-repo';
 import { Stage, type Issue } from '../src/types';
 import * as path from 'path';
 
-vi.mock('../src/agent-runtime/acp-session', () => ({
-  createAcpConnection: vi.fn(),
+vi.mock('../src/agent-runtime/agent-session', () => ({
+  AgentSession: Object.assign(vi.fn(), {
+    create: vi.fn(),
+  }),
 }));
 
 vi.mock('../src/openspec/ralph-executor', () => ({
@@ -73,7 +75,7 @@ vi.mock('child_process', () => ({
 
 import * as fs from 'fs';
 import { PlanStageRunner, type StageContext, createCheckpointManager, type ChangeArtifactsManager } from '../src/workflow';
-import { createAcpConnection } from '../src/agent-runtime/acp-session';
+import { AgentSession } from '../src/agent-runtime/agent-session';
 import { buildArtifactPrompt } from '../src/agents/artifact-prompt';
 
 function createMockIssue(overrides?: Partial<Issue>): Issue {
@@ -242,12 +244,12 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
   });
 
   function setupMockConn() {
-    const mockConn = {
-      prompt: vi.fn().mockResolvedValue({ text: 'ok', success: true, acpSessionId: 's1' }),
+    const mockSession = {
+      execute: vi.fn().mockResolvedValue({ text: 'ok', success: true, acpSessionId: 's1' }),
       close: vi.fn().mockResolvedValue(undefined),
     };
-    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
-    return mockConn;
+    (AgentSession as any).create.mockResolvedValue(mockSession);
+    return mockSession;
   }
 
   async function runPlanStage(issue: Issue, artifactManager: ChangeArtifactsManager) {
@@ -275,9 +277,9 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
       return false;
     });
 
-    const mockConn = {
-      prompt: vi.fn().mockImplementation(() => {
-        const callCount = mockConn.prompt.mock.calls.length;
+    const mockSession = {
+      execute: vi.fn().mockImplementation(() => {
+        const callCount = mockSession.execute.mock.calls.length;
         if (callCount >= 1) existingArtifacts.add(path.join(CHANGE_DIR, 'specs'));
         if (callCount >= 2) existingArtifacts.add(path.join(CHANGE_DIR, 'design.md'));
         if (callCount >= 3) existingArtifacts.add(path.join(CHANGE_DIR, 'tasks.json'));
@@ -286,7 +288,7 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
       }),
       close: vi.fn().mockResolvedValue(undefined),
     };
-    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+    (AgentSession as any).create.mockResolvedValue(mockSession);
 
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
@@ -299,7 +301,7 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
     expect(roundTypes).toContain('specs');
     expect(roundTypes).toContain('design');
     expect(roundTypes).toContain('tasks');
-    expect(mockConn.prompt).toHaveBeenCalledTimes(4);
+    expect(mockSession.execute).toHaveBeenCalledTimes(4);
   });
 
   it('should re-run round when checkpoint marks complete but artifact is missing', async () => {
@@ -313,30 +315,30 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
       return false;
     });
 
-    const mockConn = {
-      prompt: vi.fn().mockImplementation(() => {
+    const mockSession = {
+      execute: vi.fn().mockImplementation(() => {
         return Promise.resolve({ text: 'ok', success: true, acpSessionId: 's1' });
       }),
       close: vi.fn().mockResolvedValue(undefined),
     };
-    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+    (AgentSession as any).create.mockResolvedValue(mockSession);
 
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 
-    mockConn.prompt.mockImplementation(() => {
-      if (mockConn.prompt.mock.calls.length >= 1) {
+    mockSession.execute.mockImplementation(() => {
+      if (mockSession.execute.mock.calls.length >= 1) {
         existingArtifacts.add(path.join(CHANGE_DIR, 'proposal.md'));
       }
-      if (mockConn.prompt.mock.calls.length >= 2) {
+      if (mockSession.execute.mock.calls.length >= 2) {
         existingArtifacts.add(path.join(CHANGE_DIR, 'specs'));
       }
-      if (mockConn.prompt.mock.calls.length >= 3) {
+      if (mockSession.execute.mock.calls.length >= 3) {
         existingArtifacts.add(path.join(CHANGE_DIR, 'design.md'));
       }
-      if (mockConn.prompt.mock.calls.length >= 4) {
+      if (mockSession.execute.mock.calls.length >= 4) {
         existingArtifacts.add(path.join(CHANGE_DIR, 'tasks.json'));
       }
-      if (mockConn.prompt.mock.calls.length >= 5) {
+      if (mockSession.execute.mock.calls.length >= 5) {
         existingArtifacts.add(path.join(CHANGE_DIR, 'self-review.md'));
       }
       return Promise.resolve({ text: 'ok', success: true, acpSessionId: 's1' });
@@ -421,20 +423,20 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
       return false;
     });
 
-    let promptCallCount = 0;
-    const mockConn = {
-      prompt: vi.fn().mockImplementation(() => {
-        promptCallCount++;
-        if (promptCallCount <= 2) {
-          if (promptCallCount >= 1) existingArtifacts.add(path.join(CHANGE_DIR, 'proposal.md'));
-          if (promptCallCount >= 2) existingArtifacts.add(path.join(CHANGE_DIR, 'specs'));
+    let executeCallCount = 0;
+    const mockSession = {
+      execute: vi.fn().mockImplementation(() => {
+        executeCallCount++;
+        if (executeCallCount <= 2) {
+          if (executeCallCount >= 1) existingArtifacts.add(path.join(CHANGE_DIR, 'proposal.md'));
+          if (executeCallCount >= 2) existingArtifacts.add(path.join(CHANGE_DIR, 'specs'));
           return Promise.resolve({ text: 'ok', success: true, acpSessionId: 's1' });
         }
         return Promise.resolve({ success: false, error: 'agent failed', text: '', acpSessionId: 's1' });
       }),
       close: vi.fn().mockResolvedValue(undefined),
     };
-    (createAcpConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockConn);
+    (AgentSession as any).create.mockResolvedValue(mockSession);
 
     const artifactManager = createMockArtifactManager(CHANGE_DIR);
 

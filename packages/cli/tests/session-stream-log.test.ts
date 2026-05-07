@@ -4,7 +4,7 @@ import { initializeDatabase } from '../src/db/migrations';
 import { SessionStreamLogRepo } from '../src/db/session-stream-log-repo';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
-import { SESSION_STREAM_EVENT_TYPES } from '../src/agent-runtime/acp-session';
+const SESSION_STREAM_EVENT_TYPES = new Set(['agent_thought_chunk', 'agent_message_chunk', 'tool_call', 'tool_call_update', 'user_message_chunk']);
 
 describe('SessionStreamLogRepo', () => {
   let db: DatabaseManager;

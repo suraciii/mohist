@@ -70,7 +70,7 @@ export class CodeCompilesCheck implements Check {
 
   async fix(ctx: CheckContext): Promise<void> {
     try {
-      const { runAcpSession } = await import('../../agent-runtime/acp-session');
+      const { withSession } = await import('../../agent-runtime/agent-session');
       const prompt = [
         '## Task',
         '',
@@ -88,7 +88,7 @@ export class CodeCompilesCheck implements Check {
         '- Do NOT refactor or change unrelated code',
       ].join('\n');
 
-      await runAcpSession({
+      await withSession({
         cwd: this.worktreePath,
         task: prompt,
         taskId: `build-auto-fix-${ctx.issue.number}`,

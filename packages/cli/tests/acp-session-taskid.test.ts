@@ -31,7 +31,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
   PROTOCOL_VERSION: '0.1',
 }));
 
-import { runAcpSession } from '../src/agent-runtime/acp-session';
+import { withSession } from '../src/agent-runtime/agent-session';
 
 describe('ACP session taskId logging', () => {
   let workflowLogInsert: ReturnType<typeof vi.fn>;
@@ -51,7 +51,7 @@ describe('ACP session taskId logging', () => {
   }
 
   it('should log taskId in acp_session_start when provided', async () => {
-    const result = await runAcpSession({
+    const result = await withSession({
       cwd: '/tmp/test',
       task: 'some task prompt text',
       taskId: 'T-001',
@@ -67,7 +67,7 @@ describe('ACP session taskId logging', () => {
   });
 
   it('should have undefined taskId when not provided', async () => {
-    const result = await runAcpSession({
+    const result = await withSession({
       cwd: '/tmp/test',
       task: 'some task prompt text',
       workflowLogRepo: { insert: workflowLogInsert } as any,
@@ -84,7 +84,7 @@ describe('ACP session taskId logging', () => {
   it('should include promptPreview truncated to 100 characters', async () => {
     const longTask = 'x'.repeat(200);
 
-    await runAcpSession({
+    await withSession({
       cwd: '/tmp/test',
       task: longTask,
       taskId: 'T-002',

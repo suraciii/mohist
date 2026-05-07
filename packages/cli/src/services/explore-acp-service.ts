@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { runAcpSession, type AgentSessionOptions, type AcpSessionResult } from '../agent-runtime/acp-session';
+import { withSession, type AgentSessionOptions, type AcpSessionResult } from '../agent-runtime/agent-session';
 import { buildExplorePrompt } from '../agents/artifact-prompt';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueService } from './issue-service';
@@ -57,7 +57,7 @@ export class ExploreAcpService {
       loadAgentConfig(this.worktreePath),
     );
 
-    const result = await runAcpSession({
+    const result = await withSession({
       ...acpOptions,
       cwd: this.worktreePath,
       task: prompt,
@@ -89,7 +89,7 @@ export class ExploreAcpService {
       loadAgentConfig(this.worktreePath),
     );
 
-    const result = await runAcpSession({
+    const result = await withSession({
       ...acpOptions,
       cwd: this.worktreePath,
       task: prompt,

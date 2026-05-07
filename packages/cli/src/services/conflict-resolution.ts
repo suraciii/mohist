@@ -1,5 +1,5 @@
 import { buildConflictResolutionPrompt } from '../agents/artifact-prompt';
-import { createAcpConnection, type AgentSessionOptions } from '../agent-runtime/acp-session';
+import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { IssueRepo } from '../db/issue-repo';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
@@ -45,15 +45,15 @@ export async function resolveConflictsViaAgent(
   try {
     const prompt = buildConflictResolutionPrompt(issue, worktreePath, conflictFiles, loadAgentConfig(worktreePath));
 
-    const connection = await createAcpConnection(acpOptions);
+    const session = await AgentSession.create(acpOptions);
     try {
-      const result = await connection.prompt(prompt);
+      const result = await session.execute(prompt);
       if (!result.success) {
         return { success: false, error: result.error || 'Agent ACP session failed' };
       }
       return { success: true };
     } finally {
-      await connection.close().catch(() => {});
+      await session.close().catch(() => {});
     }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };

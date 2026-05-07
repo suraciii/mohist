@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { runAcpSession } from '../agent-runtime/acp-session';
+import { withSession } from '../agent-runtime/agent-session';
 import { SkillRepo, type Skill, type CreateSkillData } from '../db/skill-repo';
 import { SkillRunRepo, type SkillRun } from '../db/skill-run-repo';
 import { IssueService } from './issue-service';
@@ -172,7 +172,7 @@ export class SkillService {
     projectId: string,
     projectPath: string,
   ): void {
-    runAcpSession({
+    withSession({
       cwd: projectPath,
       task: skill.prompt,
       eventBus: this.eventBus,

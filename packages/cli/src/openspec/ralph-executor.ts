@@ -6,7 +6,8 @@ import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
 import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
 import type { AgentConfig } from '../workflow/workflow-loader';
-import { runAcpSession as _runAcpSession } from '../agent-runtime/acp-session';
+import { withSession } from '../agent-runtime/agent-session';
+import type { AgentSessionOptions, AcpSessionResult } from '../agent-runtime/agent-session';
 import { WorktreeManager } from '../git/worktree-manager';
 import { load as loadConfig, getAgentTimeoutConfig } from '../config/config-loader';
 import { Log } from '../util/log';
@@ -15,14 +16,16 @@ const execFileAsync = promisify(execFile);
 
 const log = Log.create({ service: 'ralph' });
 
-let _acpSessionRunner = _runAcpSession;
+type SessionRunner = (options: AgentSessionOptions) => Promise<AcpSessionResult>;
 
-export function setAcpSessionRunner(runner: typeof _runAcpSession): void {
+let _acpSessionRunner: SessionRunner = withSession;
+
+export function setAcpSessionRunner(runner: SessionRunner): void {
   _acpSessionRunner = runner;
 }
 
 export function resetAcpSessionRunner(): void {
-  _acpSessionRunner = _runAcpSession;
+  _acpSessionRunner = withSession;
 }
 import type { EventBus } from '../services/event-bus';
 import type { StageTaskResult } from '../workflow/stage-context';

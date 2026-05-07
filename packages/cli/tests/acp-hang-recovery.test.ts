@@ -39,7 +39,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
   PROTOCOL_VERSION: '0.1',
 }));
 
-import { runAcpSession } from '../src/agent-runtime/acp-session';
+import { withSession } from '../src/agent-runtime/agent-session';
 
 const HANG_CHECK_INTERVAL_MS = 30_000;
 
@@ -95,10 +95,10 @@ describe('ACP hang recovery', () => {
   }
 
   // Note: The following 4 hang-recovery tests are skipped because the
-  // runAcpSession implementation now uses real child_process.spawn and
+  // withSession implementation now uses real child_process.spawn and
   // stream-based ACP protocol, which doesn't work correctly with vitest's
   // fake timers. The tests would need to be rewritten with a different
-  // mocking strategy (e.g., mocking the entire runAcpSession module).
+  // mocking strategy (e.g., mocking the entire withSession module).
   it.skip('should emit coder_recovery_status with status=detected on idle', async () => {
     let callIdx = 0;
     mockPromptFn.mockImplementation(() => {
@@ -108,7 +108,7 @@ describe('ACP hang recovery', () => {
     });
     mockCancelFn.mockResolvedValue(undefined);
 
-    const sessionPromise = runAcpSession(makeSessionOptions());
+    const sessionPromise = withSession(makeSessionOptions());
 
     await flushMicrotasks();
     await vi.advanceTimersByTimeAsync(HANG_CHECK_INTERVAL_MS + 5000);
@@ -127,7 +127,7 @@ describe('ACP hang recovery', () => {
     mockPromptFn.mockReturnValue(new Promise(() => {}));
     mockCancelFn.mockResolvedValue(undefined);
 
-    const sessionPromise = runAcpSession(makeSessionOptions());
+    const sessionPromise = withSession(makeSessionOptions());
 
     await flushMicrotasks();
 
@@ -154,7 +154,7 @@ describe('ACP hang recovery', () => {
     mockPromptFn.mockReturnValue(new Promise(() => {}));
     mockCancelFn.mockReturnValue(new Promise(() => {}));
 
-    const sessionPromise = runAcpSession(makeSessionOptions());
+    const sessionPromise = withSession(makeSessionOptions());
 
     await flushMicrotasks();
     await vi.advanceTimersByTimeAsync(HANG_CHECK_INTERVAL_MS + 5_000 + 10_000);
@@ -177,7 +177,7 @@ describe('ACP hang recovery', () => {
   it('should complete normally without recovery events when no hang', async () => {
     mockPromptFn.mockResolvedValue(undefined);
 
-    const result = await runAcpSession(makeSessionOptions());
+    const result = await withSession(makeSessionOptions());
 
     expect(result.success).toBe(true);
     expect(getRecoveryEvents()).toHaveLength(0);
@@ -190,7 +190,7 @@ describe('ACP hang recovery', () => {
   it('should disable idle monitoring when hangIdleMs=0', async () => {
     mockPromptFn.mockReturnValue(new Promise(() => {}));
 
-    const sessionPromise = runAcpSession(makeSessionOptions({
+    const sessionPromise = withSession(makeSessionOptions({
       hangIdleMs: 0,
       timeout: 5_000,
     }));
@@ -216,7 +216,7 @@ describe('ACP hang recovery', () => {
     });
     mockCancelFn.mockResolvedValue(undefined);
 
-    const sessionPromise = runAcpSession(makeSessionOptions());
+    const sessionPromise = withSession(makeSessionOptions());
 
     await flushMicrotasks();
     await vi.advanceTimersByTimeAsync(HANG_CHECK_INTERVAL_MS + 5_000);
