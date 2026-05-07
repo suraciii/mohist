@@ -288,6 +288,10 @@ describe('Session Transcript API', () => {
         expect(response.status).toBe(200);
         expect(response.body.data.turns).toHaveLength(1);
         expect(response.body.data.workflowLogs).toBeDefined();
+        const assistantText = response.body.data.turns[0].assistant
+          .map((p: any) => p.text ?? '')
+          .join('');
+        expect(assistantText).toContain('Fallback text');
       });
     });
 

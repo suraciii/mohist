@@ -241,6 +241,8 @@ export class SessionTranscriptAssembler {
   private hasReceivedPrompt: boolean = false;
   private currentEventId: string = 'session';
   private partIndexByEventId: Map<string, number> = new Map();
+  private syntheticToolIdCounter = 0;
+  private pendingToolNames = new Map<string, string>();
 
   constructor(session: CoderSession) {
     this.session = {
@@ -318,6 +320,7 @@ export class SessionTranscriptAssembler {
     }
 
     if (eventType === 'tool_call') {
+      this.ensureToolCallId(data);
       const start = parseToolCallStart(data, createdAt);
       if (start) {
         this.handleToolCallStart(start);
@@ -440,9 +443,51 @@ export class SessionTranscriptAssembler {
     }
   }
 
+  private ensureToolCallId(data: Record<string, unknown>): void {
+    const d = getObject(data.toolCall) ?? data;
+    const hasId = typeof d.toolCallId === 'string' || typeof d.id === 'string' || typeof d.callId === 'string';
+    if (hasId) return;
+    const toolName = typeof d.toolName === 'string' ? d.toolName : (typeof d.name === 'string' ? d.name : 'unknown');
+    const status = typeof d.status === 'string' ? d.status : '';
+    const key = toolName;
+    if (status === 'completed' || status === 'failed') {
+      const pendingId = this.pendingToolNames.get(key);
+      if (pendingId) {
+        this.pendingToolNames.delete(key);
+        this.setToolCallIdOnData(data, pendingId);
+      } else {
+        const newId = `synthetic-${this.syntheticToolIdCounter++}`;
+        this.setToolCallIdOnData(data, newId);
+      }
+    } else {
+      const newId = `synthetic-${this.syntheticToolIdCounter++}`;
+      this.pendingToolNames.set(key, newId);
+      this.setToolCallIdOnData(data, newId);
+    }
+  }
+
+  private setToolCallIdOnData(data: Record<string, unknown>, id: string): void {
+    const toolCall = data.toolCall;
+    if (typeof toolCall === 'object' && toolCall !== null) {
+      (toolCall as Record<string, unknown>).toolCallId = id;
+    } else {
+      data.toolCallId = id;
+    }
+  }
+
   private handleToolCallStart(start: ToolCallStartData): void {
     if (!this.currentTurn) {
       this.ensureActiveTurn(start.createdAt);
+    }
+
+    const existing = this.toolPartsById.get(start.toolCallId);
+    if (existing) {
+      if (start.title !== undefined) existing.tool.title = start.title;
+      if (start.input !== undefined) existing.tool.input = start.input;
+      if (existing.tool.target === undefined && start.input) {
+        existing.tool.target = deriveToolTarget(start.toolName, start.input);
+      }
+      return;
     }
 
     const toolPart: ToolPart = {

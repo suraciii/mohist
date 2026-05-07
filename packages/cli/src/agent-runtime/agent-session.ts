@@ -173,6 +173,25 @@ export class AgentSession {
       }
     }
 
+    if (eventType === 'tool_call') {
+      const toolData = update as Record<string, unknown>;
+      const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
+      const toolStatus = (toolCallData?.status as string) ?? '';
+      const state = toolStatus === 'completed' ? 'completed' as const : 'started' as const;
+      const toolName = (toolCallData?.toolName as string) ?? '';
+      const existingToolCallId = (toolCallData?.toolCallId as string | undefined)
+        ?? (toolCallData?.id as string | undefined)
+        ?? (toolCallData?.callId as string | undefined);
+      const toolCallId = existingToolCallId ?? (this._wfObserver
+        ? this._wfObserver.nextToolCallId(this._sessionId, toolName, state)
+        : `${this._sessionId}-${toolName}-0`);
+      if (toolCallData && !existingToolCallId) {
+        toolCallData.toolCallId = toolCallId;
+      } else if (!toolCallData && !existingToolCallId) {
+        toolData.toolCall = { toolCallId };
+      }
+    }
+
     {
       const ctx = this.makeCtx();
       for (const obs of this._observers) {
@@ -199,9 +218,6 @@ export class AgentSession {
       const toolCallId = existingToolCallId ?? (this._wfObserver
         ? this._wfObserver.nextToolCallId(this._sessionId, toolName, state)
         : `${this._sessionId}-${toolName}-0`);
-      if (toolCallData && !existingToolCallId) {
-        toolCallData.toolCallId = toolCallId;
-      }
       const ctx = this.makeCtx();
       const event: ToolCallEvent = {
         toolName,
