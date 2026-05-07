@@ -231,6 +231,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
+              <div id="changes-panel">
               <ChangesPanel
                 files={diffData?.files ?? []}
                 commits={commitsData?.commits ?? []}
@@ -242,6 +243,7 @@ export function IssueDetailPage() {
                 setExpandedCommits={setExpandedCommits}
                 issueNumber={issueNumber}
               />
+            </div>
 
               <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">
