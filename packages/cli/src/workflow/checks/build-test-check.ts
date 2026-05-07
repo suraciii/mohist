@@ -200,7 +200,14 @@ export class BuildTestCheck implements Check {
 
     try {
       const { withSession } = await import('../../agent-runtime/agent-session');
+      const { createWorkflowSessionObservers } = await import('../../agent-runtime');
       const prompt = buildCheckAutoFixPrompt(buildLog);
+
+      const fixObservers = createWorkflowSessionObservers({
+        eventBus: ctx.eventBus,
+        stage: 'check',
+        title: 'Auto-fix: test failures',
+      });
 
       const result = await withSession({
         cwd: this.worktreePath,
@@ -208,15 +215,13 @@ export class BuildTestCheck implements Check {
         taskId: `check-auto-fix-${ctx.issue.number}`,
         issueId: ctx.issue.id,
         projectId: ctx.projectId,
-        workflowLogRepo: ctx.acpOptions?.workflowLogRepo,
-        eventBus: ctx.eventBus,
-        coderSessionRepo: ctx.acpOptions?.coderSessionRepo,
         issueNumber: ctx.issue.number,
         opencodeBinPath: ctx.acpOptions?.opencodeBinPath,
         model: ctx.acpOptions?.model,
         stage: 'check',
         timeout: 10 * 60 * 1000,
         title: 'Auto-fix: test failures',
+        observers: fixObservers,
         onBeforeKill: async (cwd: string) => {
           try {
             const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });

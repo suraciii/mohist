@@ -18,6 +18,7 @@ import { TasksValidCheck } from './checks/tasks-valid-check';
 import { SelfReviewPassedCheck } from './checks/self-review-passed-check';
 import { UserApprovalCheck } from './checks/user-approval-check';
 import { isCurrentStageApproval } from './issue-lifecycle';
+import { createWorkflowSessionObservers } from '../agent-runtime';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
@@ -91,6 +92,35 @@ export class PlanStageRunner extends BaseStageRunner {
 
     const completedSteps = [...resumeSteps];
 
+    const planBridgeObserver = {
+      onRawNotification(_ctx: import('../agent-runtime/session-observer').SessionContext, notification: import('@agentclientprotocol/sdk').SessionNotification) {
+        if (!ctx.eventBus) return;
+        try {
+          ctx.eventBus.emit('plan_session_update', {
+            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+            projectId: issue.projectId,
+            roundType: '',
+            roundIndex: 0,
+            sessionUpdate: notification.update.sessionUpdate,
+            data: notification.update as unknown,
+          });
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_session_update', {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      },
+    };
+
+    const wfObservers = createWorkflowSessionObservers({
+      eventBus: ctx.eventBus,
+      workflowLogRepo: ctx.workflowLogRepo,
+      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+      coderSessionRepo: ctx.coderSessionRepo,
+      stage: 'plan',
+      title: 'Plan stage',
+    }, [planBridgeObserver]);
+
     const connectionOptions: AgentSessionOptions = {
       ...acpOptions,
       issueId: issue.id,
@@ -99,23 +129,7 @@ export class PlanStageRunner extends BaseStageRunner {
       executionId: `plan-${issue.number}`,
       stage: 'plan',
       title: 'Plan stage',
-      onSessionUpdate: (_notification) => {
-        if (!eventBus) return;
-        try {
-          eventBus.emit('plan_session_update', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: issue.projectId,
-            roundType: '',
-            roundIndex: 0,
-            sessionUpdate: _notification.update.sessionUpdate,
-            data: _notification.update as unknown,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_session_update', {
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      },
+      observers: wfObservers,
     };
 
     let session: AgentSession | undefined;

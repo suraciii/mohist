@@ -9,6 +9,7 @@ import { loadAgentConfig } from '../workflow/workflow-loader';
 import { load as loadConfig } from '../config/config-loader';
 import { resolveStageModel } from '../config/model-resolution';
 import { Stage } from '../types';
+import { createWorkflowSessionObservers } from '../agent-runtime';
 
 export interface ConflictResolutionDeps {
   issueRepo: IssueRepo;
@@ -35,17 +36,23 @@ export async function resolveConflictsViaAgent(
 
   const config = loadConfig();
 
+  const wfObservers = createWorkflowSessionObservers({
+    eventBus,
+    workflowLogRepo,
+    sessionStreamLogRepo,
+    coderSessionRepo,
+    stage: 'conflict-resolution',
+    title: 'Conflict Resolution',
+  });
+
   const acpOptions: AgentSessionOptions = {
     cwd: worktreePath,
     issueId: issue.id,
     projectId,
-    workflowLogRepo,
-    sessionStreamLogRepo,
-    coderSessionRepo,
-    eventBus,
     issueNumber: issue.number,
     opencodeBinPath,
     model: resolveStageModel(Stage.Build, config),
+    observers: wfObservers,
   };
 
   try {

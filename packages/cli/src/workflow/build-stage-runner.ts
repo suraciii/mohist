@@ -11,6 +11,7 @@ import type { Check } from './checks';
 import { AllTasksCompleteCheck } from './checks/all-tasks-complete-check';
 import { CodeCompilesCheck } from './checks/code-compiles-check';
 import { Log } from '../util/log';
+import { createWorkflowSessionObservers } from '../agent-runtime';
 
 const log = Log.create({ service: 'workflow' });
 
@@ -39,7 +40,7 @@ export class BuildStageRunner extends BaseStageRunner {
     const { issue, acpOptions, eventBus, checkpointManager } = ctx;
     const issueId = issue.id;
     const projectId = this.projectId ?? issue.projectId;
-    const workflowLogRepo = acpOptions.workflowLogRepo;
+    const workflowLogRepo = ctx.workflowLogRepo;
 
     const completedTaskIds = checkpointManager.getResumeSteps(issue.number, 'build');
 
@@ -139,6 +140,15 @@ export class BuildStageRunner extends BaseStageRunner {
       passed,
     });
 
+    const executorObservers = createWorkflowSessionObservers({
+      eventBus: ctx.eventBus,
+      workflowLogRepo: ctx.workflowLogRepo,
+      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+      coderSessionRepo: ctx.coderSessionRepo,
+      stage: 'build',
+      title: 'Build stage',
+    });
+
     const executor = new RalphExecutor({
       worktreePath: this.worktreePath,
       projectPath: this.worktreePath,
@@ -146,14 +156,13 @@ export class BuildStageRunner extends BaseStageRunner {
       projectId: issue.projectId,
       eventBus,
       executionId: `build-${issue.number}`,
-      workflowLogRepo: acpOptions.workflowLogRepo,
-      sessionStreamLogRepo: acpOptions.sessionStreamLogRepo,
-      coderSessionRepo: acpOptions.coderSessionRepo,
       issueNumber: issue.number,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
       stageExecutionId: this.getStageExecutionId(),
       stageExecutionRepo: ctx.stageExecutionRepo,
       model: acpOptions.model,
+      stage: 'build',
+      observers: executorObservers,
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];

@@ -73,10 +73,17 @@ export class AiReviewCheck implements Check {
 
     try {
       const { withSession } = await import('../../agent-runtime/agent-session');
+      const { createWorkflowSessionObservers } = await import('../../agent-runtime');
       const autoFixPrompt = buildAutoFixPrompt(ctx.issue, ctx.changeDir, reviewReport, this.reviewOutputPath);
 
       log.info('AiReviewCheck auto-fix: spawning coder agent', {
         issueNumber: ctx.issue.number,
+      });
+
+      const autoFixObservers = createWorkflowSessionObservers({
+        eventBus: ctx.eventBus,
+        stage: 'check',
+        title: 'Auto-fix: review findings',
       });
 
       await withSession({
@@ -85,35 +92,36 @@ export class AiReviewCheck implements Check {
         taskId: `review-auto-fix-${ctx.issue.number}`,
         issueId: ctx.issue.id,
         projectId: ctx.projectId,
-        workflowLogRepo: ctx.acpOptions?.workflowLogRepo,
-        eventBus: ctx.eventBus,
-        coderSessionRepo: ctx.acpOptions?.coderSessionRepo,
-        sessionStreamLogRepo: ctx.acpOptions?.sessionStreamLogRepo,
         issueNumber: ctx.issue.number,
         opencodeBinPath: ctx.acpOptions?.opencodeBinPath,
         model: ctx.acpOptions?.model,
         stage: 'check',
         timeout: 10 * 60 * 1000,
         title: 'Auto-fix: review findings',
+        observers: autoFixObservers,
       });
 
       const reVerifyPrompt = buildReVerifyPrompt(ctx.issue, ctx.changeDir, reviewReport);
+
+      const reVerifyObservers = createWorkflowSessionObservers({
+        eventBus: ctx.eventBus,
+        stage: 'check',
+        title: 'Re-review after auto-fix',
+      });
+
       const reVerifyResult = await withSession({
         cwd: ctx.acpOptions.cwd,
         task: reVerifyPrompt,
         taskId: `review-reverify-${ctx.issue.number}`,
         issueId: ctx.issue.id,
         projectId: ctx.projectId,
-        workflowLogRepo: ctx.acpOptions?.workflowLogRepo,
-        eventBus: ctx.eventBus,
-        coderSessionRepo: ctx.acpOptions?.coderSessionRepo,
-        sessionStreamLogRepo: ctx.acpOptions?.sessionStreamLogRepo,
         issueNumber: ctx.issue.number,
         opencodeBinPath: ctx.acpOptions?.opencodeBinPath,
         model: ctx.acpOptions?.model,
         stage: 'check',
         timeout: 10 * 60 * 1000,
         title: 'Re-review after auto-fix',
+        observers: reVerifyObservers,
       });
 
       log.info('AiReviewCheck auto-fix completed', {

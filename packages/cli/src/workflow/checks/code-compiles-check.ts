@@ -71,6 +71,7 @@ export class CodeCompilesCheck implements Check {
   async fix(ctx: CheckContext): Promise<void> {
     try {
       const { withSession } = await import('../../agent-runtime/agent-session');
+      const { createWorkflowSessionObservers } = await import('../../agent-runtime');
       const prompt = [
         '## Task',
         '',
@@ -88,21 +89,25 @@ export class CodeCompilesCheck implements Check {
         '- Do NOT refactor or change unrelated code',
       ].join('\n');
 
+      const fixObservers = createWorkflowSessionObservers({
+        eventBus: ctx.eventBus,
+        stage: 'build',
+        title: 'Auto-fix: compilation errors',
+      });
+
       await withSession({
         cwd: this.worktreePath,
         task: prompt,
         taskId: `build-auto-fix-${ctx.issue.number}`,
         issueId: ctx.issue.id,
         projectId: ctx.projectId,
-        workflowLogRepo: ctx.acpOptions?.workflowLogRepo,
-        eventBus: ctx.eventBus,
-        coderSessionRepo: ctx.acpOptions?.coderSessionRepo,
         issueNumber: ctx.issue.number,
         opencodeBinPath: ctx.acpOptions?.opencodeBinPath,
         model: ctx.acpOptions?.model,
         stage: 'build',
         timeout: 10 * 60 * 1000,
         title: 'Auto-fix: compilation errors',
+        observers: fixObservers,
         onBeforeKill: async (cwd: string) => {
           try {
             const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
