@@ -73,11 +73,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "AgentRunnerService already holds llmConfig; just forward it. Note: llmConfig is a legacy name — it is actually the full ConfigInfo, not just LLM config. Future refactor may rename it to config.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        68160
+      ]
     },
     {
       "id": "T-004",
