@@ -4,6 +4,7 @@ import type { IssueQueueStatus } from './agent-runner-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { Log } from '../util/log';
+import { classifyMergeDelivery } from '../workflow/issue-lifecycle';
 
 const log = Log.create({ service: 'issue' });
 
@@ -22,11 +23,14 @@ export interface ArchiveOptions {
 export interface ArchiveResult {
   issue: Issue;
   warning?: string;
+  falseDoneWarning?: boolean;
 }
 
 export interface ArchiveAllResult {
   count: number;
+  skipped: number;
   message: string;
+  skippedNumbers?: number[];
 }
 
 export class IssueService {
@@ -191,9 +195,18 @@ export class IssueService {
       throw new Error('Cannot archive: issue has a running agent. Force-stop it first.');
     }
 
-    const warning = issue.stage !== Stage.Done
-      ? `Warning: Issue #${number} is not completed (stage: ${issue.stage}). Archived anyway.`
-      : undefined;
+    const deliveryStatus = classifyMergeDelivery(issue);
+    const isFalseDone = deliveryStatus === 'done-not-merged';
+
+    let warning: string | undefined;
+    let falseDoneWarning = false;
+
+    if (isFalseDone) {
+      falseDoneWarning = true;
+      warning = `Warning: Issue #${number} is marked done/completed but has not been merged (mergeState: ${issue.mergeState ?? 'null'}). Archiving without merge confirmation.`;
+    } else if (issue.stage !== Stage.Done) {
+      warning = `Warning: Issue #${number} is not completed (stage: ${issue.stage}). Archived anyway.`;
+    }
 
     const updated = this.issueRepo.archive(issue.id);
     if (!updated) {
@@ -205,9 +218,9 @@ export class IssueService {
       await this.performCleanup(projectId, number);
     }
 
-    log.info('Issue archived', { issueNumber: number, cleanup });
+    log.info('Issue archived', { issueNumber: number, cleanup, falseDone: isFalseDone });
 
-    return { issue: updated, warning };
+    return { issue: updated, warning, falseDoneWarning };
   }
 
   async unarchive(projectId: string, number: number): Promise<Issue> {
@@ -244,11 +257,19 @@ export class IssueService {
     });
 
     if (completed.length === 0) {
-      return { count: 0, message: 'No completed issues to archive.' };
+      return { count: 0, skipped: 0, message: 'No completed issues to archive.' };
     }
 
     let count = 0;
+    const skippedNumbers: number[] = [];
     for (const issue of completed) {
+      const deliveryStatus = classifyMergeDelivery(issue);
+      if (deliveryStatus === 'done-not-merged') {
+        skippedNumbers.push(issue.number);
+        log.info('Skipped false-done issue in batch archive', { issueNumber: issue.number, mergeState: issue.mergeState ?? 'null' });
+        continue;
+      }
+
       try {
         await this.archive(projectId, issue.number);
         count++;
@@ -260,7 +281,12 @@ export class IssueService {
       }
     }
 
-    return { count, message: `Archived ${count} issues.` };
+    let message = `Archived ${count} issues.`;
+    if (skippedNumbers.length > 0) {
+      message = `Archived ${count} issues. Skipped ${skippedNumbers.length} false-done issues (not merged): #${skippedNumbers.join(', #')}.`;
+    }
+
+    return { count, skipped: skippedNumbers.length, message, skippedNumbers };
   }
 
   private async performCleanup(projectId: string, issueNumber: number): Promise<void> {

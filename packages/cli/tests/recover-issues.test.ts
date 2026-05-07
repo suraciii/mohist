@@ -9,7 +9,7 @@ import { IssueRepo } from '../src/db/issue-repo';
 import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
-import { Stage, IssueStatus } from '../src/types';
+import { Stage, IssueStatus, MergeState } from '../src/types';
 
 function makeTasksJson(tasks: Array<{ id: string; passes: boolean }>) {
   return JSON.stringify({ version: 1, tasks });
@@ -990,5 +990,123 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
     expect(status.blockedIssues[0].issueNumber).toBe(1);
     expect(status.blockedIssues[0].blockedReason).toBe('Some reason');
     expect(status.blockedIssues[0].retryCount).toBe(0);
+  });
+});
+
+describe('recoverIssues — false-done detection', () => {
+  let db: DatabaseManager;
+  let projectRepo: ProjectRepo;
+  let issueRepo: IssueRepo;
+  let issueService: IssueService;
+  let eventBus: EventBus;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    db = new DatabaseManager({ inMemory: true });
+    initializeDatabase(db);
+    projectRepo = new ProjectRepo(db);
+    issueRepo = new IssueRepo(db);
+    issueService = new IssueService(issueRepo);
+    eventBus = new EventBus();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'recover-false-done-test-'));
+  });
+
+  afterEach(() => {
+    db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('false-done (stage=done, status=active, mergeState=null): blocked with false-done reason during recovery', () => {
+    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
+    const issue = issueService.create({ projectId: project.id, title: 'False Done' });
+    issueRepo.updateStatus(issue.id, IssueStatus.Active);
+    issueRepo.updateStage(issue.id, Stage.Done);
+    // status stays Active but stage is Done — simulates false-done state
+    // mergeState remains null
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+    );
+
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.status).toBe(IssueStatus.Blocked);
+    expect(recovered?.blockedReason).toContain('False-done anomaly');
+    expect(recovered?.blockedReason).toContain('mergeState is null');
+  });
+
+  it('false-done (stage=done, status=active, mergeState=conflict): blocked with false-done reason during recovery', () => {
+    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
+    const issue = issueService.create({ projectId: project.id, title: 'False Done Conflict' });
+    issueRepo.updateStatus(issue.id, IssueStatus.Active);
+    issueRepo.updateStage(issue.id, Stage.Done);
+    issueRepo.setMergeState(issue.id, MergeState.Conflict);
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+    );
+
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.status).toBe(IssueStatus.Blocked);
+    expect(recovered?.blockedReason).toContain('False-done anomaly');
+    expect(recovered?.blockedReason).toContain('mergeState is conflict');
+  });
+
+  it('truly merged (stage=done, status=active, mergeState=merged): not flagged as false-done during recovery', () => {
+    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
+    const issue = issueService.create({ projectId: project.id, title: 'Truly Merged' });
+    issueRepo.updateStatus(issue.id, IssueStatus.Active);
+    issueRepo.updateStage(issue.id, Stage.Done);
+    issueRepo.setMergeState(issue.id, MergeState.Merged);
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+    );
+
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.blockedReason).toBeUndefined();
+  });
+
+  it('detectRecoverableIssues marks false-done issues with falseDone=true', () => {
+    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
+    const falseDoneIssue = issueService.create({ projectId: project.id, title: 'False Done' });
+    issueRepo.updateStatus(falseDoneIssue.id, IssueStatus.Active);
+    issueRepo.updateStage(falseDoneIssue.id, Stage.Done);
+
+    const normalIssue = issueService.create({ projectId: project.id, title: 'Normal' });
+    issueRepo.updateStatus(normalIssue.id, IssueStatus.Active);
+    issueRepo.updateStage(normalIssue.id, Stage.Check);
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+    );
+
+    const blockedEvents: any[] = [];
+    eventBus.on('agent_blocked', (e) => blockedEvents.push(e));
+
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(falseDoneIssue.id);
+    expect(recovered?.status).toBe(IssueStatus.Blocked);
+    expect(recovered?.blockedReason).toContain('False-done anomaly');
+    expect(blockedEvents.some(e => e.issueNumber === falseDoneIssue.number)).toBe(true);
   });
 });

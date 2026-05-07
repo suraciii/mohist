@@ -24,7 +24,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
+import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
 
 const execFileAsync = promisify(execFile);
 
@@ -58,6 +58,7 @@ export interface GlobalQueueStatus {
 export interface RecoverableIssue {
   issueNumber: number;
   stage: string;
+  falseDone?: boolean;
 }
 
 export interface BlockedIssueInfo {
@@ -200,7 +201,11 @@ export class AgentRunnerService {
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active });
     return activeIssues
       .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog)
-      .map(issue => ({ issueNumber: issue.number, stage: issue.stage }));
+      .map(issue => {
+        const deliveryStatus = classifyMergeDelivery(issue);
+        const falseDone = deliveryStatus === 'done-not-merged';
+        return { issueNumber: issue.number, stage: issue.stage, falseDone };
+      });
   }
 
   recoverFromQueue(): void {
@@ -348,6 +353,31 @@ export class AgentRunnerService {
   private recoverSingleIssue(issue: Issue): void {
     if (!this.issueRepo) return;
     try {
+      const deliveryStatus = classifyMergeDelivery(issue);
+      const isFalseDone = deliveryStatus === 'done-not-merged';
+
+      if (isFalseDone) {
+        const falseDoneReason = `False-done anomaly detected: issue is marked done/completed but mergeState is ${issue.mergeState ?? 'null'}. Merge has not been confirmed.`;
+        this.issueRepo.blockIssue(issue.id, falseDoneReason);
+        this.cleanupOrphanedCoderSessions(issue.id, issue.number);
+        log.warn('False-done issue detected during recovery', {
+          issueNumber: issue.number,
+          mergeState: issue.mergeState ?? 'null',
+          action: 'status=blocked, false-done anomaly',
+        });
+        this.emitBlocked(issue, falseDoneReason, issue.retryCount ?? 0);
+        return;
+      }
+
+      if (deliveryStatus === 'merged') {
+        log.info('Truly merged issue — no recovery action needed', {
+          issueNumber: issue.number,
+          stage: issue.stage,
+          action: 'status remains active',
+        });
+        return;
+      }
+
       if (isCurrentStageApproval(issue, issue.stage, 'awaiting')) {
         log.info('Restored awaiting issue', {
           issueNumber: issue.number,
