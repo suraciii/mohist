@@ -178,7 +178,9 @@ export class WorkflowSessionObserver implements SessionObserver {
           update,
         );
       }
-    } catch {}
+    } catch (err) {
+      log.error('WorkflowSessionObserver.onSessionEvent failed', { eventType, error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   onStateChange(_ctx: SessionContext, _from: SessionState, to: SessionState): void {

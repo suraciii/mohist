@@ -159,13 +159,25 @@ export class AgentSession {
         }
       }
       const ctx = this.makeCtx();
-      for (const obs of this._observers) { try { obs.onTextChunk?.(ctx, textChunk); } catch {} }
+      for (const obs of this._observers) {
+        try { obs.onTextChunk?.(ctx, textChunk); } catch (err) {
+          log.error('onTextChunk observer failed', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
     }
 
     {
       const ctx = this.makeCtx();
-      for (const obs of this._observers) { try { obs.onSessionEvent?.(ctx, eventType, update); } catch {} }
-      for (const obs of this._observers) { try { obs.onRawNotification?.(ctx, notification); } catch {} }
+      for (const obs of this._observers) {
+        try { obs.onSessionEvent?.(ctx, eventType, update); } catch (err) {
+          log.error('onSessionEvent observer failed', { eventType, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      for (const obs of this._observers) {
+        try { obs.onRawNotification?.(ctx, notification); } catch (err) {
+          log.error('onRawNotification observer failed', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
     }
 
     if (eventType === 'tool_call') {
@@ -186,7 +198,11 @@ export class AgentSession {
         rawInput: state === 'started' ? toolCallData?.input : undefined,
         rawOutput: state === 'completed' ? toolCallData?.output : undefined,
       };
-      for (const obs of this._observers) { try { obs.onToolCall?.(ctx, event); } catch {} }
+      for (const obs of this._observers) {
+        try { obs.onToolCall?.(ctx, event); } catch (err) {
+          log.error('onToolCall observer failed', { toolName: event.toolName, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
     }
   }
 
@@ -280,7 +296,9 @@ export class AgentSession {
           phase: 'initialize', timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
         });
         if (options.onBeforeKill) {
-          try { await options.onBeforeKill(options.cwd); } catch {}
+          try { await options.onBeforeKill(options.cwd); } catch (err) {
+            log.warn('onBeforeKill failed on init timeout', { error: err instanceof Error ? err.message : String(err) });
+          }
         }
         await acpProcess.cleanup();
         throw new Error('Timed out during initialize');
@@ -300,7 +318,9 @@ export class AgentSession {
           phase: 'newSession', timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
         });
         if (options.onBeforeKill) {
-          try { await options.onBeforeKill(options.cwd); } catch {}
+          try { await options.onBeforeKill(options.cwd); } catch (err) {
+            log.warn('onBeforeKill failed on newSession timeout', { error: err instanceof Error ? err.message : String(err) });
+          }
         }
         await acpProcess.cleanup();
         throw new Error('Timed out during newSession');
@@ -327,7 +347,11 @@ export class AgentSession {
 
     session._stateMachine.transition('running');
     const startCtx = session.makeCtx();
-    for (const obs of observers) { try { obs.onSessionStart?.(startCtx); } catch {} }
+    for (const obs of observers) {
+      try { obs.onSessionStart?.(startCtx); } catch (err) {
+        log.error('onSessionStart observer failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
 
     if (session._wfObserver?.coderSessionId) {
       session._stateMachine = new SessionStateMachine(
@@ -372,10 +396,14 @@ export class AgentSession {
         this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_aborted', {
           sessionId: this._sessionId, mode: 'agent-session', timestamp: new Date().toISOString(),
         });
-        try { await this._connection.cancel({ sessionId: this._sessionId }); } catch {}
+        try { await this._connection.cancel({ sessionId: this._sessionId }); } catch (err) {
+          log.warn('cancel failed on abort', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
+        }
         let wipCommitted = false;
         if (this._options.onBeforeKill) {
-          try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch {}
+          try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (err) {
+            log.warn('onBeforeKill failed on abort', { error: err instanceof Error ? err.message : String(err) });
+          }
         }
         await this._acpProcess.cleanup();
         this._closed = true;
@@ -394,13 +422,23 @@ export class AgentSession {
         this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_timeout', {
           phase: 'prompt', sessionId: this._sessionId, timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
         });
-        try { this._stateMachine.transition('timeout'); } catch {}
+        try { this._stateMachine.transition('timeout'); } catch (err) {
+          log.warn('stateMachine transition to timeout failed', { error: err instanceof Error ? err.message : String(err) });
+        }
         const failCtx = this.makeCtx();
-        for (const obs of this._observers) { try { obs.onStateChange?.(failCtx, 'running', 'timeout'); } catch {} }
-        try { await this._connection.cancel({ sessionId: this._sessionId }); } catch {}
+        for (const obs of this._observers) {
+          try { obs.onStateChange?.(failCtx, 'running', 'timeout'); } catch (err) {
+            log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        try { await this._connection.cancel({ sessionId: this._sessionId }); } catch (err) {
+          log.warn('cancel failed on timeout', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
+        }
         let wipCommitted = false;
         if (this._options.onBeforeKill) {
-          try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch {}
+          try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (err) {
+            log.warn('onBeforeKill failed on timeout', { error: err instanceof Error ? err.message : String(err) });
+          }
         }
         this._closed = true;
         await this._acpProcess.cleanup();
@@ -427,12 +465,20 @@ export class AgentSession {
         sessionId: this._sessionId, success: false, duration,
         error: err instanceof Error ? err.message : String(err), mode: 'agent-session', timestamp: new Date().toISOString(),
       });
-      try { this._stateMachine.transition('failed'); } catch {}
+      try { this._stateMachine.transition('failed'); } catch (stateErr) {
+        log.warn('stateMachine transition to failed failed', { error: stateErr instanceof Error ? stateErr.message : String(stateErr) });
+      }
       const failCtx = this.makeCtx();
-      for (const obs of this._observers) { try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch {} }
+      for (const obs of this._observers) {
+        try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch (obsErr) {
+          log.error('onStateChange observer failed', { error: obsErr instanceof Error ? obsErr.message : String(obsErr) });
+        }
+      }
       let wipCommitted = false;
       if (this._options.onBeforeKill) {
-        try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch {}
+        try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (killErr) {
+          log.warn('onBeforeKill failed on error', { error: killErr instanceof Error ? killErr.message : String(killErr) });
+        }
       }
       await this._acpProcess.cleanup();
       const message = err instanceof Error ? err.message : String(err);
@@ -442,10 +488,18 @@ export class AgentSession {
 
   async cancel(): Promise<void> {
     if (this._closed) return;
-    try { await this._connection.cancel({ sessionId: this._sessionId }); } catch {}
-    try { this._stateMachine.transition('cancelled'); } catch {}
+    try { await this._connection.cancel({ sessionId: this._sessionId }); } catch (err) {
+      log.warn('cancel failed', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
+    }
+    try { this._stateMachine.transition('cancelled'); } catch (err) {
+      log.warn('stateMachine transition to cancelled failed', { error: err instanceof Error ? err.message : String(err) });
+    }
     const ctx = this.makeCtx();
-    for (const obs of this._observers) { try { obs.onStateChange?.(ctx, 'running', 'cancelled'); } catch {} }
+    for (const obs of this._observers) {
+      try { obs.onStateChange?.(ctx, 'running', 'cancelled'); } catch (err) {
+        log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
   }
 
   async close(): Promise<void> {
@@ -456,9 +510,15 @@ export class AgentSession {
     this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_completed', {
       sessionId: this._sessionId, success: true, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
     });
-    try { this._stateMachine.transition('completed'); } catch {}
+    try { this._stateMachine.transition('completed'); } catch (err) {
+      log.warn('stateMachine transition to completed failed', { error: err instanceof Error ? err.message : String(err) });
+    }
     const ctx = this.makeCtx();
-    for (const obs of this._observers) { try { obs.onStateChange?.(ctx, 'running', 'completed'); } catch {} }
+    for (const obs of this._observers) {
+      try { obs.onStateChange?.(ctx, 'running', 'completed'); } catch (err) {
+        log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
     await this._acpProcess.cleanup();
   }
 }
