@@ -173,11 +173,14 @@
         "T-004",
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep backend assembly authoritative. The client-side live reducer should be small and reconcile from the API after terminal events.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        385882
+      ]
     },
     {
       "id": "T-007",
