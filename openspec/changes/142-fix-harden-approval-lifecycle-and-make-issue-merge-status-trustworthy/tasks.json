@@ -47,11 +47,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Search for direct approvalState.status checks and replace only lifecycle-driving checks, preserving historical display where appropriate.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        813880
+      ]
     },
     {
       "id": "T-003",
