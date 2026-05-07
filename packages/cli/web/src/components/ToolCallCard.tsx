@@ -5,6 +5,7 @@ export interface EditInput {
   filePath: string
   oldString: string
   newString: string
+  patch?: string
 }
 
 export interface BashInput {
@@ -16,6 +17,7 @@ export type ToolDisplayType = 'diff' | 'terminal' | 'summary' | 'generic'
 export const TOOL_DISPLAY_TYPE: Record<string, ToolDisplayType> = {
   edit: 'diff',
   write: 'diff',
+  apply_patch: 'diff',
   bash: 'terminal',
   read: 'summary',
   glob: 'summary',
@@ -35,10 +37,52 @@ export function parseEditInput(rawInput: string | undefined): EditInput | null {
     const filePath = parsed.file_path ?? parsed.filePath ?? parsed.path ?? ''
     const oldString = parsed.oldString ?? ''
     const newString = parsed.newString ?? parsed.content ?? ''
-    return { filePath, oldString, newString }
+    const patch = typeof parsed.patchText === 'string' ? parsed.patchText
+      : typeof parsed.patch === 'string' ? parsed.patch
+        : undefined
+    return { filePath, oldString, newString, patch }
   } catch {
+    if (rawInput.includes('*** Begin Patch') || rawInput.includes('*** Update File:')) {
+      return { filePath: extractPatchTarget(rawInput), oldString: '', newString: '', patch: rawInput }
+    }
     return null
   }
+}
+
+function extractPatchTarget(patch: string): string {
+  const match = patch.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/m)
+  return match?.[1]?.trim() ?? 'patch'
+}
+
+function PatchBlock({ patch }: { patch: string }) {
+  const lines = patch.split('\n')
+  const COLLAPSE_THRESHOLD = 80
+  const visibleLines = lines.slice(0, COLLAPSE_THRESHOLD)
+  const isCollapsed = lines.length > COLLAPSE_THRESHOLD
+
+  return (
+    <div className="text-xs font-mono rounded overflow-hidden border border-gray-200">
+      {isCollapsed && (
+        <div className="bg-gray-50 px-3 py-1.5 text-gray-500 border-b border-gray-100">
+          {lines.length} patch lines · showing first {COLLAPSE_THRESHOLD}
+        </div>
+      )}
+      <div className="max-h-64 overflow-auto">
+        {visibleLines.map((line, i) => {
+          const className = line.startsWith('+') && !line.startsWith('+++')
+            ? 'bg-green-50 text-green-800 border-l-2 border-green-400'
+            : line.startsWith('-') && !line.startsWith('---')
+              ? 'bg-red-50 text-red-800 border-l-2 border-red-400'
+              : 'bg-gray-50 text-gray-700 border-l-2 border-gray-200'
+          return (
+            <div key={i} className={`${className} px-3 py-0.5 min-h-[1.25rem] whitespace-pre-wrap break-all`}>
+              {line || ' '}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 export function parseBashInput(rawInput: string | undefined): BashInput | null {
@@ -234,7 +278,11 @@ function EditToolCard({ entry }: { entry: ToolCallEntry }) {
       <div className="px-3 py-1 text-xs text-gray-400 font-mono border-b border-gray-100 bg-gray-50/30">
         {parsed.filePath}
       </div>
-      <DiffBlock oldStr={parsed.oldString} newStr={parsed.newString} />
+      {parsed.patch && !parsed.oldString && !parsed.newString ? (
+        <PatchBlock patch={parsed.patch} />
+      ) : (
+        <DiffBlock oldStr={parsed.oldString} newStr={parsed.newString} />
+      )}
       {entry.state === 'failed' && entry.error && (
         <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50 border-t border-red-100">
           {entry.error}

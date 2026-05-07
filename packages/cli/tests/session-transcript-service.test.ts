@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { assembleSessionTranscript, type SessionTranscript, type SessionTurn, type SessionPart, type ToolPart } from '../src/services/session-transcript-service';
 import type { SessionStreamLogEntry } from '../src/db/session-stream-log-repo';
 import type { CoderSession } from '../src/db/coder-session-repo';
+import { DatabaseManager } from '../src/db/database';
+import { initializeDatabase } from '../src/db/migrations';
+import { SessionStreamLogRepo } from '../src/db/session-stream-log-repo';
 
 function makeSession(overrides: Partial<CoderSession> = {}): CoderSession {
   return {
@@ -312,6 +315,71 @@ describe('SessionTranscriptAssembler', () => {
       expect(toolPart.status).toBe('completed');
     });
 
+    it('should create legacy tool part if update arrives without a prompt or start event', () => {
+      const session = makeSession();
+      const events = [
+        makeToolCallUpdate('tc-1', 'completed', 'result', undefined, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns).toHaveLength(1);
+      expect(transcript.turns[0].user.kind).toBe('legacy-missing');
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.toolCallId).toBe('tc-1');
+      expect(toolPart.status).toBe('completed');
+      expect(toolPart.output).toBe('result');
+    });
+
+    it('should replay nested ACP tool_call without a toolCallId using a deterministic synthetic id', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Run a tool', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'src/index.ts',
+            input: { file_path: 'src/index.ts' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.toolCallId).toBe('session-Read-2024-01-01T10:00:01.000Z');
+      expect(toolPart.toolName).toBe('Read');
+      expect(toolPart.input).toBe('{"file_path":"src/index.ts"}');
+    });
+
+    it('should replay nested ACP completed tool_call without a toolCallId', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Run a tool', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Bash',
+            input: { command: 'npm test' },
+            output: 'ok',
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.toolCallId).toBe('session-Bash-2024-01-01T10:00:01.000Z');
+      expect(toolPart.status).toBe('completed');
+      expect(toolPart.output).toBe('ok');
+    });
+
     it('should set target from input when not explicitly set', () => {
       const session = makeSession();
       const events = [
@@ -464,18 +532,42 @@ describe('SessionTranscriptAssembler', () => {
       expect((transcript.turns[0].assistant[0] as any).text).toBe('Early responseLate response');
     });
 
-    it('should use id as tiebreaker for same-timestamp events', () => {
+    it('should preserve input order for same-timestamp events instead of sorting by UUID id', () => {
       const session = makeSession();
       const events = [
-        { id: 'evt-second', sessionId: 'session-1', issueId: 'issue-1', eventType: 'agent_message_chunk', data: JSON.stringify({ content: { text: 'Second' } }), createdAt: '2024-01-01T10:00:01.000Z' },
+        { id: 'zzzz-uuid-like', sessionId: 'session-1', issueId: 'issue-1', eventType: 'mohist_prompt', data: JSON.stringify({ role: 'mohist', text: 'Prompt', kind: 'task', sentAt: '2024-01-01T10:00:00.000Z' }), createdAt: '2024-01-01T10:00:00.000Z' },
         { id: 'evt-prompt', sessionId: 'session-1', issueId: 'issue-1', eventType: 'mohist_prompt', data: JSON.stringify({ role: 'mohist', text: 'Prompt', kind: 'task', sentAt: '2024-01-01T10:00:00.000Z' }), createdAt: '2024-01-01T10:00:00.000Z' },
-        { id: 'evt-first', sessionId: 'session-1', issueId: 'issue-1', eventType: 'agent_message_chunk', data: JSON.stringify({ content: { text: 'First' } }), createdAt: '2024-01-01T10:00:01.000Z' },
+        { id: '0000-uuid-like', sessionId: 'session-1', issueId: 'issue-1', eventType: 'agent_message_chunk', data: JSON.stringify({ content: { text: 'Assistant' } }), createdAt: '2024-01-01T10:00:00.000Z' },
       ];
 
       const transcript = assembleSessionTranscript(session, events as any);
 
-      expect(transcript.turns).toHaveLength(1);
-      expect((transcript.turns[0].assistant[0] as any).text).toBe('FirstSecond');
+      expect(transcript.turns).toHaveLength(2);
+      expect(transcript.turns[1].user.text).toBe('Prompt');
+      expect((transcript.turns[1].assistant[0] as any).text).toBe('Assistant');
+    });
+
+    it('should read same-second rows in SQLite insertion order', () => {
+      const db = new DatabaseManager({ inMemory: true });
+      initializeDatabase(db);
+      const repo = new SessionStreamLogRepo(db);
+      try {
+        db.run(`INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, datetime('now'))`, ['project-1', 'Project', '/tmp/project']);
+        db.run(`INSERT INTO issues (id, project_id, number, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, ['issue-1', 'project-1', 1, 'Issue', 'open']);
+        db.run(
+          `INSERT INTO session_stream_log (id, session_id, issue_id, event_type, data, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          ['zzzz-uuid-like', 'session-1', 'issue-1', 'mohist_prompt', JSON.stringify({ role: 'mohist', text: 'Prompt', kind: 'task', sentAt: '2024-01-01T10:00:00.000Z' }), '2024-01-01 10:00:00'],
+        );
+        db.run(
+          `INSERT INTO session_stream_log (id, session_id, issue_id, event_type, data, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          ['0000-uuid-like', 'session-1', 'issue-1', 'agent_message_chunk', JSON.stringify({ content: { text: 'Assistant' } }), '2024-01-01 10:00:00'],
+        );
+
+        const rows = repo.findBySessionId('session-1');
+        expect(rows.map((row) => row.id)).toEqual(['zzzz-uuid-like', '0000-uuid-like']);
+      } finally {
+        db.close();
+      }
     });
   });
 

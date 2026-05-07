@@ -127,6 +127,7 @@ function SessionErrorPartView({ part }: { part: ErrorPart }) {
       </svg>
       <span>
         {messages[part.kind] ?? part.kind}
+        {part.message && part.message !== (messages[part.kind] ?? part.kind) ? `: ${part.message}` : ''}
         {' · '}
         {formatTime(part.at)}
       </span>
