@@ -1,6 +1,7 @@
 import type { Check, CheckContext, CheckResult } from './index';
 import type { ReactionConfig } from '../stage-context';
 import { Stage } from '../../types';
+import { isCurrentStageApproval } from '../issue-lifecycle';
 
 export class UserApprovalCheck implements Check {
   public readonly name = 'user-approval';
@@ -19,28 +20,36 @@ export class UserApprovalCheck implements Check {
   }
 
   async run(ctx: CheckContext): Promise<CheckResult> {
-    const status = ctx.issue.approvalState?.status;
+    const issue = ctx.issue;
 
-    if (status === 'approved') {
+    if (!isCurrentStageApproval(issue, issue.stage, 'approved')) {
+      if (isCurrentStageApproval(issue, issue.stage, 'rejected')) {
+        return {
+          name: this.name,
+          status: 'fail',
+          message: 'User rejected — escalating to prior stage',
+        };
+      }
+
+      if (isCurrentStageApproval(issue, issue.stage, 'awaiting')) {
+        return {
+          name: this.name,
+          status: 'pending',
+          message: 'Waiting for user approval',
+        };
+      }
+
       return {
         name: this.name,
-        status: 'pass',
-        message: 'User approved',
-      };
-    }
-
-    if (status === 'rejected') {
-      return {
-        name: this.name,
-        status: 'fail',
-        message: 'User rejected — escalating to prior stage',
+        status: 'pending',
+        message: 'Waiting for user approval',
       };
     }
 
     return {
       name: this.name,
-      status: 'pending',
-      message: 'Waiting for user approval',
+      status: 'pass',
+      message: 'User approved',
     };
   }
 }

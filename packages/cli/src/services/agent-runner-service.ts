@@ -24,6 +24,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
 
 const execFileAsync = promisify(execFile);
 
@@ -214,17 +215,21 @@ export class AgentRunnerService {
     for (const task of runningTasks) {
       const issue = this.issueRepo.findById(task.issueId);
 
-      if (issue?.approvalState?.status === 'awaiting') {
-        this.taskQueueRepo.updateStatus(task.id, 'completed', {
-          result: 'awaiting_approval',
+      if (issue?.mergeState) {
+        this.taskQueueRepo.updateStatus(task.id, 'failed', {
+          result: 'Server restarted',
           completedAt: new Date().toISOString(),
         });
-        log.info('Recovered running task — at approval checkpoint, marked completed', {
+        if (issue) {
+          this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
+          this.cleanupOrphanedCoderSessions(issue.id, issue.number);
+        }
+        log.info('Recovered running task — merge in progress, marked failed', {
           taskId: task.id,
           issueNumber: task.issueNumber,
-          stage: issue.stage,
+          action: 'task=failed, issue=interrupted',
         });
-      } else {
+      } else if (!isCurrentStageApproval(issue!, issue!.stage, 'awaiting')) {
         this.taskQueueRepo.updateStatus(task.id, 'failed', {
           result: 'Server restarted',
           completedAt: new Date().toISOString(),
@@ -237,6 +242,16 @@ export class AgentRunnerService {
           taskId: task.id,
           issueNumber: task.issueNumber,
           action: 'task=failed, issue=interrupted',
+        });
+      } else {
+        this.taskQueueRepo.updateStatus(task.id, 'completed', {
+          result: 'awaiting_approval',
+          completedAt: new Date().toISOString(),
+        });
+        log.info('Recovered running task — at approval checkpoint, marked completed', {
+          taskId: task.id,
+          issueNumber: task.issueNumber,
+          stage: issue!.stage,
         });
       }
     }
@@ -296,7 +311,7 @@ export class AgentRunnerService {
       if (this.runningSlots.has(issue.id)) return false;
       if (runningSessionIssueIds.has(issue.id)) return false;
       if (issue.mergeState) return false;
-      if (issue.approvalState?.status === 'awaiting') return false;
+      if (!isCurrentStageApproval(issue, issue.stage, 'awaiting')) return false;
       return true;
     });
 
@@ -333,10 +348,10 @@ export class AgentRunnerService {
   private recoverSingleIssue(issue: Issue): void {
     if (!this.issueRepo) return;
     try {
-      if (issue.approvalState?.status === 'awaiting') {
+      if (isCurrentStageApproval(issue, issue.stage, 'awaiting')) {
         log.info('Restored awaiting issue', {
           issueNumber: issue.number,
-          stage: issue.approvalState.stage ?? issue.stage,
+          stage: issue.approvalState!.stage ?? issue.stage,
           action: 'status remains active',
         });
       } else if (issue.stage === Stage.Check || issue.stage === Stage.Plan) {
@@ -919,7 +934,7 @@ export class AgentRunnerService {
     }
 
     if (issue.status === IssueStatus.Blocked) {
-      if (issue.approvalState?.status === 'approved') {
+      if (isCurrentStageApproval(issue, issue.stage, 'approved')) {
         log.info('Unblocking approved issue before resume', { issueNumber: issue.number });
         this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
         this.issueRepo.updateBlockedReason(issue.id, null);
@@ -1420,7 +1435,7 @@ export class AgentRunnerService {
     if (!this.issueRepo) return false;
     const issue = this.issueRepo.findById(issueId);
     if (!issue) return false;
-    return issue.approvalState?.status === 'awaiting';
+    return isCurrentStageApproval(issue, issue.stage, 'awaiting');
   }
 
   getBlockedIssues(): BlockedIssueInfo[] {

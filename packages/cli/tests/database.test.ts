@@ -279,10 +279,10 @@ describe('IssueRepo', () => {
   });
 
   describe('findPendingApprovalByIssueId', () => {
-    it('should return issue when approval_state.status is awaiting', () => {
+    it('should return issue when approval_state.status is awaiting and stage matches', () => {
       const issue = repo.create({ number: 1, projectId, title: 'Test' });
-      repo.setApprovalState(issue.id, { status: 'awaiting', approvedBy: undefined, approvedAt: undefined });
-      
+      repo.setApprovalState(issue.id, { stage: issue.stage, status: 'awaiting', output: null, requestedAt: '2024-01-01T00:00:00Z' });
+
       const found = repo.findPendingApprovalByIssueId(issue.id);
       expect(found).not.toBeNull();
       expect(found?.id).toBe(issue.id);
@@ -290,15 +290,23 @@ describe('IssueRepo', () => {
 
     it('should return null when issue has no approval state', () => {
       const issue = repo.create({ number: 1, projectId, title: 'Test' });
-      
+
       const found = repo.findPendingApprovalByIssueId(issue.id);
       expect(found).toBeNull();
     });
 
     it('should return null when approval_state.status is not awaiting', () => {
       const issue = repo.create({ number: 1, projectId, title: 'Test' });
-      repo.setApprovalState(issue.id, { status: 'approved', approvedBy: 'user1', approvedAt: '2024-01-01' });
-      
+      repo.setApprovalState(issue.id, { stage: issue.stage, status: 'approved', output: null, requestedAt: '2024-01-01T00:00:00Z' });
+
+      const found = repo.findPendingApprovalByIssueId(issue.id);
+      expect(found).toBeNull();
+    });
+
+    it('should return null when stage does not match', () => {
+      const issue = repo.create({ number: 1, projectId, title: 'Test' });
+      repo.setApprovalState(issue.id, { stage: Stage.Plan, status: 'awaiting', output: null, requestedAt: '2024-01-01T00:00:00Z' });
+
       const found = repo.findPendingApprovalByIssueId(issue.id);
       expect(found).toBeNull();
     });
