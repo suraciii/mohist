@@ -1,12 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { Stage } from '../lib/types'
 
 interface MergeStatePanelProps {
   issueNumber: number
   mergeState: string | null | undefined
+  stage: string
+  status: string
 }
 
-export function MergeStatePanel({ issueNumber, mergeState }: MergeStatePanelProps) {
+export function MergeStatePanel({ issueNumber, mergeState, stage, status }: MergeStatePanelProps) {
   const queryClient = useQueryClient()
 
   const retryMutation = useMutation({
@@ -16,7 +19,54 @@ export function MergeStatePanel({ issueNumber, mergeState }: MergeStatePanelProp
     },
   })
 
-  if (!mergeState) return null
+  if (mergeState === null || mergeState === undefined) {
+    const isDoneOrCompleted = stage === Stage.Done || status === 'completed'
+    if (isDoneOrCompleted) {
+      return (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <div className="flex items-center gap-2">
+            <svg className="h-4 w-4 text-red-600" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+            </svg>
+            <span className="text-sm font-medium text-red-800">Done but not merged</span>
+          </div>
+          <p className="mt-1 text-xs text-red-600">
+            This issue is marked as completed but has not been merged. The merge may have failed or was never attempted.
+          </p>
+        </div>
+      )
+    }
+
+    if (stage === Stage.Check) {
+      return (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="flex items-center gap-2">
+            <svg className="h-4 w-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h3a.75.75 0 000-1.5h-2.25V5z" clipRule="evenodd" />
+            </svg>
+            <span className="text-sm font-medium text-gray-700">Awaiting merge approval</span>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            This issue is in check stage. Approve to queue for merge.
+          </p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12z" clipRule="evenodd" />
+          </svg>
+          <span className="text-sm font-medium text-gray-600">Not ready for merge</span>
+        </div>
+        <p className="mt-1 text-xs text-gray-400">
+          This issue has not reached the merge stage yet.
+        </p>
+      </div>
+    )
+  }
 
   if (mergeState === 'pending') {
     return (
