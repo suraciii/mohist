@@ -126,11 +126,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "These paths are outside WorkflowEngine so they read config directly. load() is cached; no I/O overhead. Recovery pipeline (recoverBuildStageIssue) does not need separate wiring — it enqueues resume-pipeline which will naturally go through executeResumePipelineTask (T-003).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        153312
+      ]
     },
     {
       "id": "T-006",
