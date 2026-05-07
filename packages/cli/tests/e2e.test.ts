@@ -77,9 +77,9 @@ describe('E2E: Single Issue Complete Flow', () => {
     app = new Hono();
     app.route('/api/projects', createProjectRoutes(projectService));
     const eventBus = new EventBus();
-    const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, undefined, taskQueueRepo);
+    const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, taskQueueRepo);
     const opencodeBinPath = process.env.OPENCODE_BIN_PATH;
-    app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner, undefined, undefined, undefined, opencodeBinPath));
+    app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, opencodeBinPath));
     app.route('/api', createStatusRoutes(projectService, issueService));
 
     server = createTestServer(app);

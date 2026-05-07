@@ -70,9 +70,9 @@ describe('POST /api/issues/:number/rebase', () => {
     });
     app.route('/api/issues', createIssueRoutes(
       issueService, projectService, stateManager,
-      null, undefined, undefined, agentRunner,
+      null, undefined, agentRunner,
       undefined, undefined, undefined, undefined,
-      undefined, opts.mergeQueue,
+      opts.mergeQueue,
     ));
     return { server: createTestServer(app), agentRunner };
   }
