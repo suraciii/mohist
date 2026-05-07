@@ -83,7 +83,6 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -120,7 +119,6 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -154,7 +152,6 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
