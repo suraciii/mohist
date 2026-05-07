@@ -180,7 +180,7 @@ export interface AgentTimeoutConfig {
 
 export function getAgentTimeoutConfig(config: ConfigInfo): AgentTimeoutConfig {
   return {
-    taskTimeout: config.agent?.taskTimeout ?? 600,
+    taskTimeout: config.agent?.taskTimeout ?? 1800,
     stageTimeout: config.agent?.stageTimeout ?? 3600,
     maxGracePeriods: config.agent?.maxGracePeriods ?? 2,
   };

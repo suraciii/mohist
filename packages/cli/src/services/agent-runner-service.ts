@@ -83,7 +83,7 @@ export interface WaitingQuestion {
   question: string;
 }
 
-const PIPELINE_TIMEOUT_MS = 30 * 60 * 1000;
+const PIPELINE_TIMEOUT_MS = 90 * 60 * 1000;
 
 const log = Log.create({ service: 'agent-runner' });
 
