@@ -5,6 +5,7 @@ export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' 
 
 export interface SessionMetadata {
   sessionId: string;
+  coderSessionId: string;
   issueId: string;
   acpSessionId: string;
   executionId: string | null;
@@ -14,6 +15,9 @@ export interface SessionMetadata {
   stage: string | null;
   createdAt: string;
   completedAt: string | null;
+  cwd?: string | null;
+  worktree?: string | null;
+  firstPromptSentAt?: string | null;
 }
 
 export interface SessionTranscript {
@@ -84,6 +88,7 @@ export interface ErrorPart {
 }
 
 interface RawEvent {
+  id: string;
   eventType: string;
   data: Record<string, unknown>;
   createdAt: string;
@@ -91,8 +96,13 @@ interface RawEvent {
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled']);
 
-function generateId(): string {
-  return `part-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+function stringifyPayload(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function getObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : null;
 }
 
 function parseMohistPromptEvent(data: Record<string, unknown>): { text: string; kind: PromptKind; sentAt: string; title?: string } | null {
@@ -124,8 +134,11 @@ function parseAgentThoughtChunk(data: Record<string, unknown>): string | null {
 interface ToolCallStartData {
   toolCallId: string;
   toolName: string;
+  status?: string;
   title?: string;
   input?: string;
+  output?: string;
+  error?: string;
   createdAt: string;
 }
 
@@ -139,31 +152,42 @@ interface ToolCallUpdateData {
   createdAt: string;
 }
 
-function parseToolCallStart(data: Record<string, unknown>): ToolCallStartData | null {
+function parseToolCallStart(data: Record<string, unknown>, fallbackCreatedAt: string): ToolCallStartData | null {
   if (typeof data !== 'object' || data === null) return null;
-  const d = data as Record<string, unknown>;
-  const toolCallId = typeof d.toolCallId === 'string' ? d.toolCallId : '';
+  const d = getObject(data.toolCall) ?? data;
+  const toolCallId = typeof d.toolCallId === 'string' ? d.toolCallId
+    : typeof d.id === 'string' ? d.id
+      : typeof d.callId === 'string' ? d.callId
+        : '';
   if (!toolCallId) return null;
   const toolName = typeof d.toolName === 'string' ? d.toolName : (typeof d.name === 'string' ? d.name : 'unknown');
-  const title = typeof d.title === 'string' ? d.title : undefined;
-  const rawInput = d.rawInput ?? d.input;
-  const input = rawInput !== undefined ? (typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput)) : undefined;
-  return { toolCallId, toolName, title, input, createdAt: String(d.createdAt ?? new Date().toISOString()) };
-}
-
-function parseToolCallUpdate(data: Record<string, unknown>): ToolCallUpdateData | null {
-  if (typeof data !== 'object' || data === null) return null;
-  const d = data as Record<string, unknown>;
-  const toolCallId = typeof d.toolCallId === 'string' ? d.toolCallId : '';
-  if (!toolCallId) return null;
   const status = typeof d.status === 'string' ? d.status : undefined;
   const title = typeof d.title === 'string' ? d.title : undefined;
   const rawInput = d.rawInput ?? d.input;
-  const input = rawInput !== undefined ? (typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput)) : undefined;
+  const input = stringifyPayload(rawInput);
   const rawOutput = d.rawOutput ?? d.output;
-  const output = rawOutput !== undefined ? (typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput)) : undefined;
+  const output = stringifyPayload(rawOutput);
   const error = typeof d.error === 'string' ? d.error : undefined;
-  return { toolCallId, status, title, input, output, error, createdAt: String(d.createdAt ?? new Date().toISOString()) };
+  return { toolCallId, toolName, status, title, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt) };
+}
+
+function parseToolCallUpdate(data: Record<string, unknown>, fallbackCreatedAt: string): ToolCallUpdateData | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const d = getObject(data.toolCall) ?? data;
+  const toolCallId = typeof d.toolCallId === 'string' ? d.toolCallId
+    : typeof d.id === 'string' ? d.id
+      : typeof d.callId === 'string' ? d.callId
+        : '';
+  if (!toolCallId) return null;
+  const status = typeof d.status === 'string' ? d.status : undefined;
+  const toolName = typeof d.toolName === 'string' ? d.toolName : undefined;
+  const title = typeof d.title === 'string' ? d.title : undefined;
+  const rawInput = d.rawInput ?? d.input;
+  const input = stringifyPayload(rawInput);
+  const rawOutput = d.rawOutput ?? d.output;
+  const output = stringifyPayload(rawOutput);
+  const error = typeof d.error === 'string' ? d.error : undefined;
+  return { toolCallId, status, title: title ?? toolName, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt) };
 }
 
 function deriveToolTarget(toolName: string, input: string | undefined): string | undefined {
@@ -203,10 +227,13 @@ export class SessionTranscriptAssembler {
   private toolPartsById: Map<string, ToolPart> = new Map();
   private incomplete: boolean = false;
   private hasReceivedPrompt: boolean = false;
+  private currentEventId: string = 'session';
+  private partIndexByEventId: Map<string, number> = new Map();
 
   constructor(session: CoderSession) {
     this.session = {
       sessionId: session.id,
+      coderSessionId: session.id,
       issueId: session.issueId,
       acpSessionId: session.acpSessionId,
       executionId: session.executionId,
@@ -225,6 +252,7 @@ export class SessionTranscriptAssembler {
     for (const entry of orderedEvents) {
       const data = typeof entry.data === 'string' ? JSON.parse(entry.data) : entry.data;
       this.processEvent({
+        id: entry.id,
         eventType: entry.eventType,
         data: data as Record<string, unknown>,
         createdAt: entry.createdAt,
@@ -259,6 +287,7 @@ export class SessionTranscriptAssembler {
 
   private processEvent(event: RawEvent): void {
     const { eventType, data, createdAt } = event;
+    this.currentEventId = event.id;
 
     if (eventType === 'mohist_prompt') {
       this.handleMohistPrompt(data, createdAt);
@@ -278,13 +307,26 @@ export class SessionTranscriptAssembler {
     }
 
     if (eventType === 'tool_call') {
-      const start = parseToolCallStart(data);
-      if (start) this.handleToolCallStart(start);
+      const start = parseToolCallStart(data, createdAt);
+      if (start) {
+        this.handleToolCallStart(start);
+        if (start.status === 'completed' || start.status === 'failed' || start.output !== undefined || start.error !== undefined) {
+          this.handleToolCallUpdate({
+            toolCallId: start.toolCallId,
+            status: start.status,
+            title: start.title,
+            input: start.input,
+            output: start.output,
+            error: start.error,
+            createdAt: start.createdAt,
+          });
+        }
+      }
       return;
     }
 
     if (eventType === 'tool_call_update') {
-      const update = parseToolCallUpdate(data);
+      const update = parseToolCallUpdate(data, createdAt);
       if (update) this.handleToolCallUpdate(update);
       return;
     }
@@ -330,7 +372,10 @@ export class SessionTranscriptAssembler {
     if (!parsed) return;
 
     this.hasReceivedPrompt = true;
-    const turnId = generateId();
+    if (!this.session.firstPromptSentAt) {
+      this.session.firstPromptSentAt = parsed.sentAt;
+    }
+    const turnId = this.nextId('turn');
     this.currentTurn = {
       id: turnId,
       startedAt: parsed.sentAt,
@@ -355,7 +400,7 @@ export class SessionTranscriptAssembler {
       this.activeParts.textPart.text += text;
     } else {
       const textPart: TextPart = {
-        id: generateId(),
+        id: this.nextId('text'),
         type: 'text',
         text,
         startedAt: createdAt,
@@ -373,7 +418,7 @@ export class SessionTranscriptAssembler {
       this.activeParts.reasoningPart.text += text;
     } else {
       const reasoningPart: ReasoningPart = {
-        id: generateId(),
+        id: this.nextId('reasoning'),
         type: 'reasoning',
         text,
         startedAt: createdAt,
@@ -390,7 +435,7 @@ export class SessionTranscriptAssembler {
     }
 
     const toolPart: ToolPart = {
-      id: generateId(),
+      id: this.nextId('tool'),
       type: 'tool',
       tool: {
         toolCallId: start.toolCallId,
@@ -427,7 +472,7 @@ export class SessionTranscriptAssembler {
       }
     } else {
       const toolPart: ToolPart = {
-        id: generateId(),
+          id: this.nextId('tool'),
         type: 'tool',
         tool: {
           toolCallId: update.toolCallId,
@@ -454,7 +499,7 @@ export class SessionTranscriptAssembler {
     }
 
     const errorPart: ErrorPart = {
-      id: generateId(),
+      id: this.nextId('error'),
       type: 'error',
       message,
       kind,
@@ -474,7 +519,7 @@ export class SessionTranscriptAssembler {
       this.hasReceivedPrompt = false;
     }
 
-    const turnId = generateId();
+    const turnId = this.nextId('turn');
     this.currentTurn = {
       id: turnId,
       startedAt: createdAt,
@@ -496,7 +541,7 @@ export class SessionTranscriptAssembler {
   private createLegacyTurn(): void {
     if (this.hasReceivedPrompt) return;
 
-    const turnId = generateId();
+    const turnId = this.nextId('turn');
     const createdAt = this.session.createdAt;
     this.currentTurn = {
       id: turnId,
@@ -538,6 +583,12 @@ export class SessionTranscriptAssembler {
       }
       this.currentTurn = null;
     }
+  }
+
+  private nextId(prefix: string): string {
+    const current = this.partIndexByEventId.get(this.currentEventId) ?? 0;
+    this.partIndexByEventId.set(this.currentEventId, current + 1);
+    return `${prefix}-${this.currentEventId}-${current}`;
   }
 
   private finalizeTerminalState(): void {

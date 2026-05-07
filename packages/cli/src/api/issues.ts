@@ -1714,6 +1714,7 @@ export function createIssueRoutes(
         'tool_call',
         'tool_call_update',
         'user_message_chunk',
+        'mohist_prompt',
       ]);
 
       const sessions = coderSessionRepo.findByIssueId(issue.id);
@@ -1809,7 +1810,7 @@ export function createIssueRoutes(
         streamEvents = sessionStreamLogRepo.findBySessionId(session.acpSessionId);
       }
 
-      let fallbackLogs: Array<{ id: string; eventType: string; data: unknown; createdAt: string }> = [];
+      let fallbackLogs: Array<{ id: string; sessionId: string; issueId: string; eventType: string; data: unknown; createdAt: string }> = [];
       if (streamEvents.length === 0) {
         const SESSION_STREAM_EVENT_TYPES = new Set([
           'agent_thought_chunk',
@@ -1823,13 +1824,27 @@ export function createIssueRoutes(
           .filter(l => SESSION_STREAM_EVENT_TYPES.has(l.eventType))
           .map(l => ({
             id: l.id,
+            sessionId: session.acpSessionId,
+            issueId: session.issueId,
             eventType: l.eventType,
             data: (() => { try { return JSON.parse(l.data); } catch { return l.data; } })(),
             createdAt: l.createdAt,
           }));
       }
 
-      const transcript = assembleSessionTranscript(session, streamEvents);
+      const transcriptEvents = streamEvents.length > 0 ? streamEvents : fallbackLogs.map(l => ({
+        id: l.id,
+        sessionId: l.sessionId,
+        issueId: l.issueId,
+        eventType: l.eventType,
+        data: typeof l.data === 'string' ? l.data : JSON.stringify(l.data),
+        createdAt: l.createdAt,
+      }));
+      const transcript = assembleSessionTranscript(session, transcriptEvents);
+      const firstPromptEvent = transcriptEvents.find((event) => event.eventType === 'mohist_prompt');
+      const firstPromptData = firstPromptEvent
+        ? (() => { try { return JSON.parse(firstPromptEvent.data) as Record<string, unknown>; } catch { return {}; } })()
+        : null;
 
       const terminalStatuses = new Set(['completed', 'failed', 'timeout', 'cancelled']);
       const isTerminal = terminalStatuses.has(session.status);
@@ -1848,6 +1863,7 @@ export function createIssueRoutes(
         title: session.title,
         metadata: {
           sessionId: session.id,
+          coderSessionId: session.id,
           issueId: session.issueId,
           acpSessionId: session.acpSessionId,
           executionId: session.executionId,
@@ -1857,6 +1873,9 @@ export function createIssueRoutes(
           stage: session.stage,
           createdAt: session.createdAt,
           completedAt: isTerminal ? session.completedAt : null,
+          cwd: projectService.getById(projectId)?.path ?? null,
+          worktree: worktreeManager?.getPath(projectService.getById(projectId)?.name ?? '', issue.number) ?? null,
+          firstPromptSentAt: typeof firstPromptData?.sentAt === 'string' ? firstPromptData.sentAt : null,
         },
         turns: transcript.turns,
         incomplete: transcript.incomplete,
