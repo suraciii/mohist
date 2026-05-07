@@ -196,11 +196,19 @@
       "dependsOn": [
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is the final safety-net task after implementation tasks have landed; keep tests deterministic and avoid requiring real remote merges.",
-      "attempts": 0,
+      "attempts": 4,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1889503,
+        586659,
+        104324,
+        32853,
+        76065,
+        75
+      ]
     }
   ]
 }
