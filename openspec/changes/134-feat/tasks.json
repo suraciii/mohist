@@ -74,11 +74,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "StepList already has access to `issue` prop (line 532) and passes issueNumber/stage/readOnly to InlineApproval (line 586). Add approvalOutput prop. The scroll target needs id='changes-panel' added to IssueDetailPage.tsx ChangesPanel wrapper div (line 234).",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        162349
+      ]
     },
     {
       "id": "T-004",
