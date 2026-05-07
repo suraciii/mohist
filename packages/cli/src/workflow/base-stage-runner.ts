@@ -4,6 +4,7 @@ import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
 import { Log } from '../util/log';
+import { parseVerdict, parseDimensions, readReportFile } from './utils';
 
 const log = Log.create({ service: 'base-stage-runner' });
 
@@ -245,10 +246,43 @@ export abstract class BaseStageRunner implements StageRunner {
     allResults: CheckResult[],
     taskOutput: unknown,
   ): StageRunResult {
+    let approvalOutput: unknown = null;
+
+    if (ctx.issue.stage === Stage.Plan) {
+      const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+      if (changeDir) {
+        const selfReviewContent = readReportFile(changeDir, 'self-review.md');
+        if (selfReviewContent) {
+          const parsedVerdict = parseVerdict(selfReviewContent);
+          if (parsedVerdict) {
+            const dimensions = parseDimensions(selfReviewContent);
+            approvalOutput = {
+              result: parsedVerdict,
+              selfReviewNotes: selfReviewContent,
+              dimensions,
+            };
+          }
+        }
+      }
+    } else if (ctx.issue.stage === Stage.Check) {
+      const aiReviewResult = allResults.find(r => r.name === 'ai-review');
+      if (aiReviewResult?.output) {
+        const output = aiReviewResult.output as { verdict?: string; reviewReport?: string };
+        if (output.verdict && output.reviewReport) {
+          const dimensions = parseDimensions(output.reviewReport);
+          approvalOutput = {
+            result: output.verdict,
+            reviewReport: output.reviewReport,
+            dimensions,
+          };
+        }
+      }
+    }
+
     ctx.issueRepo.setApprovalState(ctx.issue.id, {
       stage: ctx.issue.stage,
       status: 'awaiting',
-      output: null,
+      output: approvalOutput,
       requestedAt: new Date().toISOString(),
     });
 
