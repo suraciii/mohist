@@ -111,11 +111,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Introduce transcript-focused components such as `SessionTranscriptView`, `SessionTurnView`, `MohistPromptCard`, `AssistantTextPart`, `ReasoningPart`, and `SessionErrorPart` as needed.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        287196
+      ]
     },
     {
       "id": "T-005",
