@@ -22,6 +22,7 @@ export interface IssueRepo {
   setApprovalState(id: string, state: { stage: Stage; status: string; output: unknown; requestedAt: string }): void;
   clearApprovalState(id: string): void;
   updateStatus(id: string, status: IssueStatus): Issue | null;
+  findById(id: string): Issue | null;
 }
 
 export interface ReactionConfig {

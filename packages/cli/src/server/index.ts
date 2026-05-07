@@ -21,7 +21,7 @@ import { createSettingsSystemRoutes } from '../api/settings-system';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
-import { Stage, IssueStatus } from '../types';
+import { Stage, IssueStatus, MergeState } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { MergeEntry } from '../git/merge-queue';
@@ -217,11 +217,17 @@ async function main(): Promise<void> {
     },
     onMergeSuccess: (entry) => {
       const issue = issueRepo.findById(entry.issueId);
-      if (issue && issue.stage === Stage.Check) {
+      if (!issue) return;
+      if (issue.stage === Stage.Done && issue.status === IssueStatus.Completed && issue.mergeState === MergeState.Merged) {
+        log.info('onMergeSuccess: issue already completed, skipping', { issueNumber: entry.issueNumber });
+        return;
+      }
+      if (issue.stage === Stage.Check) {
         log.info('onMergeSuccess: advancing issue to Done', { issueNumber: entry.issueNumber });
         issueRepo.updateStage(entry.issueId, Stage.Done);
         issueRepo.clearApprovalState(entry.issueId);
         issueRepo.updateStatus(entry.issueId, IssueStatus.Completed);
+        issueRepo.setMergeState(entry.issueId, MergeState.Merged);
         issueRepo.updateBlockedReason(entry.issueId, null);
         eventBus.emit('agent_completed', {
           issueId: entry.issueId,
@@ -283,9 +289,18 @@ async function main(): Promise<void> {
     log.info('Merge completed, transitioning issue to done', { issueNumber });
 
     try {
-      issueRepo.updateStage(issueId, Stage.Done);
-      issueRepo.updateStatus(issueId, IssueStatus.Completed);
-      issueRepo.clearApprovalState(issueId);
+      const issue = issueRepo.findById(issueId);
+      if (!issue) return;
+      if (issue.stage === Stage.Done && issue.status === IssueStatus.Completed && issue.mergeState === MergeState.Merged) {
+        log.info('merge_completed: issue already completed, skipping', { issueNumber });
+        return;
+      }
+      if (issue.stage === Stage.Check || issue.mergeState === MergeState.Merged) {
+        issueRepo.updateStage(issueId, Stage.Done);
+        issueRepo.updateStatus(issueId, IssueStatus.Completed);
+        issueRepo.clearApprovalState(issueId);
+        issueRepo.setMergeState(issueId, MergeState.Merged);
+      }
     } catch (err) {
       log.error('Failed to transition issue to done after merge_completed', {
         issueNumber,

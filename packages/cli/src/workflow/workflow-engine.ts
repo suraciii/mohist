@@ -133,6 +133,9 @@ export class WorkflowEngine {
 
       if (result.success) {
         if (result.nextStage !== undefined) {
+          if (result.nextStage === Stage.Done && currentIssue.stage === Stage.Check) {
+            return { completed: false, stage: currentIssue.stage, message: 'Check stage cannot transition directly to Done; must wait for merge completion' };
+          }
           const updated = this.issueRepo.updateStage(currentIssue.id, result.nextStage);
           if (updated) {
             currentIssue = updated;
@@ -143,6 +146,9 @@ export class WorkflowEngine {
           return { completed: false, stage: currentIssue.stage, message: 'Stage completed but no next stage specified' };
         }
       } else if (result.escalateToStage !== undefined) {
+        if (result.escalateToStage === Stage.Done && currentIssue.stage === Stage.Check) {
+          return { completed: false, stage: currentIssue.stage, message: 'Check stage cannot escalate to Done; must wait for merge completion' };
+        }
         const updated = this.issueRepo.updateStage(currentIssue.id, result.escalateToStage);
         if (updated) {
           currentIssue = updated;
