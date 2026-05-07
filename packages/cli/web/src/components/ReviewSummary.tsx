@@ -13,7 +13,12 @@ export type ReviewOutput = {
 
 export function parseReviewOutput(output?: Record<string, unknown>): ReviewOutput {
   if (!output) return {}
-  const result = typeof output.result === 'string' ? output.result : undefined
+  const result =
+    typeof output.result === 'string'
+      ? output.result
+      : typeof output.verdict === 'string'
+        ? output.verdict
+        : undefined
   const dimensions = Array.isArray(output.dimensions)
     ? output.dimensions
         .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
