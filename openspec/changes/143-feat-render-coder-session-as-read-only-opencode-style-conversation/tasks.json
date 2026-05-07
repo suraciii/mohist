@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Render coder session detail as a read-only opencode-style conversation transcript with persisted Mohist prompts, structured turns, assistant parts, and replayable history.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/agent-runtime/agent-session.ts, packages/cli/src/agent-runtime/session-observer.ts, packages/cli/src/db/coder-session-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This task produces the durable input events consumed by transcript assembly. Prefer append-only `session_stream_log` events over a new message table unless ordering tests prove a migration is required."
+      "passes": true,
+      "notes": "This task produces the durable input events consumed by transcript assembly. Prefer append-only `session_stream_log` events over a new message table unless ordering tests prove a migration is required.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        335544
+      ]
     },
     {
       "id": "T-002",
@@ -46,7 +51,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Keep this as a deep module: callers provide session metadata plus ordered logs and receive a `SessionTranscript`. The frontend should not reconstruct turn semantics from raw logs."
+      "notes": "Keep this as a deep module: callers provide session metadata plus ordered logs and receive a `SessionTranscript`. The frontend should not reconstruct turn semantics from raw logs.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -70,7 +78,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "If a detail endpoint is added, update frontend API helpers and shared WebUI types in the same task so the endpoint is immediately consumable."
+      "notes": "If a detail endpoint is added, update frontend API helpers and shared WebUI types in the same task so the endpoint is immediately consumable.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -95,7 +106,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Introduce transcript-focused components such as `SessionTranscriptView`, `SessionTurnView`, `MohistPromptCard`, `AssistantTextPart`, `ReasoningPart`, and `SessionErrorPart` as needed."
+      "notes": "Introduce transcript-focused components such as `SessionTranscriptView`, `SessionTurnView`, `MohistPromptCard`, `AssistantTextPart`, `ReasoningPart`, and `SessionErrorPart` as needed.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -120,7 +134,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Tool rendering should be presentation-only over transcript `ToolPart` data. Keep a generic fallback as the safety net for all unrecognized tool names."
+      "notes": "Tool rendering should be presentation-only over transcript `ToolPart` data. Keep a generic fallback as the safety net for all unrecognized tool names.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -145,7 +162,10 @@
         "T-005"
       ],
       "passes": false,
-      "notes": "Keep backend assembly authoritative. The client-side live reducer should be small and reconcile from the API after terminal events."
+      "notes": "Keep backend assembly authoritative. The client-side live reducer should be small and reconcile from the API after terminal events.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -175,7 +195,10 @@
         "T-006"
       ],
       "passes": false,
-      "notes": "This task is intentionally last because it consumes persistence, assembler, API, UI, tool rendering, and live replay outputs."
+      "notes": "This task is intentionally last because it consumes persistence, assembler, API, UI, tool rendering, and live replay outputs.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
