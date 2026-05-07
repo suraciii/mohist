@@ -1,0 +1,154 @@
+{
+  "project": "mohist",
+  "description": "Harden stage-aware approval lifecycle and make issue merge/completion status trustworthy.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add issue lifecycle state helpers",
+      "spec": "specs/local-issue-store/spec.md#REQ-STORE-001",
+      "description": "Implement shared domain helpers that define current-stage approval validity and merge delivery classification for issues. The helpers should make stale approval inert and classify false-done states such as done/completed with missing or non-merged merge state.",
+      "acceptanceCriteria": [
+        "A current-stage approval helper returns true only when approvalState.stage equals the issue stage and the optional status matches",
+        "Stale awaiting, approved, and rejected approval states are classified as not current-stage approval",
+        "A merge delivery classifier distinguishes merged, queued, merging, conflict/build-failed/blocked, not-ready/not-merged, unknown, and done-not-merged states",
+        "Unit tests cover mergeState null across draft/plan/build/check/done and done/completed + null as an anomaly",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/**/issue-lifecycle*.ts and related unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Prefer a small pure module that can be used by workflow, API, storage, CLI formatting, and tests without introducing a database migration."
+    },
+    {
+      "id": "T-002",
+      "title": "Harden stage-aware approval consumption",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-001",
+      "description": "Apply the current-stage approval helper to all workflow and approval lookup paths. UserApprovalCheck, Plan runner skip logic, pending approval queries, paused-agent detection, blocked resume logic, approve, and reject must ignore stale approval state and only act on the current stage.",
+      "acceptanceCriteria": [
+        "Plan-stage approved approvalState does not make Check-stage UserApprovalCheck pass",
+        "Only current-stage awaiting approval is returned by pending approval lookup methods and approval APIs",
+        "Stale approved and rejected approval states do not pass or fail checks for the current stage",
+        "Consumed Plan approval is cleared or made inert before Build/Check can observe it",
+        "Regression tests cover stale Plan approval leaking into Check and stale awaiting approval not being approvable",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow, packages/cli/src/db/issue-repo.ts, packages/cli/src/services/agent-runner-service.ts, packages/cli/src/api/issues.ts, and tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Search for direct approvalState.status checks and replace only lifecycle-driving checks, preserving historical display where appropriate."
+    },
+    {
+      "id": "T-003",
+      "title": "Gate completion on successful merge",
+      "spec": "specs/http-api/spec.md#REQ-API-002",
+      "description": "Change Check completion so passing checks and user approval do not directly mark the issue done. Check approval must enqueue the merge queue, and only an idempotent merge-success transition may set stage=done and status=completed.",
+      "acceptanceCriteria": [
+        "Check stage completion without current user approval leaves the issue awaiting approval instead of done",
+        "Approving a current Check approval calls mergeQueue.enqueue and returns a queued-for-merge API message",
+        "WorkflowEngine and CheckStageRunner no longer complete an issue as done/completed merely because Check checks passed",
+        "Merge success transition is idempotent and is the only path that writes done/completed for merged Check issues",
+        "Tests prove done/completed is not written until mergeState is merged",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow, packages/cli/src/api/issues.ts, packages/cli/src/git/merge-queue.ts, packages/cli/src/server/index.ts, and tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Keep the persisted stage model as plan/build/check/done; represent the merge gate through Check + mergeState rather than adding a new database stage."
+    },
+    {
+      "id": "T-004",
+      "title": "Guard false-done recovery and archive flows",
+      "spec": "specs/local-issue-store/spec.md#REQ-STORE-002",
+      "description": "Use the merge delivery classifier to detect issues that are marked done/completed without a merged merge state. Recovery/status paths should make this anomaly visible, and archive-all-completed must not silently archive false-done issues.",
+      "acceptanceCriteria": [
+        "done/completed issues with mergeState null or non-merged are classified as false-done anomalies",
+        "Agent recovery/status surfaces false-done issues as recoverable or anomalous instead of treating them as safely completed",
+        "archiveAllCompleted archives only trusted merged completed issues and skips false-done issues with a clear message or warning",
+        "Single issue archive returns a visible warning or blocking error when the issue is false-done",
+        "Regression tests cover done/completed + merge_state null archive and recovery behavior",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/issue-service.ts, packages/cli/src/services/agent-runner-service.ts, packages/cli/src/api/issues.ts, and tests",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Do not backfill historical rows to merged; the goal is to expose untrusted completion state."
+    },
+    {
+      "id": "T-005",
+      "title": "Expose merge trust in CLI output",
+      "spec": "specs/cli-interface/spec.md#REQ-CLI-001",
+      "description": "Update CLI issue formatting so users can see merge status without inferring it from stage and status. `mo issue show` should display merge state, source/target branch context where available, and false-done warnings; `mo issue approve` should print the API-provided action message.",
+      "acceptanceCriteria": [
+        "mo issue show displays merged, queued/merging, conflict/build-failed/blocked, not merged/unknown, and done-not-merged states from issue data",
+        "mo issue show highlights done/completed + missing or non-merged mergeState as a warning",
+        "mo issue approve prints the API response message and distinguishes resumed pipeline from queued for merge",
+        "Issue list or status formatting shows a merge warning badge/marker for false-done issues when such issues are listed",
+        "CLI formatting tests cover null mergeState in multiple stages and false-done output",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts and CLI tests",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "If source/target branch metadata is not stored, derive best-effort values from issue number and project baseBranch without adding schema."
+    },
+    {
+      "id": "T-006",
+      "title": "Expose merge trust in Web UI",
+      "spec": "specs/web-ui/spec.md#REQ-WEB-001",
+      "description": "Update the Web UI to make merge delivery status visible on issue detail and issue cards. MergeStatePanel must render a stable merge box even when mergeState is null, and approval labels must describe resume/build or queue-merge actions instead of saying Approve & Done.",
+      "acceptanceCriteria": [
+        "Issue detail renders a merge status box for null mergeState with Not ready, Not merged, Unknown, or Done but not merged semantics",
+        "Issue detail and cards display merged, queued/merging/rebasing/resolving, conflict/build-failed/blocked, and false-done states distinctly",
+        "Done column cards for unmerged or unknown merge status show a warning badge or marker",
+        "Check approval button no longer says Approve & Done and instead communicates queue merge or merge-to-target intent",
+        "Plan approval copy communicates approving design and starting/resuming build",
+        "Web component or formatting tests cover null mergeState and done/completed anomaly rendering",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/*, packages/cli/web/src/lib/*, and Web UI tests",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Preserve the existing visual language; this is a clarity fix, not a redesign."
+    },
+    {
+      "id": "T-007",
+      "title": "Add end-to-end regression coverage",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-002",
+      "description": "Add focused regression coverage tying together approval lifecycle, merge-gated completion, CLI formatting, Web formatting, and archive guardrails. These tests should prevent recurrence of the #135 false-done path where Check user-approval passes from stale Plan approval and no merge queue entry exists.",
+      "acceptanceCriteria": [
+        "A regression test reproduces stale Plan approval at Check and verifies Check requests fresh approval instead of passing",
+        "A regression test verifies Check approve enqueues merge and issue remains not completed until merge success",
+        "A regression test verifies done/completed + mergeState null is displayed or reported as an anomaly in backend/API-facing output",
+        "A regression test verifies archive-all-completed does not silently archive false-done issues",
+        "CLI and Web formatting tests cover mergeState null state matrix",
+        "npm test passes in packages/cli",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/* and packages/cli/web/src/**/*.test.*",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "This is the final safety-net task after implementation tasks have landed; keep tests deterministic and avoid requiring real remote merges."
+    }
+  ]
+}
