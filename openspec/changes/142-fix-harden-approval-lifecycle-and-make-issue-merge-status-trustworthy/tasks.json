@@ -76,11 +76,15 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep the persisted stage model as plan/build/check/done; represent the merge gate through Check + mergeState rather than adding a new database stage.",
-      "attempts": 0,
+      "attempts": 2,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1895983,
+        1887919
+      ]
     },
     {
       "id": "T-004",
