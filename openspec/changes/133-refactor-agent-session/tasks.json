@@ -217,11 +217,14 @@
         "T-005",
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The runningSlots Map in AgentRunnerService can remain as a performance cache, but the DB becomes the authoritative source. Orphan detection should work from DB queries alone.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        623856
+      ]
     }
   ]
 }
