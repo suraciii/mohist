@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { AcpConnection, AcpSessionResult } from '../src/agent-runtime/acp-session';
+import type { AgentSession, AcpSessionResult } from '../src/agent-runtime/agent-session';
 
 describe('ACP session stream destroy on process exit', () => {
   it('should destroy stdin and stdout on proc exit event', () => {
@@ -61,7 +61,7 @@ describe('ACP session stream destroy on process exit', () => {
   });
 });
 
-describe('AcpConnection multi-round contract', () => {
+describe('AgentSession multi-round contract', () => {
   it('should support multiple prompt calls on a mock connection', async () => {
     const responses: string[] = [
       'proposal generated',
@@ -72,8 +72,8 @@ describe('AcpConnection multi-round contract', () => {
     ];
 
     let callCount = 0;
-    const connection: AcpConnection = {
-      async prompt(text: string): Promise<AcpSessionResult> {
+    const connection: AgentSession = {
+      async execute(text: string): Promise<AcpSessionResult> {
         const response = responses[callCount] ?? 'default';
         callCount++;
         return { text: response, success: true, acpSessionId: 'session-1' };
@@ -81,23 +81,23 @@ describe('AcpConnection multi-round contract', () => {
       async close(): Promise<void> {},
     };
 
-    const r1 = await connection.prompt('generate proposal');
+    const r1 = await connection.execute('generate proposal');
     expect(r1.success).toBe(true);
     expect(r1.text).toBe('proposal generated');
 
-    const r2 = await connection.prompt('generate specs');
+    const r2 = await connection.execute('generate specs');
     expect(r2.success).toBe(true);
     expect(r2.text).toBe('specs generated');
 
-    const r3 = await connection.prompt('generate design');
+    const r3 = await connection.execute('generate design');
     expect(r3.success).toBe(true);
     expect(r3.text).toBe('design generated');
 
-    const r4 = await connection.prompt('generate tasks');
+    const r4 = await connection.execute('generate tasks');
     expect(r4.success).toBe(true);
     expect(r4.text).toBe('tasks generated');
 
-    const r5 = await connection.prompt('self-review');
+    const r5 = await connection.execute('self-review');
     expect(r5.success).toBe(true);
     expect(r5.text).toBe('self-review complete');
 
@@ -106,8 +106,8 @@ describe('AcpConnection multi-round contract', () => {
 
   it('should return error after close is called', async () => {
     let closed = false;
-    const connection: AcpConnection = {
-      async prompt(text: string): Promise<AcpSessionResult> {
+    const connection: AgentSession = {
+      async execute(text: string): Promise<AcpSessionResult> {
         if (closed) {
           return { text: '', success: false, error: 'Connection is closed' };
         }
@@ -118,20 +118,20 @@ describe('AcpConnection multi-round contract', () => {
       },
     };
 
-    const r1 = await connection.prompt('first');
+    const r1 = await connection.execute('first');
     expect(r1.success).toBe(true);
 
     await connection.close();
 
-    const r2 = await connection.prompt('after close');
+    const r2 = await connection.execute('after close');
     expect(r2.success).toBe(false);
     expect(r2.error).toContain('closed');
   });
 
   it('should report per-round text (not cumulative)', async () => {
     const roundTexts: string[] = [];
-    const connection: AcpConnection = {
-      async prompt(text: string): Promise<AcpSessionResult> {
+    const connection: AgentSession = {
+      async execute(text: string): Promise<AcpSessionResult> {
         roundTexts.push(`round-${roundTexts.length + 1}`);
         return {
           text: `round-${roundTexts.length}`,
@@ -142,8 +142,8 @@ describe('AcpConnection multi-round contract', () => {
       async close(): Promise<void> {},
     };
 
-    const r1 = await connection.prompt('round 1');
-    const r2 = await connection.prompt('round 2');
+    const r1 = await connection.execute('round 1');
+    const r2 = await connection.execute('round 2');
 
     expect(r1.text).toBe('round-1');
     expect(r2.text).toBe('round-2');

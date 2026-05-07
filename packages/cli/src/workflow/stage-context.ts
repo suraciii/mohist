@@ -1,6 +1,6 @@
 import type { Stage, Issue, Project, IssueStatus } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
-import type { AgentSessionOptions } from '../agent-runtime/acp-session';
+import type { AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';

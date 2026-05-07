@@ -199,10 +199,10 @@ export class BuildTestCheck implements Check {
     });
 
     try {
-      const { runAcpSession } = await import('../../agent-runtime/acp-session');
+      const { withSession } = await import('../../agent-runtime/agent-session');
       const prompt = buildCheckAutoFixPrompt(buildLog);
 
-      const result = await runAcpSession({
+      const result = await withSession({
         cwd: this.worktreePath,
         task: prompt,
         taskId: `check-auto-fix-${ctx.issue.number}`,

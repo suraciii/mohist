@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-vi.mock('../src/agent-runtime/acp-session', () => ({
-  runAcpSession: vi.fn(),
+vi.mock('../src/agent-runtime/agent-session', () => ({
+  withSession: vi.fn(),
 }));
 
 import * as fs from 'fs';
@@ -17,9 +17,9 @@ import { SkillRunRepo } from '../src/db/skill-run-repo';
 import { IssueService } from '../src/services/issue-service';
 import { EventBus } from '../src/services/event-bus';
 import { SkillService } from '../src/services/skill-service';
-import { runAcpSession } from '../src/agent-runtime/acp-session';
+import { withSession } from '../src/agent-runtime/agent-session';
 
-const mockRunAcpSession = vi.mocked(runAcpSession);
+const mockWithSession = vi.mocked(withSession);
 
 describe('SkillService', () => {
   let db: DatabaseManager;
@@ -230,7 +230,7 @@ describe('SkillService', () => {
 
       service.scanAndRegister(tmpDir, projectId);
 
-      mockRunAcpSession.mockResolvedValue({
+      mockWithSession.mockResolvedValue({
         text: '# Refactor Authentication Module\n\nHere is my analysis...',
         success: true,
       });
@@ -273,7 +273,7 @@ describe('SkillService', () => {
       eventBus.on('skill_started', (d) => startedEvents.push(d));
       eventBus.on('skill_completed', (d) => completedEvents.push(d));
 
-      mockRunAcpSession.mockResolvedValue({
+      mockWithSession.mockResolvedValue({
         text: 'Some output',
         success: true,
       });
@@ -304,7 +304,7 @@ describe('SkillService', () => {
 
       service.scanAndRegister(tmpDir, projectId);
 
-      mockRunAcpSession.mockResolvedValue({
+      mockWithSession.mockResolvedValue({
         text: '',
         success: false,
         error: 'Agent timeout',
@@ -335,7 +335,7 @@ describe('SkillService', () => {
 
       service.scanAndRegister(tmpDir, projectId);
 
-      mockRunAcpSession.mockRejectedValue(new Error('spawn failed'));
+      mockWithSession.mockRejectedValue(new Error('spawn failed'));
 
       const runRecord = service.run('throw-skill', projectId, tmpDir);
 
@@ -364,7 +364,7 @@ describe('SkillService', () => {
       const failedEvents: unknown[] = [];
       eventBus.on('skill_failed', (d) => failedEvents.push(d));
 
-      mockRunAcpSession.mockResolvedValue({
+      mockWithSession.mockResolvedValue({
         text: '',
         success: false,
         error: 'Something went wrong',
@@ -402,7 +402,7 @@ describe('SkillService', () => {
 
       service.scanAndRegister(tmpDir, projectId);
 
-      mockRunAcpSession.mockResolvedValue({
+      mockWithSession.mockResolvedValue({
         text: '### Fix memory leak in cache\n\nDetails here.',
         success: true,
       });
@@ -432,7 +432,7 @@ describe('SkillService', () => {
 
       service.scanAndRegister(tmpDir, projectId);
 
-      mockRunAcpSession.mockResolvedValue({
+      mockWithSession.mockResolvedValue({
         text: '',
         success: true,
       });
@@ -462,7 +462,7 @@ describe('SkillService', () => {
 
       service.scanAndRegister(tmpDir, projectId);
 
-      mockRunAcpSession.mockResolvedValue({
+      mockWithSession.mockResolvedValue({
         text: 'This is a plain text first line\n\nMore details here.',
         success: true,
       });
@@ -506,7 +506,7 @@ describe('SkillService', () => {
         eventBus,
       });
 
-      mockRunAcpSession.mockResolvedValue({
+      mockWithSession.mockResolvedValue({
         text: 'Some output',
         success: true,
       });
@@ -540,7 +540,7 @@ describe('SkillService', () => {
 
       service.scanAndRegister(tmpDir, projectId);
 
-      mockRunAcpSession.mockResolvedValue({ text: 'ok', success: true });
+      mockWithSession.mockResolvedValue({ text: 'ok', success: true });
 
       const skill = service.getByName('history-skill')!;
       service.run('history-skill', projectId, tmpDir);

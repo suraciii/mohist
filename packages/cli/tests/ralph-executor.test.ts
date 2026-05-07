@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { runRalphLoop, sortTasksByOrder, getOrderValue, readTasks, findNextPendingTask, RalphExecutor, categorizeFailure, FAILURE_CATEGORY_CONFIGS, setAcpSessionRunner, resetAcpSessionRunner, validateTaskDependencies } from '../src/openspec/ralph-executor';
-import { truncateAgentText } from '../src/agent-runtime/acp-session';
+import { truncateAgentText } from '../src/agent-runtime/agent-session';
 import type { OpenSpecChange } from '../src/openspec/detector';
 
 describe('ralph-executor utilities', () => {
