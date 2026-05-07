@@ -283,13 +283,8 @@ describe('Escalation Paths', () => {
     expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Build);
   });
 
-  it('CHECK ai-review failure escalates to PLAN', async () => {
-    const planRunner = new SimpleStageRunner({
-      checks: [new PassCheck('proposal-complete'), new PassCheck('user-approval')],
-      nextStage: Stage.Done,
-      stage: Stage.Plan,
-    });
-
+  it('CHECK ai-review failure auto-fixes before falling back to BUILD', async () => {
+    let fixCalled = false;
     const buildRunner = new SimpleStageRunner({
       checks: [new PassCheck('all-tasks-complete'), new PassCheck('code-compiles')],
       nextStage: Stage.Check,
@@ -298,7 +293,9 @@ describe('Escalation Paths', () => {
 
     const aiReviewFailCheck = new FailCheck(
       'ai-review',
-      { type: 'escalate', escalateTarget: Stage.Plan },
+      { type: 'auto-fix', maxAttempts: 1, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build } },
+      undefined,
+      async () => { fixCalled = true; },
     );
 
     const checkRunner = new SimpleStageRunner({
@@ -315,7 +312,7 @@ describe('Escalation Paths', () => {
     } as unknown as IssueRepo;
 
     const ctx = makeEngineContext({
-      runners: [planRunner, buildRunner, checkRunner],
+      runners: [buildRunner, checkRunner],
       issueRepo,
     });
 
@@ -324,8 +321,9 @@ describe('Escalation Paths', () => {
 
     const result = await engine.run(issue, {} as any);
 
-    expect(result.completed).toBe(true);
-    expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Plan);
+    expect(result.completed).toBe(false);
+    expect(fixCalled).toBe(true);
+    expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Build);
   });
 
   it('BUILD tasks-complete failure escalates to PLAN', async () => {
