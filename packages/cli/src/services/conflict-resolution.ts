@@ -7,6 +7,8 @@ import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from './event-bus';
 import { loadAgentConfig } from '../workflow/workflow-loader';
 import { load as loadConfig } from '../config/config-loader';
+import { resolveStageModel } from '../config/model-resolution';
+import { Stage } from '../types';
 
 export interface ConflictResolutionDeps {
   issueRepo: IssueRepo;
@@ -43,7 +45,7 @@ export async function resolveConflictsViaAgent(
     eventBus,
     issueNumber: issue.number,
     opencodeBinPath,
-    model: config.opencode?.model,
+    model: resolveStageModel(Stage.Build, config),
   };
 
   try {
