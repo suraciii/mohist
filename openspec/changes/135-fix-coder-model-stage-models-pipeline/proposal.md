@@ -42,3 +42,8 @@ User-configured **Coder Model** and **Stage Model Overrides** are persisted in c
 | Database | `coder_session.model` field populated; `workflow_log` gains `model_selected` entries |
 | APIs | No breaking changes; behavior correction only |
 | WebUI | No direct changes; model selection UI already exists and will now actually affect execution |
+
+**Note on `config.model` vs `config.opencode.model`:**
+- `config.model` is consumed by the SDK path (explore, propose) via `resolveModel()` — **unchanged**.
+- `config.opencode.model` is consumed by the ACP path (pipeline) via `setSessionConfigOption()` — **this is what we fix**.
+These are intentionally separate configurations; users who set "Default Model" in Settings should also set "Coder Model" if they want pipeline agents to use a specific model.

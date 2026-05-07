@@ -12,6 +12,7 @@
         "resolveStageModel('build', { opencode: { model: 'm1', stageModels: { plan: 'm2' } } }) returns 'm1'",
         "resolveStageModel('check', {}) returns undefined",
         "resolveStageModel('plan', { opencode: { model: 'm1' } }) returns 'm1'",
+        "resolveStageModel('Plan', { opencode: { model: 'm1', stageModels: { plan: 'm2' } } }) returns undefined (case-sensitive)",
         "Typecheck passes"
       ],
       "priority": 1,
@@ -20,7 +21,7 @@
       "output": "src/config/model-resolution.ts",
       "dependsOn": [],
       "passes": false,
-      "notes": "Place next to config-loader.ts. Keep it a pure function with no side effects."
+      "notes": "Place next to config-loader.ts. Keep it a pure function with no side effects. Stage key must match exactly (case-sensitive). Issue.stage enum values are capitalized ('Plan', 'Build', 'Check') but stageModels keys should use lowercase ('plan', 'build', 'check') for consistency. The resolver should normalize or the caller should ensure correct casing."
     },
     {
       "id": "T-002",
@@ -58,7 +59,7 @@
       "output": "src/services/agent-runner-service.ts",
       "dependsOn": ["T-002"],
       "passes": false,
-      "notes": "AgentRunnerService already holds llmConfig; just forward it."
+      "notes": "AgentRunnerService already holds llmConfig; just forward it. Note: llmConfig is a legacy name — it is actually the full ConfigInfo, not just LLM config. Future refactor may rename it to config."
     },
     {
       "id": "T-004",
@@ -95,7 +96,7 @@
       "output": "src/server/index.ts, src/services/conflict-resolution.ts",
       "dependsOn": ["T-002"],
       "passes": false,
-      "notes": "These paths are outside WorkflowEngine so they read config directly. load() is cached; no I/O overhead."
+      "notes": "These paths are outside WorkflowEngine so they read config directly. load() is cached; no I/O overhead. Recovery pipeline (recoverBuildStageIssue) does not need separate wiring — it enqueues resume-pipeline which will naturally go through executeResumePipelineTask (T-003)."
     },
     {
       "id": "T-006",
