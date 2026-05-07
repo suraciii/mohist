@@ -203,7 +203,7 @@ async function main(): Promise<void> {
       try {
         const session = await AgentSession.create(acpOptions);
         try {
-          const result = await session.execute(prompt);
+          const result = await session.execute(prompt, { kind: 'recovery' });
           if (!result.success) {
             return { success: false, error: result.error || 'Agent build fix session failed' };
           }

@@ -151,12 +151,20 @@ export class CoderSessionRepo {
   }
 
   updateStatus(id: string, status: string): CoderSession {
+    const terminalStatuses = new Set(['completed', 'failed', 'timeout', 'cancelled']);
     const now = new Date().toISOString();
 
-    this.db.run(
-      'UPDATE coder_session SET status = ?, completed_at = ? WHERE id = ?',
-      [status, now, id]
-    );
+    if (terminalStatuses.has(status)) {
+      this.db.run(
+        'UPDATE coder_session SET status = ?, completed_at = ? WHERE id = ?',
+        [status, now, id]
+      );
+    } else {
+      this.db.run(
+        'UPDATE coder_session SET status = ? WHERE id = ?',
+        [status, id]
+      );
+    }
 
     const row = this.db.get<CoderSessionRow>(
       'SELECT * FROM coder_session WHERE id = ?',

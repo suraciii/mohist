@@ -175,7 +175,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         let attempts = 1;
 
         const prompt = task.buildPrompt(ctx.issue, changeDir);
-        const result = await session.execute(prompt);
+        const result = await session.execute(prompt, { kind: 'task', title: task.label });
 
         if (!result.success) {
           log.error('Review task failed', { artifact: task.type, error: result.error });
@@ -211,7 +211,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
           attempts++;
           emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'retrying', attempts, []);
 
-          const retryResult = await session.execute(retryPrompt);
+          const retryResult = await session.execute(retryPrompt, { kind: 'retry', title: task.label });
 
           if (!retryResult.success) {
             log.error('Review retry prompt failed', { artifact: task.type, error: retryResult.error });

@@ -19,6 +19,13 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'agent-session' });
 
+export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery';
+
+export interface ExecutePromptOptions {
+  kind?: PromptKind;
+  title?: string;
+}
+
 export interface AgentSessionOptions {
   cwd: string;
   task?: string;
@@ -374,13 +381,26 @@ export class AgentSession {
     return session;
   }
 
-  async execute(prompt: string): Promise<AcpSessionResult> {
+  async execute(prompt: string, meta?: ExecutePromptOptions): Promise<AcpSessionResult> {
     if (this._closed) {
       return { text: '', success: false, error: 'Session is closed' };
     }
 
     const roundStartIndex = this._agentText.length;
     const timeout = this._options.timeout ?? PER_ROUND_TIMEOUT;
+
+    const kind = meta?.kind ?? 'task';
+    const sentAt = new Date().toISOString();
+
+    this._wfObserver?.writeMohistPrompt({
+      role: 'mohist',
+      text: prompt,
+      kind,
+      sentAt,
+      executionId: this._options.executionId,
+      stage: this._options.stage,
+      title: meta?.title ?? this._options.title,
+    });
 
     const abortPromise = this._options.signal
       ? new Promise<'aborted'>((resolve) => {
@@ -556,7 +576,7 @@ export async function withSession<T = AcpSessionResult>(
   }
   try {
     if (fn) return await fn(session);
-    return await session.execute(options.task ?? '');
+    return await session.execute(options.task ?? '', { kind: 'initial' });
   } finally {
     await session.close();
   }
