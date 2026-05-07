@@ -43,7 +43,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     this.checks = options.checks ?? [
       new BuildTestCheck({ worktreePath: this.worktreePath }),
       new AiReviewCheck(),
-      new UserApprovalCheck(Stage.Plan),
+      new UserApprovalCheck(Stage.Check),
     ];
   }
 

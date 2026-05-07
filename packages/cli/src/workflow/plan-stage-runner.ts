@@ -17,6 +17,7 @@ import { DesignCompleteCheck } from './checks/design-complete-check';
 import { TasksValidCheck } from './checks/tasks-valid-check';
 import { SelfReviewPassedCheck } from './checks/self-review-passed-check';
 import { UserApprovalCheck } from './checks/user-approval-check';
+import { isCurrentStageApproval } from './issue-lifecycle';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
@@ -43,7 +44,7 @@ export class PlanStageRunner extends BaseStageRunner {
       throw new Error(`Failed to get or create change directory for issue #${issue.number}`);
     }
 
-    if (issue.approvalState?.status === 'approved') {
+    if (isCurrentStageApproval(issue, Stage.Plan, 'approved')) {
       checkpointManager.delete(issue.number, 'plan');
       return { changeDir, skipped: true };
     }

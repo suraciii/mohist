@@ -21,6 +21,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Log } from '../util/log';
 import type { IssueQueueStatus } from '../services/agent-runner-service';
+import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
 
 const log = Log.create({ service: 'issue' });
 
@@ -919,9 +920,9 @@ export function createIssueRoutes(
         return c.json(response, 500);
       }
 
-      if (!agentRunner.isIssueAwaitingApproval(issue.id)) {
+      if (!isCurrentStageApproval(issue, issue.stage, 'awaiting')) {
         const pendingIssue = issueRepo.findPendingApprovalByIssueId(issue.id);
-        if (!(pendingIssue?.approvalState?.status === 'awaiting')) {
+        if (!pendingIssue) {
           const response: ApiResponse = {
             success: false,
             error: `No pending approval for issue #${number}. The pipeline may have completed or not been started. Try: mo issue start ${number}`
@@ -1061,10 +1062,10 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      if (!issue.approvalState || issue.approvalState.status !== 'awaiting') {
+      if (!isCurrentStageApproval(issue, issue.stage, 'awaiting')) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is not awaiting approval`
+          error: `Issue #${number} is not awaiting approval at current stage`
         };
         return c.json(response, 400);
       }
@@ -1099,13 +1100,13 @@ export function createIssueRoutes(
         issueService.createComment(issue.id, message);
       }
 
-      const rejectedStage = issue.approvalState.stage;
+      const rejectedStage = issue.approvalState!.stage;
 
       issueRepo.setApprovalState(issue.id, {
         stage: rejectedStage,
         status: 'rejected',
-        output: issue.approvalState.output,
-        requestedAt: issue.approvalState.requestedAt,
+        output: issue.approvalState!.output,
+        requestedAt: issue.approvalState!.requestedAt,
         respondedAt: new Date().toISOString(),
       });
 

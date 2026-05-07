@@ -410,7 +410,7 @@ export class IssueRepo {
     );
     if (!row) return null;
     const issue = rowToIssue(row);
-    if (issue.approvalState && issue.approvalState.status === 'awaiting') {
+    if (issue.approvalState && issue.approvalState.status === 'awaiting' && issue.approvalState.stage === issue.stage) {
       return issue;
     }
     return null;
@@ -423,7 +423,7 @@ export class IssueRepo {
     );
     if (!row) return null;
     const issue = rowToIssue(row);
-    if (issue.approvalState && issue.approvalState.status === 'awaiting') {
+    if (issue.approvalState && issue.approvalState.status === 'awaiting' && issue.approvalState.stage === issue.stage) {
       return issue;
     }
     return null;
