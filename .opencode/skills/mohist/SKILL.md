@@ -34,6 +34,7 @@ mo status                          当前项目概览
 mo project list / use <name>       项目管理
 mo attach [-f]                     实时跟踪 agent 事件（交互式 REPL）
 mo server start / stop / status    服务管理
+mo server update                   重新构建并重启（源码模式）
 ```
 
 ## 常用模式
