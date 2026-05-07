@@ -279,6 +279,9 @@ export class AgentSession {
         wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', {
           phase: 'initialize', timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
         });
+        if (options.onBeforeKill) {
+          try { await options.onBeforeKill(options.cwd); } catch {}
+        }
         await acpProcess.cleanup();
         throw new Error('Timed out during initialize');
       }
@@ -296,6 +299,9 @@ export class AgentSession {
         wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', {
           phase: 'newSession', timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
         });
+        if (options.onBeforeKill) {
+          try { await options.onBeforeKill(options.cwd); } catch {}
+        }
         await acpProcess.cleanup();
         throw new Error('Timed out during newSession');
       }
@@ -367,6 +373,10 @@ export class AgentSession {
           sessionId: this._sessionId, mode: 'agent-session', timestamp: new Date().toISOString(),
         });
         try { await this._connection.cancel({ sessionId: this._sessionId }); } catch {}
+        let wipCommitted = false;
+        if (this._options.onBeforeKill) {
+          try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch {}
+        }
         await this._acpProcess.cleanup();
         this._closed = true;
         return {
@@ -374,6 +384,7 @@ export class AgentSession {
           success: false,
           error: 'Agent stopped by user',
           acpSessionId: this._sessionId,
+          wipCommitted,
         };
       }
 
@@ -387,11 +398,18 @@ export class AgentSession {
         const failCtx = this.makeCtx();
         for (const obs of this._observers) { try { obs.onStateChange?.(failCtx, 'running', 'timeout'); } catch {} }
         try { await this._connection.cancel({ sessionId: this._sessionId }); } catch {}
+        let wipCommitted = false;
+        if (this._options.onBeforeKill) {
+          try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch {}
+        }
+        this._closed = true;
+        await this._acpProcess.cleanup();
         return {
           text: this._agentText.slice(roundStartIndex),
           success: false,
           error: `Timed out after ${timeout / 1000}s`,
           acpSessionId: this._sessionId,
+          wipCommitted,
         };
       }
 
@@ -412,9 +430,13 @@ export class AgentSession {
       try { this._stateMachine.transition('failed'); } catch {}
       const failCtx = this.makeCtx();
       for (const obs of this._observers) { try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch {} }
+      let wipCommitted = false;
+      if (this._options.onBeforeKill) {
+        try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch {}
+      }
       await this._acpProcess.cleanup();
       const message = err instanceof Error ? err.message : String(err);
-      return { text: this._agentText.slice(roundStartIndex), success: false, error: message };
+      return { text: this._agentText.slice(roundStartIndex), success: false, error: message, wipCommitted };
     }
   }
 
