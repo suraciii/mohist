@@ -97,4 +97,21 @@ No migration or rollback needed. This is a pure bug-fix change:
 
 ## Open Questions
 
-None.
+### Q1: `issue.model` 字段完全悬空，如何处理？
+
+`Issue` 类型（`types/index.ts:86`）定义了 `model?: string`，API 支持 PATCH 设置，但**全代码库零处读取**。当前 `resolveStageModel` 的优先级链不包含 `issue.model`。
+
+选项：
+- **纳入优先级链**（`issue.model > stageModels[stage] > opencode.model`）→ 需新增 per-issue 模型覆盖 UI
+- **从 Issue 类型中移除** → 避免半实现状态误导
+
+**本 issue 暂不处理**，保持 `resolveStageModel(stage, config)` 签名不变。后续专门 issue 决定 `issue.model` 的去留。
+
+### Q2: `config.model` 与 `config.opencode.model` 的关系
+
+- `config.model` → SDK 路径（explore、propose），通过 `resolveModel()` 消费
+- `config.opencode.model` → ACP 路径（pipeline），通过 `setSessionConfigOption()` 消费
+
+两者是独立配置。用户在 Settings 中配置的 "Default Model" 走 `config.model`，"Coder Model" 走 `config.opencode.model`。
+
+**本 issue 不合并两者**，仅修复 ACP 路径的断裂。
