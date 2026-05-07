@@ -310,19 +310,19 @@ describe('ConfigLoader', () => {
     it('should return all defaults when agent section is missing', () => {
       const config: ConfigInfo = {};
       const result = getAgentTimeoutConfig(config);
-      expect(result).toEqual({ taskTimeout: 600, stageTimeout: 3600, maxGracePeriods: 2 });
+      expect(result).toEqual({ taskTimeout: 1800, stageTimeout: 3600, maxGracePeriods: 2 });
     });
 
     it('should return all defaults when config file does not exist', () => {
       const config = load(path.join(tmpDir, 'nonexistent.jsonc'));
       const result = getAgentTimeoutConfig(config);
-      expect(result).toEqual({ taskTimeout: 600, stageTimeout: 3600, maxGracePeriods: 2 });
+      expect(result).toEqual({ taskTimeout: 1800, stageTimeout: 3600, maxGracePeriods: 2 });
     });
 
     it('should return all defaults when agent is empty object', () => {
       const config: ConfigInfo = { agent: {} };
       const result = getAgentTimeoutConfig(config);
-      expect(result).toEqual({ taskTimeout: 600, stageTimeout: 3600, maxGracePeriods: 2 });
+      expect(result).toEqual({ taskTimeout: 1800, stageTimeout: 3600, maxGracePeriods: 2 });
     });
   });
 

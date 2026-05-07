@@ -893,8 +893,8 @@ describe('v4 bug fix: stage timeout calculation', () => {
     await runRalphLoop(change, context, { maxRetries: 0 });
 
     expect(capturedTimeouts).toHaveLength(2);
-    expect(capturedTimeouts[0]).toBe(600_000);
-    expect(capturedTimeouts[1]).toBe(600_000);
+    expect(capturedTimeouts[0]).toBe(1800_000);
+    expect(capturedTimeouts[1]).toBe(1800_000);
   });
 
   it('uses taskTimeout from config even when stage timeout is very small', async () => {
@@ -915,7 +915,7 @@ describe('v4 bug fix: stage timeout calculation', () => {
 
     expect(capturedTimeouts).toHaveLength(10);
     for (const t of capturedTimeouts) {
-      expect(t).toBe(600_000);
+      expect(t).toBe(1800_000);
     }
   });
 
@@ -936,7 +936,7 @@ describe('v4 bug fix: stage timeout calculation', () => {
 
     expect(capturedTimeouts).toHaveLength(2);
     for (const t of capturedTimeouts) {
-      expect(t).toBe(600 * 1000);
+      expect(t).toBe(1800 * 1000);
     }
   });
 });
