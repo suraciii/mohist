@@ -205,10 +205,13 @@
         "T-006"
       ],
       "passes": true,
-      "notes": "Decision: Do NOT extract ACP driver. Extracting a driver would create a 1:1 pass-through interface mirroring the ACP SDK methods (initialize, newSession, prompt, cancel, setSessionConfigOption). AgentSession would still call the same methods just through an extra indirection layer. The meaningful domain complexity (tool-call ID generation, observer dispatch, state machine, text aggregation, timeout/abort racing, cleanup guarantees) remains in AgentSession regardless. This is a shallow pass-through that adds indirection without reducing responsibility. All acceptance criteria met: AgentSession remains workflow-visibility independent, tests pass, typecheck passes.",
+      "notes": "Do not create a large protocol abstraction just to reduce line count. This task is complete if the agent makes and documents the extraction decision and keeps tests green.",
       "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        226899
+      ]
     },
     {
       "id": "T-008",
