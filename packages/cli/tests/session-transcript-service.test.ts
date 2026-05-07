@@ -552,7 +552,7 @@ describe('SessionTranscriptAssembler', () => {
       initializeDatabase(db);
       const repo = new SessionStreamLogRepo(db);
       try {
-        db.run(`INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, datetime('now'))`, ['project-1', 'Project', '/tmp/project']);
+        db.run(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))`, ['project-1', 'Project', '/tmp/project']);
         db.run(`INSERT INTO issues (id, project_id, number, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, ['issue-1', 'project-1', 1, 'Issue', 'open']);
         db.run(
           `INSERT INTO session_stream_log (id, session_id, issue_id, event_type, data, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
