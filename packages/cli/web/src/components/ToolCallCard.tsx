@@ -59,6 +59,10 @@ function formatDuration(ms: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
 }
 
+function stripAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+}
+
 function tryFormatJson(text: string): string {
   try {
     const parsed = JSON.parse(text)
@@ -75,6 +79,36 @@ function getDisplayType(toolName: string): ToolDisplayType {
 function DiffBlock({ oldStr, newStr }: { oldStr: string; newStr: string }) {
   const oldLines = oldStr ? oldStr.split('\n') : []
   const newLines = newStr ? newStr.split('\n') : []
+  const totalLines = oldLines.length + newLines.length
+  const COLLAPSE_THRESHOLD = 20
+  const isLarge = totalLines > COLLAPSE_THRESHOLD
+
+  if (isLarge) {
+    return (
+      <div className="text-xs font-mono rounded overflow-hidden border border-gray-200">
+        <div className="bg-gray-50 px-3 py-1.5 text-gray-500 border-b border-gray-100">
+          {oldLines.length > 0 && (
+            <span className="text-red-500 mr-3">-{oldLines.length} lines</span>
+          )}
+          {newLines.length > 0 && (
+            <span className="text-green-600">+{newLines.length} lines</span>
+          )}
+        </div>
+        <div className="max-h-48 overflow-auto">
+          {oldLines.length > 0 && oldLines.map((line, i) => (
+            <div key={`old-${i}`} className="bg-red-50 text-red-800 px-3 py-0.5 border-l-2 border-red-400 min-h-[1.25rem]">
+              <span className="text-red-400 select-none mr-2">-</span>{line}
+            </div>
+          ))}
+          {newLines.length > 0 && newLines.map((line, i) => (
+            <div key={`new-${i}`} className="bg-green-50 text-green-800 px-3 py-0.5 border-l-2 border-green-400 min-h-[1.25rem]">
+              <span className="text-green-400 select-none mr-2">+</span>{line}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="text-xs font-mono rounded overflow-hidden border border-gray-200">
@@ -93,14 +127,29 @@ function DiffBlock({ oldStr, newStr }: { oldStr: string; newStr: string }) {
 }
 
 function TerminalBlock({ output, collapsed }: { output: string; collapsed: boolean }) {
-  const lines = output.split('\n')
-  const COLLAPSE_THRESHOLD = 10
+  const cleanOutput = stripAnsi(output)
+  const lines = cleanOutput.split('\n')
+  const COLLAPSE_THRESHOLD = 20
   const shouldCollapse = !collapsed && lines.length > COLLAPSE_THRESHOLD
+  const sizeKB = (new Blob([cleanOutput]).size / 1024).toFixed(1)
+
+  if (shouldCollapse) {
+    return (
+      <div className="text-xs font-mono rounded bg-gray-900 text-gray-100 overflow-hidden">
+        <div className="px-3 py-1.5 text-gray-400 border-b border-gray-700">
+          {lines.length} lines · {sizeKB}KB
+        </div>
+        <pre className="p-3 whitespace-pre-wrap break-all overflow-x-auto max-h-48">
+          {lines.slice(0, COLLAPSE_THRESHOLD).join('\n')}
+        </pre>
+      </div>
+    )
+  }
 
   return (
     <div className="text-xs font-mono rounded bg-gray-900 text-gray-100 overflow-hidden">
       <pre className="p-3 whitespace-pre-wrap break-all overflow-x-auto max-h-96">
-        {shouldCollapse ? lines.slice(0, COLLAPSE_THRESHOLD).join('\n') : output}
+        {cleanOutput}
       </pre>
     </div>
   )
