@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Harden stage-aware approval lifecycle and make issue merge/completion status trustworthy.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/**/issue-lifecycle*.ts and related unit tests",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Prefer a small pure module that can be used by workflow, API, storage, CLI formatting, and tests without introducing a database migration."
+      "passes": true,
+      "notes": "Prefer a small pure module that can be used by workflow, API, storage, CLI formatting, and tests without introducing a database migration.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        228977
+      ]
     },
     {
       "id": "T-002",
@@ -39,9 +44,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow, packages/cli/src/db/issue-repo.ts, packages/cli/src/services/agent-runner-service.ts, packages/cli/src/api/issues.ts, and tests",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Search for direct approvalState.status checks and replace only lifecycle-driving checks, preserving historical display where appropriate."
+      "notes": "Search for direct approvalState.status checks and replace only lifecycle-driving checks, preserving historical display where appropriate.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -60,9 +70,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow, packages/cli/src/api/issues.ts, packages/cli/src/git/merge-queue.ts, packages/cli/src/server/index.ts, and tests",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Keep the persisted stage model as plan/build/check/done; represent the merge gate through Check + mergeState rather than adding a new database stage."
+      "notes": "Keep the persisted stage model as plan/build/check/done; represent the merge gate through Check + mergeState rather than adding a new database stage.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -81,9 +96,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/services/issue-service.ts, packages/cli/src/services/agent-runner-service.ts, packages/cli/src/api/issues.ts, and tests",
-      "dependsOn": ["T-003"],
+      "dependsOn": [
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Do not backfill historical rows to merged; the goal is to expose untrusted completion state."
+      "notes": "Do not backfill historical rows to merged; the goal is to expose untrusted completion state.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -102,9 +122,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/issue.ts and CLI tests",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "If source/target branch metadata is not stored, derive best-effort values from issue number and project baseBranch without adding schema."
+      "notes": "If source/target branch metadata is not stored, derive best-effort values from issue number and project baseBranch without adding schema.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -124,9 +149,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/*, packages/cli/web/src/lib/*, and Web UI tests",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Preserve the existing visual language; this is a clarity fix, not a redesign."
+      "notes": "Preserve the existing visual language; this is a clarity fix, not a redesign.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -146,9 +176,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/* and packages/cli/web/src/**/*.test.*",
-      "dependsOn": ["T-006"],
+      "dependsOn": [
+        "T-006"
+      ],
       "passes": false,
-      "notes": "This is the final safety-net task after implementation tasks have landed; keep tests deterministic and avoid requiring real remote merges."
+      "notes": "This is the final safety-net task after implementation tasks have landed; keep tests deterministic and avoid requiring real remote merges.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
