@@ -21,6 +21,7 @@ vi.mock('child_process', () => {
 
 const mockPromptFn = vi.fn();
 const mockCancelFn = vi.fn();
+const mockSetSessionConfigOptionFn = vi.fn();
 let globalSessionUpdateFn: ((notification: any) => void) | undefined;
 
 vi.mock('@agentclientprotocol/sdk', () => ({
@@ -32,7 +33,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
       newSession: vi.fn().mockResolvedValue({ sessionId: 'test-session-123' }),
       prompt: mockPromptFn,
       cancel: mockCancelFn,
-      setSessionConfigOption: vi.fn().mockResolvedValue(undefined),
+      setSessionConfigOption: mockSetSessionConfigOptionFn,
     };
   }),
   ndJsonStream: vi.fn().mockReturnValue({
@@ -587,5 +588,284 @@ describe('Session lifecycle observer notifications', () => {
 
     const completedChange = stateChanges.find(c => c.to === 'completed');
     expect(completedChange).toBeDefined();
+  });
+});
+
+describe('withSession finally cleanup', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockPromptFn.mockReset();
+    mockCancelFn.mockReset();
+    mockSetSessionConfigOptionFn.mockReset();
+    mockSetSessionConfigOptionFn.mockResolvedValue(undefined);
+    globalSessionUpdateFn = undefined;
+    mockPromptFn.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    globalSessionUpdateFn = undefined;
+  });
+
+  it('should call close() in finally path when execution succeeds', async () => {
+    const { withSession } = await import('../src/agent-runtime/agent-session');
+
+    const stateChanges: Array<{ from: string; to: string }> = [];
+
+    const result = await withSession({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      timeout: 600_000,
+      observers: [{
+        onStateChange(_ctx, from, to) { stateChanges.push({ from, to }); },
+      }],
+    });
+
+    expect(result.success).toBe(true);
+    const completedChange = stateChanges.find(c => c.to === 'completed');
+    expect(completedChange).toBeDefined();
+  });
+
+  it('should call close() in finally path when execution fails', async () => {
+    const { withSession } = await import('../src/agent-runtime/agent-session');
+
+    mockPromptFn.mockRejectedValue(new Error('test error'));
+
+    const stateChanges: Array<{ from: string; to: string }> = [];
+
+    const result = await withSession({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      timeout: 600_000,
+      observers: [{
+        onStateChange(_ctx, from, to) { stateChanges.push({ from, to }); },
+      }],
+    });
+
+    expect(result.success).toBe(false);
+    expect(stateChanges.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Abort path cleanup and cancellation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockPromptFn.mockReset();
+    mockCancelFn.mockReset();
+    mockSetSessionConfigOptionFn.mockReset();
+    mockSetSessionConfigOptionFn.mockResolvedValue(undefined);
+    globalSessionUpdateFn = undefined;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    globalSessionUpdateFn = undefined;
+  });
+
+  it('should attempt ACP cancel, run onBeforeKill, cleanup, and return success:false on abort', async () => {
+    const { withSession } = await import('../src/agent-runtime/agent-session');
+
+    mockCancelFn.mockResolvedValue(undefined);
+    mockPromptFn.mockImplementation(() => new Promise(() => {}));
+
+    const abortController = new AbortController();
+    const onBeforeKillFn = vi.fn().mockResolvedValue(false);
+
+    const resultPromise = withSession({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      timeout: 600_000,
+      signal: abortController.signal,
+      onBeforeKill: onBeforeKillFn,
+      observers: [],
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    abortController.abort();
+
+    const result = await resultPromise;
+
+    expect(mockCancelFn).toHaveBeenCalled();
+    expect(onBeforeKillFn).toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Agent stopped by user');
+  });
+
+  it('should cleanup process even if onBeforeKill throws', async () => {
+    const { withSession } = await import('../src/agent-runtime/agent-session');
+
+    mockCancelFn.mockResolvedValue(undefined);
+    mockPromptFn.mockImplementation(() => new Promise(() => {}));
+
+    const abortController = new AbortController();
+    const onBeforeKillFn = vi.fn().mockRejectedValue(new Error('onBeforeKill failed'));
+
+    const resultPromise = withSession({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      timeout: 600_000,
+      signal: abortController.signal,
+      onBeforeKill: onBeforeKillFn,
+      observers: [],
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    abortController.abort();
+
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Agent stopped by user');
+  });
+});
+
+describe('Timeout path cleanup and cancellation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockPromptFn.mockReset();
+    mockCancelFn.mockReset();
+    mockSetSessionConfigOptionFn.mockReset();
+    mockSetSessionConfigOptionFn.mockResolvedValue(undefined);
+    globalSessionUpdateFn = undefined;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    globalSessionUpdateFn = undefined;
+  });
+
+  it('should attempt ACP cancel, run onBeforeKill, cleanup, emit terminal state, and return timeout failure', async () => {
+    const { withSession } = await import('../src/agent-runtime/agent-session');
+
+    mockCancelFn.mockResolvedValue(undefined);
+    mockPromptFn.mockImplementation(() => new Promise(() => {}));
+
+    const onBeforeKillFn = vi.fn().mockResolvedValue(false);
+    const stateChanges: Array<{ from: string; to: string }> = [];
+
+    const resultPromise = withSession({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      timeout: 5000,
+      onBeforeKill: onBeforeKillFn,
+      observers: [{
+        onStateChange(_ctx, from, to) { stateChanges.push({ from, to }); },
+      }],
+    });
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    const result = await resultPromise;
+
+    expect(mockCancelFn).toHaveBeenCalled();
+    expect(onBeforeKillFn).toHaveBeenCalled();
+    expect(stateChanges.some(c => c.to === 'timeout')).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Timed out');
+  });
+
+  it('should emit timeout terminal state to observers', async () => {
+    const { withSession } = await import('../src/agent-runtime/agent-session');
+
+    mockCancelFn.mockResolvedValue(undefined);
+    mockPromptFn.mockImplementation(() => new Promise(() => {}));
+
+    const stateChanges: Array<{ from: string; to: string }> = [];
+
+    const resultPromise = withSession({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      timeout: 5000,
+      observers: [{
+        onStateChange(_ctx, from, to) { stateChanges.push({ from, to }); },
+      }],
+    });
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    await resultPromise;
+
+    expect(stateChanges.some(c => c.to === 'timeout')).toBe(true);
+  });
+});
+
+describe('Model override behavior', () => {
+  beforeEach(() => {
+    mockPromptFn.mockReset();
+    mockCancelFn.mockReset();
+    mockSetSessionConfigOptionFn.mockReset();
+    mockSetSessionConfigOptionFn.mockResolvedValue(undefined);
+    globalSessionUpdateFn = undefined;
+    mockPromptFn.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    globalSessionUpdateFn = undefined;
+  });
+
+  it('should send model override after session creation when configured', async () => {
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      model: 'claude-3-5-sonnet',
+      observers: [],
+    });
+
+    await session.execute('test');
+
+    expect(mockSetSessionConfigOptionFn).toHaveBeenCalledWith({
+      sessionId: 'test-session-123',
+      configId: 'model',
+      value: 'claude-3-5-sonnet',
+    });
+
+    await session.close();
+  });
+
+  it('should degrade without failing session creation when model-set fails', async () => {
+    mockSetSessionConfigOptionFn.mockRejectedValue(new Error('model set failed'));
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      model: 'claude-3-5-sonnet',
+      observers: [],
+    });
+
+    await session.execute('test');
+
+    expect(mockSetSessionConfigOptionFn).toHaveBeenCalled();
+    expect(session.state).toBe('running');
+
+    await session.close();
+  });
+
+  it('should not call setSessionConfigOption when model is not configured', async () => {
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [],
+    });
+
+    await session.execute('test');
+
+    expect(mockSetSessionConfigOptionFn).not.toHaveBeenCalled();
+
+    await session.close();
   });
 });
