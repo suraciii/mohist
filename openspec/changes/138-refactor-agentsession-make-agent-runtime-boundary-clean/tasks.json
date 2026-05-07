@@ -143,11 +143,14 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Prefer focused tests around the runtime boundary and observer behavior rather than broad E2E-only coverage.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1434541
+      ]
     },
     {
       "id": "T-006",
