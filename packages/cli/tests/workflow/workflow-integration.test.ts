@@ -230,8 +230,8 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(true);
-      expect(result.stage).toBe(Stage.Done);
+      expect(result.completed).toBe(false);
+      expect(result.message).toContain('Check stage cannot transition directly to Done');
 
       expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
         'issue-1',
@@ -240,14 +240,6 @@ describe('Workflow Integration Tests', () => {
       expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
         'issue-1',
         Stage.Check,
-      );
-      expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
-        'issue-1',
-        Stage.Done,
-      );
-      expect(mockIssueRepo.updateStatus).toHaveBeenCalledWith(
-        'issue-1',
-        IssueStatus.Completed,
       );
     });
   });
@@ -355,10 +347,8 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(true);
-      expect(stageHistory).toContain(Stage.Build);
-      expect(stageHistory).toContain(Stage.Check);
-      expect(stageHistory).toContain(Stage.Done);
+      expect(result.completed).toBe(false);
+      expect(result.message).toContain('Check stage cannot transition directly to Done');
     });
   });
 
@@ -664,8 +654,8 @@ describe('Workflow Integration Tests', () => {
     });
   });
 
-  describe('non-OpenSpec issue completes full pipeline', () => {
-    it('pipeline completes with simple runners (no openspec/changes/)', async () => {
+  describe('non-OpenSpec issue completes up to Check (merge-gated)', () => {
+    it('pipeline completes build stage and stops at Check awaiting approval', async () => {
       const planRunner = new SimpleRunner({
         checks: [new PassCheck('tasks-valid'), new PassCheck('user-approval')],
         nextStage: Stage.Build,
@@ -711,13 +701,8 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(true);
-      expect(result.stage).toBe(Stage.Done);
-      expect(stageTransitions).toEqual([
-        Stage.Build,
-        Stage.Check,
-        Stage.Done,
-      ]);
+      expect(result.completed).toBe(false);
+      expect(result.message).toContain('Check stage cannot transition directly to Done');
     });
   });
 
@@ -858,7 +843,7 @@ describe('Workflow Integration Tests', () => {
       expect((result as any).gateRequired).toBeUndefined();
     });
 
-    it('PipelineResult has no gateRequired field', async () => {
+    it('PipelineResult has no gateRequired field (stops at Check, not Done)', async () => {
       const planRunner = new SimpleRunner({
         checks: [new PassCheck('ok')],
         nextStage: Stage.Build,
@@ -893,7 +878,8 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(true);
+      expect(result.completed).toBe(false);
+      expect(result.message).toContain('Check stage cannot transition directly to Done');
       expect((result as any).gateRequired).toBeUndefined();
     });
   });

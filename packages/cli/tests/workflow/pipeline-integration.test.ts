@@ -213,12 +213,10 @@ describe('Full Pipeline: Plan -> Build -> Check -> Done', () => {
 
     const result = await engine.run(issue, {} as any);
 
-    expect(result.completed).toBe(true);
-    expect(result.stage).toBe(Stage.Done);
+    expect(result.completed).toBe(false);
+    expect(result.message).toContain('Check stage cannot transition directly to Done');
     expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Build);
     expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Check);
-    expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Done);
-    expect(ctx.issueRepo.updateStatus).toHaveBeenCalledWith(expect.any(String), IssueStatus.Completed);
   });
 
   it('Plan stage has no requiresApproval in result', async () => {
@@ -427,8 +425,8 @@ describe('User-Approval Check', () => {
 
     const result2 = await engine.run(issueAfterApproval, {} as any);
 
-    expect(result2.completed).toBe(true);
-    expect(result2.stage).toBe(Stage.Done);
+    expect(result2.completed).toBe(false);
+    expect(result2.message).toContain('Check stage cannot transition directly to Done');
   });
 
   it('emits approval_requested event when user-approval check is pending', async () => {
@@ -613,8 +611,8 @@ describe('Non-OpenSpec Issue (no openspec/changes/)', () => {
 
     const result = await engine.run(issue, {} as any);
 
-    expect(result.completed).toBe(true);
-    expect(result.stage).toBe(Stage.Done);
+    expect(result.completed).toBe(false);
+    expect(result.message).toContain('Check stage cannot transition directly to Done');
     expect(planRunner.executeTasksCalls).toBe(1);
     expect(buildRunner.executeTasksCalls).toBe(1);
     expect(checkRunner.executeTasksCalls).toBe(1);
