@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Clean the AgentSession runtime boundary by moving workflow visibility persistence and EventBus wiring into explicit observers while preserving session behavior.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/session-observers.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This task produces the visibility adapter boundary consumed by later tasks. Temporary imports from AgentSession to the moved observer are acceptable only until T-002 removes runtime construction."
+      "passes": true,
+      "notes": "This task produces the visibility adapter boundary consumed by later tasks. Temporary imports from AgentSession to the moved observer are acceptable only until T-002 removes runtime construction.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        331776
+      ]
     },
     {
       "id": "T-002",
@@ -45,7 +50,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Do not replace workflow dependencies with a generic visibility option bag. Keep runtime options limited to session/runtime metadata plus observers."
+      "notes": "Do not replace workflow dependencies with a generic visibility option bag. Keep runtime options limited to session/runtime metadata plus observers.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -70,7 +78,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "This is the consumer migration task. Prefer the helper for common observer construction and small inline observers only for Plan/Check raw notification bridges."
+      "notes": "This is the consumer migration task. Prefer the helper for common observer construction and small inline observers only for Plan/Check raw notification bridges.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -93,7 +104,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "This task closes the package-level boundary, not just the `agent-session.ts` boundary."
+      "notes": "This task closes the package-level boundary, not just the `agent-session.ts` boundary.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -118,7 +132,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Prefer focused tests around the runtime boundary and observer behavior rather than broad E2E-only coverage."
+      "notes": "Prefer focused tests around the runtime boundary and observer behavior rather than broad E2E-only coverage.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -143,7 +160,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "These tests protect the highest-risk non-visibility behavior: no zombie ACP processes and no silent model override regression."
+      "notes": "These tests protect the highest-risk non-visibility behavior: no zombie ACP processes and no silent model override regression.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -167,7 +187,10 @@
         "T-006"
       ],
       "passes": false,
-      "notes": "Do not create a large protocol abstraction just to reduce line count. This task is complete if the agent makes and documents the extraction decision and keeps tests green."
+      "notes": "Do not create a large protocol abstraction just to reduce line count. This task is complete if the agent makes and documents the extraction decision and keeps tests green.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -193,7 +216,10 @@
         "T-007"
       ],
       "passes": false,
-      "notes": "Final verification task. It intentionally depends on the optional ACP-driver decision so the final graph remains linear and verifiable."
+      "notes": "Final verification task. It intentionally depends on the optional ACP-driver decision so the final graph remains linear and verifiable.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
