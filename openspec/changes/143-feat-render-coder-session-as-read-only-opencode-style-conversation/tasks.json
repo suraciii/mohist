@@ -50,11 +50,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep this as a deep module: callers provide session metadata plus ordered logs and receive a `SessionTranscript`. The frontend should not reconstruct turn semantics from raw logs.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1191777
+      ]
     },
     {
       "id": "T-003",
