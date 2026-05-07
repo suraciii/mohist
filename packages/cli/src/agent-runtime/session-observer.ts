@@ -14,6 +14,17 @@ export interface SessionObserver {
   onSessionEvent?(ctx: SessionContext, eventType: string, data: unknown): void;
   onStateChange?(ctx: SessionContext, from: SessionState, to: SessionState): void;
   onRawNotification?(ctx: SessionContext, notification: SessionNotification): void;
+  writeMohistPrompt?(prompt: MohistPromptEvent): void;
+}
+
+export interface MohistPromptEvent {
+  role: 'mohist';
+  text: string;
+  kind: string;
+  sentAt: string;
+  executionId?: string;
+  stage?: string;
+  title?: string;
 }
 
 export interface SessionContext {
@@ -230,6 +241,20 @@ export class WorkflowSessionObserver implements SessionObserver {
       this.workflowLogRepo.insert(issueId, null, eventType, data);
     } catch (e) {
       log.warn('workflowLogRepo.insert failed', { eventType, issueId, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  writeMohistPrompt(prompt: MohistPromptEvent): void {
+    if (!this.sessionStreamLogRepo) return;
+    try {
+      this.sessionStreamLogRepo.insert(
+        prompt.executionId ?? this._coderSessionId ?? '',
+        prompt.executionId ?? '',
+        'mohist_prompt',
+        prompt,
+      );
+    } catch (e) {
+      log.warn('writeMohistPrompt failed', { error: e instanceof Error ? e.message : String(e) });
     }
   }
 }

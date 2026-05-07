@@ -53,7 +53,7 @@ export async function resolveConflictsViaAgent(
 
     const session = await AgentSession.create(acpOptions);
     try {
-      const result = await session.execute(prompt);
+      const result = await session.execute(prompt, { kind: 'recovery' });
       if (!result.success) {
         return { success: false, error: result.error || 'Agent ACP session failed' };
       }

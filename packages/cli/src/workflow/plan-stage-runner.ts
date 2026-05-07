@@ -178,7 +178,7 @@ export class PlanStageRunner extends BaseStageRunner {
         let attempts = 1;
 
         const prompt = task.buildPrompt(issue, changeDir);
-        const result = await session.execute(prompt);
+        const result = await session.execute(prompt, { kind: 'task', title: task.label });
 
         if (!result.success) {
           log.error('Plan task failed', { artifact: task.type, error: result.error });
@@ -214,7 +214,7 @@ export class PlanStageRunner extends BaseStageRunner {
           attempts++;
           emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'retrying', attempts, []);
 
-          const retryResult = await session.execute(retryPrompt);
+          const retryResult = await session.execute(retryPrompt, { kind: 'retry', title: task.label });
 
           if (!retryResult.success) {
             log.error('Plan retry prompt failed', { artifact: task.type, error: retryResult.error });
