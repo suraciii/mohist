@@ -10,6 +10,7 @@ import { buildReviewerPrompt, buildReviewSelfCheckPrompt } from '../agents/artif
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import { readReportFile } from './utils';
 import { Log } from '../util/log';
+import { createWorkflowSessionObservers } from '../agent-runtime';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
@@ -88,12 +89,8 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
     const roundState = { type: '', index: 0 };
 
-    const connectionOptions: AgentSessionOptions = {
-      ...ctx.acpOptions,
-      executionId: `review-${ctx.issue.number}`,
-      stage: 'review',
-      title: 'Check stage',
-      onSessionUpdate: (_notification) => {
+    const checkBridgeObserver = {
+      onRawNotification(_ctx: import('../agent-runtime/session-observer').SessionContext, notification: import('@agentclientprotocol/sdk').SessionNotification) {
         if (!ctx.eventBus) return;
         try {
           ctx.eventBus.emit('plan_session_update', {
@@ -101,8 +98,8 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
             projectId: ctx.issue.projectId,
             roundType: roundState.type,
             roundIndex: roundState.index,
-            sessionUpdate: _notification.update.sessionUpdate,
-            data: _notification.update as unknown,
+            sessionUpdate: notification.update.sessionUpdate,
+            data: notification.update as unknown,
           });
         } catch (e) {
           log.warn('eventBus.emit failed for plan_session_update', {
@@ -110,6 +107,23 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
           });
         }
       },
+    };
+
+    const wfObservers = createWorkflowSessionObservers({
+      eventBus: ctx.eventBus,
+      workflowLogRepo: ctx.workflowLogRepo,
+      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+      coderSessionRepo: ctx.coderSessionRepo,
+      stage: 'review',
+      title: 'Check stage',
+    }, [checkBridgeObserver]);
+
+    const connectionOptions: AgentSessionOptions = {
+      ...ctx.acpOptions,
+      executionId: `review-${ctx.issue.number}`,
+      stage: 'review',
+      title: 'Check stage',
+      observers: wfObservers,
     };
 
     let session: AgentSession | undefined;

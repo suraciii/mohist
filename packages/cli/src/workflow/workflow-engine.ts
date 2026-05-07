@@ -10,6 +10,7 @@ import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { ConfigInfo } from '../config/config-schema';
 import { resolveStageModel } from '../config/model-resolution';
+import { createWorkflowSessionObservers } from '../agent-runtime';
 
 export interface PipelineResult {
   completed: boolean;
@@ -67,15 +68,19 @@ export class WorkflowEngine {
 
   private buildContext(issue: Issue, acpOptions: AgentSessionOptions): StageContext {
     const resolvedModel = this.config ? resolveStageModel(issue.stage, this.config) : undefined;
+    const wfObservers = createWorkflowSessionObservers({
+      eventBus: this.eventBus,
+      workflowLogRepo: this.workflowLogRepo,
+      sessionStreamLogRepo: this.sessionStreamLogRepo,
+      coderSessionRepo: this.coderSessionRepo,
+    });
     return {
       issue,
       acpOptions: {
         ...acpOptions,
         signal: this.signal,
         ...(resolvedModel !== undefined ? { model: resolvedModel } : {}),
-        ...(this.coderSessionRepo ? { coderSessionRepo: this.coderSessionRepo } : {}),
-        ...(this.workflowLogRepo ? { workflowLogRepo: this.workflowLogRepo } : {}),
-        ...(this.sessionStreamLogRepo ? { sessionStreamLogRepo: this.sessionStreamLogRepo } : {}),
+        observers: wfObservers,
       },
       artifactManager: this.artifactManager,
       worktreeManager: this.worktreeManager as WorktreeManager,

@@ -30,6 +30,8 @@ export function resetAcpSessionRunner(): void {
 import type { EventBus } from '../services/event-bus';
 import type { StageTaskResult } from '../workflow/stage-context';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
+import type { SessionObserver } from '../agent-runtime/session-observer';
+import { createWorkflowSessionObservers } from '../agent-runtime';
 
 export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip' | 'hang_unrecoverable';
 
@@ -128,9 +130,6 @@ export interface RalphExecutorContext {
   onTaskComplete?: (task: Task, success: boolean, output: string) => void;
   onLoopComplete?: (results: RalphLoopResult) => void;
   onAskUser?: (question: string, taskId: string) => Promise<string>;
-  workflowLogRepo?: import('../db/workflow-log-repo').WorkflowLogRepo;
-  sessionStreamLogRepo?: import('../db/session-stream-log-repo').SessionStreamLogRepo;
-  coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
   issueNumber?: number;
   stageTimeoutMs?: number;
   onProcessSpawned?: (proc: import('child_process').ChildProcess) => void;
@@ -140,6 +139,10 @@ export interface RalphExecutorContext {
   agentConfig?: AgentConfig;
   stageExecutionId?: string;
   stageExecutionRepo?: StageExecutionRepo;
+  workflowLogRepo?: import('../db/workflow-log-repo').WorkflowLogRepo;
+  sessionStreamLogRepo?: import('../db/session-stream-log-repo').SessionStreamLogRepo;
+  coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
+  observers?: SessionObserver[];
 }
 
 export interface RalphLoopResult {
@@ -694,6 +697,15 @@ export async function runRalphLoop(
 
       const attemptStartTime = Date.now();
 
+      const taskObservers = context.observers ?? createWorkflowSessionObservers({
+        eventBus: context.eventBus,
+        workflowLogRepo: context.workflowLogRepo,
+        sessionStreamLogRepo: context.sessionStreamLogRepo,
+        coderSessionRepo: context.coderSessionRepo,
+        stage: context.stage,
+        title: `${nextTask.id}: ${nextTask.title}`,
+      });
+
       const result = await _acpSessionRunner({
         cwd: context.worktreePath,
         task: prompt,
@@ -702,15 +714,12 @@ export async function runRalphLoop(
         issueId: context.issueId,
         projectId: context.projectId,
         executionId: taskExecutionId,
-        eventBus: context.eventBus,
-        workflowLogRepo: context.workflowLogRepo,
-        sessionStreamLogRepo: context.sessionStreamLogRepo,
-        coderSessionRepo: context.coderSessionRepo,
         issueNumber: context.issueNumber,
         onProcessSpawned: context.onProcessSpawned,
         stage: context.stage,
         model: context.model,
         title: `${nextTask.id}: ${nextTask.title}`,
+        observers: taskObservers,
         onBeforeKill: context.worktreeManager
           ? async (cwd: string) => {
               const hash = await context.worktreeManager!.createWipCommit(cwd, nextTask.id, attempt);

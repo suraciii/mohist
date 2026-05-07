@@ -6,6 +6,7 @@ import { SkillRunRepo, type SkillRun } from '../db/skill-run-repo';
 import { IssueService } from './issue-service';
 import type { EventBus } from './event-bus';
 import { Log } from '../util/log';
+import { createWorkflowSessionObservers } from '../agent-runtime';
 
 const log = Log.create({ service: 'skill-service' });
 
@@ -172,13 +173,19 @@ export class SkillService {
     projectId: string,
     projectPath: string,
   ): void {
+    const observers = createWorkflowSessionObservers({
+      eventBus: this.eventBus,
+      stage: 'skill',
+      title: `Skill: ${skill.name}`,
+    });
+
     withSession({
       cwd: projectPath,
       task: skill.prompt,
-      eventBus: this.eventBus,
       projectId,
       opencodeBinPath: this.opencodeBinPath,
       title: `Skill: ${skill.name}`,
+      observers,
     })
       .then((result) => {
         if (result.success) {

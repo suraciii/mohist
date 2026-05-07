@@ -24,6 +24,7 @@ import { MergeQueue } from '../git/merge-queue';
 import { Stage, IssueStatus, MergeState } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
+import { createWorkflowSessionObservers } from '../agent-runtime';
 import type { MergeEntry } from '../git/merge-queue';
 import { Log } from '../util/log';
 import { getVersionInfo } from '../version';
@@ -162,17 +163,23 @@ async function main(): Promise<void> {
 
       const config = loadConfig();
 
+      const fixObservers = createWorkflowSessionObservers({
+        eventBus,
+        workflowLogRepo,
+        sessionStreamLogRepo,
+        coderSessionRepo,
+        stage: 'build',
+        title: 'Build error fix',
+      });
+
       const acpOptions: AgentSessionOptions = {
         cwd: worktreePath,
         issueId: refreshedIssue.id,
         projectId: entry.projectId,
-        workflowLogRepo,
-        sessionStreamLogRepo,
-        coderSessionRepo,
-        eventBus,
         issueNumber: refreshedIssue.number,
         opencodeBinPath,
         model: resolveStageModel(Stage.Build, config),
+        observers: fixObservers,
       };
 
       const truncatedOutput = buildOutput.length > 8000 ? buildOutput.slice(-8000) : buildOutput;

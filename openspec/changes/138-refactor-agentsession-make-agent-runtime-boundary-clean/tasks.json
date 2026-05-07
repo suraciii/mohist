@@ -84,7 +84,12 @@
       "notes": "This is the consumer migration task. Prefer the helper for common observer construction and small inline observers only for Plan/Check raw notification bridges.",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        963765,
+        122906,
+        173509
+      ]
     },
     {
       "id": "T-004",
