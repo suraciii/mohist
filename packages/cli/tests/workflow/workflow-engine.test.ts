@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Stage, IssueStatus, type Issue } from '../../src/types';
+import { Stage, IssueStatus, MergeState, type Issue } from '../../src/types';
 import type {
   StageContext,
   StageRunResult,
@@ -194,5 +194,83 @@ describe('WorkflowEngine.buildContext model injection', () => {
     expect(planRunner.capturedContexts[0].acpOptions.cwd).toBe('/tmp');
     expect(planRunner.capturedContexts[0].acpOptions.taskId).toBe('task-123');
     expect(planRunner.capturedContexts[0].acpOptions.model).toBe('injected-model');
+  });
+});
+
+describe('WorkflowEngine merge-gated completion', () => {
+  function makeMockIssueRepoWithIssue(initialIssue: Issue) {
+    let currentIssue = initialIssue;
+    return {
+      updateStage: vi.fn().mockImplementation((_id: string, stage: Stage) => {
+        currentIssue = { ...currentIssue, stage };
+        return currentIssue;
+      }),
+      findById: vi.fn().mockReturnValue(currentIssue),
+      setApprovalState: vi.fn(),
+      clearApprovalState: vi.fn(),
+      updateStatus: vi.fn().mockImplementation((_id: string, status: IssueStatus) => {
+        currentIssue = { ...currentIssue, status };
+        return currentIssue;
+      }),
+      updateBlockedReason: vi.fn(),
+      setMergeState: vi.fn(),
+    } as unknown as IssueRepo;
+  }
+
+  it('blocks Check stage from transitioning directly to Done', async () => {
+    const checkRunner = new class implements StageRunner {
+      canHandle(s: Stage): boolean { return s === Stage.Check; }
+      async run(): Promise<StageRunResult> {
+        return { success: true, nextStage: Stage.Done, checkResults: [], output: {} };
+      }
+    }();
+
+    const issue = makeIssue(Stage.Check);
+    const mockRepo = makeMockIssueRepoWithIssue(issue);
+
+    const engine = new WorkflowEngine({
+      runners: [checkRunner],
+      issueRepo: mockRepo,
+      eventBus: new EventBus(),
+      checkpointManager: { save: vi.fn(), load: vi.fn(), deleteAll: vi.fn(), markStepComplete: vi.fn(), getResumeSteps: vi.fn() } as unknown as CheckpointManager,
+      artifactManager: { getChangeDir: vi.fn().mockReturnValue('/tmp/change'), createChangeDir: vi.fn(), readArtifact: vi.fn(), writeArtifact: vi.fn(), exists: vi.fn(), readTasks: vi.fn(), updateTaskPasses: vi.fn(), archiveChange: vi.fn() } as unknown as ChangeArtifactsManager,
+    });
+
+    const result = await engine.run(issue, { cwd: '/tmp' });
+
+    expect(result.completed).toBe(false);
+    expect(result.message).toContain('Check stage cannot transition directly to Done');
+  });
+
+  it('marks done/completed only when mergeState is merged', async () => {
+    const buildRunner = new class implements StageRunner {
+      canHandle(s: Stage): boolean { return s === Stage.Build; }
+      async run(): Promise<StageRunResult> {
+        return { success: true, nextStage: Stage.Check, checkResults: [], output: {} };
+      }
+    }();
+
+    const checkRunner = new class implements StageRunner {
+      canHandle(s: Stage): boolean { return s === Stage.Check; }
+      async run(): Promise<StageRunResult> {
+        return { success: false, checkResults: [], message: 'Waiting for approval' };
+      }
+    }();
+
+    const issue = makeIssue(Stage.Build);
+    const mockRepo = makeMockIssueRepoWithIssue({ ...issue, mergeState: MergeState.Merged });
+    const updateStatusSpy = vi.spyOn(mockRepo, 'updateStatus');
+
+    const engine = new WorkflowEngine({
+      runners: [buildRunner, checkRunner],
+      issueRepo: mockRepo,
+      eventBus: new EventBus(),
+      checkpointManager: { save: vi.fn(), load: vi.fn(), deleteAll: vi.fn(), markStepComplete: vi.fn(), getResumeSteps: vi.fn() } as unknown as CheckpointManager,
+      artifactManager: { getChangeDir: vi.fn().mockReturnValue('/tmp/change'), createChangeDir: vi.fn(), readArtifact: vi.fn(), writeArtifact: vi.fn(), exists: vi.fn(), readTasks: vi.fn(), updateTaskPasses: vi.fn(), archiveChange: vi.fn() } as unknown as ChangeArtifactsManager,
+    });
+
+    await engine.run(issue, { cwd: '/tmp' });
+
+    expect(updateStatusSpy).not.toHaveBeenCalled();
   });
 });
