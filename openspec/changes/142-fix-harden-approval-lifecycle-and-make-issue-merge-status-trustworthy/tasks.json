@@ -166,11 +166,14 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Preserve the existing visual language; this is a clarity fix, not a redesign.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        631964
+      ]
     },
     {
       "id": "T-007",
