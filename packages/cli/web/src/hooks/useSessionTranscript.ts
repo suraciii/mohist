@@ -185,6 +185,9 @@ export function useSessionTranscript({
     }
   }, [bumpTranscriptVersion, isNearBottom])
 
+  const markNewContentRef = useRef(markNewContent)
+  markNewContentRef.current = markNewContent
+
   const acknowledgeNewContent = useCallback(() => {
     setNewContentAvailable(false)
   }, [])
@@ -198,6 +201,7 @@ export function useSessionTranscript({
   useEffect(() => {
     if (!isRunning) return
 
+    mountedRef.current = true
     const unsubs: Array<() => void> = []
 
     unsubs.push(
@@ -211,7 +215,7 @@ export function useSessionTranscript({
           next[next.length - 1] = appendTextToTurn(lastTurn, detail.text)
           return next
         })
-        markNewContent()
+        markNewContentRef.current()
       }),
     )
 
@@ -249,7 +253,7 @@ export function useSessionTranscript({
             })
             return next
           })
-          markNewContent()
+          markNewContentRef.current()
         } else {
           const existing = liveToolCallMapRef.current.get(detail.toolCallId)
           if (existing) {
@@ -268,7 +272,7 @@ export function useSessionTranscript({
             })
             return next
           })
-          markNewContent()
+          markNewContentRef.current()
         }
       }),
     )
@@ -300,7 +304,7 @@ export function useSessionTranscript({
           }
           return next
         })
-        markNewContent()
+        markNewContentRef.current()
       }),
     )
 
@@ -320,7 +324,7 @@ export function useSessionTranscript({
           }
           return next
         })
-        markNewContent()
+        markNewContentRef.current()
 
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
       }),
@@ -330,7 +334,7 @@ export function useSessionTranscript({
       mountedRef.current = false
       for (const unsub of unsubs) unsub()
     }
-  }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient, markNewContent])
+  }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient])
 
   return {
     turns,

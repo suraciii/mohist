@@ -5,6 +5,7 @@ import type { CoderSession } from '../src/db/coder-session-repo';
 import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { SessionStreamLogRepo } from '../src/db/session-stream-log-repo';
+import { WorkflowSessionObserver, type SessionContext, type MohistPromptEvent } from '../src/agent-runtime/session-observer';
 
 function makeSession(overrides: Partial<CoderSession> = {}): CoderSession {
   return {
@@ -351,7 +352,7 @@ describe('SessionTranscriptAssembler', () => {
 
       expect(transcript.turns[0].assistant).toHaveLength(1);
       const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
-      expect(toolPart.toolCallId).toBe('session-Read-2024-01-01T10:00:01.000Z');
+      expect(toolPart.toolCallId).toBe('synthetic-0');
       expect(toolPart.toolName).toBe('Read');
       expect(toolPart.input).toBe('{"file_path":"src/index.ts"}');
     });
@@ -375,9 +376,81 @@ describe('SessionTranscriptAssembler', () => {
 
       expect(transcript.turns[0].assistant).toHaveLength(1);
       const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
-      expect(toolPart.toolCallId).toBe('session-Bash-2024-01-01T10:00:01.000Z');
+      expect(toolPart.toolCallId).toBe('synthetic-0');
       expect(toolPart.status).toBe('completed');
       expect(toolPart.output).toBe('ok');
+    });
+
+    it('should merge two no-id ACP tool_call events (started + completed) into one tool part', () => {
+      const session = makeSession();
+      const sharedToolCallId = 'session-Read-0';
+      const events = [
+        makePromptEvent('Run a tool', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolCallId: sharedToolCallId,
+            toolName: 'Read',
+            title: 'src/index.ts',
+            input: { file_path: 'src/index.ts' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolCallId: sharedToolCallId,
+            toolName: 'Read',
+            title: 'src/index.ts',
+            output: 'file contents here',
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.toolCallId).toBe(sharedToolCallId);
+      expect(toolPart.toolName).toBe('Read');
+      expect(toolPart.status).toBe('completed');
+      expect(toolPart.input).toBe('{"file_path":"src/index.ts"}');
+      expect(toolPart.output).toBe('file contents here');
+    });
+
+    it('should merge two no-id ACP tool_call events (started + completed) without any toolCallId into one tool part', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Run a tool', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'src/index.ts',
+            input: { file_path: 'src/index.ts' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'src/index.ts',
+            output: 'file contents here',
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.toolName).toBe('Read');
+      expect(toolPart.status).toBe('completed');
+      expect(toolPart.input).toBe('{"file_path":"src/index.ts"}');
+      expect(toolPart.output).toBe('file contents here');
     });
 
     it('should set target from input when not explicitly set', () => {
@@ -639,6 +712,54 @@ describe('SessionTranscriptAssembler', () => {
       expect(transcript.turns[1].user.kind).toBe('followup');
       expect(transcript.turns[1].completedAt).toBeNull();
       expect(transcript.turns[1].assistant.filter(p => p.type === 'text')).toHaveLength(1);
+    });
+  });
+
+  describe('production prompt persistence', () => {
+    it('writeMohistPrompt persists prompt retrievable by acpSessionId', () => {
+      const db = new DatabaseManager({ inMemory: true });
+      initializeDatabase(db);
+      const repo = new SessionStreamLogRepo(db);
+      try {
+        db.run(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))`, ['project-1', 'Project', '/tmp/project']);
+        db.run(`INSERT INTO issues (id, project_id, number, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, ['issue-1', 'project-1', 1, 'Issue', 'open']);
+
+        const observer = new WorkflowSessionObserver({ sessionStreamLogRepo: repo });
+        const ctx: SessionContext = {
+          issueId: 'issue-1',
+          issueNumber: 1,
+          projectId: 'project-1',
+          executionId: 'exec-1',
+          acpSessionId: 'acp-test-session',
+          coderSessionId: undefined,
+          stage: 'build',
+          model: 'claude-3',
+          processPid: undefined,
+        };
+        const prompt: MohistPromptEvent = {
+          role: 'mohist',
+          text: 'Implement task T-001: Add authentication middleware',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+          executionId: 'exec-1',
+          stage: 'build',
+          issueId: 'issue-1',
+          acpSessionId: 'acp-test-session',
+        };
+
+        observer.writeMohistPrompt(ctx, prompt);
+
+        const rows = repo.findBySessionId('acp-test-session');
+        expect(rows.length).toBeGreaterThanOrEqual(1);
+        const promptRow = rows.find(r => r.eventType === 'mohist_prompt');
+        expect(promptRow).toBeDefined();
+        const data = JSON.parse(promptRow!.data);
+        expect(data.text).toBe('Implement task T-001: Add authentication middleware');
+        expect(data.kind).toBe('task');
+        expect(data.role).toBe('mohist');
+      } finally {
+        db.close();
+      }
     });
   });
 });
