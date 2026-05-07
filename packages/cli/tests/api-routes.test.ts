@@ -212,8 +212,8 @@ describe('API Routes', () => {
     beforeEach(async () => {
       const app = new Hono();
       const eventBus = new EventBus();
-      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, projectRepo, undefined, stateManager.getIssueTaskQueueRepo());
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner));
+      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, projectRepo, undefined, stateManager.getIssueTaskQueueRepo());
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner));
       server = createTestServer(app);
       
       const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
@@ -354,8 +354,8 @@ describe('API Routes', () => {
 
           const skipApp = new Hono();
           const skipEventBus = new EventBus();
-          const skipAgentRunner = new AgentRunnerService(skipEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
-          skipApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, skipAgentRunner));
+          const skipAgentRunner = new AgentRunnerService(skipEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          skipApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, skipAgentRunner));
           const skipServer = createTestServer(skipApp);
 
           const response = await request(skipServer).post(`/api/issues/${issue.number}/skip-to-review`);
@@ -381,9 +381,9 @@ describe('API Routes', () => {
 
         const reopenApp = new Hono();
         const reopenEventBus = new EventBus();
-        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
         const enqueueSpy = vi.spyOn(reopenAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-        reopenApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, reopenAgentRunner));
+        reopenApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, reopenAgentRunner));
         const reopenServer = createTestServer(reopenApp);
 
         const response = await request(reopenServer).post(`/api/issues/${issue.number}/reopen`);
@@ -542,7 +542,7 @@ describe('API Routes', () => {
 
     function createRetryServer(agentRunner: AgentRunnerService) {
       const app = new Hono();
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, undefined, agentRunner));
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner));
       return createTestServer(app);
     }
 
@@ -591,7 +591,7 @@ describe('API Routes', () => {
           fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
 
           const eventBus = new EventBus();
-          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
           const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
           const mockWm = {
@@ -600,7 +600,7 @@ describe('API Routes', () => {
           } as any;
 
           const retryApp = new Hono();
-          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
+          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
           const retryServer = createTestServer(retryApp);
 
           const response = await request(retryServer).post(`/api/issues/${issue.number}/retry`);
@@ -636,7 +636,7 @@ describe('API Routes', () => {
       it('should retry even when issue has a running slot (queue handles concurrency)', async () => {
         const issue = createBlockedIssue('Running Agent');
         const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
         (agentRunner as any).runningSlots.set(issue.id, { id: 'fake-task', issueId: issue.id });
         server = createRetryServer(agentRunner);
 
@@ -714,7 +714,7 @@ describe('API Routes', () => {
       it('should return 409 when agent is already running', async () => {
         const issue = createBlockedIssue('Running Restart');
         const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
         (agentRunner as any).runningSlots.set(issue.id, { id: 'fake-task', issueId: issue.id });
         server = createRetryServer(agentRunner);
 

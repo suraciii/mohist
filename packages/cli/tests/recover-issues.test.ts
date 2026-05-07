@@ -81,7 +81,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -113,7 +112,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -152,7 +150,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -177,7 +174,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -205,7 +201,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -236,7 +231,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -260,7 +254,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -292,7 +285,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -329,7 +321,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(recovered?.stage).toBe(Stage.Build);
   });
 
-  it('no worktree found: build-stage blocked', () => {
+    it('no worktree found: build-stage blocked', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'No Worktree' });
 
@@ -341,7 +333,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -387,7 +378,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -423,7 +413,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -604,7 +593,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -628,7 +616,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -655,7 +642,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -678,7 +664,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -709,7 +694,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -729,7 +713,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -770,9 +753,8 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       mockProjectRepo,
-      createWorktreeMock(tmpDir),
+      createWorktreeMock(null),
     );
 
     const blockedEvents: any[] = [];
@@ -829,7 +811,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -854,7 +835,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
@@ -888,7 +868,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -920,7 +899,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
     );
@@ -947,7 +925,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       undefined,
       issueRepo,
       8,
-      undefined,
       undefined,
       undefined,
       projectRepo,
