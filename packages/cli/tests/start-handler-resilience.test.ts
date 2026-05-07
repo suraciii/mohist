@@ -120,7 +120,7 @@ describe('POST /issues/:number/start resilience', () => {
     const app = new Hono();
     app.route('/api/issues', createIssueRoutes(
       issueService, projectService, stateManager,
-      worktreeManager as any, undefined, undefined, agentRunner,
+      worktreeManager as any, undefined, agentRunner,
     ));
     const server = createTestServer(app);
 
@@ -142,7 +142,7 @@ describe('POST /issues/:number/start resilience', () => {
     const app = new Hono();
     app.route('/api/issues', createIssueRoutes(
       issueService, projectService, stateManager,
-      worktreeManager as any, undefined, undefined, agentRunner,
+      worktreeManager as any, undefined, agentRunner,
     ));
     const server = createTestServer(app);
 
