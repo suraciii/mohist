@@ -236,11 +236,14 @@
         "T-006",
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Final verification task. It intentionally depends on the optional ACP-driver decision so the final graph remains linear and verifiable.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        472024
+      ]
     }
   ]
 }
