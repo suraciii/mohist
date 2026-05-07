@@ -7,6 +7,7 @@ import { ApiResponse, Issue, Priority, VALID_PRIORITIES } from '../../types';
 import { slugify } from '../../utils/slugify';
 import { apiClient } from '../api-client';
 import { requireServer } from '../server-check';
+import { classifyMergeDelivery, type MergeDeliveryStatus } from '../../workflow/issue-lifecycle';
 
 function formatStage(stage: string): string {
   const colors: Record<string, typeof chalk.green> = {
@@ -171,14 +172,17 @@ export function setupIssueCommands(program: Command): void {
             const labels = formatLabels(issue.labels).padEnd(20);
             const titlePart = issue.title.substring(0, 40);
 
+            const mergeStatus = classifyMergeDelivery(issue);
+            const mergeWarning = mergeStatus === 'done-not-merged' ? chalk.red.bold(' [UNMERGED]') : '';
+
             if (options.archived || options.all) {
               const archivedCol = issue.archivedAt
                 ? chalk.gray(formatArchivedAt(issue.archivedAt)).padEnd(24)
                 : '';
               const suffix = issue.archivedAt && !options.archived ? chalk.gray(' (archived)') : '';
-              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart.padEnd(42)}${archivedCol}${suffix}`);
+              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart.padEnd(42)}${archivedCol}${suffix}${mergeWarning}`);
             } else {
-              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart}`);
+              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart}${mergeWarning}`);
             }
           });
           console.log();
@@ -197,7 +201,7 @@ export function setupIssueCommands(program: Command): void {
           'GET',
           `/issues/${number}`
         );
-        
+
         if (response.success && response.data) {
           const issue = response.data;
           const displayId = `${issue.projectName || 'unknown'}#${issue.number}`;
@@ -205,6 +209,48 @@ export function setupIssueCommands(program: Command): void {
           console.log(`  Priority: ${formatPriority(issue.priority || 'p2')}`);
           console.log(`  Stage: ${formatStage(issue.stage)}`);
           console.log(`  Status: ${formatStatus(issue.status)}`);
+
+          const mergeStatus = classifyMergeDelivery(issue);
+          const mergeStatusColors: Record<MergeDeliveryStatus, typeof chalk.green> = {
+            merged: chalk.green,
+            queued: chalk.blue,
+            rebasing: chalk.blue,
+            merging: chalk.blue,
+            resolving: chalk.yellow,
+            conflict: chalk.red,
+            'build-failed': chalk.red,
+            blocked: chalk.red,
+            'not-ready': chalk.gray,
+            'not-merged': chalk.yellow,
+            unknown: chalk.gray,
+            'done-not-merged': chalk.red,
+          };
+          const mergeColor = mergeStatusColors[mergeStatus] || chalk.white;
+          const mergeStatusLabels: Record<MergeDeliveryStatus, string> = {
+            merged: 'Merged',
+            queued: 'Queued for merge',
+            rebasing: 'Rebasing',
+            merging: 'Merging',
+            resolving: 'Resolving conflicts',
+            conflict: 'Merge conflict',
+            'build-failed': 'Build failed after merge',
+            blocked: 'Blocked',
+            'not-ready': 'Not ready for merge',
+            'not-merged': 'Not merged',
+            unknown: 'Unknown',
+            'done-not-merged': 'DONE BUT NOT MERGED',
+          };
+          console.log(`  Merge: ${mergeColor(mergeStatusLabels[mergeStatus])}`);
+
+          if (issue.baseBranch) {
+            const sourceBranch = `mo/issue-${issue.number}`;
+            const targetBranch = issue.baseBranch;
+            console.log(`  Branch: ${chalk.cyan(sourceBranch)} → ${chalk.cyan(targetBranch)}`);
+          }
+
+          if (mergeStatus === 'done-not-merged') {
+            console.log(chalk.red.bold('  WARNING: This issue is marked done/completed but has not been merged!'));
+          }
 
           if (issue.archivedAt) {
             console.log(`  Archived: ${chalk.gray(new Date(issue.archivedAt).toLocaleString())}`);
@@ -457,13 +503,18 @@ export function setupIssueCommands(program: Command): void {
     .description('Approve an issue awaiting approval')
     .action(async (number) => {
       try {
-        const response = await apiClient<ApiResponse>(
+        const response = await apiClient<ApiResponse<any>>(
           'POST',
           `/issues/${number}/approve`
         );
-        
+
         if (response.success) {
-          console.log(chalk.green(`✓ Issue #${number} approved, agent resumed`));
+          const message = response.data?.message;
+          if (message) {
+            console.log(chalk.green(`✓ ${message}`));
+          } else {
+            console.log(chalk.green(`✓ Issue #${number} approved`));
+          }
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
         }
