@@ -339,8 +339,16 @@ export class AgentSession {
             model, stage, sessionId: session._sessionId, timestamp: new Date().toISOString(),
           });
         } catch (err) {
+          session._options = { ...session._options, model: undefined };
           log.warn('setSessionConfigOption for model failed', {
             sessionId: session._sessionId, model, error: err instanceof Error ? err.message : String(err),
+          });
+          wfObserver?.writeSessionLog(issueId, 'model_set_failed', {
+            requestedModel: model,
+            stage,
+            sessionId: session._sessionId,
+            error: err instanceof Error ? err.message : String(err),
+            timestamp: new Date().toISOString(),
           });
         }
       }

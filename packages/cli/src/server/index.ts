@@ -30,6 +30,7 @@ import { getVersionInfo } from '../version';
 
 
 import { load as loadConfig, getServerConfig, getLogConfig, resolveOpencodeBinPath } from '../config/config-loader';
+import { resolveStageModel } from '../config/model-resolution';
 import { RateLimiter } from '../utils/rate-limiter';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -171,7 +172,7 @@ async function main(): Promise<void> {
         eventBus,
         issueNumber: refreshedIssue.number,
         opencodeBinPath,
-        model: config.opencode?.model,
+        model: resolveStageModel(Stage.Build, config),
       };
 
       const truncatedOutput = buildOutput.length > 8000 ? buildOutput.slice(-8000) : buildOutput;
