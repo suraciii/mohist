@@ -92,6 +92,7 @@ export class WorkflowSessionObserver implements SessionObserver {
           stage: this.stage ?? ctx.stage,
           title: this.title,
           processPid: ctx.processPid ?? null,
+          model: ctx.model,
         });
         this._coderSessionId = coderSession.id;
         log.info('coder_session row created', { coderSessionId: this._coderSessionId, acpSessionId: ctx.acpSessionId });

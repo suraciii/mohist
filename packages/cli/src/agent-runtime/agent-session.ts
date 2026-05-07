@@ -335,6 +335,9 @@ export class AgentSession {
             sessionId: session._sessionId, configId: 'model', value: model,
           });
           log.info('ACP session model set', { sessionId: session._sessionId, model });
+          wfObserver?.writeSessionLog(issueId, 'model_selected', {
+            model, stage, sessionId: session._sessionId, timestamp: new Date().toISOString(),
+          });
         } catch (err) {
           log.warn('setSessionConfigOption for model failed', {
             sessionId: session._sessionId, model, error: err instanceof Error ? err.message : String(err),
