@@ -56,8 +56,12 @@ export class AcpProcess {
     });
 
     this.proc.on('exit', () => {
-      try { this.proc.stdin!.destroy(); } catch {}
-      try { this.proc.stdout!.destroy(); } catch {}
+      try { this.proc.stdin!.destroy(); } catch (err) {
+        log.warn('stdin destroy failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+      try { this.proc.stdout!.destroy(); } catch (err) {
+        log.warn('stdout destroy failed', { error: err instanceof Error ? err.message : String(err) });
+      }
     });
 
     this.proc.on('exit', (code) => {
@@ -96,9 +100,13 @@ export class AcpProcess {
   ensureKill(): void {
     if (!this._exited) {
       this._exited = true;
-      try { this.proc.kill('SIGTERM'); } catch {}
+      try { this.proc.kill('SIGTERM'); } catch (err) {
+        log.warn('SIGTERM failed', { error: err instanceof Error ? err.message : String(err) });
+      }
       setTimeout(() => {
-        try { this.proc.kill('SIGKILL'); } catch {}
+        try { this.proc.kill('SIGKILL'); } catch (err) {
+          log.warn('SIGKILL failed', { error: err instanceof Error ? err.message : String(err) });
+        }
       }, 5000);
     }
   }
