@@ -42,11 +42,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/components/ReviewReportModal.tsx",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "ReviewApprovalPanel.tsx is not rendered by any page but must remain compilable. The parseReviewOutput change is in ReviewSummary.tsx lines 14-33.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        90634
+      ]
     },
     {
       "id": "T-003",
