@@ -88,8 +88,10 @@ export function SessionPage() {
 
   const {
     turns,
+    transcriptVersion,
     scrollToBottom,
     newContentAvailable,
+    setIsNearBottom,
   } = useSessionTranscript({
     issueNumber,
     sessionId: sessionId ?? '',
@@ -104,7 +106,8 @@ export function SessionPage() {
     const threshold = 200
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     isNearBottomRef.current = distanceFromBottom < threshold
-  }, [])
+    setIsNearBottom(isNearBottomRef.current)
+  }, [setIsNearBottom])
 
   const handleScrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current
@@ -130,11 +133,11 @@ export function SessionPage() {
     const container = scrollContainerRef.current
     if (!container) return
 
+    container.scrollTop = container.scrollHeight
     if (scrollToBottomPendingRef.current) {
       scrollToBottomPendingRef.current = false
-      container.scrollTop = container.scrollHeight
     }
-  }, [turns.length, isRunning])
+  }, [transcriptVersion, isRunning])
 
   useEffect(() => {
     if (!isRunning) return

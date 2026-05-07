@@ -57,7 +57,7 @@ export class SessionStreamLogRepo {
 
   findBySessionId(sessionId: string): SessionStreamLogEntry[] {
     const rows = this.db.all<SessionStreamLogRow>(
-      `SELECT * FROM session_stream_log WHERE session_id = ? ORDER BY created_at ASC`,
+      `SELECT * FROM session_stream_log WHERE session_id = ? ORDER BY created_at ASC, rowid ASC`,
       [sessionId]
     );
     return rows.map(rowToEntry);
@@ -65,7 +65,7 @@ export class SessionStreamLogRepo {
 
   findByIssueId(issueId: string): SessionStreamLogEntry[] {
     const rows = this.db.all<SessionStreamLogRow>(
-      `SELECT * FROM session_stream_log WHERE issue_id = ? ORDER BY created_at ASC`,
+      `SELECT * FROM session_stream_log WHERE issue_id = ? ORDER BY created_at ASC, rowid ASC`,
       [issueId]
     );
     return rows.map(rowToEntry);

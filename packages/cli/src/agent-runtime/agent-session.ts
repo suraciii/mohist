@@ -193,9 +193,15 @@ export class AgentSession {
       const toolStatus = (toolCallData?.status as string) ?? '';
       const state = toolStatus === 'completed' ? 'completed' as const : 'started' as const;
       const toolName = (toolCallData?.toolName as string) ?? '';
-      const toolCallId = this._wfObserver
+      const existingToolCallId = (toolCallData?.toolCallId as string | undefined)
+        ?? (toolCallData?.id as string | undefined)
+        ?? (toolCallData?.callId as string | undefined);
+      const toolCallId = existingToolCallId ?? (this._wfObserver
         ? this._wfObserver.nextToolCallId(this._sessionId, toolName, state)
-        : `${this._sessionId}-${toolName}-0`;
+        : `${this._sessionId}-${toolName}-0`);
+      if (toolCallData && !existingToolCallId) {
+        toolCallData.toolCallId = toolCallId;
+      }
       const ctx = this.makeCtx();
       const event: ToolCallEvent = {
         toolName,

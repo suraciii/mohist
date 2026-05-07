@@ -26,7 +26,9 @@ interface LiveToolCall {
 
 export interface UseSessionTranscriptResult {
   turns: SessionTurn[]
+  transcriptVersion: number
   isNearBottom: boolean
+  setIsNearBottom: (nearBottom: boolean) => void
   scrollToBottom: () => void
   newContentAvailable: boolean
   acknowledgeNewContent: () => void
@@ -61,6 +63,26 @@ function createToolPart(tool: LiveToolCall): ToolPart {
       completedAt: tool.completedAt,
     },
   }
+}
+
+function createTemporaryTurn(at: string): SessionTurn {
+  return {
+    id: `live-${generateId()}`,
+    startedAt: at,
+    completedAt: null,
+    incomplete: true,
+    user: {
+      role: 'mohist',
+      text: 'Prompt is loading for this live session',
+      kind: 'legacy-missing',
+      sentAt: at,
+    },
+    assistant: [],
+  }
+}
+
+function ensureLiveTurn(turns: SessionTurn[], at: string): SessionTurn[] {
+  return turns.length > 0 ? [...turns] : [createTemporaryTurn(at)]
 }
 
 function appendTextToTurn(turn: SessionTurn, text: string): SessionTurn {
@@ -135,6 +157,7 @@ export function useSessionTranscript({
 }: UseSessionTranscriptOptions): UseSessionTranscriptResult {
   const queryClient = useQueryClient()
   const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
+  const [transcriptVersion, setTranscriptVersion] = useState(0)
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [newContentAvailable, setNewContentAvailable] = useState(false)
 
@@ -151,6 +174,17 @@ export function useSessionTranscript({
     setNewContentAvailable(false)
   }, [])
 
+  const bumpTranscriptVersion = useCallback(() => {
+    setTranscriptVersion((version) => version + 1)
+  }, [])
+
+  const markNewContent = useCallback(() => {
+    bumpTranscriptVersion()
+    if (!isNearBottom) {
+      setNewContentAvailable(true)
+    }
+  }, [bumpTranscriptVersion, isNearBottom])
+
   const acknowledgeNewContent = useCallback(() => {
     setNewContentAvailable(false)
   }, [])
@@ -158,6 +192,7 @@ export function useSessionTranscript({
   useEffect(() => {
     setTurns(initialTurns)
     liveToolCallMapRef.current.clear()
+    setTranscriptVersion((version) => version + 1)
   }, [initialTurns])
 
   useEffect(() => {
@@ -171,12 +206,12 @@ export function useSessionTranscript({
         if (detail.acpSessionId !== acpSessionId) return
 
         setTurns((prev) => {
-          if (prev.length === 0) return prev
-          const next = [...prev]
+          const next = ensureLiveTurn(prev, new Date().toISOString())
           const lastTurn = next[next.length - 1]
           next[next.length - 1] = appendTextToTurn(lastTurn, detail.text)
           return next
         })
+        markNewContent()
       }),
     )
 
@@ -202,8 +237,7 @@ export function useSessionTranscript({
           })
 
           setTurns((prev) => {
-            if (prev.length === 0) return prev
-            const next = [...prev]
+            const next = ensureLiveTurn(prev, now)
             const lastTurn = next[next.length - 1]
             next[next.length - 1] = updateToolInTurn(lastTurn, detail.toolCallId, {
               toolName: detail.toolName,
@@ -215,6 +249,7 @@ export function useSessionTranscript({
             })
             return next
           })
+          markNewContent()
         } else {
           const existing = liveToolCallMapRef.current.get(detail.toolCallId)
           if (existing) {
@@ -224,8 +259,7 @@ export function useSessionTranscript({
           }
 
           setTurns((prev) => {
-            if (prev.length === 0) return prev
-            const next = [...prev]
+            const next = ensureLiveTurn(prev, now)
             const lastTurn = next[next.length - 1]
             next[next.length - 1] = updateToolInTurn(lastTurn, detail.toolCallId, {
               status: detail.state,
@@ -234,6 +268,7 @@ export function useSessionTranscript({
             })
             return next
           })
+          markNewContent()
         }
       }),
     )
@@ -252,8 +287,7 @@ export function useSessionTranscript({
         }
 
         setTurns((prev) => {
-          if (prev.length === 0) return prev
-          const next = [...prev]
+          const next = ensureLiveTurn(prev, now)
           const lastTurn = next[next.length - 1]
           const newPart = createErrorPart(
             errorMessages[detail.status] ?? detail.status,
@@ -266,6 +300,7 @@ export function useSessionTranscript({
           }
           return next
         })
+        markNewContent()
       }),
     )
 
@@ -277,8 +312,7 @@ export function useSessionTranscript({
         const now = new Date().toISOString()
 
         setTurns((prev) => {
-          if (prev.length === 0) return prev
-          const next = [...prev]
+          const next = ensureLiveTurn(prev, now)
           const lastTurn = next[next.length - 1]
           next[next.length - 1] = {
             ...lastTurn,
@@ -286,6 +320,7 @@ export function useSessionTranscript({
           }
           return next
         })
+        markNewContent()
 
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
       }),
@@ -295,28 +330,13 @@ export function useSessionTranscript({
       mountedRef.current = false
       for (const unsub of unsubs) unsub()
     }
-  }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient])
-
-  useEffect(() => {
-    if (!isRunning) return
-
-    let lastTurnsLength = turns.length
-    const checkNewContent = () => {
-      if (turns.length > lastTurnsLength) {
-        lastTurnsLength = turns.length
-        if (!isNearBottom) {
-          setNewContentAvailable(true)
-        }
-      }
-    }
-
-    const interval = setInterval(checkNewContent, 500)
-    return () => clearInterval(interval)
-  }, [isRunning, isNearBottom, turns.length])
+  }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient, markNewContent])
 
   return {
     turns,
+    transcriptVersion,
     isNearBottom,
+    setIsNearBottom,
     scrollToBottom,
     newContentAvailable,
     acknowledgeNewContent,

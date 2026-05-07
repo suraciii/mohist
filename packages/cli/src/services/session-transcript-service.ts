@@ -144,6 +144,7 @@ interface ToolCallStartData {
 
 interface ToolCallUpdateData {
   toolCallId: string;
+  toolName?: string;
   status?: string;
   title?: string;
   input?: string;
@@ -152,14 +153,26 @@ interface ToolCallUpdateData {
   createdAt: string;
 }
 
+function syntheticToolCallId(data: Record<string, unknown>, fallbackCreatedAt: string): string {
+  const sessionId = typeof data.sessionId === 'string' ? data.sessionId
+    : typeof data.acpSessionId === 'string' ? data.acpSessionId
+      : 'session';
+  const toolName = typeof data.toolName === 'string' ? data.toolName
+    : typeof data.name === 'string' ? data.name
+      : 'unknown';
+  const sequence = typeof data.sequence === 'number' || typeof data.sequence === 'string'
+    ? String(data.sequence)
+    : fallbackCreatedAt;
+  return `${sessionId}-${toolName}-${sequence}`;
+}
+
 function parseToolCallStart(data: Record<string, unknown>, fallbackCreatedAt: string): ToolCallStartData | null {
   if (typeof data !== 'object' || data === null) return null;
   const d = getObject(data.toolCall) ?? data;
   const toolCallId = typeof d.toolCallId === 'string' ? d.toolCallId
     : typeof d.id === 'string' ? d.id
       : typeof d.callId === 'string' ? d.callId
-        : '';
-  if (!toolCallId) return null;
+        : syntheticToolCallId(d, fallbackCreatedAt);
   const toolName = typeof d.toolName === 'string' ? d.toolName : (typeof d.name === 'string' ? d.name : 'unknown');
   const status = typeof d.status === 'string' ? d.status : undefined;
   const title = typeof d.title === 'string' ? d.title : undefined;
@@ -177,8 +190,7 @@ function parseToolCallUpdate(data: Record<string, unknown>, fallbackCreatedAt: s
   const toolCallId = typeof d.toolCallId === 'string' ? d.toolCallId
     : typeof d.id === 'string' ? d.id
       : typeof d.callId === 'string' ? d.callId
-        : '';
-  if (!toolCallId) return null;
+        : syntheticToolCallId(d, fallbackCreatedAt);
   const status = typeof d.status === 'string' ? d.status : undefined;
   const toolName = typeof d.toolName === 'string' ? d.toolName : undefined;
   const title = typeof d.title === 'string' ? d.title : undefined;
@@ -187,7 +199,7 @@ function parseToolCallUpdate(data: Record<string, unknown>, fallbackCreatedAt: s
   const rawOutput = d.rawOutput ?? d.output;
   const output = stringifyPayload(rawOutput);
   const error = typeof d.error === 'string' ? d.error : undefined;
-  return { toolCallId, status, title: title ?? toolName, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt) };
+  return { toolCallId, toolName, status, title: title ?? toolName, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt) };
 }
 
 function deriveToolTarget(toolName: string, input: string | undefined): string | undefined {
@@ -280,8 +292,7 @@ export class SessionTranscriptAssembler {
     return [...events].sort((a, b) => {
       const timeA = new Date(a.createdAt).getTime();
       const timeB = new Date(b.createdAt).getTime();
-      if (timeA !== timeB) return timeA - timeB;
-      return a.id.localeCompare(b.id);
+      return timeA - timeB;
     });
   }
 
@@ -471,15 +482,20 @@ export class SessionTranscriptAssembler {
         existing.tool.target = deriveToolTarget(existing.tool.toolName, existing.tool.input);
       }
     } else {
+      if (!this.currentTurn) {
+        this.ensureActiveTurn(update.createdAt);
+      }
       const toolPart: ToolPart = {
-          id: this.nextId('tool'),
+        id: this.nextId('tool'),
         type: 'tool',
         tool: {
           toolCallId: update.toolCallId,
-          toolName: 'unknown',
+          toolName: update.toolName ?? 'unknown',
           status: update.status === 'completed' ? 'completed'
             : update.status === 'failed' ? 'failed'
             : 'started',
+          title: update.title,
+          input: update.input,
           output: update.output,
           error: update.error,
           startedAt: update.createdAt,
@@ -487,9 +503,10 @@ export class SessionTranscriptAssembler {
         },
       };
       this.toolPartsById.set(update.toolCallId, toolPart);
-      if (this.currentTurn) {
-        this.currentTurn.assistant.push(toolPart);
+      if (toolPart.tool.target === undefined && toolPart.tool.input) {
+        toolPart.tool.target = deriveToolTarget(toolPart.tool.toolName, toolPart.tool.input);
       }
+      this.currentTurn!.assistant.push(toolPart);
     }
   }
 
