@@ -49,11 +49,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Do not replace workflow dependencies with a generic visibility option bag. Keep runtime options limited to session/runtime metadata plus observers.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        220128
+      ]
     },
     {
       "id": "T-003",
