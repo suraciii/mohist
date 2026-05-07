@@ -173,7 +173,7 @@ export function createIssueRoutes(
       }
 
       const result = await issueService.archiveAllCompleted(projectId);
-      return c.json({ success: true, data: { archived: result.count, message: result.message } } satisfies ApiResponse);
+      return c.json({ success: true, data: { archived: result.count, skipped: result.skipped, message: result.message, skippedNumbers: result.skippedNumbers ?? [] } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

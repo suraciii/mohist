@@ -110,7 +110,10 @@
       "notes": "Do not backfill historical rows to merged; the goal is to expose untrusted completion state.",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1896896
+      ]
     },
     {
       "id": "T-005",
