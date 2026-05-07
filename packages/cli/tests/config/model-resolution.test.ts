@@ -35,4 +35,39 @@ describe('resolveStageModel', () => {
     };
     expect(resolveStageModel('Plan', config)).toBe('m1');
   });
+
+  it('returns undefined when opencode.model is absent and stageModels is empty', () => {
+    const config: ConfigInfo = {
+      opencode: { stageModels: {} },
+    };
+    expect(resolveStageModel('plan', config)).toBeUndefined();
+  });
+
+  it('returns undefined when opencode exists but has no model or stageModels', () => {
+    const config: ConfigInfo = {
+      opencode: { binPath: '/path/to/opencode' },
+    };
+    expect(resolveStageModel('build', config)).toBeUndefined();
+  });
+
+  it('returns stage-specific model for check stage when overridden', () => {
+    const config: ConfigInfo = {
+      opencode: { model: 'm1', stageModels: { check: 'm-check' } },
+    };
+    expect(resolveStageModel('check', config)).toBe('m-check');
+  });
+
+  it('returns undefined when config.opencode.model is explicitly undefined', () => {
+    const config: ConfigInfo = {
+      opencode: { model: undefined },
+    };
+    expect(resolveStageModel('plan', config)).toBeUndefined();
+  });
+
+  it('returns undefined when stage override is explicitly undefined', () => {
+    const config: ConfigInfo = {
+      opencode: { model: 'm1', stageModels: { plan: undefined as unknown as string } },
+    };
+    expect(resolveStageModel('plan', config)).toBeUndefined();
+  });
 });
