@@ -783,7 +783,6 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       8,
       undefined,
       undefined,
-      undefined,
       projectRepo,
       createWorktreeMock(null),
     );

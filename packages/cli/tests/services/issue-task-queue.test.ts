@@ -58,8 +58,7 @@ describe('IssueTaskQueue', () => {
   function createService(maxConcurrent = 8, wtManager?: any) {
     return new AgentRunnerService(
       eventBus, undefined, issueRepo, maxConcurrent,
-      undefined, undefined, undefined,
-      projectRepo,
+      undefined, undefined, projectRepo,
       wtManager ?? createHangingWorktreeManager(),
       taskQueueRepo,
     );
