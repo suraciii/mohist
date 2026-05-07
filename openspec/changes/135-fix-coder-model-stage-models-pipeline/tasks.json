@@ -153,11 +153,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Both changes are in the observer/session layer; no changes to DB schema needed.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        83291
+      ]
     },
     {
       "id": "T-007",
