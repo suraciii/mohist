@@ -136,11 +136,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "If source/target branch metadata is not stored, derive best-effort values from issue number and project baseBranch without adding schema.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        290521
+      ]
     },
     {
       "id": "T-006",
