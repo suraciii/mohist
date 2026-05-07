@@ -7,7 +7,7 @@ import { Stage, IssueStatus } from '../lib/types'
 import type { Issue, StageExecution, StageTaskResult, CheckResult, AgentDetailEventMap } from '../lib/types'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
-import { FullReportModal, ResultBadge } from './ReviewReportModal'
+import { FullReportModal } from './ReviewReportModal'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'

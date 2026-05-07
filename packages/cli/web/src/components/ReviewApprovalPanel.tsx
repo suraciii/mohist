@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { useSendMessage } from '../hooks/useQueries'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
-import { FullReportModal, ResultBadge } from './ReviewReportModal'
+import { FullReportModal } from './ReviewReportModal'
 import { useLiveTask } from '../hooks/useSSE'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
