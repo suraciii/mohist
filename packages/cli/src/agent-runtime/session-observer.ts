@@ -14,7 +14,7 @@ export interface SessionObserver {
   onSessionEvent?(ctx: SessionContext, eventType: string, data: unknown): void;
   onStateChange?(ctx: SessionContext, from: SessionState, to: SessionState): void;
   onRawNotification?(ctx: SessionContext, notification: SessionNotification): void;
-  writeMohistPrompt?(prompt: MohistPromptEvent): void;
+  writeMohistPrompt?(ctx: SessionContext, prompt: MohistPromptEvent): void;
 }
 
 export interface MohistPromptEvent {
@@ -25,6 +25,8 @@ export interface MohistPromptEvent {
   executionId?: string;
   stage?: string;
   title?: string;
+  issueId?: string;
+  acpSessionId?: string;
 }
 
 export interface SessionContext {
@@ -244,12 +246,12 @@ export class WorkflowSessionObserver implements SessionObserver {
     }
   }
 
-  writeMohistPrompt(prompt: MohistPromptEvent): void {
+  writeMohistPrompt(ctx: SessionContext, prompt: MohistPromptEvent): void {
     if (!this.sessionStreamLogRepo) return;
     try {
       this.sessionStreamLogRepo.insert(
-        prompt.executionId ?? this._coderSessionId ?? '',
-        prompt.executionId ?? '',
+        prompt.issueId ?? ctx.issueId ?? '',
+        prompt.acpSessionId ?? ctx.acpSessionId,
         'mohist_prompt',
         prompt,
       );

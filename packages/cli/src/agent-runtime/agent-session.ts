@@ -392,7 +392,7 @@ export class AgentSession {
     const kind = meta?.kind ?? 'task';
     const sentAt = new Date().toISOString();
 
-    this._wfObserver?.writeMohistPrompt({
+    this._wfObserver?.writeMohistPrompt(this.makeCtx(), {
       role: 'mohist',
       text: prompt,
       kind,
@@ -400,6 +400,8 @@ export class AgentSession {
       executionId: this._options.executionId,
       stage: this._options.stage,
       title: meta?.title ?? this._options.title,
+      issueId: this._options.issueId,
+      acpSessionId: this._sessionId,
     });
 
     const abortPromise = this._options.signal
