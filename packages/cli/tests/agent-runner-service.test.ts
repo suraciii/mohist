@@ -3,7 +3,7 @@ import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
-import { AgentRunnerService } from '../src/services/agent-runner-service';
+import { AgentRunnerService, isCurrentStageAwaitingApproval } from '../src/services/agent-runner-service';
 import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
 import { Stage, IssueStatus } from '../src/types';
@@ -32,6 +32,58 @@ describe('AgentRunnerService', () => {
     it('should return false when no approval pending', () => {
       const service = new AgentRunnerService(eventBus, undefined, issueRepo, 8);
       expect(service.isIssueAwaitingApproval('nonexistent')).toBe(false);
+    });
+  });
+
+  describe('stage-aware approval lifecycle guards', () => {
+    it('treats only current-stage awaiting approval as a pipeline pause', () => {
+      const currentIssue = issueService.create({ projectId: projectRepo.create({ name: 'Test Project', path: '/test' }).id, title: 'Current Awaiting' });
+      issueRepo.updateStage(currentIssue.id, Stage.Check);
+      issueRepo.setApprovalState(currentIssue.id, {
+        stage: Stage.Check,
+        status: 'awaiting',
+        requestedAt: new Date().toISOString(),
+      });
+
+      const staleIssue = issueService.create({ projectId: currentIssue.projectId, title: 'Stale Awaiting' });
+      issueRepo.updateStage(staleIssue.id, Stage.Check);
+      issueRepo.setApprovalState(staleIssue.id, {
+        stage: Stage.Plan,
+        status: 'awaiting',
+        requestedAt: new Date().toISOString(),
+      });
+
+      expect(isCurrentStageAwaitingApproval(issueRepo.findById(currentIssue.id))).toBe(true);
+      expect(isCurrentStageAwaitingApproval(issueRepo.findById(staleIssue.id))).toBe(false);
+    });
+
+    it('orphan scan preserves current-stage awaiting approval issues', () => {
+      const project = projectRepo.create({ name: 'Test Project', path: '/test' });
+      const issue = issueService.create({ projectId: project.id, title: 'Awaiting Check Approval' });
+
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      issueRepo.updateStage(issue.id, Stage.Check);
+      issueRepo.setApprovalState(issue.id, {
+        stage: Stage.Check,
+        status: 'awaiting',
+        requestedAt: new Date().toISOString(),
+      });
+
+      const service = new AgentRunnerService(
+        eventBus,
+        undefined,
+        issueRepo,
+        8,
+        { findAllRunning: () => [] } as any,
+      );
+
+      (service as any).scanOrphanedIssues();
+
+      const recovered = issueRepo.findById(issue.id);
+      expect(recovered?.status).toBe(IssueStatus.Active);
+      expect(recovered?.blockedReason).toBeUndefined();
+
+      service.shutdown();
     });
   });
 
