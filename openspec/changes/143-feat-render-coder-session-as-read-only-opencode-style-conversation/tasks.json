@@ -209,11 +209,14 @@
         "T-005",
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This task is intentionally last because it consumes persistence, assembler, API, UI, tool rendering, and live replay outputs.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1657262
+      ]
     }
   ]
 }
