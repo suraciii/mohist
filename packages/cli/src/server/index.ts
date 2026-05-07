@@ -159,6 +159,8 @@ async function main(): Promise<void> {
         return { success: false, error: 'Issue not found for build fix' };
       }
 
+      const config = loadConfig();
+
       const acpOptions: AgentSessionOptions = {
         cwd: worktreePath,
         issueId: refreshedIssue.id,
@@ -169,6 +171,7 @@ async function main(): Promise<void> {
         eventBus,
         issueNumber: refreshedIssue.number,
         opencodeBinPath,
+        model: config.opencode?.model,
       };
 
       const truncatedOutput = buildOutput.length > 8000 ? buildOutput.slice(-8000) : buildOutput;
