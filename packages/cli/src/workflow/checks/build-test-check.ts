@@ -217,6 +217,19 @@ export class BuildTestCheck implements Check {
         stage: 'check',
         timeout: 10 * 60 * 1000,
         title: 'Auto-fix: test failures',
+        onBeforeKill: async (cwd: string) => {
+          try {
+            const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
+            if (!statusOut.trim()) return false;
+            await execFileAsync('git', ['add', '-A'], { cwd });
+            const { stdout: remaining } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
+            if (!remaining.trim()) return false;
+            await execFileAsync('git', ['commit', '-m', `WIP: check-auto-fix-${ctx.issue.number} timeout`, '--no-verify'], { cwd });
+            return true;
+          } catch {
+            return false;
+          }
+        },
       });
 
       log.info('Auto-fix agent completed', {

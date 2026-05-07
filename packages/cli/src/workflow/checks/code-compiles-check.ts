@@ -103,6 +103,19 @@ export class CodeCompilesCheck implements Check {
         stage: 'build',
         timeout: 10 * 60 * 1000,
         title: 'Auto-fix: compilation errors',
+        onBeforeKill: async (cwd: string) => {
+          try {
+            const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
+            if (!statusOut.trim()) return false;
+            await execFileAsync('git', ['add', '-A'], { cwd });
+            const { stdout: remaining } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
+            if (!remaining.trim()) return false;
+            await execFileAsync('git', ['commit', '-m', `WIP: build-auto-fix-${ctx.issue.number} timeout`, '--no-verify'], { cwd });
+            return true;
+          } catch {
+            return false;
+          }
+        },
       });
     } catch (err) {
       log.error('Auto-fix agent failed', {
