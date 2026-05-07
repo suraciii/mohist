@@ -1009,6 +1009,7 @@ export class AgentRunnerService {
         workflowLogRepo: this.workflowLogRepo,
         sessionStreamLogRepo: this.sessionStreamLogRepo,
         stageExecutionRepo: this.stageExecutionRepo,
+        config: this.llmConfig,
       });
 
       const abortPromise = new Promise<never>((_resolve, reject) => {
