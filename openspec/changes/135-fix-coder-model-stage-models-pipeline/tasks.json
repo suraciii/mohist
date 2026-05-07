@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Fix Coder Model and Stage Models not being passed through the pipeline",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "src/config/model-resolution.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Place next to config-loader.ts. Keep it a pure function with no side effects. Stage key must match exactly (case-sensitive). Issue.stage enum values are capitalized ('Plan', 'Build', 'Check') but stageModels keys should use lowercase ('plan', 'build', 'check') for consistency. The resolver should normalize or the caller should ensure correct casing."
+      "passes": true,
+      "notes": "Place next to config-loader.ts. Keep it a pure function with no side effects. Stage key must match exactly (case-sensitive). Issue.stage enum values are capitalized ('Plan', 'Build', 'Check') but stageModels keys should use lowercase ('plan', 'build', 'check') for consistency. The resolver should normalize or the caller should ensure correct casing.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        276217
+      ]
     },
     {
       "id": "T-002",
@@ -38,9 +43,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "src/workflow/workflow-engine.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Config field must be optional so existing tests continue to work."
+      "notes": "Config field must be optional so existing tests continue to work.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -57,9 +67,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "src/services/agent-runner-service.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "AgentRunnerService already holds llmConfig; just forward it. Note: llmConfig is a legacy name — it is actually the full ConfigInfo, not just LLM config. Future refactor may rename it to config."
+      "notes": "AgentRunnerService already holds llmConfig; just forward it. Note: llmConfig is a legacy name — it is actually the full ConfigInfo, not just LLM config. Future refactor may rename it to config.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -75,9 +90,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "src/workflow/build-stage-runner.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "RalphExecutorContext.model is already defined as optional; just wire the value."
+      "notes": "RalphExecutorContext.model is already defined as optional; just wire the value.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -94,9 +114,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "src/server/index.ts, src/services/conflict-resolution.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "These paths are outside WorkflowEngine so they read config directly. load() is cached; no I/O overhead. Recovery pipeline (recoverBuildStageIssue) does not need separate wiring — it enqueues resume-pipeline which will naturally go through executeResumePipelineTask (T-003)."
+      "notes": "These paths are outside WorkflowEngine so they read config directly. load() is cached; no I/O overhead. Recovery pipeline (recoverBuildStageIssue) does not need separate wiring — it enqueues resume-pipeline which will naturally go through executeResumePipelineTask (T-003).",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -113,9 +138,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "src/agent-runtime/session-observer.ts, src/agent-runtime/agent-session.ts",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Both changes are in the observer/session layer; no changes to DB schema needed."
+      "notes": "Both changes are in the observer/session layer; no changes to DB schema needed.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -133,9 +163,19 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "tests/config/model-resolution.test.ts, tests/workflow/workflow-engine.test.ts",
-      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
       "passes": false,
-      "notes": "Follow existing test conventions in packages/cli/tests/."
+      "notes": "Follow existing test conventions in packages/cli/tests/.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
