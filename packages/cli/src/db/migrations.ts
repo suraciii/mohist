@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -194,6 +194,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 22) {
     migrateToVersion22(db);
+  }
+
+  if (currentVersion < 23) {
+    migrateToVersion23(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -937,5 +941,18 @@ function migrateToVersion22(db: DatabaseManager): void {
     db.exec('DROP INDEX IF EXISTS idx_agent_session_message_issue_step');
     db.exec('DROP TABLE IF EXISTS agent_session_message');
     setSchemaVersion(db, 22);
+  });
+}
+
+function migrateToVersion23(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>("PRAGMA table_info(coder_session)");
+    const hasProcessPid = tableInfo.some(col => col.name === 'process_pid');
+
+    if (!hasProcessPid) {
+      db.exec('ALTER TABLE coder_session ADD COLUMN process_pid INTEGER');
+    }
+
+    setSchemaVersion(db, 23);
   });
 }

@@ -25,6 +25,7 @@ export interface SessionContext {
   readonly coderSessionId: string | undefined;
   readonly stage: string | undefined;
   readonly model: string | undefined;
+  readonly processPid: number | undefined;
 }
 
 export type SessionState = 'initializing' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'closed';
@@ -90,6 +91,7 @@ export class WorkflowSessionObserver implements SessionObserver {
           taskDescription: this.taskDescription,
           stage: this.stage ?? ctx.stage,
           title: this.title,
+          processPid: ctx.processPid ?? null,
         });
         this._coderSessionId = coderSession.id;
         log.info('coder_session row created', { coderSessionId: this._coderSessionId, acpSessionId: ctx.acpSessionId });
@@ -182,7 +184,7 @@ export class WorkflowSessionObserver implements SessionObserver {
   onStateChange(_ctx: SessionContext, _from: SessionState, to: SessionState): void {
     if (!this.coderSessionRepo || !this._coderSessionId) return;
 
-    if (to === 'completed' || to === 'failed') {
+    if (to === 'completed' || to === 'failed' || to === 'timeout' || to === 'cancelled') {
       try {
         this.coderSessionRepo.updateStatus(this._coderSessionId, to);
       } catch (err) {
