@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useIssue } from '../hooks/useQueries'
 import { useCoderSessions } from '../hooks/useCoderSessions'
-import { useSessionTimeline } from '../hooks/useSessionTimeline'
+import { api } from '../lib/api'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
-import { ToolCallCard } from './ToolCallCard'
-import type { CoderSessionItem } from '../lib/types'
-import type { Round } from '../hooks/useSessionTimeline'
+import { SessionTranscriptView } from './SessionTranscriptView'
+import type { CoderSessionDetail } from '../lib/types'
 
 function formatDuration(ms: number): string {
   if (ms < 0) return '0s'
@@ -20,115 +20,16 @@ function formatDuration(ms: number): string {
   return `${hr}h ${String(remMin).padStart(2, '0')}m`
 }
 
-function getSessionDuration(session: CoderSessionItem): number {
-  if (session.status === 'running') {
-    return Date.now() - new Date(session.createdAt).getTime()
+function getSessionDuration(createdAt: string, completedAt: string | null): number {
+  if (completedAt) {
+    return new Date(completedAt).getTime() - new Date(createdAt).getTime()
   }
-  if (session.completedAt) {
-    return new Date(session.completedAt).getTime() - new Date(session.createdAt).getTime()
-  }
-  return 0
+  return Date.now() - new Date(createdAt).getTime()
 }
 
 function getStageLabel(stage: string | null): string {
   if (!stage) return 'Session'
   return stage.charAt(0).toUpperCase() + stage.slice(1)
-}
-
-function ConversationRound({
-  round,
-  isStreaming,
-}: {
-  round: Round
-  isStreaming: boolean
-}) {
-  const isLiveRound = !round.completedAt
-  const hasContent = round.agentText || round.toolCalls.length > 0 || round.recoveryEvents.length > 0
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-xs text-gray-400">
-        <span className="font-medium text-gray-600">{round.label}</span>
-        {round.startedAt && (
-          <>
-            <span className="text-gray-300">·</span>
-            <span>{new Date(round.startedAt).toLocaleTimeString()}</span>
-          </>
-        )}
-        {isLiveRound && (
-          <>
-            <span className="text-gray-300">·</span>
-            <span className="flex items-center gap-1 text-blue-500">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
-              Live
-            </span>
-          </>
-        )}
-      </div>
-
-      {round.userText && (
-        <div className="flex justify-end">
-          <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-blue-600 text-white px-4 py-2.5 text-sm whitespace-pre-wrap">
-            {round.userText}
-          </div>
-        </div>
-      )}
-
-      {round.agentText && (
-        <div className="max-w-[90%]">
-          <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-            {round.agentText}
-            {isLiveRound && isStreaming && (
-              <span className="inline-block w-1.5 h-4 bg-blue-500 ml-0.5 animate-pulse align-text-bottom" />
-            )}
-          </div>
-        </div>
-      )}
-
-      {round.thoughtText && (
-        <details className="max-w-[90%]">
-          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
-            Thinking...{round.thoughtText.length > 500 ? ` (${(round.thoughtText.length / 1024).toFixed(1)}KB)` : ''}
-          </summary>
-          <pre className="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-48 overflow-auto bg-gray-50 rounded p-2">
-            {round.thoughtText.length > 20000
-              ? round.thoughtText.slice(0, 20000) + '\n... (truncated)'
-              : round.thoughtText}
-          </pre>
-        </details>
-      )}
-
-      {round.toolCalls.length > 0 && (
-        <div className="space-y-2 max-w-[90%]">
-          {round.toolCalls.map((tc) => (
-            <ToolCallCard key={tc.toolCallId ?? tc.executionId} entry={tc} />
-          ))}
-        </div>
-      )}
-
-      {round.recoveryEvents.length > 0 && (
-        <div className="space-y-1 max-w-[90%]">
-          {round.recoveryEvents.map((evt, i) => (
-            <div key={i} className="flex items-center gap-1.5 text-xs text-amber-600">
-              <svg className="h-3 w-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-              </svg>
-              <span>
-                {evt.status === 'detected' && 'LLM 连接中断'}
-                {evt.status === 'recovering' && `恢复中 (attempt ${evt.attempt})`}
-                {evt.status === 'recovered' && '恢复成功'}
-                {evt.status === 'failed' && `恢复失败${evt.reason ? `: ${evt.reason}` : ''}`}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!hasContent && !isLiveRound && (
-        <div className="text-xs text-gray-400">No output recorded</div>
-      )}
-    </div>
-  )
 }
 
 function SessionNotFound({ issueNumber }: { issueNumber: number }) {
@@ -155,13 +56,13 @@ export function SessionPage() {
 
   const { data: issue } = useIssue(issueNumber)
   const { sessions, isLoading: sessionsLoading } = useCoderSessions(issueNumber)
-
   const session = sessions.find((s) => s.id === sessionId)
 
-  const { rounds, isStreaming, isLoading: timelineLoading } = useSessionTimeline(
-    issueNumber,
-    session,
-  )
+  const { data: detail, isLoading: detailLoading } = useQuery<CoderSessionDetail>({
+    queryKey: ['issues', issueNumber, 'coder-sessions', sessionId],
+    queryFn: () => api.getCoderSessionDetail(issueNumber, sessionId!),
+    enabled: !!sessionId && sessionId.length > 0 && issueNumber > 0,
+  })
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -185,13 +86,13 @@ export function SessionPage() {
     const container = scrollContainerRef.current
     if (!container) return
     container.scrollTop = container.scrollHeight
-  }, [rounds, isStreaming])
+  }, [detail?.turns.length])
 
   if (!sessionId || isNaN(issueNumber) || issueNumber <= 0) {
     return <SessionNotFound issueNumber={issueNumber || 0} />
   }
 
-  if (sessionsLoading || timelineLoading) {
+  if (sessionsLoading || detailLoading) {
     return (
       <div className="flex items-center justify-center flex-1">
         <div className="text-gray-400">Loading session...</div>
@@ -199,14 +100,18 @@ export function SessionPage() {
     )
   }
 
-  if (!session) {
+  if (!detail && !session) {
     return <SessionNotFound issueNumber={issueNumber} />
   }
 
-  const isRunning = session.status === 'running'
-  const duration = getSessionDuration(session)
-  const model = session.model || 'unknown'
-  const stageLabel = getStageLabel(session.stage)
+  const meta = detail?.metadata
+  const isRunning = (meta?.status ?? session?.status) === 'running'
+  const title = meta?.title ?? session?.taskDescription ?? meta?.stage ?? 'Session'
+  const model = meta?.model ?? session?.model ?? 'unknown'
+  const stageLabel = getStageLabel(meta?.stage ?? session?.stage ?? null)
+  const createdAt = meta?.createdAt ?? session?.createdAt ?? new Date().toISOString()
+  const completedAt = meta?.completedAt ?? session?.completedAt ?? null
+  const duration = getSessionDuration(createdAt, completedAt)
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -231,9 +136,7 @@ export function SessionPage() {
 
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-gray-900">
-              {session.taskDescription || stageLabel}
-            </h1>
+            <h1 className="text-lg font-semibold text-gray-900">{title}</h1>
           </div>
 
           <div className="flex items-center gap-2 text-xs text-gray-500 ml-auto shrink-0">
@@ -245,6 +148,12 @@ export function SessionPage() {
             <span className={isRunning ? 'text-blue-600 font-medium' : ''}>
               {formatDuration(duration)}
             </span>
+            {meta?.sessionId && (
+              <>
+                <span className="text-gray-300">·</span>
+                <span className="font-mono text-gray-400 text-xs">{meta.sessionId.slice(0, 8)}</span>
+              </>
+            )}
             {isRunning && (
               <span className="flex items-center gap-1 text-blue-600 font-medium">
                 <span className="relative flex h-2 w-2">
@@ -260,26 +169,13 @@ export function SessionPage() {
 
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-4 py-6 space-y-6"
+        className="flex-1 overflow-y-auto px-4 py-6"
       >
-        {rounds.length === 0 && !isRunning && (
+        {detail ? (
+          <SessionTranscriptView turns={detail.turns} isRunning={isRunning} />
+        ) : (
           <div className="text-center text-gray-400 text-sm py-12">
             No activity recorded for this session
-          </div>
-        )}
-
-        {rounds.map((round) => (
-          <ConversationRound
-            key={`${round.roundIndex}-${round.label}`}
-            round={round}
-            isStreaming={isStreaming}
-          />
-        ))}
-
-        {rounds.length === 0 && isRunning && (
-          <div className="flex items-center gap-2 text-sm text-blue-500 justify-center py-12">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
-            Waiting for activity...
           </div>
         )}
       </div>
