@@ -142,11 +142,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Tool rendering should be presentation-only over transcript `ToolPart` data. Keep a generic fallback as the safety net for all unrecognized tool names.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        293921
+      ]
     },
     {
       "id": "T-006",
