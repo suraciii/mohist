@@ -89,6 +89,10 @@ const PIPELINE_TIMEOUT_MS = 90 * 60 * 1000;
 
 const log = Log.create({ service: 'agent-runner' });
 
+export function isCurrentStageAwaitingApproval(issue: Issue | null | undefined): boolean {
+  return Boolean(issue && isCurrentStageApproval(issue, issue.stage, 'awaiting'));
+}
+
 export class AgentRunnerService {
   private waitingQuestions = new Map<string, WaitingQuestion>();
   private readonly maxConcurrentAgents: number;
@@ -316,7 +320,7 @@ export class AgentRunnerService {
       if (this.runningSlots.has(issue.id)) return false;
       if (runningSessionIssueIds.has(issue.id)) return false;
       if (issue.mergeState) return false;
-      if (!isCurrentStageApproval(issue, issue.stage, 'awaiting')) return false;
+      if (isCurrentStageAwaitingApproval(issue)) return false;
       return true;
     });
 
@@ -1083,7 +1087,8 @@ export class AgentRunnerService {
       }
 
       const duration = Date.now() - startTime;
-      const isPaused = !result.completed && (issueRepo.findById(issue.id)?.approvalState?.status === 'awaiting');
+      const latestIssue = issueRepo.findById(issue.id);
+      const isPaused = !result.completed && isCurrentStageAwaitingApproval(latestIssue);
       log.info('Pipeline run completed', { issueNumber: issue.number, elapsedMs: duration, completed: result.completed, paused: isPaused });
 
       if (isPaused) {
