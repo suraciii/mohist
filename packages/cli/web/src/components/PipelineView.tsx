@@ -5,6 +5,17 @@ import { useIssueExecutions } from '../hooks/useQueries'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
 import type { Issue, StageExecution, StageTaskResult, CheckResult, AgentDetailEventMap } from '../lib/types'
+import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
+import type { ReviewOutput } from './ReviewSummary'
+import { FullReportModal, ResultBadge } from './ReviewReportModal'
+
+function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
+  if (!result) return 'UNKNOWN'
+  const upper = result.toUpperCase()
+  if (upper === 'PASS') return 'PASS'
+  if (upper === 'FAIL') return 'FAIL'
+  return 'UNKNOWN'
+}
 
 const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done] as const
 type PipelineStage = (typeof PIPELINE_STAGES)[number]
@@ -388,15 +399,25 @@ function InlineApproval({
   issueNumber,
   stage,
   readOnly,
+  approvalOutput,
 }: {
   issueNumber: number
   stage: PipelineStage
   readOnly: boolean
+  approvalOutput?: Record<string, unknown>
 }) {
   const queryClient = useQueryClient()
   const [feedback, setFeedback] = useState('')
   const [messageText, setMessageText] = useState('')
   const [showSendMessage, setShowSendMessage] = useState(false)
+  const [reportModalOpen, setReportModalOpen] = useState(false)
+  const [instructionsExpanded, setInstructionsExpanded] = useState(false)
+  const [instructionsText, setInstructionsText] = useState('')
+  const [notesExpanded, setNotesExpanded] = useState(false)
+  const [notesText, setNotesText] = useState('')
+
+  const review: ReviewOutput = useMemo(() => parseReviewOutput(approvalOutput), [approvalOutput])
+  const classified = useMemo(() => classifyResult(review.result), [review.result])
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveIssue(issueNumber),
@@ -428,6 +449,43 @@ function InlineApproval({
     },
   })
 
+  const handleSendBackForFixes = useCallback(() => {
+    const failDims = (review.dimensions ?? []).filter(
+      (d) => d.status.toUpperCase() === 'FAIL',
+    )
+    if (failDims.length > 0) {
+      const parts = failDims.map((dim) => {
+        const issues = dim.issues && dim.issues.length > 0
+          ? dim.issues.map((i) => `- ${i}`).join('\n')
+          : '- Issues identified in this dimension'
+        return `### ${dim.name}\n${issues}`
+      })
+      sendMessageMutation.mutate(`Please fix the following issues:\n\n${parts.join('\n\n')}`)
+    } else if (review.reviewReport) {
+      sendMessageMutation.mutate(`Please fix the following issues:\n\n${review.reviewReport}`)
+    } else {
+      sendMessageMutation.mutate('The review found issues that need to be addressed. Please review and fix all problems.')
+    }
+  }, [review, sendMessageMutation])
+
+  const handleSendWithInstructions = useCallback(() => {
+    if (!instructionsText.trim()) return
+    sendMessageMutation.mutate(instructionsText.trim())
+  }, [instructionsText, sendMessageMutation])
+
+  const handleSendBackWithNotes = useCallback(() => {
+    if (!notesText.trim()) return
+    sendMessageMutation.mutate(notesText.trim())
+  }, [notesText, sendMessageMutation])
+
+  const handleApproveAnyway = useCallback(() => {
+    approveMutation.mutate()
+  }, [approveMutation])
+
+  const handleViewChanges = useCallback(() => {
+    document.getElementById('changes-panel')?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
   const getApproveLabel = () => {
     if (stage === Stage.Plan) return 'Approve & Start Build'
     if (stage === Stage.Check) return 'Approve & Queue Merge'
@@ -436,8 +494,18 @@ function InlineApproval({
 
   if (readOnly) return null
 
+  const hasApprovalOutput = approvalOutput != null
+
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+      {reportModalOpen && (
+        <FullReportModal
+          review={review}
+          classified={classified}
+          onClose={() => setReportModalOpen(false)}
+        />
+      )}
+
       <h3 className="text-sm font-semibold text-amber-800">Approval Required</h3>
       <p className="text-xs text-amber-600">
         {stage === Stage.Plan
@@ -446,82 +514,208 @@ function InlineApproval({
             ? 'Review the check results and approve to queue for merge.'
             : `Review the ${stage} stage output and approve to continue, or send back with feedback.`}
       </p>
-      <div className="space-y-2">
-        <div className="flex gap-2">
+
+      {hasApprovalOutput && (
+        <ReviewSummary output={approvalOutput} />
+      )}
+
+      {hasApprovalOutput && (
+        <div className="flex gap-4 text-xs">
+          <button
+            onClick={() => setReportModalOpen(true)}
+            className="text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            View Full Report
+          </button>
+          <button
+            onClick={handleViewChanges}
+            className="text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            View Changes
+          </button>
+        </div>
+      )}
+
+      {!hasApprovalOutput && (
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <button
+              onClick={() => approveMutation.mutate()}
+              disabled={approveMutation.isPending}
+              className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
+            </button>
+            <button
+              onClick={() => rejectMutation.mutate()}
+              disabled={rejectMutation.isPending}
+              className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              {rejectMutation.isPending ? 'Sending...' : 'Send back'}
+            </button>
+          </div>
+          <textarea
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder="Optional feedback..."
+            rows={2}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+          />
+        </div>
+      )}
+
+      {hasApprovalOutput && classified === 'PASS' && (
+        <div className="space-y-2">
           <button
             onClick={() => approveMutation.mutate()}
             disabled={approveMutation.isPending}
-            className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="w-full rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
           >
             {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
           </button>
-          <button
-            onClick={() => rejectMutation.mutate()}
-            disabled={rejectMutation.isPending}
-            className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-          >
-            {rejectMutation.isPending ? 'Sending...' : 'Send back'}
-          </button>
-        </div>
-        <textarea
-          value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
-          placeholder="Optional feedback..."
-          rows={2}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-        />
-      </div>
-      {(approveMutation.error || rejectMutation.error) && (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          {approveMutation.error?.message || rejectMutation.error?.message}
         </div>
       )}
-      <div className="border-t border-amber-200 pt-3">
-        {!showSendMessage ? (
+
+      {hasApprovalOutput && classified === 'FAIL' && (
+        <div className="space-y-2">
           <button
-            onClick={() => setShowSendMessage(true)}
-            className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
+            onClick={handleSendBackForFixes}
+            disabled={sendMessageMutation.isPending}
+            className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
           >
-            Send a message to the agent instead
+            {sendMessageMutation.isPending ? 'Sending...' : 'Send back for fixes'}
           </button>
-        ) : (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold text-blue-800">Send Message</h4>
-            <p className="text-xs text-blue-600">
-              Send a free-text message to the agent. The agent will decide the next step based on your message.
-            </p>
-            <textarea
-              value={messageText}
-              onChange={(e) => setMessageText(e.target.value)}
-              placeholder="Type a message to the agent..."
-              rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-            />
-            <div className="flex items-center justify-between">
-              {sendMessageMutation.error && (
-                <span className="text-xs text-red-500">
-                  {sendMessageMutation.error.message}
-                </span>
-              )}
-              <div className="ml-auto flex gap-2">
+
+          <div>
+            <button
+              onClick={() => setInstructionsExpanded(!instructionsExpanded)}
+              className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              {instructionsExpanded ? '▾' : '▸'} Add instructions...
+            </button>
+            {instructionsExpanded && (
+              <div className="mt-2 space-y-2">
+                <textarea
+                  value={instructionsText}
+                  onChange={(e) => setInstructionsText(e.target.value)}
+                  placeholder="Add your instructions for the fix..."
+                  rows={3}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                />
                 <button
-                  onClick={() => setShowSendMessage(false)}
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  onClick={handleSendWithInstructions}
+                  disabled={!instructionsText.trim() || sendMessageMutation.isPending}
+                  className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
-                  Cancel
+                  {sendMessageMutation.isPending ? 'Sending...' : 'Send with instructions'}
                 </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleApproveAnyway}
+            disabled={approveMutation.isPending}
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            {approveMutation.isPending ? 'Approving...' : 'Approve anyway'}
+          </button>
+        </div>
+      )}
+
+      {hasApprovalOutput && classified === 'UNKNOWN' && (
+        <div className="space-y-2">
+          <button
+            onClick={() => approveMutation.mutate()}
+            disabled={approveMutation.isPending}
+            className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
+          </button>
+
+          <div>
+            <button
+              onClick={() => setNotesExpanded(!notesExpanded)}
+              className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              {notesExpanded ? '▾' : '▸'} Send back with notes...
+            </button>
+            {notesExpanded && (
+              <div className="mt-2 space-y-2">
+                <textarea
+                  value={notesText}
+                  onChange={(e) => setNotesText(e.target.value)}
+                  placeholder="Describe what needs to be changed..."
+                  rows={3}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                />
                 <button
-                  onClick={() => sendMessageMutation.mutate(messageText)}
-                  disabled={!messageText.trim() || sendMessageMutation.isPending}
+                  onClick={handleSendBackWithNotes}
+                  disabled={!notesText.trim() || sendMessageMutation.isPending}
                   className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
                 </button>
               </div>
-            </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {(approveMutation.error || rejectMutation.error || sendMessageMutation.error) && (
+        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+          {approveMutation.error?.message || rejectMutation.error?.message || sendMessageMutation.error?.message}
+        </div>
+      )}
+
+      {!hasApprovalOutput && (
+        <div className="border-t border-amber-200 pt-3">
+          {!showSendMessage ? (
+            <button
+              onClick={() => setShowSendMessage(true)}
+              className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
+            >
+              Send a message to the agent instead
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold text-blue-800">Send Message</h4>
+              <p className="text-xs text-blue-600">
+                Send a free-text message to the agent. The agent will decide the next step based on your message.
+              </p>
+              <textarea
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                placeholder="Type a message to the agent..."
+                rows={2}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+              />
+              <div className="flex items-center justify-between">
+                {sendMessageMutation.error && (
+                  <span className="text-xs text-red-500">
+                    {sendMessageMutation.error.message}
+                  </span>
+                )}
+                <div className="ml-auto flex gap-2">
+                  <button
+                    onClick={() => setShowSendMessage(false)}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => sendMessageMutation.mutate(messageText)}
+                    disabled={!messageText.trim() || sendMessageMutation.isPending}
+                    className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -583,7 +777,7 @@ function StepList({
           </div>
           {isAwaitingApproval && (
             <div className="mt-3">
-              <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} />
+              <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} approvalOutput={issue.approvalState?.output} />
             </div>
           )}
         </div>
