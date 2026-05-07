@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useIssue } from '../hooks/useQueries'
@@ -6,6 +6,7 @@ import { useCoderSessions } from '../hooks/useCoderSessions'
 import { api } from '../lib/api'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { SessionTranscriptView } from './SessionTranscriptView'
+import { useSessionTranscript } from '../hooks/useSessionTranscript'
 import type { CoderSessionDetail } from '../lib/types'
 
 function formatDuration(ms: number): string {
@@ -48,6 +49,20 @@ function SessionNotFound({ issueNumber }: { issueNumber: number }) {
   )
 }
 
+function JumpToBottomButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 text-white text-xs font-medium rounded-full shadow-lg hover:bg-gray-700 transition-colors"
+    >
+      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M10 17a.75.75 0 01-.75-.75V5.612L5.29 9.77a.75.75 0 01-1.08-1.04l5.25-5.5a.75.75 0 011.08 0l5.25 5.5a.75.75 0 11-1.08 1.04l-3.96-4.158V16.25A.75.75 0 0110 17z" clipRule="evenodd" />
+      </svg>
+      Jump to bottom
+    </button>
+  )
+}
+
 export function SessionPage() {
   const { number: numberStr, sessionId } = useParams<{ number: string; sessionId: string }>()
   const issueNumber = Number(numberStr)
@@ -66,27 +81,68 @@ export function SessionPage() {
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
+  const scrollToBottomPendingRef = useRef(false)
+
+  const isRunning = (detail?.metadata?.status ?? session?.status) === 'running'
+  const acpSessionId = detail?.acpSessionId ?? session?.acpSessionId ?? ''
+
+  const {
+    turns,
+    scrollToBottom,
+    newContentAvailable,
+  } = useSessionTranscript({
+    issueNumber,
+    sessionId: sessionId ?? '',
+    acpSessionId,
+    initialTurns: detail?.turns ?? [],
+    isRunning,
+  })
+
+  const handleScroll = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const threshold = 200
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    isNearBottomRef.current = distanceFromBottom < threshold
+  }, [])
+
+  const handleScrollToBottom = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: 'smooth',
+    })
+    scrollToBottom()
+  }, [scrollToBottom])
 
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
-
-    const handleScroll = () => {
-      const threshold = 200
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      isNearBottomRef.current = distanceFromBottom < threshold
-    }
 
     container.addEventListener('scroll', handleScroll, { passive: true })
     return () => container.removeEventListener('scroll', handleScroll)
-  }, [])
+  }, [handleScroll])
 
   useEffect(() => {
     if (!isNearBottomRef.current) return
+    if (!isRunning) return
     const container = scrollContainerRef.current
     if (!container) return
+
+    if (scrollToBottomPendingRef.current) {
+      scrollToBottomPendingRef.current = false
+      container.scrollTop = container.scrollHeight
+    }
+  }, [turns.length, isRunning])
+
+  useEffect(() => {
+    if (!isRunning) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
     container.scrollTop = container.scrollHeight
-  }, [detail?.turns.length])
+  }, [isRunning, detail?.metadata?.status])
 
   if (!sessionId || isNaN(issueNumber) || issueNumber <= 0) {
     return <SessionNotFound issueNumber={issueNumber || 0} />
@@ -105,7 +161,6 @@ export function SessionPage() {
   }
 
   const meta = detail?.metadata
-  const isRunning = (meta?.status ?? session?.status) === 'running'
   const title = meta?.title ?? session?.taskDescription ?? meta?.stage ?? 'Session'
   const model = meta?.model ?? session?.model ?? 'unknown'
   const stageLabel = getStageLabel(meta?.stage ?? session?.stage ?? null)
@@ -114,7 +169,7 @@ export function SessionPage() {
   const duration = getSessionDuration(createdAt, completedAt)
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col flex-1 min-h-0 relative">
       <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0">
         <div className="flex items-center gap-2 text-sm mb-2">
           <Link
@@ -171,14 +226,18 @@ export function SessionPage() {
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto px-4 py-6"
       >
-        {detail ? (
-          <SessionTranscriptView turns={detail.turns} isRunning={isRunning} />
+        {turns.length > 0 ? (
+          <SessionTranscriptView turns={turns} isRunning={isRunning} />
         ) : (
           <div className="text-center text-gray-400 text-sm py-12">
             No activity recorded for this session
           </div>
         )}
       </div>
+
+      {newContentAvailable && (
+        <JumpToBottomButton onClick={handleScrollToBottom} />
+      )}
     </div>
   )
 }
