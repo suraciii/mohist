@@ -13,6 +13,8 @@ const MERGE_STATE_LABELS: Record<string, string> = {
   conflict: 'Conflict',
   pending: 'Pending',
   merging: 'Merging',
+  'done-not-merged': 'Not Merged',
+  '': 'Not Merged',
 }
 
 interface Props {
@@ -21,13 +23,12 @@ interface Props {
   showArchiveButton?: boolean
 }
 
-type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | null
+type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | 'false-done' | null
 
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (
     issue.stage === Stage.Done &&
-    issue.mergeState != null &&
-    issue.mergeState !== 'merged'
+    (issue.mergeState === null || issue.mergeState === undefined || issue.mergeState !== 'merged')
   ) {
     return 'conflict'
   }

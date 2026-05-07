@@ -497,7 +497,7 @@ export function IssueDetailPage() {
                 </div>
               </div>
 
-              <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} />
+              <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} stage={issue.stage} status={issue.status} />
 
               {isAgentRunningOnThis && (
                 <QuestionPanel issueId={issue.id} />

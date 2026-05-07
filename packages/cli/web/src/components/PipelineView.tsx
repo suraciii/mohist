@@ -428,13 +428,23 @@ function InlineApproval({
     },
   })
 
+  const getApproveLabel = () => {
+    if (stage === Stage.Plan) return 'Approve & Start Build'
+    if (stage === Stage.Check) return 'Approve & Queue Merge'
+    return 'Approve'
+  }
+
   if (readOnly) return null
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
       <h3 className="text-sm font-semibold text-amber-800">Approval Required</h3>
       <p className="text-xs text-amber-600">
-        Review the {stage} stage output and approve to continue, or send back with feedback.
+        {stage === Stage.Plan
+          ? 'Review the design proposal and approve to start implementation.'
+          : stage === Stage.Check
+            ? 'Review the check results and approve to queue for merge.'
+            : `Review the ${stage} stage output and approve to continue, or send back with feedback.`}
       </p>
       <div className="space-y-2">
         <div className="flex gap-2">
@@ -443,7 +453,7 @@ function InlineApproval({
             disabled={approveMutation.isPending}
             className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
-            {approveMutation.isPending ? 'Approving...' : 'Approve'}
+            {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
           </button>
           <button
             onClick={() => rejectMutation.mutate()}
