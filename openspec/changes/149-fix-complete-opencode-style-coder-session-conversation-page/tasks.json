@@ -318,18 +318,20 @@
         "T-008",
         "T-009"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Final verification consumes every earlier output. Keep fixtures local to tests unless a shared fixture directory already exists.",
-      "attempts": 3,
+      "attempts": 7,
       "order": 999999,
-      "error": "Auto-skipped (no onAskUser): [PROCESS_EXIT] opencode process exited unexpectedly (exit code: killed by signal)",
+      "error": null,
       "durations": [
         495803,
         1837603,
         1835585,
         59516,
         356884,
-        176995
+        176995,
+        74523,
+        25937
       ]
     }
   ]
