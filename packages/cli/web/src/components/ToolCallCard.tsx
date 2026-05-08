@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ToolCallEntry } from '../lib/types'
+import type { ToolCallEntry, FileChangeSummary } from '../lib/types'
 
 export interface EditInput {
   filePath: string
@@ -29,20 +29,104 @@ export const TOOL_DISPLAY_TYPE: Record<string, ToolDisplayType> = {
   memsearch: 'summary',
 }
 
+export function parsePatchOperations(patchText: string): FileChangeSummary[] {
+  const unescaped = patchText.replace(/\\n/g, '\n')
+  const changes: FileChangeSummary[] = []
+  const addRegex = /^\*\*\* Add File:\s*(.+)/
+  const updateRegex = /^\*\*\* Update File:\s*(.+)/
+  const deleteRegex = /^\*\*\* Delete File:\s*(.+)/
+  const moveRegex = /^\*\*\* Move to:\s*(.+)/
+  const oldPathRegex = /^OldPath:\s*(.+)/
+
+  const lines = unescaped.split('\n')
+  let currentOp: 'created' | 'modified' | 'deleted' | 'moved' | null = null
+  let currentPath: string | null = null
+  let oldPath: string | null = null
+  let additions = 0
+  let deletions = 0
+
+  for (const line of lines) {
+    const addMatch = line.match(addRegex)
+    const updateMatch = line.match(updateRegex)
+    const deleteMatch = line.match(deleteRegex)
+    const moveMatch = line.match(moveRegex)
+    const oldPathMatch = line.match(oldPathRegex)
+
+    if (addMatch) {
+      if (currentPath) {
+        changes.push({ path: currentPath, operation: currentOp!, additions, deletions, oldPath: oldPath ?? undefined })
+      }
+      currentOp = 'created'
+      currentPath = addMatch[1].trim()
+      additions = 0
+      deletions = 0
+      oldPath = null
+    } else if (updateMatch) {
+      if (currentPath) {
+        changes.push({ path: currentPath, operation: currentOp!, additions, deletions, oldPath: oldPath ?? undefined })
+      }
+      currentOp = 'modified'
+      currentPath = updateMatch[1].trim()
+      additions = 0
+      deletions = 0
+      oldPath = null
+    } else if (deleteMatch) {
+      if (currentPath) {
+        changes.push({ path: currentPath, operation: currentOp!, additions, deletions, oldPath: oldPath ?? undefined })
+      }
+      currentOp = 'deleted'
+      currentPath = deleteMatch[1].trim()
+      additions = 0
+      deletions = 0
+      oldPath = null
+    } else if (moveMatch) {
+      if (currentPath) {
+        changes.push({ path: currentPath, operation: currentOp!, additions, deletions, oldPath: oldPath ?? undefined })
+      }
+      currentOp = 'moved'
+      currentPath = moveMatch[1].trim()
+      additions = 0
+      deletions = 0
+    } else if (oldPathMatch) {
+      oldPath = oldPathMatch[1].trim()
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      additions++
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      deletions++
+    }
+  }
+
+  if (currentPath && currentOp) {
+    changes.push({ path: currentPath, operation: currentOp, additions, deletions, oldPath: oldPath ?? undefined })
+  }
+
+  return changes
+}
+
 export function parseEditInput(rawInput: string | undefined): EditInput | null {
   if (!rawInput) return null
   try {
     const parsed = JSON.parse(rawInput)
     if (typeof parsed !== 'object' || parsed === null) return null
     const filePath = parsed.file_path ?? parsed.filePath ?? parsed.path ?? ''
-    const oldString = parsed.oldString ?? ''
-    const newString = parsed.newString ?? parsed.content ?? ''
+    const oldString = parsed.old_string ?? parsed.oldString ?? ''
+    const newString = parsed.new_string ?? parsed.newString ?? parsed.content ?? ''
+    if (typeof parsed.patchText === 'string' && parsed.patchText.includes('*** ')) {
+      return { filePath: extractPatchTarget(parsed.patchText) || filePath, oldString, newString, patch: parsed.patchText }
+    }
     const patch = typeof parsed.patchText === 'string' ? parsed.patchText
       : typeof parsed.patch === 'string' ? parsed.patch
         : undefined
     return { filePath, oldString, newString, patch }
   } catch {
-    if (rawInput.includes('*** Begin Patch') || rawInput.includes('*** Update File:')) {
+    const patchMatch = rawInput.match(/"patchText"\s*:\s*"([^"]+)"/)
+    if (patchMatch) {
+      const potentialPatch = patchMatch[1]
+      if (potentialPatch.includes('*** ')) {
+        return { filePath: extractPatchTarget(potentialPatch) || 'patch', oldString: '', newString: '', patch: potentialPatch }
+      }
+    }
+    if (rawInput.includes('*** Begin Patch') || rawInput.includes('*** Update File:') || rawInput.includes('*** Add File:') || rawInput.includes('*** Delete File:') || rawInput.includes('*** Move to:')) {
       return { filePath: extractPatchTarget(rawInput), oldString: '', newString: '', patch: rawInput }
     }
     return null
@@ -211,6 +295,102 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
   )
 }
 
+function FileOperationBadge({ operation }: { operation: 'created' | 'modified' | 'deleted' | 'moved' }) {
+  const styles: Record<string, string> = {
+    created: 'bg-green-100 text-green-700',
+    modified: 'bg-blue-100 text-blue-700',
+    deleted: 'bg-red-100 text-red-700',
+    moved: 'bg-purple-100 text-purple-700',
+  }
+  const labels: Record<string, string> = {
+    created: 'A',
+    modified: 'M',
+    deleted: 'D',
+    moved: 'R',
+  }
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${styles[operation]}`}>
+      {labels[operation]}
+    </span>
+  )
+}
+
+function FileRow({ change }: { change: FileChangeSummary }) {
+  return (
+    <div className="flex items-center gap-2 py-1 px-2 hover:bg-gray-50 rounded">
+      <FileOperationBadge operation={change.operation} />
+      <span className="text-xs font-mono text-gray-700 truncate flex-1">{change.path}</span>
+      {change.operation === 'moved' && change.oldPath && (
+        <span className="text-xs text-gray-400">← {change.oldPath}</span>
+      )}
+      {change.additions !== undefined && change.additions > 0 && (
+        <span className="text-xs text-green-600">+{change.additions}</span>
+      )}
+      {change.deletions !== undefined && change.deletions > 0 && (
+        <span className="text-xs text-red-600">-{change.deletions}</span>
+      )}
+    </div>
+  )
+}
+
+function parseEditWriteChanges(parsed: EditInput): FileChangeSummary[] {
+  if (!parsed || !parsed.filePath) return []
+  const fileName = parsed.filePath.split('/').pop() ?? parsed.filePath
+  const isNewFile = !parsed.oldString
+  const operation: 'created' | 'modified' = isNewFile ? 'created' : 'modified'
+
+  let additions = 0
+  let deletions = 0
+  if (parsed.oldString && parsed.newString) {
+    const oldLines = parsed.oldString.split('\n').length
+    const newLines = parsed.newString.split('\n').length
+    additions = newLines
+    deletions = oldLines
+  }
+
+  return [{
+    path: fileName,
+    operation,
+    additions: additions || undefined,
+    deletions: deletions || undefined,
+  }]
+}
+
+function PatchFilesView({ changes }: { changes: FileChangeSummary[] }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="rounded border border-gray-200 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
+      >
+        <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+        </svg>
+        <span className="text-xs font-medium text-gray-700">
+          {changes.length} file{changes.length !== 1 ? 's' : ''} changed
+        </span>
+        {changes.length <= 3 && (
+          <span className="text-xs text-gray-400">
+            {changes.map(c => c.path.split('/').pop()).join(', ')}
+          </span>
+        )}
+        <ChevronIcon expanded={expanded} />
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-100 max-h-48 overflow-auto">
+          {changes.map((change, i) => (
+            <div key={i} className="border-b border-gray-50 last:border-b-0">
+              <FileRow change={change} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StatusIcon({ state }: { state: ToolCallEntry['state'] }) {
   if (state === 'started') {
     return (
@@ -238,6 +418,11 @@ function EditToolCard({ entry }: { entry: ToolCallEntry }) {
   const parsed = parseEditInput(entry.rawInput)
   const isNewFile = entry.toolName === 'write' && parsed && !parsed.oldString
 
+  const changedFiles: FileChangeSummary[] = entry.changedFiles ?? (parsed?.patch ? parsePatchOperations(parsed.patch) : [])
+  const editWriteFiles: FileChangeSummary[] = (entry.toolName === 'write' || entry.toolName === 'edit') && parsed ? parseEditWriteChanges(parsed) : []
+
+  const allChangedFiles = changedFiles.length > 0 ? changedFiles : editWriteFiles
+
   if (entry.state === 'started') {
     return (
       <div className="rounded-md border border-blue-200 bg-blue-50/30 overflow-hidden">
@@ -257,11 +442,13 @@ function EditToolCard({ entry }: { entry: ToolCallEntry }) {
     )
   }
 
-  if (!parsed) {
+  const [showRaw, setShowRaw] = useState(false)
+
+  const hasFileSummary = allChangedFiles.length > 0
+
+  if (!parsed && !hasFileSummary) {
     return <GenericToolCard entry={entry} />
   }
-
-  const fileName = parsed.filePath.split('/').pop() ?? parsed.filePath
 
   return (
     <div className={`rounded-md border overflow-hidden ${entry.state === 'failed' ? 'border-red-200' : 'border-gray-200'}`}>
@@ -270,19 +457,63 @@ function EditToolCard({ entry }: { entry: ToolCallEntry }) {
         <span className="text-xs font-medium text-gray-700">
           {isNewFile ? 'Created' : 'Edited'}
         </span>
-        <span className="text-xs text-gray-500 font-mono truncate">{fileName}</span>
+        {hasFileSummary ? (
+          <span className="text-xs text-gray-500">
+            {allChangedFiles.length} file{allChangedFiles.length !== 1 ? 's' : ''}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-500 font-mono truncate">{parsed?.filePath.split('/').pop() ?? parsed?.filePath ?? ''}</span>
+        )}
         {entry.duration != null && (
           <span className="text-xs text-gray-400 ml-auto">{formatDuration(entry.duration)}</span>
         )}
       </div>
-      <div className="px-3 py-1 text-xs text-gray-400 font-mono border-b border-gray-100 bg-gray-50/30">
-        {parsed.filePath}
-      </div>
-      {parsed.patch && !parsed.oldString && !parsed.newString ? (
-        <PatchBlock patch={parsed.patch} />
-      ) : (
-        <DiffBlock oldStr={parsed.oldString} newStr={parsed.newString} />
+
+      {hasFileSummary ? (
+        <PatchFilesView changes={allChangedFiles} />
+      ) : null}
+
+      {showRaw && parsed?.patch && !parsed.oldString && !parsed.newString && (
+        <div className="border-t border-gray-100">
+          <PatchBlock patch={parsed.patch} />
+        </div>
       )}
+      {showRaw && (!parsed || (parsed && (parsed.oldString || parsed.newString))) && (
+        <div className="border-t border-gray-100 px-3 py-2 space-y-2">
+          {parsed && parsed.oldString && parsed.newString && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-1">Changes</div>
+              <DiffBlock oldStr={parsed.oldString} newStr={parsed.newString} />
+            </div>
+          )}
+          {entry.rawInput && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-1">Input</div>
+              <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+                {entry.rawInput}
+              </pre>
+            </div>
+          )}
+          {entry.rawOutput && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-1">Output</div>
+              <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+                {entry.rawOutput}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {hasFileSummary && (parsed?.patch || entry.rawInput || entry.rawOutput || parsed?.oldString || parsed?.newString) && (
+        <button
+          onClick={() => setShowRaw(!showRaw)}
+          className="w-full text-xs text-blue-500 hover:text-blue-700 py-1 text-center border-t border-gray-100 hover:bg-gray-50 transition-colors"
+        >
+          {showRaw ? 'Hide raw' : 'Show raw patch'}
+        </button>
+      )}
+
       {entry.state === 'failed' && entry.error && (
         <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50 border-t border-red-100">
           {entry.error}
