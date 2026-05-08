@@ -40,7 +40,7 @@ export function SessionList({ issueNumber }: SessionListProps) {
       <div className="divide-y divide-gray-100">
         {sorted.map((session) => (
           <div key={session.id}>
-            <SessionHeader session={session} issueNumber={issueNumber} />
+            <SessionHeader session={session} issueNumber={issueNumber} showTranscriptLink />
             <SessionDetail session={session} />
           </div>
         ))}
