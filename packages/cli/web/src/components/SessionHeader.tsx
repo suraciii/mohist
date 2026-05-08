@@ -1,6 +1,12 @@
 import { Link } from 'react-router-dom'
 import type { CoderSessionItem } from '../lib/types'
 
+interface SessionHeaderProps {
+  session: CoderSessionItem
+  issueNumber: number
+  showTranscriptLink?: boolean
+}
+
 function formatDuration(ms: number): string {
   if (ms < 0) return '0s'
   const totalSec = Math.floor(ms / 1000)
@@ -67,9 +73,10 @@ function StatusIcon({ status }: { status: string }) {
 interface SessionHeaderProps {
   session: CoderSessionItem
   issueNumber: number
+  showTranscriptLink?: boolean
 }
 
-export function SessionHeader({ session, issueNumber }: SessionHeaderProps) {
+export function SessionHeader({ session, issueNumber, showTranscriptLink }: SessionHeaderProps) {
   const label = getSessionLabel(session)
   const coderInfo = [session.coderType, session.model].filter(Boolean).join(' · ') || 'unknown'
   const startTime = formatTime(session.createdAt)
@@ -80,11 +87,8 @@ export function SessionHeader({ session, issueNumber }: SessionHeaderProps) {
       ? new Date(session.completedAt).getTime() - new Date(session.createdAt).getTime()
       : 0
 
-  return (
-    <Link
-      to={`/issue/${issueNumber}/session/${session.id}`}
-      className="flex items-center gap-2.5 w-full text-left px-3 py-2 hover:bg-gray-50/80 transition-colors rounded-t-lg"
-    >
+  const content = (
+    <>
       <StatusIcon status={session.status} />
       <span className="text-sm font-medium text-gray-800 truncate max-w-[200px]">{label}</span>
       <span className="text-xs text-gray-400">{coderInfo}</span>
@@ -95,13 +99,39 @@ export function SessionHeader({ session, issueNumber }: SessionHeaderProps) {
           {formatDuration(durationMs)}
         </span>
       </span>
-      <svg
-        className="h-4 w-4 text-gray-400 shrink-0"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-      >
-        <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
-      </svg>
+      {showTranscriptLink ? (
+        <Link
+          to={`/issue/${issueNumber}/session/${session.id}`}
+          className="text-xs text-blue-600 hover:text-blue-800 shrink-0 ml-2"
+        >
+          View transcript
+        </Link>
+      ) : (
+        <svg
+          className="h-4 w-4 text-gray-400 shrink-0"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+        </svg>
+      )}
+    </>
+  )
+
+  if (showTranscriptLink) {
+    return (
+      <div className="flex items-center gap-2.5 w-full text-left px-3 py-2 hover:bg-gray-50/80 transition-colors rounded-t-lg border-b border-gray-100">
+        {content}
+      </div>
+    )
+  }
+
+  return (
+    <Link
+      to={`/issue/${issueNumber}/session/${session.id}`}
+      className="flex items-center gap-2.5 w-full text-left px-3 py-2 hover:bg-gray-50/80 transition-colors rounded-t-lg"
+    >
+      {content}
     </Link>
   )
 }

@@ -846,14 +846,30 @@ describe('SessionTranscriptView', () => {
   })
 })
 
-describe('Live/historical parity', () => {
-  function makeMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
+describe('SessionPage header and states', () => {
+  function makeMockSession() {
+    return {
+      id: 'session-123',
+      acpSessionId: 'acp-123',
+      executionId: 'exec-123',
+      taskDescription: 'Test task',
+      status: 'running',
+      createdAt: '2024-01-01T10:00:00.000Z',
+      completedAt: null,
+      model: 'claude-3-5-sonnet',
+      coderType: null,
+      stage: 'build',
+      title: 'Test Session',
+    }
+  }
+
+  function makeMockMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
     return {
       sessionId: 'session-123',
       coderSessionId: 'coder-session-123',
       issueId: 'issue-1',
       acpSessionId: 'acp-123',
-      executionId: null,
+      executionId: 'exec-123',
       title: 'Test Session',
       status: 'running',
       statusKind: 'live',
@@ -869,11 +885,11 @@ describe('Live/historical parity', () => {
     }
   }
 
-  function makeDetail(overrides: Partial<{ metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean }> = {}): CoderSessionDetail {
+  function makeMockDetail(overrides: Partial<{ metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean; status: string; completedAt: string | null }> = {}): CoderSessionDetail {
     return {
       id: 'session-123',
       acpSessionId: 'acp-123',
-      executionId: null,
+      executionId: 'exec-123',
       taskDescription: 'Test task',
       status: 'running',
       createdAt: '2024-01-01T10:00:00.000Z',
@@ -882,13 +898,447 @@ describe('Live/historical parity', () => {
       coderType: null,
       stage: 'build',
       title: 'Test Session',
-      metadata: makeMetadata(),
+      metadata: makeMockMetadata(),
       turns: [],
       incomplete: false,
       ...overrides,
     }
   }
 
+  describe('header displays session metadata', () => {
+    it('shows issue link, stage, model, turn count, last activity, and status badge', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          stage: 'build',
+          model: 'claude-3-5-sonnet',
+          turnCount: 3,
+          lastActivityAt: '2024-01-01T10:05:00.000Z',
+          statusKind: 'live',
+        }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: { number: 123, title: 'Test Issue' } }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Issue #123')).toBeInTheDocument()
+      })
+      expect(screen.getByText('Test Issue')).toBeInTheDocument()
+      expect(screen.getByText('Build')).toBeInTheDocument()
+      expect(screen.getByText('claude-3-5-sonnet')).toBeInTheDocument()
+      expect(screen.getByText('3 turns')).toBeInTheDocument()
+      expect(screen.getByText('Live')).toBeInTheDocument()
+    })
+
+    it('shows changed-files summary in header when metadata has changedFiles', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          statusKind: 'completed',
+          changedFiles: [
+            { path: 'src/index.ts', operation: 'modified', additions: 10, deletions: 2 },
+            { path: 'src/new.ts', operation: 'created', additions: 5 },
+          ],
+        }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: { number: 123, title: 'Test Issue' } }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('2 files changed')).toBeInTheDocument()
+      })
+    })
+
+    it('shows duration for completed sessions', async () => {
+      const mockSessions = [{
+        ...makeMockSession(),
+        status: 'completed',
+        completedAt: '2024-01-01T10:30:00.000Z',
+      }]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        status: 'completed',
+        completedAt: '2024-01-01T10:30:00.000Z',
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+          completedAt: '2024-01-01T10:30:00.000Z',
+          createdAt: '2024-01-01T10:00:00.000Z',
+        }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: { number: 123, title: 'Test Issue' } }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Completed')).toBeInTheDocument()
+      })
+      expect(screen.getByText('30m 00s')).toBeInTheDocument()
+    })
+
+    it('does not show duration for running sessions', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          statusKind: 'live',
+          completedAt: null,
+        }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: { number: 123, title: 'Test Issue' } }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Live')).toBeInTheDocument()
+      })
+      const headerEl = screen.getByText('Live').closest('.border-b')
+      expect(headerEl?.textContent).not.toMatch(/duration/i)
+    })
+  })
+
+  describe('status kind display', () => {
+    it('shows live status badge for running sessions with recent activity', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'live',
+          lastActivityAt: new Date().toISOString(),
+        }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Live')).toBeInTheDocument()
+      })
+    })
+
+    it('shows stale status badge for running sessions with old activity', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'stale',
+          lastActivityAt: fiveMinutesAgo,
+        }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Stale')).toBeInTheDocument()
+      })
+    })
+
+    it('shows finalizing status badge when session is finalizing', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'finalizing',
+        }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Finalizing')).toBeInTheDocument()
+      })
+    })
+
+    it('shows failed status badge for failed sessions', async () => {
+      const mockSessions = [{
+        ...makeMockSession(),
+        status: 'failed',
+        completedAt: '2024-01-01T10:30:00.000Z',
+      }]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        status: 'failed',
+        completedAt: '2024-01-01T10:30:00.000Z',
+        metadata: makeMockMetadata({
+          status: 'failed',
+          statusKind: 'failed',
+          completedAt: '2024-01-01T10:30:00.000Z',
+          createdAt: '2024-01-01T10:00:00.000Z',
+        }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed')).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('loading and error state rendering', () => {
+    it('shows loading state while sessions are loading', async () => {
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: [], isLoading: true }),
+      }))
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      expect(screen.getByText('Loading session...')).toBeInTheDocument()
+    })
+
+    it('shows loading state while detail is loading', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockImplementation(() => new Promise(() => {})),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      expect(screen.getByText('Loading session...')).toBeInTheDocument()
+    })
+
+    it('shows API error state when detail query fails', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockRejectedValue(new Error('API Error')),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to load session')).toBeInTheDocument()
+      })
+      expect(screen.getByText(/An error occurred while fetching session data/i)).toBeInTheDocument()
+    })
+
+    it('shows waiting for activity state when session is running but no turns yet', async () => {
+      const mockSessions = [makeMockSession()]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({ statusKind: 'live' }),
+        turns: [],
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Waiting for activity...')).toBeInTheDocument()
+      })
+    })
+
+    it('shows empty state when session has no recorded activity', async () => {
+      const mockSessions = [{
+        ...makeMockSession(),
+        status: 'completed',
+      }]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        status: 'completed',
+        turns: [],
+        metadata: makeMockMetadata({ statusKind: 'completed' }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('No activity recorded for this session')).toBeInTheDocument()
+      })
+    })
+
+    it('shows incomplete/legacy state when session has incomplete flag and no turns', async () => {
+      const mockSessions = [{
+        ...makeMockSession(),
+        status: 'completed',
+      }]
+      vi.mock('../hooks/useCoderSessions', () => ({
+        useCoderSessions: () => ({ sessions: mockSessions, isLoading: false }),
+      }))
+
+      const detail = makeMockDetail({
+        status: 'completed',
+        turns: [],
+        incomplete: true,
+        metadata: makeMockMetadata({ statusKind: 'completed' }),
+      })
+
+      vi.mock('../hooks/useQueries', () => ({
+        useIssue: () => ({ data: null }),
+      }))
+
+      vi.mock('../lib/api', () => ({
+        api: {
+          getCoderSessionDetail: vi.fn().mockResolvedValue(detail),
+        },
+      }))
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Incomplete Session Data')).toBeInTheDocument()
+      })
+      expect(screen.getByText(/Prompt was not recorded/i)).toBeInTheDocument()
+    })
+  })
+})
+
+describe('Live/historical parity', () => {
   it('renders turns with Coder label when assistant parts exist', async () => {
     const turns = [makeTurn({
       assistant: [{
@@ -1015,5 +1465,106 @@ describe('Live/historical parity', () => {
     await waitFor(() => {
       expect(screen.getByText('UnknownTool')).toBeInTheDocument()
     })
+  })
+})
+
+describe('SessionHeader navigation', () => {
+  it('session header link routes to /issue/:number/session/:sessionId', async () => {
+    const { SessionHeader } = await import('../src/components/SessionHeader')
+    const session = {
+      id: 'session-abc',
+      acpSessionId: 'acp-123',
+      executionId: null,
+      taskDescription: 'Test task',
+      status: 'completed',
+      createdAt: '2024-01-01T10:00:00.000Z',
+      completedAt: '2024-01-01T10:30:00.000Z',
+      model: 'claude-3-5-sonnet',
+      coderType: null,
+      stage: 'build',
+      title: 'T-001',
+      workflowLogs: [],
+    }
+
+    renderWithQueryClient(<SessionHeader session={session} issueNumber={42} />)
+
+    const link = screen.getByRole('link')
+    expect(link.getAttribute('href')).toBe('/issue/42/session/session-abc')
+  })
+
+  it('session header shows session label', async () => {
+    const { SessionHeader } = await import('../src/components/SessionHeader')
+    const session = {
+      id: 'session-abc',
+      acpSessionId: 'acp-123',
+      executionId: null,
+      taskDescription: 'Implement the feature',
+      status: 'running',
+      createdAt: '2024-01-01T10:00:00.000Z',
+      completedAt: null,
+      model: 'claude-3-5-sonnet',
+      coderType: null,
+      stage: 'build',
+      title: null,
+      workflowLogs: [],
+    }
+
+    renderWithQueryClient(<SessionHeader session={session} issueNumber={42} />)
+
+    expect(screen.getByText(/Implement the feature/)).toBeInTheDocument()
+  })
+
+  it('showTranscriptLink renders View transcript link instead of full row link', async () => {
+    const { SessionHeader } = await import('../src/components/SessionHeader')
+    const session = {
+      id: 'session-abc',
+      acpSessionId: 'acp-123',
+      executionId: null,
+      taskDescription: 'Test task',
+      status: 'completed',
+      createdAt: '2024-01-01T10:00:00.000Z',
+      completedAt: '2024-01-01T10:30:00.000Z',
+      model: 'claude-3-5-sonnet',
+      coderType: null,
+      stage: 'build',
+      title: 'T-001',
+      workflowLogs: [],
+    }
+
+    renderWithQueryClient(<SessionHeader session={session} issueNumber={42} showTranscriptLink />)
+
+    const link = screen.getByRole('link')
+    expect(link.getAttribute('href')).toBe('/issue/42/session/session-abc')
+    expect(screen.getByText('View transcript')).toBeInTheDocument()
+  })
+
+  it('getSessionLabel returns title when present', async () => {
+    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const session = { id: 's1', title: 'T-001 My Task', executionId: null, stage: null, taskDescription: null, status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
+    expect(getSessionLabel(session)).toBe('T-001 My Task')
+  })
+
+  it('getSessionLabel extracts T-N pattern from executionId', async () => {
+    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const session = { id: 's1', title: null, executionId: 'build-T-042-description', stage: null, taskDescription: null, status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
+    expect(getSessionLabel(session)).toBe('T-042')
+  })
+
+  it('getSessionLabel uses stage label when no title or executionId', async () => {
+    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const session = { id: 's1', title: null, executionId: null, stage: 'plan', taskDescription: null, status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
+    expect(getSessionLabel(session)).toBe('Plan')
+  })
+
+  it('getSessionLabel falls back to taskDescription', async () => {
+    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const session = { id: 's1', title: null, executionId: null, stage: null, taskDescription: 'Do something important', status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
+    expect(getSessionLabel(session)).toBe('Do something important')
+  })
+
+  it('getSessionLabel defaults to Session', async () => {
+    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const session = { id: 's1', title: null, executionId: null, stage: null, taskDescription: null, status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
+    expect(getSessionLabel(session)).toBe('Session')
   })
 })
