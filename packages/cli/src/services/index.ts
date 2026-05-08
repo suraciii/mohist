@@ -12,3 +12,4 @@ export type { ExploreAcpServiceOptions, ExploreResult } from './explore-acp-serv
 export { OpencodeDiscoveryService, getOpencodeDiscoveryService } from './opencode-discovery-service';
 export { SchedulerService, type SkillRunner } from './scheduler-service';
 export { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
+export { PostMergeFinalizer, type FinalizationResult, type HealthGateResult } from './post-merge-finalizer';

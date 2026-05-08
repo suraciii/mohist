@@ -18,7 +18,7 @@ import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
 import { createSettingsConfigRoutes } from '../api/settings-config';
 import { createSettingsSystemRoutes } from '../api/settings-system';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, type SkillRunner, type ConflictResolutionDeps } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import { Stage, IssueStatus, MergeState } from '../types';
@@ -140,6 +140,13 @@ async function main(): Promise<void> {
   const issueRepo = stateManager.getIssueRepo();
   const coderSessionRepo = stateManager.getCoderSessionRepo();
 
+  const postMergeFinalizer = new PostMergeFinalizer(
+    issueRepo,
+    stateManager.getProjectRepo(),
+    stateManager.getStageExecutionRepo(),
+    eventBus,
+  );
+
   const mergeQueue = new MergeQueue({
     worktreeManager,
     eventBus,
@@ -222,27 +229,6 @@ async function main(): Promise<void> {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
-    onMergeSuccess: (entry) => {
-      const issue = issueRepo.findById(entry.issueId);
-      if (!issue) return;
-      if (issue.stage === Stage.Done && issue.status === IssueStatus.Completed && issue.mergeState === MergeState.Merged) {
-        log.info('onMergeSuccess: issue already completed, skipping', { issueNumber: entry.issueNumber });
-        return;
-      }
-      if (issue.stage === Stage.Check) {
-        log.info('onMergeSuccess: advancing issue to Done', { issueNumber: entry.issueNumber });
-        issueRepo.updateStage(entry.issueId, Stage.Done);
-        issueRepo.clearApprovalState(entry.issueId);
-        issueRepo.updateStatus(entry.issueId, IssueStatus.Completed);
-        issueRepo.setMergeState(entry.issueId, MergeState.Merged);
-        issueRepo.updateBlockedReason(entry.issueId, null);
-        eventBus.emit('agent_completed', {
-          issueId: entry.issueId,
-          projectId: entry.projectId,
-          issueNumber: entry.issueNumber,
-        });
-      }
-    },
   });
 
   mergeQueue.recoverFromDB();
@@ -265,7 +251,7 @@ async function main(): Promise<void> {
   const server = new HttpServer(config, rateLimiter);
   
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo()));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), postMergeFinalizer));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
@@ -292,8 +278,8 @@ async function main(): Promise<void> {
     log.info('Agent completed', { issueNumber });
   });
 
-  eventBus.on('merge_completed', ({ issueId, issueNumber }) => {
-    log.info('Merge completed, transitioning issue to done', { issueNumber });
+  eventBus.on('merge_completed', async ({ issueId, issueNumber }) => {
+    log.info('Merge completed, running post-merge finalization', { issueNumber });
 
     try {
       const issue = issueRepo.findById(issueId);
@@ -303,10 +289,17 @@ async function main(): Promise<void> {
         return;
       }
       if (issue.stage === Stage.Check || issue.mergeState === MergeState.Merged) {
-        issueRepo.updateStage(issueId, Stage.Done);
-        issueRepo.updateStatus(issueId, IssueStatus.Completed);
-        issueRepo.clearApprovalState(issueId);
-        issueRepo.setMergeState(issueId, MergeState.Merged);
+        const result = await postMergeFinalizer.finalize(issue);
+        if (!result.success) {
+          log.warn('Post-merge finalization failed', {
+            issueNumber,
+            error: result.error,
+            command: result.healthGateResult?.command,
+            summary: result.healthGateResult?.summary,
+          });
+        } else {
+          log.info('Post-merge finalization succeeded', { issueNumber });
+        }
       }
     } catch (err) {
       log.error('Failed to transition issue to done after merge_completed', {
