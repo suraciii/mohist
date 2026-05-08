@@ -115,6 +115,7 @@ export interface DiffFile {
 
 export interface CommitEntry {
   hash: string
+  shortHash: string
   message: string
   author: string
   date: string

@@ -1539,11 +1539,26 @@ export function createIssueRoutes(
 
       const branchName = `mo/issue-${number}`;
 
-      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+      if (!worktreeManager) {
         if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
           const response: ApiResponse = {
             success: true,
             data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet. Start the issue to see commits.' }
+          };
+          return c.json(response);
+        }
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed. Commits are only available while the issue worktree is retained.' }
+        };
+        return c.json(response);
+      }
+
+      if (!worktreeManager.exists(project.name, issue.number)) {
+        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
+          const response: ApiResponse = {
+            success: true,
+            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet. Start the issue to see commits.' },
           };
           return c.json(response);
         }
@@ -1587,12 +1602,16 @@ export function createIssueRoutes(
       }
 
       let logOutput: { stdout: string };
+      let summaryNumstatOutput: { stdout: string };
       try {
-        logOutput = await execFileAsync(
-          'git',
-          ['log', `${project.baseBranch}..${branchName}`, '--date=iso-strict', '--numstat', '--format=%H%x00%h%x00%s%x00%an%x00%aI%x00'],
-          { cwd: project.path }
-        );
+        [logOutput, summaryNumstatOutput] = await Promise.all([
+          execFileAsync(
+            'git',
+            ['log', `${project.baseBranch}..${branchName}`, '--date=iso-strict', '--numstat', '--format=%x1e%H%x00%h%x00%s%x00%an%x00%aI'],
+            { cwd: project.path }
+          ),
+          execFileAsync('git', ['diff', `${project.baseBranch}...${branchName}`, '--numstat'], { cwd: project.path }),
+        ]);
       } catch (err) {
         const response: ApiResponse = {
           success: true,
@@ -1605,15 +1624,16 @@ export function createIssueRoutes(
       const rawOutput = logOutput.stdout.trim();
 
       if (rawOutput) {
-        const entries = rawOutput.split('\x01');
+        const entries = rawOutput.split('\x1e');
         for (const entry of entries) {
           const trimmed = entry.trim();
           if (!trimmed) continue;
 
-          const nullParts = trimmed.split('\x00');
-          if (nullParts.length < 6) continue;
+          const [headerLine = '', ...numstatLines] = trimmed.split('\n');
+          const nullParts = headerLine.split('\x00');
+          if (nullParts.length < 5) continue;
 
-          const [fullHash, shortHash, message, author, date, ...numstatLines] = nullParts;
+          const [fullHash, shortHash, message, author, date] = nullParts;
 
           let filesChanged = 0;
           let additions = 0;
@@ -1653,6 +1673,15 @@ export function createIssueRoutes(
         }
       }
 
+      const summaryFiles = new Set<string>();
+      for (const line of summaryNumstatOutput.stdout.trim().split('\n')) {
+        if (!line.trim()) continue;
+        const parts = line.split('\t');
+        if (parts.length >= 3) {
+          summaryFiles.add(parts[2]);
+        }
+      }
+
       const totalAdditions = commits.reduce((sum, c) => sum + c.additions, 0);
       const totalDeletions = commits.reduce((sum, c) => sum + c.deletions, 0);
 
@@ -1662,7 +1691,7 @@ export function createIssueRoutes(
         base: project.baseBranch,
         head: branchName,
         summary: {
-          filesChanged: commits.reduce((sum, c) => sum + c.filesChanged, 0),
+          filesChanged: summaryFiles.size,
           commits: commits.length,
           additions: totalAdditions,
           deletions: totalDeletions,
@@ -1726,7 +1755,22 @@ export function createIssueRoutes(
 
       const branchName = `mo/issue-${number}`;
 
-      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+      if (!worktreeManager) {
+        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
+          const response: ApiResponse = {
+            success: true,
+            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet.' }
+          };
+          return c.json(response);
+        }
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed.' }
+        };
+        return c.json(response);
+      }
+
+      if (!worktreeManager.exists(project.name, issue.number)) {
         if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
           const response: ApiResponse = {
             success: true,
