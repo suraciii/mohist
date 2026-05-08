@@ -20,7 +20,7 @@ import { CommentRepo } from '../src/db/comment-repo';
 import { LabelRepo } from '../src/db/label-repo';
 import { createProjectRoutes } from '../src/api/projects';
 import { createIssueRoutes } from '../src/api/issues';
-import { Stage, IssueStatus } from '../src/types';
+import { Stage, IssueStatus, MergeState } from '../src/types';
 import { createStatusRoutes } from '../src/api/status';
 import { createConfigRoutes } from '../src/api/config';
 
@@ -916,6 +916,125 @@ describe('API Routes', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.data.blockedIssues).toEqual([]);
+    });
+  });
+
+  describe('POST /api/issues/:number/merge health gate response', () => {
+    let server: http.Server;
+
+    afterEach(() => {
+      server?.close();
+    });
+
+    function createMergeApp(worktreeManager: any, postMergeFinalizer?: any): http.Server {
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        worktreeManager,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        postMergeFinalizer,
+      ));
+      return createTestServer(app);
+    }
+
+    it('returns structured healthGateResult when post-merge finalization fails', async () => {
+      const project = await projectService.create({ name: 'Test Project', path: '/tmp/test-project' });
+      projectService.setCurrent(project);
+      const issue = await issueService.create({ projectId: project.id, title: 'Merge Me' });
+      const worktreeManager = {
+        exists: vi.fn().mockReturnValue(true),
+        mergeBack: vi.fn().mockResolvedValue({ success: true, message: 'Merged' }),
+      };
+      const healthGateResult = {
+        passed: false,
+        enabled: true,
+        command: 'npm run build && npm test',
+        timeout: 300000,
+        duration: 123,
+        timedOut: false,
+        summary: 'tests failed',
+        logExcerpt: 'failure excerpt',
+      };
+      const postMergeFinalizer = {
+        finalize: vi.fn().mockResolvedValue({ success: false, error: 'Post-merge health gate failed', healthGateResult }),
+      };
+      server = createMergeApp(worktreeManager, postMergeFinalizer);
+
+      const response = await request(server).post(`/api/issues/${issue.number}/merge`);
+
+      expect(response.status).toBe(422);
+      expect(response.body.success).toBe(false);
+      expect(response.body.data.healthGateResult).toEqual(healthGateResult);
+      expect(issueRepo.findById(issue.id)?.stage).not.toBe(Stage.Done);
+      expect(issueRepo.findById(issue.id)?.status).not.toBe(IssueStatus.Completed);
+    });
+
+    it('returns structured healthGateResult when direct merge succeeds', async () => {
+      const project = await projectService.create({ name: 'Test Project', path: '/tmp/test-project' });
+      projectService.setCurrent(project);
+      const issue = await issueService.create({ projectId: project.id, title: 'Merge Me' });
+      const worktreeManager = {
+        exists: vi.fn().mockReturnValue(true),
+        mergeBack: vi.fn().mockResolvedValue({ success: true, message: 'Merged' }),
+      };
+      const healthGateResult = {
+        passed: true,
+        enabled: true,
+        command: 'npm run build && npm test',
+        timeout: 300000,
+        duration: 123,
+        timedOut: false,
+        summary: 'Post-merge health gate passed',
+        logExcerpt: 'ok',
+      };
+      const postMergeFinalizer = {
+        finalize: vi.fn().mockImplementation(async () => {
+          issueRepo.updateStage(issue.id, Stage.Done);
+          issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+          issueRepo.setMergeState(issue.id, MergeState.Merged);
+          return { success: true, healthGateResult };
+        }),
+      };
+      server = createMergeApp(worktreeManager, postMergeFinalizer);
+
+      const response = await request(server).post(`/api/issues/${issue.number}/merge`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.healthGateResult).toEqual(healthGateResult);
+      expect(response.body.data.issue.stage).toBe(Stage.Done);
+    });
+
+    it('does not complete direct merge when postMergeFinalizer is missing', async () => {
+      const project = await projectService.create({ name: 'Test Project', path: '/tmp/test-project' });
+      projectService.setCurrent(project);
+      const issue = await issueService.create({ projectId: project.id, title: 'Merge Me' });
+      const worktreeManager = {
+        exists: vi.fn().mockReturnValue(true),
+        mergeBack: vi.fn().mockResolvedValue({ success: true, message: 'Merged' }),
+      };
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager as any));
+      server = createTestServer(app);
+
+      const response = await request(server).post(`/api/issues/${issue.number}/merge`);
+
+      expect(response.status).toBe(500);
+      expect(response.body.error).toBe('Post-merge finalizer not configured');
+      expect(issueRepo.findById(issue.id)?.stage).not.toBe(Stage.Done);
+      expect(issueRepo.findById(issue.id)?.status).not.toBe(IssueStatus.Completed);
     });
   });
 

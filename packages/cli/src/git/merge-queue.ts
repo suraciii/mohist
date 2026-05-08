@@ -6,6 +6,7 @@ import { EventBus } from '../services/event-bus';
 import { IssueRepo } from '../db/issue-repo';
 import { MergeState } from '../types';
 import { Log } from '../util/log';
+import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
 
 const log = Log.create({ service: 'merge-queue' });
 
@@ -32,6 +33,7 @@ interface MergeQueueDeps {
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
   resolveConflicts: (entry: MergeEntry, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>;
   fixBuildErrors: (entry: MergeEntry, worktreePath: string, buildOutput: string) => Promise<{ success: boolean; error?: string }>;
+  postMergeFinalizer?: PostMergeFinalizer;
 }
 
 export class MergeQueue {
@@ -316,8 +318,24 @@ export class MergeQueue {
       issueNumber: entry.issueNumber,
     });
 
+    if (!this.deps.postMergeFinalizer) {
+      this.handleFailure(entry, 'Post-merge finalizer not configured');
+      return;
+    }
+
+    const issue = this.deps.issueRepo.findById(entry.issueId);
+    if (!issue) {
+      this.handleFailure(entry, 'Issue not found for post-merge finalization');
+      return;
+    }
+
+    const finalization = await this.deps.postMergeFinalizer.finalize(issue);
+    if (!finalization.success) {
+      this.handleFailure(entry, finalization.error || 'Post-merge health gate failed');
+      return;
+    }
+
     entry.mergeState = MergeState.Merged;
-    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
 
     this.queue.delete(entry.issueNumber);
 

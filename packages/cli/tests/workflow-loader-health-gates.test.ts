@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   loadHealthGatePolicies,
+  loadWorkflow,
   DEFAULT_HEALTH_GATE_POLICIES,
   DEFAULT_CHECKS_CONFIG,
 } from '../src/workflow/workflow-loader';
@@ -170,6 +171,34 @@ healthGates:
   });
 
   describe('checks.buildTest fallback', () => {
+    it('preserves real workflow.yaml healthGates and checks through loadWorkflow', () => {
+      fs.writeFileSync(path.join(tempDir, 'workflow.yaml'), `
+stages:
+  - stage: check
+healthGates:
+  build:
+    enabled: false
+    command: npm run configured-build
+checks:
+  buildTest:
+    command: npm run configured-ci
+    timeout: 600000
+    autoFix: false
+    maxFixAttempts: 1
+`, 'utf-8');
+
+      const workflow = loadWorkflow(tempDir);
+      expect(typeof workflow).not.toBe('string');
+
+      const result = loadHealthGatePolicies(workflow as any);
+      expect(result.build.enabled).toBe(false);
+      expect(result.build.command).toBe('npm run configured-build');
+      expect(result.check.command).toBe('npm run configured-ci');
+      expect(result.check.timeout).toBe(600000);
+      expect(result.check.autoFix).toBe(false);
+      expect(result.check.maxFixAttempts).toBe(1);
+    });
+
     it('maps checks.buildTest to check health gate when healthGates.check is absent', () => {
       const workflow = parseYamlWorkflow(`
 stages:

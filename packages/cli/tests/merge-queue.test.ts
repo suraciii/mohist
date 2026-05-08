@@ -49,6 +49,7 @@ function createMergeQueueDeps(overrides?: Partial<{
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
   resolveConflicts: typeof resolveConflictsMock;
   fixBuildErrors: typeof fixBuildErrorsMock;
+  postMergeFinalizer: { finalize: ReturnType<typeof vi.fn> };
 }>) {
   return overrides as any;
 }
@@ -101,6 +102,12 @@ describe('MergeQueue', () => {
       },
       resolveConflicts: resolveConflictsMock,
       fixBuildErrors: fixBuildErrorsMock,
+      postMergeFinalizer: {
+        finalize: vi.fn().mockImplementation(async (issue) => {
+          issueRepo.setMergeState(issue.id, MergeState.Merged);
+          return { success: true, healthGateResult: { passed: true, enabled: true } };
+        }),
+      } as any,
     });
   }
 
@@ -179,6 +186,39 @@ describe('MergeQueue', () => {
   });
 
   describe('processNext → merged lifecycle', () => {
+    it('does not mark merged or emit completion when postMerge finalizer fails', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const finalizer = {
+        finalize: vi.fn().mockResolvedValue({ success: false, error: 'postMerge failed' }),
+      };
+      const queue = new MergeQueue({
+        worktreeManager,
+        eventBus,
+        issueRepo,
+        getProjectPath: (pid: string) => {
+          if (pid !== project.id) return null;
+          return { path: PROJECT_PATH, name: PROJECT_NAME, baseBranch: BASE_BRANCH };
+        },
+        resolveConflicts: resolveConflictsMock,
+        fixBuildErrors: fixBuildErrorsMock,
+        postMergeFinalizer: finalizer as any,
+      });
+
+      const completedEvents: any[] = [];
+      const failedEvents: any[] = [];
+      eventBus.on('merge_completed', (data) => completedEvents.push(data));
+      eventBus.on('merge_failed', (data) => failedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(finalizer.finalize).toHaveBeenCalled();
+      expect(completedEvents).toHaveLength(0);
+      expect(failedEvents).toHaveLength(1);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.BuildFailed);
+    });
+
     it('should FF merge when canFastForward is true, skipping rebase', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
