@@ -2450,25 +2450,19 @@ export function createIssueRoutes(
         return c.json({ success: false, error: mergeResult.message } satisfies ApiResponse, 409);
       }
 
-      let healthGateResult: unknown;
-      if (postMergeFinalizer) {
-        const finalization = await postMergeFinalizer.finalize(issue);
-        if (!finalization.success) {
-          return c.json({
-            success: false,
-            error: finalization.error || 'Post-merge health gate failed',
-            data: { healthGateResult: finalization.healthGateResult },
-          } satisfies ApiResponse, 422);
-        }
-        healthGateResult = finalization.healthGateResult;
-      } else {
-        const issueRepo = stateManager.getIssueRepo();
-        issueRepo.updateStage(issue.id, Stage.Done);
-        issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-        issueRepo.clearApprovalState(issue.id);
-        issueRepo.setMergeState(issue.id, MergeState.Merged);
-        issueRepo.updateBlockedReason(issue.id, null);
+      if (!postMergeFinalizer) {
+        return c.json({ success: false, error: 'PostMergeFinalizer not configured' } satisfies ApiResponse, 500);
       }
+
+      const finalization = await postMergeFinalizer.finalize(issue);
+      if (!finalization.success) {
+        return c.json({
+          success: false,
+          error: finalization.error || 'Post-merge health gate failed',
+          data: { healthGateResult: finalization.healthGateResult },
+        } satisfies ApiResponse, 422);
+      }
+      const healthGateResult = finalization.healthGateResult;
       const refreshedIssue = issueService.getByNumber(projectId, number);
       return c.json({
         success: true,

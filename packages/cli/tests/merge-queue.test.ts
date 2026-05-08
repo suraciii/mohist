@@ -219,7 +219,7 @@ describe('MergeQueue', () => {
       expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.BuildFailed);
     });
 
-    it('falls back to legacy completion when postMerge finalizer is missing', async () => {
+    it('fails closed without completion when postMerge finalizer is missing', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = new MergeQueue({
@@ -242,10 +242,13 @@ describe('MergeQueue', () => {
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
-      expect(completedEvents).toHaveLength(1);
-      expect(failedEvents).toHaveLength(0);
-      expect(queue.getStatus()).toHaveLength(0);
-      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.Merged);
+      expect(completedEvents).toHaveLength(0);
+      expect(failedEvents).toHaveLength(1);
+      expect(failedEvents[0].reason).toBe(MergeState.BuildFailed);
+      expect(queue.getStatus()).toHaveLength(1);
+      expect(issueRepo.findById(issue.id)?.stage).not.toBe('done');
+      expect(issueRepo.findById(issue.id)?.status).not.toBe('completed');
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.BuildFailed);
     });
 
     it('should FF merge when canFastForward is true, skipping rebase', async () => {
