@@ -1,0 +1,127 @@
+{
+  "project": "mohist",
+  "description": "Keep Done issue worktrees for inspection and clean them only when issues are archived.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Retain worktrees after successful merge",
+      "spec": "specs/worktree-manager/spec.md#REQ-WT-001",
+      "description": "Change the merge queue and manual merge API so successful merges update delivery state without removing the issue worktree. Merge success should still set `mergeState=merged`, emit completion events, and allow Done transition logic to run, but cleanup must be deferred until archive.",
+      "acceptanceCriteria": [
+        "Merge queue success does not call WorktreeManager.remove",
+        "Manual POST /api/issues/:number/merge success does not call WorktreeManager.remove",
+        "After merge success, issue delivery state still reaches Done/Completed with mergeState=merged through the existing merge success flow",
+        "Worktree status remains available for a merged Done issue",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/merge-queue.ts, packages/cli/src/api/issues.ts, and related tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Rename cleanup-oriented merge logs to retention-oriented logs. Do not change merge conflict, rebase, or retry behavior."
+    },
+    {
+      "id": "T-002",
+      "title": "Make archive own cleanup and reporting",
+      "spec": "specs/http-api/spec.md#REQ-API-002",
+      "description": "Update archive service and API behavior so archive remains the explicit cleanup boundary for worktrees and checkpoints. Single archive should return visible warnings for false-Done or non-Done issues, batch archive should archive only truly merged Done issues, and batch responses should include archived/skipped/skippedNumbers plus a clear message.",
+      "acceptanceCriteria": [
+        "Single issue archive defaults to cleaning the retained worktree and checkpoints",
+        "Single issue archive with cleanup=false marks the issue archived without removing worktree or checkpoints",
+        "Single issue archive of done-but-not-merged returns a visible warning while allowing the archive",
+        "archiveAllCompleted archives only issues classified as merged and skips done-not-merged issues",
+        "archiveAllCompleted response includes archived, skipped, skippedNumbers, and message",
+        "Default issue list/kanban API results exclude archived issues, while archived=true returns archived issues",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/issue-service.ts, packages/cli/src/api/issues.ts, packages/cli/src/db/issue-repo.ts, and related tests",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Prefer extending archiveAllCompleted(projectId, { cleanup }) and POST /issues/archive-completed body parsing so --no-cleanup has the same meaning for single and batch archive."
+    },
+    {
+      "id": "T-003",
+      "title": "Update CLI archive semantics",
+      "spec": "specs/cli-interface/spec.md#REQ-CLI-001",
+      "description": "Update `mo issue archive` so single and batch archive output reflects backend warnings, skipped false-Done issues, and cleanup semantics. The CLI should pass cleanup consistently, print server-provided batch messages, and avoid duplicating warning prefixes.",
+      "acceptanceCriteria": [
+        "mo issue archive <number> prints a single warning prefix and never prints Warning: Warning:",
+        "mo issue archive <number> --no-cleanup sends cleanup=false and reports successful archive",
+        "mo issue archive --all-completed prints archived and skipped counts from the API response",
+        "mo issue archive --all-completed reports skipped issue numbers for done-but-not-merged issues",
+        "If batch --no-cleanup is supported, it sends cleanup=false; if not supported, the CLI shows a clear error instead of silently ignoring the flag",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts and CLI archive tests",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "The CLI is a thin client; keep archive trust decisions in the API/service and only format returned data."
+    },
+    {
+      "id": "T-004",
+      "title": "Update Web archive and Done worktree UX",
+      "spec": "specs/web-ui/spec.md#REQ-WEB-001",
+      "description": "Update Web archive interactions so backend warnings/errors and batch skipped results are visible, the Done column shows batch archive whenever Done issues exist, and Done worktrees are described as retained for review/traceability. The Archived page should remain history-only by removing restore/unarchive affordances while keeping search and issue-detail navigation.",
+      "acceptanceCriteria": [
+        "Single issue archive in Web UI displays backend warning or error feedback instead of silently invalidating queries",
+        "Batch archive in the Done column displays archived count, skipped count, skippedNumbers, and explanatory message",
+        "Done column batch archive button is visible when Done has issues even if archivedCount is zero",
+        "Done issue worktree UI states the worktree is retained for review/traceability and archive will remove it",
+        "Archived page lists and searches archived issues and links to issue detail",
+        "Archived page does not show restore, unarchive, or checkpoint/worktree restoration actions",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts, packages/cli/web/src/components/StageColumn.tsx, IssueCard.tsx, IssueDetailPage.tsx, WorktreePanel.tsx, ArchivedPage.tsx, and Web UI tests",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Use existing toast/error patterns. Do not introduce a restore workflow or new archived issue execution path."
+    },
+    {
+      "id": "T-005",
+      "title": "Add end-to-end archive regression coverage",
+      "spec": "specs/local-issue-store/spec.md#REQ-STORE-001",
+      "description": "Add focused regression tests that tie together merge retention, archive cleanup, API filtering, CLI output, and Web archive behavior. These tests should prove the lifecycle boundary: Done retains inspection state, Archive hides the issue and cleans retained local state.",
+      "acceptanceCriteria": [
+        "Test proves merge queue success leaves the issue worktree present after Done/merged",
+        "Test proves manual merge API success leaves the issue worktree present",
+        "Test proves archiving removes retained worktree and checkpoints by default",
+        "Test proves archived issues are hidden from default issue list/kanban data and visible through archived list queries",
+        "Test proves batch archive skips done-but-not-merged issues and returns skippedNumbers",
+        "Test proves CLI warning output does not contain Warning: Warning:",
+        "Test proves Web Done column archive entry appears when Done has issues and archivedCount is zero",
+        "Test proves Archived page has no restore/unarchive action",
+        "npm test passes in packages/cli",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/* and packages/cli/web/tests/*",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "Keep tests deterministic and avoid requiring a real remote merge. Use existing mock WorktreeManager and web test patterns where available."
+    }
+  ]
+}
