@@ -87,11 +87,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the prompt summary/raw prompt fields exposed by T-002. Keep the page read-only.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        483807
+      ]
     },
     {
       "id": "T-004",
