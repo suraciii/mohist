@@ -319,7 +319,6 @@ export function useSessionTranscript({
           next[next.length - 1] = appendTextToTurn(lastTurn, detail.text)
           return next
         })
-        setIsFinalizing(true)
         markNewContentRef.current()
       }),
     )
@@ -432,6 +431,7 @@ export function useSessionTranscript({
           }
           return next
         })
+        setIsFinalizing(true)
         markNewContentRef.current()
 
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
