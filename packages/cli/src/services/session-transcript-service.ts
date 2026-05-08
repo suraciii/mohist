@@ -407,51 +407,62 @@ function parseApplyPatch(patchText: string): FileChangeSummary[] {
   const updateRegex = /^(?:\*\*\*\s+)?Update File:\s*(.+)/;
   const deleteRegex = /^(?:\*\*\*\s+)?Delete File:\s*(.+)/;
   const moveRegex = /^(?:\*\*\*\s+)?Move to:\s*(.+)/;
+  const oldPathRegex = /^(?:\*\*\*\s+)?OldPath:\s*(.+)/;
 
   const lines = patchText.split('\n');
   let currentOp: 'created' | 'modified' | 'deleted' | 'moved' | null = null;
   let currentPath: string | null = null;
+  let oldPath: string | null = null;
   let additions = 0;
   let deletions = 0;
+
+  const pushCurrent = () => {
+    if (currentPath && currentOp) {
+      changes.push({ path: currentPath, operation: currentOp, additions, deletions, oldPath: oldPath ?? undefined });
+    }
+  };
 
   for (const line of lines) {
     const addMatch = line.match(addRegex);
     const updateMatch = line.match(updateRegex);
     const deleteMatch = line.match(deleteRegex);
     const moveMatch = line.match(moveRegex);
+    const oldPathMatch = line.match(oldPathRegex);
 
     if (addMatch) {
-      if (currentPath) {
-        changes.push({ path: currentPath, operation: currentOp!, additions, deletions });
-      }
+      pushCurrent();
       currentOp = 'created';
       currentPath = addMatch[1].trim();
       additions = 0;
       deletions = 0;
+      oldPath = null;
     } else if (updateMatch) {
-      if (currentPath) {
-        changes.push({ path: currentPath, operation: currentOp!, additions, deletions });
-      }
+      pushCurrent();
       currentOp = 'modified';
       currentPath = updateMatch[1].trim();
       additions = 0;
       deletions = 0;
+      oldPath = null;
     } else if (deleteMatch) {
-      if (currentPath) {
-        changes.push({ path: currentPath, operation: currentOp!, additions, deletions });
-      }
+      pushCurrent();
       currentOp = 'deleted';
       currentPath = deleteMatch[1].trim();
       additions = 0;
       deletions = 0;
+      oldPath = null;
     } else if (moveMatch) {
-      if (currentPath) {
-        changes.push({ path: currentPath, operation: currentOp!, additions, deletions });
-      }
+      pushCurrent();
       currentOp = 'moved';
       currentPath = moveMatch[1].trim();
       additions = 0;
       deletions = 0;
+    } else if (oldPathMatch) {
+      pushCurrent();
+      currentOp = null;
+      currentPath = null;
+      additions = 0;
+      deletions = 0;
+      oldPath = oldPathMatch[1].trim();
     } else if (line.startsWith('+') && !line.startsWith('+++')) {
       additions++;
     } else if (line.startsWith('-') && !line.startsWith('---')) {
@@ -460,7 +471,7 @@ function parseApplyPatch(patchText: string): FileChangeSummary[] {
   }
 
   if (currentPath && currentOp) {
-    changes.push({ path: currentPath, operation: currentOp, additions, deletions });
+    changes.push({ path: currentPath, operation: currentOp, additions, deletions, oldPath: oldPath ?? undefined });
   }
 
   return changes;
@@ -942,7 +953,7 @@ export class SessionTranscriptAssembler {
       if (typeof parsed.patch === 'string') return parsed.patch;
       if (typeof parsed === 'string') return parsed;
     } catch {
-      if (typeof source === 'string' && (source.includes('Add File:') || source.includes('Update File:'))) {
+      if (typeof source === 'string' && (source.includes('Add File:') || source.includes('Update File:') || source.includes('Delete File:') || source.includes('Move to:'))) {
         return source;
       }
     }

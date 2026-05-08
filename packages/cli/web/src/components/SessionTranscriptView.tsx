@@ -15,7 +15,11 @@ function isTodowriteTool(toolName: string): boolean {
 }
 
 function getToolIdentity(part: ToolPart): string {
-  return part.tool.normalizedName ?? part.tool.toolName
+  const name = part.tool.normalizedName ?? part.tool.toolName
+  if (name && name !== 'unknown') return name
+  const title = part.tool.title
+  if (title && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(title)) return title
+  return name ?? 'unknown'
 }
 
 function formatTime(iso: string): string {

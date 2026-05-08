@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, renderHook, act } from './test-utils'
+import { baseRender, screen, fireEvent, waitFor, renderHook, act } from './test-utils'
 import { SessionPage } from '../src/components/SessionPage'
 import { SessionTranscriptView } from '../src/components/SessionTranscriptView'
 import { useSessionTranscript } from '../src/hooks/useSessionTranscript'
 import { dispatchAgentEvent } from '../src/lib/agent-events'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
 import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata } from '../src/lib/types'
 
@@ -50,6 +51,7 @@ Object.defineProperty(navigator, 'clipboard', {
 })
 
 const originalScrollTo = Element.prototype.scrollTo
+const queryClients: QueryClient[] = []
 beforeEach(() => {
   vi.clearAllMocks()
   sessionPageMocks.sessions = []
@@ -64,12 +66,14 @@ beforeEach(() => {
 
 afterEach(() => {
   Element.prototype.scrollTo = originalScrollTo
+  for (const queryClient of queryClients) queryClient.clear()
+  queryClients.length = 0
 })
 
 function createMockQueryClient() {
   return new QueryClient({
     defaultOptions: {
-      queries: { retry: false },
+      queries: { retry: false, gcTime: 0 },
       mutations: { retry: false },
     },
   })
@@ -77,15 +81,17 @@ function createMockQueryClient() {
 
 function renderWithQueryClient(ui: React.ReactElement) {
   const queryClient = createMockQueryClient()
-  return render(
+  queryClients.push(queryClient)
+  return baseRender(
     <QueryClientProvider client={queryClient}>
-      {ui}
+      <MemoryRouter>{ui}</MemoryRouter>
     </QueryClientProvider>,
   )
 }
 
 function renderHookWithQueryClient<T>(callback: () => T) {
   const queryClient = createMockQueryClient()
+  queryClients.push(queryClient)
   return renderHook(callback, {
     wrapper: ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -1022,9 +1028,9 @@ describe('SessionPage header and states', () => {
       acpSessionId: 'acp-123',
       executionId: 'exec-123',
       taskDescription: 'Test task',
-      status: 'running',
+      status: 'completed',
       createdAt: '2024-01-01T10:00:00.000Z',
-      completedAt: null,
+      completedAt: '2024-01-01T11:00:00.000Z',
       model: 'claude-3-5-sonnet',
       coderType: null,
       stage: 'build',
@@ -1060,9 +1066,9 @@ describe('SessionPage header and states', () => {
       acpSessionId: 'acp-123',
       executionId: 'exec-123',
       taskDescription: 'Test task',
-      status: 'running',
+      status: 'completed',
       createdAt: '2024-01-01T10:00:00.000Z',
-      completedAt: null,
+      completedAt: '2024-01-01T11:00:00.000Z',
       model: 'claude-3-5-sonnet',
       coderType: null,
       stage: 'build',
@@ -1389,7 +1395,7 @@ describe('Live/historical parity', () => {
     renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Read')).toBeInTheDocument()
+      expect(screen.getByText(/Context gathered/)).toBeInTheDocument()
     })
   })
 

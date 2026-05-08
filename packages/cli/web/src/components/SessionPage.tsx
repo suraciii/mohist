@@ -274,6 +274,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
 }
 
 export function SessionPage() {
+  console.log('SessionPage render')
   const { number: numberStr, sessionId } = useParams<{ number: string; sessionId: string }>()
   const issueNumber = Number(numberStr)
 
