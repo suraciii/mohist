@@ -168,11 +168,14 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes all implementation and visibility work to validate the complete stage exit health guarantee.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1234018
+      ]
     }
   ]
 }
