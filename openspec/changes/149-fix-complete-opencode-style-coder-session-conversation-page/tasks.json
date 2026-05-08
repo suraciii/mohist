@@ -118,11 +118,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Builds on the conversation renderer from T-003. Grouping is presentation-only; do not remove individual tool parts from the transcript data.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        705901
+      ]
     },
     {
       "id": "T-005",
