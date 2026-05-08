@@ -1364,6 +1364,7 @@ describe('SessionTranscriptAssembler', () => {
 - old line
 + new line
 *** Delete File: src/obsolete.ts
+*** OldPath: src/old-name.ts
 *** Move to: src/renamed.ts
 + moved content
 *** End Patch`;
@@ -1380,7 +1381,7 @@ describe('SessionTranscriptAssembler', () => {
         { path: 'src/new-file.ts', operation: 'created', additions: 1, deletions: 0 },
         { path: 'src/index.ts', operation: 'modified', additions: 1, deletions: 1 },
         { path: 'src/obsolete.ts', operation: 'deleted', additions: 0, deletions: 0 },
-        { path: 'src/renamed.ts', operation: 'moved', additions: 1, deletions: 0 },
+        { path: 'src/renamed.ts', operation: 'moved', additions: 1, deletions: 0, oldPath: 'src/old-name.ts' },
       ]);
     });
 
