@@ -81,11 +81,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the backend contract from T-001 and frontend response types/hooks from T-002. Expected files include ChangesPanel.tsx, IssueDetailPage.tsx, and any small supporting UI helpers needed for state copy.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        444683
+      ]
     },
     {
       "id": "T-004",
