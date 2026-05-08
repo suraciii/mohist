@@ -108,11 +108,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes integrated health gates and closes the direct merge bypass.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        938064
+      ]
     },
     {
       "id": "T-005",
