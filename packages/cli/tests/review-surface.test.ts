@@ -140,8 +140,11 @@ describe('Issue Review Surface Regression Tests', () => {
       expect(response.body.data.available).toBe(true);
 
       const commits = response.body.data.commits;
-      expect(commits.length).toBeGreaterThanOrEqual(1);
-      expect(commits[0].message).toBeDefined();
+      expect(commits).toHaveLength(3);
+      expect(commits.map((c: any) => c.message)).toEqual(['commit 3', 'commit 2', 'commit 1']);
+      expect(commits.map((c: any) => c.files)).toEqual([['file3.txt'], ['file2.txt'], ['file1.txt']]);
+      expect(commits.map((c: any) => c.additions)).toEqual([1, 1, 1]);
+      expect(commits.map((c: any) => c.deletions)).toEqual([0, 0, 0]);
 
       fs.rmSync(worktreeDir, { recursive: true, force: true });
       server.close();
@@ -184,7 +187,16 @@ describe('Issue Review Surface Regression Tests', () => {
       const response = await request(server).get(`/api/issues/${issue.number}/commits`);
 
       expect(response.status).toBe(200);
-      expect(response.body.data.commits.length).toBeGreaterThanOrEqual(1);
+      expect(response.body.data.commits).toHaveLength(2);
+      expect(response.body.data.commits.map((c: any) => c.message)).toEqual(['add one file', 'add two files']);
+      expect(response.body.data.commits[0].files).toEqual(['c.txt']);
+      expect(response.body.data.commits[0].filesChanged).toBe(1);
+      expect(response.body.data.commits[0].additions).toBe(1);
+      expect(response.body.data.commits[0].deletions).toBe(0);
+      expect(response.body.data.commits[1].files.sort()).toEqual(['a.txt', 'b.txt']);
+      expect(response.body.data.commits[1].filesChanged).toBe(2);
+      expect(response.body.data.commits[1].additions).toBe(2);
+      expect(response.body.data.commits[1].deletions).toBe(0);
 
       fs.rmSync(worktreeDir, { recursive: true, force: true });
       server.close();
@@ -226,10 +238,11 @@ describe('Issue Review Surface Regression Tests', () => {
       const response = await request(server).get(`/api/issues/${issue.number}/commits`);
 
       expect(response.status).toBe(200);
-      expect(response.body.data.commits.length).toBeGreaterThanOrEqual(1);
+      expect(response.body.data.commits).toHaveLength(2);
+      expect(response.body.data.summary.filesChanged).toBe(2);
 
       const messages = response.body.data.commits.map((c: any) => c.message);
-      expect(messages.some((m: string) => m.includes('with file') || m.includes('another'))).toBe(true);
+      expect(messages).toEqual(['with another file', 'with file']);
 
       fs.rmSync(worktreeDir, { recursive: true, force: true });
       server.close();
@@ -383,6 +396,30 @@ describe('Issue Review Surface Regression Tests', () => {
       server.close();
     });
 
+    it('returns not_started when a worktree manager exists but no draft worktree exists', async () => {
+      const project = await projectService.create({ name: 'CommitsNoWorktreeTest', path: repoDir });
+      projectService.setCurrent(project);
+
+      const issue = issueService.create({ projectId: project.id, title: 'No Worktree Draft Commit Issue' });
+
+      const { WorktreeManager } = await import('../src/git/worktree-manager');
+      const wm = new WorktreeManager();
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, wm, undefined, agentRunner));
+      const server = createTestServer(app);
+
+      const response = await request(server).get(`/api/issues/${issue.number}/commits`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.available).toBe(false);
+      expect(response.body.data.reason).toBe('not_started');
+
+      server.close();
+    });
+
     it('returns worktree_removed reason for done stage issue with no worktree', async () => {
       const project = await projectService.create({ name: 'CommitsAvailTest2', path: repoDir });
       projectService.setCurrent(project);
@@ -520,6 +557,31 @@ describe('Issue Review Surface Regression Tests', () => {
 
       const app = new Hono();
       app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, null, undefined, agentRunner));
+      const server = createTestServer(app);
+
+      const response = await request(server).get(`/api/issues/${issue.number}/commits/abc1234/diff`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.available).toBe(false);
+      expect(response.body.data.reason).toBe('worktree_removed');
+
+      server.close();
+    });
+
+    it('returns worktree_removed when a worktree manager exists but no build worktree exists', async () => {
+      const project = await projectService.create({ name: 'CommitDiffNoWorktreeTest', path: repoDir });
+      projectService.setCurrent(project);
+
+      const issue = issueService.create({ projectId: project.id, title: 'No Worktree Build Diff Issue' });
+      issueService.transitionToStage(issue.id, Stage.Build);
+
+      const { WorktreeManager } = await import('../src/git/worktree-manager');
+      const wm = new WorktreeManager();
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, wm, undefined, agentRunner));
       const server = createTestServer(app);
 
       const response = await request(server).get(`/api/issues/${issue.number}/commits/abc1234/diff`);
