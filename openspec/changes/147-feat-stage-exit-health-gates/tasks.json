@@ -1,0 +1,145 @@
+{
+  "project": "mohist",
+  "description": "Add explicit stage exit health gates before approval and completion boundaries.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add health gate workflow policy resolution",
+      "spec": "specs/workflow-config/spec.md#workflow-health-gate-policy",
+      "description": "Add typed health gate policy defaults and workflow.yaml parsing for plan, build, check, and postMerge gates. Preserve existing checks.buildTest compatibility by mapping it into the check-stage health gate when no explicit check gate is configured.",
+      "acceptanceCriteria": [
+        "Workflow config exposes resolved health gate policies for plan, build, check, and postMerge with enabled, command, timeout, autoFix, maxFixAttempts, and fallback reaction fields",
+        "Missing per-field values fall back to explicit defaults instead of disabling gates accidentally",
+        "Existing checks.buildTest command, timeout, autoFix, and maxFixAttempts are used for the check health gate when healthGates.check is absent",
+        "Unit tests cover default policy resolution, explicit per-stage overrides, disabled gates, and checks.buildTest fallback",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "packages/cli/src/workflow/workflow-loader.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Produces the central policy API consumed by later check and runner work."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement reusable HealthGateCheck",
+      "spec": "specs/workflow-log/spec.md#health-gate-check-result-details",
+      "description": "Implement a parameterized Check that runs a resolved health gate command, captures bounded output, measures duration, and returns a structured health-gate CheckResult. Include optional auto-fix support through the existing ReactionConfig model so BaseStageRunner can retry the failed gate consistently.",
+      "acceptanceCriteria": [
+        "HealthGateCheck returns pass results containing kind, stage, command, timeout, duration, enabled status, and log excerpt",
+        "Failed commands return fail results containing exit code or timeout status, concise summary, duration, command, and bounded log excerpt",
+        "Disabled gates return pass results with output.enabled=false and do not execute the command",
+        "Auto-fix gates expose an auto-fix reaction and generic fix prompt that includes the gate stage, command, and failure output",
+        "Unit tests cover pass, fail, timeout, disabled, output truncation, and reaction behavior",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/checks/health-gate-check.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Consumes the policy resolver from T-001 and produces the reusable health gate primitive."
+    },
+    {
+      "id": "T-003",
+      "title": "Apply health gates to plan build and check stages",
+      "spec": "specs/workflow-definition/spec.md#stage-health-gates-before-approval",
+      "description": "Wire HealthGateCheck into PlanStageRunner, BuildStageRunner, and CheckStageRunner in the required order. Health gates must execute after stage-specific artifact/task checks and before UserApprovalCheck, so approval is requested only for machine-verified results.",
+      "acceptanceCriteria": [
+        "Plan stage check order runs artifact/self-review checks, then health:plan, then user approval",
+        "Build stage completion requires all tasks complete and health:build passing before advancing to check",
+        "Check stage runs health:check before AI review and UserApprovalCheck",
+        "A failing plan or check health gate prevents approval state from being requested",
+        "Stage execution checkResults include health-gate output for passing and failing gates",
+        "Regression tests cover check ordering and blocked advancement on health gate failure",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/plan-stage-runner.ts, packages/cli/src/workflow/build-stage-runner.ts, packages/cli/src/workflow/check-stage-runner.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Consumes HealthGateCheck and policy resolution; preserves existing artifact/task/AI/user approval checks."
+    },
+    {
+      "id": "T-004",
+      "title": "Enforce post-merge health verification before done",
+      "spec": "specs/pipeline-model/spec.md#post-merge-health-gate-before-done",
+      "description": "Create a shared post-merge finalization path that runs the postMerge health gate after mergeBack succeeds and before writing done/completed state. Route both merge queue completion and the direct merge API through this helper so final verification cannot be bypassed when enabled.",
+      "acceptanceCriteria": [
+        "Merge queue calls the shared finalizer after successful mergeBack and only marks mergeState merged and issue done after health:postMerge passes",
+        "Direct POST /api/issues/:number/merge uses the same finalizer and cannot mark an issue done when an enabled postMerge gate fails",
+        "Post-merge health gate runs in the target project path rather than the issue worktree",
+        "Post-merge health failures are returned or emitted with command, summary, duration, and log excerpt and leave the issue not completed",
+        "Recovery or resume logic does not advance Stage.Check plus MergeState.Merged to Done unless final verification has been completed by the shared path",
+        "Regression tests cover merge queue success, direct merge success, direct merge health failure, and disabled postMerge policy behavior",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/post-merge-finalizer.ts, packages/cli/src/git/merge-queue.ts, packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Consumes integrated health gates and closes the direct merge bypass."
+    },
+    {
+      "id": "T-005",
+      "title": "Expose health gate state in API CLI and UI surfaces",
+      "spec": "specs/http-api/spec.md#health-gate-visibility-in-api-responses",
+      "description": "Update issue and stage execution consumers so health-gate check results are visible and approval UI is only shown after prior health gates pass. Surface failures with command, duration, concise summary, and log excerpt without introducing a separate storage model.",
+      "acceptanceCriteria": [
+        "Stage execution API responses include health-gate checkResults without losing command, duration, summary, or logExcerpt fields",
+        "Approval-related API/UI states do not show pending approval before the relevant health gate has passed",
+        "CLI or API issue detail output distinguishes failed health gates from awaiting user approval where current surfaces expose stage execution status",
+        "Web UI components that render stage checks identify health-gate results by output.kind or health:* check name and show useful failure details",
+        "No new database table is introduced for health gates",
+        "Relevant API/UI/CLI tests or snapshots are updated",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts, packages/cli/src/cli, packages/cli/web/src",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "Consumes the stage and post-merge result shapes produced by earlier tasks."
+    },
+    {
+      "id": "T-006",
+      "title": "Add end-to-end health gate regression coverage",
+      "spec": "specs/pipeline-model/spec.md#stage-exit-health-guarantee",
+      "description": "Add regression coverage that exercises the full health gate guarantee across stage approval and merge completion boundaries. The tests should prove existing configs remain compatible and that no enabled health gate can be silently bypassed.",
+      "acceptanceCriteria": [
+        "Tests prove check-stage approval is requested only after health:check passes",
+        "Tests prove build-stage completion requires health:build passing after tasks complete",
+        "Tests prove direct merge cannot mark an issue done when health:postMerge fails",
+        "Tests prove checks.buildTest-only workflow config still controls the check-stage health command",
+        "Tests prove disabled gates are recorded as disabled policy results and do not block progression",
+        "Full relevant test suite passes",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "Consumes all implementation and visibility work to validate the complete stage exit health guarantee."
+    }
+  ]
+}
