@@ -150,11 +150,14 @@
         "T-001",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes changedFiles/file summary fields from T-001 and the grouped transcript rendering structure from T-004.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        640595
+      ]
     },
     {
       "id": "T-006",
