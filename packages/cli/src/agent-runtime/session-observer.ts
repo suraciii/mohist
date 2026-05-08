@@ -8,6 +8,7 @@ export interface SessionObserver {
   onStateChange?(ctx: SessionContext, from: SessionState, to: SessionState): void;
   onRawNotification?(ctx: SessionContext, notification: SessionNotification): void;
   writeMohistPrompt?(ctx: SessionContext, prompt: MohistPromptEvent): void;
+  nextToolCallId?(acpSessionId: string, toolName: string, state: 'started' | 'completed'): string;
 }
 
 export interface MohistPromptEvent {

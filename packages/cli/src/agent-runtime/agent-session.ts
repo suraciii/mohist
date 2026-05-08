@@ -104,6 +104,7 @@ export class AgentSession {
   private _acpProcess: AcpProcess;
   private _connection!: ClientSideConnection;
   private _observers: SessionObserver[];
+  private _wfObserver: SessionObserver | undefined;
   private _stateMachine: SessionStateMachine;
   private _sessionId = '';
   private _agentText = '';
@@ -123,6 +124,7 @@ export class AgentSession {
     this._options = options;
     this._acpProcess = acpProcess;
     this._observers = observers;
+    this._wfObserver = observers.find(o => typeof o.nextToolCallId === 'function');
     this._sessionStartTime = Date.now();
     this._stateMachine = new SessionStateMachine('initializing');
   }
@@ -184,9 +186,15 @@ export class AgentSession {
       const existingToolCallId = (toolCallData?.toolCallId as string | undefined)
         ?? (toolCallData?.id as string | undefined)
         ?? (toolCallData?.callId as string | undefined);
-      const toolCallId = existingToolCallId ?? (this._wfObserver
-        ? this._wfObserver.nextToolCallId(this._sessionId, toolName, state)
-        : `${this._sessionId}-${toolName}-0`);
+      const wfObs = this._wfObserver;
+      let toolCallId: string;
+      if (existingToolCallId) {
+        toolCallId = existingToolCallId;
+      } else if (wfObs) {
+        toolCallId = wfObs.nextToolCallId!(this._sessionId, toolName, state);
+      } else {
+        toolCallId = `${this._sessionId}-${toolName}-0`;
+      }
       if (toolCallData && !existingToolCallId) {
         toolCallData.toolCallId = toolCallId;
       } else if (!toolCallData && !existingToolCallId) {
@@ -375,17 +383,20 @@ export class AgentSession {
     const kind = meta?.kind ?? 'task';
     const sentAt = new Date().toISOString();
 
-    this._wfObserver?.writeMohistPrompt(this.makeCtx(), {
-      role: 'mohist',
-      text: prompt,
-      kind,
-      sentAt,
-      executionId: this._options.executionId,
-      stage: this._options.stage,
-      title: meta?.title ?? this._options.title,
-      issueId: this._options.issueId,
-      acpSessionId: this._sessionId,
-    });
+    const wfObs2 = this._wfObserver;
+    if (wfObs2) {
+      wfObs2.writeMohistPrompt!(this.makeCtx(), {
+        role: 'mohist',
+        text: prompt,
+        kind,
+        sentAt,
+        executionId: this._options.executionId,
+        stage: this._options.stage,
+        title: meta?.title ?? this._options.title,
+        issueId: this._options.issueId,
+        acpSessionId: this._sessionId,
+      });
+    }
 
     const abortPromise = this._options.signal
       ? new Promise<'aborted'>((resolve) => {
