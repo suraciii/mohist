@@ -403,10 +403,10 @@ function inferDisplayTitle(d: Record<string, unknown>): string | undefined {
 
 function parseApplyPatch(patchText: string): FileChangeSummary[] {
   const changes: FileChangeSummary[] = [];
-  const addRegex = /^Add File:\s*(.+)/;
-  const updateRegex = /^Update File:\s*(.+)/;
-  const deleteRegex = /^Delete File:\s*(.+)/;
-  const moveRegex = /^Move to:\s*(.+)/;
+  const addRegex = /^(?:\*\*\*\s+)?Add File:\s*(.+)/;
+  const updateRegex = /^(?:\*\*\*\s+)?Update File:\s*(.+)/;
+  const deleteRegex = /^(?:\*\*\*\s+)?Delete File:\s*(.+)/;
+  const moveRegex = /^(?:\*\*\*\s+)?Move to:\s*(.+)/;
 
   const lines = patchText.split('\n');
   let currentOp: 'created' | 'modified' | 'deleted' | 'moved' | null = null;

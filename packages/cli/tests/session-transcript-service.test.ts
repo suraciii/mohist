@@ -1355,6 +1355,35 @@ describe('SessionTranscriptAssembler', () => {
       expect(toolPart.changedFiles![0].additions).toBe(2);
     });
 
+    it('should parse real apply_patch envelope headers', () => {
+      const session = makeSession();
+      const patchText = `*** Begin Patch
+*** Add File: src/new-file.ts
++ export const foo = 1;
+*** Update File: src/index.ts
+- old line
++ new line
+*** Delete File: src/obsolete.ts
+*** Move to: src/renamed.ts
++ moved content
+*** End Patch`;
+      const events = [
+        makePromptEvent('Patch files', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-patch', 'apply_patch', 'src/new-file.ts', JSON.stringify({ patchText }), '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.changedFiles).toEqual([
+        { path: 'src/new-file.ts', operation: 'created', additions: 1, deletions: 0 },
+        { path: 'src/index.ts', operation: 'modified', additions: 1, deletions: 1 },
+        { path: 'src/obsolete.ts', operation: 'deleted', additions: 0, deletions: 0 },
+        { path: 'src/renamed.ts', operation: 'moved', additions: 1, deletions: 0 },
+      ]);
+    });
+
     it('should parse apply_patch Update File operations', () => {
       const session = makeSession();
       const patchText = `Update File: src/index.ts
