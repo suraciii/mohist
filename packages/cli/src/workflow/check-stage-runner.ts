@@ -3,7 +3,6 @@ import type { StageContext, StageRunResult } from './stage-context';
 import { emitStageTaskUpdate } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
 import type { Check } from './checks';
-import { BuildTestCheck } from './checks/build-test-check';
 import { AiReviewCheck } from './checks/ai-review-check';
 import { UserApprovalCheck } from './checks/user-approval-check';
 import { buildReviewerPrompt, buildReviewSelfCheckPrompt } from '../agents/artifact-prompt';
@@ -11,6 +10,8 @@ import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-s
 import { readReportFile } from './utils';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
+import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
+import { HealthGateCheck } from './checks/health-gate-check';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
@@ -37,14 +38,19 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   private preTaskChecks: Check[];
   private postTaskChecks: Check[];
   private usesDefaultChecks: boolean;
+  private checkHealthGatePolicy: import('./workflow-loader').HealthGatePolicy;
 
   constructor(options: CheckStageRunnerOptions) {
     super();
     this.worktreePath = options.worktreePath;
     this.usesDefaultChecks = !options.checks;
-    const buildTestCheck = new BuildTestCheck({ worktreePath: this.worktreePath });
-    this.preTaskChecks = options.checks?.filter(check => check.name === buildTestCheck.name) ?? [buildTestCheck];
-    this.postTaskChecks = options.checks?.filter(check => check.name !== buildTestCheck.name) ?? [
+    this.preTaskChecks = [];
+    const wf = loadWorkflow(this.worktreePath);
+    this.checkHealthGatePolicy = typeof wf === 'string'
+      ? { enabled: true, command: 'npm run build && npm test', timeout: 300000, autoFix: true, maxFixAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Check } }
+      : loadHealthGatePolicies(wf).check;
+    this.postTaskChecks = options.checks ?? [
+      new HealthGateCheck({ worktreePath: this.worktreePath, policy: this.checkHealthGatePolicy, stage: 'check' }),
       new AiReviewCheck(),
       new UserApprovalCheck(Stage.Check),
     ];

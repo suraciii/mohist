@@ -19,6 +19,8 @@ import { SelfReviewPassedCheck } from './checks/self-review-passed-check';
 import { UserApprovalCheck } from './checks/user-approval-check';
 import { isCurrentStageApproval } from './issue-lifecycle';
 import { createWorkflowSessionObservers } from '../agent-runtime';
+import { HealthGateCheck } from './checks/health-gate-check';
+import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
@@ -32,6 +34,18 @@ interface TaskConfig {
 }
 
 export class PlanStageRunner extends BaseStageRunner {
+  private worktreePath: string;
+  private planHealthGatePolicy: import('./workflow-loader').HealthGatePolicy;
+
+  constructor(worktreePath: string = '') {
+    super();
+    this.worktreePath = worktreePath;
+    const wf = loadWorkflow(worktreePath);
+    this.planHealthGatePolicy = typeof wf === 'string'
+      ? { enabled: true, command: 'npm run typecheck', timeout: 300000, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' } }
+      : loadHealthGatePolicies(wf).plan;
+  }
+
   canHandle(stage: Stage): boolean {
     return stage === Stage.Plan || stage === Stage.Draft || stage === Stage.Backlog;
   }
@@ -307,14 +321,30 @@ export class PlanStageRunner extends BaseStageRunner {
   }
 
   protected getChecks(): Check[] {
+    const changeDir = this._getChangeDirForHealthGate();
     return [
       new ProposalCompleteCheck(),
       new SpecsCompleteCheck(),
       new DesignCompleteCheck(),
       new TasksValidCheck(),
       new SelfReviewPassedCheck(),
+      new HealthGateCheck({
+        worktreePath: changeDir,
+        policy: this.planHealthGatePolicy,
+        stage: 'plan',
+      }),
       new UserApprovalCheck(Stage.Plan),
     ];
+  }
+
+  private _getChangeDirForHealthGate(): string {
+    try {
+      const worktree = this.worktreePath || process.cwd();
+      const changeDir = require('../openspec/detector').findChangeDir(worktree, 0);
+      return changeDir ? path.dirname(path.dirname(changeDir)) : worktree;
+    } catch {
+      return this.worktreePath || process.cwd();
+    }
   }
 
   protected getNextStage(): Stage {
