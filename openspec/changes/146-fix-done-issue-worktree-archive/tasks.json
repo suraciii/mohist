@@ -107,11 +107,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use existing toast/error patterns. Do not introduce a restore workflow or new archived issue execution path.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        356928
+      ]
     },
     {
       "id": "T-005",
