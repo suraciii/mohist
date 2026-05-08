@@ -8,6 +8,7 @@ import { useLiveTask } from '../hooks/useSSE'
 interface WorktreePanelProps {
   issueNumber: number
   isAgentRunning: boolean
+  isDone?: boolean
 }
 
 type RebaseResult = {
@@ -25,7 +26,7 @@ const STEP_LABELS: Record<RebaseStep, string> = {
   verifying: 'Verifying build...',
 }
 
-export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProps) {
+export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreePanelProps) {
   const queryClient = useQueryClient()
   const { data: status, isLoading } = useWorktreeStatus(issueNumber, true)
   const { rebaseConflict } = useLiveTask()
@@ -98,7 +99,12 @@ export function WorktreePanel({ issueNumber, isAgentRunning }: WorktreePanelProp
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <h2 className="text-sm font-semibold text-gray-700 mb-3">Worktree</h2>
+      <h2 className="text-sm font-semibold text-gray-700 mb-1">Worktree</h2>
+      {isDone && (
+        <p className="text-xs text-gray-400 mb-2">
+          Retained for review/traceability. Archiving will remove this worktree.
+        </p>
+      )}
 
       {status.branch && (
         <div className="text-xs text-gray-500 mb-2 font-mono">{status.branch}</div>

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useArchivedIssues, useUnarchiveIssue } from '../hooks/useQueries'
+import { useArchivedIssues } from '../hooks/useQueries'
 import { useProject } from '../context/ProjectContext'
 import { getLabelStyle, sortLabels } from '../lib/label-colors'
 import { formatRelativeTime } from '../lib/relative-time'
@@ -12,7 +12,6 @@ export function ArchivedPage() {
   const { data: archivedIssues, isLoading } = useArchivedIssues(
     projectId ? { projectId } : undefined,
   )
-  const unarchiveMutation = useUnarchiveIssue()
   const [search, setSearch] = useState('')
 
   useDocumentTitle('Archived — Mohist')
@@ -132,17 +131,6 @@ export function ArchivedPage() {
                         )}
                       </div>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        unarchiveMutation.mutate(issue.number)
-                      }}
-                      disabled={unarchiveMutation.isPending}
-                      className="flex-shrink-0 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                    >
-                      {unarchiveMutation.isPending ? 'Restoring...' : '\u6062\u590d'}
-                    </button>
                   </div>
                 </a>
               )

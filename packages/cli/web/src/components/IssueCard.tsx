@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import type { Issue, AgentStatus } from '../lib/types'
 import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
@@ -108,9 +109,17 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
 
   const archiveMutation = useMutation({
     mutationFn: () => api.archiveIssue(issue.number),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+      if (data.warning) {
+        toast.warning(data.warning)
+      } else {
+        toast.success('Issue archived')
+      }
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Archive failed')
     },
   })
 

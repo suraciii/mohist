@@ -269,13 +269,13 @@ export const api = {
     request<import('./types').StageExecution[]>(`/issues/${number}/executions`),
 
   archiveIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/archive`, { method: 'POST' }),
+    request<{ issue: import('./types').Issue; message: string; warning?: string }>(`/issues/${number}/archive`, { method: 'POST' }),
 
   unarchiveIssue: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/unarchive`, { method: 'POST' }),
 
   archiveAllCompleted: () =>
-    request<{ archived: number; message: string }>('/issues/archive-completed', { method: 'POST' }),
+    request<{ archived: number; skipped: number; skippedNumbers: number[]; message: string }>('/issues/archive-completed', { method: 'POST' }),
 
   getOpencodeModel: () =>
     request<{ model: string | null }>('/opencode-model'),
