@@ -278,11 +278,14 @@
         "T-006",
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keeps issue-level surfaces aligned with the session transcript model without redesigning the whole issue page.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        908083
+      ]
     },
     {
       "id": "T-010",
