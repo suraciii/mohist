@@ -1,5 +1,6 @@
 import React, { type ReactElement, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { BrowserRouter } from 'react-router-dom'
 import { render, type RenderOptions } from '@testing-library/react'
 
 function createQueryClient() {
@@ -24,7 +25,7 @@ function QueryClientWrapper({ children }: WrapperProps) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <BrowserRouter>{children}</BrowserRouter>
     </QueryClientProvider>
   )
 }

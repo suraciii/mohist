@@ -46,13 +46,43 @@ function createErrorPart(message: string, kind: ErrorPart['kind'], at: string): 
   return { id: generateId(), type: 'error', message, kind, at }
 }
 
+function normalizeToolName(toolName: string): string {
+  if (!toolName || toolName === 'unknown') return 'unknown'
+  return toolName.toLowerCase().replace(/[^a-z0-9]/g, '_')
+}
+
+function inferDisplayTitle(toolName: string, title?: string): { displayTitle?: string; displaySubtitle?: string } {
+  if (title) {
+    return { displayTitle: title }
+  }
+  const normalized = normalizeToolName(toolName)
+  const displayTitles: Record<string, string> = {
+    apply_patch: 'Patch',
+    read: 'Read',
+    write: 'Write',
+    edit: 'Edit',
+    glob: 'Glob',
+    grep: 'Search',
+    list: 'List',
+    todowrite: 'Update todo list',
+    membrowse: 'Browse',
+    memread: 'Read memory',
+    memsearch: 'Search memory',
+  }
+  return { displayTitle: displayTitles[normalized] ?? toolName }
+}
+
 function createToolPart(tool: LiveToolCall): ToolPart {
+  const { displayTitle, displaySubtitle } = inferDisplayTitle(tool.toolName, tool.title)
   return {
     id: generateId(),
     type: 'tool',
     tool: {
       toolCallId: tool.toolCallId,
+      normalizedName: normalizeToolName(tool.toolName),
       toolName: tool.toolName,
+      displayTitle,
+      displaySubtitle,
       status: tool.status,
       title: tool.title,
       target: tool.target,
@@ -327,6 +357,41 @@ export function useSessionTranscript({
         markNewContentRef.current()
 
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('coder_recovery_status', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (detail.acpSessionId !== acpSessionId) return
+
+        const now = new Date().toISOString()
+        const errorMessages: Record<string, string> = {
+          detected: 'Recovery detected',
+          recovering: 'Recovery in progress',
+          recovered: 'Recovery succeeded',
+          failed: 'Recovery failed',
+        }
+
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          const newPart = createErrorPart(
+            errorMessages[detail.status] ?? detail.status,
+            'recovery',
+            now,
+          )
+          next[next.length - 1] = {
+            ...lastTurn,
+            assistant: [...lastTurn.assistant, newPart],
+          }
+          return next
+        })
+        markNewContentRef.current()
+
+        if (detail.status === 'recovered' || detail.status === 'failed') {
+          queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
+        }
       }),
     )
 
