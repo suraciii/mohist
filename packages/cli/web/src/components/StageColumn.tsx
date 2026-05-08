@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import type { Issue, AgentStatus } from '../lib/types'
 import { api } from '../lib/api'
 import { IssueCard } from './IssueCard'
@@ -33,9 +34,20 @@ export function StageColumn({ label, issues, agentStatus, isDone, archivedCount 
 
   const archiveAllMutation = useMutation({
     mutationFn: () => api.archiveAllCompleted(),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+      const parts: string[] = [`${data.archived} archived`]
+      if (data.skipped > 0) {
+        parts.push(`${data.skipped} skipped`)
+      }
+      toast.success(parts.join(', '))
+      if (data.message) {
+        toast.message(data.message)
+      }
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Archive failed')
     },
   })
 
@@ -66,11 +78,13 @@ export function StageColumn({ label, issues, agentStatus, isDone, archivedCount 
         )}
       </div>
 
-      {isDone && archivedCount > 0 && (
+      {isDone && totalCount > 0 && (
         <div className="mt-2 px-2 py-2 rounded-lg bg-gray-100/60 text-xs text-gray-500 flex items-center justify-between">
           <span className="flex items-center gap-1">
             📦 {archivedCount} 已归档
-            <a href="/archived" className="text-gray-500 hover:text-gray-700 underline ml-1">查看</a>
+            {archivedCount > 0 && (
+              <a href="/archived" className="text-gray-500 hover:text-gray-700 underline ml-1">查看</a>
+            )}
           </span>
           {totalCount > 0 && (
             <button
