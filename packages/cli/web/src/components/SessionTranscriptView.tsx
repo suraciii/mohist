@@ -194,9 +194,12 @@ function SessionErrorPartView({ part }: { part: ErrorPart }) {
 }
 
 function ToolPartView({ part }: { part: ToolPart }) {
+  const toolName = part.tool.toolName === 'unknown' && part.tool.title
+    ? part.tool.title
+    : part.tool.toolName
   const entry: ToolCallEntry = {
     executionId: '',
-    toolName: part.tool.toolName,
+    toolName,
     state: part.tool.status,
     timestamp: part.tool.startedAt ? new Date(part.tool.startedAt).getTime() : Date.now(),
     toolCallId: part.tool.toolCallId,
@@ -207,6 +210,7 @@ function ToolPartView({ part }: { part: ToolPart }) {
     duration: part.tool.completedAt && part.tool.startedAt
       ? new Date(part.tool.completedAt).getTime() - new Date(part.tool.startedAt).getTime()
       : undefined,
+    changedFiles: part.tool.changedFiles,
   }
 
   return <ToolCallCard entry={entry} />
@@ -271,20 +275,6 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
       if (expanded) {
         <div className="px-3 pb-2 space-y-1.5 border-t border-gray-100">
           {tools.map((tool) => {
-            const entry: ToolCallEntry = {
-              executionId: '',
-              toolName: tool.tool.toolName,
-              state: tool.tool.status,
-              timestamp: tool.tool.startedAt ? new Date(tool.tool.startedAt).getTime() : Date.now(),
-              toolCallId: tool.tool.toolCallId,
-              title: tool.tool.title,
-              rawInput: tool.tool.input,
-              rawOutput: tool.tool.output,
-              error: tool.tool.error,
-              duration: tool.tool.completedAt && tool.tool.startedAt
-                ? new Date(tool.tool.completedAt).getTime() - new Date(tool.tool.startedAt).getTime()
-                : undefined,
-            }
             return (
               <div key={tool.id} className="rounded-md border border-gray-200 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-gray-50">

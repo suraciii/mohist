@@ -489,6 +489,7 @@ export interface ToolCallEntry {
   rawInput?: string
   rawOutput?: string
   title?: string
+  changedFiles?: FileChangeSummary[]
 }
 
 export interface TaskProgressEntry {
