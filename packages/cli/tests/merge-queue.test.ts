@@ -219,6 +219,35 @@ describe('MergeQueue', () => {
       expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.BuildFailed);
     });
 
+    it('fails closed and keeps queue entry unresolved when postMerge finalizer is missing', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = new MergeQueue({
+        worktreeManager,
+        eventBus,
+        issueRepo,
+        getProjectPath: (pid: string) => {
+          if (pid !== project.id) return null;
+          return { path: PROJECT_PATH, name: PROJECT_NAME, baseBranch: BASE_BRANCH };
+        },
+        resolveConflicts: resolveConflictsMock,
+        fixBuildErrors: fixBuildErrorsMock,
+      });
+
+      const completedEvents: any[] = [];
+      const failedEvents: any[] = [];
+      eventBus.on('merge_completed', (data) => completedEvents.push(data));
+      eventBus.on('merge_failed', (data) => failedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(completedEvents).toHaveLength(0);
+      expect(failedEvents).toHaveLength(1);
+      expect(queue.getStatus()).toHaveLength(1);
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.BuildFailed);
+    });
+
     it('should FF merge when canFastForward is true, skipping rebase', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });

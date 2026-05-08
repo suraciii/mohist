@@ -123,7 +123,7 @@ describe('CheckStageRunner ordering', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  describe('BuildTestCheck runs before review artifact generation', () => {
+  describe('health:check is the default check-stage boundary', () => {
     it('pre-task checks run before executeTasks', async () => {
       const runner = new TestStageRunner();
       runner.preTaskChecks = [makePassCheck('build-test')];
@@ -147,12 +147,20 @@ describe('CheckStageRunner ordering', () => {
       expect(runner.executeTasksCalls).toBe(0);
     });
 
-    it('default CheckStageRunner has build-test as first pre-task check', () => {
+    it('default CheckStageRunner has no pre-task build-test check', () => {
       const runner = new CheckStageRunner({ worktreePath: '/tmp/worktree' });
       const preChecks = runner.getPreTaskChecks();
 
-      expect(preChecks.length).toBeGreaterThan(0);
-      expect(preChecks[0].name).toBe('build-test');
+      expect(preChecks).toHaveLength(0);
+    });
+
+    it('default CheckStageRunner runs health:check before AI review and user approval', () => {
+      const worktreePath = path.join(tmpDir, 'worktree');
+      fs.mkdirSync(worktreePath, { recursive: true });
+      const runner = new CheckStageRunner({ worktreePath });
+      const checks = runner.getChecks();
+
+      expect(checks.map(check => check.name)).toEqual(['health:check', 'ai-review', 'user-approval']);
     });
   });
 
