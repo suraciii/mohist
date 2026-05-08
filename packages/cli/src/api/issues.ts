@@ -24,6 +24,58 @@ import type { IssueQueueStatus } from '../services/agent-runner-service';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { assembleSessionTranscript } from '../services/session-transcript-service';
 
+type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
+
+type ChangesAvailability =
+  | { available: true; reason: null }
+  | { available: false; reason: ChangesUnavailableReason; message: string };
+
+type ChangesSummary = {
+  filesChanged: number;
+  commits: number;
+  additions: number;
+  deletions: number;
+};
+
+type DiffFile = {
+  file: string;
+  additions: number;
+  deletions: number;
+  diff: string;
+  isBinary: boolean;
+};
+
+type CommitEntry = {
+  hash: string;
+  shortHash: string;
+  message: string;
+  author: string;
+  date: string;
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  files: string[];
+};
+
+type IssueDiffResponse = ChangesAvailability & {
+  base: string;
+  head: string;
+  summary: ChangesSummary;
+  files: DiffFile[];
+};
+
+type IssueCommitsResponse = ChangesAvailability & {
+  base: string;
+  head: string;
+  summary: ChangesSummary & { commits: number };
+  commits: CommitEntry[];
+};
+
+type CommitDiffResponse = ChangesAvailability & {
+  hash: string;
+  diff: string;
+};
+
 const log = Log.create({ service: 'issue' });
 
 const execFileAsync = promisify(execFile);
@@ -1257,21 +1309,71 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
+      const branchName = `mo/issue-${number}`;
+
       if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
+          const response: ApiResponse = {
+            success: true,
+            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet. Start the issue to see changes.' }
+          };
+          return c.json(response);
+        }
         const response: ApiResponse = {
           success: true,
-          data: { files: [] }
+          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed. Diff is only available while the issue worktree is retained.' }
         };
         return c.json(response);
       }
 
-      const branchName = `mo/issue-${number}`;
+      let branchExists = false;
+      try {
+        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branchName}`], { cwd: project.path });
+        branchExists = revOutput.stdout.trim().length > 0;
+      } catch {
+        branchExists = false;
+      }
+
+      if (!branchExists) {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'branch_missing' as const, message: `Branch ${branchName} not found. The issue branch may have been deleted.` }
+        };
+        return c.json(response);
+      }
+
+      let baseExists = false;
+      try {
+        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${project.baseBranch}`], { cwd: project.path });
+        baseExists = revOutput.stdout.trim().length > 0;
+      } catch {
+        baseExists = false;
+      }
+
+      if (!baseExists) {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'branch_missing' as const, message: `Base branch ${project.baseBranch} not found.` }
+        };
+        return c.json(response);
+      }
+
       const diffArgs = ['diff', `${project.baseBranch}...${branchName}`];
 
-      const [numstatOutput, fullDiffOutput] = await Promise.all([
-        execFileAsync('git', [...diffArgs, '--numstat'], { cwd: project.path }),
-        execFileAsync('git', diffArgs, { cwd: project.path }),
-      ]);
+      let numstatOutput: { stdout: string };
+      let fullDiffOutput: { stdout: string };
+      try {
+        [numstatOutput, fullDiffOutput] = await Promise.all([
+          execFileAsync('git', [...diffArgs, '--numstat'], { cwd: project.path }),
+          execFileAsync('git', diffArgs, { cwd: project.path }),
+        ]);
+      } catch (err) {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'git_error' as const, message: 'Failed to load diff. Check that the branch has commits.' }
+        };
+        return c.json(response);
+      }
 
       const numstatEntries = new Map<string, { additions: number; deletions: number; isBinary: boolean }>();
       for (const line of numstatOutput.stdout.trim().split('\n')) {
@@ -1301,7 +1403,9 @@ export function createIssueRoutes(
         }
       }
 
-      const files: Array<{ file: string; additions: number; deletions: number; diff: string; isBinary: boolean }> = [];
+      const files: DiffFile[] = [];
+      let totalAdditions = 0;
+      let totalDeletions = 0;
       for (const [filePath, stats] of numstatEntries) {
         files.push({
           file: filePath,
@@ -1310,11 +1414,27 @@ export function createIssueRoutes(
           diff: stats.isBinary ? '' : (diffByFile.get(filePath) || ''),
           isBinary: stats.isBinary,
         });
+        totalAdditions += stats.additions;
+        totalDeletions += stats.deletions;
       }
+
+      const data: IssueDiffResponse = {
+        available: true,
+        reason: null,
+        base: project.baseBranch,
+        head: branchName,
+        summary: {
+          filesChanged: files.length,
+          commits: 0,
+          additions: totalAdditions,
+          deletions: totalDeletions,
+        },
+        files,
+      };
 
       const response: ApiResponse = {
         success: true,
-        data: { files }
+        data,
       };
       return c.json(response);
     } catch (error) {
@@ -1417,65 +1537,142 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
+      const branchName = `mo/issue-${number}`;
+
       if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
+          const response: ApiResponse = {
+            success: true,
+            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet. Start the issue to see commits.' }
+          };
+          return c.json(response);
+        }
         const response: ApiResponse = {
           success: true,
-          data: { commits: [] }
+          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed. Commits are only available while the issue worktree is retained.' }
         };
         return c.json(response);
       }
 
-      const branchName = `mo/issue-${number}`;
-      const logOutput = await execFileAsync(
-        'git',
-        ['log', `${project.baseBranch}..${branchName}`, '--format=%h%x00%s%x00%an%x00%aI%x01', '--stat'],
-        { cwd: project.path }
-      );
+      let branchExists = false;
+      try {
+        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branchName}`], { cwd: project.path });
+        branchExists = revOutput.stdout.trim().length > 0;
+      } catch {
+        branchExists = false;
+      }
 
-      const commits: Array<{ hash: string; message: string; author: string; date: string; filesChanged: number; additions: number; deletions: number; files: string[] }> = [];
+      if (!branchExists) {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'branch_missing' as const, message: `Branch ${branchName} not found. The issue branch may have been deleted.` }
+        };
+        return c.json(response);
+      }
+
+      let baseExists = false;
+      try {
+        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${project.baseBranch}`], { cwd: project.path });
+        baseExists = revOutput.stdout.trim().length > 0;
+      } catch {
+        baseExists = false;
+      }
+
+      if (!baseExists) {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'branch_missing' as const, message: `Base branch ${project.baseBranch} not found.` }
+        };
+        return c.json(response);
+      }
+
+      let logOutput: { stdout: string };
+      try {
+        logOutput = await execFileAsync(
+          'git',
+          ['log', `${project.baseBranch}..${branchName}`, '--date=iso-strict', '--numstat', '--format=%H%x00%h%x00%s%x00%an%x00%aI%x00'],
+          { cwd: project.path }
+        );
+      } catch (err) {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'git_error' as const, message: 'Failed to load commits. Check that the branch has commits.' }
+        };
+        return c.json(response);
+      }
+
+      const commits: CommitEntry[] = [];
       const rawOutput = logOutput.stdout.trim();
 
       if (rawOutput) {
-        const entries = rawOutput.split('\x01').filter(e => e.trim());
+        const entries = rawOutput.split('\x01');
         for (const entry of entries) {
-          const [headerLine, ...statLines] = entry.trim().split('\n');
-          const parts = headerLine.split('\x00');
-          if (parts.length < 4) continue;
+          const trimmed = entry.trim();
+          if (!trimmed) continue;
 
-          const hash = parts[0].trim();
-          const message = parts[1].trim();
-          const author = parts[2].trim();
-          const date = parts[3].trim();
+          const nullParts = trimmed.split('\x00');
+          if (nullParts.length < 6) continue;
+
+          const [fullHash, shortHash, message, author, date, ...numstatLines] = nullParts;
 
           let filesChanged = 0;
           let additions = 0;
           let deletions = 0;
+          const files: string[] = [];
 
-          const statSummary = statLines.find(l => l.includes('files changed') || l.includes('file changed'));
-          if (statSummary) {
-            const fc = statSummary.match(/(\d+) files? changed/);
-            if (fc) filesChanged = parseInt(fc[1], 10);
-            const ins = statSummary.match(/(\d+) insertions?\(\+\)/);
-            if (ins) additions = parseInt(ins[1], 10);
-            const del = statSummary.match(/(\d+) deletions?\(-\)/);
-            if (del) deletions = parseInt(del[1], 10);
+          for (const line of numstatLines) {
+            const l = line.trim();
+            if (!l) continue;
+            const parts = l.split('\t');
+            if (parts.length >= 3) {
+              const [addStr, delStr, filePath] = parts;
+              const isBinary = addStr === '-' && delStr === '-';
+              files.push(filePath);
+              if (!isBinary) {
+                const add = parseInt(addStr, 10);
+                const del = parseInt(delStr, 10);
+                additions += add;
+                deletions += del;
+              }
+            }
           }
 
-          const files: string[] = statLines
-            .filter(l => !l.includes('files changed') && !l.includes('file changed'))
-            .map(l => {
-              const m = l.match(/^\s+(.+?)\s*\|/);
-              return m ? m[1].trim() : null;
-            })
-            .filter((f): f is string => f !== null);
+          filesChanged = files.length;
 
-          commits.push({ hash, message, author, date, filesChanged, additions, deletions, files });
+          commits.push({
+            hash: fullHash,
+            shortHash,
+            message,
+            author,
+            date,
+            filesChanged,
+            additions,
+            deletions,
+            files,
+          });
         }
       }
 
+      const totalAdditions = commits.reduce((sum, c) => sum + c.additions, 0);
+      const totalDeletions = commits.reduce((sum, c) => sum + c.deletions, 0);
+
+      const data: IssueCommitsResponse = {
+        available: true,
+        reason: null,
+        base: project.baseBranch,
+        head: branchName,
+        summary: {
+          filesChanged: commits.reduce((sum, c) => sum + c.filesChanged, 0),
+          commits: commits.length,
+          additions: totalAdditions,
+          deletions: totalDeletions,
+        },
+        commits,
+      };
+
       const response: ApiResponse = {
         success: true,
-        data: { commits }
+        data,
       };
       return c.json(response);
     } catch (error) {
@@ -1527,38 +1724,87 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
+      const branchName = `mo/issue-${number}`;
+
       if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
+          const response: ApiResponse = {
+            success: true,
+            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet.' }
+          };
+          return c.json(response);
+        }
         const response: ApiResponse = {
-          success: false,
-          error: `No worktree for issue #${number}`
+          success: true,
+          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed.' }
         };
-        return c.json(response, 404);
+        return c.json(response);
       }
 
-      const branchName = `mo/issue-${number}`;
-      const containsOutput = await execFileAsync(
-        'git',
-        ['branch', '--contains', hash, '--list', branchName],
-        { cwd: project.path }
-      );
+      let branchExists = false;
+      try {
+        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branchName}`], { cwd: project.path });
+        branchExists = revOutput.stdout.trim().length > 0;
+      } catch {
+        branchExists = false;
+      }
+
+      if (!branchExists) {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'branch_missing' as const, message: `Branch ${branchName} not found.` }
+        };
+        return c.json(response);
+      }
+
+      let containsOutput: { stdout: string };
+      try {
+        containsOutput = await execFileAsync(
+          'git',
+          ['branch', '--contains', hash, '--list', branchName],
+          { cwd: project.path }
+        );
+      } catch {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'git_error' as const, message: 'Failed to verify commit belongs to branch.' }
+        };
+        return c.json(response);
+      }
 
       if (!containsOutput.stdout.trim()) {
         const response: ApiResponse = {
-          success: false,
-          error: `Commit ${hash} does not belong to branch ${branchName}`
+          success: true,
+          data: { available: false as const, reason: 'branch_missing' as const, message: `Commit ${hash} does not belong to branch ${branchName}.` }
         };
-        return c.json(response, 404);
+        return c.json(response);
       }
 
-      const diffOutput = await execFileAsync(
-        'git',
-        ['show', '--format=', '--patch', hash],
-        { cwd: project.path }
-      );
+      let diffOutput: { stdout: string };
+      try {
+        diffOutput = await execFileAsync(
+          'git',
+          ['show', '--format=', '--patch', hash],
+          { cwd: project.path }
+        );
+      } catch {
+        const response: ApiResponse = {
+          success: true,
+          data: { available: false as const, reason: 'git_error' as const, message: 'Failed to load commit diff.' }
+        };
+        return c.json(response);
+      }
+
+      const data: CommitDiffResponse = {
+        available: true,
+        reason: null,
+        hash,
+        diff: diffOutput.stdout,
+      };
 
       const response: ApiResponse = {
         success: true,
-        data: { hash, diff: diffOutput.stdout }
+        data,
       };
       return c.json(response);
     } catch (error) {
