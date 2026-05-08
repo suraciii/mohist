@@ -287,7 +287,8 @@ export function setupIssueCommands(program: Command): void {
           if (issue.comments && issue.comments.length > 0) {
             console.log(`\n  ${chalk.gray('Comments:')} (${issue.comments.length})`);
             issue.comments.forEach((comment: any) => {
-              console.log(`    ${chalk.gray(new Date(comment.createdAt).toLocaleString())}`);
+              const shortId = comment.id.substring(0, 8);
+              console.log(`    [${chalk.cyan(shortId)}] ${chalk.gray(new Date(comment.createdAt).toLocaleString())}`);
               console.log(`    ${comment.body.split('\n').join('\n    ')}`);
               console.log();
             });
@@ -472,7 +473,7 @@ export function setupIssueCommands(program: Command): void {
           `/issues/${number}/comments`,
           { body: text }
         );
-        
+
         if (response.success) {
           console.log(chalk.green(`✓ Comment added to issue #${number}`));
         } else {
@@ -480,6 +481,26 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to add comment: ${error}`));
+      }
+    });
+
+  issue
+    .command('delete-comment <number> <comment-id>')
+    .description('Delete a comment from an issue')
+    .action(async (number, commentId) => {
+      try {
+        const response = await apiClient<ApiResponse>(
+          'DELETE',
+          `/issues/${number}/comments/${commentId}`
+        );
+
+        if (response.success) {
+          console.log(chalk.green(`✓ Deleted comment ${commentId} from issue #${number}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to delete comment: ${error}`));
       }
     });
 
