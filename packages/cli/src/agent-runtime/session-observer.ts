@@ -21,6 +21,8 @@ export interface MohistPromptEvent {
   title?: string;
   issueId?: string;
   acpSessionId?: string;
+  outputPath?: string;
+  contextFiles?: string[];
 }
 
 export interface SessionContext {
@@ -44,6 +46,8 @@ export interface ToolCallEvent {
   title?: string;
   rawInput?: unknown;
   rawOutput?: unknown;
+  rawOutputMetadata?: Record<string, unknown>;
+  status?: string;
 }
 
 export { WorkflowSessionObserver } from '../services/session-observers';

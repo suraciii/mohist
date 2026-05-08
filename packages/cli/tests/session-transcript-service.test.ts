@@ -761,6 +761,150 @@ describe('SessionTranscriptAssembler', () => {
         db.close();
       }
     });
+
+    it('writeMohistPrompt persists outputPath and contextFiles metadata', () => {
+      const db = new DatabaseManager({ inMemory: true });
+      initializeDatabase(db);
+      const repo = new SessionStreamLogRepo(db);
+      try {
+        db.run(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))`, ['project-1', 'Project', '/tmp/project']);
+        db.run(`INSERT INTO issues (id, project_id, number, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, ['issue-1', 'project-1', 1, 'Issue', 'open']);
+
+        const observer = new WorkflowSessionObserver({ sessionStreamLogRepo: repo });
+        const ctx: SessionContext = {
+          issueId: 'issue-1',
+          issueNumber: 1,
+          projectId: 'project-1',
+          executionId: 'exec-1',
+          acpSessionId: 'acp-test-session-2',
+          coderSessionId: undefined,
+          stage: 'build',
+          model: 'claude-3',
+          processPid: undefined,
+        };
+        const prompt: MohistPromptEvent = {
+          role: 'mohist',
+          text: '<contract>packages/cli/src/index.ts</contract>\n<role>Implement feature</role>\n<context_files>\nsrc/a.ts\nsrc/b.ts\n</context_files>',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+          executionId: 'exec-1',
+          stage: 'build',
+          issueId: 'issue-1',
+          acpSessionId: 'acp-test-session-2',
+          outputPath: 'packages/cli/src/index.ts',
+          contextFiles: ['src/a.ts', 'src/b.ts'],
+        };
+
+        observer.writeMohistPrompt(ctx, prompt);
+
+        const rows = repo.findBySessionId('acp-test-session-2');
+        expect(rows.length).toBeGreaterThanOrEqual(1);
+        const promptRow = rows.find(r => r.eventType === 'mohist_prompt');
+        expect(promptRow).toBeDefined();
+        const data = JSON.parse(promptRow!.data);
+        expect(data.outputPath).toBe('packages/cli/src/index.ts');
+        expect(data.contextFiles).toEqual(['src/a.ts', 'src/b.ts']);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  describe('tool event replay', () => {
+    it('should replay tool with rawOutputMetadata preserved after fetch', () => {
+      const db = new DatabaseManager({ inMemory: true });
+      initializeDatabase(db);
+      const repo = new SessionStreamLogRepo(db);
+      try {
+        db.run(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))`, ['project-1', 'Project', '/tmp/project']);
+        db.run(`INSERT INTO issues (id, project_id, number, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, ['issue-1', 'project-1', 1, 'Issue', 'open']);
+
+        const observer = new WorkflowSessionObserver({ sessionStreamLogRepo: repo });
+        const ctx: SessionContext = {
+          issueId: 'issue-1',
+          issueNumber: 1,
+          projectId: 'project-1',
+          executionId: 'exec-1',
+          acpSessionId: 'acp-test-session-3',
+          coderSessionId: undefined,
+          stage: 'build',
+          model: 'claude-3',
+          processPid: undefined,
+        };
+
+        const toolData = {
+          toolCallId: 'tool-call-1',
+          toolName: 'Read',
+          title: 'src/index.ts',
+          input: JSON.stringify({ file_path: 'src/index.ts' }),
+          output: JSON.stringify({ result: 'file contents', metadata: { toolName: 'Read', name: 'Read' } }),
+          status: 'completed',
+          createdAt: '2024-01-01T10:00:01.000Z',
+          rawOutputMetadata: { toolName: 'Read', name: 'Read' },
+        };
+
+        observer.onSessionEvent(ctx, 'tool_call', toolData);
+
+        const rows = repo.findBySessionId('acp-test-session-3');
+        expect(rows.length).toBeGreaterThanOrEqual(1);
+        const toolRow = rows.find(r => r.eventType === 'tool_call');
+        expect(toolRow).toBeDefined();
+        const data = JSON.parse(toolRow!.data);
+        expect(data.toolName).toBe('Read');
+        expect(data.title).toBe('src/index.ts');
+        expect(data.rawOutputMetadata).toEqual({ toolName: 'Read', name: 'Read' });
+        expect(data.status).toBe('completed');
+      } finally {
+        db.close();
+      }
+    });
+
+    it('should reconstruct tool title/rawInput/rawOutput from persisted event', () => {
+      const session = makeSession();
+      const events: SessionStreamLogEntry[] = [
+        makePromptEvent('Read a file', 'task', '2024-01-01T10:00:00.000Z'),
+        { id: 'evt-tool', sessionId: 'session-1', issueId: 'issue-1', eventType: 'tool_call', data: JSON.stringify({
+          toolCallId: 'tc-replay',
+          toolName: 'Read',
+          title: 'src/index.ts',
+          input: JSON.stringify({ file_path: 'src/index.ts' }),
+          output: JSON.stringify({ result: 'file contents', metadata: { toolName: 'Read' } }),
+          status: 'completed',
+          createdAt: '2024-01-01T10:00:01.000Z',
+          rawOutputMetadata: { toolName: 'Read' },
+        }), createdAt: '2024-01-01T10:00:01.000Z' },
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.title).toBe('src/index.ts');
+      expect(toolPart.input).toBe(JSON.stringify({ file_path: 'src/index.ts' }));
+      expect(toolPart.output).toBe(JSON.stringify({ result: 'file contents', metadata: { toolName: 'Read' } }));
+    });
+
+    it('should preserve terminal status for turn closure after replay', () => {
+      const session = makeSession({ status: 'completed', completedAt: '2024-01-01T10:00:10.000Z' });
+      const events: SessionStreamLogEntry[] = [
+        makePromptEvent('Run command', 'task', '2024-01-01T10:00:00.000Z'),
+        { id: 'evt-tool', sessionId: 'session-1', issueId: 'issue-1', eventType: 'tool_call', data: JSON.stringify({
+          toolCallId: 'tc-term',
+          toolName: 'Bash',
+          title: 'npm test',
+          status: 'completed',
+          output: 'tests passed',
+          createdAt: '2024-01-01T10:00:05.000Z',
+        }), createdAt: '2024-01-01T10:00:05.000Z' },
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].completedAt).toBe('2024-01-01T10:00:10.000Z');
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.status).toBe('completed');
+      expect(toolPart.output).toBe('tests passed');
+    });
   });
 
   describe('same-second event ordering', () => {

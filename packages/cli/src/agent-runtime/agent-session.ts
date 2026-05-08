@@ -8,7 +8,7 @@ import type {
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import { AcpProcess } from './acp-process';
-import type { SessionObserver, SessionContext, SessionState, ToolCallEvent } from './session-observer';
+import type { SessionObserver, SessionContext, SessionState, ToolCallEvent, MohistPromptEvent } from './session-observer';
 import { SessionStateMachine } from './session-state';
 import { Log } from '../util/log';
 
@@ -231,6 +231,8 @@ export class AgentSession {
         title: (toolCallData?.title as string) ?? undefined,
         rawInput: state === 'started' ? toolCallData?.input : undefined,
         rawOutput: state === 'completed' ? toolCallData?.output : undefined,
+        rawOutputMetadata: state === 'completed' ? ((toolCallData?.output as Record<string, unknown>)?.metadata as Record<string, unknown> | undefined) : undefined,
+        status: toolStatus || undefined,
       };
       for (const obs of this._observers) {
         try { obs.onToolCall?.(ctx, event); } catch (err) {
@@ -251,6 +253,41 @@ export class AgentSession {
       model: this._options.model,
       processPid: this._acpProcess.process.pid ?? undefined,
     };
+  }
+
+  private buildPromptData(prompt: string, kind: string, sentAt: string, title?: string): MohistPromptEvent {
+    const outputPath = this.extractOutputPath(prompt);
+    const contextFiles = this.extractContextFiles(prompt);
+    return {
+      role: 'mohist',
+      text: prompt,
+      kind,
+      sentAt,
+      executionId: this._options.executionId,
+      stage: this._options.stage,
+      title: title ?? this._options.title,
+      issueId: this._options.issueId,
+      acpSessionId: this._sessionId,
+      outputPath,
+      contextFiles,
+    };
+  }
+
+  private extractOutputPath(prompt: string): string | undefined {
+    const match = prompt.match(/<contract>([\s\S]*?)<\/contract>/i);
+    if (match) {
+      return match[1].trim().split('\n')[0].trim();
+    }
+    return undefined;
+  }
+
+  private extractContextFiles(prompt: string): string[] | undefined {
+    const match = prompt.match(/<context_files>([\s\S]*?)<\/context_files>/i);
+    if (match) {
+      const files = match[1].trim().split('\n').map(f => f.trim()).filter(f => f);
+      return files.length > 0 ? files.slice(0, 5) : undefined;
+    }
+    return undefined;
   }
 
   static async create(options: AgentSessionOptions): Promise<AgentSession> {
@@ -385,17 +422,8 @@ export class AgentSession {
 
     const wfObs2 = this._wfObserver;
     if (wfObs2) {
-      wfObs2.writeMohistPrompt!(this.makeCtx(), {
-        role: 'mohist',
-        text: prompt,
-        kind,
-        sentAt,
-        executionId: this._options.executionId,
-        stage: this._options.stage,
-        title: meta?.title ?? this._options.title,
-        issueId: this._options.issueId,
-        acpSessionId: this._sessionId,
-      });
+      const promptData = this.buildPromptData(prompt, kind, sentAt, meta?.title);
+      wfObs2.writeMohistPrompt!(this.makeCtx(), promptData);
     }
 
     const abortPromise = this._options.signal

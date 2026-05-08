@@ -119,6 +119,8 @@ export class WorkflowSessionObserver {
       title: event.title,
       rawInput: event.rawInput,
       rawOutput: event.rawOutput,
+      rawOutputMetadata: event.rawOutputMetadata,
+      status: event.status,
     });
   }
 
