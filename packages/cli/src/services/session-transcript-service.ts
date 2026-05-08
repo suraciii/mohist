@@ -3,6 +3,20 @@ import type { CoderSession } from '../db/coder-session-repo';
 
 export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' | 'legacy-missing';
 
+export interface FileChangeSummary {
+  path: string;
+  operation: 'created' | 'modified' | 'deleted' | 'moved';
+  additions?: number;
+  deletions?: number;
+  oldPath?: string;
+  rawDetail?: string;
+}
+
+export interface TranscriptWarning {
+  code: string;
+  message: string;
+}
+
 export interface SessionMetadata {
   sessionId: string;
   coderSessionId: string;
@@ -18,12 +32,28 @@ export interface SessionMetadata {
   cwd?: string | null;
   worktree?: string | null;
   firstPromptSentAt?: string | null;
+  lastActivityAt?: string | null;
+  eventCount?: number;
+  toolCount?: number;
+  turnCount?: number;
+  changedFiles?: FileChangeSummary[];
+  warnings?: TranscriptWarning[];
+  hasUnknownTools?: boolean;
 }
 
 export interface SessionTranscript {
   session: SessionMetadata;
   turns: SessionTurn[];
   incomplete: boolean;
+}
+
+export interface PromptSummary {
+  title?: string;
+  subtitle?: string;
+  outputPath?: string;
+  contextFiles?: string[];
+  kind: PromptKind;
+  rawText?: string;
 }
 
 export interface SessionTurn {
@@ -36,6 +66,7 @@ export interface SessionTurn {
     text: string;
     kind: PromptKind;
     sentAt: string;
+    summary?: PromptSummary;
   };
   assistant: SessionPart[];
 }
@@ -67,6 +98,10 @@ export interface ToolPart {
   type: 'tool';
   tool: {
     toolCallId: string;
+    normalizedName?: string;
+    displayTitle?: string;
+    displaySubtitle?: string;
+    category?: string;
     toolName: string;
     status: 'started' | 'completed' | 'failed';
     title?: string;
@@ -76,6 +111,11 @@ export interface ToolPart {
     error?: string;
     startedAt: string;
     completedAt?: string | null;
+    rawInput?: string;
+    rawOutput?: string;
+    metadata?: Record<string, unknown>;
+    changedFiles?: FileChangeSummary[];
+    warnings?: TranscriptWarning[];
   };
 }
 
@@ -95,6 +135,21 @@ interface RawEvent {
 }
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled']);
+
+const EVENT_PRIORITY: Record<string, number> = {
+  mohist_prompt: 0,
+  agent_thought_chunk: 1,
+  agent_message_chunk: 1,
+  tool_call: 2,
+  tool_call_update: 3,
+  acp_session_recovery_started: 4,
+  acp_session_recovery_failed: 4,
+  acp_session_recovery_succeeded: 4,
+  acp_session_timeout: 5,
+  acp_session_aborted: 5,
+  cancel: 5,
+  acp_session_completed: 5,
+};
 
 function stringifyPayload(value: unknown): string | undefined {
   if (value === undefined) return undefined;
@@ -140,6 +195,9 @@ interface ToolCallStartData {
   output?: string;
   error?: string;
   createdAt: string;
+  rawInput?: string;
+  rawOutput?: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface ToolCallUpdateData {
@@ -151,6 +209,9 @@ interface ToolCallUpdateData {
   output?: string;
   error?: string;
   createdAt: string;
+  rawInput?: string;
+  rawOutput?: string;
+  metadata?: Record<string, unknown>;
 }
 
 function syntheticToolCallId(data: Record<string, unknown>, fallbackCreatedAt: string): string {
@@ -162,8 +223,57 @@ function syntheticToolCallId(data: Record<string, unknown>, fallbackCreatedAt: s
       : 'unknown';
   const sequence = typeof data.sequence === 'number' || typeof data.sequence === 'string'
     ? String(data.sequence)
-    : fallbackCreatedAt;
+    : typeof data.createdAt === 'string' ? data.createdAt.replace(/[^0-9]/g, '').slice(0, 12)
+      : fallbackCreatedAt.replace(/[^0-9]/g, '').slice(0, 12);
   return `${sessionId}-${toolName}-${sequence}`;
+}
+
+function inferNormalizedToolName(d: Record<string, unknown>): string {
+  if (typeof d.toolName === 'string' && d.toolName) return d.toolName;
+  if (typeof d.name === 'string' && d.name) return d.name;
+  if (typeof d.title === 'string' && d.title) {
+    const titleLower = d.title.toLowerCase();
+    if (['apply_patch', 'edit', 'write', 'read', 'glob', 'grep', 'bash', 'list', 'search'].some(t => titleLower.includes(t))) {
+      return d.title;
+    }
+  }
+  const rawInput = d.rawInput ?? d.input;
+  if (rawInput && typeof rawInput === 'object') {
+    const inputObj = rawInput as Record<string, unknown>;
+    if (inputObj.patchText !== undefined) return 'apply_patch';
+    if (inputObj.command !== undefined || inputObj.script !== undefined) return 'bash';
+    if (inputObj.pattern !== undefined || inputObj.query !== undefined || inputObj.search !== undefined) {
+      if (inputObj.file_path !== undefined) return 'grep';
+      return 'search';
+    }
+    if (inputObj.file_path !== undefined || inputObj.path !== undefined) return 'read';
+    if (inputObj.pattern !== undefined) return 'glob';
+    if (inputObj.todos !== undefined) return 'todowrite';
+  }
+  const rawOutput = d.rawOutput ?? d.output;
+  if (rawOutput) {
+    if (typeof rawOutput === 'string') {
+      try {
+        const parsed = JSON.parse(rawOutput);
+        if (parsed && typeof parsed === 'object' && parsed.metadata && typeof parsed.metadata === 'object') {
+          const meta = parsed.metadata as Record<string, unknown>;
+          if (typeof meta.toolName === 'string') return meta.toolName;
+          if (typeof meta.name === 'string') return meta.name;
+          if (typeof meta.title === 'string') return meta.title;
+        }
+      } catch {
+      }
+    } else if (typeof rawOutput === 'object' && rawOutput !== null) {
+      const outputObj = rawOutput as Record<string, unknown>;
+      if (outputObj.metadata && typeof outputObj.metadata === 'object') {
+        const meta = (outputObj.metadata as Record<string, unknown>);
+        if (typeof meta.toolName === 'string') return meta.toolName;
+        if (typeof meta.name === 'string') return meta.name;
+        if (typeof meta.title === 'string') return meta.title;
+      }
+    }
+  }
+  return 'unknown';
 }
 
 function parseToolCallStart(data: Record<string, unknown>, fallbackCreatedAt: string): ToolCallStartData | null {
@@ -181,7 +291,8 @@ function parseToolCallStart(data: Record<string, unknown>, fallbackCreatedAt: st
   const rawOutput = d.rawOutput ?? d.output;
   const output = stringifyPayload(rawOutput);
   const error = typeof d.error === 'string' ? d.error : undefined;
-  return { toolCallId, toolName, status, title, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt) };
+  const metadata = getObject(d.metadata) ?? (rawOutput && typeof rawOutput === 'object' ? getObject((rawOutput as Record<string, unknown>).metadata) : null);
+  return { toolCallId, toolName, status, title, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt), rawInput: typeof rawInput === 'string' ? rawInput : input, rawOutput: typeof rawOutput === 'string' ? rawOutput : output, metadata: metadata ?? undefined };
 }
 
 function parseToolCallUpdate(data: Record<string, unknown>, fallbackCreatedAt: string): ToolCallUpdateData | null {
@@ -199,7 +310,8 @@ function parseToolCallUpdate(data: Record<string, unknown>, fallbackCreatedAt: s
   const rawOutput = d.rawOutput ?? d.output;
   const output = stringifyPayload(rawOutput);
   const error = typeof d.error === 'string' ? d.error : undefined;
-  return { toolCallId, toolName, status, title: title ?? toolName, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt) };
+  const metadata = getObject(d.metadata) ?? (rawOutput && typeof rawOutput === 'object' ? getObject((rawOutput as Record<string, unknown>).metadata) : null);
+  return { toolCallId, toolName, status, title: title ?? toolName, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt), rawInput: typeof rawInput === 'string' ? rawInput : input, rawOutput: typeof rawOutput === 'string' ? rawOutput : output, metadata: metadata ?? undefined };
 }
 
 function deriveToolTarget(toolName: string, input: string | undefined): string | undefined {
@@ -226,6 +338,141 @@ function deriveToolTarget(toolName: string, input: string | undefined): string |
   return undefined;
 }
 
+function getToolCategory(toolName: string): string | undefined {
+  const lower = toolName.toLowerCase();
+  if (['read', 'read_file', 'glob', 'grep', 'search', 'list', 'membrowse', 'memread', 'memsearch'].includes(lower)) {
+    return 'context';
+  }
+  if (['apply_patch', 'edit', 'write', 'write_file'].includes(lower)) {
+    return 'file-change';
+  }
+  if (['bash', 'shell'].includes(lower)) {
+    return 'execution';
+  }
+  if (['todowrite', 'todo'].includes(lower)) {
+    return 'planning';
+  }
+  return undefined;
+}
+
+function inferDisplayTitle(d: Record<string, unknown>): string | undefined {
+  if (typeof d.title === 'string' && d.title) return d.title;
+  if (typeof d.toolName === 'string' && d.toolName) return d.toolName;
+  if (typeof d.name === 'string' && d.name) return d.name;
+  return undefined;
+}
+
+function parseApplyPatch(patchText: string): FileChangeSummary[] {
+  const changes: FileChangeSummary[] = [];
+  const addRegex = /^Add File:\s*(.+)/;
+  const updateRegex = /^Update File:\s*(.+)/;
+  const deleteRegex = /^Delete File:\s*(.+)/;
+  const moveRegex = /^Move to:\s*(.+)/;
+
+  const lines = patchText.split('\n');
+  let currentOp: 'created' | 'modified' | 'deleted' | 'moved' | null = null;
+  let currentPath: string | null = null;
+  let additions = 0;
+  let deletions = 0;
+
+  for (const line of lines) {
+    const addMatch = line.match(addRegex);
+    const updateMatch = line.match(updateRegex);
+    const deleteMatch = line.match(deleteRegex);
+    const moveMatch = line.match(moveRegex);
+
+    if (addMatch) {
+      if (currentPath) {
+        changes.push({ path: currentPath, operation: currentOp!, additions, deletions });
+      }
+      currentOp = 'created';
+      currentPath = addMatch[1].trim();
+      additions = 0;
+      deletions = 0;
+    } else if (updateMatch) {
+      if (currentPath) {
+        changes.push({ path: currentPath, operation: currentOp!, additions, deletions });
+      }
+      currentOp = 'modified';
+      currentPath = updateMatch[1].trim();
+      additions = 0;
+      deletions = 0;
+    } else if (deleteMatch) {
+      if (currentPath) {
+        changes.push({ path: currentPath, operation: currentOp!, additions, deletions });
+      }
+      currentOp = 'deleted';
+      currentPath = deleteMatch[1].trim();
+      additions = 0;
+      deletions = 0;
+    } else if (moveMatch) {
+      if (currentPath) {
+        changes.push({ path: currentPath, operation: currentOp!, additions, deletions });
+      }
+      currentOp = 'moved';
+      currentPath = moveMatch[1].trim();
+      additions = 0;
+      deletions = 0;
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      additions++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      deletions++;
+    }
+  }
+
+  if (currentPath && currentOp) {
+    changes.push({ path: currentPath, operation: currentOp, additions, deletions });
+  }
+
+  return changes;
+}
+
+function parseEditWriteChanges(toolName: string, input: string | undefined): FileChangeSummary[] {
+  if (!input) return [];
+  const lower = toolName.toLowerCase();
+  if (!['edit', 'write', 'write_file'].includes(lower)) return [];
+
+  try {
+    const parsed = JSON.parse(input);
+    if (typeof parsed !== 'object' || parsed === null) return [];
+
+    const filePath = parsed.file_path ?? parsed.path;
+    if (typeof filePath !== 'string') return [];
+
+    let operation: 'created' | 'modified' = 'modified';
+    if (lower === 'write' || lower === 'write_file') {
+      const content = parsed.content;
+      if (content === '' || content === null || content === undefined) {
+        operation = 'created';
+      }
+    }
+
+    let additions = 0;
+    let deletions = 0;
+
+    if (parsed.old_string || parsed.new_string) {
+      const oldStr = typeof parsed.old_string === 'string' ? parsed.old_string : '';
+      const newStr = typeof parsed.new_string === 'string' ? parsed.new_string : '';
+      const oldLines = oldStr.split('\n').length;
+      const newLines = newStr.split('\n').length;
+      additions = newLines;
+      deletions = oldLines;
+    } else if (parsed.additions !== undefined || parsed.deletions !== undefined) {
+      additions = typeof parsed.additions === 'number' ? parsed.additions : 0;
+      deletions = typeof parsed.deletions === 'number' ? parsed.deletions : 0;
+    }
+
+    return [{
+      path: filePath.split('/').pop() ?? filePath,
+      operation,
+      additions: additions || undefined,
+      deletions: deletions || undefined,
+    }];
+  } catch {
+    return [];
+  }
+}
+
 interface ActiveParts {
   textPart: TextPart | null;
   reasoningPart: ReasoningPart | null;
@@ -243,6 +490,12 @@ export class SessionTranscriptAssembler {
   private partIndexByEventId: Map<string, number> = new Map();
   private syntheticToolIdCounter = 0;
   private pendingToolNames = new Map<string, string>();
+  private eventCount = 0;
+  private toolCount = 0;
+  private warnings: TranscriptWarning[] = [];
+  private hasUnknownTools = false;
+  private allChangedFiles: FileChangeSummary[] = [];
+  private lastActivityAt: string | null = null;
 
   constructor(session: CoderSession) {
     this.session = {
@@ -262,6 +515,7 @@ export class SessionTranscriptAssembler {
 
   assemble(events: SessionStreamLogEntry[]): SessionTranscript {
     const orderedEvents = this.sortEvents(events);
+    this.eventCount = events.length;
 
     for (const entry of orderedEvents) {
       const data = typeof entry.data === 'string' ? JSON.parse(entry.data) : entry.data;
@@ -283,6 +537,14 @@ export class SessionTranscriptAssembler {
       this.closeOpenTurn(this.session.completedAt ?? new Date().toISOString());
     }
 
+    this.session.lastActivityAt = this.lastActivityAt ?? undefined;
+    this.session.eventCount = this.eventCount;
+    this.session.toolCount = this.toolCount;
+    this.session.turnCount = this.turns.length;
+    this.session.changedFiles = this.allChangedFiles.length > 0 ? this.allChangedFiles : undefined;
+    this.session.warnings = this.warnings.length > 0 ? this.warnings : undefined;
+    this.session.hasUnknownTools = this.hasUnknownTools;
+
     return {
       session: this.session,
       turns: this.turns,
@@ -294,13 +556,18 @@ export class SessionTranscriptAssembler {
     return [...events].sort((a, b) => {
       const timeA = new Date(a.createdAt).getTime();
       const timeB = new Date(b.createdAt).getTime();
-      return timeA - timeB;
+      if (timeA !== timeB) return timeA - timeB;
+      const priorityA = EVENT_PRIORITY[a.eventType] ?? 3;
+      const priorityB = EVENT_PRIORITY[b.eventType] ?? 3;
+      if (priorityA !== priorityB) return priorityA - priorityB;
+      return a.id.localeCompare(b.id);
     });
   }
 
   private processEvent(event: RawEvent): void {
     const { eventType, data, createdAt } = event;
     this.currentEventId = event.id;
+    this.lastActivityAt = createdAt;
 
     if (eventType === 'mohist_prompt') {
       this.handleMohistPrompt(data, createdAt);
@@ -323,6 +590,7 @@ export class SessionTranscriptAssembler {
       this.ensureToolCallId(data);
       const start = parseToolCallStart(data, createdAt);
       if (start) {
+        this.toolCount++;
         this.handleToolCallStart(start);
         if (start.status === 'completed' || start.status === 'failed' || start.output !== undefined || start.error !== undefined) {
           this.handleToolCallUpdate({
@@ -333,6 +601,9 @@ export class SessionTranscriptAssembler {
             output: start.output,
             error: start.error,
             createdAt: start.createdAt,
+            rawInput: start.rawInput,
+            rawOutput: start.rawOutput,
+            metadata: start.metadata,
           });
         }
       }
@@ -341,7 +612,10 @@ export class SessionTranscriptAssembler {
 
     if (eventType === 'tool_call_update') {
       const update = parseToolCallUpdate(data, createdAt);
-      if (update) this.handleToolCallUpdate(update);
+      if (update) {
+        this.toolCount++;
+        this.handleToolCallUpdate(update);
+      }
       return;
     }
 
@@ -390,6 +664,41 @@ export class SessionTranscriptAssembler {
       this.session.firstPromptSentAt = parsed.sentAt;
     }
     const turnId = this.nextId('turn');
+
+    const summary: PromptSummary = {
+      kind: parsed.kind,
+      rawText: parsed.text,
+    };
+
+    if (parsed.title) {
+      summary.title = parsed.title;
+    }
+
+    if (parsed.text) {
+      const contractMatch = parsed.text.match(/<contract>([\s\S]*?)<\/contract>/i);
+      if (contractMatch) {
+        const contract = contractMatch[1].trim();
+        summary.outputPath = contract.split('\n')[0].trim();
+        summary.subtitle = `Output: ${summary.outputPath}`;
+      }
+
+      const roleMatch = parsed.text.match(/<role>([\s\S]*?)<\/role>/i);
+      if (roleMatch && !summary.title) {
+        const role = roleMatch[1].trim();
+        if (role.length < 80) {
+          summary.title = role;
+        }
+      }
+
+      const contextMatch = parsed.text.match(/<context_files>([\s\S]*?)<\/context_files>/i);
+      if (contextMatch) {
+        const files = contextMatch[1].trim().split('\n').map(f => f.trim()).filter(f => f);
+        if (files.length > 0) {
+          summary.contextFiles = files.slice(0, 5);
+        }
+      }
+    }
+
     this.currentTurn = {
       id: turnId,
       startedAt: parsed.sentAt,
@@ -399,6 +708,7 @@ export class SessionTranscriptAssembler {
         text: parsed.text,
         kind: parsed.kind,
         sentAt: parsed.sentAt,
+        summary,
       },
       assistant: [],
     };
@@ -475,6 +785,13 @@ export class SessionTranscriptAssembler {
     }
   }
 
+  private computeToolNormalization(d: Record<string, unknown>): { normalizedName: string; displayTitle?: string; displaySubtitle?: string; category?: string } {
+    let normalizedName = inferNormalizedToolName(d);
+    const displayTitle = inferDisplayTitle(d);
+    const category = getToolCategory(normalizedName);
+    return { normalizedName, displayTitle, displaySubtitle: undefined, category };
+  }
+
   private handleToolCallStart(start: ToolCallStartData): void {
     if (!this.currentTurn) {
       this.ensureActiveTurn(start.createdAt);
@@ -490,11 +807,45 @@ export class SessionTranscriptAssembler {
       return;
     }
 
+    let parsedRawInput: Record<string, unknown> | undefined;
+    if (start.rawInput) {
+      try {
+        parsedRawInput = JSON.parse(start.rawInput);
+      } catch {
+        parsedRawInput = undefined;
+      }
+    }
+    let parsedRawOutput: Record<string, unknown> | undefined;
+    if (start.rawOutput) {
+      try {
+        parsedRawOutput = JSON.parse(start.rawOutput);
+      } catch {
+        parsedRawOutput = undefined;
+      }
+    }
+
+    const d: Record<string, unknown> = { toolName: start.toolName, title: start.title };
+    if (parsedRawInput) {
+      d.rawInput = parsedRawInput;
+    }
+    if (parsedRawOutput) {
+      d.rawOutput = parsedRawOutput;
+    }
+    const { normalizedName, displayTitle, category } = this.computeToolNormalization(d);
+
+    if (normalizedName === 'unknown' && start.toolName !== 'unknown') {
+      this.hasUnknownTools = true;
+      this.warnings.push({ code: 'UNKNOWN_TOOL', message: `Could not normalize tool name from: ${start.toolName}` });
+    }
+
     const toolPart: ToolPart = {
       id: this.nextId('tool'),
       type: 'tool',
       tool: {
         toolCallId: start.toolCallId,
+        normalizedName,
+        displayTitle: displayTitle ?? start.title,
+        category,
         toolName: start.toolName,
         status: 'started',
         title: start.title,
@@ -502,10 +853,52 @@ export class SessionTranscriptAssembler {
         input: start.input,
         startedAt: start.createdAt,
         completedAt: null,
+        rawInput: start.rawInput,
+        rawOutput: start.rawOutput,
+        metadata: start.metadata,
       },
     };
+
+    const changedFiles = this.extractChangedFiles(normalizedName, start.input, start.rawInput);
+    if (changedFiles.length > 0) {
+      toolPart.tool.changedFiles = changedFiles;
+      this.allChangedFiles.push(...changedFiles);
+    }
+
     this.toolPartsById.set(start.toolCallId, toolPart);
     this.currentTurn!.assistant.push(toolPart);
+  }
+
+  private extractChangedFiles(toolName: string, input: string | undefined, rawInput: string | undefined): FileChangeSummary[] {
+    const lower = toolName.toLowerCase();
+
+    if (lower === 'apply_patch' || toolName === 'apply_patch') {
+      const patchText = this.extractPatchText(input, rawInput);
+      if (patchText) {
+        return parseApplyPatch(patchText);
+      }
+    }
+
+    if (!input) return [];
+    return parseEditWriteChanges(toolName, input);
+  }
+
+  private extractPatchText(input: string | undefined, rawInput: string | undefined): string | null {
+    if (!input && !rawInput) return null;
+    const source = input ?? rawInput;
+    if (!source) return null;
+
+    try {
+      const parsed = JSON.parse(source);
+      if (typeof parsed.patchText === 'string') return parsed.patchText;
+      if (typeof parsed.patch === 'string') return parsed.patch;
+      if (typeof parsed === 'string') return parsed;
+    } catch {
+      if (typeof source === 'string' && (source.includes('Add File:') || source.includes('Update File:'))) {
+        return source;
+      }
+    }
+    return null;
   }
 
   private handleToolCallUpdate(update: ToolCallUpdateData): void {
@@ -526,15 +919,63 @@ export class SessionTranscriptAssembler {
       if (existing.tool.target === undefined && existing.tool.input) {
         existing.tool.target = deriveToolTarget(existing.tool.toolName, existing.tool.input);
       }
+
+      if (existing.tool.rawOutput === undefined && update.rawOutput) {
+        existing.tool.rawOutput = update.rawOutput;
+      }
+      if (update.metadata) {
+        existing.tool.metadata = { ...existing.tool.metadata, ...update.metadata };
+      }
+
+      const changedFiles = this.extractChangedFiles(existing.tool.normalizedName ?? existing.tool.toolName, update.input, update.rawInput);
+      if (changedFiles.length > 0) {
+        existing.tool.changedFiles = [...(existing.tool.changedFiles ?? []), ...changedFiles];
+        this.allChangedFiles.push(...changedFiles);
+      }
     } else {
       if (!this.currentTurn) {
         this.ensureActiveTurn(update.createdAt);
       }
+
+      let parsedRawInput: Record<string, unknown> | undefined;
+      if (update.rawInput) {
+        try {
+          parsedRawInput = JSON.parse(update.rawInput);
+        } catch {
+          parsedRawInput = undefined;
+        }
+      }
+      let parsedRawOutput: Record<string, unknown> | undefined;
+      if (update.rawOutput) {
+        try {
+          parsedRawOutput = JSON.parse(update.rawOutput);
+        } catch {
+          parsedRawOutput = undefined;
+        }
+      }
+
+      const d: Record<string, unknown> = { toolName: update.toolName ?? 'unknown', title: update.title };
+      if (parsedRawInput) {
+        d.rawInput = parsedRawInput;
+      }
+      if (parsedRawOutput) {
+        d.rawOutput = parsedRawOutput;
+      }
+      const { normalizedName, displayTitle, category } = this.computeToolNormalization(d);
+
+      if (normalizedName === 'unknown' && update.toolName !== 'unknown' && update.toolName !== undefined) {
+        this.hasUnknownTools = true;
+        this.warnings.push({ code: 'UNKNOWN_TOOL', message: `Could not normalize tool name from: ${update.toolName}` });
+      }
+
       const toolPart: ToolPart = {
         id: this.nextId('tool'),
         type: 'tool',
         tool: {
           toolCallId: update.toolCallId,
+          normalizedName,
+          displayTitle: displayTitle ?? update.title,
+          category,
           toolName: update.toolName ?? 'unknown',
           status: update.status === 'completed' ? 'completed'
             : update.status === 'failed' ? 'failed'
@@ -545,12 +986,23 @@ export class SessionTranscriptAssembler {
           error: update.error,
           startedAt: update.createdAt,
           completedAt: update.status ? update.createdAt : null,
+          rawInput: update.rawInput,
+          rawOutput: update.rawOutput,
+          metadata: update.metadata,
         },
       };
-      this.toolPartsById.set(update.toolCallId, toolPart);
+
       if (toolPart.tool.target === undefined && toolPart.tool.input) {
         toolPart.tool.target = deriveToolTarget(toolPart.tool.toolName, toolPart.tool.input);
       }
+
+      const changedFiles = this.extractChangedFiles(normalizedName, update.input, update.rawInput);
+      if (changedFiles.length > 0) {
+        toolPart.tool.changedFiles = changedFiles;
+        this.allChangedFiles.push(...changedFiles);
+      }
+
+      this.toolPartsById.set(update.toolCallId, toolPart);
       this.currentTurn!.assistant.push(toolPart);
     }
   }
