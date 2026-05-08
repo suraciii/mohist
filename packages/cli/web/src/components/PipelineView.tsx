@@ -364,9 +364,16 @@ function TaskItem({
   )
 }
 
+function isHealthGateCheck(check: CheckResult): boolean {
+  const output = check.output as { kind?: string } | undefined
+  return output?.kind === 'health-gate' || check.name.startsWith('health:')
+}
+
 function CheckItem({ check }: { check: CheckResult }) {
   const isPending = check.status === 'pending'
   const isFailed = check.status === 'fail' || check.status === 'error'
+  const isHealthGate = isHealthGateCheck(check)
+  const healthOutput = check.output as { command?: string; duration?: number; summary?: string; logExcerpt?: string; enabled?: boolean; exitCode?: number; timedOut?: boolean } | undefined
 
   let icon: React.ReactNode
   if (check.status === 'pass') {
@@ -379,16 +386,31 @@ function CheckItem({ check }: { check: CheckResult }) {
     icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
   }
 
+  const displayName = isHealthGate ? `Health Gate: ${check.name.replace('health:', '')}` : check.name
+
   return (
     <div
-      className={`flex items-center gap-2 px-3 py-2 rounded-md border border-gray-200 ${isPending ? 'opacity-50' : ''}`}
+      className={`flex items-center gap-2 px-3 py-2 rounded-md border ${isHealthGate && isFailed ? 'border-red-200 bg-red-50' : ''} ${isPending ? 'opacity-50' : ''}`}
     >
       {icon}
-      <span className="text-sm text-gray-900 flex-1 truncate">{check.name}</span>
-      {isFailed && (check.summary || check.message) && (
-        <span className="text-xs text-red-500 flex-shrink-0 truncate max-w-48">{check.summary || check.message}</span>
+      <span className="text-sm text-gray-900 flex-1 truncate">{displayName}</span>
+      {isFailed && check.message && (
+        <span className="text-xs text-red-500 flex-shrink-0 truncate max-w-48">{check.message}</span>
       )}
-      {check.duration != null && (
+      {isHealthGate && healthOutput && (
+        <>
+          {healthOutput.command && (
+            <span className="text-xs text-gray-400 flex-shrink-0 font-mono truncate max-w-32" title={healthOutput.command}>{healthOutput.command}</span>
+          )}
+          {healthOutput.duration != null && (
+            <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(healthOutput.duration)}</span>
+          )}
+          {isFailed && healthOutput.summary && (
+            <span className="text-xs text-red-400 flex-shrink-0 truncate max-w-48" title={healthOutput.summary}>{healthOutput.summary}</span>
+          )}
+        </>
+      )}
+      {check.duration != null && !isHealthGate && (
         <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(check.duration)}</span>
       )}
     </div>
@@ -740,7 +762,13 @@ function StepList({
   const checkResults: CheckResult[] = execution?.checkResults ?? []
   const taskResults = mergeTasksForStage(stage, rawTaskResults, runningTaskIds)
 
+  const healthGateChecks = checkResults.filter(c =>
+    c.name.startsWith('health:') || (c.output && (c.output as any).kind === 'health-gate')
+  )
+  const failedHealthGates = healthGateChecks.filter(c => c.status === 'fail' || c.status === 'error')
+
   const isAwaitingApproval =
+    failedHealthGates.length === 0 &&
     issue.approvalState?.status === 'awaiting' &&
     issue.stage === stage &&
     (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked)
