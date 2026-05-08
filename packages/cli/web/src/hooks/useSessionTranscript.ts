@@ -67,8 +67,11 @@ function inferToolName(toolName: string | undefined, title?: string, rawInput?: 
     if (typeof input.name === 'string') return input.name
     if (typeof input.patchText === 'string') return 'apply_patch'
     if (typeof input.command === 'string') return 'bash'
-    if (typeof input.pattern === 'string') return 'grep'
-    if (typeof input.filePath === 'string' || typeof input.file_path === 'string') return 'read'
+    if (input.pattern !== undefined || input.query !== undefined || input.search !== undefined) {
+      if (input.file_path !== undefined) return 'grep'
+      return 'search'
+    }
+    if (typeof input.filePath === 'string' || typeof input.file_path === 'string' || typeof input.path === 'string') return 'read'
     if (Array.isArray(input.todos)) return 'todowrite'
   }
   if (typeof input === 'string') {
@@ -381,37 +384,6 @@ export function useSessionTranscript({
           })
           markNewContentRef.current()
         }
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('coder_recovery_status', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.acpSessionId !== acpSessionId) return
-
-        const now = new Date().toISOString()
-        const errorMessages: Record<string, string> = {
-          detected: 'Recovery detected',
-          recovering: 'Recovery in progress',
-          recovered: 'Recovery succeeded',
-          failed: 'Recovery failed',
-        }
-
-        setTurns((prev) => {
-          const next = ensureLiveTurn(prev, now)
-          const lastTurn = next[next.length - 1]
-          const newPart = createErrorPart(
-            errorMessages[detail.status] ?? detail.status,
-            'recovery',
-            now,
-          )
-          next[next.length - 1] = {
-            ...lastTurn,
-            assistant: [...lastTurn.assistant, newPart],
-          }
-          return next
-        })
-        markNewContentRef.current()
       }),
     )
 

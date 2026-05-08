@@ -84,6 +84,15 @@ function renderWithQueryClient(ui: React.ReactElement) {
   )
 }
 
+function renderHookWithQueryClient<T>(callback: () => T) {
+  const queryClient = createMockQueryClient()
+  return renderHook(callback, {
+    wrapper: ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  })
+}
+
 function makeTurn(overrides: Partial<SessionTurn> = {}): SessionTurn {
   return {
     id: 'turn-1',
@@ -1447,7 +1456,7 @@ describe('Live/historical parity', () => {
   it('marks live transcript finalizing after completion SSE until refetch', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHook(() => useSessionTranscript({
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
       acpSessionId: 'acp-123',
@@ -1475,7 +1484,7 @@ describe('Live/historical parity', () => {
   it('does not mark live transcript finalizing for ordinary text chunks', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHook(() => useSessionTranscript({
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
       acpSessionId: 'acp-123',
@@ -1498,6 +1507,69 @@ describe('Live/historical parity', () => {
       expect(result.current.turns.at(-1)?.assistant.some((part) => part.type === 'text')).toBe(true)
     })
     expect(result.current.isFinalizing).toBe(false)
+  })
+
+  it('appends one recovery part for a single live recovery event', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('coder_recovery_status', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        status: 'recovering',
+        attempt: 1,
+      })
+    })
+
+    await waitFor(() => {
+      const recoveryParts = result.current.turns.at(-1)?.assistant.filter(
+        (part) => part.type === 'error' && part.kind === 'recovery',
+      )
+      expect(recoveryParts).toHaveLength(1)
+    })
+  })
+
+  it('normalizes unknown live pattern tools as search like historical replay', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-pattern',
+        toolName: 'unknown',
+        state: 'started',
+        rawInput: { pattern: '**/*.ts' },
+      })
+    })
+
+    await waitFor(() => {
+      const toolPart = result.current.turns.at(-1)?.assistant.find(
+        (part): part is ToolPart => part.type === 'tool',
+      )
+      expect(toolPart?.tool.normalizedName).toBe('search')
+    })
   })
 
   it('renders unknown tool when tool name is not recognized', async () => {

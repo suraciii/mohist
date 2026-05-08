@@ -17,6 +17,7 @@
     "start:server": "node bin/mo-server",
     "start:cli": "node bin/mo",
     "test": "vitest run",
+    "test:web": "npm --prefix web run test:run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts",
