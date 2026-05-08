@@ -173,6 +173,14 @@ export class IssueService {
     return this.commentRepo.findByIssue(issueId);
   }
 
+  deleteComment(issueId: string, commentId: string): boolean {
+    const comment = this.commentRepo.findById(commentId);
+    if (!comment || comment.issueId !== issueId) {
+      return false;
+    }
+    return this.commentRepo.delete(commentId);
+  }
+
   delete(issueId: string): boolean {
     return this.issueRepo.deleteCascade(issueId);
   }
