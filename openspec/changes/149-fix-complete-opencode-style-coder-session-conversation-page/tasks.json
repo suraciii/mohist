@@ -217,11 +217,14 @@
         "T-005",
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Backend transcript remains authoritative; live state should be a temporary incremental view that reconciles after refetch.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        875403
+      ]
     },
     {
       "id": "T-008",
