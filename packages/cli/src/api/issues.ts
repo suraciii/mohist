@@ -2185,6 +2185,20 @@ export function createIssueRoutes(
 
       const terminalStatuses = new Set(['completed', 'failed', 'timeout', 'cancelled']);
       const isTerminal = terminalStatuses.has(session.status);
+      const failedStatuses = new Set(['failed', 'timeout', 'cancelled']);
+      const deriveStatusKind = (): 'live' | 'finalizing' | 'completed' | 'failed' | 'stale' => {
+        if (failedStatuses.has(session.status)) return 'failed';
+        if (session.status === 'completed') return 'completed';
+        if (session.completedAt) return 'finalizing';
+        const lastActivityAt = transcript.session.lastActivityAt;
+        if (lastActivityAt) {
+          const lastActivityTime = new Date(lastActivityAt).getTime();
+          if (Number.isFinite(lastActivityTime) && Date.now() - lastActivityTime > 2 * 60 * 1000) {
+            return 'stale';
+          }
+        }
+        return 'live';
+      };
 
       const data = {
         id: session.id,
@@ -2206,6 +2220,7 @@ export function createIssueRoutes(
           executionId: session.executionId,
           title: session.title,
           status: session.status,
+          statusKind: deriveStatusKind(),
           model: session.model,
           stage: session.stage,
           createdAt: session.createdAt,

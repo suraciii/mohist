@@ -977,13 +977,14 @@ describe('API Routes', () => {
         expect(response.body.error).toContain('not found');
       });
 
-      it('should return empty commits when no worktree', async () => {
+      it('should return unavailable when no draft worktree exists', async () => {
         await issueService.create({ projectId, title: 'Test Issue' });
 
         const response = await request(server).get('/api/issues/1/commits');
 
         expect(response.status).toBe(200);
-        expect(response.body.data.commits).toEqual([]);
+        expect(response.body.data.available).toBe(false);
+        expect(response.body.data.reason).toBe('not_started');
       });
 
       it('should return commits with correct fields', async () => {
@@ -1044,13 +1045,14 @@ describe('API Routes', () => {
         expect(response.body.error).toContain('not found');
       });
 
-      it('should return 404 when no worktree exists', async () => {
+      it('should return unavailable when no draft worktree exists', async () => {
         await issueService.create({ projectId, title: 'Test Issue' });
 
         const response = await request(server).get('/api/issues/1/commits/abc1234/diff');
 
-        expect(response.status).toBe(404);
-        expect(response.body.error).toContain('No worktree');
+        expect(response.status).toBe(200);
+        expect(response.body.data.available).toBe(false);
+        expect(response.body.data.reason).toBe('not_started');
       });
     });
   });

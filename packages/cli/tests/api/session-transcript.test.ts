@@ -112,6 +112,10 @@ describe('Session Transcript API', () => {
     if (overrides.status && overrides.status !== 'running') {
       return coderSessionRepo.updateStatus(session.id, overrides.status);
     }
+    if (overrides.completedAt) {
+      db.run('UPDATE coder_session SET completed_at = ? WHERE id = ?', [overrides.completedAt, session.id]);
+      return coderSessionRepo.findById(session.id)!;
+    }
     return session;
   }
 
@@ -315,6 +319,28 @@ describe('Session Transcript API', () => {
         expect(response.body.data.metadata.model).toBe('claude-3-opus');
         expect(response.body.data.metadata.stage).toBe('build');
         expect(response.body.data.metadata.title).toBe('Test Session Title');
+        expect(response.body.data.metadata.statusKind).toBe('completed');
+      });
+
+      it('derives finalizing status when running session has terminal timing before refetch', async () => {
+        const { issue } = await setupProjectAndIssue();
+        const session = createSession(issue.id, {
+          status: 'running',
+          completedAt: '2024-01-01T10:30:00.000Z',
+        });
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'mohist_prompt', {
+          role: 'mohist',
+          text: 'Task',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        }, '2024-01-01T10:00:00.000Z');
+
+        const response = await request(server).get(`/api/issues/${issue.number}/coder-sessions/${session.id}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.metadata.status).toBe('running');
+        expect(response.body.data.metadata.statusKind).toBe('finalizing');
       });
 
       it('completedAt is null for running sessions', async () => {

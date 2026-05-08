@@ -25,6 +25,7 @@ export interface SessionMetadata {
   executionId: string | null;
   title: string | null;
   status: string;
+  statusKind?: 'loading' | 'live' | 'finalizing' | 'completed' | 'failed' | 'stale';
   model: string | null;
   stage: string | null;
   createdAt: string;
@@ -592,15 +593,17 @@ export class SessionTranscriptAssembler {
   }
 
   private sortEvents(events: SessionStreamLogEntry[]): SessionStreamLogEntry[] {
-    return [...events].sort((a, b) => {
-      const timeA = new Date(a.createdAt).getTime();
-      const timeB = new Date(b.createdAt).getTime();
+    return events.map((event, index) => ({ event, index })).sort((a, b) => {
+      const eventA = a.event;
+      const eventB = b.event;
+      const timeA = new Date(eventA.createdAt).getTime();
+      const timeB = new Date(eventB.createdAt).getTime();
       if (timeA !== timeB) return timeA - timeB;
-      const priorityA = EVENT_PRIORITY[a.eventType] ?? 3;
-      const priorityB = EVENT_PRIORITY[b.eventType] ?? 3;
+      const priorityA = EVENT_PRIORITY[eventA.eventType] ?? 3;
+      const priorityB = EVENT_PRIORITY[eventB.eventType] ?? 3;
       if (priorityA !== priorityB) return priorityA - priorityB;
-      return a.id.localeCompare(b.id);
-    });
+      return a.index - b.index;
+    }).map(({ event }) => event);
   }
 
   private processEvent(event: RawEvent): void {

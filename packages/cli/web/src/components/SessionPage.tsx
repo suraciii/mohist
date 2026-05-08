@@ -39,10 +39,11 @@ function getSessionStatusKind(
   lastActivityAt: string | null | undefined,
   isRunning: boolean,
 ): StatusKind {
+  if (rawStatus === 'failed' || rawStatus === 'timeout' || rawStatus === 'cancelled') {
+    return 'failed'
+  }
+  if (rawStatus === 'completed') return 'completed'
   if (!isRunning) {
-    if (rawStatus === 'failed' || rawStatus === 'timeout' || rawStatus === 'cancelled') {
-      return 'failed'
-    }
     return 'completed'
   }
   if (!lastActivityAt) return 'live'
@@ -308,6 +309,7 @@ export function SessionPage() {
     scrollToBottom,
     newContentAvailable,
     setIsNearBottom,
+    isFinalizing,
   } = useSessionTranscript({
     issueNumber,
     sessionId: sessionId ?? '',
@@ -315,6 +317,8 @@ export function SessionPage() {
     initialTurns: detail?.turns ?? [],
     isRunning,
   })
+
+  const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
 
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current
@@ -386,7 +390,7 @@ export function SessionPage() {
           issueNumber={issueNumber}
           issueTitle={issue?.title}
           meta={detail.metadata}
-          statusKind={statusKind}
+          statusKind={displayStatusKind}
           turnCount={turns.length}
         />
         <SessionLegacyMissingState />
@@ -401,7 +405,7 @@ export function SessionPage() {
           issueNumber={issueNumber}
           issueTitle={issue?.title}
           meta={detail.metadata}
-          statusKind={statusKind}
+          statusKind={displayStatusKind}
           turnCount={turns.length}
         />
         <SessionWaitingState />
@@ -416,7 +420,7 @@ export function SessionPage() {
           issueNumber={issueNumber}
           issueTitle={issue?.title}
           meta={detail.metadata}
-          statusKind={statusKind}
+          statusKind={displayStatusKind}
           turnCount={turns.length}
         />
         <SessionEmptyState issueNumber={issueNumber} />
@@ -430,7 +434,7 @@ export function SessionPage() {
         issueNumber={issueNumber}
         issueTitle={issue?.title}
         meta={detail.metadata}
-        statusKind={statusKind}
+        statusKind={displayStatusKind}
         turnCount={turns.length}
       />
 

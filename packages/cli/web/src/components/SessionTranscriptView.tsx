@@ -14,6 +14,10 @@ function isTodowriteTool(toolName: string): boolean {
   return toolName.toLowerCase() === 'todowrite'
 }
 
+function getToolIdentity(part: ToolPart): string {
+  return part.tool.normalizedName ?? part.tool.toolName
+}
+
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString()
 }
@@ -48,7 +52,6 @@ function PromptSummaryCard({
   const title = summary?.title ?? ''
   const subtitle = summary?.subtitle ?? summary?.outputPath ?? ''
   const isLegacy = kind === 'legacy-missing'
-  const isLong = rawText.length > 500
 
   const handleCopy = () => {
     navigator.clipboard.writeText(rawText).then(() => {
@@ -83,21 +86,25 @@ function PromptSummaryCard({
           <span>{formatDateTime(sentAt)}</span>
         </div>
 
-        {(title || subtitle) && (
-          <div className="mb-2">
-            {title && <p className="text-sm font-medium leading-relaxed">{title}</p>}
-            {subtitle && <p className="text-xs text-blue-200 mt-0.5">{subtitle}</p>}
-          </div>
-        )}
+        <div className="mb-2 space-y-1">
+          <p className="text-sm font-medium leading-relaxed">{title || 'Task prompt'}</p>
+          {subtitle && <p className="text-xs text-blue-200">{subtitle}</p>}
+          {summary?.outputPath && summary.outputPath !== subtitle && (
+            <p className="text-xs text-blue-200">Output: {summary.outputPath}</p>
+          )}
+          {summary?.contextFiles && summary.contextFiles.length > 0 && (
+            <p className="text-xs text-blue-100">
+              Context: {summary.contextFiles.join(', ')}
+            </p>
+          )}
+        </div>
 
-        {expanded || !isLong ? (
-          <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed">{rawText}</pre>
-        ) : (
-          <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed max-h-32 overflow-hidden">{rawText}</pre>
+        {expanded && (
+          <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed mt-2 border-t border-blue-500/40 pt-2">{rawText}</pre>
         )}
 
         <div className="flex items-center gap-2 mt-2">
-          {isLong && !expanded && (
+          {!expanded && rawText && (
             <button
               onClick={() => setExpanded(true)}
               className="text-xs text-blue-200 hover:text-white transition-colors"
@@ -105,7 +112,7 @@ function PromptSummaryCard({
               Show full prompt
             </button>
           )}
-          {expanded && isLong && (
+          {expanded && (
             <button
               onClick={() => setExpanded(false)}
               className="text-xs text-blue-200 hover:text-white transition-colors"
@@ -194,16 +201,14 @@ function SessionErrorPartView({ part }: { part: ErrorPart }) {
 }
 
 function ToolPartView({ part }: { part: ToolPart }) {
-  const toolName = part.tool.toolName === 'unknown' && part.tool.title
-    ? part.tool.title
-    : part.tool.toolName
+  const toolName = getToolIdentity(part)
   const entry: ToolCallEntry = {
     executionId: '',
     toolName,
     state: part.tool.status,
     timestamp: part.tool.startedAt ? new Date(part.tool.startedAt).getTime() : Date.now(),
     toolCallId: part.tool.toolCallId,
-    title: part.tool.title,
+    title: part.tool.displayTitle ?? part.tool.title ?? part.tool.target,
     rawInput: part.tool.input,
     rawOutput: part.tool.output,
     error: part.tool.error,
@@ -233,7 +238,7 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
     counts[name]++
     if (tool.tool.status === 'failed') failedCount++
 
-    if (tool.tool.input) {
+      if (tool.tool.input) {
       try {
         const parsed = JSON.parse(tool.tool.input)
         const filePath = parsed.file_path ?? parsed.filePath ?? parsed.path
@@ -272,16 +277,17 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
       </button>
-      if (expanded) {
+      {expanded && (
         <div className="px-3 pb-2 space-y-1.5 border-t border-gray-100">
           {tools.map((tool) => {
+            const name = getToolIdentity(tool)
             return (
               <div key={tool.id} className="rounded-md border border-gray-200 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-gray-50">
                   <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
                   </svg>
-                  <span className="text-xs font-mono text-gray-600">{tool.tool.toolName}</span>
+                  <span className="text-xs font-mono text-gray-600">{name}</span>
                   {tool.tool.status === 'failed' && (
                     <span className="text-xs text-red-500">failed</span>
                   )}
@@ -311,7 +317,7 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
             )
           })}
         </div>
-      }
+      )}
     </div>
   )
 }
@@ -402,18 +408,18 @@ function SessionTurnView({ turn }: { turn: SessionTurn }) {
     while (i < turn.assistant.length) {
       const part = turn.assistant[i]
 
-      if (part.type === 'tool' && isTodowriteTool(part.tool.toolName)) {
+      if (part.type === 'tool' && isTodowriteTool(getToolIdentity(part))) {
         parts.push(<TodoUpdateCard key={part.id} part={part} />)
         i++
         continue
       }
 
-      if (part.type === 'tool' && isContextTool(part.tool.toolName)) {
+      if (part.type === 'tool' && isContextTool(getToolIdentity(part))) {
         const contextGroup: ToolPart[] = []
         while (
           i < turn.assistant.length &&
           turn.assistant[i].type === 'tool' &&
-          isContextTool((turn.assistant[i] as ToolPart).tool.toolName)
+          isContextTool(getToolIdentity(turn.assistant[i] as ToolPart))
         ) {
           contextGroup.push(turn.assistant[i] as ToolPart)
           i++
