@@ -50,6 +50,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   const behind = data.behind ?? 0
   const branch = data.branch ?? `mo/issue-${issueNumber}`
   const baseBranch = data.baseBranch ?? 'master'
+  const isDone = stage === Stage.Done
 
   if (isRebasing) {
     return (
@@ -131,6 +132,11 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
         {isAgentRunning && (
           <p className="text-xs text-amber-500">Cannot rebase while agent is running</p>
         )}
+        {isDone && (
+          <p className="text-xs text-amber-600">
+            This Done worktree is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained worktree.
+          </p>
+        )}
         {rebaseMutation.isError && (
           <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
             {rebaseMutation.error instanceof ApiError
@@ -170,6 +176,11 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
           <span className="text-xs font-medium text-green-600">up to date</span>
         </div>
       </div>
+      {isDone && (
+        <p className="mt-2 text-xs text-gray-500">
+          This Done worktree is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained worktree.
+        </p>
+      )}
     </div>
   )
 }

@@ -178,9 +178,10 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
       db.close();
     });
 
-    it('POST /api/issues/:number/merge succeeds without calling worktreeManager.remove', async () => {
+    it('POST /api/issues/:number/merge marks issue Done/Completed/Merged without cleanup', async () => {
       const issue = await issueService.create({ projectId, title: 'Test Issue' });
-      issueRepo.updateStage(issue.id, Stage.Done);
+      issueRepo.updateStage(issue.id, Stage.Check);
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
       issueRepo.setMergeState(issue.id, MergeState.Pending);
 
       const response = await request(server)
@@ -189,7 +190,15 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
+      expect(response.body.data.issue.stage).toBe(Stage.Done);
+      expect(response.body.data.issue.status).toBe(IssueStatus.Completed);
+      expect(response.body.data.issue.mergeState).toBe(MergeState.Merged);
       expect(worktreeManager.remove).not.toHaveBeenCalled();
+
+      const stored = issueRepo.findById(issue.id);
+      expect(stored?.stage).toBe(Stage.Done);
+      expect(stored?.status).toBe(IssueStatus.Completed);
+      expect(stored?.mergeState).toBe(MergeState.Merged);
     });
   });
 
@@ -460,6 +469,30 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
 
       const footerCondition = source.match(/\{isDone && totalCount > 0 && \([^)]*\)\}/);
       expect(footerCondition).not.toBeNull();
+    });
+  });
+
+  describe('REQ-WEB-001: Done worktree retention copy is visible in issue detail path', () => {
+    const repoRoot = path.join(__dirname, '..');
+
+    it('IssueDetailPage renders BranchBar for worktree status', () => {
+      const source = fs.readFileSync(
+        path.join(repoRoot, 'web/src/components/IssueDetailPage.tsx'),
+        'utf-8'
+      );
+
+      expect(source).toContain('<BranchBar issueNumber={issueNumber} stage={issue.stage}');
+    });
+
+    it('BranchBar displays Done retained worktree and archive-removal copy', () => {
+      const source = fs.readFileSync(
+        path.join(repoRoot, 'web/src/components/BranchBar.tsx'),
+        'utf-8'
+      );
+
+      expect(source).toContain('stage === Stage.Done');
+      expect(source).toContain('retained for review, traceability, diff inspection, and debugging');
+      expect(source).toContain('Archiving will remove the retained worktree');
     });
   });
 
