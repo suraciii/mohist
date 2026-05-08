@@ -138,11 +138,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the stage and post-merge result shapes produced by earlier tasks.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        636619
+      ]
     },
     {
       "id": "T-006",
