@@ -48,11 +48,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Prefer extending archiveAllCompleted(projectId, { cleanup }) and POST /issues/archive-completed body parsing so --no-cleanup has the same meaning for single and batch archive.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        452744
+      ]
     },
     {
       "id": "T-003",
