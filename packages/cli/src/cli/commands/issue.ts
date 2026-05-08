@@ -404,7 +404,10 @@ export function setupIssueCommands(program: Command): void {
         if (response.success) {
           console.log(chalk.green(`✓ Archived issue #${number}`));
           if (response.data?.warning) {
-            console.log(chalk.yellow(`  Warning: ${response.data.warning}`));
+            const warningText = response.data.warning.startsWith('Warning:')
+              ? response.data.warning
+              : `Warning: ${response.data.warning}`;
+            console.log(chalk.yellow(`  ${warningText}`));
           }
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
