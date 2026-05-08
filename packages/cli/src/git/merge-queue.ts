@@ -313,18 +313,9 @@ export class MergeQueue {
       return;
     }
 
-    log.info('Fast-forward merge succeeded, cleaning up worktree', {
+    log.info('Fast-forward merge succeeded; retaining worktree until archive', {
       issueNumber: entry.issueNumber,
     });
-
-    try {
-      await this.deps.worktreeManager.remove(project.path, project.name, entry.issueNumber);
-    } catch (err) {
-      log.warn('Failed to clean up worktree after successful merge', {
-        issueNumber: entry.issueNumber,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
 
     entry.mergeState = MergeState.Merged;
     this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
