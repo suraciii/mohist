@@ -4,6 +4,7 @@ import * as yaml from 'yaml';
 import { findChangeDir } from '../openspec/detector';
 import { load as loadConfig, getAgentTimeoutConfig } from '../config/config-loader';
 import { Log } from '../util/log';
+import { Stage } from '../types';
 
 const log = Log.create({ service: 'workflow' });
 
@@ -145,6 +146,152 @@ export function detectOpenSpecForIssue(cwd: string, issueNumber: number): OpenSp
   }
 
   return { detected: true, changePath, tasksPath, mode: 'openspec' };
+}
+
+export type HealthGateStage = 'plan' | 'build' | 'check' | 'postMerge';
+
+export interface HealthGatePolicy {
+  enabled: boolean;
+  command: string;
+  timeout: number;
+  autoFix: boolean;
+  maxFixAttempts: number;
+  fallbackReaction: ReactionConfig;
+}
+
+export interface HealthGatePolicies {
+  plan: HealthGatePolicy;
+  build: HealthGatePolicy;
+  check: HealthGatePolicy;
+  postMerge: HealthGatePolicy;
+}
+
+export interface ReactionConfig {
+  type: 'retry-task' | 'auto-fix' | 'escalate' | 'ask-user';
+  maxAttempts?: number;
+  escalateTarget?: Stage;
+  fallbackReaction?: ReactionConfig;
+}
+
+const DEFAULT_PLAN_COMMAND = 'npm run typecheck';
+const DEFAULT_BUILD_COMMAND = 'npm run build';
+const DEFAULT_CHECK_COMMAND = 'npm run build && npm test';
+
+export const DEFAULT_HEALTH_GATE_POLICIES: HealthGatePolicies = {
+  plan: {
+    enabled: true,
+    command: DEFAULT_PLAN_COMMAND,
+    timeout: 5 * 60 * 1000,
+    autoFix: false,
+    maxFixAttempts: 0,
+    fallbackReaction: { type: 'ask-user' },
+  },
+  build: {
+    enabled: true,
+    command: DEFAULT_BUILD_COMMAND,
+    timeout: 5 * 60 * 1000,
+    autoFix: true,
+    maxFixAttempts: 2,
+    fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan },
+  },
+  check: {
+    enabled: true,
+    command: DEFAULT_CHECK_COMMAND,
+    timeout: 5 * 60 * 1000,
+    autoFix: true,
+    maxFixAttempts: 2,
+    fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build },
+  },
+  postMerge: {
+    enabled: true,
+    command: DEFAULT_CHECK_COMMAND,
+    timeout: 5 * 60 * 1000,
+    autoFix: false,
+    maxFixAttempts: 0,
+    fallbackReaction: { type: 'ask-user' },
+  },
+};
+
+function parseHealthGatePolicy(
+  raw: unknown,
+  defaults: HealthGatePolicy,
+  checksBuildTest?: BuildTestCheckConfig,
+): HealthGatePolicy {
+  if (!raw || typeof raw !== 'object') {
+    return checksBuildTest
+      ? {
+          enabled: defaults.enabled,
+          command: checksBuildTest.command,
+          timeout: checksBuildTest.timeout,
+          autoFix: checksBuildTest.autoFix,
+          maxFixAttempts: checksBuildTest.maxFixAttempts,
+          fallbackReaction: defaults.fallbackReaction,
+        }
+      : defaults;
+  }
+
+  const r = raw as Record<string, unknown>;
+
+  const command = (typeof r.command === 'string' && r.command.length > 0)
+    ? r.command
+    : (checksBuildTest ? checksBuildTest.command : defaults.command);
+
+  const timeout = typeof r.timeout === 'number' ? r.timeout : defaults.timeout;
+  const autoFix = typeof r.autoFix === 'boolean' ? r.autoFix : defaults.autoFix;
+  const maxFixAttempts = typeof r.maxFixAttempts === 'number' ? r.maxFixAttempts : defaults.maxFixAttempts;
+
+  let enabled = defaults.enabled;
+  if (r.enabled !== undefined) {
+    enabled = r.enabled === true;
+  }
+
+  let fallbackReaction = defaults.fallbackReaction;
+  if (r.fallbackReaction && typeof r.fallbackReaction === 'object') {
+    const fr = r.fallbackReaction as Record<string, unknown>;
+    fallbackReaction = {
+      type: typeof fr.type === 'string' ? fr.type as ReactionConfig['type'] : defaults.fallbackReaction.type,
+      maxAttempts: typeof fr.maxAttempts === 'number' ? fr.maxAttempts : defaults.fallbackReaction.maxAttempts,
+      escalateTarget: typeof fr.escalateTarget === 'string' ? fr.escalateTarget as Stage : defaults.fallbackReaction.escalateTarget,
+    };
+  }
+
+  return { enabled, command, timeout, autoFix, maxFixAttempts, fallbackReaction };
+}
+
+export function loadHealthGatePolicies(workflow: WorkflowConfig): HealthGatePolicies {
+  const parsed = workflow as any;
+  const healthGates = parsed.healthGates;
+  const checks = parsed.checks as any;
+  const checksBuildTest: BuildTestCheckConfig | undefined = checks?.buildTest
+    ? {
+        command: typeof checks.buildTest.command === 'string' ? checks.buildTest.command : DEFAULT_CHECKS_CONFIG.buildTest.command,
+        timeout: typeof checks.buildTest.timeout === 'number' ? checks.buildTest.timeout : DEFAULT_CHECKS_CONFIG.buildTest.timeout,
+        autoFix: typeof checks.buildTest.autoFix === 'boolean' ? checks.buildTest.autoFix : DEFAULT_CHECKS_CONFIG.buildTest.autoFix,
+        maxFixAttempts: typeof checks.buildTest.maxFixAttempts === 'number' ? checks.buildTest.maxFixAttempts : DEFAULT_CHECKS_CONFIG.buildTest.maxFixAttempts,
+      }
+    : undefined;
+
+  const hasExplicitCheckGate = healthGates && typeof healthGates === 'object' && healthGates.check !== undefined;
+
+  return {
+    plan: parseHealthGatePolicy(
+      healthGates?.plan,
+      DEFAULT_HEALTH_GATE_POLICIES.plan,
+    ),
+    build: parseHealthGatePolicy(
+      healthGates?.build,
+      DEFAULT_HEALTH_GATE_POLICIES.build,
+    ),
+    check: parseHealthGatePolicy(
+      healthGates?.check,
+      DEFAULT_HEALTH_GATE_POLICIES.check,
+      hasExplicitCheckGate ? undefined : checksBuildTest,
+    ),
+    postMerge: parseHealthGatePolicy(
+      healthGates?.postMerge,
+      DEFAULT_HEALTH_GATE_POLICIES.postMerge,
+    ),
+  };
 }
 
 export interface BuildTestCheckConfig {
