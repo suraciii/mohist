@@ -23,6 +23,7 @@ import { Log } from '../util/log';
 import type { IssueQueueStatus } from '../services/agent-runner-service';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { assembleSessionTranscript } from '../services/session-transcript-service';
+import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 
@@ -96,6 +97,7 @@ export function createIssueRoutes(
   _resolveConflictsDeps?: ConflictResolutionDeps,
   checkSuiteRepo?: CheckSuiteRepo,
   stageExecutionRepo?: StageExecutionRepo,
+  postMergeFinalizer?: PostMergeFinalizer,
 ): Hono {
   const app = new Hono();
 
@@ -2444,20 +2446,36 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `No worktree found for issue #${number}` } satisfies ApiResponse, 404);
       }
 
-      const result = await worktreeManager.mergeBack(project.path, project.name, issue.number, project.baseBranch);
+      const mergeResult = await worktreeManager.mergeBack(project.path, project.name, issue.number, project.baseBranch);
 
-      if (!result.success) {
-        return c.json({ success: false, error: result.message } satisfies ApiResponse, 409);
+      if (!mergeResult.success) {
+        return c.json({ success: false, error: mergeResult.message } satisfies ApiResponse, 409);
       }
 
-      const issueRepo = stateManager.getIssueRepo();
-      issueRepo.updateStage(issue.id, Stage.Done);
-      issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-      issueRepo.clearApprovalState(issue.id);
-      issueRepo.setMergeState(issue.id, MergeState.Merged);
+      if (postMergeFinalizer) {
+        const finalization = await postMergeFinalizer.finalize(issue);
+        if (!finalization.success) {
+          const errorParts = [`Post-merge health gate failed: ${finalization.error}`];
+          if (finalization.healthGateResult) {
+            errorParts.push(`Command: ${finalization.healthGateResult.command}`);
+            errorParts.push(`Duration: ${finalization.healthGateResult.duration}ms`);
+            errorParts.push(`Summary: ${finalization.healthGateResult.summary}`);
+          }
+          return c.json({
+            success: false,
+            error: errorParts.join(' | '),
+          } satisfies ApiResponse, 422);
+        }
+      } else {
+        const issueRepo = stateManager.getIssueRepo();
+        issueRepo.updateStage(issue.id, Stage.Done);
+        issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+        issueRepo.clearApprovalState(issue.id);
+        issueRepo.setMergeState(issue.id, MergeState.Merged);
+      }
 
       const refreshedIssue = issueService.getByNumber(projectId, number);
-      return c.json({ success: true, data: { issue: refreshedIssue ?? issue, message: result.message } } satisfies ApiResponse);
+      return c.json({ success: true, data: { issue: refreshedIssue ?? issue, message: mergeResult.message } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

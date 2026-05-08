@@ -32,7 +32,6 @@ interface MergeQueueDeps {
   getProjectPath: (projectId: string) => { path: string; name: string; baseBranch: string } | null;
   resolveConflicts: (entry: MergeEntry, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>;
   fixBuildErrors: (entry: MergeEntry, worktreePath: string, buildOutput: string) => Promise<{ success: boolean; error?: string }>;
-  onMergeSuccess?: (entry: MergeEntry) => void;
 }
 
 export class MergeQueue {
@@ -327,8 +326,6 @@ export class MergeQueue {
       projectId: entry.projectId,
       issueNumber: entry.issueNumber,
     });
-
-    this.deps.onMergeSuccess?.(entry);
 
     log.info('Merge completed successfully', { issueNumber: entry.issueNumber });
   }
