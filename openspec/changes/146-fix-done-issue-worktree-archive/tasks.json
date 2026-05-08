@@ -77,11 +77,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The CLI is a thin client; keep archive trust decisions in the API/service and only format returned data.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        379270
+      ]
     },
     {
       "id": "T-004",
