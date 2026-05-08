@@ -229,8 +229,8 @@ function syntheticToolCallId(data: Record<string, unknown>, fallbackCreatedAt: s
 }
 
 function inferNormalizedToolName(d: Record<string, unknown>): string {
-  if (typeof d.toolName === 'string' && d.toolName) return d.toolName;
-  if (typeof d.name === 'string' && d.name) return d.name;
+  if (typeof d.toolName === 'string' && d.toolName && d.toolName !== 'unknown' && isKnownToolName(d.toolName)) return d.toolName;
+  if (typeof d.name === 'string' && d.name && isKnownToolName(d.name)) return d.name;
   if (typeof d.title === 'string' && d.title) {
     const titleLower = d.title.toLowerCase();
     if (['apply_patch', 'edit', 'write', 'read', 'glob', 'grep', 'bash', 'list', 'search'].some(t => titleLower.includes(t))) {
@@ -238,28 +238,50 @@ function inferNormalizedToolName(d: Record<string, unknown>): string {
     }
   }
   const rawInput = d.rawInput ?? d.input;
-  if (rawInput && typeof rawInput === 'object') {
-    const inputObj = rawInput as Record<string, unknown>;
-    if (inputObj.patchText !== undefined) return 'apply_patch';
-    if (inputObj.command !== undefined || inputObj.script !== undefined) return 'bash';
-    if (inputObj.pattern !== undefined || inputObj.query !== undefined || inputObj.search !== undefined) {
-      if (inputObj.file_path !== undefined) return 'grep';
-      return 'search';
+  if (rawInput) {
+    if (typeof rawInput === 'object' && rawInput !== null) {
+      const inputObj = rawInput as Record<string, unknown>;
+      if (inputObj.patchText !== undefined) return 'apply_patch';
+      if (inputObj.command !== undefined || inputObj.script !== undefined) return 'bash';
+      if (inputObj.pattern !== undefined || inputObj.query !== undefined || inputObj.search !== undefined) {
+        if (inputObj.file_path !== undefined) return 'grep';
+        return 'search';
+      }
+      if (inputObj.file_path !== undefined || inputObj.path !== undefined) return 'read';
+      if (inputObj.pattern !== undefined) return 'glob';
+      if (inputObj.todos !== undefined) return 'todowrite';
+    } else if (typeof rawInput === 'string') {
+      try {
+        const parsed = JSON.parse(rawInput);
+        if (parsed && typeof parsed === 'object' && parsed !== null) {
+          const inputObj = parsed as Record<string, unknown>;
+          if (inputObj.patchText !== undefined) return 'apply_patch';
+          if (inputObj.command !== undefined || inputObj.script !== undefined) return 'bash';
+          if (inputObj.pattern !== undefined || inputObj.query !== undefined || inputObj.search !== undefined) {
+            if (inputObj.file_path !== undefined) return 'grep';
+            return 'search';
+          }
+          if (inputObj.file_path !== undefined || inputObj.path !== undefined) return 'read';
+          if (inputObj.pattern !== undefined) return 'glob';
+          if (inputObj.todos !== undefined) return 'todowrite';
+        }
+      } catch {
+      }
     }
-    if (inputObj.file_path !== undefined || inputObj.path !== undefined) return 'read';
-    if (inputObj.pattern !== undefined) return 'glob';
-    if (inputObj.todos !== undefined) return 'todowrite';
   }
   const rawOutput = d.rawOutput ?? d.output;
   if (rawOutput) {
     if (typeof rawOutput === 'string') {
       try {
         const parsed = JSON.parse(rawOutput);
-        if (parsed && typeof parsed === 'object' && parsed.metadata && typeof parsed.metadata === 'object') {
-          const meta = parsed.metadata as Record<string, unknown>;
-          if (typeof meta.toolName === 'string') return meta.toolName;
-          if (typeof meta.name === 'string') return meta.name;
-          if (typeof meta.title === 'string') return meta.title;
+        if (parsed && typeof parsed === 'object' && parsed !== null) {
+          const outputObj = parsed as Record<string, unknown>;
+          if (outputObj.metadata && typeof outputObj.metadata === 'object') {
+            const meta = (outputObj.metadata as Record<string, unknown>);
+            if (typeof meta.toolName === 'string') return meta.toolName;
+            if (typeof meta.name === 'string') return meta.name;
+            if (typeof meta.title === 'string') return meta.title;
+          }
         }
       } catch {
       }
@@ -273,7 +295,23 @@ function inferNormalizedToolName(d: Record<string, unknown>): string {
       }
     }
   }
+  if (typeof d.metadata === 'object' && d.metadata !== null) {
+    const meta = d.metadata as Record<string, unknown>;
+    if (typeof meta.toolName === 'string') return meta.toolName;
+    if (typeof meta.name === 'string') return meta.name;
+    if (typeof meta.title === 'string') return meta.title;
+  }
   return 'unknown';
+}
+
+function isKnownToolName(toolName: string): boolean {
+  const lower = toolName.toLowerCase();
+  return [
+    'apply_patch', 'edit', 'write', 'write_file',
+    'read', 'read_file', 'glob', 'grep', 'bash', 'shell',
+    'list', 'search', 'membrowse', 'memread', 'memsearch',
+    'todowrite', 'todo',
+  ].includes(lower);
 }
 
 function parseToolCallStart(data: Record<string, unknown>, fallbackCreatedAt: string): ToolCallStartData | null {
@@ -490,6 +528,7 @@ export class SessionTranscriptAssembler {
   private partIndexByEventId: Map<string, number> = new Map();
   private syntheticToolIdCounter = 0;
   private pendingToolNames = new Map<string, string>();
+  private pendingToolByTitle = new Map<string, string>();
   private eventCount = 0;
   private toolCount = 0;
   private warnings: TranscriptWarning[] = [];
@@ -611,9 +650,9 @@ export class SessionTranscriptAssembler {
     }
 
     if (eventType === 'tool_call_update') {
+      this.ensureToolCallId(data);
       const update = parseToolCallUpdate(data, createdAt);
       if (update) {
-        this.toolCount++;
         this.handleToolCallUpdate(update);
       }
       return;
@@ -647,7 +686,7 @@ export class SessionTranscriptAssembler {
     if (eventType === 'acp_session_completed') {
       const success = data.success === false ? false : true;
       if (!success && data.error) {
-        this.handleError('failed', String(data.error), createdAt);
+        this.handleError('failed', String(data.error), createdAt, false);
       }
       return;
     }
@@ -758,21 +797,27 @@ export class SessionTranscriptAssembler {
     const hasId = typeof d.toolCallId === 'string' || typeof d.id === 'string' || typeof d.callId === 'string';
     if (hasId) return;
     const toolName = typeof d.toolName === 'string' ? d.toolName : (typeof d.name === 'string' ? d.name : 'unknown');
-    const status = typeof d.status === 'string' ? d.status : '';
+    const title = typeof d.title === 'string' ? d.title : undefined;
     const key = toolName;
-    if (status === 'completed' || status === 'failed') {
-      const pendingId = this.pendingToolNames.get(key);
-      if (pendingId) {
-        this.pendingToolNames.delete(key);
-        this.setToolCallIdOnData(data, pendingId);
-      } else {
-        const newId = `synthetic-${this.syntheticToolIdCounter++}`;
-        this.setToolCallIdOnData(data, newId);
-      }
+    const pendingId = this.pendingToolNames.get(key);
+    const titleKey = title ? `${toolName}:${title}` : undefined;
+    const pendingByTitle = titleKey ? this.pendingToolByTitle.get(titleKey) : undefined;
+    if (pendingByTitle) {
+      this.pendingToolNames.delete(key);
+      this.pendingToolByTitle.delete(titleKey!);
+      this.setToolCallIdOnData(data, pendingByTitle);
+    } else if ((d.status === 'completed' || d.status === 'failed') && pendingId) {
+      this.pendingToolNames.delete(key);
+      this.setToolCallIdOnData(data, pendingId);
     } else {
       const newId = `synthetic-${this.syntheticToolIdCounter++}`;
-      this.pendingToolNames.set(key, newId);
       this.setToolCallIdOnData(data, newId);
+      if (d.status !== 'completed' && d.status !== 'failed') {
+        this.pendingToolNames.set(key, newId);
+        if (titleKey) {
+          this.pendingToolByTitle.set(titleKey, newId);
+        }
+      }
     }
   }
 
@@ -1007,7 +1052,7 @@ export class SessionTranscriptAssembler {
     }
   }
 
-  private handleError(kind: ErrorPart['kind'], message: string, createdAt: string): void {
+  private handleError(kind: ErrorPart['kind'], message: string, createdAt: string, closeTerminal = true): void {
     if (!this.currentTurn) {
       this.ensureActiveTurn(createdAt);
     }
@@ -1021,7 +1066,7 @@ export class SessionTranscriptAssembler {
     };
     this.currentTurn!.assistant.push(errorPart);
 
-    if (kind === 'timeout' || kind === 'failed' || kind === 'cancelled') {
+    if (closeTerminal && (kind === 'timeout' || kind === 'failed' || kind === 'cancelled')) {
       this.closeOpenTurn(createdAt);
     }
   }
