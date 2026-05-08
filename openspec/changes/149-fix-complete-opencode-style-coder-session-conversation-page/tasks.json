@@ -320,9 +320,15 @@
       ],
       "passes": false,
       "notes": "Final verification consumes every earlier output. Keep fixtures local to tests unless a shared fixture directory already exists.",
-      "attempts": 0,
+      "attempts": 3,
       "order": 999999,
-      "error": null
+      "error": "Auto-skipped (no onAskUser): [PROCESS_EXIT] opencode process exited unexpectedly (exit code: killed by signal)",
+      "durations": [
+        495803,
+        1837603,
+        1835585,
+        59516
+      ]
     }
   ]
 }
