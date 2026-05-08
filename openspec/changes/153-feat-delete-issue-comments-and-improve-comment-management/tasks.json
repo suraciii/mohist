@@ -107,11 +107,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes all feature outputs. If a layer lacks practical test harness coverage, document the manual verification command/output in the task result.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        997976
+      ]
     }
   ]
 }
