@@ -143,11 +143,14 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep tests deterministic and avoid requiring a real remote merge. Use existing mock WorktreeManager and web test patterns where available.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        557981
+      ]
     }
   ]
 }
