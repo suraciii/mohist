@@ -74,7 +74,7 @@ describe('SessionTranscriptView', () => {
       expect(screen.getAllByText(/10:00:00|2024/).length).toBeGreaterThan(0)
     })
 
-    it('expands long prompt when Show more is clicked', async () => {
+    it('expands long prompt when Show full prompt is clicked', async () => {
       const longText = 'A'.repeat(600)
       const turns = [makeTurn({
         user: {
@@ -88,10 +88,10 @@ describe('SessionTranscriptView', () => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText('Show more')).toBeInTheDocument()
+        expect(screen.getByText('Show full prompt')).toBeInTheDocument()
       })
 
-      fireEvent.click(screen.getByText('Show more'))
+      fireEvent.click(screen.getByText('Show full prompt'))
 
       await waitFor(() => {
         expect(screen.getByText('Show less')).toBeInTheDocument()
@@ -317,7 +317,7 @@ describe('SessionTranscriptView', () => {
   })
 
   describe('turn rendering', () => {
-    it('renders turn indicator with Turn label', async () => {
+    it('renders Mohist speaker label with timestamp', async () => {
       const turns = [makeTurn({
         startedAt: '2024-01-01T10:00:00.000Z',
       })]
@@ -325,7 +325,7 @@ describe('SessionTranscriptView', () => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText('Turn')).toBeInTheDocument()
+        expect(screen.getByText('Mohist')).toBeInTheDocument()
       })
     })
 
@@ -346,6 +346,43 @@ describe('SessionTranscriptView', () => {
         expect(screen.getByText(/Missing Prompt/i)).toBeInTheDocument()
       })
       expect(screen.getByText(/Incomplete/i)).toBeInTheDocument()
+    })
+
+    it('renders Coder speaker label when assistant parts exist', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Hello world',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: null,
+        } as TextPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Coder')).toBeInTheDocument()
+      })
+    })
+
+    it('renders legacy missing prompt with gray styling and no expand', async () => {
+      const turns = [makeTurn({
+        user: {
+          role: 'mohist',
+          text: '',
+          kind: 'legacy-missing',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        },
+        incomplete: true,
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Missing Prompt/i)).toBeInTheDocument()
+      })
+      expect(screen.queryByText('Show full prompt')).not.toBeInTheDocument()
     })
   })
 })
