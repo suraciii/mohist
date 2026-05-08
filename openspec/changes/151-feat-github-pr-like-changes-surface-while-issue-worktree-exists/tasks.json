@@ -47,11 +47,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the response shapes produced by T-001. Expected files include packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts, and IssueDetailPage.tsx.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1804592
+      ]
     },
     {
       "id": "T-003",
