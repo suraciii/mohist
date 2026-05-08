@@ -3,13 +3,13 @@ import { Stage } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
-import { loadWorkflow } from './workflow-loader';
+import { loadWorkflow, loadHealthGatePolicies } from './workflow-loader';
 import { GitCommitter } from './git-committer';
 import { BaseStageRunner } from './base-stage-runner';
 import type { StageContext, StageRunResult } from './stage-context';
 import type { Check } from './checks';
 import { AllTasksCompleteCheck } from './checks/all-tasks-complete-check';
-import { CodeCompilesCheck } from './checks/code-compiles-check';
+import { HealthGateCheck } from './checks/health-gate-check';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 
@@ -19,17 +19,17 @@ export class BuildStageRunner extends BaseStageRunner {
   private worktreePath: string;
   private projectId?: string;
   private gitCommitter: GitCommitter;
-  private checks: Check[];
+  private buildHealthGatePolicy: import('./workflow-loader').HealthGatePolicy;
 
   constructor(opts: { worktreePath: string; projectId?: string }) {
     super();
     this.worktreePath = opts.worktreePath;
     this.projectId = opts.projectId;
     this.gitCommitter = new GitCommitter(this.worktreePath);
-    this.checks = [
-      new AllTasksCompleteCheck(),
-      new CodeCompilesCheck({ worktreePath: this.worktreePath }),
-    ];
+    const wf = loadWorkflow(this.worktreePath);
+    this.buildHealthGatePolicy = typeof wf === 'string'
+      ? { enabled: true, command: 'npm run build', timeout: 300000, autoFix: true, maxFixAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build } }
+      : loadHealthGatePolicies(wf).build;
   }
 
   canHandle(stage: Stage): boolean {
@@ -252,7 +252,14 @@ export class BuildStageRunner extends BaseStageRunner {
   }
 
   protected getChecks(): Check[] {
-    return this.checks;
+    return [
+      new AllTasksCompleteCheck(),
+      new HealthGateCheck({
+        worktreePath: this.worktreePath,
+        policy: this.buildHealthGatePolicy,
+        stage: 'build',
+      }),
+    ];
   }
 
   protected getNextStage(): Stage {
