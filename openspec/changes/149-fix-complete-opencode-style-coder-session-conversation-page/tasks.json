@@ -56,11 +56,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the enriched assembler output from T-001 and makes it the API contract for the session page.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        396393
+      ]
     },
     {
       "id": "T-003",
