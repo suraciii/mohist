@@ -51,11 +51,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Prefer focused unit or integration tests around CheckStageRunner/BaseStageRunner rather than broad end-to-end tests. Mock checks and artifact generation where possible to make ordering assertions deterministic.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1077173
+      ]
     }
   ]
 }
