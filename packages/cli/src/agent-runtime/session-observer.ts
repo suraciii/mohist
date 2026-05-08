@@ -28,7 +28,7 @@ export interface SessionContext {
   readonly projectId: string;
   readonly executionId: string | undefined;
   readonly acpSessionId: string;
-  readonly coderSessionId: string | undefined;
+  readonly coderSessionId?: string | undefined;
   readonly stage: string | undefined;
   readonly model: string | undefined;
   readonly processPid: number | undefined;
