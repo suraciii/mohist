@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Markdown from 'react-markdown'
-import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart } from '../lib/types'
+import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart, PromptSummary } from '../lib/types'
 import { ToolCallCard } from './ToolCallCard'
 import type { ToolCallEntry } from '../lib/types'
 
@@ -12,47 +12,95 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString()
 }
 
-function MohistPromptCard({ text, kind, sentAt }: { text: string; kind: string; sentAt: string }) {
+const KIND_LABELS: Record<string, string> = {
+  initial: 'Initial Task',
+  task: 'Task',
+  retry: 'Retry',
+  followup: 'Follow-up',
+  recovery: 'Recovery',
+  'legacy-missing': 'Missing Prompt',
+}
+
+function PromptSummaryCard({
+  summary,
+  kind,
+  sentAt,
+  rawText,
+}: {
+  summary: PromptSummary | undefined
+  kind: string
+  sentAt: string
+  rawText: string
+}) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
-  const isLong = text.length > 500
 
-  const kindLabels: Record<string, string> = {
-    initial: 'Initial Task',
-    task: 'Task',
-    retry: 'Retry',
-    followup: 'Follow-up',
-    recovery: 'Recovery',
-    'legacy-missing': 'Missing Prompt',
-  }
+  const title = summary?.title ?? ''
+  const subtitle = summary?.subtitle ?? summary?.outputPath ?? ''
+  const isLegacy = kind === 'legacy-missing'
+  const isLong = rawText.length > 500
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(text).then(() => {
+    navigator.clipboard.writeText(rawText).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
+  }
+
+  if (isLegacy) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-gray-400 text-white px-4 py-2.5 text-sm">
+          <div className="flex items-center gap-2 text-xs text-gray-200 mb-1.5">
+            <span className="font-medium">{KIND_LABELS[kind] ?? kind}</span>
+            <span className="text-gray-300">·</span>
+            <span>{formatDateTime(sentAt)}</span>
+          </div>
+          <p className="text-sm italic text-gray-100">
+            Prompt was not recorded for this historical session
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="flex justify-end">
       <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-blue-600 text-white px-4 py-2.5 text-sm">
         <div className="flex items-center gap-2 text-xs text-blue-200 mb-1.5">
-          <span className="font-medium">{kindLabels[kind] ?? kind}</span>
+          <span className="font-medium">{KIND_LABELS[kind] ?? kind}</span>
           <span className="text-blue-300">·</span>
           <span>{formatDateTime(sentAt)}</span>
         </div>
-        {expanded || !isLong ? (
-          <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed">{text}</pre>
-        ) : (
-          <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed max-h-32 overflow-hidden">{text}</pre>
+
+        {(title || subtitle) && (
+          <div className="mb-2">
+            {title && <p className="text-sm font-medium leading-relaxed">{title}</p>}
+            {subtitle && <p className="text-xs text-blue-200 mt-0.5">{subtitle}</p>}
+          </div>
         )}
+
+        {expanded || !isLong ? (
+          <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed">{rawText}</pre>
+        ) : (
+          <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed max-h-32 overflow-hidden">{rawText}</pre>
+        )}
+
         <div className="flex items-center gap-2 mt-2">
-          {isLong && (
+          {isLong && !expanded && (
             <button
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => setExpanded(true)}
               className="text-xs text-blue-200 hover:text-white transition-colors"
             >
-              {expanded ? 'Show less' : 'Show more'}
+              Show full prompt
+            </button>
+          )}
+          {expanded && isLong && (
+            <button
+              onClick={() => setExpanded(false)}
+              className="text-xs text-blue-200 hover:text-white transition-colors"
+            >
+              Show less
             </button>
           )}
           <button
@@ -158,13 +206,9 @@ function SessionTurnView({ turn }: { turn: SessionTurn }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-xs text-gray-400">
-        <span className="font-medium text-gray-600">Turn</span>
-        {turn.startedAt && (
-          <>
-            <span className="text-gray-300">·</span>
-            <span>{formatDateTime(turn.startedAt)}</span>
-          </>
-        )}
+        <span className="font-medium text-gray-600">Mohist</span>
+        <span className="text-gray-300">·</span>
+        <span>{formatDateTime(turn.startedAt)}</span>
         {turn.incomplete && (
           <>
             <span className="text-gray-300">·</span>
@@ -173,7 +217,18 @@ function SessionTurnView({ turn }: { turn: SessionTurn }) {
         )}
       </div>
 
-      <MohistPromptCard text={turn.user.text} kind={turn.user.kind} sentAt={turn.user.sentAt} />
+      <PromptSummaryCard
+        summary={turn.user.summary}
+        kind={turn.user.kind}
+        sentAt={turn.user.sentAt}
+        rawText={turn.user.text}
+      />
+
+      {turn.assistant.length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-gray-400 ml-2">
+          <span className="font-medium text-gray-600">Coder</span>
+        </div>
+      )}
 
       {turn.assistant.map((part) => {
         if (part.type === 'text') return <AssistantTextPartView key={part.id} part={part} />
