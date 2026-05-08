@@ -2450,41 +2450,30 @@ export function createIssueRoutes(
         return c.json({ success: false, error: mergeResult.message } satisfies ApiResponse, 409);
       }
 
-      if (postMergeFinalizer) {
-        const finalization = await postMergeFinalizer.finalize(issue);
-        if (!finalization.success) {
-          return c.json({
-            success: false,
-            error: finalization.error || 'Post-merge health gate failed',
-            data: { healthGateResult: finalization.healthGateResult },
-          } satisfies ApiResponse, 422);
-        }
-        const refreshedIssue = issueService.getByNumber(projectId, number);
+      if (!postMergeFinalizer) {
         return c.json({
-          success: true,
-          data: {
-            issue: refreshedIssue ?? issue,
-            message: mergeResult.message,
-            healthGateResult: finalization.healthGateResult,
-          },
-        } satisfies ApiResponse);
-      } else {
-        const issueRepo = stateManager.getIssueRepo();
-        issueRepo.updateStage(issue.id, Stage.Done);
-        issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-        issueRepo.clearApprovalState(issue.id);
-        issueRepo.setMergeState(issue.id, MergeState.Merged);
-        issueRepo.updateBlockedReason(issue.id, null);
-
-        const refreshedIssue = issueService.getByNumber(projectId, number);
-        return c.json({
-          success: true,
-          data: {
-            issue: refreshedIssue ?? issue,
-            message: mergeResult.message,
-          },
-        } satisfies ApiResponse);
+          success: false,
+          error: 'Post-merge finalizer not configured',
+        } satisfies ApiResponse, 500);
       }
+
+      const finalization = await postMergeFinalizer.finalize(issue);
+      if (!finalization.success) {
+        return c.json({
+          success: false,
+          error: finalization.error || 'Post-merge health gate failed',
+          data: { healthGateResult: finalization.healthGateResult },
+        } satisfies ApiResponse, 422);
+      }
+      const refreshedIssue = issueService.getByNumber(projectId, number);
+      return c.json({
+        success: true,
+        data: {
+          issue: refreshedIssue ?? issue,
+          message: mergeResult.message,
+          healthGateResult: finalization.healthGateResult,
+        },
+      } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

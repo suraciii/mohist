@@ -1017,7 +1017,7 @@ describe('API Routes', () => {
       expect(response.body.data.issue.stage).toBe(Stage.Done);
     });
 
-    it('completes direct merge when postMergeFinalizer is missing', async () => {
+    it('fails closed when postMergeFinalizer is missing', async () => {
       const project = await projectService.create({ name: 'Test Project', path: '/tmp/test-project' });
       projectService.setCurrent(project);
       const issue = await issueService.create({ projectId: project.id, title: 'Merge Me' });
@@ -1031,14 +1031,12 @@ describe('API Routes', () => {
 
       const response = await request(server).post(`/api/issues/${issue.number}/merge`);
 
-      expect(response.status).toBe(200);
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.issue.stage).toBe(Stage.Done);
-      expect(response.body.data.issue.status).toBe(IssueStatus.Completed);
-      expect(response.body.data.issue.mergeState).toBe(MergeState.Merged);
-      expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Done);
-      expect(issueRepo.findById(issue.id)?.status).toBe(IssueStatus.Completed);
-      expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.Merged);
+      expect(response.status).toBe(500);
+      expect(response.body.success).toBe(false);
+      expect(response.body.error).toBe('Post-merge finalizer not configured');
+      expect(issueRepo.findById(issue.id)?.stage).not.toBe(Stage.Done);
+      expect(issueRepo.findById(issue.id)?.status).not.toBe(IssueStatus.Completed);
+      expect(issueRepo.findById(issue.id)?.mergeState).not.toBe(MergeState.Merged);
     });
   });
 
