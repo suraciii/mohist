@@ -152,11 +152,13 @@
       ],
       "passes": true,
       "notes": "Consumes changedFiles/file summary fields from T-001 and the grouped transcript rendering structure from T-004.",
-      "attempts": 1,
+      "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
-        640595
+        1808957,
+        1805360,
+        441949
       ]
     },
     {
@@ -182,14 +184,13 @@
         "T-003",
         "T-005"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Consumes API metadata from T-002 and changed-file summaries rendered by T-005.",
-      "attempts": 2,
+      "attempts": 0,
       "order": 999999,
       "error": null,
       "durations": [
-        1805024,
-        852763
+        1806886
       ]
     },
     {
@@ -217,14 +218,11 @@
         "T-005",
         "T-006"
       ],
-      "passes": true,
+      "passes": false,
       "notes": "Backend transcript remains authoritative; live state should be a temporary incremental view that reconciles after refetch.",
-      "attempts": 1,
+      "attempts": 0,
       "order": 999999,
-      "error": null,
-      "durations": [
-        875403
-      ]
+      "error": null
     },
     {
       "id": "T-008",
@@ -248,9 +246,9 @@
         "T-002",
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes transcript normalization and live reconciliation work to verify the persisted event inputs are complete enough for replay.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null
     },
