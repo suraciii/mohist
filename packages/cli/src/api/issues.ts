@@ -2154,6 +2154,7 @@ export function createIssueRoutes(
           'tool_call',
           'tool_call_update',
           'user_message_chunk',
+          'mohist_prompt',
         ]);
         const rawFallbackLogs = workflowLogRepo.findBySessionId(session.acpSessionId);
         fallbackLogs = rawFallbackLogs
@@ -2212,6 +2213,13 @@ export function createIssueRoutes(
           cwd: projectService.getById(projectId)?.path ?? null,
           worktree: worktreeManager?.getPath(projectService.getById(projectId)?.name ?? '', issue.number) ?? null,
           firstPromptSentAt: typeof firstPromptData?.sentAt === 'string' ? firstPromptData.sentAt : null,
+          lastActivityAt: transcript.session.lastActivityAt ?? null,
+          eventCount: transcript.session.eventCount ?? null,
+          toolCount: transcript.session.toolCount ?? null,
+          turnCount: transcript.session.turnCount ?? null,
+          changedFiles: transcript.session.changedFiles ?? null,
+          warnings: transcript.session.warnings ?? null,
+          hasUnknownTools: transcript.session.hasUnknownTools ?? null,
         },
         turns: transcript.turns,
         incomplete: transcript.incomplete,

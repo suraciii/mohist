@@ -342,8 +342,32 @@ export interface CoderSessionItem {
 
 export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' | 'legacy-missing'
 
+export interface FileChangeSummary {
+  path: string
+  operation: 'created' | 'modified' | 'deleted' | 'moved'
+  additions?: number
+  deletions?: number
+  oldPath?: string
+  rawDetail?: string
+}
+
+export interface TranscriptWarning {
+  code: string
+  message: string
+}
+
+export interface PromptSummary {
+  title?: string
+  subtitle?: string
+  outputPath?: string
+  contextFiles?: string[]
+  kind: PromptKind
+  rawText?: string
+}
+
 export interface SessionMetadata {
   sessionId: string
+  coderSessionId: string
   issueId: string
   acpSessionId: string
   executionId: string | null
@@ -353,6 +377,16 @@ export interface SessionMetadata {
   stage: string | null
   createdAt: string
   completedAt: string | null
+  cwd?: string | null
+  worktree?: string | null
+  firstPromptSentAt?: string | null
+  lastActivityAt?: string | null
+  eventCount?: number
+  toolCount?: number
+  turnCount?: number
+  changedFiles?: FileChangeSummary[]
+  warnings?: TranscriptWarning[]
+  hasUnknownTools?: boolean
 }
 
 export interface TextPart {
@@ -376,6 +410,10 @@ export interface ToolPart {
   type: 'tool'
   tool: {
     toolCallId: string
+    normalizedName?: string
+    displayTitle?: string
+    displaySubtitle?: string
+    category?: string
     toolName: string
     status: 'started' | 'completed' | 'failed'
     title?: string
@@ -385,6 +423,11 @@ export interface ToolPart {
     error?: string
     startedAt: string
     completedAt?: string | null
+    rawInput?: string
+    rawOutput?: string
+    metadata?: Record<string, unknown>
+    changedFiles?: FileChangeSummary[]
+    warnings?: TranscriptWarning[]
   }
 }
 
@@ -408,6 +451,7 @@ export interface SessionTurn {
     text: string
     kind: PromptKind
     sentAt: string
+    summary?: PromptSummary
   }
   assistant: SessionPart[]
 }
