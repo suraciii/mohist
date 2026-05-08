@@ -21,7 +21,7 @@ import { createSettingsSystemRoutes } from '../api/settings-system';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
-import { Stage, IssueStatus, MergeState } from '../types';
+import { Stage } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import { createWorkflowSessionObservers } from '../agent-runtime';
@@ -125,7 +125,17 @@ async function main(): Promise<void> {
     opencodeBinPath,
   };
 
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps, sessionStreamLogRepo, stateManager.getStageExecutionRepo());
+  const issueRepo = stateManager.getIssueRepo();
+  const coderSessionRepo = stateManager.getCoderSessionRepo();
+
+  const postMergeFinalizer = new PostMergeFinalizer(
+    issueRepo,
+    stateManager.getProjectRepo(),
+    stateManager.getStageExecutionRepo(),
+    eventBus,
+  );
+
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps, sessionStreamLogRepo, stateManager.getStageExecutionRepo(), postMergeFinalizer);
 
   agentRunner.setLlmConfig(fileConfig);
 
@@ -136,16 +146,6 @@ async function main(): Promise<void> {
   if (expiredCount > 0) {
     log.info(`Expired ${expiredCount} orphaned pending question(s) from previous session`);
   }
-
-  const issueRepo = stateManager.getIssueRepo();
-  const coderSessionRepo = stateManager.getCoderSessionRepo();
-
-  const postMergeFinalizer = new PostMergeFinalizer(
-    issueRepo,
-    stateManager.getProjectRepo(),
-    stateManager.getStageExecutionRepo(),
-    eventBus,
-  );
 
   const mergeQueue = new MergeQueue({
     worktreeManager,
@@ -229,6 +229,7 @@ async function main(): Promise<void> {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
+    postMergeFinalizer,
   });
 
   mergeQueue.recoverFromDB();
@@ -276,37 +277,6 @@ async function main(): Promise<void> {
 
   eventBus.on('agent_completed', async ({ issueNumber }) => {
     log.info('Agent completed', { issueNumber });
-  });
-
-  eventBus.on('merge_completed', async ({ issueId, issueNumber }) => {
-    log.info('Merge completed, running post-merge finalization', { issueNumber });
-
-    try {
-      const issue = issueRepo.findById(issueId);
-      if (!issue) return;
-      if (issue.stage === Stage.Done && issue.status === IssueStatus.Completed && issue.mergeState === MergeState.Merged) {
-        log.info('merge_completed: issue already completed, skipping', { issueNumber });
-        return;
-      }
-      if (issue.stage === Stage.Check || issue.mergeState === MergeState.Merged) {
-        const result = await postMergeFinalizer.finalize(issue);
-        if (!result.success) {
-          log.warn('Post-merge finalization failed', {
-            issueNumber,
-            error: result.error,
-            command: result.healthGateResult?.command,
-            summary: result.healthGateResult?.summary,
-          });
-        } else {
-          log.info('Post-merge finalization succeeded', { issueNumber });
-        }
-      }
-    } catch (err) {
-      log.error('Failed to transition issue to done after merge_completed', {
-        issueNumber,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
   });
 
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');

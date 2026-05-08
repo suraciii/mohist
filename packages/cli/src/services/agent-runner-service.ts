@@ -25,6 +25,7 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
+import type { PostMergeFinalizer } from './post-merge-finalizer';
 
 const execFileAsync = promisify(execFile);
 
@@ -123,6 +124,7 @@ export class AgentRunnerService {
     private readonly conflictResolutionDeps?: ConflictResolutionDeps,
     private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
     private readonly stageExecutionRepo?: StageExecutionRepo,
+    private readonly postMergeFinalizer?: PostMergeFinalizer,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -1031,13 +1033,21 @@ export class AgentRunnerService {
     }
 
     if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
-      log.info('Advancing merged issue to Done', { issueNumber: issue.number });
-      this.issueRepo!.updateStage(issue.id, Stage.Done);
-      this.issueRepo!.clearApprovalState(issue.id);
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Completed);
-      this.issueRepo!.updateBlockedReason(issue.id, null);
-      this.eventBus.emit('agent_completed', { issueId: issue.id, projectId: issue.projectId, issueNumber: issue.number });
-      this.completeTask(task.id, 'completed', 'success');
+      if (!this.postMergeFinalizer) {
+        this.handlePipelineFailure(issue, this.issueRepo, issue.projectId, 'Post-merge finalizer not configured');
+        this.completeTask(task.id, 'failed', 'Post-merge finalizer not configured');
+        return;
+      }
+
+      log.info('Finalizing previously merged issue before Done', { issueNumber: issue.number });
+      const finalization = await this.postMergeFinalizer.finalize(issue);
+      if (finalization.success) {
+        this.completeTask(task.id, 'completed', 'success');
+      } else {
+        const failure = finalization.error || finalization.healthGateResult?.summary || 'Post-merge health gate failed';
+        this.handlePipelineFailure(issue, this.issueRepo, issue.projectId, failure);
+        this.completeTask(task.id, 'failed', failure);
+      }
       return;
     }
 

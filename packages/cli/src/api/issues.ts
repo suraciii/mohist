@@ -77,6 +77,18 @@ type CommitDiffResponse = ChangesAvailability & {
   diff: string;
 };
 
+function unavailableChangesData(issue: Issue, message: string) {
+  const reason = issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+    ? 'not_started' as const
+    : 'worktree_removed' as const;
+
+  return {
+    available: false as const,
+    reason,
+    message,
+  };
+}
+
 const log = Log.create({ service: 'issue' });
 
 const execFileAsync = promisify(execFile);
@@ -1588,31 +1600,27 @@ export function createIssueRoutes(
       const branchName = `mo/issue-${number}`;
 
       if (!worktreeManager) {
-        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
-          const response: ApiResponse = {
-            success: true,
-            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet. Start the issue to see commits.' }
-          };
-          return c.json(response);
-        }
         const response: ApiResponse = {
           success: true,
-          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed. Commits are only available while the issue worktree is retained.' }
+          data: {
+            ...unavailableChangesData(issue, issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+              ? 'Issue has not started yet. Start the issue to see commits.'
+              : 'Workspace has been removed. Commits are only available while the issue worktree is retained.'),
+            commits: [],
+          }
         };
         return c.json(response);
       }
 
       if (!worktreeManager.exists(project.name, issue.number)) {
-        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
-          const response: ApiResponse = {
-            success: true,
-            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet. Start the issue to see commits.' },
-          };
-          return c.json(response);
-        }
         const response: ApiResponse = {
           success: true,
-          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed. Commits are only available while the issue worktree is retained.' }
+          data: {
+            ...unavailableChangesData(issue, issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+              ? 'Issue has not started yet. Start the issue to see commits.'
+              : 'Workspace has been removed. Commits are only available while the issue worktree is retained.'),
+            commits: [],
+          }
         };
         return c.json(response);
       }
@@ -1804,31 +1812,21 @@ export function createIssueRoutes(
       const branchName = `mo/issue-${number}`;
 
       if (!worktreeManager) {
-        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
-          const response: ApiResponse = {
-            success: true,
-            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet.' }
-          };
-          return c.json(response);
-        }
         const response: ApiResponse = {
           success: true,
-          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed.' }
+          data: unavailableChangesData(issue, issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+            ? 'Issue has not started yet.'
+            : 'Workspace has been removed.')
         };
         return c.json(response);
       }
 
       if (!worktreeManager.exists(project.name, issue.number)) {
-        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
-          const response: ApiResponse = {
-            success: true,
-            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet.' }
-          };
-          return c.json(response);
-        }
         const response: ApiResponse = {
           success: true,
-          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed.' }
+          data: unavailableChangesData(issue, issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+            ? 'Issue has not started yet.'
+            : 'Workspace has been removed.')
         };
         return c.json(response);
       }
@@ -2455,27 +2453,24 @@ export function createIssueRoutes(
       if (postMergeFinalizer) {
         const finalization = await postMergeFinalizer.finalize(issue);
         if (!finalization.success) {
-          const errorParts = [`Post-merge health gate failed: ${finalization.error}`];
-          if (finalization.healthGateResult) {
-            errorParts.push(`Command: ${finalization.healthGateResult.command}`);
-            errorParts.push(`Duration: ${finalization.healthGateResult.duration}ms`);
-            errorParts.push(`Summary: ${finalization.healthGateResult.summary}`);
-          }
           return c.json({
             success: false,
-            error: errorParts.join(' | '),
+            error: finalization.error || 'Post-merge health gate failed',
+            data: { healthGateResult: finalization.healthGateResult },
           } satisfies ApiResponse, 422);
         }
+        const refreshedIssue = issueService.getByNumber(projectId, number);
+        return c.json({
+          success: true,
+          data: {
+            issue: refreshedIssue ?? issue,
+            message: mergeResult.message,
+            healthGateResult: finalization.healthGateResult,
+          },
+        } satisfies ApiResponse);
       } else {
-        const issueRepo = stateManager.getIssueRepo();
-        issueRepo.updateStage(issue.id, Stage.Done);
-        issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-        issueRepo.clearApprovalState(issue.id);
-        issueRepo.setMergeState(issue.id, MergeState.Merged);
+        return c.json({ success: false, error: 'Post-merge finalizer not configured' } satisfies ApiResponse, 500);
       }
-
-      const refreshedIssue = issueService.getByNumber(projectId, number);
-      return c.json({ success: true, data: { issue: refreshedIssue ?? issue, message: mergeResult.message } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

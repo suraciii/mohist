@@ -7,6 +7,7 @@ import { BaseStageRunner } from '../../src/workflow/base-stage-runner';
 import type { Check } from '../../src/workflow/checks';
 import { loadHealthGatePolicies } from '../../src/workflow/workflow-loader';
 import { UserApprovalCheck } from '../../src/workflow/checks/user-approval-check';
+import { AgentRunnerService } from '../../src/services/agent-runner-service';
 
 function makeIssue(overrides: Partial<import('../../src/types').Issue> = {}): import('../../src/types').Issue {
   return {
@@ -296,6 +297,8 @@ describe('Direct merge API cannot mark issue done when health:postMerge fails', 
 
     const stageExecutionRepo = {
       findActiveByIssueId: vi.fn().mockReturnValue(null),
+      findByIssueId: vi.fn().mockReturnValue([]),
+      create: vi.fn().mockReturnValue({ id: 'exec-1', stage: Stage.Check, checkResults: [] }),
       updateCheckResults: vi.fn(),
       updateStatus: vi.fn(),
     } as unknown as import('../../src/db/stage-execution-repo').StageExecutionRepo;
@@ -353,6 +356,8 @@ describe('Direct merge API cannot mark issue done when health:postMerge fails', 
 
     const stageExecutionRepo = {
       findActiveByIssueId: vi.fn().mockReturnValue(null),
+      findByIssueId: vi.fn().mockReturnValue([]),
+      create: vi.fn().mockReturnValue({ id: 'exec-1', stage: Stage.Check, checkResults: [] }),
       updateCheckResults: vi.fn(),
       updateStatus: vi.fn(),
     } as unknown as import('../../src/db/stage-execution-repo').StageExecutionRepo;
@@ -367,6 +372,162 @@ describe('Direct merge API cannot mark issue done when health:postMerge fails', 
 
     expect(issueRepo.updateStage).not.toHaveBeenCalled();
     expect(issueRepo.updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('persists passing postMerge health gate results to the latest check execution', async () => {
+    vi.resetModules();
+    const execFileMock = vi.fn();
+    execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+      process.nextTick(() => cb?.(null, { stdout: 'ok', stderr: '' }));
+      return {} as any;
+    });
+
+    vi.doMock('child_process', async () => ({
+      ...await vi.importActual<typeof import('child_process')>('child_process'),
+      execFile: execFileMock,
+    }));
+
+    const { PostMergeFinalizer } = await import('../../src/services/post-merge-finalizer');
+
+    const issueRepo = {
+      updateStage: vi.fn(),
+      updateStatus: vi.fn(),
+      clearApprovalState: vi.fn(),
+      setMergeState: vi.fn(),
+      updateBlockedReason: vi.fn(),
+    } as unknown as import('../../src/db/issue-repo').IssueRepo;
+
+    const projectRepo = {
+      findById: vi.fn().mockReturnValue({ id: 'proj-1', path: '/tmp/test-project', name: 'test', baseBranch: 'main' }),
+    } as unknown as import('../../src/db/project-repo').ProjectRepo;
+
+    const stageExecutionRepo = {
+      findActiveByIssueId: vi.fn().mockReturnValue(null),
+      findByIssueId: vi.fn().mockReturnValue([{ id: 'exec-latest', stage: Stage.Check, checkResults: [] }]),
+      create: vi.fn(),
+      updateCheckResults: vi.fn(),
+      updateStatus: vi.fn(),
+    } as unknown as import('../../src/db/stage-execution-repo').StageExecutionRepo;
+
+    const finalizer = new PostMergeFinalizer(issueRepo, projectRepo, stageExecutionRepo, new EventBus() as any);
+    const result = await finalizer.finalize(makeIssue({ stage: Stage.Check, mergeState: MergeState.Merged }));
+
+    expect(result.success).toBe(true);
+    expect(stageExecutionRepo.updateCheckResults).toHaveBeenCalledWith(
+      'exec-latest',
+      [expect.objectContaining({ name: 'health:postMerge', status: 'pass', message: 'Post-merge health gate passed' })],
+    );
+    expect(stageExecutionRepo.updateStatus).toHaveBeenCalledWith('exec-latest', 'passed');
+  });
+
+  it('creates a check-stage execution when no execution exists for postMerge result persistence', async () => {
+    vi.resetModules();
+    const execFileMock = vi.fn();
+    execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+      process.nextTick(() => cb?.(null, { stdout: 'ok', stderr: '' }));
+      return {} as any;
+    });
+
+    vi.doMock('child_process', async () => ({
+      ...await vi.importActual<typeof import('child_process')>('child_process'),
+      execFile: execFileMock,
+    }));
+
+    const { PostMergeFinalizer } = await import('../../src/services/post-merge-finalizer');
+
+    const issueRepo = {
+      updateStage: vi.fn(),
+      updateStatus: vi.fn(),
+      clearApprovalState: vi.fn(),
+      setMergeState: vi.fn(),
+      updateBlockedReason: vi.fn(),
+    } as unknown as import('../../src/db/issue-repo').IssueRepo;
+    const projectRepo = {
+      findById: vi.fn().mockReturnValue({ id: 'proj-1', path: '/tmp/test-project', name: 'test', baseBranch: 'main' }),
+    } as unknown as import('../../src/db/project-repo').ProjectRepo;
+    const stageExecutionRepo = {
+      findActiveByIssueId: vi.fn().mockReturnValue(null),
+      findByIssueId: vi.fn().mockReturnValue([]),
+      create: vi.fn().mockReturnValue({ id: 'created-exec', stage: Stage.Check, checkResults: [] }),
+      updateCheckResults: vi.fn(),
+      updateStatus: vi.fn(),
+    } as unknown as import('../../src/db/stage-execution-repo').StageExecutionRepo;
+
+    const finalizer = new PostMergeFinalizer(issueRepo, projectRepo, stageExecutionRepo, new EventBus() as any);
+    await finalizer.finalize(makeIssue({ stage: Stage.Check, mergeState: MergeState.Merged }));
+
+    expect(stageExecutionRepo.create).toHaveBeenCalledWith('issue-1', Stage.Check);
+    expect(stageExecutionRepo.updateCheckResults).toHaveBeenCalledWith(
+      'created-exec',
+      [expect.objectContaining({ name: 'health:postMerge', status: 'pass' })],
+    );
+  });
+});
+
+describe('Recovery finalization cannot bypass postMerge health gate', () => {
+  it('runs shared finalizer for Stage.Check + MergeState.Merged recovery failures', async () => {
+    const issue = makeIssue({ stage: Stage.Check, mergeState: MergeState.Merged });
+    const task = {
+      id: 'task-1',
+      issueId: issue.id,
+      issueNumber: issue.number,
+      projectId: issue.projectId,
+      taskType: 'resume-pipeline',
+      payload: '{}',
+      priority: 0,
+      status: 'pending',
+      enqueuedAt: new Date().toISOString(),
+      startedAt: null,
+      result: null,
+      completedAt: null,
+    } as import('../../src/db/issue-task-queue-repo').IssueTaskQueueRecord;
+    const eventBus = new EventBus();
+    const issueRepo = {
+      findById: vi.fn().mockReturnValue(issue),
+      findAll: vi.fn().mockReturnValue([]),
+      blockIssue: vi.fn(),
+      updateStage: vi.fn(),
+      updateStatus: vi.fn(),
+      clearApprovalState: vi.fn(),
+      updateBlockedReason: vi.fn(),
+    } as any;
+    const projectRepo = { findById: vi.fn().mockReturnValue({ id: issue.projectId, path: '/tmp/project', name: 'project', baseBranch: 'main' }) } as any;
+    const taskQueueRepo = {
+      findByStatus: vi.fn().mockReturnValue([]),
+      findById: vi.fn().mockReturnValue(task),
+      updateStatus: vi.fn(),
+    } as any;
+    const finalizer = {
+      finalize: vi.fn().mockResolvedValue({ success: false, error: 'Post-merge health gate failed' }),
+    } as any;
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      1,
+      undefined,
+      undefined,
+      projectRepo,
+      {} as any,
+      taskQueueRepo,
+      undefined,
+      undefined,
+      undefined,
+      finalizer,
+    );
+
+    await (service as any).executeResumePipelineTask(task, issue);
+
+    expect(finalizer.finalize).toHaveBeenCalledWith(issue);
+    expect(issueRepo.updateStage).not.toHaveBeenCalledWith(issue.id, Stage.Done);
+    expect(issueRepo.updateStatus).not.toHaveBeenCalledWith(issue.id, IssueStatus.Completed);
+    expect(issueRepo.blockIssue).toHaveBeenCalledWith(issue.id, 'Post-merge health gate failed');
+    expect(taskQueueRepo.updateStatus).toHaveBeenCalledWith(
+      task.id,
+      'failed',
+      expect.objectContaining({ result: 'Post-merge health gate failed' }),
+    );
+    service.shutdown();
   });
 });
 

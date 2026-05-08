@@ -18,6 +18,8 @@ export interface WorkflowStage {
 export interface WorkflowConfig {
   stages: WorkflowStage[];
   source: string;
+  healthGates?: unknown;
+  checks?: unknown;
 }
 
 export interface OpenSpecDetection {
@@ -86,6 +88,8 @@ function parseWorkflowFile(filePath: string): WorkflowConfig | string {
         approval: Boolean(s.approval),
         timeout: typeof s.timeout === 'number' ? s.timeout : undefined,
       })),
+      healthGates: parsed.healthGates,
+      checks: parsed.checks,
       source: filePath,
     };
   } catch (err) {

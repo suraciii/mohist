@@ -64,19 +64,22 @@ export class PostMergeFinalizer {
       log.info('PostMerge health gate disabled, completing without verification', {
         issueNumber: issue.number,
       });
+      const disabledResult: HealthGateResult = {
+        passed: true,
+        enabled: false,
+        command: policy.command,
+        timeout: policy.timeout,
+        duration: 0,
+        timedOut: false,
+        summary: 'PostMerge health gate disabled',
+        logExcerpt: '',
+      };
+
+      this.recordHealthGateResult(issue, disabledResult);
       this.completeIssue(issue);
       return {
         success: true,
-        healthGateResult: {
-          passed: true,
-          enabled: false,
-          command: policy.command,
-          timeout: policy.timeout,
-          duration: 0,
-          timedOut: false,
-          summary: 'PostMerge health gate disabled',
-          logExcerpt: '',
-        },
+        healthGateResult: disabledResult,
       };
     }
 
@@ -89,7 +92,7 @@ export class PostMergeFinalizer {
         summary: healthResult.summary,
       });
 
-      this.recordHealthGateFailure(issue, healthResult);
+      this.recordHealthGateResult(issue, healthResult);
 
       return {
         success: false,
@@ -98,6 +101,7 @@ export class PostMergeFinalizer {
       };
     }
 
+    this.recordHealthGateResult(issue, healthResult);
     this.completeIssue(issue);
     return { success: true, healthGateResult: healthResult };
   }
@@ -217,14 +221,19 @@ export class PostMergeFinalizer {
     });
   }
 
-  private recordHealthGateFailure(issue: Issue, result: HealthGateResult): void {
+  private recordHealthGateResult(issue: Issue, result: HealthGateResult): void {
     if (!this.stageExecutionRepo) return;
 
-    const execution = this.stageExecutionRepo.findActiveByIssueId(issue.id);
+    const execution = this.stageExecutionRepo.findActiveByIssueId(issue.id)
+      ?? this.stageExecutionRepo.findByIssueId(issue.id).filter(e => e.stage === Stage.Check).at(-1)
+      ?? this.stageExecutionRepo.create(issue.id, Stage.Check);
+
     if (execution) {
+      const status = result.passed ? 'pass' : 'fail';
       const healthGateCheckResult = {
         name: 'health:postMerge',
-        status: 'fail',
+        status,
+        message: result.summary,
         duration: result.duration,
         summary: result.summary,
         output: {
@@ -243,7 +252,7 @@ export class PostMergeFinalizer {
 
       const existing = execution.checkResults as Array<unknown>;
       this.stageExecutionRepo.updateCheckResults(execution.id, [...existing, healthGateCheckResult]);
-      this.stageExecutionRepo.updateStatus(execution.id, 'failed');
+      this.stageExecutionRepo.updateStatus(execution.id, result.passed ? 'passed' : 'failed');
     }
   }
 }
