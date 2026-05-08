@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Run build and test before AI review in the check stage, failing fast before review artifacts or approval when mechanical verification fails.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,15 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/base-stage-runner.ts, packages/cli/src/workflow/check-stage-runner.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Implement the design's pre-task check phase or an equivalent minimal orchestration that avoids duplicating BaseStageRunner status, persistence, reaction, and approval handling. Autofix continuation must stay scoped to the active phase so AiReviewCheck is not run before review.md exists."
+      "passes": true,
+      "notes": "Implement the design's pre-task check phase or an equivalent minimal orchestration that avoids duplicating BaseStageRunner status, persistence, reaction, and approval handling. Autofix continuation must stay scoped to the active phase so AiReviewCheck is not run before review.md exists.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1806546,
+        785773
+      ]
     },
     {
       "id": "T-002",
@@ -46,7 +52,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Prefer focused unit or integration tests around CheckStageRunner/BaseStageRunner rather than broad end-to-end tests. Mock checks and artifact generation where possible to make ordering assertions deterministic."
+      "notes": "Prefer focused unit or integration tests around CheckStageRunner/BaseStageRunner rather than broad end-to-end tests. Mock checks and artifact generation where possible to make ordering assertions deterministic.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
