@@ -12,6 +12,11 @@ export abstract class BaseStageRunner implements StageRunner {
   abstract canHandle(stage: Stage): boolean;
   protected abstract executeTasks(ctx: StageContext): Promise<unknown>;
   protected abstract getChecks(): Check[];
+
+  protected getPreTaskChecks(): Check[] {
+    return [];
+  }
+
   protected abstract getNextStage(): Stage;
 
   private stageExecutionId?: string;
@@ -41,6 +46,14 @@ export abstract class BaseStageRunner implements StageRunner {
       }
     }
 
+    const preTaskChecks = this.getPreTaskChecks();
+    if (preTaskChecks.length > 0) {
+      const preTaskResult = await this.runChecksPhase(ctx, [], preTaskChecks, null, 0, true);
+      if (!preTaskResult.success) {
+        return preTaskResult;
+      }
+    }
+
     let taskOutput: unknown;
     try {
       taskOutput = await this.executeTasks(ctx);
@@ -56,7 +69,8 @@ export abstract class BaseStageRunner implements StageRunner {
       };
     }
 
-    const result = await this.runAllChecks(ctx, taskOutput, 0);
+    const postTaskChecks = this.getChecks();
+    const result = await this.runChecksPhase(ctx, [], postTaskChecks, taskOutput, 0, false);
     if (result.success) {
       this.updateStageExecutionStatus(ctx, 'passed');
     } else {
@@ -68,23 +82,16 @@ export abstract class BaseStageRunner implements StageRunner {
     return result;
   }
 
-  private updateStageExecutionStatus(ctx: StageContext, status: StageExecutionStatus): void {
-    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
-    try {
-      ctx.stageExecutionRepo.updateStatus(this.stageExecutionId, status);
-    } catch (e) {
-      log.warn('updateStageExecutionStatus failed', { error: e instanceof Error ? e.message : String(e) });
-    }
-  }
-
-  private async runAllChecks(
+  private async runChecksPhase(
     ctx: StageContext,
+    priorResults: CheckResult[],
+    checks: Check[],
     taskOutput: unknown,
     taskRetryCount: number,
+    isPreTask: boolean,
   ): Promise<StageRunResult> {
-    const checks = this.getChecks();
     const checkCtx = this.buildCheckContext(ctx);
-    const results: CheckResult[] = [];
+    const results: CheckResult[] = [...priorResults];
 
     for (const check of checks) {
       const result = await check.run(checkCtx);
@@ -92,17 +99,26 @@ export abstract class BaseStageRunner implements StageRunner {
 
       if (result.status !== 'pass') {
         this.persistCheckResults(ctx, results);
-        return this.dispatchReaction(ctx, check, result, results, taskOutput, taskRetryCount);
+        return this.dispatchReaction(ctx, check, result, results, taskOutput, taskRetryCount, isPreTask, checks);
       }
     }
 
     this.persistCheckResults(ctx, results);
     return {
       success: true,
-      nextStage: this.getNextStage(),
-      output: taskOutput,
+      nextStage: isPreTask ? undefined : this.getNextStage(),
+      output: isPreTask ? undefined : taskOutput,
       checkResults: results,
     };
+  }
+
+  private updateStageExecutionStatus(ctx: StageContext, status: StageExecutionStatus): void {
+    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
+    try {
+      ctx.stageExecutionRepo.updateStatus(this.stageExecutionId, status);
+    } catch (e) {
+      log.warn('updateStageExecutionStatus failed', { error: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   private buildCheckContext(ctx: StageContext): CheckContext {
@@ -123,12 +139,14 @@ export abstract class BaseStageRunner implements StageRunner {
     allResults: CheckResult[],
     taskOutput: unknown,
     taskRetryCount: number,
+    isPreTask: boolean,
+    activeChecks: Check[],
   ): Promise<StageRunResult> {
     switch (check.reaction.type) {
       case 'retry-task':
-        return this.handleRetryTask(ctx, check, result, allResults, taskOutput, taskRetryCount);
+        return this.handleRetryTask(ctx, check, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
       case 'auto-fix':
-        return this.handleAutoFix(ctx, check, result, allResults, taskOutput, taskRetryCount, 0);
+        return this.handleAutoFix(ctx, check, result, allResults, taskOutput, taskRetryCount, 0, isPreTask, activeChecks);
       case 'escalate':
         return {
           success: false,
@@ -139,7 +157,7 @@ export abstract class BaseStageRunner implements StageRunner {
         };
       case 'ask-user':
         if (result.status === 'fail' && check.reaction.fallbackReaction) {
-          return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount);
+          return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
         }
         return this.handleAskUser(ctx, check, result, allResults, taskOutput);
     }
@@ -152,12 +170,14 @@ export abstract class BaseStageRunner implements StageRunner {
     allResults: CheckResult[],
     taskOutput: unknown,
     taskRetryCount: number,
+    isPreTask: boolean,
+    activeChecks: Check[],
   ): Promise<StageRunResult> {
     const maxAttempts = check.reaction.maxAttempts ?? 3;
 
     if (taskRetryCount >= maxAttempts) {
       if (check.reaction.fallbackReaction) {
-        return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount);
+        return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
       }
       return {
         success: false,
@@ -179,7 +199,7 @@ export abstract class BaseStageRunner implements StageRunner {
       };
     }
 
-    return this.runAllChecks(ctx, newTaskOutput, taskRetryCount + 1);
+    return this.runChecksPhase(ctx, allResults, activeChecks, newTaskOutput, taskRetryCount + 1, isPreTask);
   }
 
   private async handleAutoFix(
@@ -190,12 +210,14 @@ export abstract class BaseStageRunner implements StageRunner {
     taskOutput: unknown,
     taskRetryCount: number,
     autoFixAttempt: number,
+    isPreTask: boolean,
+    activeChecks: Check[],
   ): Promise<StageRunResult> {
     const maxAttempts = check.reaction.maxAttempts ?? 2;
 
     if (autoFixAttempt >= maxAttempts) {
       if (check.reaction.fallbackReaction) {
-        return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount);
+        return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
       }
       return {
         success: false,
@@ -214,7 +236,16 @@ export abstract class BaseStageRunner implements StageRunner {
     const recheckResult = await check.run(checkCtx);
 
     if (recheckResult.status === 'pass') {
-      const checks = this.getChecks();
+      if (isPreTask) {
+        const continuedResults = [...allResults.slice(0, -1), recheckResult];
+        return {
+          success: true,
+          nextStage: undefined,
+          output: undefined,
+          checkResults: continuedResults,
+        };
+      }
+      const checks = activeChecks;
       const currentIndex = checks.findIndex(c => c.name === check.name);
       const remaining = checks.slice(currentIndex + 1);
       const continuedResults = [...allResults.slice(0, -1), recheckResult];
@@ -223,7 +254,7 @@ export abstract class BaseStageRunner implements StageRunner {
         const nextResult = await nextCheck.run(checkCtx);
         continuedResults.push(nextResult);
         if (nextResult.status !== 'pass') {
-          return this.dispatchReaction(ctx, nextCheck, nextResult, continuedResults, taskOutput, taskRetryCount);
+          return this.dispatchReaction(ctx, nextCheck, nextResult, continuedResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
         }
       }
 
@@ -236,7 +267,7 @@ export abstract class BaseStageRunner implements StageRunner {
     }
 
     const updatedResults = [...allResults.slice(0, -1), recheckResult];
-    return this.handleAutoFix(ctx, check, recheckResult, updatedResults, taskOutput, taskRetryCount, autoFixAttempt + 1);
+    return this.handleAutoFix(ctx, check, recheckResult, updatedResults, taskOutput, taskRetryCount, autoFixAttempt + 1, isPreTask, activeChecks);
   }
 
   private handleAskUser(
@@ -307,6 +338,8 @@ export abstract class BaseStageRunner implements StageRunner {
     allResults: CheckResult[],
     taskOutput: unknown,
     taskRetryCount: number,
+    isPreTask: boolean,
+    activeChecks: Check[],
   ): Promise<StageRunResult> {
     const fallback = check.reaction.fallbackReaction!;
     const fallbackCheck: Check = {
@@ -314,7 +347,7 @@ export abstract class BaseStageRunner implements StageRunner {
       reaction: fallback,
       run: async () => result,
     };
-    return this.dispatchReaction(ctx, fallbackCheck, result, allResults, taskOutput, taskRetryCount);
+    return this.dispatchReaction(ctx, fallbackCheck, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
   }
 
   private persistCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {
@@ -325,5 +358,4 @@ export abstract class BaseStageRunner implements StageRunner {
       log.warn('persistCheckResults failed', { error: e instanceof Error ? e.message : String(e) });
     }
   }
-
 }

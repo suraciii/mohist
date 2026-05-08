@@ -34,15 +34,17 @@ export interface CheckStageRunnerOptions {
 
 export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   private worktreePath: string;
-  private checks: Check[];
+  private preTaskChecks: Check[];
+  private postTaskChecks: Check[];
   private usesDefaultChecks: boolean;
 
   constructor(options: CheckStageRunnerOptions) {
     super();
     this.worktreePath = options.worktreePath;
     this.usesDefaultChecks = !options.checks;
-    this.checks = options.checks ?? [
-      new BuildTestCheck({ worktreePath: this.worktreePath }),
+    const buildTestCheck = new BuildTestCheck({ worktreePath: this.worktreePath });
+    this.preTaskChecks = [buildTestCheck];
+    this.postTaskChecks = [
       new AiReviewCheck(),
       new UserApprovalCheck(Stage.Check),
     ];
@@ -50,6 +52,13 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
   canHandle(stage: Stage): boolean {
     return stage === Stage.Check;
+  }
+
+  protected getPreTaskChecks(): Check[] {
+    if (!this.usesDefaultChecks) {
+      return [];
+    }
+    return this.preTaskChecks;
   }
 
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
@@ -297,7 +306,10 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected getChecks(): Check[] {
-    return this.checks;
+    if (!this.usesDefaultChecks) {
+      return [];
+    }
+    return this.postTaskChecks;
   }
 
   protected getNextStage(): Stage {
