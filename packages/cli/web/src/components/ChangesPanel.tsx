@@ -1,4 +1,4 @@
-import type { DiffFile, CommitEntry } from '../lib/types'
+import type { DiffFile, CommitEntry, IssueDiffResponse, IssueCommitsResponse } from '../lib/types'
 import { formatTimeAgo } from '../lib/format-time'
 import { DiffViewer } from './DiffViewer'
 import { useCommitDiff } from '../hooks/useQueries'
@@ -61,7 +61,13 @@ function CommitRow({
           {isError && (
             <div className="text-xs text-red-500 py-2">Failed to load diff</div>
           )}
-          {diffData?.diff && <DiffViewer diff={diffData.diff} />}
+          {!isLoading && !isError && diffData?.available === false && (
+            <div className="text-xs text-orange-500 py-2">{diffData.message}</div>
+          )}
+          {diffData?.available !== false && diffData?.diff && <DiffViewer diff={diffData.diff} />}
+          {diffData?.available !== false && !diffData?.diff && diffData?.diff !== '' && (
+            <div className="text-xs text-gray-400 py-2">Empty diff</div>
+          )}
         </div>
       )}
     </div>
@@ -69,8 +75,8 @@ function CommitRow({
 }
 
 interface ChangesPanelProps {
-  files: DiffFile[]
-  commits: CommitEntry[]
+  diffData?: IssueDiffResponse
+  commitsData?: IssueCommitsResponse
   diffTab: 'files' | 'commits'
   setDiffTab: (tab: 'files' | 'commits') => void
   expandedFiles: Set<string>
@@ -82,8 +88,8 @@ interface ChangesPanelProps {
 }
 
 export function ChangesPanel({
-  files,
-  commits,
+  diffData,
+  commitsData,
   diffTab,
   setDiffTab,
   expandedFiles,
@@ -93,20 +99,39 @@ export function ChangesPanel({
   issueNumber,
   onCommitExpand,
 }: ChangesPanelProps) {
+  const files = diffData?.available === true ? diffData.files : []
+  const commits = commitsData?.available === true ? commitsData.commits : []
+
   const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0)
   const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0)
-  const isEmpty = files.length === 0 && commits.length === 0
+
+  const diffUnavailable = diffData?.available === false
+  const commitsUnavailable = commitsData?.available === false
+
+  const worktreeRemoved = diffData?.reason === 'worktree_removed' || commitsData?.reason === 'worktree_removed'
+  const branchMissing = diffData?.reason === 'branch_missing' || commitsData?.reason === 'branch_missing'
+  const notStarted = diffData?.reason === 'not_started' || commitsData?.reason === 'not_started'
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold text-gray-700">Changes</h2>
-        <span className="text-xs text-gray-400">
-          {files.length} file{files.length !== 1 ? 's' : ''}, +{totalAdditions}/-{totalDeletions}, {commits.length} commit{commits.length !== 1 ? 's' : ''}
-        </span>
+        {diffData?.available === true && (
+          <span className="text-xs text-gray-400">
+            {files.length} file{files.length !== 1 ? 's' : ''}, +{totalAdditions}/-{totalDeletions}
+          </span>
+        )}
       </div>
 
-      {isEmpty ? (
+      {notStarted ? (
+        <p className="text-sm text-gray-400">No changes yet</p>
+      ) : worktreeRemoved ? (
+        <p className="text-sm text-gray-400">Changes unavailable — workspace removed</p>
+      ) : branchMissing ? (
+        <p className="text-sm text-gray-400">Changes unavailable — branch missing</p>
+      ) : diffUnavailable ? (
+        <p className="text-sm text-gray-400">{diffData?.message ?? 'Failed to load changes'}</p>
+      ) : files.length === 0 && commits.length === 0 ? (
         <p className="text-sm text-gray-400">No changes yet</p>
       ) : (
         <>
