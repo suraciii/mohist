@@ -152,11 +152,13 @@
       ],
       "passes": true,
       "notes": "Consumes changedFiles/file summary fields from T-001 and the grouped transcript rendering structure from T-004.",
-      "attempts": 1,
+      "attempts": 3,
       "order": 999999,
       "error": null,
       "durations": [
-        640595
+        1808957,
+        1805360,
+        441949
       ]
     },
     {
@@ -186,10 +188,7 @@
       "notes": "Consumes API metadata from T-002 and changed-file summaries rendered by T-005.",
       "attempts": 0,
       "order": 999999,
-      "error": null,
-      "durations": [
-        1805024
-      ]
+      "error": null
     },
     {
       "id": "T-007",
