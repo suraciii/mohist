@@ -385,4 +385,251 @@ describe('SessionTranscriptView', () => {
       expect(screen.queryByText('Show full prompt')).not.toBeInTheDocument()
     })
   })
+
+  describe('context tool grouping', () => {
+    it('groups consecutive context tools into Context gathered card', async () => {
+      const turns = [makeTurn({
+        assistant: [
+          {
+            id: 'tool-1',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-1',
+              toolName: 'read',
+              status: 'completed',
+              input: '{"file_path":"src/index.ts"}',
+              output: 'file content',
+              startedAt: '2024-01-01T10:00:02.000Z',
+              completedAt: '2024-01-01T10:00:03.000Z',
+            },
+          } as ToolPart,
+          {
+            id: 'tool-2',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-2',
+              toolName: 'grep',
+              status: 'completed',
+              input: '{"pattern":"function"}',
+              output: 'matches',
+              startedAt: '2024-01-01T10:00:04.000Z',
+              completedAt: '2024-01-01T10:00:05.000Z',
+            },
+          } as ToolPart,
+        ],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Context gathered/i)).toBeInTheDocument()
+      })
+    })
+
+    it('expands context group to show individual tools', async () => {
+      const turns = [makeTurn({
+        assistant: [
+          {
+            id: 'tool-1',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-1',
+              toolName: 'read',
+              status: 'completed',
+              input: '{"file_path":"src/index.ts"}',
+              output: 'content',
+              startedAt: '2024-01-01T10:00:02.000Z',
+              completedAt: '2024-01-01T10:00:03.000Z',
+            },
+          } as ToolPart,
+          {
+            id: 'tool-2',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-2',
+              toolName: 'glob',
+              status: 'completed',
+              input: '{"pattern":"**/*.ts"}',
+              output: 'files',
+              startedAt: '2024-01-01T10:00:04.000Z',
+              completedAt: '2024-01-01T10:00:05.000Z',
+            },
+          } as ToolPart,
+        ],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Context gathered/i)).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText(/Context gathered/i))
+
+      await waitFor(() => {
+        expect(screen.getByText(/src\/index\.ts/i)).toBeInTheDocument()
+      }, { timeout: 3000 })
+    })
+
+    it('does not group across text or reasoning boundaries', async () => {
+      const turns = [makeTurn({
+        assistant: [
+          {
+            id: 'text-1',
+            type: 'text',
+            text: 'Let me check the files first',
+            startedAt: '2024-01-01T10:00:01.000Z',
+            completedAt: null,
+          } as TextPart,
+          {
+            id: 'tool-1',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-1',
+              toolName: 'read',
+              status: 'completed',
+              input: '{"file_path":"src/index.ts"}',
+              output: 'content',
+              startedAt: '2024-01-01T10:00:02.000Z',
+              completedAt: '2024-01-01T10:00:03.000Z',
+            },
+          } as ToolPart,
+        ],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Let me check the files first/i)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/Context gathered/i)).toBeInTheDocument()
+    })
+
+    it('shows failed count in context group summary', async () => {
+      const turns = [makeTurn({
+        assistant: [
+          {
+            id: 'tool-1',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-1',
+              toolName: 'read',
+              status: 'failed',
+              input: '{"file_path":"missing.txt"}',
+              error: 'File not found',
+              startedAt: '2024-01-01T10:00:02.000Z',
+              completedAt: '2024-01-01T10:00:03.000Z',
+            },
+          } as ToolPart,
+          {
+            id: 'tool-2',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-2',
+              toolName: 'grep',
+              status: 'completed',
+              input: '{"pattern":"function"}',
+              output: 'matches',
+              startedAt: '2024-01-01T10:00:04.000Z',
+              completedAt: '2024-01-01T10:00:05.000Z',
+            },
+          } as ToolPart,
+        ],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Context gathered/)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('todowrite summary', () => {
+    it('renders todowrite as Updated todo list by default', async () => {
+      const turns = [makeTurn({
+        assistant: [
+          {
+            id: 'tool-1',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-1',
+              toolName: 'todowrite',
+              status: 'completed',
+              input: '{"todos":[{"content":"Task 1","status":"completed"},{"content":"Task 2","status":"pending"}]}',
+              output: '{"todos":[{"content":"Task 1","status":"completed"},{"content":"Task 2","status":"pending"}]}',
+              startedAt: '2024-01-01T10:00:02.000Z',
+              completedAt: '2024-01-01T10:00:03.000Z',
+            },
+          } as ToolPart,
+        ],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Updated todo list/i)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/\(2 items\)/i)).toBeInTheDocument()
+    })
+
+    it('expands todowrite to show tool details', async () => {
+      const turns = [makeTurn({
+        assistant: [
+          {
+            id: 'tool-1',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-1',
+              toolName: 'todowrite',
+              status: 'completed',
+              input: '{"todos":[{"content":"Task 1","status":"completed"}]}',
+              output: '{}',
+              startedAt: '2024-01-01T10:00:02.000Z',
+              completedAt: '2024-01-01T10:00:03.000Z',
+            },
+          } as ToolPart,
+        ],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Updated todo list/i)).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText(/Updated todo list/i))
+
+      await waitFor(() => {
+        expect(screen.getByText(/src\/index\.ts|Task 1/i)).toBeInTheDocument()
+      }, { timeout: 3000 })
+    })
+
+    it('renders failed todowrite with failure indicator', async () => {
+      const turns = [makeTurn({
+        assistant: [
+          {
+            id: 'tool-1',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-1',
+              toolName: 'todowrite',
+              status: 'failed',
+              input: '{"todos":[]}',
+              error: 'Failed to update todos',
+              startedAt: '2024-01-01T10:00:02.000Z',
+              completedAt: '2024-01-01T10:00:03.000Z',
+            },
+          } as ToolPart,
+        ],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Updated todo list/i)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/failed/i)).toBeInTheDocument()
+    })
+  })
 })
