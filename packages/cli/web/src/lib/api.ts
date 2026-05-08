@@ -91,6 +91,11 @@ export const api = {
       body: JSON.stringify({ body }),
     }),
 
+  deleteComment: (issueNumber: number, commentId: string) =>
+    request<{ message: string }>(`/issues/${issueNumber}/comments/${commentId}`, {
+      method: 'DELETE',
+    }),
+
   getQuestions: (issueId: string) =>
     request<import('./types').Question[]>(`/questions?issueId=${encodeURIComponent(issueId)}`),
 
