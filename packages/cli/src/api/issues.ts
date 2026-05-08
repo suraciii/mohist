@@ -2091,10 +2091,6 @@ export function createIssueRoutes(
         return c.json({ success: false, error: result.message } satisfies ApiResponse, 409);
       }
 
-      await worktreeManager.remove(project.path, project.name, issue.number).catch((err) => {
-        log.warn('Failed to cleanup worktree after merge', { number, error: err instanceof Error ? err.message : String(err) });
-      });
-
       return c.json({ success: true, data: { issue, message: result.message } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
