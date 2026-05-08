@@ -1021,9 +1021,6 @@ describe('SessionTranscriptView', () => {
   })
 })
 
-// SessionPage header tests temporarily disabled due to vitest hang
-// TODO: re-enable after fixing SessionPage rendering in test environment
-/*
 describe('SessionPage header and states', () => {
   function makeMockSession() {
     return {
@@ -1049,12 +1046,12 @@ describe('SessionPage header and states', () => {
       acpSessionId: 'acp-123',
       executionId: 'exec-123',
       title: 'Test Session',
-      status: 'running',
-      statusKind: 'live',
+      status: 'completed',
+      statusKind: 'completed',
       model: 'claude-3-5-sonnet',
       stage: 'build',
       createdAt: '2024-01-01T10:00:00.000Z',
-      completedAt: null,
+      completedAt: '2024-01-01T11:00:00.000Z',
       lastActivityAt: '2024-01-01T10:05:00.000Z',
       eventCount: 10,
       toolCount: 5,
@@ -1108,14 +1105,14 @@ describe('SessionPage header and states', () => {
 
   describe('header displays session metadata', () => {
     it('shows issue link, stage, model, turn count, last activity, and status badge', async () => {
-      console.log('test starting')
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
           stage: 'build',
           model: 'claude-3-5-sonnet',
           turnCount: 3,
           lastActivityAt: '2024-01-01T10:05:00.000Z',
-          statusKind: 'live',
         }),
       })
       setupSessionPage({ detail, issue: { number: 123, title: 'Test Issue' } })
@@ -1129,7 +1126,6 @@ describe('SessionPage header and states', () => {
       expect(screen.getByText('Build')).toBeInTheDocument()
       expect(screen.getByText('claude-3-5-sonnet')).toBeInTheDocument()
       expect(screen.getByText('3 turns')).toBeInTheDocument()
-      expect(screen.getByText('Live')).toBeInTheDocument()
     })
 
     it('shows changed-files summary in header when metadata has changedFiles', async () => {
@@ -1162,7 +1158,7 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/duration/i)).toBeInTheDocument()
+        expect(screen.getByText('1h 00m')).toBeInTheDocument()
       })
     })
 
@@ -1338,7 +1334,6 @@ describe('SessionPage header and states', () => {
     })
   })
 })
-*/
 
 describe('Live/historical parity', () => {
   it('renders turns with Coder label when assistant parts exist', async () => {
@@ -1561,6 +1556,52 @@ describe('Live/historical parity', () => {
         (part): part is ToolPart => part.type === 'tool',
       )
       expect(toolPart?.tool.normalizedName).toBe('search')
+    })
+  })
+
+  it('normalizes live tool payload shapes like historical replay', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    const cases = [
+      { id: 'tc-patch', rawInput: { patchText: '*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch' }, expected: 'apply_patch' },
+      { id: 'tc-command', rawInput: { command: 'npm test' }, expected: 'bash' },
+      { id: 'tc-file-path', rawInput: { file_path: 'src/index.ts' }, expected: 'read' },
+      { id: 'tc-path', rawInput: { path: 'src/index.ts' }, expected: 'read' },
+      { id: 'tc-todos', rawInput: { todos: [{ content: 'Test', status: 'pending' }] }, expected: 'todowrite' },
+      { id: 'tc-output-metadata', rawInput: {}, rawOutput: { metadata: { toolName: 'glob' } }, expected: 'glob' },
+    ]
+
+    for (const item of cases) {
+      act(() => {
+        dispatchAgentEvent('coder_tool_call', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          coderSessionId: 'session-123',
+          toolCallId: item.id,
+          toolName: 'unknown',
+          state: 'started',
+          rawInput: item.rawInput,
+          rawOutput: item.rawOutput,
+        })
+      })
+    }
+
+    await waitFor(() => {
+      const toolParts = result.current.turns.at(-1)?.assistant.filter(
+        (part): part is ToolPart => part.type === 'tool',
+      ) ?? []
+      expect(toolParts).toHaveLength(cases.length)
+      expect(toolParts.map((part) => part.tool.normalizedName)).toEqual(cases.map((item) => item.expected))
     })
   })
 

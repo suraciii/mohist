@@ -341,8 +341,10 @@ export function useSessionTranscript({
             title: detail.title,
             target: detail.title,
             input: stringifyPayload(detail.rawInput),
+            output: stringifyPayload(detail.rawOutput),
             error: '',
             rawInput: detail.rawInput,
+            rawOutput: detail.rawOutput,
             startedAt: now,
             completedAt: null,
           })
@@ -356,7 +358,9 @@ export function useSessionTranscript({
               title: detail.title,
               target: detail.title,
               input: stringifyPayload(detail.rawInput),
+              output: stringifyPayload(detail.rawOutput),
               rawInput: detail.rawInput,
+              rawOutput: detail.rawOutput,
               startedAt: now,
             })
             return next
