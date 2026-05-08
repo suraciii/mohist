@@ -76,11 +76,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the DELETE API produced by T-001. Query invalidation is preferred over optimistic local deletion for the MVP.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        81932
+      ]
     },
     {
       "id": "T-004",
