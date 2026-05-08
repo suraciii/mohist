@@ -203,8 +203,12 @@ export class BuildTestCheck implements Check {
       const { createWorkflowSessionObservers } = await import('../../agent-runtime');
       const prompt = buildCheckAutoFixPrompt(buildLog);
 
-      const fixObservers = createWorkflowSessionObservers({
+      const observerFactory = ctx.createWorkflowSessionObservers ?? createWorkflowSessionObservers;
+      const fixObservers = observerFactory({
         eventBus: ctx.eventBus,
+        workflowLogRepo: ctx.workflowLogRepo,
+        sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+        coderSessionRepo: ctx.coderSessionRepo,
         stage: 'check',
         title: 'Auto-fix: test failures',
       });

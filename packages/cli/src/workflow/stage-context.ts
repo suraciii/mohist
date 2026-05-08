@@ -5,6 +5,7 @@ import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
+import type { WorkflowSessionObserverDeps } from '../services/session-observers';
 
 export interface ChangeArtifactsManager {
   getChangeDir(issueNumber: number): string | null;
@@ -70,6 +71,10 @@ export interface CheckContext {
   eventBus?: EventBus;
   projectId?: string;
   acpOptions: AgentSessionOptions;
+  workflowLogRepo?: WorkflowLogRepo;
+  sessionStreamLogRepo?: SessionStreamLogRepo;
+  coderSessionRepo?: CoderSessionRepo;
+  createWorkflowSessionObservers?: (options: WorkflowSessionObserverDeps) => import('../agent-runtime/session-observer').SessionObserver[];
 }
 
 export interface WorktreeManager {
