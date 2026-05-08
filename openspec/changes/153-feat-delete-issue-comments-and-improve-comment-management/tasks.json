@@ -47,11 +47,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the DELETE API produced by T-001. Prefer mo issue delete-comment to avoid ambiguity with the existing positional comment command.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        157858
+      ]
     },
     {
       "id": "T-003",
