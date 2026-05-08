@@ -46,10 +46,13 @@ export abstract class BaseStageRunner implements StageRunner {
       }
     }
 
+    let checkResults: CheckResult[] = [];
     const preTaskChecks = this.getPreTaskChecks();
     if (preTaskChecks.length > 0) {
       const preTaskResult = await this.runChecksPhase(ctx, [], preTaskChecks, null, 0, true);
+      checkResults = preTaskResult.checkResults ?? [];
       if (!preTaskResult.success) {
+        this.updateStageExecutionStatus(ctx, 'failed');
         return preTaskResult;
       }
     }
@@ -70,7 +73,7 @@ export abstract class BaseStageRunner implements StageRunner {
     }
 
     const postTaskChecks = this.getChecks();
-    const result = await this.runChecksPhase(ctx, [], postTaskChecks, taskOutput, 0, false);
+    const result = await this.runChecksPhase(ctx, checkResults, postTaskChecks, taskOutput, 0, false);
     if (result.success) {
       this.updateStageExecutionStatus(ctx, 'passed');
     } else {

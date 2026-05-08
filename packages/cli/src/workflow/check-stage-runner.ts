@@ -44,13 +44,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     super();
     this.worktreePath = options.worktreePath;
     this.usesDefaultChecks = !options.checks;
-    this.preTaskChecks = [];
     const wf = loadWorkflow(this.worktreePath);
     this.checkHealthGatePolicy = typeof wf === 'string'
       ? { enabled: true, command: 'npm run build && npm test', timeout: 300000, autoFix: true, maxFixAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Check } }
       : loadHealthGatePolicies(wf).check;
-    this.postTaskChecks = options.checks ?? [
+    this.preTaskChecks = options.checks ? [] : [
       new HealthGateCheck({ worktreePath: this.worktreePath, policy: this.checkHealthGatePolicy, stage: 'check' }),
+    ];
+    this.postTaskChecks = options.checks ?? [
       new AiReviewCheck(),
       new UserApprovalCheck(Stage.Check),
     ];

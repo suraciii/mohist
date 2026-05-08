@@ -147,20 +147,49 @@ describe('CheckStageRunner ordering', () => {
       expect(runner.executeTasksCalls).toBe(0);
     });
 
-    it('default CheckStageRunner has no pre-task build-test check', () => {
+    it('default CheckStageRunner runs health:check as a pre-task check', () => {
       const runner = new CheckStageRunner({ worktreePath: '/tmp/worktree' });
       const preChecks = runner.getPreTaskChecks();
 
-      expect(preChecks).toHaveLength(0);
+      expect(preChecks.map(check => check.name)).toEqual(['health:check']);
     });
 
-    it('default CheckStageRunner runs health:check before AI review and user approval', () => {
+    it('default CheckStageRunner runs AI review and user approval after tasks', () => {
       const worktreePath = path.join(tmpDir, 'worktree');
       fs.mkdirSync(worktreePath, { recursive: true });
       const runner = new CheckStageRunner({ worktreePath });
       const checks = runner.getChecks();
 
-      expect(checks.map(check => check.name)).toEqual(['health:check', 'ai-review', 'user-approval']);
+      expect(checks.map(check => check.name)).toEqual(['ai-review', 'user-approval']);
+    });
+
+    it('default CheckStageRunner.run blocks review artifact generation when health:check fails', async () => {
+      const worktreePath = path.join(tmpDir, 'worktree');
+      fs.mkdirSync(worktreePath, { recursive: true });
+      fs.writeFileSync(path.join(worktreePath, 'workflow.yaml'), [
+        'stages:',
+        '  - stage: check',
+        '    prompt: check',
+        'healthGates:',
+        '  check:',
+        '    command: "node -e \\"process.exit(1)\\""',
+        '    autoFix: false',
+        '    fallbackReaction:',
+        '      type: escalate',
+        '      escalateTarget: build',
+      ].join('\n'));
+
+      const runner = new CheckStageRunner({ worktreePath });
+      const ctx = createMockContext(tmpDir, 42, {
+        acpOptions: { cwd: worktreePath, issueNumber: 42 } as any,
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.checkResults?.map(check => check.name)).toEqual(['health:check']);
+      expect(artifactExists(tmpDir, 42, 'review.md')).toBe(false);
+      expect(artifactExists(tmpDir, 42, 'review-self-check.md')).toBe(false);
     });
   });
 
