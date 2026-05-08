@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from './test-utils'
+import { SessionPage } from '../src/components/SessionPage'
 import { SessionTranscriptView } from '../src/components/SessionTranscriptView'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
-import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../src/lib/types'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata } from '../src/lib/types'
 
 Object.defineProperty(navigator, 'clipboard', {
   value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -53,6 +54,343 @@ function makeTurn(overrides: Partial<SessionTurn> = {}): SessionTurn {
     ...overrides,
   }
 }
+
+function makeMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
+  return {
+    sessionId: 'session-123',
+    coderSessionId: 'coder-session-123',
+    issueId: 'issue-1',
+    acpSessionId: 'acp-123',
+    executionId: null,
+    title: 'Test Session',
+    status: 'running',
+    statusKind: 'live',
+    model: 'claude-3-5-sonnet',
+    stage: 'build',
+    createdAt: '2024-01-01T10:00:00.000Z',
+    completedAt: null,
+    lastActivityAt: '2024-01-01T10:05:00.000Z',
+    eventCount: 10,
+    toolCount: 5,
+    turnCount: 2,
+    ...overrides,
+  }
+}
+
+function makeCoderSessionItem(overrides: Partial<{ id: string; status: string; model: string | null; stage: string | null; createdAt: string; completedAt: string | null }> = {}) {
+  return {
+    id: 'session-123',
+    acpSessionId: 'acp-123',
+    executionId: null,
+    taskDescription: 'Test task',
+    status: 'running',
+    model: 'claude-3-5-sonnet' as string | null,
+    coderType: null,
+    stage: 'build' as string | null,
+    title: null,
+    workflowLogs: [],
+    ...overrides,
+  }
+}
+
+function makeDetail(overrides: Partial<{ metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean }> = {}): CoderSessionDetail {
+  return {
+    id: 'session-123',
+    acpSessionId: 'acp-123',
+    executionId: null,
+    taskDescription: 'Test task',
+    status: 'running',
+    createdAt: '2024-01-01T10:00:00.000Z',
+    completedAt: null,
+    model: 'claude-3-5-sonnet',
+    coderType: null,
+    stage: 'build',
+    title: 'Test Session',
+    metadata: makeMetadata(),
+    turns: [],
+    incomplete: false,
+    ...overrides,
+  }
+}
+
+describe('SessionPage status states', () => {
+  describe('live status', () => {
+    it('shows live badge and turn count for running sessions with recent activity', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'running' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'running', statusKind: 'live', lastActivityAt: new Date().toISOString() }),
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Live/i)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/0 turns/i)).toBeInTheDocument()
+    })
+
+    it('shows last activity time for live sessions', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'running' })]
+      const recentActivity = new Date(Date.now() - 60000).toISOString()
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'running', statusKind: 'live', lastActivityAt: recentActivity }),
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Live/i)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('completed status', () => {
+    it('shows completed badge for completed sessions', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'completed' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'completed', statusKind: 'completed', completedAt: '2024-01-01T11:00:00.000Z' }),
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Completed/i)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/1h 0m 0s/i)).toBeInTheDocument()
+    })
+
+    it('does not show misleading duration for running sessions', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'running' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'running', statusKind: 'live', completedAt: null }),
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Live/i)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('failed status', () => {
+    it('shows failed badge for failed sessions', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'failed' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'failed', statusKind: 'failed', completedAt: '2024-01-01T11:00:00.000Z' }),
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Failed/i)).toBeInTheDocument()
+      })
+    })
+
+    it('shows duration for failed sessions', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'failed' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'failed', statusKind: 'failed', completedAt: '2024-01-01T11:00:00.000Z' }),
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Failed/i)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('stale status', () => {
+    it('shows stale badge when session is running but has old last activity', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'running' })]
+      const oldActivity = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'running', statusKind: 'stale', lastActivityAt: oldActivity }),
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Stale/i)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('empty states', () => {
+    it('shows waiting message when running with no turns', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'running' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'running', statusKind: 'live' }),
+        turns: [],
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Waiting for activity/i)).toBeInTheDocument()
+      })
+    })
+
+    it('shows no activity message when not running and no turns', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'completed' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'completed', statusKind: 'completed' }),
+        turns: [],
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/No activity recorded/i)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('legacy missing prompt', () => {
+    it('shows incomplete message when detail is incomplete', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'completed' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({ status: 'completed', statusKind: 'completed' }),
+        turns: [],
+        incomplete: true,
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Incomplete Session Data/i)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('changed files summary', () => {
+    it('shows file count when changed files are available', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'completed' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+          changedFiles: [
+            { path: 'src/a.ts', operation: 'created', additions: 10, deletions: 0 },
+            { path: 'src/b.ts', operation: 'modified', additions: 5, deletions: 2 },
+          ],
+        }),
+        turns: [],
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/2 files changed/i)).toBeInTheDocument()
+      })
+    })
+
+    it('shows singular file count when only one file changed', async () => {
+      const sessions = [makeCoderSessionItem({ status: 'completed' })]
+      const detail = makeDetail({
+        metadata: makeMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+          changedFiles: [
+            { path: 'src/new.ts', operation: 'created', additions: 5, deletions: 0 },
+          ],
+        }),
+        turns: [],
+      })
+
+      renderWithQueryClient(
+        <SessionPage
+          sessions={sessions}
+          issueNumber={1}
+          issueTitle="Test Issue"
+          detail={detail}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/1 file changed/i)).toBeInTheDocument()
+      })
+    })
+  })
+})
 
 describe('SessionTranscriptView', () => {
   describe('prompt card expansion and copy', () => {

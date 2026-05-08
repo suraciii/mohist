@@ -373,6 +373,7 @@ export interface SessionMetadata {
   executionId: string | null
   title: string | null
   status: string
+  statusKind?: SessionStatusKind
   model: string | null
   stage: string | null
   createdAt: string
@@ -388,6 +389,8 @@ export interface SessionMetadata {
   warnings?: TranscriptWarning[]
   hasUnknownTools?: boolean
 }
+
+export type SessionStatusKind = 'loading' | 'live' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
 export interface TextPart {
   id: string
