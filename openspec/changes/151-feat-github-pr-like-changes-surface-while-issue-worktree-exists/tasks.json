@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add a PR-like issue Changes review surface that is reliable while the issue worktree exists and explicit when review data is unavailable.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Consumes existing WorktreeManager/project/issue data and produces the backend response contract used by later UI work. Prefer --numstat for parseable stats and preserve lazy commit patch loading."
+      "passes": true,
+      "notes": "Consumes existing WorktreeManager/project/issue data and produces the backend response contract used by later UI work. Prefer --numstat for parseable stats and preserve lazy commit patch loading.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        358083
+      ]
     },
     {
       "id": "T-002",
@@ -43,7 +48,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Consumes the response shapes produced by T-001. Expected files include packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts, and IssueDetailPage.tsx."
+      "notes": "Consumes the response shapes produced by T-001. Expected files include packages/cli/web/src/lib/types.ts, packages/cli/web/src/lib/api.ts, packages/cli/web/src/hooks/useQueries.ts, and IssueDetailPage.tsx.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -70,7 +78,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Consumes the backend contract from T-001 and frontend response types/hooks from T-002. Expected files include ChangesPanel.tsx, IssueDetailPage.tsx, and any small supporting UI helpers needed for state copy."
+      "notes": "Consumes the backend contract from T-001 and frontend response types/hooks from T-002. Expected files include ChangesPanel.tsx, IssueDetailPage.tsx, and any small supporting UI helpers needed for state copy.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -94,7 +105,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Consumes the backend contract from T-001 and frontend UI behavior from T-002/T-003. If there is no established component test harness for this panel, prefer focused backend tests plus the closest existing frontend test pattern."
+      "notes": "Consumes the backend contract from T-001 and frontend UI behavior from T-002/T-003. If there is no established component test harness for this panel, prefer focused backend tests plus the closest existing frontend test pattern.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
