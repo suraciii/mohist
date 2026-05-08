@@ -396,6 +396,100 @@ describe('API Routes', () => {
         expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
       });
     });
+
+    describe('POST /api/issues/:number/comments', () => {
+      it('should add a comment to an issue', async () => {
+        const issue = issueService.create({ projectId, title: 'Comment Test' });
+
+        const response = await request(server)
+          .post(`/api/issues/${issue.number}/comments`)
+          .send({ body: 'Test comment' });
+
+        expect(response.status).toBe(201);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.body).toBe('Test comment');
+        expect(response.body.data.issueId).toBe(issue.id);
+      });
+
+      it('should require body', async () => {
+        const issue = issueService.create({ projectId, title: 'Comment Test' });
+
+        const response = await request(server)
+          .post(`/api/issues/${issue.number}/comments`)
+          .send({});
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('body is required');
+      });
+
+      it('should return 404 when issue not found', async () => {
+        const response = await request(server)
+          .post('/api/issues/999/comments')
+          .send({ body: 'Test comment' });
+
+        expect(response.status).toBe(404);
+      });
+    });
+
+    describe('DELETE /api/issues/:number/comments/:commentId', () => {
+      it('should delete a comment that belongs to the issue', async () => {
+        const issue = issueService.create({ projectId, title: 'Delete Comment Test' });
+        const comment = issueService.createComment(issue.id, 'Comment to delete');
+
+        const response = await request(server)
+          .delete(`/api/issues/${issue.number}/comments/${comment.id}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.message).toContain(`Deleted comment ${comment.id} from issue #${issue.number}`);
+
+        const comments = issueService.getCommentsByIssue(issue.id);
+        expect(comments.find(c => c.id === comment.id)).toBeUndefined();
+      });
+
+      it('should return 404 when comment does not exist', async () => {
+        const issue = issueService.create({ projectId, title: 'Delete Comment Test' });
+
+        const response = await request(server)
+          .delete(`/api/issues/${issue.number}/comments/non-existent-id`);
+
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('Comment not found');
+      });
+
+      it('should return 404 when trying to delete a comment from another issue', async () => {
+        const issue1 = issueService.create({ projectId, title: 'Issue 1' });
+        const issue2 = issueService.create({ projectId, title: 'Issue 2' });
+        const commentOnIssue1 = issueService.createComment(issue1.id, 'Comment on issue 1');
+
+        const response = await request(server)
+          .delete(`/api/issues/${issue2.number}/comments/${commentOnIssue1.id}`);
+
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('Comment not found');
+
+        const commentsOnIssue1 = issueService.getCommentsByIssue(issue1.id);
+        expect(commentsOnIssue1.find(c => c.id === commentOnIssue1.id)).toBeDefined();
+      });
+
+      it('should return 404 when issue does not exist', async () => {
+        const response = await request(server)
+          .delete('/api/issues/999/comments/some-id');
+
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('Issue #999 not found');
+      });
+
+      it('should return 400 when no active project', async () => {
+        projectService.clearCurrent();
+
+        const response = await request(server)
+          .delete('/api/issues/1/comments/some-id');
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('No active project');
+      });
+    });
   });
 
   describe('Status Routes', () => {

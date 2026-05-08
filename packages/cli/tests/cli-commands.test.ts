@@ -26,10 +26,10 @@ describe('CLI Commands', () => {
     it('should setup issue commands', () => {
       const program = new Command();
       setupIssueCommands(program);
-      
+
       const commands = program.commands;
       expect(commands.some(cmd => cmd.name() === 'issue')).toBe(true);
-      
+
       const issueCmd = commands.find(cmd => cmd.name() === 'issue');
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'create')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'list')).toBe(true);
@@ -37,6 +37,23 @@ describe('CLI Commands', () => {
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'start')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'close')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'reopen')).toBe(true);
+      expect(issueCmd?.commands.some(cmd => cmd.name() === 'comment')).toBe(true);
+      expect(issueCmd?.commands.some(cmd => cmd.name() === 'delete-comment')).toBe(true);
+    });
+
+    it('should setup comment and delete-comment subcommands', () => {
+      const program = new Command();
+      setupIssueCommands(program);
+
+      const issueCmd = program.commands.find(cmd => cmd.name() === 'issue');
+
+      const commentCmd = issueCmd?.commands.find(cmd => cmd.name() === 'comment');
+      expect(commentCmd).toBeDefined();
+      expect(commentCmd?.name()).toBe('comment');
+
+      const deleteCommentCmd = issueCmd?.commands.find(cmd => cmd.name() === 'delete-comment');
+      expect(deleteCommentCmd).toBeDefined();
+      expect(deleteCommentCmd?.name()).toBe('delete-comment');
     });
   });
   
