@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../lib/agent-events'
 import type { SessionTurn, TextPart, ToolPart, ErrorPart } from '../lib/types'
+import { parseEditInput, parsePatchOperations } from '../components/ToolCallCard'
 
 interface UseSessionTranscriptOptions {
   issueNumber: number
@@ -22,6 +23,8 @@ interface LiveToolCall {
   error?: string
   startedAt: string
   completedAt?: string | null
+  rawInput?: unknown
+  rawOutput?: unknown
 }
 
 export interface UseSessionTranscriptResult {
@@ -32,6 +35,7 @@ export interface UseSessionTranscriptResult {
   scrollToBottom: () => void
   newContentAvailable: boolean
   acknowledgeNewContent: () => void
+  isFinalizing: boolean
 }
 
 function generateId(): string {
@@ -46,9 +50,47 @@ function createErrorPart(message: string, kind: ErrorPart['kind'], at: string): 
   return { id: generateId(), type: 'error', message, kind, at }
 }
 
-function normalizeToolName(toolName: string): string {
-  if (!toolName || toolName === 'unknown') return 'unknown'
-  return toolName.toLowerCase().replace(/[^a-z0-9]/g, '_')
+function stringifyPayload(payload: unknown): string | undefined {
+  if (payload === undefined || payload === null) return undefined
+  return typeof payload === 'string' ? payload : JSON.stringify(payload)
+}
+
+function inferToolName(toolName: string | undefined, title?: string, rawInput?: unknown, rawOutput?: unknown): string {
+  const explicit = toolName && toolName !== 'unknown' ? toolName : undefined
+  const titleName = title && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(title) ? title : undefined
+  if (explicit) return explicit
+  if (titleName) return titleName
+
+  const input = typeof rawInput === 'string' ? rawInput : rawInput && typeof rawInput === 'object' ? rawInput as Record<string, unknown> : null
+  if (input && typeof input === 'object') {
+    if (typeof input.toolName === 'string') return input.toolName
+    if (typeof input.name === 'string') return input.name
+    if (typeof input.patchText === 'string') return 'apply_patch'
+    if (typeof input.command === 'string') return 'bash'
+    if (typeof input.pattern === 'string') return 'grep'
+    if (typeof input.filePath === 'string' || typeof input.file_path === 'string') return 'read'
+    if (Array.isArray(input.todos)) return 'todowrite'
+  }
+  if (typeof input === 'string') {
+    try {
+      return inferToolName(undefined, undefined, JSON.parse(input), rawOutput)
+    } catch {
+      if (input.includes('*** Begin Patch') || input.includes('*** Add File:') || input.includes('*** Update File:') || input.includes('*** Delete File:')) return 'apply_patch'
+    }
+  }
+
+  const output = rawOutput && typeof rawOutput === 'object' ? rawOutput as Record<string, unknown> : null
+  const metadata = output?.metadata && typeof output.metadata === 'object' ? output.metadata as Record<string, unknown> : null
+  if (typeof metadata?.toolName === 'string') return metadata.toolName
+  if (typeof metadata?.name === 'string') return metadata.name
+
+  return 'unknown'
+}
+
+function normalizeToolName(toolName: string | undefined, title?: string, rawInput?: unknown, rawOutput?: unknown): string {
+  const inferred = inferToolName(toolName, title, rawInput, rawOutput)
+  if (!inferred || inferred === 'unknown') return 'unknown'
+  return inferred.toLowerCase().replace(/[^a-z0-9]/g, '_')
 }
 
 function inferDisplayTitle(toolName: string, title?: string): { displayTitle?: string; displaySubtitle?: string } {
@@ -73,24 +115,32 @@ function inferDisplayTitle(toolName: string, title?: string): { displayTitle?: s
 }
 
 function createToolPart(tool: LiveToolCall): ToolPart {
-  const { displayTitle, displaySubtitle } = inferDisplayTitle(tool.toolName, tool.title)
+  const normalizedName = normalizeToolName(tool.toolName, tool.title, tool.rawInput, tool.rawOutput)
+  const { displayTitle, displaySubtitle } = inferDisplayTitle(normalizedName, tool.title)
+  const input = tool.input ?? stringifyPayload(tool.rawInput)
+  const output = tool.output ?? stringifyPayload(tool.rawOutput)
+  const parsedEdit = parseEditInput(input)
+  const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : undefined
   return {
     id: generateId(),
     type: 'tool',
     tool: {
       toolCallId: tool.toolCallId,
-      normalizedName: normalizeToolName(tool.toolName),
+      normalizedName,
       toolName: tool.toolName,
       displayTitle,
       displaySubtitle,
       status: tool.status,
       title: tool.title,
       target: tool.target,
-      input: tool.input,
-      output: tool.output,
+      input,
+      output,
       error: tool.error,
       startedAt: tool.startedAt,
       completedAt: tool.completedAt,
+      rawInput: input,
+      rawOutput: output,
+      changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
     },
   }
 }
@@ -146,11 +196,31 @@ function updateToolInTurn(turn: SessionTurn, toolCallId: string, updates: Partia
       assistant: turn.assistant.map((p, i) => {
         if (i !== existingToolIndex) return p
         const toolPart = p as ToolPart
+        const rawInput = updates.rawInput ?? updates.input ?? toolPart.tool.rawInput ?? toolPart.tool.input
+        const rawOutput = updates.rawOutput ?? updates.output ?? toolPart.tool.rawOutput ?? toolPart.tool.output
+        const startedAt = updates.startedAt ?? toolPart.tool.startedAt
+        const normalizedName = normalizeToolName(
+          updates.toolName ?? toolPart.tool.toolName,
+          updates.title ?? toolPart.tool.title,
+          rawInput,
+          rawOutput,
+        )
+        const input = stringifyPayload(rawInput) ?? toolPart.tool.input
+        const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
+        const parsedEdit = parseEditInput(input)
+        const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
         return {
           ...toolPart,
           tool: {
             ...toolPart.tool,
             ...updates,
+            normalizedName,
+            input,
+            output,
+            rawInput: input,
+            rawOutput: output,
+            changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
+            startedAt,
             completedAt: updates.status === 'completed' || updates.status === 'failed' ? now : toolPart.tool.completedAt,
           },
         }
@@ -171,6 +241,8 @@ function updateToolInTurn(turn: SessionTurn, toolCallId: string, updates: Partia
         input: updates.input,
         output: updates.output,
         error: updates.error,
+        rawInput: updates.rawInput,
+        rawOutput: updates.rawOutput,
         startedAt: now,
         completedAt: updates.status === 'completed' || updates.status === 'failed' ? now : null,
       }),
@@ -190,6 +262,7 @@ export function useSessionTranscript({
   const [transcriptVersion, setTranscriptVersion] = useState(0)
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [newContentAvailable, setNewContentAvailable] = useState(false)
+  const [isFinalizing, setIsFinalizing] = useState(false)
 
   const turnsRef = useRef(turns)
   turnsRef.current = turns
@@ -225,6 +298,7 @@ export function useSessionTranscript({
   useEffect(() => {
     setTurns(initialTurns)
     liveToolCallMapRef.current.clear()
+    setIsFinalizing(false)
     setTranscriptVersion((version) => version + 1)
   }, [initialTurns])
 
@@ -245,6 +319,7 @@ export function useSessionTranscript({
           next[next.length - 1] = appendTextToTurn(lastTurn, detail.text)
           return next
         })
+        setIsFinalizing(true)
         markNewContentRef.current()
       }),
     )
@@ -263,9 +338,9 @@ export function useSessionTranscript({
             status: 'started',
             title: detail.title,
             target: detail.title,
-            input: typeof detail.rawInput === 'string' ? detail.rawInput : JSON.stringify(detail.rawInput ?? ''),
-            output: '',
+            input: stringifyPayload(detail.rawInput),
             error: '',
+            rawInput: detail.rawInput,
             startedAt: now,
             completedAt: null,
           })
@@ -278,7 +353,8 @@ export function useSessionTranscript({
               status: 'started',
               title: detail.title,
               target: detail.title,
-              input: typeof detail.rawInput === 'string' ? detail.rawInput : JSON.stringify(detail.rawInput ?? ''),
+              input: stringifyPayload(detail.rawInput),
+              rawInput: detail.rawInput,
               startedAt: now,
             })
             return next
@@ -288,7 +364,8 @@ export function useSessionTranscript({
           const existing = liveToolCallMapRef.current.get(detail.toolCallId)
           if (existing) {
             existing.status = detail.state
-            existing.output = typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? '')
+            existing.output = stringifyPayload(detail.rawOutput)
+            existing.rawOutput = detail.rawOutput
             existing.completedAt = now
           }
 
@@ -297,7 +374,8 @@ export function useSessionTranscript({
             const lastTurn = next[next.length - 1]
             next[next.length - 1] = updateToolInTurn(lastTurn, detail.toolCallId, {
               status: detail.state,
-              output: typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? ''),
+              output: stringifyPayload(detail.rawOutput),
+              rawOutput: detail.rawOutput,
               completedAt: now,
             })
             return next
@@ -409,5 +487,6 @@ export function useSessionTranscript({
     scrollToBottom,
     newContentAvailable,
     acknowledgeNewContent,
+    isFinalizing,
   }
 }

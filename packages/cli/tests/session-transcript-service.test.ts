@@ -620,6 +620,20 @@ describe('SessionTranscriptAssembler', () => {
       expect((transcript.turns[1].assistant[0] as any).text).toBe('Assistant');
     });
 
+    it('should preserve same-priority same-timestamp message chunk input order', () => {
+      const session = makeSession();
+      const sameTime = '2024-01-01T10:00:00.000Z';
+      const events = [
+        makePromptEvent('Prompt', 'task', sameTime),
+        { id: 'zzzz-uuid-like', sessionId: 'session-1', issueId: 'issue-1', eventType: 'agent_message_chunk', data: JSON.stringify({ content: { text: 'first ' } }), createdAt: sameTime },
+        { id: '0000-uuid-like', sessionId: 'session-1', issueId: 'issue-1', eventType: 'agent_message_chunk', data: JSON.stringify({ content: { text: 'second' } }), createdAt: sameTime },
+      ];
+
+      const transcript = assembleSessionTranscript(session, events as any);
+
+      expect((transcript.turns[0].assistant[0] as any).text).toBe('first second');
+    });
+
     it('should read same-second rows in SQLite insertion order', () => {
       const db = new DatabaseManager({ inMemory: true });
       initializeDatabase(db);
