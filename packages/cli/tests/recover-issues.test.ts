@@ -93,6 +93,41 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(recovered?.stage).toBe(Stage.Check);
   });
 
+  it('build-stage with check approval: reconciles to check without blocking', () => {
+    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
+    const issue = issueService.create({ projectId: project.id, title: 'Approval Race' });
+
+    issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+    issueRepo.updateStage(issue.id, Stage.Build);
+    issueRepo.setApprovalState(issue.id, {
+      stage: Stage.Check,
+      status: 'awaiting',
+      output: null,
+      requestedAt: new Date().toISOString(),
+    });
+    issueRepo.updateBlockedReason(issue.id, '检测到 agent 已退出但状态未更新，自动恢复');
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+      undefined,
+      undefined,
+      projectRepo,
+      createWorktreeMock(tmpDir),
+    );
+
+    service.recoverSingleIssueById(issue.id);
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.stage).toBe(Stage.Check);
+    expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.approvalState?.stage).toBe(Stage.Check);
+    expect(recovered?.approvalState?.status).toBe('awaiting');
+    expect(recovered?.blockedReason).toBeUndefined();
+  });
+
   it('build-stage partial: auto-retry triggered', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Partial' });

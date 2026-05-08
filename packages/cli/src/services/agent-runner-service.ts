@@ -11,7 +11,7 @@ import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue, MergeState } from '../types';
 import { EventBus } from './event-bus';
-import { Stage } from '../types';
+import { Stage, STAGE_TRANSITIONS } from '../types';
 import { load } from '../config/config-loader';
 import { maskSensitiveData } from '../utils/sensitive-data';
 import { Log } from '../util/log';
@@ -91,6 +91,12 @@ const log = Log.create({ service: 'agent-runner' });
 
 export function isCurrentStageAwaitingApproval(issue: Issue | null | undefined): boolean {
   return Boolean(issue && isCurrentStageApproval(issue, issue.stage, 'awaiting'));
+}
+
+function isAwaitingApprovalForReachableStage(issue: Issue | null | undefined): boolean {
+  if (!issue?.approvalState || issue.approvalState.status !== 'awaiting') return false;
+  if (issue.approvalState.stage === issue.stage) return true;
+  return STAGE_TRANSITIONS[issue.stage]?.includes(issue.approvalState.stage) ?? false;
 }
 
 export class AgentRunnerService {
@@ -286,7 +292,10 @@ export class AgentRunnerService {
 
     if (!this.issueRepo) return;
 
-    const orphans = this.issueRepo.findAll({ status: IssueStatus.Active })
+    const orphans = [
+      ...this.issueRepo.findAll({ status: IssueStatus.Active }),
+      ...this.issueRepo.findAll({ status: IssueStatus.Blocked }).filter(isAwaitingApprovalForReachableStage),
+    ]
       .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog);
 
     if (orphans.length === 0) return;
@@ -350,7 +359,7 @@ export class AgentRunnerService {
     const issue = this.issueRepo.findById(issueId);
     if (!issue) return;
     if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) return;
-    if (issue.status !== IssueStatus.Active) return;
+    if (issue.status !== IssueStatus.Active && !isAwaitingApprovalForReachableStage(issue)) return;
     this.recoverSingleIssue(issue);
   }
 
@@ -382,11 +391,18 @@ export class AgentRunnerService {
         return;
       }
 
-      if (isCurrentStageApproval(issue, issue.stage, 'awaiting')) {
+      if (isAwaitingApprovalForReachableStage(issue)) {
+        if (issue.approvalState!.stage !== issue.stage) {
+          this.issueRepo.updateStage(issue.id, issue.approvalState!.stage);
+        }
+        if (issue.status !== IssueStatus.Active) {
+          this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        }
+        this.issueRepo.updateBlockedReason(issue.id, null);
         log.info('Restored awaiting issue', {
           issueNumber: issue.number,
           stage: issue.approvalState!.stage ?? issue.stage,
-          action: 'status remains active',
+          action: 'stage/status reconciled, awaiting approval preserved',
         });
       } else if (issue.stage === Stage.Check || issue.stage === Stage.Plan) {
         const recoveredOutput = this.recoverApprovalOutput(issue);
@@ -396,6 +412,8 @@ export class AgentRunnerService {
           output: recoveredOutput,
           requestedAt: new Date().toISOString(),
         });
+        this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        this.issueRepo.updateBlockedReason(issue.id, null);
         log.info('Recovered review-stage issue', {
           issueNumber: issue.number,
           stage: issue.stage,
@@ -545,6 +563,7 @@ export class AgentRunnerService {
         output: { recovered: true, reason: 'build completed, auto-advanced to check' },
         requestedAt: new Date().toISOString(),
       });
+      this.issueRepo!.updateStatus(issue.id, IssueStatus.Active);
       this.issueRepo!.updateRetryCount(issue.id, 0);
       this.issueRepo!.updateBlockedReason(issue.id, null);
       log.info('Recovered build-stage orphan — all tasks pass, auto-advanced to review', {
