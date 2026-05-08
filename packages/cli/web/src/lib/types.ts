@@ -578,6 +578,7 @@ export interface CheckResult {
   reviewReport?: string
   autoFixed?: boolean
   verdict?: string
+  output?: unknown
 }
 
 export interface CheckSuiteOutput {
