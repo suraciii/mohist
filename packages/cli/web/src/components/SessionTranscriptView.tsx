@@ -1,8 +1,18 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import Markdown from 'react-markdown'
 import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart, PromptSummary } from '../lib/types'
 import { ToolCallCard } from './ToolCallCard'
 import type { ToolCallEntry } from '../lib/types'
+
+const CONTEXT_TOOL_NAMES = new Set(['read', 'glob', 'grep', 'list', 'membrowse', 'memread', 'memsearch'])
+
+function isContextTool(toolName: string): boolean {
+  return CONTEXT_TOOL_NAMES.has(toolName.toLowerCase())
+}
+
+function isTodowriteTool(toolName: string): boolean {
+  return toolName.toLowerCase() === 'todowrite'
+}
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString()
@@ -202,7 +212,239 @@ function ToolPartView({ part }: { part: ToolPart }) {
   return <ToolCallCard entry={entry} />
 }
 
+interface ContextGroupCardProps {
+  tools: ToolPart[]
+}
+
+function ContextGroupCard({ tools }: ContextGroupCardProps) {
+  const [expanded, setExpanded] = useState(false)
+
+  const counts: Record<string, number> = {}
+  const targets: string[] = []
+  let failedCount = 0
+
+  for (const tool of tools) {
+    const name = tool.tool.normalizedName ?? tool.tool.toolName
+    if (!counts[name]) counts[name] = 0
+    counts[name]++
+    if (tool.tool.status === 'failed') failedCount++
+
+    if (tool.tool.input) {
+      try {
+        const parsed = JSON.parse(tool.tool.input)
+        const filePath = parsed.file_path ?? parsed.filePath ?? parsed.path
+        const pattern = parsed.pattern ?? parsed.query
+        if (filePath) targets.push(filePath)
+        else if (pattern) targets.push(pattern)
+      } catch {}
+    }
+  }
+
+  const uniqueTargets = [...new Set(targets)]
+  const labelParts: string[] = []
+  for (const [name, count] of Object.entries(counts)) {
+    labelParts.push(count === 1 ? name : `${name} ${count}`)
+  }
+
+  const failedLabel = failedCount > 0 ? ` · ${failedCount} failed` : ''
+  const summary = uniqueTargets.length > 0
+    ? `Context gathered · ${labelParts.join(' · ')}${failedLabel}`
+    : `Context gathered · ${labelParts.join(' · ')}${failedLabel}`
+
+  return (
+    <div className="rounded-md border border-gray-200 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
+      >
+        <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM7.5 4.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm5 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" />
+        </svg>
+        <span className="text-xs font-medium text-gray-700">{summary}</span>
+        {failedCount > 0 && (
+          <span className="text-xs text-red-500">{failedCount} failed</span>
+        )}
+        <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+        </svg>
+      </button>
+      if (expanded) {
+        <div className="px-3 pb-2 space-y-1.5 border-t border-gray-100">
+          {tools.map((tool) => {
+            const entry: ToolCallEntry = {
+              executionId: '',
+              toolName: tool.tool.toolName,
+              state: tool.tool.status,
+              timestamp: tool.tool.startedAt ? new Date(tool.tool.startedAt).getTime() : Date.now(),
+              toolCallId: tool.tool.toolCallId,
+              title: tool.tool.title,
+              rawInput: tool.tool.input,
+              rawOutput: tool.tool.output,
+              error: tool.tool.error,
+              duration: tool.tool.completedAt && tool.tool.startedAt
+                ? new Date(tool.tool.completedAt).getTime() - new Date(tool.tool.startedAt).getTime()
+                : undefined,
+            }
+            return (
+              <div key={tool.id} className="rounded-md border border-gray-200 overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-gray-50">
+                  <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-xs font-mono text-gray-600">{tool.tool.toolName}</span>
+                  {tool.tool.status === 'failed' && (
+                    <span className="text-xs text-red-500">failed</span>
+                  )}
+                </div>
+                {tool.tool.input && (
+                  <div className="px-3 py-2">
+                    <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
+                    <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+                      {tool.tool.input}
+                    </pre>
+                  </div>
+                )}
+                {tool.tool.output && (
+                  <div className="px-3 py-2 border-t border-gray-100">
+                    <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
+                    <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+                      {tool.tool.output}
+                    </pre>
+                  </div>
+                )}
+                {tool.tool.error && (
+                  <div className="px-3 py-2 text-xs text-red-600 bg-red-50 border-t border-red-100">
+                    {tool.tool.error}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      }
+    </div>
+  )
+}
+
+interface TodoUpdateCardProps {
+  part: ToolPart
+}
+
+function TodoUpdateCard({ part }: TodoUpdateCardProps) {
+  const [expanded, setExpanded] = useState(false)
+
+  let itemCount = 0
+  if (part.tool.input) {
+    try {
+      const parsed = JSON.parse(part.tool.input)
+      if (parsed.todos && Array.isArray(parsed.todos)) {
+        itemCount = parsed.todos.length
+      }
+    } catch {}
+  }
+
+  const summary = itemCount > 0
+    ? `Updated todo list (${itemCount} items)`
+    : 'Updated todo list'
+
+  return (
+    <div className="rounded-md border border-gray-200 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
+      >
+        <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+        </svg>
+        <span className="text-xs font-medium text-gray-700">{summary}</span>
+        {part.tool.status === 'failed' && (
+          <span className="text-xs text-red-500">failed</span>
+        )}
+        <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2 border-t border-gray-100">
+          <div className="rounded-md border border-gray-200 overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-gray-50">
+              <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+              </svg>
+              <span className="text-xs font-mono text-gray-600">todowrite</span>
+              {part.tool.status === 'failed' && (
+                <span className="text-xs text-red-500">failed</span>
+              )}
+            </div>
+            {part.tool.input && (
+              <div className="px-3 py-2">
+                <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
+                <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-48 overflow-auto">
+                  {part.tool.input}
+                </pre>
+              </div>
+            )}
+            {part.tool.output && (
+              <div className="px-3 py-2 border-t border-gray-100">
+                <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
+                <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-48 overflow-auto">
+                  {part.tool.output}
+                </pre>
+              </div>
+            )}
+            {part.tool.error && (
+              <div className="px-3 py-2 text-xs text-red-600 bg-red-50 border-t border-red-100">
+                {part.tool.error}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SessionTurnView({ turn }: { turn: SessionTurn }) {
+  const renderParts = () => {
+    const parts: React.ReactNode[] = []
+    let i = 0
+
+    while (i < turn.assistant.length) {
+      const part = turn.assistant[i]
+
+      if (part.type === 'tool' && isTodowriteTool(part.tool.toolName)) {
+        parts.push(<TodoUpdateCard key={part.id} part={part} />)
+        i++
+        continue
+      }
+
+      if (part.type === 'tool' && isContextTool(part.tool.toolName)) {
+        const contextGroup: ToolPart[] = []
+        while (
+          i < turn.assistant.length &&
+          turn.assistant[i].type === 'tool' &&
+          isContextTool((turn.assistant[i] as ToolPart).tool.toolName)
+        ) {
+          contextGroup.push(turn.assistant[i] as ToolPart)
+          i++
+        }
+        if (contextGroup.length > 0) {
+          parts.push(<ContextGroupCard key={`ctx-${contextGroup[0].id}`} tools={contextGroup} />)
+        }
+        continue
+      }
+
+      if (part.type === 'text') parts.push(<AssistantTextPartView key={part.id} part={part} />)
+      else if (part.type === 'reasoning') parts.push(<ReasoningPartView key={part.id} part={part} />)
+      else if (part.type === 'error') parts.push(<SessionErrorPartView key={part.id} part={part} />)
+      else if (part.type === 'tool') parts.push(<ToolPartView key={part.id} part={part} />)
+
+      i++
+    }
+
+    return parts
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -230,13 +472,7 @@ function SessionTurnView({ turn }: { turn: SessionTurn }) {
         </div>
       )}
 
-      {turn.assistant.map((part) => {
-        if (part.type === 'text') return <AssistantTextPartView key={part.id} part={part} />
-        if (part.type === 'reasoning') return <ReasoningPartView key={part.id} part={part} />
-        if (part.type === 'error') return <SessionErrorPartView key={part.id} part={part} />
-        if (part.type === 'tool') return <ToolPartView key={part.id} part={part} />
-        return null
-      })}
+      {renderParts()}
     </div>
   )
 }
