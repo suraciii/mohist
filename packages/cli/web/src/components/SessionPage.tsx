@@ -11,6 +11,8 @@ import type { CoderSessionDetail, SessionStatusKind } from '../lib/types'
 
 type StatusKind = SessionStatusKind
 
+const EMPTY_TURNS: CoderSessionDetail['turns'] = []
+
 function formatDuration(ms: number): string {
   if (ms < 0) return '0s'
   const totalSec = Math.floor(ms / 1000)
@@ -274,7 +276,6 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
 }
 
 export function SessionPage() {
-  console.log('SessionPage render')
   const { number: numberStr, sessionId } = useParams<{ number: string; sessionId: string }>()
   const issueNumber = Number(numberStr)
 
@@ -298,8 +299,9 @@ export function SessionPage() {
   const isNearBottomRef = useRef(true)
   const scrollToBottomPendingRef = useRef(false)
 
-  const rawStatus = detail?.metadata?.status ?? session?.status
-  const isRunning = rawStatus === 'running'
+  const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
+  const apiStatusKind = detail?.metadata?.statusKind
+  const isRunning = rawStatus === 'running' && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
   const acpSessionId = detail?.acpSessionId ?? session?.acpSessionId ?? ''
 
   const statusKind: StatusKind = detail
@@ -317,11 +319,12 @@ export function SessionPage() {
     issueNumber,
     sessionId: sessionId ?? '',
     acpSessionId,
-    initialTurns: detail?.turns ?? [],
+    initialTurns: detail?.turns ?? EMPTY_TURNS,
     isRunning,
   })
 
   const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
+  const displayTurnCount = detail?.metadata?.turnCount ?? turns.length
 
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current
@@ -394,7 +397,7 @@ export function SessionPage() {
           issueTitle={issue?.title}
           meta={detail.metadata}
           statusKind={displayStatusKind}
-          turnCount={turns.length}
+          turnCount={displayTurnCount}
         />
         <SessionLegacyMissingState />
       </div>
@@ -409,7 +412,7 @@ export function SessionPage() {
           issueTitle={issue?.title}
           meta={detail.metadata}
           statusKind={displayStatusKind}
-          turnCount={turns.length}
+          turnCount={displayTurnCount}
         />
         <SessionWaitingState />
       </div>
@@ -424,7 +427,7 @@ export function SessionPage() {
           issueTitle={issue?.title}
           meta={detail.metadata}
           statusKind={displayStatusKind}
-          turnCount={turns.length}
+          turnCount={displayTurnCount}
         />
         <SessionEmptyState issueNumber={issueNumber} />
       </div>
@@ -438,7 +441,7 @@ export function SessionPage() {
         issueTitle={issue?.title}
         meta={detail.metadata}
         statusKind={displayStatusKind}
-        turnCount={turns.length}
+        turnCount={displayTurnCount}
       />
 
       <div
