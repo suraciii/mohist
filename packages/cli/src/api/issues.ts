@@ -2469,7 +2469,21 @@ export function createIssueRoutes(
           },
         } satisfies ApiResponse);
       } else {
-        return c.json({ success: false, error: 'Post-merge finalizer not configured' } satisfies ApiResponse, 500);
+        const issueRepo = stateManager.getIssueRepo();
+        issueRepo.updateStage(issue.id, Stage.Done);
+        issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+        issueRepo.clearApprovalState(issue.id);
+        issueRepo.setMergeState(issue.id, MergeState.Merged);
+        issueRepo.updateBlockedReason(issue.id, null);
+
+        const refreshedIssue = issueService.getByNumber(projectId, number);
+        return c.json({
+          success: true,
+          data: {
+            issue: refreshedIssue ?? issue,
+            message: mergeResult.message,
+          },
+        } satisfies ApiResponse);
       }
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);

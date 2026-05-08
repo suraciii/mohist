@@ -12,6 +12,7 @@ import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import { HealthGateCheck } from './checks/health-gate-check';
+import { BuildTestCheck } from './checks/build-test-check';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
@@ -44,7 +45,9 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     super();
     this.worktreePath = options.worktreePath;
     this.usesDefaultChecks = !options.checks;
-    this.preTaskChecks = [];
+    this.preTaskChecks = options.checks ? [] : [
+      new BuildTestCheck({ worktreePath: this.worktreePath }),
+    ];
     const wf = loadWorkflow(this.worktreePath);
     this.checkHealthGatePolicy = typeof wf === 'string'
       ? { enabled: true, command: 'npm run build && npm test', timeout: 300000, autoFix: true, maxFixAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Check } }

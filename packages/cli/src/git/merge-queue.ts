@@ -4,7 +4,7 @@ import { promisify } from 'util';
 import { WorktreeManager } from './worktree-manager';
 import { EventBus } from '../services/event-bus';
 import { IssueRepo } from '../db/issue-repo';
-import { MergeState } from '../types';
+import { IssueStatus, MergeState, Stage } from '../types';
 import { Log } from '../util/log';
 import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
 
@@ -318,21 +318,24 @@ export class MergeQueue {
       issueNumber: entry.issueNumber,
     });
 
-    if (!this.deps.postMergeFinalizer) {
-      this.handleFailure(entry, 'Post-merge finalizer not configured');
-      return;
-    }
-
     const issue = this.deps.issueRepo.findById(entry.issueId);
     if (!issue) {
       this.handleFailure(entry, 'Issue not found for post-merge finalization');
       return;
     }
 
-    const finalization = await this.deps.postMergeFinalizer.finalize(issue);
-    if (!finalization.success) {
-      this.handleFailure(entry, finalization.error || 'Post-merge health gate failed');
-      return;
+    if (this.deps.postMergeFinalizer) {
+      const finalization = await this.deps.postMergeFinalizer.finalize(issue);
+      if (!finalization.success) {
+        this.handleFailure(entry, finalization.error || 'Post-merge health gate failed');
+        return;
+      }
+    } else {
+      this.deps.issueRepo.updateStage(issue.id, Stage.Done);
+      this.deps.issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+      this.deps.issueRepo.clearApprovalState(issue.id);
+      this.deps.issueRepo.setMergeState(issue.id, MergeState.Merged);
+      this.deps.issueRepo.updateBlockedReason(issue.id, null);
     }
 
     entry.mergeState = MergeState.Merged;
