@@ -129,6 +129,38 @@ export interface CommitDiff {
   diff: string
 }
 
+export type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error'
+
+export type ChangesAvailability =
+  | { available: true; reason: null }
+  | { available: false; reason: ChangesUnavailableReason; message: string }
+
+export interface ChangesSummary {
+  filesChanged: number
+  commits: number
+  additions: number
+  deletions: number
+}
+
+export type IssueDiffResponse = ChangesAvailability & {
+  base: string
+  head: string
+  summary: ChangesSummary
+  files: DiffFile[]
+}
+
+export type IssueCommitsResponse = ChangesAvailability & {
+  base: string
+  head: string
+  summary: ChangesSummary & { commits: number }
+  commits: CommitEntry[]
+}
+
+export type CommitDiffResponse = ChangesAvailability & {
+  hash: string
+  diff: string
+}
+
 export type PlanRoundStartEvent = {
   issueId: string
   projectId: string

@@ -38,7 +38,7 @@ export function IssueDetailPage() {
   const [commentText, setCommentText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
-  const [diffTab, setDiffTab] = useState<'files' | 'commits'>('commits')
+  const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
 
@@ -221,6 +221,37 @@ export function IssueDetailPage() {
 
           <PipelineView issue={issue} />
 
+          {diffData?.available === true && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 mb-6">
+              <div className="flex items-center gap-4 text-sm">
+                <span className="text-gray-500">
+                  <span className="font-medium text-gray-700">{diffData.base}</span>
+                  {' → '}
+                  <span className="font-medium text-gray-700">{diffData.head}</span>
+                </span>
+                <span className="text-gray-300">·</span>
+                <span className="text-gray-500">
+                  <span className="font-medium text-gray-700">{diffData.summary.filesChanged}</span> files changed
+                </span>
+                <span className="text-gray-300">·</span>
+                <span className="text-gray-500">
+                  <span className="font-medium text-gray-700">{commitsData?.summary?.commits ?? 0}</span> commits
+                </span>
+                <span className="text-gray-300">·</span>
+                <span className="text-green-600">+{diffData.summary.additions}</span>
+                <span className="text-red-500">-{diffData.summary.deletions}</span>
+                <span className="text-gray-300">·</span>
+                <span className="text-xs text-gray-400">Worktree retained</span>
+                {issue.mergeState && (
+                  <>
+                    <span className="text-gray-300">·</span>
+                    <span className="text-xs text-gray-500">Merge: {issue.mergeState}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
               <BranchBar issueNumber={issueNumber} stage={issue.stage} isAgentRunning={isAgentRunningOnThis} />
@@ -233,8 +264,8 @@ export function IssueDetailPage() {
 
               <div id="changes-panel">
               <ChangesPanel
-                files={diffData?.files ?? []}
-                commits={commitsData?.commits ?? []}
+                diffData={diffData}
+                commitsData={commitsData}
                 diffTab={diffTab}
                 setDiffTab={setDiffTab}
                 expandedFiles={expandedFiles}
