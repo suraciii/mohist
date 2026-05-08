@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add explicit stage exit health gates before approval and completion boundaries.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "CONFIG",
       "output": "packages/cli/src/workflow/workflow-loader.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Produces the central policy API consumed by later check and runner work."
+      "passes": true,
+      "notes": "Produces the central policy API consumed by later check and runner work.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        191254
+      ]
     },
     {
       "id": "T-002",
@@ -43,7 +48,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Consumes the policy resolver from T-001 and produces the reusable health gate primitive."
+      "notes": "Consumes the policy resolver from T-001 and produces the reusable health gate primitive.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -67,7 +75,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Consumes HealthGateCheck and policy resolution; preserves existing artifact/task/AI/user approval checks."
+      "notes": "Consumes HealthGateCheck and policy resolution; preserves existing artifact/task/AI/user approval checks.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -91,7 +102,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Consumes integrated health gates and closes the direct merge bypass."
+      "notes": "Consumes integrated health gates and closes the direct merge bypass.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -115,7 +129,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Consumes the stage and post-merge result shapes produced by earlier tasks."
+      "notes": "Consumes the stage and post-merge result shapes produced by earlier tasks.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -139,7 +156,10 @@
         "T-005"
       ],
       "passes": false,
-      "notes": "Consumes all implementation and visibility work to validate the complete stage exit health guarantee."
+      "notes": "Consumes all implementation and visibility work to validate the complete stage exit health guarantee.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
