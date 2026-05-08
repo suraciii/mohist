@@ -89,7 +89,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     ];
 
     const resumeSteps = ctx.checkpointManager
-      ? ctx.checkpointManager.getResumeSteps(ctx.issue.number, 'review')
+      ? ctx.checkpointManager.getResumeSteps(ctx.issue.number, 'check')
       : [];
     const completedSteps = [...resumeSteps];
 
@@ -174,7 +174,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
           completedSteps.push(task.type);
           ctx.checkpointManager?.markStepComplete(
             ctx.issue.number,
-            'review',
+            'check',
             task.type,
             tasks[index + 1]?.type ?? null,
           );
@@ -284,7 +284,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         completedSteps.push(task.type);
         ctx.checkpointManager?.markStepComplete(
           ctx.issue.number,
-          'review',
+          'check',
           task.type,
           tasks[index + 1]?.type ?? null,
         );
