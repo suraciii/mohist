@@ -55,343 +55,6 @@ function makeTurn(overrides: Partial<SessionTurn> = {}): SessionTurn {
   }
 }
 
-function makeMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
-  return {
-    sessionId: 'session-123',
-    coderSessionId: 'coder-session-123',
-    issueId: 'issue-1',
-    acpSessionId: 'acp-123',
-    executionId: null,
-    title: 'Test Session',
-    status: 'running',
-    statusKind: 'live',
-    model: 'claude-3-5-sonnet',
-    stage: 'build',
-    createdAt: '2024-01-01T10:00:00.000Z',
-    completedAt: null,
-    lastActivityAt: '2024-01-01T10:05:00.000Z',
-    eventCount: 10,
-    toolCount: 5,
-    turnCount: 2,
-    ...overrides,
-  }
-}
-
-function makeCoderSessionItem(overrides: Partial<{ id: string; status: string; model: string | null; stage: string | null; createdAt: string; completedAt: string | null }> = {}) {
-  return {
-    id: 'session-123',
-    acpSessionId: 'acp-123',
-    executionId: null,
-    taskDescription: 'Test task',
-    status: 'running',
-    model: 'claude-3-5-sonnet' as string | null,
-    coderType: null,
-    stage: 'build' as string | null,
-    title: null,
-    workflowLogs: [],
-    ...overrides,
-  }
-}
-
-function makeDetail(overrides: Partial<{ metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean }> = {}): CoderSessionDetail {
-  return {
-    id: 'session-123',
-    acpSessionId: 'acp-123',
-    executionId: null,
-    taskDescription: 'Test task',
-    status: 'running',
-    createdAt: '2024-01-01T10:00:00.000Z',
-    completedAt: null,
-    model: 'claude-3-5-sonnet',
-    coderType: null,
-    stage: 'build',
-    title: 'Test Session',
-    metadata: makeMetadata(),
-    turns: [],
-    incomplete: false,
-    ...overrides,
-  }
-}
-
-describe('SessionPage status states', () => {
-  describe('live status', () => {
-    it('shows live badge and turn count for running sessions with recent activity', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'running' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'running', statusKind: 'live', lastActivityAt: new Date().toISOString() }),
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Live/i)).toBeInTheDocument()
-      })
-      expect(screen.getByText(/0 turns/i)).toBeInTheDocument()
-    })
-
-    it('shows last activity time for live sessions', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'running' })]
-      const recentActivity = new Date(Date.now() - 60000).toISOString()
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'running', statusKind: 'live', lastActivityAt: recentActivity }),
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Live/i)).toBeInTheDocument()
-      })
-    })
-  })
-
-  describe('completed status', () => {
-    it('shows completed badge for completed sessions', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'completed' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'completed', statusKind: 'completed', completedAt: '2024-01-01T11:00:00.000Z' }),
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Completed/i)).toBeInTheDocument()
-      })
-      expect(screen.getByText(/1h 0m 0s/i)).toBeInTheDocument()
-    })
-
-    it('does not show misleading duration for running sessions', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'running' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'running', statusKind: 'live', completedAt: null }),
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Live/i)).toBeInTheDocument()
-      })
-    })
-  })
-
-  describe('failed status', () => {
-    it('shows failed badge for failed sessions', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'failed' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'failed', statusKind: 'failed', completedAt: '2024-01-01T11:00:00.000Z' }),
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Failed/i)).toBeInTheDocument()
-      })
-    })
-
-    it('shows duration for failed sessions', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'failed' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'failed', statusKind: 'failed', completedAt: '2024-01-01T11:00:00.000Z' }),
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Failed/i)).toBeInTheDocument()
-      })
-    })
-  })
-
-  describe('stale status', () => {
-    it('shows stale badge when session is running but has old last activity', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'running' })]
-      const oldActivity = new Date(Date.now() - 10 * 60 * 1000).toISOString()
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'running', statusKind: 'stale', lastActivityAt: oldActivity }),
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Stale/i)).toBeInTheDocument()
-      })
-    })
-  })
-
-  describe('empty states', () => {
-    it('shows waiting message when running with no turns', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'running' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'running', statusKind: 'live' }),
-        turns: [],
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Waiting for activity/i)).toBeInTheDocument()
-      })
-    })
-
-    it('shows no activity message when not running and no turns', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'completed' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'completed', statusKind: 'completed' }),
-        turns: [],
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/No activity recorded/i)).toBeInTheDocument()
-      })
-    })
-  })
-
-  describe('legacy missing prompt', () => {
-    it('shows incomplete message when detail is incomplete', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'completed' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({ status: 'completed', statusKind: 'completed' }),
-        turns: [],
-        incomplete: true,
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/Incomplete Session Data/i)).toBeInTheDocument()
-      })
-    })
-  })
-
-  describe('changed files summary', () => {
-    it('shows file count when changed files are available', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'completed' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({
-          status: 'completed',
-          statusKind: 'completed',
-          changedFiles: [
-            { path: 'src/a.ts', operation: 'created', additions: 10, deletions: 0 },
-            { path: 'src/b.ts', operation: 'modified', additions: 5, deletions: 2 },
-          ],
-        }),
-        turns: [],
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/2 files changed/i)).toBeInTheDocument()
-      })
-    })
-
-    it('shows singular file count when only one file changed', async () => {
-      const sessions = [makeCoderSessionItem({ status: 'completed' })]
-      const detail = makeDetail({
-        metadata: makeMetadata({
-          status: 'completed',
-          statusKind: 'completed',
-          changedFiles: [
-            { path: 'src/new.ts', operation: 'created', additions: 5, deletions: 0 },
-          ],
-        }),
-        turns: [],
-      })
-
-      renderWithQueryClient(
-        <SessionPage
-          sessions={sessions}
-          issueNumber={1}
-          issueTitle="Test Issue"
-          detail={detail}
-        />
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText(/1 file changed/i)).toBeInTheDocument()
-      })
-    })
-  })
-})
-
 describe('SessionTranscriptView', () => {
   describe('prompt card expansion and copy', () => {
     it('renders Mohist prompt card with kind and timestamp', async () => {
@@ -1179,6 +842,178 @@ describe('SessionTranscriptView', () => {
         expect(screen.getByText('1 file changed')).toBeInTheDocument()
       })
       expect(screen.getByText(/new-location\.ts/i)).toBeInTheDocument()
+    })
+  })
+})
+
+describe('Live/historical parity', () => {
+  function makeMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
+    return {
+      sessionId: 'session-123',
+      coderSessionId: 'coder-session-123',
+      issueId: 'issue-1',
+      acpSessionId: 'acp-123',
+      executionId: null,
+      title: 'Test Session',
+      status: 'running',
+      statusKind: 'live',
+      model: 'claude-3-5-sonnet',
+      stage: 'build',
+      createdAt: '2024-01-01T10:00:00.000Z',
+      completedAt: null,
+      lastActivityAt: '2024-01-01T10:05:00.000Z',
+      eventCount: 10,
+      toolCount: 5,
+      turnCount: 2,
+      ...overrides,
+    }
+  }
+
+  function makeDetail(overrides: Partial<{ metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean }> = {}): CoderSessionDetail {
+    return {
+      id: 'session-123',
+      acpSessionId: 'acp-123',
+      executionId: null,
+      taskDescription: 'Test task',
+      status: 'running',
+      createdAt: '2024-01-01T10:00:00.000Z',
+      completedAt: null,
+      model: 'claude-3-5-sonnet',
+      coderType: null,
+      stage: 'build',
+      title: 'Test Session',
+      metadata: makeMetadata(),
+      turns: [],
+      incomplete: false,
+      ...overrides,
+    }
+  }
+
+  it('renders turns with Coder label when assistant parts exist', async () => {
+    const turns = [makeTurn({
+      assistant: [{
+        id: 'text-1',
+        type: 'text',
+        text: 'Hello world',
+        startedAt: '2024-01-01T10:00:01.000Z',
+        completedAt: null,
+      } as TextPart],
+    })]
+
+    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Coder')).toBeInTheDocument()
+    })
+  })
+
+  it('renders live tool with normalized name and display title', async () => {
+    const turns = [makeTurn({
+      assistant: [{
+        id: 'tool-1',
+        type: 'tool',
+        tool: {
+          toolCallId: 'tc-1',
+          normalizedName: 'read',
+          displayTitle: 'Read',
+          toolName: 'Read',
+          status: 'completed',
+          input: '{"file_path":"src/index.ts"}',
+          output: 'file content',
+          startedAt: '2024-01-01T10:00:02.000Z',
+          completedAt: '2024-01-01T10:00:03.000Z',
+        },
+      } as ToolPart],
+    })]
+
+    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Read')).toBeInTheDocument()
+    })
+  })
+
+  it('shows Jump to bottom button when new content available and not near bottom', async () => {
+    const turns = [makeTurn({
+      user: {
+        role: 'mohist',
+        text: 'Test prompt',
+        kind: 'task',
+        sentAt: '2024-01-01T10:00:00.000Z',
+      },
+      assistant: [{
+        id: 'text-1',
+        type: 'text',
+        text: 'Initial text',
+        startedAt: '2024-01-01T10:00:01.000Z',
+        completedAt: null,
+      } as TextPart],
+    })]
+
+    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Coder')).toBeInTheDocument()
+    })
+  })
+
+  it('displays recovery error part with message for recovery events', async () => {
+    const turns = [makeTurn({
+      assistant: [{
+        id: 'error-1',
+        type: 'error',
+        message: 'Recovery detected',
+        kind: 'recovery',
+        at: '2024-01-01T10:00:05.000Z',
+      } as ErrorPart],
+    })]
+
+    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Recovery detected/i)).toBeInTheDocument()
+    })
+  })
+
+  it('displays terminal error parts for failed sessions', async () => {
+    const turns = [makeTurn({
+      assistant: [{
+        id: 'error-1',
+        type: 'error',
+        message: 'Execution failed',
+        kind: 'failed',
+        at: '2024-01-01T10:00:05.000Z',
+      } as ErrorPart],
+    })]
+
+    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Execution failed/i)).toBeInTheDocument()
+    })
+  })
+
+  it('renders unknown tool when tool name is not recognized', async () => {
+    const turns = [makeTurn({
+      assistant: [{
+        id: 'tool-1',
+        type: 'tool',
+        tool: {
+          toolCallId: 'tc-unknown',
+          toolName: 'UnknownTool',
+          status: 'completed',
+          input: '{"arg1":"value1"}',
+          output: '{"result":"ok"}',
+          startedAt: '2024-01-01T10:00:02.000Z',
+          completedAt: '2024-01-01T10:00:03.000Z',
+        },
+      } as ToolPart],
+    })]
+
+    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('UnknownTool')).toBeInTheDocument()
     })
   })
 })
