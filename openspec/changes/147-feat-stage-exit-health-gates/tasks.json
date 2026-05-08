@@ -47,11 +47,15 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the policy resolver from T-001 and produces the reusable health gate primitive.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        139897,
+        922477
+      ]
     },
     {
       "id": "T-003",
