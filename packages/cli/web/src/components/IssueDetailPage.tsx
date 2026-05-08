@@ -116,6 +116,22 @@ export function IssueDetailPage() {
     },
   })
 
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null)
+  const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
+
+  const deleteCommentMutation = useMutation({
+    mutationFn: (commentId: string) => api.deleteComment(issueNumber, commentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      setDeletingCommentId(null)
+      setDeleteCommentError(null)
+    },
+    onError: (err) => {
+      setDeleteCommentError(err instanceof Error ? err.message : 'Failed to delete comment')
+      setDeletingCommentId(null)
+    },
+  })
+
   const { data: exploreSessions } = useExploreSessions(issue?.projectId ?? '')
   const createExploreMutation = useCreateExploreSession()
   const [exploreError, setExploreError] = useState<string | null>(null)
@@ -289,12 +305,33 @@ export function IssueDetailPage() {
                         key={comment.id}
                         className="border-b border-gray-100 pb-3 last:border-0 last:pb-0"
                       >
-                        <div className="text-xs text-gray-400 mb-1">
-                          {formatTime(comment.createdAt)}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <div className="text-xs text-gray-400 mb-1">
+                              {formatTime(comment.createdAt)}
+                            </div>
+                            <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                              {comment.body}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setDeleteCommentError(null)
+                              if (window.confirm('Delete this comment?')) {
+                                setDeletingCommentId(comment.id)
+                                deleteCommentMutation.mutate(comment.id)
+                              }
+                            }}
+                            disabled={deletingCommentId === comment.id}
+                            className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50 transition-colors"
+                            title="Delete comment"
+                          >
+                            {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
+                          </button>
                         </div>
-                        <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                          {comment.body}
-                        </div>
+                        {deleteCommentError && deletingCommentId === null && (
+                          <div className="mt-1 text-xs text-red-500">{deleteCommentError}</div>
+                        )}
                       </div>
                     ))}
                   </div>
