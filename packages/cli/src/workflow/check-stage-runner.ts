@@ -120,14 +120,17 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       workflowLogRepo: ctx.workflowLogRepo,
       sessionStreamLogRepo: ctx.sessionStreamLogRepo,
       coderSessionRepo: ctx.coderSessionRepo,
-      stage: 'review',
+      stage: 'check',
       title: 'Check stage',
     }, [checkBridgeObserver]);
 
     const connectionOptions: AgentSessionOptions = {
       ...ctx.acpOptions,
-      executionId: `review-${ctx.issue.number}`,
-      stage: 'review',
+      issueId: ctx.issue.id,
+      issueNumber: ctx.issue.number,
+      projectId: ctx.issue.projectId,
+      executionId: `check-${ctx.issue.number}`,
+      stage: 'check',
       title: 'Check stage',
       observers: wfObservers,
     };

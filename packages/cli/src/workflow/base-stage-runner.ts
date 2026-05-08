@@ -129,6 +129,9 @@ export abstract class BaseStageRunner implements StageRunner {
       eventBus: ctx.eventBus,
       projectId: ctx.issue.projectId,
       acpOptions: ctx.acpOptions,
+      workflowLogRepo: ctx.workflowLogRepo,
+      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+      coderSessionRepo: ctx.coderSessionRepo,
     };
   }
 
