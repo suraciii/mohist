@@ -368,17 +368,25 @@ export function setupIssueCommands(program: Command): void {
     .action(async (number, options) => {
       try {
         if (options.allCompleted) {
+          if (options.noCleanup) {
+            console.error(chalk.red('Error: --no-cleanup is not supported for batch archive. Use "mo issue archive <number> --no-cleanup" for single-issue archive without cleanup.'));
+            return;
+          }
+
           const response = await apiClient<ApiResponse>(
             'POST',
             '/issues/archive-completed'
           );
 
           if (response.success && response.data) {
-            const { archived, message } = response.data;
-            if (archived === 0) {
+            const { archived = 0, skipped = 0, skippedNumbers = [], message } = response.data as any;
+            if (archived === 0 && skipped === 0) {
               console.log(chalk.yellow('No completed issues to archive'));
             } else {
               console.log(chalk.green(`✓ Archived ${archived} completed issue(s)`));
+              if (skipped > 0) {
+                console.log(chalk.yellow(`  Skipped ${skipped} false-done issue(s) (not merged): #${skippedNumbers.join(', #')}`));
+              }
             }
             if (message) {
               console.log(chalk.gray(`  ${message}`));
@@ -404,10 +412,7 @@ export function setupIssueCommands(program: Command): void {
         if (response.success) {
           console.log(chalk.green(`✓ Archived issue #${number}`));
           if (response.data?.warning) {
-            const warningText = response.data.warning.startsWith('Warning:')
-              ? response.data.warning
-              : `Warning: ${response.data.warning}`;
-            console.log(chalk.yellow(`  ${warningText}`));
+            console.log(chalk.yellow(`  ${response.data.warning}`));
           }
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
