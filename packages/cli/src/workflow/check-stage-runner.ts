@@ -43,8 +43,8 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     this.worktreePath = options.worktreePath;
     this.usesDefaultChecks = !options.checks;
     const buildTestCheck = new BuildTestCheck({ worktreePath: this.worktreePath });
-    this.preTaskChecks = [buildTestCheck];
-    this.postTaskChecks = [
+    this.preTaskChecks = options.checks?.filter(check => check.name === buildTestCheck.name) ?? [buildTestCheck];
+    this.postTaskChecks = options.checks?.filter(check => check.name !== buildTestCheck.name) ?? [
       new AiReviewCheck(),
       new UserApprovalCheck(Stage.Check),
     ];
@@ -55,9 +55,6 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected getPreTaskChecks(): Check[] {
-    if (!this.usesDefaultChecks) {
-      return [];
-    }
     return this.preTaskChecks;
   }
 
@@ -306,9 +303,6 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected getChecks(): Check[] {
-    if (!this.usesDefaultChecks) {
-      return [];
-    }
     return this.postTaskChecks;
   }
 
