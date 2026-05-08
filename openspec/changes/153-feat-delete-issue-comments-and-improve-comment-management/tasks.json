@@ -1,0 +1,89 @@
+{
+  "project": "mohist",
+  "description": "Delete issue comments from CLI and Web while validating issue/comment ownership.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement comment deletion API",
+      "spec": "specs/http-api/spec.md#API-提供操作接口",
+      "description": "Add the backend capability to delete a single comment from a specific issue. The service must validate that the comment exists and belongs to the resolved issue before deleting, and the API must expose DELETE /api/issues/:number/comments/:commentId with clear 404 behavior.",
+      "acceptanceCriteria": [
+        "DELETE /api/issues/:number/comments/:commentId deletes a comment that belongs to the requested issue",
+        "Deleting a missing comment returns a 404 response with a clear error message",
+        "Deleting a comment that belongs to a different issue returns a 404 response and does not delete it",
+        "Deleting a comment does not delete the issue or any other issue's comments",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/issue-service.ts, packages/cli/src/api/issues.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Consumes existing CommentRepo.findById/delete and produces the API consumed by CLI and Web tasks. No schema migration is expected."
+    },
+    {
+      "id": "T-002",
+      "title": "Add CLI comment deletion",
+      "spec": "specs/cli-interface/spec.md#CLI-支持本地-Issue-CRUD",
+      "description": "Add a CLI command for deleting a comment from an issue while preserving the existing mo issue comment <number> <text> add-comment command. Update mo issue show <number> so each comment displays an id or copyable short/full id that users can pass to the delete command.",
+      "acceptanceCriteria": [
+        "mo issue show <number> displays an id or short id for each listed comment",
+        "mo issue delete-comment <number> <comment-id> calls the DELETE comment endpoint",
+        "Successful deletion prints Deleted comment <id> from issue #<number>",
+        "The existing mo issue comment <number> <text> command still adds comments",
+        "Delete-command help and error text clearly refer to comments, not issues",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Consumes the DELETE API produced by T-001. Prefer mo issue delete-comment to avoid ambiguity with the existing positional comment command."
+    },
+    {
+      "id": "T-003",
+      "title": "Add Web comment deletion",
+      "spec": "specs/web-ui/spec.md#Web-UI-支持删除-Issue-评论",
+      "description": "Add Web UI support for deleting a comment from the issue detail page. Each comment should expose a lightweight Delete action with confirmation, pending state, error handling, and refreshed issue detail after success.",
+      "acceptanceCriteria": [
+        "Each comment in IssueDetailPage exposes a Delete action",
+        "Clicking Delete asks for confirmation before sending the request",
+        "The active delete action shows a pending/disabled state while deletion is in progress",
+        "Deletion failure displays an understandable error without removing the comment from the UI",
+        "Deletion success refreshes issue detail or otherwise removes the deleted comment from the displayed list",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/api.ts, packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Consumes the DELETE API produced by T-001. Query invalidation is preferred over optimistic local deletion for the MVP."
+    },
+    {
+      "id": "T-004",
+      "title": "Verify comment management behavior",
+      "spec": "specs/local-issue-store/spec.md#CLI-可以为-Issue-添加评论",
+      "description": "Add or update automated coverage for the completed comment deletion workflow across backend, CLI, and Web where existing test infrastructure supports it. Verify ownership checks, not-found handling, preserved add-comment behavior, visible comment ids, and UI delete success/failure behavior.",
+      "acceptanceCriteria": [
+        "Backend tests cover successful deletion, missing comment 404, and cross-issue comment 404 without deleting the foreign comment",
+        "CLI tests or equivalent command verification cover comment id display and successful delete-comment output",
+        "Web tests or equivalent component verification cover confirmation, pending state, failure display, and successful refresh/removal",
+        "Existing comment creation behavior remains covered or manually verified",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests and/or packages/cli/web test files for comment deletion coverage",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Consumes all feature outputs. If a layer lacks practical test harness coverage, document the manual verification command/output in the task result."
+    }
+  ]
+}
