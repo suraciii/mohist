@@ -9,12 +9,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { AcpProcess } from './acp-process';
 import type { SessionObserver, SessionContext, SessionState, ToolCallEvent } from './session-observer';
-import { WorkflowSessionObserver } from './session-observer';
 import { SessionStateMachine } from './session-state';
-import type { WorkflowLogRepo } from '../db/workflow-log-repo';
-import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
-import type { CoderSessionRepo } from '../db/coder-session-repo';
-import type { EventBus } from '../services/event-bus';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'agent-session' });
@@ -34,11 +29,6 @@ export interface AgentSessionOptions {
   issueId?: string;
   projectId?: string;
   executionId?: string;
-  workflowLogRepo?: WorkflowLogRepo;
-  sessionStreamLogRepo?: SessionStreamLogRepo;
-  eventBus?: EventBus;
-  throttleMs?: number;
-  coderSessionRepo?: CoderSessionRepo;
   issueNumber?: number;
   onSessionUpdate?: (notification: SessionNotification) => void;
   opencodeBinPath?: string;
@@ -72,27 +62,41 @@ export function truncateAgentText(text: string): string {
   return `${head}\n\n...[truncated ${truncated} characters]...\n\n${tail}`;
 }
 
-function buildWorkflowObserver(
-  options: AgentSessionOptions,
-  meta?: { taskDescription?: string; title?: string; stage?: string },
-): WorkflowSessionObserver | undefined {
-  if (!options.eventBus && !options.workflowLogRepo && !options.sessionStreamLogRepo && !options.coderSessionRepo) {
-    return undefined;
-  }
-  return new WorkflowSessionObserver({
-    eventBus: options.eventBus,
-    workflowLogRepo: options.workflowLogRepo,
-    sessionStreamLogRepo: options.sessionStreamLogRepo,
-    coderSessionRepo: options.coderSessionRepo,
-    throttleMs: options.throttleMs,
-    taskDescription: meta?.taskDescription,
-    title: meta?.title,
-    stage: meta?.stage,
-  });
-}
-
 function createTimeout(ms: number): Promise<'timeout'> {
   return new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), ms));
+}
+
+class ToolCallIdGenerator {
+  private counters = new Map<string, number>();
+  private ids = new Map<string, string[]>();
+
+  nextToolCallId(acpSessionId: string, toolName: string, state: 'started' | 'completed'): string {
+    if (state === 'started') {
+      const toolCallId = `${acpSessionId}-${toolName}-${this.counters.get(acpSessionId) ?? 0}`;
+      this.counters.set(acpSessionId, (this.counters.get(acpSessionId) ?? 0) + 1);
+      const key = `${acpSessionId}-${toolName}`;
+      const list = this.ids.get(key) ?? [];
+      list.push(toolCallId);
+      this.ids.set(key, list);
+      return toolCallId;
+    } else {
+      const key = `${acpSessionId}-${toolName}`;
+      const list = this.ids.get(key) ?? [];
+      const toolCallId = list.shift() ?? `${acpSessionId}-${toolName}-${this.counters.get(acpSessionId) ?? 0}`;
+      if (list.length > 0) {
+        this.ids.set(key, list);
+      } else {
+        this.ids.delete(key);
+      }
+      return toolCallId;
+    }
+  }
+}
+
+function buildRawNotificationObserver(
+  onSessionUpdate: (notification: SessionNotification) => void,
+): SessionObserver {
+  return { onRawNotification(_ctx, n) { onSessionUpdate(n); } };
 }
 
 export class AgentSession {
@@ -100,13 +104,13 @@ export class AgentSession {
   private _acpProcess: AcpProcess;
   private _connection!: ClientSideConnection;
   private _observers: SessionObserver[];
-  private _wfObserver: WorkflowSessionObserver | undefined;
   private _stateMachine: SessionStateMachine;
   private _sessionId = '';
   private _agentText = '';
   private _agentTextTruncated = false;
   private _closed = false;
   private _sessionStartTime: number;
+  private _toolCallIdGenerator = new ToolCallIdGenerator();
 
   get state(): SessionState { return this._stateMachine.current; }
   get acpSessionId(): string { return this._sessionId; }
@@ -115,12 +119,10 @@ export class AgentSession {
     options: AgentSessionOptions,
     acpProcess: AcpProcess,
     observers: SessionObserver[],
-    wfObserver: WorkflowSessionObserver | undefined,
   ) {
     this._options = options;
     this._acpProcess = acpProcess;
     this._observers = observers;
-    this._wfObserver = wfObserver;
     this._sessionStartTime = Date.now();
     this._stateMachine = new SessionStateMachine('initializing');
   }
@@ -212,12 +214,7 @@ export class AgentSession {
       const toolStatus = (toolCallData?.status as string) ?? '';
       const state = toolStatus === 'completed' ? 'completed' as const : 'started' as const;
       const toolName = (toolCallData?.toolName as string) ?? '';
-      const existingToolCallId = (toolCallData?.toolCallId as string | undefined)
-        ?? (toolCallData?.id as string | undefined)
-        ?? (toolCallData?.callId as string | undefined);
-      const toolCallId = existingToolCallId ?? (this._wfObserver
-        ? this._wfObserver.nextToolCallId(this._sessionId, toolName, state)
-        : `${this._sessionId}-${toolName}-0`);
+      const toolCallId = this._toolCallIdGenerator.nextToolCallId(this._sessionId, toolName, state);
       const ctx = this.makeCtx();
       const event: ToolCallEvent = {
         toolName,
@@ -242,7 +239,6 @@ export class AgentSession {
       projectId: this._options.projectId ?? '',
       executionId: this._options.executionId,
       acpSessionId: this._sessionId,
-      coderSessionId: this._wfObserver?.coderSessionId,
       stage: this._options.stage,
       model: this._options.model,
       processPid: this._acpProcess.process.pid ?? undefined,
@@ -255,44 +251,32 @@ export class AgentSession {
       timeout = PER_ROUND_TIMEOUT,
       issueId,
       model,
-      stage,
-      title,
     } = options;
 
-    const wfObserver = buildWorkflowObserver(options, {
-      taskDescription: 'multi-round agent session',
-      title,
-      stage,
-    });
-    const extraObservers: SessionObserver[] = [];
+    const observers: SessionObserver[] = [];
     if (options.onSessionUpdate) {
-      const cb = options.onSessionUpdate;
-      extraObservers.push({ onRawNotification(_ctx, n) { cb(n); } });
+      observers.push(buildRawNotificationObserver(options.onSessionUpdate));
     }
-    extraObservers.push(...(options.observers ?? []));
-    const observers: SessionObserver[] = wfObserver ? [wfObserver, ...extraObservers] : [...extraObservers];
+    observers.push(...(options.observers ?? []));
 
     log.info('Spawning opencode acp subprocess for agent session', {
       cwd, timeout, issueId: issueId?.slice(0, 8), taskId: options.taskId, promptPreview: (options.task ?? '').slice(0, 100),
-    });
-    wfObserver?.writeSessionLog(issueId, 'acp_session_start', {
-      cwd, timeout, issueId: issueId?.slice(0, 8), taskId: options.taskId,
-      promptPreview: (options.task ?? '').slice(0, 100),
-      mode: 'agent-session', timestamp: new Date().toISOString(),
     });
 
     const acpProcess = new AcpProcess({
       cwd,
       opencodeBinPath: options.opencodeBinPath,
       onError: (err) => {
-        wfObserver?.writeSessionLog(issueId, 'acp_session_process_error', {
-          error: err.message, mode: 'agent-session', timestamp: new Date().toISOString(),
-        });
+        const ctx = { issueId: issueId ?? '', acpSessionId: '', stage: options.stage, model: options.model, processPid: acpProcess.process.pid ?? undefined, executionId: options.executionId, projectId: options.projectId ?? '', issueNumber: options.issueNumber };
+        for (const obs of observers) {
+          try { obs.onSessionEvent?.(ctx, 'acp_session_process_error', { error: err.message, mode: 'agent-session', timestamp: new Date().toISOString() }); } catch (e) { /* ignore */ }
+        }
       },
       onExit: ({ exitCode, phase }) => {
-        wfObserver?.writeSessionLog(issueId, 'acp_session_process_exit', {
-          exitCode, phase, mode: 'agent-session', timestamp: new Date().toISOString(),
-        });
+        const ctx = { issueId: issueId ?? '', acpSessionId: '', stage: options.stage, model: options.model, processPid: acpProcess.process.pid ?? undefined, executionId: options.executionId, projectId: options.projectId ?? '', issueNumber: options.issueNumber };
+        for (const obs of observers) {
+          try { obs.onSessionEvent?.(ctx, 'acp_session_process_exit', { exitCode, phase, mode: 'agent-session', timestamp: new Date().toISOString() }); } catch (e) { /* ignore */ }
+        }
       },
     });
 
@@ -300,7 +284,7 @@ export class AgentSession {
       options.onProcessSpawned(acpProcess.process);
     }
 
-    const session = new AgentSession(options, acpProcess, observers, wfObserver);
+    const session = new AgentSession(options, acpProcess, observers);
     session.setupConnection();
 
     try {
@@ -321,9 +305,6 @@ export class AgentSession {
       if (initResult === 'timeout') {
         const duration = Date.now() - session._sessionStartTime;
         log.error('ACP initialize timed out', { timeout, elapsedMs: duration });
-        wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', {
-          phase: 'initialize', timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
-        });
         if (options.onBeforeKill) {
           try { await options.onBeforeKill(options.cwd); } catch (err) {
             log.warn('onBeforeKill failed on init timeout', { error: err instanceof Error ? err.message : String(err) });
@@ -343,9 +324,6 @@ export class AgentSession {
       if (sessionResult === 'timeout') {
         const duration = Date.now() - session._sessionStartTime;
         log.error('ACP newSession timed out', { timeout, elapsedMs: duration });
-        wfObserver?.writeSessionLog(issueId, 'acp_session_timeout', {
-          phase: 'newSession', timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
-        });
         if (options.onBeforeKill) {
           try { await options.onBeforeKill(options.cwd); } catch (err) {
             log.warn('onBeforeKill failed on newSession timeout', { error: err instanceof Error ? err.message : String(err) });
@@ -364,20 +342,10 @@ export class AgentSession {
             sessionId: session._sessionId, configId: 'model', value: model,
           });
           log.info('ACP session model set', { sessionId: session._sessionId, model });
-          wfObserver?.writeSessionLog(issueId, 'model_selected', {
-            model, stage, sessionId: session._sessionId, timestamp: new Date().toISOString(),
-          });
         } catch (err) {
           session._options = { ...session._options, model: undefined };
           log.warn('setSessionConfigOption for model failed', {
             sessionId: session._sessionId, model, error: err instanceof Error ? err.message : String(err),
-          });
-          wfObserver?.writeSessionLog(issueId, 'model_set_failed', {
-            requestedModel: model,
-            stage,
-            sessionId: session._sessionId,
-            error: err instanceof Error ? err.message : String(err),
-            timestamp: new Date().toISOString(),
           });
         }
       }
@@ -387,17 +355,10 @@ export class AgentSession {
 
     session._stateMachine.transition('running');
     const startCtx = session.makeCtx();
-    for (const obs of observers) {
+    for (const obs of session._observers) {
       try { obs.onSessionStart?.(startCtx); } catch (err) {
         log.error('onSessionStart observer failed', { error: err instanceof Error ? err.message : String(err) });
       }
-    }
-
-    if (session._wfObserver?.coderSessionId && options.coderSessionRepo) {
-      session._stateMachine.attachDb(
-        options.coderSessionRepo,
-        session._wfObserver.coderSessionId,
-      );
     }
 
     return session;
@@ -447,9 +408,6 @@ export class AgentSession {
 
       if (promptResult === 'aborted') {
         log.info('ACP prompt aborted by signal', { sessionId: this._sessionId });
-        this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_aborted', {
-          sessionId: this._sessionId, mode: 'agent-session', timestamp: new Date().toISOString(),
-        });
         try { await this._connection.cancel({ sessionId: this._sessionId }); } catch (err) {
           log.warn('cancel failed on abort', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
         }
@@ -473,9 +431,6 @@ export class AgentSession {
       if (promptResult === 'timeout') {
         const duration = Date.now() - this._sessionStartTime;
         log.error('ACP prompt timed out', { sessionId: this._sessionId, timeout, elapsedMs: duration });
-        this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_timeout', {
-          phase: 'prompt', sessionId: this._sessionId, timeout, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
-        });
         try { this._stateMachine.transition('timeout'); } catch (err) {
           log.warn('stateMachine transition to timeout failed', { error: err instanceof Error ? err.message : String(err) });
         }
@@ -514,10 +469,6 @@ export class AgentSession {
       const duration = Date.now() - this._sessionStartTime;
       log.error('ACP execute failed', {
         sessionId: this._sessionId, elapsedMs: duration, error: err instanceof Error ? err.message : String(err),
-      });
-      this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_completed', {
-        sessionId: this._sessionId, success: false, duration,
-        error: err instanceof Error ? err.message : String(err), mode: 'agent-session', timestamp: new Date().toISOString(),
       });
       try { this._stateMachine.transition('failed'); } catch (stateErr) {
         log.warn('stateMachine transition to failed failed', { error: stateErr instanceof Error ? stateErr.message : String(stateErr) });
@@ -561,9 +512,6 @@ export class AgentSession {
     this._closed = true;
     const duration = Date.now() - this._sessionStartTime;
     log.info('Agent session closed', { sessionId: this._sessionId, elapsedMs: duration });
-    this._wfObserver?.writeSessionLog(this._options.issueId, 'acp_session_completed', {
-      sessionId: this._sessionId, success: true, duration, mode: 'agent-session', timestamp: new Date().toISOString(),
-    });
     try { this._stateMachine.transition('completed'); } catch (err) {
       log.warn('stateMachine transition to completed failed', { error: err instanceof Error ? err.message : String(err) });
     }
