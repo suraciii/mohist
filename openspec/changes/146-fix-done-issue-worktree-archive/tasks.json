@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Keep Done issue worktrees for inspection and clean them only when issues are archived.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/git/merge-queue.ts, packages/cli/src/api/issues.ts, and related tests",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Rename cleanup-oriented merge logs to retention-oriented logs. Do not change merge conflict, rebase, or retry behavior."
+      "passes": true,
+      "notes": "Rename cleanup-oriented merge logs to retention-oriented logs. Do not change merge conflict, rebase, or retry behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        159017
+      ]
     },
     {
       "id": "T-002",
@@ -44,7 +49,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Prefer extending archiveAllCompleted(projectId, { cleanup }) and POST /issues/archive-completed body parsing so --no-cleanup has the same meaning for single and batch archive."
+      "notes": "Prefer extending archiveAllCompleted(projectId, { cleanup }) and POST /issues/archive-completed body parsing so --no-cleanup has the same meaning for single and batch archive.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -67,7 +75,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "The CLI is a thin client; keep archive trust decisions in the API/service and only format returned data."
+      "notes": "The CLI is a thin client; keep archive trust decisions in the API/service and only format returned data.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -91,7 +102,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Use existing toast/error patterns. Do not introduce a restore workflow or new archived issue execution path."
+      "notes": "Use existing toast/error patterns. Do not introduce a restore workflow or new archived issue execution path.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -121,7 +135,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Keep tests deterministic and avoid requiring a real remote merge. Use existing mock WorktreeManager and web test patterns where available."
+      "notes": "Keep tests deterministic and avoid requiring a real remote merge. Use existing mock WorktreeManager and web test patterns where available.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
