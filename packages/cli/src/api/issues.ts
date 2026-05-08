@@ -552,6 +552,52 @@ export function createIssueRoutes(
     }
   });
 
+  app.delete('/:number/comments/:commentId', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const commentId = c.req.param('commentId');
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        const response: ApiResponse = {
+          success: false,
+          error: 'No active project. Use: mo project use <name>'
+        };
+        return c.json(response, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Issue #${number} not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const deleted = issueService.deleteComment(issue.id, commentId);
+      if (!deleted) {
+        const response: ApiResponse = {
+          success: false,
+          error: `Comment not found`
+        };
+        return c.json(response, 404);
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: { message: `Deleted comment ${commentId} from issue #${number}` }
+      };
+      return c.json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+      return c.json(response, 500);
+    }
+  });
+
   app.post('/:number/start', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
