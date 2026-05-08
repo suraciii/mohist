@@ -255,7 +255,51 @@ export function setupIssueCommands(program: Command): void {
           if (issue.archivedAt) {
             console.log(`  Archived: ${chalk.gray(new Date(issue.archivedAt).toLocaleString())}`);
           }
-          
+
+          const executionsResponse = await apiClient<ApiResponse<any[]>>(
+            'GET',
+            `/issues/${number}/executions`
+          );
+
+          if (executionsResponse.success && executionsResponse.data && executionsResponse.data.length > 0) {
+            console.log(chalk.gray('\n  Stage Checks:'));
+
+            for (const execution of executionsResponse.data) {
+              if (execution.checkResults && execution.checkResults.length > 0) {
+                console.log(chalk.gray(`    [${execution.stage}]`));
+                for (const check of execution.checkResults) {
+                  const isHealthGate = check.name.startsWith('health:') || (check.output && (check.output as any).kind === 'health-gate');
+                  const checkIcon = check.status === 'pass' ? chalk.green('✓') : check.status === 'fail' ? chalk.red('✗') : check.status === 'error' ? chalk.red('✗') : chalk.gray('○');
+                  const displayName = isHealthGate ? `health:${execution.stage}` : check.name;
+                  console.log(`      ${checkIcon} ${displayName}`);
+                  if (check.status === 'fail' || check.status === 'error') {
+                    if (check.message) {
+                      console.log(chalk.red(`        Error: ${check.message}`));
+                    }
+                    if (isHealthGate && check.output) {
+                      const output = check.output as any;
+                      if (output.command) console.log(chalk.gray(`        Command: ${output.command}`));
+                      if (output.duration) console.log(chalk.gray(`        Duration: ${output.duration}ms`));
+                      if (output.summary) console.log(chalk.red(`        Summary: ${output.summary}`));
+                      if (output.logExcerpt) {
+                        const excerptLines = output.logExcerpt.split('\n').slice(0, 5);
+                        if (excerptLines.length > 0) {
+                          console.log(chalk.gray(`        Log excerpt:`));
+                          for (const line of excerptLines) {
+                            console.log(chalk.gray(`          ${line}`));
+                          }
+                        }
+                      }
+                    }
+                  }
+                  if (check.duration) {
+                    console.log(chalk.gray(`        Duration: ${check.duration}ms`));
+                  }
+                }
+              }
+            }
+          }
+
           if (issue.approvalState) {
             const statusColors: Record<string, typeof chalk.green> = {
               awaiting: chalk.yellow,
