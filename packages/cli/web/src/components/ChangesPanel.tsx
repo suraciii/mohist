@@ -102,38 +102,49 @@ export function ChangesPanel({
   const files = diffData?.available === true ? diffData.files : []
   const commits = commitsData?.available === true ? commitsData.commits : []
 
-  const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0)
-  const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0)
-
   const diffUnavailable = diffData?.available === false
-  const commitsUnavailable = commitsData?.available === false
 
   const worktreeRemoved = diffData?.reason === 'worktree_removed' || commitsData?.reason === 'worktree_removed'
   const branchMissing = diffData?.reason === 'branch_missing' || commitsData?.reason === 'branch_missing'
   const notStarted = diffData?.reason === 'not_started' || commitsData?.reason === 'not_started'
 
+  const showUnavailable = notStarted
+    ? <p className="text-sm text-gray-400">No changes yet</p>
+    : worktreeRemoved
+      ? <p className="text-sm text-orange-600">Changes unavailable — workspace removed</p>
+      : branchMissing
+        ? <p className="text-sm text-orange-600">Changes unavailable — branch missing</p>
+        : diffUnavailable
+          ? <p className="text-sm text-orange-600">{diffData?.message ?? 'Failed to load changes'}</p>
+          : null
+
+  const available = diffData?.available === true && commitsData?.available === true
+
+  const baseHeadLabel = available && diffData?.base && diffData?.head
+    ? `${diffData.base} → ${diffData.head}`
+    : null
+
+  const summary = available ? (diffData?.summary || commitsData?.summary) : null
+  const commitCount = commitsData?.summary?.commits ?? 0
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-gray-700">Changes</h2>
-        {diffData?.available === true && (
-          <span className="text-xs text-gray-400">
-            {files.length} file{files.length !== 1 ? 's' : ''}, +{totalAdditions}/-{totalDeletions}
-          </span>
-        )}
-      </div>
+      {available && summary ? (
+        <div className="flex items-center gap-3 mb-3 text-xs text-gray-500">
+          {baseHeadLabel && <span className="font-mono font-medium">{baseHeadLabel}</span>}
+          {baseHeadLabel && <span>·</span>}
+          <span>{summary.filesChanged} files changed</span>
+          <span>·</span>
+          <span>{commitCount} commit{commitCount !== 1 ? 's' : ''}</span>
+          <span>·</span>
+          <span className="text-green-600">+{summary.additions}</span>
+          <span className="text-red-500">-{summary.deletions}</span>
+          <span>·</span>
+          <span className="text-gray-400">Worktree retained</span>
+        </div>
+      ) : null}
 
-      {notStarted ? (
-        <p className="text-sm text-gray-400">No changes yet</p>
-      ) : worktreeRemoved ? (
-        <p className="text-sm text-gray-400">Changes unavailable — workspace removed</p>
-      ) : branchMissing ? (
-        <p className="text-sm text-gray-400">Changes unavailable — branch missing</p>
-      ) : diffUnavailable ? (
-        <p className="text-sm text-gray-400">{diffData?.message ?? 'Failed to load changes'}</p>
-      ) : files.length === 0 && commits.length === 0 ? (
-        <p className="text-sm text-gray-400">No changes yet</p>
-      ) : (
+      {showUnavailable || (
         <>
           <div className="flex items-center gap-1 mb-3 border-b border-gray-100">
             <button
