@@ -38,11 +38,13 @@ function getSessionStatusKind(
   rawStatus: string | undefined,
   lastActivityAt: string | null | undefined,
   isRunning: boolean,
+  completedAt?: string | null,
 ): StatusKind {
   if (rawStatus === 'failed' || rawStatus === 'timeout' || rawStatus === 'cancelled') {
     return 'failed'
   }
   if (rawStatus === 'completed') return 'completed'
+  if (isRunning && completedAt) return 'finalizing'
   if (!isRunning) {
     return 'completed'
   }
@@ -300,8 +302,8 @@ export function SessionPage() {
   const acpSessionId = detail?.acpSessionId ?? session?.acpSessionId ?? ''
 
   const statusKind: StatusKind = detail
-    ? (detail.metadata.statusKind ?? getSessionStatusKind(rawStatus, detail.metadata.lastActivityAt, isRunning))
-    : getSessionStatusKind(rawStatus, undefined, isRunning)
+    ? (detail.metadata.statusKind ?? getSessionStatusKind(rawStatus, detail.metadata.lastActivityAt, isRunning, detail.metadata.completedAt ?? detail.completedAt))
+    : getSessionStatusKind(rawStatus, undefined, isRunning, session?.completedAt)
 
   const {
     turns,

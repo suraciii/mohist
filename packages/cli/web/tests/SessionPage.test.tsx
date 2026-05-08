@@ -844,6 +844,7 @@ describe('SessionTranscriptView', () => {
       await waitFor(() => {
         expect(screen.getByText('1 file changed')).toBeInTheDocument()
       })
+      expect(screen.queryByText('unknown')).not.toBeInTheDocument()
       expect(screen.queryByText('src/normalized.ts')).not.toBeInTheDocument()
     })
 
@@ -1469,6 +1470,34 @@ describe('Live/historical parity', () => {
     await waitFor(() => {
       expect(result.current.isFinalizing).toBe(true)
     })
+  })
+
+  it('does not mark live transcript finalizing for ordinary text chunks', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHook(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        text: 'streaming text',
+        coderSessionId: 'session-123',
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.turns.at(-1)?.assistant.some((part) => part.type === 'text')).toBe(true)
+    })
+    expect(result.current.isFinalizing).toBe(false)
   })
 
   it('renders unknown tool when tool name is not recognized', async () => {
