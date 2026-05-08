@@ -78,11 +78,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes HealthGateCheck and policy resolution; preserves existing artifact/task/AI/user approval checks.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        558050
+      ]
     },
     {
       "id": "T-004",
