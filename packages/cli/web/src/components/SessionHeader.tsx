@@ -47,12 +47,23 @@ export function getSessionLabel(session: CoderSessionItem): string {
   return 'Session'
 }
 
+export function getSessionStatusLabel(session: CoderSessionItem): string {
+  if (session.status === 'running') return 'Running'
+  if (session.status === 'probing') return 'Checking session'
+  if (session.status === 'failed') return 'Session failed'
+  if (session.status === 'completed') return 'Completed'
+  if (session.status === 'cancelled') return 'Cancelled'
+  return session.status
+}
+
 function StatusIcon({ status }: { status: string }) {
-  if (status === 'running') {
+  if (status === 'running' || status === 'probing') {
+    const color = status === 'probing' ? 'bg-yellow-400' : 'bg-blue-400'
+    const dotColor = status === 'probing' ? 'bg-yellow-500' : 'bg-blue-500'
     return (
       <span className="relative flex h-3 w-3">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-        <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500" />
+        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${color} opacity-75`} />
+        <span className={`relative inline-flex rounded-full h-3 w-3 ${dotColor}`} />
       </span>
     )
   }
@@ -70,18 +81,13 @@ function StatusIcon({ status }: { status: string }) {
   )
 }
 
-interface SessionHeaderProps {
-  session: CoderSessionItem
-  issueNumber: number
-  showTranscriptLink?: boolean
-}
-
 export function SessionHeader({ session, issueNumber, showTranscriptLink }: SessionHeaderProps) {
   const label = getSessionLabel(session)
   const coderInfo = [session.coderType, session.model].filter(Boolean).join(' · ') || 'unknown'
   const startTime = formatTime(session.createdAt)
 
-  const durationMs = session.status === 'running'
+  const isActive = session.status === 'running' || session.status === 'probing'
+  const durationMs = isActive
     ? Date.now() - new Date(session.createdAt).getTime()
     : session.completedAt
       ? new Date(session.completedAt).getTime() - new Date(session.createdAt).getTime()
@@ -92,10 +98,18 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
       <StatusIcon status={session.status} />
       <span className="text-sm font-medium text-gray-800 truncate max-w-[200px]">{label}</span>
       <span className="text-xs text-gray-400">{coderInfo}</span>
+      {session.status === 'probing' && (
+        <span className="text-xs text-yellow-600 font-medium">Checking session</span>
+      )}
+      {session.status === 'failed' && session.failureReason && (
+        <span className="text-xs text-red-500 truncate max-w-[150px]" title={session.failureReason}>
+          {session.failureReason}
+        </span>
+      )}
       <span className="text-xs text-gray-400 ml-auto flex items-center gap-2 shrink-0">
         <span>{startTime}</span>
         <span className="text-gray-300">·</span>
-        <span className={session.status === 'running' ? 'text-blue-600 font-medium' : 'text-gray-500'}>
+        <span className={isActive ? (session.status === 'probing' ? 'text-yellow-600 font-medium' : 'text-blue-600 font-medium') : 'text-gray-500'}>
           {formatDuration(durationMs)}
         </span>
       </span>

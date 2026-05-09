@@ -1286,7 +1286,7 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Live')).toBeInTheDocument()
+        expect(screen.getByText('Running')).toBeInTheDocument()
       })
     })
 
@@ -1337,7 +1337,7 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Failed')).toBeInTheDocument()
+        expect(screen.getByText('Session failed')).toBeInTheDocument()
       })
     })
   })
@@ -1737,6 +1737,10 @@ describe('SessionHeader navigation', () => {
       coderType: null,
       stage: 'build',
       title: 'T-001',
+      lastDataAt: null,
+      probeSentAt: null,
+      probeDeadlineAt: null,
+      failureReason: null,
       workflowLogs: [],
     }
 
@@ -1760,6 +1764,10 @@ describe('SessionHeader navigation', () => {
       coderType: null,
       stage: 'build',
       title: null,
+      lastDataAt: null,
+      probeSentAt: null,
+      probeDeadlineAt: null,
+      failureReason: null,
       workflowLogs: [],
     }
 
@@ -1782,6 +1790,10 @@ describe('SessionHeader navigation', () => {
       coderType: null,
       stage: 'build',
       title: 'T-001',
+      lastDataAt: null,
+      probeSentAt: null,
+      probeDeadlineAt: null,
+      failureReason: null,
       workflowLogs: [],
     }
 

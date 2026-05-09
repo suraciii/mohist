@@ -281,6 +281,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'plan_session_update',
       'coder_session_started',
       'coder_session_completed',
+      'coder_session_status_changed',
       'merge_queued',
       'merge_started',
       'merge_completed',
