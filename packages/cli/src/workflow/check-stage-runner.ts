@@ -16,6 +16,7 @@ import { OpenSpecSyncDryRunCheck } from './checks/openspec-sync-dry-run-check';
 import { MergeReadinessCheck } from './checks/merge-readiness-check';
 import { IntegrationHealthGatePreviewCheck } from './checks/integration-health-gate-preview-check';
 import { runHealthFixTask } from './health-fix-task';
+import { runReviewFixTask } from './review-fix-task';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
@@ -73,14 +74,23 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected getCheckFailurePolicies(): CheckFailurePolicy[] {
-    if (!this.checkHealthGatePolicy.enabled || !this.checkHealthGatePolicy.autoFix) {
-      return [];
+    const policies: CheckFailurePolicy[] = [];
+
+    if (this.checkHealthGatePolicy.enabled && this.checkHealthGatePolicy.autoFix) {
+      policies.push({
+        checkName: 'health:check',
+        fixTaskId: 'fix-check-health',
+        maxAttempts: this.checkHealthGatePolicy.maxFixAttempts,
+      });
     }
-    return [{
-      checkName: 'health:check',
-      fixTaskId: 'fix-check-health',
-      maxAttempts: this.checkHealthGatePolicy.maxFixAttempts,
-    }];
+
+    policies.push({
+      checkName: 'ai-review',
+      fixTaskId: 'fix-review-findings',
+      maxAttempts: 1,
+    });
+
+    return policies;
   }
 
   protected async runFixTask(
@@ -89,16 +99,27 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     failedCheck: CheckResult,
     attempt: number,
   ): Promise<StageTaskResult | null> {
-    if (taskId !== 'fix-check-health') return null;
-    return runHealthFixTask(ctx, {
-      taskId: 'fix-check-health',
-      title: 'Fix check health',
-      stage: 'check',
-      worktreePath: this.worktreePath,
-      healthCommand: this.checkHealthGatePolicy.command,
-      failedCheck,
-      attempt,
-    });
+    if (taskId === 'fix-check-health') {
+      return runHealthFixTask(ctx, {
+        taskId: 'fix-check-health',
+        title: 'Fix check health',
+        stage: 'check',
+        worktreePath: this.worktreePath,
+        healthCommand: this.checkHealthGatePolicy.command,
+        failedCheck,
+        attempt,
+      });
+    }
+
+    if (taskId === 'fix-review-findings') {
+      return runReviewFixTask(ctx, {
+        worktreePath: this.worktreePath,
+        failedCheck,
+        attempt,
+      });
+    }
+
+    return null;
   }
 
   protected isApprovalCheck(checkName: string): boolean {
