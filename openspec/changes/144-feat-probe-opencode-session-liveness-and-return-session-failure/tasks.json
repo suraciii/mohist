@@ -138,11 +138,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Do not add runtime health taxonomy or write session state into the issue domain.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        506285
+      ]
     },
     {
       "id": "T-006",
