@@ -24,6 +24,7 @@ import type { IssueQueueStatus } from '../services/agent-runner-service';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { assembleSessionTranscript } from '../services/session-transcript-service';
 import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
+import { isValidModelId } from '../config/model-resolution';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 
@@ -189,7 +190,7 @@ export function createIssueRoutes(
 
   app.post('/', async (c) => {
     try {
-      const { title, body, labels, priority } = await c.req.json();
+      const { title, body, labels, priority, model, stageModels } = await c.req.json();
       
       if (!title) {
         const response: ApiResponse = {
@@ -207,6 +208,21 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
+      if (model !== undefined && model !== null && typeof model === 'string' && !isValidModelId(model)) {
+        return c.json({ success: false, error: 'Invalid model format. Expected provider/model.' } satisfies ApiResponse, 400);
+      }
+
+      if (stageModels !== undefined && stageModels !== null) {
+        if (typeof stageModels !== 'object' || Array.isArray(stageModels)) {
+          return c.json({ success: false, error: 'stageModels must be an object' } satisfies ApiResponse, 400);
+        }
+        for (const [key, value] of Object.entries(stageModels as Record<string, unknown>)) {
+          if (typeof value !== 'string' || !isValidModelId(value)) {
+            return c.json({ success: false, error: `Invalid model for stage "${key}". Expected provider/model format.` } satisfies ApiResponse, 400);
+          }
+        }
+      }
+
       const projectId = getCurrentProjectId();
       if (!projectId) {
         const response: ApiResponse = {
@@ -216,7 +232,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const issue = issueService.create({ projectId, title, body, labels, priority });
+      const issue = issueService.create({ projectId, title, body, labels, priority, model: model ?? undefined, stageModels: stageModels ?? undefined });
 
       const response: ApiResponse<Issue> = {
         success: true,
@@ -463,7 +479,7 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const { title, body, addLabels, removeLabels, priority, model } = await c.req.json();
+      const { title, body, addLabels, removeLabels, priority, model, stageModels } = await c.req.json();
 
       if (priority !== undefined && !VALID_PRIORITIES.includes(priority as Priority)) {
         const response: ApiResponse = {
@@ -473,20 +489,28 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (model !== undefined && model !== null && typeof model === 'string' && !model.includes('/')) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'Invalid model format'
-        };
-        return c.json(response, 400);
+      if (model !== undefined && model !== null && typeof model === 'string' && !isValidModelId(model)) {
+        return c.json({ success: false, error: 'Invalid model format. Expected provider/model.' } satisfies ApiResponse, 400);
       }
 
-      const updateData: Partial<{ title: string; body: string; labels: string[]; priority: Priority; model: string | null }> = {};
+      if (stageModels !== undefined && stageModels !== null) {
+        if (typeof stageModels !== 'object' || Array.isArray(stageModels)) {
+          return c.json({ success: false, error: 'stageModels must be an object' } satisfies ApiResponse, 400);
+        }
+        for (const [key, value] of Object.entries(stageModels as Record<string, unknown>)) {
+          if (typeof value !== 'string' || !isValidModelId(value)) {
+            return c.json({ success: false, error: `Invalid model for stage "${key}". Expected provider/model format.` } satisfies ApiResponse, 400);
+          }
+        }
+      }
+
+      const updateData: Partial<{ title: string; body: string; labels: string[]; priority: Priority; model: string | null; stageModels: Record<string, string> | null }> = {};
       
       if (title !== undefined) updateData.title = title;
       if (body !== undefined) updateData.body = body;
       if (priority !== undefined) updateData.priority = priority;
       if (model !== undefined) updateData.model = model;
+      if (stageModels !== undefined) updateData.stageModels = stageModels;
       
       if (addLabels || removeLabels) {
         let currentLabels = [...issue.labels];
