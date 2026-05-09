@@ -20,6 +20,7 @@ import { SkillService } from '../src/services/skill-service';
 import { withSession } from '../src/agent-runtime/agent-session';
 
 const mockWithSession = vi.mocked(withSession);
+const skillsPath = (...parts: string[]) => path.join(...parts, '.mohist', 'skills');
 
 describe('SkillService', () => {
   let db: DatabaseManager;
@@ -64,7 +65,7 @@ describe('SkillService', () => {
 
   describe('parseFrontmatter (via scanAndRegister)', () => {
     it('should parse full frontmatter with name, description, and prompt', () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'my-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'my-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -86,7 +87,7 @@ describe('SkillService', () => {
     });
 
     it('should use body as prompt when frontmatter has no prompt field', () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'body-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'body-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -104,7 +105,7 @@ describe('SkillService', () => {
     });
 
     it('should fall back to dirName when no frontmatter present', () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'no-fm-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'no-fm-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'Just plain markdown content without frontmatter.');
 
@@ -117,7 +118,7 @@ describe('SkillService', () => {
     });
 
     it('should handle missing description by falling back to dirName', () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'no-desc');
+      const skillDir = path.join(skillsPath(tmpDir), 'no-desc');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -138,7 +139,7 @@ describe('SkillService', () => {
 
   describe('scanAndRegister', () => {
     it('should discover skills from .mohist/skills/ directory', () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'analyze');
+      const skillDir = path.join(skillsPath(tmpDir), 'analyze');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -160,7 +161,7 @@ describe('SkillService', () => {
     });
 
     it('should skip subdirectories without SKILL.md', () => {
-      const skillsBase = path.join(tmpDir, '.mohist', 'skills');
+      const skillsBase = skillsPath(tmpDir);
       fs.mkdirSync(path.join(skillsBase, 'with-skill'), { recursive: true });
       fs.mkdirSync(path.join(skillsBase, 'no-skill'), { recursive: true });
       fs.writeFileSync(
@@ -175,7 +176,7 @@ describe('SkillService', () => {
     });
 
     it('should skip files (non-directories) in skills directory', () => {
-      const skillsBase = path.join(tmpDir, '.mohist', 'skills');
+      const skillsBase = skillsPath(tmpDir);
       fs.mkdirSync(skillsBase, { recursive: true });
       fs.writeFileSync(path.join(skillsBase, 'README.md'), 'not a skill');
 
@@ -184,7 +185,7 @@ describe('SkillService', () => {
     });
 
     it('should update existing skill on re-scan', () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'updatable');
+      const skillDir = path.join(skillsPath(tmpDir), 'updatable');
       fs.mkdirSync(skillDir, { recursive: true });
 
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
@@ -218,7 +219,7 @@ describe('SkillService', () => {
 
   describe('run() success path', () => {
     it('should create completed run record and create Issue', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'test-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'test-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -256,7 +257,7 @@ describe('SkillService', () => {
     });
 
     it('should emit skill_started and skill_completed events', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'event-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'event-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -292,7 +293,7 @@ describe('SkillService', () => {
 
   describe('run() failure path', () => {
     it('should record failure when ACP session returns success=false', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'fail-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'fail-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -323,7 +324,7 @@ describe('SkillService', () => {
     });
 
     it('should record failure when ACP session throws', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'throw-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'throw-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -349,7 +350,7 @@ describe('SkillService', () => {
     });
 
     it('should emit skill_failed event', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'fail-event');
+      const skillDir = path.join(skillsPath(tmpDir), 'fail-event');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -390,7 +391,7 @@ describe('SkillService', () => {
 
   describe('Issue title extraction', () => {
     it('should extract title from first line with markdown heading', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'title-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'title-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -420,7 +421,7 @@ describe('SkillService', () => {
     });
 
     it('should use fallback title when output is empty', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'empty-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'empty-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -450,7 +451,7 @@ describe('SkillService', () => {
     });
 
     it('should use first line as title when no markdown heading', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'plain-title');
+      const skillDir = path.join(skillsPath(tmpDir), 'plain-title');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -482,7 +483,7 @@ describe('SkillService', () => {
 
   describe('Issue creation failure does not block run completion', () => {
     it('should complete run record even if IssueService throws', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'issue-fail');
+      const skillDir = path.join(skillsPath(tmpDir), 'issue-fail');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
@@ -528,7 +529,7 @@ describe('SkillService', () => {
 
   describe('getRuns', () => {
     it('should return run history for a skill', async () => {
-      const skillDir = path.join(tmpDir, '.mohist', 'skills', 'history-skill');
+      const skillDir = path.join(skillsPath(tmpDir), 'history-skill');
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
         '---',
