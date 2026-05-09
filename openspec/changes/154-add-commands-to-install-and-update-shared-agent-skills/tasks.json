@@ -56,11 +56,16 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the generation utility and command behavior from T-001. If direct CLI process tests are too heavy, unit-test the utility thoroughly and verify command registration/help through lightweight Commander tests or build output.",
-      "attempts": 0,
+      "attempts": 3,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1806215,
+        1805873,
+        185330
+      ]
     },
     {
       "id": "T-003",
