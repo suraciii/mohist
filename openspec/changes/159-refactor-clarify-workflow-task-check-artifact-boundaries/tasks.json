@@ -81,11 +81,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Depends on T-002 for the shared explicit agent fix-task execution pattern and task result recording conventions.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        128906
+      ]
     },
     {
       "id": "T-004",
