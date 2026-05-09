@@ -51,11 +51,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the canonical assembler output from T-001 and makes it the API contract for historical replay and frontend rendering.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        478461
+      ]
     },
     {
       "id": "T-003",
