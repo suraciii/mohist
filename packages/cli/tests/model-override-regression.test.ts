@@ -441,6 +441,15 @@ describe('model-override-regression: API validation errors', () => {
       expect(response.body.error).toContain('Invalid model format');
     });
 
+    it.each([123, {}, []])('rejects non-string model on create: %p', async (model) => {
+      const response = await request(server)
+        .post('/api/issues')
+        .send({ title: 'Test', model });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('Invalid model format');
+    });
+
     it('rejects invalid stageModels value on create', async () => {
       const response = await request(server)
         .post('/api/issues')
@@ -478,6 +487,15 @@ describe('model-override-regression: API validation errors', () => {
         .send({ title: 'Test', stageModels: { build: 'provider/' } });
       expect(response.status).toBe(400);
     });
+
+    it('does not persist issue after create validation error', async () => {
+      const response = await request(server)
+        .post('/api/issues')
+        .send({ title: 'Test', model: 123 });
+
+      expect(response.status).toBe(400);
+      expect(stateManager.getIssueRepo().findAll({ projectId })).toHaveLength(0);
+    });
   });
 
   describe('PATCH /api/issues/:number validation', () => {
@@ -489,6 +507,15 @@ describe('model-override-regression: API validation errors', () => {
       const response = await request(server)
         .patch('/api/issues/1')
         .send({ model: 'no-slash' });
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('Invalid model format');
+    });
+
+    it.each([123, {}, []])('rejects non-string model on update: %p', async (model) => {
+      const response = await request(server)
+        .patch('/api/issues/1')
+        .send({ model });
+
       expect(response.status).toBe(400);
       expect(response.body.error).toContain('Invalid model format');
     });

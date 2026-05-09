@@ -1,6 +1,7 @@
-## Requirements
+# OpenSpec Capability: agent-runtime
 
 ### Requirement: spawn_agent tool truncates subprocess stdout
+
 The spawn_agent tool SHALL truncate subprocess stdout when it exceeds 8000 characters, preserving the first 3000 and last 5000 characters with a truncation notice in between.
 
 #### Scenario: Stdout within limit
@@ -18,6 +19,7 @@ The spawn_agent tool SHALL truncate subprocess stdout when it exceeds 8000 chara
 - **THEN** the full stdout SHALL be returned without truncation
 
 ### Requirement: LLM config is loaded from config.jsonc and passed to resolveModel [UPDATED]
+
 The system SHALL read LLM configuration from `~/.mohist/config.jsonc` (NOT from SQLite config table) and pass it to `resolveModel()` so that user-configured model and proxy settings take effect. The old `llm.*` config keys in SQLite are deprecated and ignored.
 
 #### Scenario: LLM model configured in config.jsonc
@@ -34,6 +36,7 @@ The system SHALL read LLM configuration from `~/.mohist/config.jsonc` (NOT from 
 - **AND** SHALL detect API key from environment variables (ANTHROPIC_API_KEY, etc.)
 
 ### Requirement: LLM tool loop
+
 The system SHALL implement an LLM tool loop using Vercel AI SDK v5 `streamText()` with `maxSteps`. The loop SHALL support: tool definition with Zod schema, automatic tool calling cycle (LLM returns tool_call → execute → feed result back → continue), and text generation until LLM stops.
 
 #### Scenario: Tool calling cycle
@@ -46,6 +49,7 @@ The system SHALL implement an LLM tool loop using Vercel AI SDK v5 `streamText()
 - **THEN** the runtime SHALL stop and return the last assistant message
 
 ### Requirement: Tool system
+
 The system SHALL provide a tool definition API where each tool is defined with: an id, a description, Zod parameters schema, and an execute function. The execute function SHALL receive validated parameters and return a result string.
 
 #### Scenario: Tool execution with valid parameters
@@ -58,6 +62,7 @@ The system SHALL provide a tool definition API where each tool is defined with: 
 - **THEN** the runtime SHALL return a validation error to the LLM
 
 ### Requirement: In-memory session management
+
 The system SHALL support creating agent sessions in memory with: a unique ID, an associated issue ID, a message history (AI SDK CoreMessage[]), a creation timestamp, and a status (active/paused/closed). Sessions SHALL support adding messages. Sessions SHALL support pause/resume lifecycle transitions. Sessions are NOT persisted to SQLite in M1/M2 — server restart loses all session data.
 
 #### Scenario: Create session
@@ -95,6 +100,7 @@ The system SHALL support creating agent sessions in memory with: a unique ID, an
 - **AND** if no matching session exists, return undefined
 
 ### Requirement: Sub-agent spawning (opencode subprocess)
+
 The system SHALL support spawning opencode as a subprocess from the Main Agent via the spawn_agent tool. M1 implementation: spawn_agent directly spawns `opencode agent --local --message <task>` in the issue's worktree, synchronously waits for completion, and returns stdout/stderr/exit_code. No child LLM loop in M1.
 
 #### Scenario: Spawn and wait
@@ -114,6 +120,7 @@ The system SHALL support spawning opencode as a subprocess from the Main Agent v
 - **THEN** the Main Agent LLM SHALL decide how to handle the failure
 
 ### Requirement: LLM provider configuration [UPDATED]
+
 The system SHALL support configuring LLM providers via `~/.mohist/config.jsonc` (NOT via SQLite ConfigRepo). The configuration SHALL include: default model in "provider/model-id" format (e.g. "anthropic/claude-sonnet-4-20250514"), and per-provider config (apiKey, baseURL, sdk). API keys SHALL be detected from: 1) config.jsonc `provider.<id>.apiKey` (priority), 2) environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.).
 
 #### Scenario: Load provider config from config.jsonc
@@ -166,3 +173,27 @@ AgentRunnerService.resume() SHALL 接受任意字符串消息，不限固定格�
 - **THEN** 该消息作为 user role message 追加到 session
 - **AND** 新的 agent loop 以包含该消息的 session 上下文启动
 - **AND** LLM 根据消息内容自主决策下一步
+
+### Requirement: Model discovery does not create opencode sessions
+
+Model discovery SHALL list available opencode models without creating ACP sessions or persistent opencode session records. Discovery SHALL return model identifiers in `provider/model` format and cache successful results for 30 minutes.
+
+#### Scenario: Discover models through lightweight CLI
+
+- **WHEN** available opencode models are requested
+- **THEN** Mohist runs the lightweight `opencode models` command
+- **AND** parses returned `provider/model` identifiers
+- **AND** does not call ACP `newSession()`
+
+#### Scenario: Discovery cache is fresh for 30 minutes
+
+- **WHEN** model discovery succeeds
+- **THEN** subsequent requests within 30 minutes return the cached model list
+- **AND** do not spawn another discovery process
+
+#### Scenario: Discovery command fails
+
+- **WHEN** `opencode models` fails or returns no parseable model list
+- **THEN** the discovery service reports an error to callers
+- **AND** logs the failure for diagnosis
+
