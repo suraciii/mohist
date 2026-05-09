@@ -182,11 +182,18 @@
         "T-004",
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Final verification consumes all earlier outputs. Keep fixtures realistic but local to existing backend/API/frontend test suites unless a shared fixture location already exists.",
-      "attempts": 0,
+      "attempts": 3,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        71488,
+        799692,
+        1851860,
+        1860649,
+        1110223
+      ]
     }
   ]
 }
