@@ -105,11 +105,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Approval validation is the final guard for restart, manual edit, and concurrent worker cases. Prefer a clear 409/400 response unless the existing rerun path can be used safely.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        381856
+      ]
     },
     {
       "id": "T-005",
