@@ -183,6 +183,14 @@ export abstract class BaseStageRunner implements StageRunner {
 
     if (fixResult) {
       this.appendTaskResult(ctx, fixResult);
+      if (fixResult.status !== 'completed') {
+        return {
+          success: false,
+          output: taskOutput,
+          checkResults: allResults,
+          message: `${fixResult.title} failed`,
+        };
+      }
     }
 
     const checkCtx = this.buildCheckContext(ctx);

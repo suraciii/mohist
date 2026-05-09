@@ -295,6 +295,39 @@ describe('BaseStageRunner', () => {
 
       expect(runner.executeTasksCalls).toBe(1);
     });
+
+    it('stops immediately when fix task fails', async () => {
+      let checkRuns = 0;
+      const failCheck = new FailCheck(
+        'health:build',
+        undefined,
+        async () => {
+          checkRuns++;
+          return { name: 'health:build', status: 'fail', message: 'build failed' };
+        },
+      );
+
+      const runner = new TestStageRunner({
+        checks: [failCheck],
+        nextStage: Stage.Check,
+        failurePolicies: [{ checkName: 'health:build', fixTaskId: 'fix-build-health', maxAttempts: 2 }],
+        fixTaskFn: async () => ({
+          taskId: 'fix-build-health',
+          title: 'Fix build health',
+          status: 'failed',
+          artifacts: [],
+          attempts: 1,
+          duration: 100,
+          output: { error: 'agent failed' },
+        }),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Fix build health failed');
+      expect(checkRuns).toBe(1);
+    });
   });
 
   describe('ask-user / approval scenario', () => {

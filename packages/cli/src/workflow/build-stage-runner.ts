@@ -6,12 +6,13 @@ import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor'
 import { loadWorkflow, loadHealthGatePolicies } from './workflow-loader';
 import { GitCommitter } from './git-committer';
 import { BaseStageRunner } from './base-stage-runner';
-import type { StageContext, StageRunResult } from './stage-context';
+import type { CheckFailurePolicy, CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
 import type { Check } from './checks';
 import { AllTasksCompleteCheck } from './checks/all-tasks-complete-check';
 import { HealthGateCheck } from './checks/health-gate-check';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
+import { runHealthFixTask } from './health-fix-task';
 
 const log = Log.create({ service: 'workflow' });
 
@@ -260,6 +261,35 @@ export class BuildStageRunner extends BaseStageRunner {
         stage: 'build',
       }),
     ];
+  }
+
+  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
+    if (!this.buildHealthGatePolicy.enabled || !this.buildHealthGatePolicy.autoFix) {
+      return [];
+    }
+    return [{
+      checkName: 'health:build',
+      fixTaskId: 'fix-build-health',
+      maxAttempts: this.buildHealthGatePolicy.maxFixAttempts,
+    }];
+  }
+
+  protected async runFixTask(
+    ctx: StageContext,
+    taskId: string,
+    failedCheck: CheckResult,
+    attempt: number,
+  ): Promise<StageTaskResult | null> {
+    if (taskId !== 'fix-build-health') return null;
+    return runHealthFixTask(ctx, {
+      taskId: 'fix-build-health',
+      title: 'Fix build health',
+      stage: 'build',
+      worktreePath: this.worktreePath,
+      healthCommand: this.buildHealthGatePolicy.command,
+      failedCheck,
+      attempt,
+    });
   }
 
   protected getNextStage(): Stage {

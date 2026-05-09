@@ -8,7 +8,7 @@ import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-s
 import { readReportFile } from './utils';
 import { Log } from '../util/log';
 import { BaseStageRunner } from './base-stage-runner';
-import type { StageContext, StageRunResult } from './stage-context';
+import type { CheckFailurePolicy, CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
 import { emitStageTaskUpdate } from './stage-context';
 import type { Check } from './checks';
 import { ProposalCompleteCheck } from './checks/proposal-complete-check';
@@ -21,6 +21,7 @@ import { isCurrentStageApproval } from './issue-lifecycle';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { HealthGateCheck } from './checks/health-gate-check';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
+import { runHealthFixTask } from './health-fix-task';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
@@ -52,6 +53,35 @@ export class PlanStageRunner extends BaseStageRunner {
 
   protected isApprovalCheck(checkName: string): boolean {
     return checkName === 'user-approval';
+  }
+
+  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
+    if (!this.planHealthGatePolicy.enabled || !this.planHealthGatePolicy.autoFix) {
+      return [];
+    }
+    return [{
+      checkName: 'health:plan',
+      fixTaskId: 'fix-plan-health',
+      maxAttempts: this.planHealthGatePolicy.maxFixAttempts,
+    }];
+  }
+
+  protected async runFixTask(
+    ctx: StageContext,
+    taskId: string,
+    failedCheck: CheckResult,
+    attempt: number,
+  ): Promise<StageTaskResult | null> {
+    if (taskId !== 'fix-plan-health') return null;
+    return runHealthFixTask(ctx, {
+      taskId: 'fix-plan-health',
+      title: 'Fix plan health',
+      stage: 'plan',
+      worktreePath: this.worktreePath || process.cwd(),
+      healthCommand: this.planHealthGatePolicy.command,
+      failedCheck,
+      attempt,
+    });
   }
 
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
