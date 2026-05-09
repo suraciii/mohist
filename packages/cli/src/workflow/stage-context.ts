@@ -74,6 +74,7 @@ export interface CheckContext {
   workflowLogRepo?: WorkflowLogRepo;
   sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
+  worktreeManager?: WorktreeManager;
   createWorkflowSessionObservers?: (options: WorkflowSessionObserverDeps) => import('../agent-runtime/session-observer').SessionObserver[];
 }
 

@@ -12,6 +12,9 @@ import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import { HealthGateCheck } from './checks/health-gate-check';
+import { OpenSpecSyncDryRunCheck } from './checks/openspec-sync-dry-run-check';
+import { MergeReadinessCheck } from './checks/merge-readiness-check';
+import { IntegrationHealthGatePreviewCheck } from './checks/integration-health-gate-preview-check';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
@@ -50,6 +53,9 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       : loadHealthGatePolicies(wf).check;
     this.preTaskChecks = options.checks ? [] : [
       new HealthGateCheck({ worktreePath: this.worktreePath, policy: this.checkHealthGatePolicy, stage: 'check' }),
+      new OpenSpecSyncDryRunCheck(),
+      new MergeReadinessCheck(),
+      new IntegrationHealthGatePreviewCheck(),
     ];
     this.postTaskChecks = options.checks ?? [
       new AiReviewCheck(),
