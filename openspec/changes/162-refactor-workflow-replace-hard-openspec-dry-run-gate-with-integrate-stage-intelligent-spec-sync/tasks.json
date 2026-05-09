@@ -79,11 +79,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the INTEGRATE sync/evidence path from T-002 so CHECK can safely defer repairable spec sync conflicts to INTEGRATE. Keep CHECK read-only.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        302723
+      ]
     },
     {
       "id": "T-004",
