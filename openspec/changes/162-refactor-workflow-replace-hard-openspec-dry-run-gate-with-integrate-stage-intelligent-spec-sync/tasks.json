@@ -108,11 +108,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the CHECK deferral behavior from T-003. Avoid broad workflow-engine rewrites unless a test proves the current failure path violates the Integrate contract.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        367396
+      ]
     },
     {
       "id": "T-005",
