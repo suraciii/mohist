@@ -183,7 +183,7 @@ async function main(): Promise<void> {
         projectId: entry.projectId,
         issueNumber: refreshedIssue.number,
         opencodeBinPath,
-        model: resolveStageModel(Stage.Build, config),
+        model: resolveStageModel(Stage.Build, config, refreshedIssue),
         observers: fixObservers,
       };
 

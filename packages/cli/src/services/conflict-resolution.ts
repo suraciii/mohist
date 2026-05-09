@@ -51,7 +51,7 @@ export async function resolveConflictsViaAgent(
     projectId,
     issueNumber: issue.number,
     opencodeBinPath,
-    model: resolveStageModel(Stage.Build, config),
+    model: resolveStageModel(Stage.Build, config, issue),
     observers: wfObservers,
   };
 

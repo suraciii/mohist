@@ -67,7 +67,7 @@ export class WorkflowEngine {
   }
 
   private buildContext(issue: Issue, acpOptions: AgentSessionOptions): StageContext {
-    const resolvedModel = this.config ? resolveStageModel(issue.stage, this.config) : undefined;
+    const resolvedModel = this.config ? resolveStageModel(issue.stage, this.config, issue) : undefined;
     const wfObservers = createWorkflowSessionObservers({
       eventBus: this.eventBus,
       workflowLogRepo: this.workflowLogRepo,
