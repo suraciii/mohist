@@ -44,8 +44,18 @@ function createMockContext(
       updateTaskPasses: vi.fn().mockReturnValue(true),
       archiveChange: vi.fn().mockResolvedValue(undefined),
     },
-    worktreeManager: {} as any,
-    projectRepo: {} as any,
+    worktreeManager: {
+      mergeApprovedCandidate: vi.fn().mockResolvedValue({
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: true,
+      }),
+    } as any,
+    projectRepo: {
+      findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch: 'main', path: tmpDir }),
+    } as any,
     eventBus: eventBus as any,
     checkpointManager: { save: vi.fn(), load: vi.fn(), deleteAll: vi.fn() } as any,
     issueRepo: {
@@ -316,6 +326,223 @@ ArcFail added scenario content.`);
       expect(result.success).toBe(false);
       expect(result.message).toContain('Archive failed');
 
+      expect(result.nextStage).toBeUndefined();
+    });
+  });
+
+  describe('merge step', () => {
+    function createProjectRepo(baseBranch = 'main') {
+      return {
+        findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch, path: tmpDir }),
+      };
+    }
+
+    it('fast-forward merge succeeds when candidate can fast-forward into target branch', async () => {
+      const issueNumber = 50;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'ff-cap', [
+        '### Requirement: FFReq\n\nFF content.\n\n#### Scenario: FF scenario\n\nFF scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'ff-cap', `## ADDED Requirements
+
+### Requirement: FFAdded
+
+FF added content.
+
+#### Scenario: FF added scenario
+FF added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: true,
+      });
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: createProjectRepo(),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
+      expect(output.steps).toBeDefined();
+      const mergeStep = output.steps?.find(s => s.step === 'integrate:merge');
+      expect(mergeStep).toBeDefined();
+      const mergeOutput = mergeStep!.output as { targetBranch?: string; baseSha?: string; candidateHeadSha?: string; landedSha?: string; fastForward?: boolean };
+      expect(mergeOutput.targetBranch).toBe('main');
+      expect(mergeOutput.baseSha).toBe('abc123');
+      expect(mergeOutput.candidateHeadSha).toBe('def456');
+      expect(mergeOutput.landedSha).toBe('ghi789');
+      expect(mergeOutput.fastForward).toBe(true);
+    });
+
+    it('clean rebase succeeds when fast-forward is not possible but rebase is clean', async () => {
+      const issueNumber = 51;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'rb-cap', [
+        '### Requirement: RBReq\n\nRB content.\n\n#### Scenario: RB scenario\n\nRB scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'rb-cap', `## ADDED Requirements
+
+### Requirement: RBAdded
+
+RB added content.
+
+#### Scenario: RB added scenario
+RB added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: false,
+        rebased: true,
+      });
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: createProjectRepo(),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
+      const mergeStep = output.steps?.find(s => s.step === 'integrate:merge');
+      expect(mergeStep).toBeDefined();
+      const mergeOutput = mergeStep!.output as { fastForward?: boolean; rebased?: boolean };
+      expect(mergeOutput.fastForward).toBe(false);
+      expect(mergeOutput.rebased).toBe(true);
+    });
+
+    it('merge conflict fails with failing step merge and includes conflicting files', async () => {
+      const issueNumber = 52;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cf-cap', [
+        '### Requirement: CFReq\n\nCF content.\n\n#### Scenario: CF scenario\n\nCF scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'cf-cap', `## ADDED Requirements
+
+### Requirement: CFAdded
+
+CF added content.
+
+#### Scenario: CF added scenario
+CF added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        failingStep: 'merge' as const,
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        conflictFiles: ['src/foo.ts', 'src/bar.ts'],
+        error: 'Clean rebase with abort-on-conflict failed: conflicts detected',
+      });
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: createProjectRepo(),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Merge failed');
+      expect(result.message).toContain('conflicts detected');
+      expect(result.message).toContain('src/foo.ts');
+      expect(result.message).toContain('src/bar.ts');
+    });
+
+    it('does not call MergeQueue.resolveConflicts, conflict-resolution agents, fixBuildErrors, or health-gate auto-fix agents', async () => {
+      const issueNumber = 53;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'ncf-cap', [
+        '### Requirement: NCFReq\n\nNCF content.\n\n#### Scenario: NCF scenario\n\nNCF scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'ncf-cap', `## ADDED Requirements
+
+### Requirement: NCFAdded
+
+NCF added content.
+
+#### Scenario: NCF added scenario
+NCF added scenario content.`);
+
+      const resolveConflictsMock = vi.fn();
+      const fixBuildErrorsMock = vi.fn();
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        failingStep: 'merge' as const,
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        error: 'Merge failure',
+      });
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: {
+          mergeApprovedCandidate: mergeApprovedCandidateMock,
+        } as any,
+        projectRepo: createProjectRepo(),
+      });
+
+      await runner.run(ctx);
+
+      expect(resolveConflictsMock).not.toHaveBeenCalled();
+      expect(fixBuildErrorsMock).not.toHaveBeenCalled();
+    });
+
+    it('merge failure leaves the issue in Integrate and does not run final health or mark Done', async () => {
+      const issueNumber = 54;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'ml-cap', [
+        '### Requirement: MLReq\n\nML content.\n\n#### Scenario: ML scenario\n\nML scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'ml-cap', `## ADDED Requirements
+
+### Requirement: MLAdded
+
+ML added content.
+
+#### Scenario: ML added scenario
+ML added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        failingStep: 'merge' as const,
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        error: 'Merge failure',
+      });
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: createProjectRepo(),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
       expect(result.nextStage).toBeUndefined();
     });
   });

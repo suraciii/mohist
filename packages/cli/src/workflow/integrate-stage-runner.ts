@@ -12,7 +12,7 @@ export interface IntegrateStageRunnerOptions {
 }
 
 interface IntegrateStepResult {
-  step: 'integrate:spec-sync' | 'integrate:archive-change';
+  step: 'integrate:spec-sync' | 'integrate:archive-change' | 'integrate:merge';
   status: 'completed' | 'failed';
   output: unknown;
   startedAt: string;
@@ -193,6 +193,135 @@ export class IntegrateStageRunner extends BaseStageRunner {
       });
 
       log.warn('Integrate stage failed at archive-change', {
+        issueNumber: ctx.issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+
+    const mergeStartedAt = new Date().toISOString();
+    let mergeResult: IntegrateStepResult | undefined;
+
+    const project = ctx.projectRepo.findById(ctx.issue.projectId);
+    const baseBranch = project?.baseBranch ?? 'main';
+
+    try {
+      log.info('Running integration merge', {
+        issueNumber: ctx.issue.number,
+        projectId: ctx.issue.projectId,
+        baseBranch,
+      });
+
+      if (!ctx.worktreeManager.mergeApprovedCandidate) {
+        throw new Error('worktreeManager.mergeApprovedCandidate is not available');
+      }
+
+      const mergeTruth = await ctx.worktreeManager.mergeApprovedCandidate(
+        this.worktreePath,
+        ctx.issue.projectId,
+        ctx.issue.number,
+        baseBranch
+      );
+
+      if ('failingStep' in mergeTruth) {
+        const duration = Date.now() - new Date(mergeStartedAt).getTime();
+        mergeResult = {
+          step: 'integrate:merge',
+          status: 'failed',
+          output: {
+            step: 'integrate:merge' as const,
+            failingStep: mergeTruth.failingStep,
+            targetBranch: mergeTruth.targetBranch,
+            baseSha: mergeTruth.baseSha,
+            candidateHeadSha: mergeTruth.candidateHeadSha,
+            conflictFiles: mergeTruth.conflictFiles,
+            error: mergeTruth.error,
+          },
+          startedAt: mergeStartedAt,
+          completedAt: new Date().toISOString(),
+          duration,
+        };
+        steps.push(mergeResult);
+        this.appendTaskResult(ctx, {
+          taskId: 'integrate:merge',
+          title: 'Merge approved candidate to target branch',
+          status: 'failed',
+          artifacts: [],
+          attempts: 1,
+          duration,
+        });
+
+        log.warn('Integration merge failed', {
+          issueNumber: ctx.issue.number,
+          failingStep: mergeTruth.failingStep,
+          error: mergeTruth.error,
+          conflictFiles: mergeTruth.conflictFiles,
+        });
+
+        const err = new Error(
+          `Merge failed at ${mergeTruth.failingStep}: ${mergeTruth.error}` +
+          (mergeTruth.conflictFiles?.length ? ` Conflicting files: ${mergeTruth.conflictFiles.join(', ')}` : '')
+        );
+        (err as any).mergeStep = mergeResult;
+        throw err;
+      }
+
+      const duration = Date.now() - new Date(mergeStartedAt).getTime();
+      mergeResult = {
+        step: 'integrate:merge',
+        status: 'completed',
+        output: {
+          step: 'integrate:merge' as const,
+          targetBranch: mergeTruth.targetBranch,
+          baseSha: mergeTruth.baseSha,
+          candidateHeadSha: mergeTruth.candidateHeadSha,
+          landedSha: mergeTruth.landedSha,
+          fastForward: mergeTruth.fastForward,
+          rebased: mergeTruth.rebased,
+        },
+        startedAt: mergeStartedAt,
+        completedAt: new Date().toISOString(),
+        duration,
+      };
+      steps.push(mergeResult);
+      this.appendTaskResult(ctx, {
+        taskId: 'integrate:merge',
+        title: 'Merge approved candidate to target branch',
+        status: 'completed',
+        artifacts: [mergeTruth.landedSha],
+        attempts: 1,
+        duration,
+      });
+
+      log.info('Integration merge succeeded', {
+        issueNumber: ctx.issue.number,
+        targetBranch: mergeTruth.targetBranch,
+        baseSha: mergeTruth.baseSha,
+        candidateHeadSha: mergeTruth.candidateHeadSha,
+        landedSha: mergeTruth.landedSha,
+        fastForward: mergeTruth.fastForward,
+        rebased: mergeTruth.rebased,
+      });
+
+    } catch (err) {
+      const completedAt = new Date().toISOString();
+      const duration = Date.now() - new Date(mergeStartedAt).getTime();
+
+      if (!mergeResult) {
+        mergeResult = {
+          step: 'integrate:merge',
+          status: 'failed',
+          output: { error: err instanceof Error ? err.message : String(err) },
+          startedAt: mergeStartedAt,
+          completedAt,
+          duration,
+        };
+      }
+      if (!steps.includes(mergeResult)) {
+        steps.push(mergeResult);
+      }
+
+      log.warn('Integrate stage failed at merge', {
         issueNumber: ctx.issue.number,
         error: err instanceof Error ? err.message : String(err),
       });
