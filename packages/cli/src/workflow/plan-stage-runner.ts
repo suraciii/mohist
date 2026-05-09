@@ -22,9 +22,20 @@ import { createWorkflowSessionObservers } from '../agent-runtime';
 import { HealthGateCheck } from './checks/health-gate-check';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import { runHealthFixTask } from './health-fix-task';
+import { runPlanRepairTask } from './plan-repair-task';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
+
+const PLAN_ARTIFACT_CHECK_NAMES = [
+  'proposal-complete',
+  'specs-complete',
+  'design-complete',
+  'tasks-valid',
+  'self-review-passed',
+];
+
+const PLAN_REPAIR_MAX_ATTEMPTS = 1;
 
 interface TaskConfig {
   type: string;
@@ -56,14 +67,21 @@ export class PlanStageRunner extends BaseStageRunner {
   }
 
   protected getCheckFailurePolicies(): CheckFailurePolicy[] {
-    if (!this.planHealthGatePolicy.enabled || !this.planHealthGatePolicy.autoFix) {
-      return [];
+    const policies: CheckFailurePolicy[] = PLAN_ARTIFACT_CHECK_NAMES.map(checkName => ({
+      checkName,
+      fixTaskId: 'repair-plan-artifacts',
+      maxAttempts: PLAN_REPAIR_MAX_ATTEMPTS,
+    }));
+
+    if (this.planHealthGatePolicy.enabled && this.planHealthGatePolicy.autoFix) {
+      policies.push({
+        checkName: 'health:plan',
+        fixTaskId: 'fix-plan-health',
+        maxAttempts: this.planHealthGatePolicy.maxFixAttempts,
+      });
     }
-    return [{
-      checkName: 'health:plan',
-      fixTaskId: 'fix-plan-health',
-      maxAttempts: this.planHealthGatePolicy.maxFixAttempts,
-    }];
+
+    return policies;
   }
 
   protected async runFixTask(
@@ -72,16 +90,25 @@ export class PlanStageRunner extends BaseStageRunner {
     failedCheck: CheckResult,
     attempt: number,
   ): Promise<StageTaskResult | null> {
-    if (taskId !== 'fix-plan-health') return null;
-    return runHealthFixTask(ctx, {
-      taskId: 'fix-plan-health',
-      title: 'Fix plan health',
-      stage: 'plan',
-      worktreePath: this.worktreePath || process.cwd(),
-      healthCommand: this.planHealthGatePolicy.command,
-      failedCheck,
-      attempt,
-    });
+    if (taskId === 'repair-plan-artifacts') {
+      return runPlanRepairTask(ctx, {
+        worktreePath: this.worktreePath || process.cwd(),
+        failedCheck,
+        attempt,
+      });
+    }
+    if (taskId === 'fix-plan-health') {
+      return runHealthFixTask(ctx, {
+        taskId: 'fix-plan-health',
+        title: 'Fix plan health',
+        stage: 'plan',
+        worktreePath: this.worktreePath || process.cwd(),
+        healthCommand: this.planHealthGatePolicy.command,
+        failedCheck,
+        attempt,
+      });
+    }
+    return null;
   }
 
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
