@@ -1,0 +1,218 @@
+{
+  "project": "mohist",
+  "description": "Probe opencode ACP session liveness, persist session call status, and return session failure to task/workflow callers without changing issue state directly.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Persist session liveness fields",
+      "spec": "specs/coder-session-tracking/spec.md#REQ-CST-001",
+      "description": "Add persisted liveness state to coder session records so session calls can store last data time, probe timing, and failure reason independently of issue state. This includes the SQLite migration, repository types, row mapping, insert defaults, and focused helper methods for data/probe/failure updates.",
+      "acceptanceCriteria": [
+        "Database migration adds nullable last_data_at, probe_sent_at, probe_deadline_at, and failure_reason columns to coder_session without changing issues schema",
+        "New coder_session rows initialize status as running and lastDataAt to a non-null session start timestamp",
+        "CoderSessionRepo can update lastDataAt, mark probing with probe timestamps, mark failed with failureReason, and read those fields back",
+        "Existing coder_session list/detail repository methods remain compatible with existing rows that have null liveness fields",
+        "Repository or migration tests verify the new columns and helper behavior",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/migrations.ts and packages/cli/src/db/coder-session-repo.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not add IssueSessionSummary or write session state into issues.stage/status. Treat probing as a non-terminal coder_session status."
+    },
+    {
+      "id": "T-002",
+      "title": "Emit persisted session liveness updates",
+      "spec": "specs/pipeline-session-events/spec.md#REQ-PSE-001",
+      "description": "Extend the session observer boundary so runtime liveness changes update coder_session and live clients through the existing observer/EventBus path. After this task, observers can persist new data arrival, probing, running recovery, failed, cancelled, and completed session call state without runtime code knowing SQL details.",
+      "acceptanceCriteria": [
+        "SessionState includes probing and transition rules treat probing as active and non-terminal",
+        "SessionObserver exposes a focused liveness/status update callback or equivalent data path for lastDataAt, probe timestamps, and failureReason",
+        "WorkflowSessionObserver updates coder_session liveness fields using the repository helpers from T-001",
+        "A coder_session_status_changed SSE event or equivalent existing event carries status, lastDataAt, probeSentAt, probeDeadlineAt, and failureReason",
+        "Observer failures are logged but do not throw back into AgentSession execution",
+        "Unit tests verify observer persistence and EventBus payloads for running, probing, and failed transitions",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/session-observer.ts, packages/cli/src/agent-runtime/session-state.ts, packages/cli/src/services/session-observers.ts, packages/cli/src/services/event-bus.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Do not reuse coder_recovery_status for liveness probing; recovery and liveness are separate concepts."
+    },
+    {
+      "id": "T-003",
+      "title": "Implement AgentSession liveness probing",
+      "spec": "specs/agent-runtime/spec.md#REQ-AR-001",
+      "description": "Make AgentSession maintain lastDataAt from ACP/opencode observable data and probe the same session when a running prompt is quiet beyond the configured threshold. The session should recover to running on any valid new data and return a failed session result when probe send, probe timeout, protocol disconnect, or process exit proves the session failed.",
+      "acceptanceCriteria": [
+        "Any ACP sessionUpdate refreshes lastDataAt before observer fan-out and keeps or returns the session to running",
+        "Successful protocol responses that are part of session setup or execution refresh lastDataAt where applicable",
+        "A running session that exceeds livenessQuietThresholdMs transitions to probing and sends a same-session probe",
+        "If no protocol-level ping/status exists, the fallback text probe exactly follows the narrow probe instruction from the issue/design",
+        "Any valid new data received while probing transitions the session back to running and clears active probe state without failing the task",
+        "Probe timeout, probe send failure, protocol disconnect, or process exit transitions the session to failed and returns success false with session failure metadata and failureReason",
+        "Abort/cancel behavior still returns cancellation semantics rather than session_failed",
+        "Runtime tests cover new data avoiding probe, quiet threshold probe, probe recovery, probe timeout failure, and process exit failure",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agent-runtime/agent-session.ts and related runtime tests",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Keep success:boolean backward compatible on AcpSessionResult while adding status/failureKind/failureReason metadata. Test thresholds should be injectable through AgentSessionOptions."
+    },
+    {
+      "id": "T-004",
+      "title": "Propagate session failure through task callers",
+      "spec": "specs/ralph-task-execution/spec.md#REQ-RTE-001",
+      "description": "Update task and workflow call sites so session_failed results are treated as failed session calls while leaving workflow policy responsible for retry, block, interruption, or user action. This task validates that no session probing or session failure directly changes issue stage/status.",
+      "acceptanceCriteria": [
+        "Ralph task execution receives session_failed metadata from AcpSessionResult and records a task attempt failure without waiting for the full task timeout",
+        "Plan, check, fix, conflict-resolution, and other direct AgentSession callers preserve existing success false handling while retaining failureReason for logs or returned errors",
+        "No code path introduced by this change writes issue.stage or issue.status directly because a session entered probing or failed",
+        "Task/workflow tests verify session_failed is returned to callers and issue stage/status remain unchanged by probing/failure",
+        "Existing timeout and cancellation handling remains covered and distinguishable from session_failed where caller behavior depends on it",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts and AgentSession caller updates/tests",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "This task should not design a new retry/recovery workflow; use existing task failure policy."
+    },
+    {
+      "id": "T-005",
+      "title": "Keep workflow state separate from session liveness",
+      "spec": "specs/workflow-agent/spec.md#REQ-WA-001",
+      "description": "Verify and adjust workflow orchestration so it consumes session failed results from tasks without judging opencode liveness itself. This task ensures probing and failed session states do not directly mutate issue stage/status, while existing workflow policy remains responsible for any later retry, block, interruption, or user action.",
+      "acceptanceCriteria": [
+        "Workflow orchestration consumes session failure as a task/session execution result rather than independently probing opencode",
+        "Session probing does not directly update issue.stage or issue.status",
+        "Session failure does not directly update issue.stage or issue.status before a separate workflow policy decision",
+        "Workflow tests cover session failed result handling and unchanged issue stage/status",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/agent-runner-service.ts and workflow orchestration tests",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "Do not add runtime health taxonomy or write session state into the issue domain."
+    },
+    {
+      "id": "T-006",
+      "title": "Expose session liveness through API",
+      "spec": "specs/http-api/spec.md#REQ-API-001",
+      "description": "Expose persisted current session call state through existing session and issue-facing endpoints. API clients should get status, lastDataAt, probeSentAt, probeDeadlineAt, and failureReason without relying on derived stale heuristics.",
+      "acceptanceCriteria": [
+        "GET issue coder-sessions list includes lastDataAt, probeSentAt, probeDeadlineAt, and failureReason for each session",
+        "GET issue coder-session detail metadata includes the same liveness fields and maps probing to a current checking-session state",
+        "Agent/session status APIs expose enough current-session data for clients to show Running, Checking session, Session failed, or No active session",
+        "Existing API-derived stale display is no longer authoritative when persisted probing or failed session state exists",
+        "API tests cover running, probing, failed, and no active session response cases",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts and packages/cli/src/api/agent.ts",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "Do not expose healthy/quiet/stale/hung-suspected/recoverable as user-facing states."
+    },
+    {
+      "id": "T-007",
+      "title": "Show session liveness in CLI",
+      "spec": "specs/cli-interface/spec.md#REQ-CLI-001",
+      "description": "Show the simplified session state in CLI issue/status output using API liveness data. The CLI should present Running, Checking session, Session failed, and No active session without exposing internal health taxonomy labels.",
+      "acceptanceCriteria": [
+        "CLI issue/status output displays Running for running sessions",
+        "CLI issue/status output displays Checking session for probing sessions and includes probe timing when available",
+        "CLI issue/status output displays Session failed for failed sessions and includes failureReason when available",
+        "CLI issue/status output displays No active session when no current active session call exists",
+        "CLI tests cover running, probing, failed, and no active session display cases",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts",
+      "dependsOn": [
+        "T-006"
+      ],
+      "passes": false,
+      "notes": "Do not expose healthy/quiet/stale/hung-suspected/recoverable as user-facing states."
+    },
+    {
+      "id": "T-008",
+      "title": "Render simplified session state in Web UI",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-001",
+      "description": "Update Web UI session types, SSE handling, hooks, and issue/session components so users see only the simplified current session call state. The live view should update when sessions enter probing, recover to running, fail, complete, or when there is no active session.",
+      "acceptanceCriteria": [
+        "Frontend types include lastDataAt, probeSentAt, probeDeadlineAt, failureReason, and probing status for coder sessions",
+        "SSE registration and hooks handle coder_session_status_changed or equivalent liveness event and update live session rows without a full page reload",
+        "SessionHeader and session detail views label running as Running, probing as Checking session, failed as Session failed, and absence of an active session as No active session where applicable",
+        "Failed session UI displays failureReason when available and probe timing when session is checking",
+        "Web UI does not render healthy, quiet, stale, hung-suspected, or recoverable as session states for this feature",
+        "Frontend tests or component-level tests cover running, probing, failed, and no-active-session rendering",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/hooks/useCoderSessions.ts, packages/cli/web/src/components/SessionHeader.tsx and related issue/session components",
+      "dependsOn": [
+        "T-006"
+      ],
+      "passes": false,
+      "notes": "Preserve the existing visual language of the session UI; this is a state/metadata display change, not a redesign."
+    },
+    {
+      "id": "T-009",
+      "title": "Add end-to-end regression coverage",
+      "spec": "specs/agent-runtime/spec.md#REQ-AR-001",
+      "description": "Add regression tests that exercise the full liveness path across runtime, persistence, task result propagation, API, and UI/CLI-facing state. This task should prove the acceptance criteria from the issue are covered together rather than only as isolated unit tests.",
+      "acceptanceCriteria": [
+        "Regression test verifies ACP/opencode new data updates lastDataAt and does not trigger probe before the threshold",
+        "Regression test verifies quiet running session enters probing and records probeSentAt/probeDeadlineAt",
+        "Regression test verifies probing session returns to running when new data arrives",
+        "Regression test verifies probe timeout or send failure marks session failed with failureReason and returns session_failed to the task/workflow caller",
+        "Regression test verifies issue.stage and issue.status are unchanged by session probing and session failure",
+        "Regression test verifies API plus CLI/Web-facing mapping can produce Running, Checking session, Session failed, and No active session",
+        "Full relevant test suite passes",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests and packages/cli/web/src test coverage for session liveness",
+      "dependsOn": [
+        "T-007",
+        "T-008"
+      ],
+      "passes": false,
+      "notes": "Use injected short liveness thresholds and fake/mock ACP behavior to avoid slow or flaky tests."
+    }
+  ]
+}
