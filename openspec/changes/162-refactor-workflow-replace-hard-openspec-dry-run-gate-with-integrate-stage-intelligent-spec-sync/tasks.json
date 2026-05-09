@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Replace the hard CHECK OpenSpec dry-run gate with auditable intelligent spec sync in INTEGRATE.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/openspec/open-spec-integrator.ts, packages/cli/tests/openspec-integrator.test.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Keep OpenSpecIntegrator.preview/apply as the public API. Hide parsing, resolution, validation, and write ordering behind that interface. No schema migration is expected."
+      "passes": true,
+      "notes": "Keep OpenSpecIntegrator.preview/apply as the public API. Hide parsing, resolution, validation, and write ordering behind that interface. No schema migration is expected.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        348667
+      ]
     },
     {
       "id": "T-002",
@@ -46,7 +51,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Consumes the extended SpecSyncSummary from T-001. Do not merge spec sync and archive behavior."
+      "notes": "Consumes the extended SpecSyncSummary from T-001. Do not merge spec sync and archive behavior.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -69,7 +77,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Consumes the INTEGRATE sync/evidence path from T-002 so CHECK can safely defer repairable spec sync conflicts to INTEGRATE. Keep CHECK read-only."
+      "notes": "Consumes the INTEGRATE sync/evidence path from T-002 so CHECK can safely defer repairable spec sync conflicts to INTEGRATE. Keep CHECK read-only.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -92,7 +103,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Consumes the CHECK deferral behavior from T-003. Avoid broad workflow-engine rewrites unless a test proves the current failure path violates the Integrate contract."
+      "notes": "Consumes the CHECK deferral behavior from T-003. Avoid broad workflow-engine rewrites unless a test proves the current failure path violates the Integrate contract.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -116,7 +130,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Consumes the complete implementation. Focus on user-visible regressions: no CHECK dead-end, auditable correction, strict validator failure, and distinct integration steps."
+      "notes": "Consumes the complete implementation. Focus on user-visible regressions: no CHECK dead-end, auditable correction, strict validator failure, and distinct integration steps.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
