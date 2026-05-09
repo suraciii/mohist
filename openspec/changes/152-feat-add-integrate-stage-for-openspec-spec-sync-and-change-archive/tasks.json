@@ -180,12 +180,11 @@
       ],
       "passes": true,
       "notes": "Consumes the merge step from T-005. It is acceptable to wrap or rename PostMergeFinalizer, but Done transition ownership must be the workflow/Integrate path, not a hidden finalizer side effect.",
-      "attempts": 2,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        1849107,
-        969249
+        1849107
       ]
     },
     {
@@ -216,7 +215,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        1483829
+        1769638
       ]
     },
     {
@@ -240,11 +239,14 @@
       "dependsOn": [
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the routed Integrate workflow from T-007. Prefer stage_executions as the primary evidence store unless list/card rendering proves a compact issue-level field is necessary.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        583793
+      ]
     },
     {
       "id": "T-009",
