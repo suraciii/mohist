@@ -44,3 +44,5 @@
 1. `packages/cli/tests/archive-lifecycle-regression.test.ts:111` Provide a stub `postMergeFinalizer` that marks the issue merged/done for the worktree-retention success-path test, or change the test to expect fail-closed behavior when no finalizer is configured.
 2. `packages/cli/tests/archive-lifecycle-regression.test.ts:165` Pass a stub successful `postMergeFinalizer` into `createIssueRoutes()` for the manual merge success-path worktree-retention test, or update the test to assert `500` and unchanged issue completion state when finalization is absent.
 3. `packages/cli/tests/archive-lifecycle-regression.test.ts:181` Rename or split the manual merge test so archive lifecycle coverage does not depend on the now-invalid legacy assumption that direct merge can complete without post-merge finalization.
+
+<promise>FAIL</promise>

@@ -118,6 +118,12 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
         },
         resolveConflicts: vi.fn().mockResolvedValue({ success: true }),
         fixBuildErrors: vi.fn().mockResolvedValue({ success: true }),
+        postMergeFinalizer: {
+          finalize: vi.fn().mockImplementation(async (issue) => {
+            issueRepo.setMergeState(issue.id, MergeState.Merged);
+            return { success: true, healthGateResult: { passed: true, enabled: true } };
+          }),
+        } as any,
       });
 
       queue.enqueue(project.id, issue.number);
@@ -160,11 +166,21 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
 
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus);
+      const postMergeFinalizer = {
+        finalize: vi.fn().mockImplementation(async (issue) => {
+          issueRepo.updateStage(issue.id, Stage.Done);
+          issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+          issueRepo.setMergeState(issue.id, MergeState.Merged);
+          return { success: true, healthGateResult: { passed: true, enabled: true } };
+        }),
+      };
 
       const app = new Hono();
       app.route('/api/issues', createIssueRoutes(
         issueService, projectService, stateManager,
-        worktreeManager, undefined, undefined, agentRunner
+        worktreeManager, undefined, undefined, agentRunner,
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, postMergeFinalizer as any,
       ));
       server = createTestServer(app);
 
