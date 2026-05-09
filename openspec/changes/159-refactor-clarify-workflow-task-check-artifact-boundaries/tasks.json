@@ -169,11 +169,14 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the final task/check result shape from T-005 and should not synthesize hidden auto-fix behavior in the UI.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        201825
+      ]
     },
     {
       "id": "T-007",
