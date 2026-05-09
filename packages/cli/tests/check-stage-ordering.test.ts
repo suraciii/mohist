@@ -146,10 +146,17 @@ describe('CheckStageRunner ordering', () => {
 
       expect(preChecks.map(check => check.name)).toEqual([
         'health:check',
-        'openspec-sync-dry-run',
         'merge-readiness',
         'integration-health-gate-preview',
       ]);
+    });
+
+    it('default CheckStageRunner does not include openspec-sync-dry-run in pre-task checks', () => {
+      const runner = new CheckStageRunner({ worktreePath: '/tmp/worktree' });
+      const preChecks = runner.getPreTaskChecks();
+
+      const checkNames = preChecks.map(check => check.name);
+      expect(checkNames).not.toContain('openspec-sync-dry-run');
     });
 
     it('default CheckStageRunner runs AI review and user approval after tasks', () => {
