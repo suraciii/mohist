@@ -147,11 +147,16 @@ describe('CheckStageRunner ordering', () => {
       expect(runner.executeTasksCalls).toBe(0);
     });
 
-    it('default CheckStageRunner runs health:check as a pre-task check', () => {
+    it('default CheckStageRunner runs health:check and readiness checks as pre-task checks', () => {
       const runner = new CheckStageRunner({ worktreePath: '/tmp/worktree' });
       const preChecks = runner.getPreTaskChecks();
 
-      expect(preChecks.map(check => check.name)).toEqual(['health:check']);
+      expect(preChecks.map(check => check.name)).toEqual([
+        'health:check',
+        'openspec-sync-dry-run',
+        'merge-readiness',
+        'integration-health-gate-preview',
+      ]);
     });
 
     it('default CheckStageRunner runs AI review and user approval after tasks', () => {
