@@ -141,11 +141,14 @@
         "T-003",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes all explicit fix task implementations so artifact/output semantics can be normalized consistently across regular tasks and fix tasks.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        312561
+      ]
     },
     {
       "id": "T-006",
