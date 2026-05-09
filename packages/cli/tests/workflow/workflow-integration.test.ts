@@ -615,7 +615,14 @@ describe('Workflow Integration Tests', () => {
       const checkRunner = new SimpleRunner({
         checks: [
           new PassCheck('build-test-passed'),
-          new PassCheck('ai-review-passed'),
+          {
+            name: 'ai-review',
+            run: async () => ({
+              name: 'ai-review',
+              status: 'pass' as const,
+              output: { verdict: 'PASS', reviewReport: 'Mock review report' },
+            }),
+          },
           new PendingCheck(),
         ],
         nextStage: Stage.Integrate,
@@ -646,6 +653,13 @@ describe('Workflow Integration Tests', () => {
         eventBus: ctx.eventBus,
         checkpointManager: ctx.checkpointManager,
         artifactManager: ctx.artifactManager,
+        worktreeManager: {
+          getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+          createCheckConvergenceCommit: vi.fn().mockResolvedValue({ success: true, headSha: 'abc123' }),
+        } as unknown as WorktreeManager,
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({ id: 'proj-1', name: 'test-project', path: '/tmp/project' }),
+        } as unknown as ProjectRepo,
       });
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);

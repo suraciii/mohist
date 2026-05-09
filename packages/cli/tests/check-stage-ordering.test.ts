@@ -322,13 +322,25 @@ describe('CheckStageRunner ordering', () => {
       const runner = new TestStageRunner();
       runner.preTaskChecks = [makePassCheck('build-test')];
       runner.postTaskChecks = [
-        makePassCheck('ai-review'),
+        makeCheck('ai-review', async () => ({
+          name: 'ai-review',
+          status: 'pass' as const,
+          output: { verdict: 'PASS', reviewReport: 'Mock review report' },
+        })),
         makeCheck('user-approval', async () => ({
           name: 'user-approval', status: 'pending', message: 'Waiting for approval',
         })),
       ];
 
-      const ctx = createMockContext(tmpDir);
+      const ctx = createMockContext(tmpDir, 42, {
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', path: '/tmp/project' }),
+        } as any,
+        worktreeManager: {
+          getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+          createCheckConvergenceCommit: vi.fn().mockResolvedValue({ success: true, headSha: 'abc123' }),
+        } as any,
+      });
       const emitSpy = vi.spyOn(ctx.eventBus!, 'emit');
       const result = await runner.run(ctx);
 

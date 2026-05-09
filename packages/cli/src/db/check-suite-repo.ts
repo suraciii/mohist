@@ -107,6 +107,15 @@ export class CheckSuiteRepo {
     return this.findById(suiteId);
   }
 
+  updateSnapshotShaPreservingChecks(suiteId: string, newSha: string): CheckSuite | null {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE check_suites SET snapshot_sha = ?, updated_at = ? WHERE id = ?',
+      [newSha, now, suiteId]
+    );
+    return this.findById(suiteId);
+  }
+
   resetChecks(suiteId: string): CheckSuite | null {
     const now = new Date().toISOString();
     const checks = makeInitialChecks();

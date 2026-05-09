@@ -244,14 +244,15 @@ export abstract class BaseStageRunner implements StageRunner {
     return this.runFixAndRecheck(ctx, check, recheckResult, updatedResults, taskOutput, isPreTask, activeChecks, policy, attempt + 1);
   }
 
-  private handleApprovalCheck(
+  private async handleApprovalCheck(
     ctx: StageContext,
     _check: Check,
     result: CheckResult,
     allResults: CheckResult[],
     taskOutput: unknown,
-  ): StageRunResult {
+  ): Promise<StageRunResult> {
     let approvalOutput: unknown = null;
+    let effectiveResults = allResults;
 
     if (ctx.issue.stage === Stage.Plan) {
       const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
@@ -271,17 +272,64 @@ export abstract class BaseStageRunner implements StageRunner {
       }
     } else if (ctx.issue.stage === Stage.Check) {
       const aiReviewResult = getLatestCheckResult(allResults, 'ai-review');
-      if (aiReviewResult?.output) {
-        const output = aiReviewResult.output as { verdict?: string; reviewReport?: string };
-        if (output.verdict && output.reviewReport) {
-          const dimensions = parseDimensions(output.reviewReport);
-          approvalOutput = {
-            result: output.verdict,
-            reviewReport: output.reviewReport,
-            dimensions,
-          };
-        }
+      if (!aiReviewResult?.output) {
+        return {
+          success: false,
+          output: taskOutput,
+          checkResults: allResults,
+          message: 'Cannot request check approval: no AI review result found',
+        };
       }
+
+      const aiReviewOutput = aiReviewResult.output as { verdict?: string; reviewReport?: string };
+      if (aiReviewOutput.verdict !== 'PASS') {
+        return {
+          success: false,
+          output: taskOutput,
+          checkResults: allResults,
+          message: `Cannot request check approval: latest AI review verdict is ${aiReviewOutput.verdict ?? 'unknown'}, expected PASS`,
+        };
+      }
+
+      const project = ctx.projectRepo.findById(ctx.issue.projectId);
+      if (!project) {
+        return {
+          success: false,
+          output: taskOutput,
+          checkResults: allResults,
+          message: 'Cannot request check approval: project not found',
+        };
+      }
+
+      const worktreePath = ctx.worktreeManager.getPath(project.name, ctx.issue.number);
+      if (!worktreePath) {
+        return {
+          success: false,
+          output: taskOutput,
+          checkResults: allResults,
+          message: 'Cannot request check approval: worktree not found',
+        };
+      }
+
+      const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
+      if (!convergence.success) {
+        return {
+          success: false,
+          output: taskOutput,
+          checkResults: allResults,
+          message: convergence.error ?? 'Cannot request check approval: uncommitted auto-fix or review artifact changes prevented approval',
+        };
+      }
+
+      effectiveResults = this.convergeSnapshot(ctx, allResults, convergence.headSha);
+
+      const dimensions = aiReviewOutput.reviewReport ? parseDimensions(aiReviewOutput.reviewReport) : undefined;
+      approvalOutput = {
+        result: aiReviewOutput.verdict,
+        reviewReport: aiReviewOutput.reviewReport,
+        dimensions,
+        snapshotSha: convergence.headSha,
+      };
     }
 
     ctx.issueRepo.setApprovalState(ctx.issue.id, {
@@ -300,7 +348,7 @@ export abstract class BaseStageRunner implements StageRunner {
     return {
       success: false,
       output: taskOutput,
-      checkResults: allResults,
+      checkResults: effectiveResults,
       message: result.message ?? `User approval required`,
     };
   }
@@ -365,6 +413,56 @@ export abstract class BaseStageRunner implements StageRunner {
       }
     } catch (e) {
       log.warn('updateCheckSuiteAiReview failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  private convergeSnapshot(ctx: StageContext, checkResults: CheckResult[], snapshotSha: string): CheckResult[] {
+    const updated = [...checkResults];
+    let latestIdx = -1;
+    for (let i = updated.length - 1; i >= 0; i--) {
+      if (updated[i].name === 'ai-review') {
+        latestIdx = i;
+        break;
+      }
+    }
+
+    if (latestIdx >= 0) {
+      const existing = updated[latestIdx];
+      updated[latestIdx] = {
+        ...existing,
+        output: {
+          ...((existing.output as Record<string, unknown>) ?? {}),
+          snapshotSha,
+          convergedAt: new Date().toISOString(),
+        },
+      };
+    }
+
+    this.persistCheckResults(ctx, updated);
+
+    if (latestIdx >= 0) {
+      this.convergeCheckSuite(ctx, snapshotSha, updated[latestIdx]);
+    }
+
+    return updated;
+  }
+
+  private convergeCheckSuite(ctx: StageContext, snapshotSha: string, aiReviewResult: CheckResult): void {
+    if (!ctx.checkSuiteRepo) return;
+    try {
+      const suite = ctx.checkSuiteRepo.findActiveByIssueId(ctx.issue.id);
+      if (!suite) return;
+
+      const output = (aiReviewResult.output as Record<string, unknown>) ?? {};
+      ctx.checkSuiteRepo.updateChecks(suite.id, 'ai-review', {
+        status: 'passed',
+        output,
+        ranAt: (output.convergedAt as string) ?? new Date().toISOString(),
+      });
+
+      ctx.checkSuiteRepo.updateSnapshotShaPreservingChecks(suite.id, snapshotSha);
+    } catch (e) {
+      log.warn('convergeCheckSuite failed', { error: e instanceof Error ? e.message : String(e) });
     }
   }
 

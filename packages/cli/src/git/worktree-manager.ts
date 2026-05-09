@@ -28,6 +28,12 @@ export interface WipCommitInfo {
 const WIP_AUTHOR_NAME = 'mohist-wip';
 const WIP_AUTHOR_EMAIL = 'mohist@wip';
 
+export interface ConvergenceCommitResult {
+  success: boolean;
+  headSha: string;
+  error?: string;
+}
+
 function parseStatusLines(stdout: string): string[] {
   return stdout.trim().split('\n').map(l => l.trim()).filter(Boolean);
 }
@@ -881,6 +887,72 @@ export class WorktreeManager {
       log.info('Worktrees pruned', { projectPath });
     } catch (error: any) {
       throw new Error(`Failed to prune worktrees: ${error.message || error}`);
+    }
+  }
+
+  async getHeadSha(worktreePath: string): Promise<string> {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+    return stdout.trim();
+  }
+
+  async isWorktreeClean(worktreePath: string): Promise<boolean> {
+    const { stdout } = await execFileAsync(
+      'git', ['status', '--porcelain', '--ignore-submodules'],
+      { cwd: worktreePath },
+    );
+    return !stdout.trim();
+  }
+
+  async createCheckConvergenceCommit(worktreePath: string, issueNumber: number): Promise<ConvergenceCommitResult> {
+    try {
+      const { stdout: statusOut } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath },
+      );
+
+      if (!statusOut.trim()) {
+        const { stdout: headOut } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+        return { success: true, headSha: headOut.trim() };
+      }
+
+      await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
+
+      const { stdout: remaining } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath },
+      );
+      if (!remaining.trim()) {
+        const { stdout: headOut } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+        return { success: true, headSha: headOut.trim() };
+      }
+
+      await execFileAsync(
+        'git',
+        ['commit', '-m', `check: convergence commit for issue #${issueNumber}`],
+        { cwd: worktreePath },
+      );
+
+      const { stdout: postStatus } = await execFileAsync(
+        'git', ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath },
+      );
+      if (postStatus.trim()) {
+        return {
+          success: false,
+          headSha: '',
+          error: 'Worktree still has uncommitted changes after convergence commit (possible pre-commit hook modifications)',
+        };
+      }
+
+      const { stdout: headOut } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+      log.info('Check convergence commit created', { worktreePath, issueNumber, headSha: headOut.trim() });
+      return { success: true, headSha: headOut.trim() };
+    } catch (err) {
+      return {
+        success: false,
+        headSha: '',
+        error: `Convergence commit failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   }
 }
