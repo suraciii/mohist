@@ -1,0 +1,97 @@
+{
+  "project": "mohist",
+  "description": "Force issue merges to land as one squash commit with issue-level commit messages.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add squash merge metadata and commit message formatter",
+      "spec": "specs/worktree-manager/spec.md#worktree-manager-生成-issue-level-squash-commit-message",
+      "description": "Introduce the shared merge metadata contract and deterministic squash commit message formatter used by issue merge paths. The formatter should build an issue-level commit subject/body from issue number, issue title, and optional tasks.json data, and fall back gracefully when task metadata is unavailable.",
+      "acceptanceCriteria": [
+        "A shared merge metadata shape can carry issue title and optional parsed tasks to WorktreeManager merge operations",
+        "Generated commit messages include the issue title, issue number, and stable task summaries when tasks are provided",
+        "Generated commit messages still succeed with a concise issue-only fallback when tasks are missing or empty",
+        "Unit tests cover task-rich and task-missing commit message generation",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts, packages/cli/tests/worktree-manager.test.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep artifact reading outside WorktreeManager; callers pass metadata. Do not add a merge strategy option."
+    },
+    {
+      "id": "T-002",
+      "title": "Convert merge queue mergeBack to squash merge",
+      "spec": "specs/worktree-manager/spec.md#worktree-manager-强制-squash-merge-issue-分支",
+      "description": "Replace the merge queue's final fast-forward merge behavior with a forced squash merge through mergeBack(). The queue path should pass issue metadata into WorktreeManager, use the shared commit formatter, produce one base-branch commit, and remove fast-forward success wording from logs and messages.",
+      "acceptanceCriteria": [
+        "mergeBack() no longer runs git merge --ff-only as its successful final merge operation",
+        "mergeBack() runs git merge --squash followed by git commit with the generated issue-level message",
+        "MergeQueue passes the issue title and available tasks metadata into mergeBack()",
+        "Successful mergeBack() messaging describes squash completion rather than fast-forward completion",
+        "Failures during squash merge or commit return clear retryable failure messages and do not clean up the issue worktree",
+        "Tests cover mergeBack squash success, no-commit no-op behavior, and squash failure handling",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts, packages/cli/src/git/merge-queue.ts, packages/cli/src/server/index.ts, packages/cli/tests/merge-queue.test.ts, packages/cli/tests/worktree-manager.test.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "If MergeQueue lacks artifact access, inject a small readTasks dependency from server construction rather than coupling WorktreeManager to ChangeArtifactsManager."
+    },
+    {
+      "id": "T-003",
+      "title": "Convert integrate-stage mergeApprovedCandidate to squash merge",
+      "spec": "specs/worktree-manager/spec.md#worktree-manager-merge-results-do-not-expose-fast-forward-status",
+      "description": "Replace mergeApprovedCandidate() fast-forward success paths with the same forced squash merge finalization used by mergeBack(). Update the stage-context return type and integrate-stage output so successful merge results no longer expose fastForward and summaries state that a squash merge completed.",
+      "acceptanceCriteria": [
+        "mergeApprovedCandidate() does not fast-forward an already mergeable candidate and instead creates one squash commit",
+        "mergeApprovedCandidate() preserves clean rebase/conflict detection before final squash for non-fast-forward candidates",
+        "Successful mergeApprovedCandidate() results omit the fastForward field from implementation and StageContext types",
+        "Integrate-stage task output, event output, summaries, and logs no longer read or emit fastForward",
+        "Integrate-stage passes issue title and tasks metadata from artifactManager.readTasks() into mergeApprovedCandidate()",
+        "Tests cover fast-forwardable and rebased candidates both landing via squash, and merge failure output retaining base/candidate/conflict details",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts, packages/cli/src/workflow/stage-context.ts, packages/cli/src/workflow/integrate-stage-runner.ts, packages/cli/tests/workflow/integrate-stage-runner.test.ts, packages/cli/tests/integrate-regression.test.ts, packages/cli/tests/worktree-manager.test.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Remove fastForward rather than setting it to false. Keep rebased only if it remains useful as pre-squash diagnostic metadata."
+    },
+    {
+      "id": "T-004",
+      "title": "Remove obsolete fast-forward expectations from tests",
+      "spec": "specs/worktree-manager/spec.md#worktree-manager-强制-squash-merge-issue-分支",
+      "description": "Perform a final test and type cleanup pass for the forced squash strategy. Remove or rewrite fast-forward-only assertions, update mocks to the new merge result contract, and add regression coverage proving the base branch receives a single issue-level commit.",
+      "acceptanceCriteria": [
+        "No test mocks for successful mergeApprovedCandidate() include fastForward",
+        "No tests expect git merge --ff-only as the final successful issue merge operation",
+        "Regression tests verify a successful issue merge produces exactly one landed commit on the base branch",
+        "Regression tests verify generated squash commit messages include issue title and task summaries",
+        "packages/cli test suite passes",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/**/*.test.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Search for fastForward, ff-only, and fast-forward in tests and update only expectations tied to final merge strategy."
+    }
+  ]
+}
