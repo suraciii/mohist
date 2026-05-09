@@ -1,6 +1,7 @@
-## ADDED Requirements
+# OpenSpec Capability: pipeline-session-events
 
 ### Requirement: AcpConnectionOptions extended with issueNumber and onSessionUpdate
+
 `AcpConnectionOptions` and `AcpSessionOptions` SHALL include two new optional fields:
 - `issueNumber?: number` — used for SSE event `issueId` (frontend matches by issue number, not UUID)
 - `onSessionUpdate?: (notification: SessionNotification) => void` — callback for external event processing (used by Plan/Review stage bridge)
@@ -17,6 +18,7 @@ When `onSessionUpdate` is provided, `createAcpConnection` SHALL call it for ever
 - **THEN** behavior is unchanged: `coder_text_chunk` and `coder_tool_call` are emitted as before
 
 ### Requirement: acpOptions includes eventBus + issueNumber in all pipeline routes
+
 All 5 `acpOptions` constructions in `api/issues.ts` SHALL include the `eventBus` singleton and `issueNumber: issue.number`. The 5 sites are: `start`, `reopen`, `approve`, `reject`, `messages`.
 
 #### Scenario: Start pipeline route passes eventBus and issueNumber
@@ -28,6 +30,7 @@ All 5 `acpOptions` constructions in `api/issues.ts` SHALL include the `eventBus`
 - **THEN** `acpOptions.eventBus` and `acpOptions.issueNumber` are set
 
 ### Requirement: SSE event issueId uses issue number via dual-track
+
 In `acp-session.ts`, SSE event emission SHALL use `String(options.issueNumber ?? options.issueId)` as the `issueId` field. DB operations (`workflowLogRepo.insert`, `coderSessionRepo.insert`) SHALL continue using `options.issueId` (UUID) unchanged.
 
 #### Scenario: coder_text_chunk with issueNumber
@@ -39,6 +42,7 @@ In `acp-session.ts`, SSE event emission SHALL use `String(options.issueNumber ??
 - **THEN** SSE event `issueId` falls back to `issueId` (UUID)
 
 ### Requirement: Plan/Review stage sets stage-specific executionId
+
 `WorkflowController.run()` SHALL override `acpOptions.executionId` before dispatching to each stage:
 - Plan: `'plan-${issue.number}'`
 - Review: `'review-${issue.number}'`
@@ -50,6 +54,7 @@ Build stage executionId is set per-task by `RalphExecutor`.
 - **THEN** the acpOptions passed to `createAcpConnection` has `executionId: 'plan-1'` (for issue #1)
 
 ### Requirement: Plan stage emits round start events
+
 When `runPlanStage()` begins a new round (proposal / specs / design / tasks / self-review), the system SHALL emit a `plan_round_start` event via the `onSessionUpdate` bridge with `{ issueId, projectId, roundType, roundLabel, roundIndex }`.
 
 #### Scenario: Proposal round starts
@@ -61,6 +66,7 @@ When `runPlanStage()` begins a new round (proposal / specs / design / tasks / se
 - **THEN** EventBus emits `plan_round_start` with `roundType: 'self-review'`, `roundIndex: 4`
 
 ### Requirement: Plan/Review stage bridges sessionUpdate via onSessionUpdate
+
 For each sessionUpdate received from the multi-round ACP connection in `runPlanStage()` and `runPipelineReviewStage()`, the `onSessionUpdate` callback SHALL emit a `plan_session_update` event to EventBus with `{ issueId, projectId, roundType, roundIndex, sessionUpdate, data }`. The `data` field SHALL contain the full sessionUpdate payload.
 
 #### Scenario: Agent message chunk in specs round
@@ -76,6 +82,7 @@ For each sessionUpdate received from the multi-round ACP connection in `runPlanS
 - **THEN** EventBus emits `plan_session_update` with `roundType: 'review'`
 
 ### Requirement: Plan session events registered in SSE event types
+
 The `plan_round_start` and `plan_session_update` events SHALL be included in all SSE event type registrations:
 - `events.ts` `ALL_EVENT_TYPES` array (backend)
 - `agent-events.ts` `AGENT_DETAIL_EVENTS` array (frontend)
@@ -86,6 +93,7 @@ The `plan_round_start` and `plan_session_update` events SHALL be included in all
 - **THEN** the client receives `event: plan_round_start` with the round metadata
 
 ### Requirement: EventBridge logic is fire-and-forget
+
 All EventBus emit calls in the plan/review stage bridge SHALL be fire-and-forget. Emit failures SHALL NOT affect the pipeline execution flow.
 
 #### Scenario: EventBus emit throws during plan stage
@@ -93,6 +101,7 @@ All EventBus emit calls in the plan/review stage bridge SHALL be fire-and-forget
 - **THEN** the error is caught and logged, pipeline continues normally
 
 ### Requirement: Build stage passes eventBus to RalphExecutor
+
 `runPipelineBuildStage` SHALL pass `this.eventBus` to `RalphExecutor` via its context. `RalphExecutorContext` SHALL be extended with `workflowLogRepo`, `coderSessionRepo`, and `issueNumber` fields. These SHALL be forwarded to `_acpSessionRunner` (runAcpSession) calls.
 
 #### Scenario: Build stage emits ralph_task_update
@@ -108,6 +117,7 @@ All EventBus emit calls in the plan/review stage bridge SHALL be fire-and-forget
 - **THEN** `issueId` field is `String(issueNumber)` (e.g., `"1"`), not UUID
 
 ### Requirement: RalphExecutor generates per-task executionId
+
 `runPipelineBuildStage` SHALL construct `RalphExecutor` with `executionId: 'build-${issue.number}'`. Inside `runRalphLoop`, for each task, the system SHALL generate a unique `taskExecutionId = '${context.executionId}-${taskId}'` (e.g., `"build-1-T-001"`). The `ralph_task_update`, `coder_text_chunk`, and `coder_tool_call` events SHALL use `taskExecutionId`. The `ralph_loop_progress` event SHALL continue to use `context.executionId` (loop-level).
 
 #### Scenario: Each Build task has unique executionId
@@ -120,3 +130,33 @@ All EventBus emit calls in the plan/review stage bridge SHALL be fire-and-forget
 - **WHEN** `ralph_loop_progress` is emitted during Build stage
 - **THEN** `executionId` is `"build-1"` (without task suffix)
 - **AND** loop-level progress is not tied to individual tasks
+
+### Requirement: Live transcript convergence
+
+Live session events SHALL update the same normalized transcript shape used by historical replay. SSE updates are an optimistic live view, and terminal or recovery lifecycle events SHALL reconcile the page with the canonical session detail transcript.
+
+#### Scenario: Live tool updates merge in place
+
+- **WHEN** live `coder_tool_call` start and update events arrive for the same id or inferable correlation key
+- **THEN** the session page updates one existing logical tool part
+- **AND** it does not append duplicate or orphan tool cards
+
+#### Scenario: Live running state is restrained and accurate
+
+- **WHEN** a session is actively streaming
+- **THEN** only real non-terminal logical tools render as running
+- **AND** pending or half-formed lifecycle fragments do not appear as separate visible tools
+
+#### Scenario: Terminal events reconcile with persisted replay
+
+- **WHEN** coder session completion, failure, timeout, cancellation, or recovery terminal events are observed
+- **THEN** the page invalidates or refetches the session detail transcript
+- **AND** the refetched historical transcript preserves equivalent visible order and grouping to the live view
+
+#### Scenario: Live updates respect reader position
+
+- **WHEN** the reader is near the bottom of the transcript
+- **THEN** live text and tool updates follow the stream
+- **WHEN** the reader has scrolled away from the bottom
+- **THEN** live updates do not force-scroll and a new-content affordance is shown
+

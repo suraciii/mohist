@@ -1,6 +1,7 @@
-## MODIFIED Requirements
+# OpenSpec Capability: agent-session-ui
 
 ### Requirement: WebUI subscribes to agent detail SSE events
+
 The WebUI SSE subscription SHALL include the following event types: `agent_text_chunk`, `main_tool_call`, `coder_text_chunk`, `coder_tool_call`, `ralph_task_update`, `ralph_loop_progress`, `plan_round_start`, `plan_session_update`. All 4 registration arrays must be kept in sync: `event-bus.ts` EventMap, `events.ts` ALL_EVENT_TYPES, `agent-events.ts` AGENT_DETAIL_EVENTS, `useSSE.ts` eventTypes.
 
 #### Scenario: Agent starts and streams text
@@ -12,6 +13,7 @@ The WebUI SSE subscription SHALL include the following event types: `agent_text_
 - **THEN** the event is dispatched to the global event emitter for SessionTimeline to consume
 
 ### Requirement: Frontend agentStatus uses issueNumber field for matching
+
 The frontend SSE event handlers and agent status detection SHALL use `issueNumber` (number) instead of `issueId` (UUID) for matching. The `AgentRunnerService.getStatus()` endpoint returns both `issueId` (UUID) and `issueNumber` (number). Frontend SHALL compare `agentStatus.issueNumber === issueNumber` for running detection and filter SSE events by `detail.issueId === String(issueNumber)`.
 
 #### Scenario: Agent running detection works correctly
@@ -30,6 +32,7 @@ The frontend SSE event handlers and agent status detection SHALL use `issueNumbe
 - **THEN** the event is filtered out
 
 ### Requirement: AgentSessionPanel replaced by SessionTimeline
+
 The IssueDetailPage SHALL replace the AgentSessionPanel component with a SessionTimeline component that provides round-based conversation display. The SessionTimeline SHALL load historical data from the workflow_log API and append live SSE events.
 
 #### Scenario: Agent is running on this issue
@@ -45,6 +48,7 @@ The IssueDetailPage SHALL replace the AgentSessionPanel component with a Session
 - **THEN** historical data from workflow_log is loaded first, then live SSE events are appended without duplication
 
 ### Requirement: Historical and live events merged without duplicates
+
 When the SessionTimeline loads, it SHALL first fetch historical data from workflow_log API, then append live SSE events. Events SHALL be deduplicated using the following strategy:
 - **Tool calls**: Use `Map<toolCallId, ToolCallEntry>` to merge started and completed states
 - **Text chunks**: No deduplication needed (incremental accumulation)
@@ -63,9 +67,66 @@ The complex "timestamp proximity and content overlap" strategy is NOT required.
 - **AND** duplicate tool calls from SSE are filtered by checking `toolCallMap.has(detail.toolCallId)`
 
 ### Requirement: Frontend uses RAF throttling for plan_session_update events
+
 The SessionTimeline SHALL implement requestAnimationFrame-based throttling for `plan_session_update` events to prevent UI lockup during rapid streaming (1000+ events in Plan stage). Events SHALL be buffered in a ref and flushed every 100ms using `requestAnimationFrame`.
 
 #### Scenario: Rapid plan_session_update events during Plan stage
 - **WHEN** 1000+ `plan_session_update` events arrive within 5 seconds during Plan stage
 - **THEN** the UI updates in batches (every 100ms) instead of per-event
 - **AND** no frame drops occur during the streaming session
+
+### Requirement: Semantic tool parts
+
+The dedicated session page SHALL render normalized tool parts as semantic assistant conversation parts rather than raw event-log rows. Tool summaries SHALL be readable by default, with raw input/output available only through explicit disclosure.
+
+#### Scenario: Context gathering is grouped
+
+- **WHEN** adjacent context tools such as read, grep, glob, list, search, or memory reads appear in an assistant turn
+- **THEN** the page renders a compact context group such as `Gathered context · 4 reads, 1 search`
+- **AND** the group expands to show individual tool details and raw data
+
+#### Scenario: Bash tools are summarized
+
+- **WHEN** a bash or shell tool part is rendered
+- **THEN** the default view shows a human title, command, status, duration where available, and concise output preview
+- **AND** full output and raw payload are available through explicit disclosure
+
+#### Scenario: File-changing tools show file summaries
+
+- **WHEN** edit, write, or apply_patch tools change files
+- **THEN** the default view shows changed file count, operation, path, and additions/deletions where available
+- **AND** raw diff, patch, input, or output details are collapsed by default but expandable
+
+#### Scenario: Unknown tools have useful fallback display
+
+- **WHEN** a tool cannot be fully normalized
+- **THEN** the visible title uses the best available display title, title, target, source name, or event label before falling back to `unknown`
+- **AND** raw data remains available for debugging
+
+### Requirement: Readable Mohist coder transcript
+
+The dedicated session page SHALL read top-to-bottom as a Mohist prompt followed by a Coder response and resulting output. It SHALL resemble an opencode-style read-only conversation transcript more than a workflow dashboard or event log.
+
+#### Scenario: Conversation speakers are clear
+
+- **WHEN** a user reads the page from top to bottom
+- **THEN** Mohist prompt cards are visibly distinct from Coder response parts
+- **AND** each assistant response can include text, collapsed reasoning, semantic tools, errors, and file-change output in order
+
+#### Scenario: Reasoning is collapsed by default
+
+- **WHEN** reasoning or thought content exists
+- **THEN** it is available behind a collapsed or summarized disclosure
+- **AND** it does not dominate the primary transcript reading flow
+
+#### Scenario: File changes appear as transcript output
+
+- **WHEN** a turn or session includes file-changing tool output
+- **THEN** touched paths and additions/deletions are visible in a compact transcript output section
+- **AND** this output remains part of the conversation rather than a separate dashboard
+
+#### Scenario: The page stays read-only
+
+- **WHEN** the session page is rendered
+- **THEN** it does not show a composer, continue-conversation input, stop control, steering control, or stage-control dashboard as part of this issue
+

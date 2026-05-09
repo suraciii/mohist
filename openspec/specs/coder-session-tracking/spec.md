@@ -1,6 +1,7 @@
-## ADDED Requirements
+# OpenSpec Capability: coder-session-tracking
 
 ### Requirement: Coder tool call events carry full payload
+
 The `coder_tool_call` event emitted by `runAcpSession()` and `createAcpConnection()` SHALL include `rawInput`, `rawOutput`, and `title` fields in its payload when available. This data already exists in the ACP notification's `toolCall` object but is currently discarded.
 
 **Note**: In `createAcpConnection`, when `onSessionUpdate` is set, `coder_tool_call` is not emitted (see pipeline-session-events spec). This enrichment only applies when `onSessionUpdate` is NOT set (i.e., default Build stage behavior).
@@ -18,6 +19,7 @@ The `coder_tool_call` event emitted by `runAcpSession()` and `createAcpConnectio
 - **THEN** both code paths produce events with `rawInput`, `rawOutput`, `title` fields
 
 ### Requirement: SSE event issueId uses issue number for coder sessions
+
 The `coder_text_chunk` and `coder_tool_call` events SHALL use `String(options.issueNumber ?? options.issueId)` as `issueId`. DB operations continue using `options.issueId` (UUID).
 
 #### Scenario: coder_text_chunk with issueNumber
@@ -26,6 +28,7 @@ The `coder_text_chunk` and `coder_tool_call` events SHALL use `String(options.is
 - **AND** `workflowLogRepo.insert` is called with UUID `issueId`
 
 ### Requirement: Tool call events include stable toolCallId for deduplication
+
 The `coder_tool_call` event SHALL include a stable `toolCallId` that can be used by the frontend for deduplication. The ID generation logic in `acp-session.ts` (using `sessionId-toolName-counter` pattern) SHALL remain unchanged. Both `runAcpSession` and `createAcpConnection` SHALL use the same ID generation algorithm.
 
 #### Scenario: Frontend deduplicates tool calls by toolCallId
@@ -34,6 +37,7 @@ The `coder_tool_call` event SHALL include a stable `toolCallId` that can be used
 - **AND** the same ID appears in both the started and completed events for the same tool call
 
 ### Requirement: Workflow log stores tool call data with extractable fields
+
 The `workflowLogRepo.insert()` call in `acp-session.ts` SHALL store the full ACP notification payload (including `toolCall.input`, `toolCall.output`, `toolCall.title`). The frontend SHALL extract these fields from `WorkflowLogItem.data` when reconstructing historical rounds.
 
 #### Scenario: Frontend extracts tool call details from workflow_log
@@ -44,8 +48,38 @@ The `workflowLogRepo.insert()` call in `acp-session.ts` SHALL store the full ACP
 ## MODIFIED Requirements
 
 ### Requirement: Coder session mapping persisted on spawn
+
 When `spawn_coder` tool executes and creates an ACP session, the system SHALL record the mapping of issue_id, acp_session_id, execution_id, and a truncated task description to the `coder_session` table with status 'running'. The `coder_tool_call` SSE event SHALL additionally carry `rawInput`, `rawOutput`, and `title` fields so that the WebUI can display tool call details without querying the workflow_log API.
 
 #### Scenario: Spawn coder creates ACP session
 - **WHEN** runAcpSession successfully initializes ACP and obtains a sessionId (after `connection.newSession` succeeds)
 - **THEN** a coder_session row is created with issue_id (UUID), acp_session_id, execution_id, truncated task (max 200 chars), status='running', and created_at
+
+### Requirement: Tool lifecycle normalization
+
+Coder session transcript assembly SHALL normalize raw tool lifecycle events into one logical tool part per real tool call. `tool_call` and `tool_call_update` events for the same provider call id, ACP call id, nested tool call id, or deterministic correlation key SHALL merge into a single stable transcript part.
+
+#### Scenario: Tool start and update merge by id
+
+- **WHEN** a persisted session contains `tool_call` and `tool_call_update` events for the same `toolCallId`, nested `toolCall.toolCallId`, `id`, or `callId`
+- **THEN** the transcript exposes exactly one tool part for that tool call
+- **AND** the tool part contains the best available name, title, input, output, status, timestamps, and error data
+
+#### Scenario: No-id tool events merge by correlation
+
+- **WHEN** a tool start event and a later update event do not carry a stable id but share inferable normalized name plus target or title
+- **THEN** the transcript merges them into one logical tool part
+- **AND** ambiguous name-only fallback correlation adds a transcript warning rather than silently implying certainty
+
+#### Scenario: Inferable tools avoid unknown fallback
+
+- **WHEN** a raw tool event lacks `toolName` but contains a known `name`, title, raw input shape, command, file path, pattern, patch text, todo payload, or raw output metadata
+- **THEN** the transcript infers a useful normalized name and display title
+- **AND** the visible transcript does not show an orphan `unknown running...` entry
+
+#### Scenario: Tool status is normalized for transcript display
+
+- **WHEN** raw tool lifecycle status is pending, started, running, completed, failed, cancelled, or timeout-like
+- **THEN** the transcript exposes an accurate display status of pending, running, completed, failed, or cancelled where available
+- **AND** only non-terminal logical tools appear as active/running in the UI
+

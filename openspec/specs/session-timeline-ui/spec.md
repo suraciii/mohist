@@ -1,6 +1,7 @@
-## ADDED Requirements
+# OpenSpec Capability: session-timeline-ui
 
 ### Requirement: SessionTimeline component renders rounds
+
 The IssueDetailPage SHALL include a SessionTimeline component that renders agent session activity grouped by rounds. Each round SHALL be a collapsible section showing: round label (e.g., "Proposal", "Specs", "Design"), timestamp, and agent output summary.
 
 #### Scenario: Plan stage with 5 rounds
@@ -12,6 +13,7 @@ The IssueDetailPage SHALL include a SessionTimeline component that renders agent
 - **THEN** the section expands to show the full conversation: user prompt, agent text output, and tool call entries with status icons
 
 ### Requirement: SessionTimeline loads history from workflow_log API
+
 When the page loads for a non-draft issue, SessionTimeline SHALL fetch historical data from `GET /api/issues/:number/logs` and reconstruct the round-based conversation structure by splitting on `user_message_chunk` events. This replaces the broken `GET /api/issues/:number/agent-session` source which returns empty results for pipeline runs.
 
 #### Scenario: Page loads after plan stage completes
@@ -23,6 +25,7 @@ When the page loads for a non-draft issue, SessionTimeline SHALL fetch historica
 - **THEN** SessionTimeline shows "No agent activity yet" placeholder
 
 ### Requirement: SessionTimeline appends live SSE events
+
 When an agent is actively running on the current issue, SessionTimeline SHALL subscribe to `plan_session_update` and `plan_round_start` SSE events and append them to the current round in real-time. For Build stage, it SHALL also subscribe to `coder_text_chunk` and `coder_tool_call`.
 
 #### Scenario: Agent starts new round while user is viewing
@@ -38,6 +41,7 @@ When an agent is actively running on the current issue, SessionTimeline SHALL su
 - **THEN** the text is appended to the current task's round section
 
 ### Requirement: Tool calls in timeline show expandable details
+
 Each tool call entry in a round SHALL display the tool name, status icon, and duration. Completed tool calls SHALL be expandable to show input arguments and output result.
 
 #### Scenario: Tool call with read input and directory output
@@ -46,6 +50,7 @@ Each tool call entry in a round SHALL display the tool name, status icon, and du
 - **AND** clicking expands to show the full file path and directory listing output
 
 ### Requirement: Pipeline status timeline
+
 The IssueDetailPage SHALL show a pipeline status timeline above SessionTimeline, displaying key events: pipeline start, each round completion with artifact produced, gate status, and any errors.
 
 #### Scenario: Pipeline in plan stage with gate awaiting
@@ -53,6 +58,7 @@ The IssueDetailPage SHALL show a pipeline status timeline above SessionTimeline,
 - **THEN** the timeline shows: "Pipeline started" → "✓ Proposal" → "✓ Specs" → "✓ Design" → "✓ Tasks" → "✓ Self-review" → "⏸ Awaiting approval"
 
 ### Requirement: Coder session rounds in Build stage
+
 During the Build stage, SessionTimeline SHALL render coder sessions as rounds labeled by task ID and description. Each coder round SHALL show the coder's agent text and tool calls. Data comes from `coder_sessions` API (historical) and `coder_text_chunk`/`coder_tool_call` SSE events (live).
 
 #### Scenario: Build stage with 3 completed tasks
@@ -64,9 +70,37 @@ During the Build stage, SessionTimeline SHALL render coder sessions as rounds la
 - **THEN** each tool call shows its name, input args (formatted), and output result (truncated)
 
 ### Requirement: Frontend uses RAF throttling for high-frequency events
+
 The `useSessionTimeline` hook SHALL implement requestAnimationFrame-based throttling for `plan_session_update` events to prevent UI lockup during rapid streaming. Events SHALL be buffered in a ref and flushed every 100ms using `requestAnimationFrame`, matching the existing pattern in `useAgentSession`.
 
 #### Scenario: Rapid plan_session_update events during Plan stage
 - **WHEN** 1000+ `plan_session_update` events arrive within 5 seconds during Plan stage
 - **THEN** the UI updates in batches (every 100ms) instead of per-event
 - **AND** no frame drops occur during the streaming session
+
+### Requirement: Session transcript quality regression
+
+Session timeline and session detail surfaces SHALL not expose raw stream fragments as the primary coder-session experience. Regression coverage SHALL prove active and historical sessions remain readable after event normalization, refresh, and live streaming.
+
+#### Scenario: Completed tools render once after refresh
+
+- **WHEN** a persisted session is replayed after refresh
+- **THEN** completed tools appear once with stable name, title, status, and details
+- **AND** pending/update fragments do not create orphan `unknown running...` entries
+
+#### Scenario: Context and file output remain compact
+
+- **WHEN** a session contains many context tools and file-changing tools
+- **THEN** context gathering is grouped into compact summaries
+- **AND** file changes are visible as compact transcript output
+
+#### Scenario: Live and historical views agree
+
+- **WHEN** a live session receives streamed text and tool updates and is later refetched from persisted data
+- **THEN** the visible transcript order, tool grouping, and file-change summaries remain equivalent
+
+#### Scenario: Raw debugging data remains accessible
+
+- **WHEN** normalized transcript parts hide raw event detail by default
+- **THEN** raw prompt, tool input, tool output, and relevant debugging data remain available through explicit disclosure or raw-log access
+
