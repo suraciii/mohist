@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: REQ-WUI-001 Pipeline UI shows explicit fix tasks
 
