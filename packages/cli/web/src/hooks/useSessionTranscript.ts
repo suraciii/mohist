@@ -266,7 +266,7 @@ function updateToolInTurn(
         const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
         const parsedEdit = parseEditInput(input)
         const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
-        const newStatus = updates.status ?? toolPart.tool.status
+        const newStatus = mapStatusToDisplay(updates.status ?? toolPart.tool.status)
         const { status: _updatesStatus, ...restUpdates } = updates
         return {
           ...toolPart,
@@ -303,27 +303,27 @@ function updateToolInTurn(
           const startedAt = updates.startedAt ?? toolPart.tool.startedAt
           const input = stringifyPayload(rawInput) ?? toolPart.tool.input
           const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
-          const parsedEdit = parseEditInput(input)
-          const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
-          const newStatus = updates.status ?? toolPart.tool.status
-          const { status: _updatesStatus, ...restUpdates } = updates
-          return {
-            ...toolPart,
-            tool: {
-              ...toolPart.tool,
-              ...restUpdates,
-              toolCallId,
-              normalizedName,
-              input,
-              output,
-              rawInput: input,
-              rawOutput: output,
-              changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
-              startedAt,
-              status: newStatus,
-              completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
-            },
-          }
+const parsedEdit = parseEditInput(input)
+        const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
+        const newStatus = mapStatusToDisplay(updates.status ?? toolPart.tool.status)
+        const { status: _updatesStatus, ...restUpdates } = updates
+        return {
+          ...toolPart,
+          tool: {
+            ...toolPart.tool,
+            ...restUpdates,
+            toolCallId,
+            normalizedName,
+            input,
+            output,
+            rawInput: input,
+            rawOutput: output,
+            changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
+            startedAt,
+            status: newStatus,
+            completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
+          },
+        }
         }),
       }
     }
@@ -336,7 +336,7 @@ function updateToolInTurn(
       createToolPart({
         toolCallId,
         toolName: updates.toolName ?? 'unknown',
-        status: updates.status ?? 'started',
+        status: (updates.status ?? 'started') as LiveToolCall['status'],
         title: updates.title,
         target: updates.target,
         input: updates.input,
@@ -345,7 +345,7 @@ function updateToolInTurn(
         rawInput: updates.rawInput,
         rawOutput: updates.rawOutput,
         startedAt: now,
-        completedAt: isTerminalState(updates.status ?? 'started') ? now : null,
+        completedAt: isTerminalState(mapStatusToDisplay(updates.status ?? 'started')) ? now : null,
       }),
     ],
   }
@@ -492,7 +492,7 @@ export function useSessionTranscript({
             const lastTurn = next[next.length - 1]
             const error = detail.state === 'failed' ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed')) : undefined
             next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-              status: mapStatusToDisplay(detail.state),
+              status: mapStatusToDisplay(detail.state) as LiveToolCall['status'],
               output: stringifyPayload(detail.rawOutput),
               rawOutput: detail.rawOutput,
               completedAt: now,
