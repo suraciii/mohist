@@ -264,7 +264,7 @@ describe('SessionTranscriptAssembler', () => {
       const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
       expect(toolPart.toolCallId).toBe('tc-1');
       expect(toolPart.toolName).toBe('Read');
-      expect(toolPart.status).toBe('started');
+      expect(toolPart.status).toBe('running');
       expect(toolPart.title).toBe('src/index.ts');
       expect(toolPart.target).toBe('index.ts');
     });
@@ -1599,6 +1599,183 @@ describe('SessionTranscriptAssembler', () => {
       const transcript = assembleSessionTranscript(session, events);
 
       expect(transcript.turns[0].user.summary!.rawText).toBe(promptText);
+    });
+  });
+
+  describe('tool lifecycle normalization', () => {
+    it('should produce exactly one ToolPart when tool_call plus tool_call_update share the same call id', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Read a file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-same-id', 'Read', 'src/index.ts', '{"file_path":"src/index.ts"}', '2024-01-01T10:00:01.000Z'),
+        makeToolCallUpdate('tc-same-id', 'completed', 'file contents', undefined, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.toolCallId).toBe('tc-same-id');
+      expect(toolParts[0].tool.status).toBe('completed');
+      expect(toolParts[0].tool.output).toBe('file contents');
+      expect(toolParts[0].tool.completedAt).toBe('2024-01-01T10:00:02.000Z');
+    });
+
+    it('should merge update-only event into pending tool by normalized name plus title', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Read files', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'file-a.txt',
+            input: { file_path: 'file-a.txt' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call_update', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'file-a.txt',
+            output: 'contents of file-a',
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.status).toBe('completed');
+      expect(toolParts[0].tool.output).toBe('contents of file-a');
+      expect(toolParts[0].tool.input).toBe('{"file_path":"file-a.txt"}');
+    });
+
+    it('should not create orphan unknown running entry for inferable update-only payloads', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Gather context', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            name: 'read',
+            title: 'src/config.ts',
+            input: { file_path: 'src/config.ts' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call_update', {
+          toolCall: {
+            name: 'read',
+            title: 'src/config.ts',
+            output: { content: 'database url = postgres://...' },
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.normalizedName).toBe('read');
+      expect(toolParts[0].tool.status).toBe('completed');
+    });
+
+    it('should normalize status started to running for display', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Run task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-1', 'Bash', 'npm test', '{"command":"npm test"}', '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.status).toBe('running');
+    });
+
+    it('should normalize status pending when no terminal status is provided', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Do something', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call_update', {
+          toolCallId: 'tc-pending',
+          toolName: 'Read',
+          createdAt: '2024-01-01T10:00:01.000Z',
+        }, '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.status).toBe('pending');
+    });
+
+    it('should normalize status cancelled when update provides cancelled status', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Run task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-1', 'Bash', 'npm test', '{"command":"npm test"}', '2024-01-01T10:00:01.000Z'),
+        makeToolCallUpdate('tc-1', 'cancelled', undefined, 'User cancelled', '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.status).toBe('cancelled');
+      expect(toolPart.error).toBe('User cancelled');
+    });
+
+    it('should normalize status running when update provides running status', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Run task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCallId: 'tc-run',
+          toolName: 'Bash',
+          title: 'npm test',
+          status: 'started',
+          createdAt: '2024-01-01T10:00:01.000Z',
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call_update', {
+          toolCallId: 'tc-run',
+          status: 'running',
+          output: 'Running tests...',
+          createdAt: '2024-01-01T10:00:02.000Z',
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.status).toBe('running');
+      expect(toolParts[0].tool.output).toBe('Running tests...');
+    });
+
+    it('should not create tool part for internal lifecycle events', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Run task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeTextChunk('Starting work...', '2024-01-01T10:00:01.000Z'),
+        makeEvent('acp_session_step', { step: 1, phase: 'execute' }, '2024-01-01T10:00:02.000Z'),
+        makeEvent('acp_session_heartbeat', { active: true }, '2024-01-01T10:00:03.000Z'),
+        makeEvent('acp_bookkeeping', { kind: 'stats', cpu: 45 }, '2024-01-01T10:00:04.000Z'),
+        makeTextChunk('Work complete.', '2024-01-01T10:00:05.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool');
+      expect(toolParts).toHaveLength(0);
+      const textParts = transcript.turns[0].assistant.filter(p => p.type === 'text');
+      expect(textParts).toHaveLength(1);
+      expect((textParts[0] as any).text).toBe('Starting work...Work complete.');
     });
   });
 });
