@@ -196,11 +196,15 @@
       "dependsOn": [
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Do not expose healthy/quiet/stale/hung-suspected/recoverable as user-facing states.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        214097,
+        94188
+      ]
     },
     {
       "id": "T-008",
