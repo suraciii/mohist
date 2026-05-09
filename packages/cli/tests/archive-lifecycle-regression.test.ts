@@ -120,6 +120,8 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
         fixBuildErrors: vi.fn().mockResolvedValue({ success: true }),
         postMergeFinalizer: {
           finalize: vi.fn().mockImplementation(async (issue) => {
+            issueRepo.updateStage(issue.id, Stage.Done);
+            issueRepo.updateStatus(issue.id, IssueStatus.Completed);
             issueRepo.setMergeState(issue.id, MergeState.Merged);
             return { success: true, healthGateResult: { passed: true, enabled: true } };
           }),
@@ -194,7 +196,7 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
       db.close();
     });
 
-    it('POST /api/issues/:number/merge marks issue Done/Completed/Merged without cleanup', async () => {
+    it('POST /api/issues/:number/merge finalizes issue Done/Completed/Merged without cleanup', async () => {
       const issue = await issueService.create({ projectId, title: 'Test Issue' });
       issueRepo.updateStage(issue.id, Stage.Check);
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
