@@ -1,23 +1,47 @@
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { Stage } from '../types';
 import type { StageContext } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
 import { Log } from '../util/log';
 import { OpenSpecIntegrator } from '../openspec/open-spec-integrator';
+import { loadHealthGatePolicies, type HealthGatePolicy } from './workflow-loader';
 
+const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'integrate-stage-runner' });
+
+const MAX_LOG_LENGTH = 50000;
+
+function truncateLog(text: string, maxLength: number = MAX_LOG_LENGTH): string {
+  if (text.length <= maxLength) return text;
+  const half = Math.floor(maxLength / 2);
+  return text.slice(0, half) + '\n\n...[truncated]...\n\n' + text.slice(-half);
+}
 
 export interface IntegrateStageRunnerOptions {
   worktreePath: string;
 }
 
 interface IntegrateStepResult {
-  step: 'integrate:spec-sync' | 'integrate:archive-change' | 'integrate:merge';
+  step: 'integrate:spec-sync' | 'integrate:archive-change' | 'integrate:merge' | 'final-health';
   status: 'completed' | 'failed';
   output: unknown;
   startedAt: string;
   completedAt: string;
   duration: number;
+}
+
+export interface HealthGateResult {
+  passed: boolean;
+  enabled: boolean;
+  command: string;
+  timeout: number;
+  duration: number;
+  exitCode?: number;
+  timedOut: boolean;
+  summary: string;
+  logExcerpt: string;
 }
 
 export class IntegrateStageRunner extends BaseStageRunner {
@@ -328,10 +352,240 @@ export class IntegrateStageRunner extends BaseStageRunner {
       throw err;
     }
 
+    const finalHealthResult = await this.runFinalHealthGate(ctx);
+
+    if (!finalHealthResult.passed) {
+      const failingStep: IntegrateStepResult = {
+        step: 'final-health',
+        status: 'failed',
+        output: {
+          kind: 'health-gate',
+          stage: 'integrate',
+          command: finalHealthResult.command,
+          timeout: finalHealthResult.timeout,
+          duration: finalHealthResult.duration,
+          enabled: finalHealthResult.enabled,
+          passed: finalHealthResult.passed,
+          exitCode: finalHealthResult.exitCode,
+          timedOut: finalHealthResult.timedOut,
+          summary: finalHealthResult.summary,
+          logExcerpt: finalHealthResult.logExcerpt,
+        },
+        startedAt: '',
+        completedAt: new Date().toISOString(),
+        duration: finalHealthResult.duration,
+      };
+      steps.push(failingStep);
+      this.appendTaskResult(ctx, {
+        taskId: 'final-health',
+        title: 'Run final integration health gate',
+        status: 'failed',
+        artifacts: [],
+        attempts: 1,
+        duration: finalHealthResult.duration,
+      });
+
+      log.warn('Integrate stage failed at final-health', {
+        issueNumber: ctx.issue.number,
+        command: finalHealthResult.command,
+        summary: finalHealthResult.summary,
+      });
+      throw new Error(`Final health gate failed: ${finalHealthResult.summary}`);
+    }
+
+    const healthGateStep: IntegrateStepResult = {
+      step: 'final-health',
+      status: 'completed',
+      output: {
+        kind: 'health-gate',
+        stage: 'integrate',
+        command: finalHealthResult.command,
+        timeout: finalHealthResult.timeout,
+        duration: finalHealthResult.duration,
+        enabled: finalHealthResult.enabled,
+        passed: finalHealthResult.passed,
+        exitCode: finalHealthResult.exitCode,
+        timedOut: finalHealthResult.timedOut,
+        summary: finalHealthResult.summary,
+        logExcerpt: finalHealthResult.logExcerpt,
+      },
+      startedAt: '',
+      completedAt: new Date().toISOString(),
+      duration: finalHealthResult.duration,
+    };
+    steps.push(healthGateStep);
+    this.appendTaskResult(ctx, {
+      taskId: 'final-health',
+      title: 'Run final integration health gate',
+      status: 'completed',
+      artifacts: [],
+      attempts: 1,
+      duration: finalHealthResult.duration,
+    });
+
+    log.info('Final health gate passed', {
+      issueNumber: ctx.issue.number,
+      command: finalHealthResult.command,
+      duration: finalHealthResult.duration,
+    });
+
     return {
       integrate: true,
       steps,
     };
+  }
+
+  private async runFinalHealthGate(ctx: StageContext): Promise<HealthGateResult> {
+    const project = ctx.projectRepo.findById(ctx.issue.projectId);
+    if (!project) {
+      return {
+        passed: false,
+        enabled: false,
+        command: '',
+        timeout: 0,
+        duration: 0,
+        timedOut: false,
+        summary: 'Project not found',
+        logExcerpt: '',
+      };
+    }
+
+    const { loadWorkflow } = await import('./workflow-loader');
+    const workflow = loadWorkflow(project.path);
+    if (typeof workflow === 'string') {
+      return {
+        passed: false,
+        enabled: false,
+        command: '',
+        timeout: 0,
+        duration: 0,
+        timedOut: false,
+        summary: 'Failed to load workflow config',
+        logExcerpt: '',
+      };
+    }
+
+    const policies = loadHealthGatePolicies(workflow);
+    const policy = policies.postMerge;
+
+    if (!policy.enabled) {
+      log.info('Final health gate disabled, completing without verification', {
+        issueNumber: ctx.issue.number,
+      });
+      return {
+        passed: true,
+        enabled: false,
+        command: policy.command,
+        timeout: policy.timeout,
+        duration: 0,
+        timedOut: false,
+        summary: 'Final health gate disabled',
+        logExcerpt: '',
+      };
+    }
+
+    return this.executeHealthCommand(project.path, policy);
+  }
+
+  private async executeHealthCommand(projectPath: string, policy: HealthGatePolicy): Promise<HealthGateResult> {
+    const startTime = Date.now();
+    const { command, timeout } = policy;
+
+    try {
+      const { stdout, stderr } = await execFileAsync(command, [], {
+        cwd: projectPath,
+        timeout,
+        maxBuffer: 10 * 1024 * 1024,
+        shell: true,
+      });
+
+      const duration = Date.now() - startTime;
+
+      return {
+        passed: true,
+        enabled: true,
+        command,
+        timeout,
+        duration,
+        timedOut: false,
+        summary: 'Final health gate passed',
+        logExcerpt: truncateLog(stdout + '\n' + stderr, 5000),
+      };
+    } catch (err: any) {
+      const duration = Date.now() - startTime;
+      const isTimeout = err.killed === true;
+      const stderr = err.stderr || '';
+      const stdout = err.stdout || '';
+
+      let exitCode = err.code;
+      if (typeof exitCode !== 'number' && err.message) {
+        const match = err.message.match(/exit code (\d+)/);
+        if (match) exitCode = parseInt(match[1], 10);
+      }
+
+      const summary = this.formatErrorMessage(command, stderr, stdout, exitCode, isTimeout);
+
+      return {
+        passed: false,
+        enabled: true,
+        command,
+        timeout,
+        duration,
+        exitCode: typeof exitCode === 'number' ? exitCode : undefined,
+        timedOut: isTimeout,
+        summary,
+        logExcerpt: truncateLog([stdout, stderr, err.message].filter(Boolean).join('\n'), 5000),
+      };
+    }
+  }
+
+  private formatErrorMessage(
+    command: string,
+    stderr: string,
+    stdout: string,
+    exitCode: number | undefined,
+    isTimeout: boolean,
+  ): string {
+    if (isTimeout) {
+      return `${command} — 超时`;
+    }
+
+    const combined = [stdout, stderr].filter(Boolean).join('\n');
+    const lines = combined.split('\n');
+    const errorLines: string[] = [];
+    const errorPatterns = [/error/i, /fail/i, /cannot find/i, /not found/i, /unexpected/i, /syntax error/i];
+
+    for (const line of lines) {
+      if (errorPatterns.some(p => p.test(line))) {
+        errorLines.push(line);
+      }
+      if (errorLines.length >= 15) break;
+    }
+
+    if (errorLines.length === 0) {
+      const tail = lines.filter(l => l.trim()).slice(-15);
+      errorLines.push(...tail);
+    }
+
+    const keyErrors = errorLines.join('\n');
+    const parts: string[] = [];
+
+    if (typeof exitCode === 'number') {
+      parts.push(`${command} 失败 (exit code ${exitCode})`);
+    } else {
+      parts.push(`${command} 失败`);
+    }
+
+    if (keyErrors) {
+      const oneLine = keyErrors.split('\n').filter(l => l.trim()).slice(0, 3).join(' | ');
+      if (oneLine.length > 200) {
+        parts.push(oneLine.slice(0, 200) + '...');
+      } else {
+        parts.push(oneLine);
+      }
+    }
+
+    return parts.join(' — ');
   }
 
   protected getChecks(): import('./checks').Check[] {

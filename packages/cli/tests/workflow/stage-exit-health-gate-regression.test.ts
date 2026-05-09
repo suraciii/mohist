@@ -305,7 +305,7 @@ describe('Direct merge API cannot mark issue done when health:postMerge fails', 
 
     const eventBus = new EventBus();
 
-    const finalizer = new PostMergeFinalizer(issueRepo, projectRepo, stageExecutionRepo, eventBus as any);
+    const finalizer = new PostMergeFinalizer(projectRepo, stageExecutionRepo);
 
     const issue = makeIssue({ stage: Stage.Check, mergeState: MergeState.Merged });
 
@@ -364,7 +364,7 @@ describe('Direct merge API cannot mark issue done when health:postMerge fails', 
 
     const eventBus = new EventBus();
 
-    const finalizer = new PostMergeFinalizer(issueRepo, projectRepo, stageExecutionRepo, eventBus as any);
+    const finalizer = new PostMergeFinalizer(projectRepo, stageExecutionRepo);
 
     const issue = makeIssue({ stage: Stage.Check, mergeState: MergeState.Merged });
 
@@ -409,13 +409,13 @@ describe('Direct merge API cannot mark issue done when health:postMerge fails', 
       updateStatus: vi.fn(),
     } as unknown as import('../../src/db/stage-execution-repo').StageExecutionRepo;
 
-    const finalizer = new PostMergeFinalizer(issueRepo, projectRepo, stageExecutionRepo, new EventBus() as any);
+    const finalizer = new PostMergeFinalizer(projectRepo, stageExecutionRepo);
     const result = await finalizer.finalize(makeIssue({ stage: Stage.Check, mergeState: MergeState.Merged }));
 
-    expect(result.success).toBe(true);
+expect(result.success).toBe(true);
     expect(stageExecutionRepo.updateCheckResults).toHaveBeenCalledWith(
       'exec-latest',
-      [expect.objectContaining({ name: 'health:postMerge', status: 'pass', message: 'Post-merge health gate passed' })],
+      [expect.objectContaining({ name: 'health:integrate', status: 'pass', message: 'Post-merge health gate passed' })],
     );
     expect(stageExecutionRepo.updateStatus).toHaveBeenCalledWith('exec-latest', 'passed');
   });
@@ -453,19 +453,19 @@ describe('Direct merge API cannot mark issue done when health:postMerge fails', 
       updateStatus: vi.fn(),
     } as unknown as import('../../src/db/stage-execution-repo').StageExecutionRepo;
 
-    const finalizer = new PostMergeFinalizer(issueRepo, projectRepo, stageExecutionRepo, new EventBus() as any);
+    const finalizer = new PostMergeFinalizer(projectRepo, stageExecutionRepo);
     await finalizer.finalize(makeIssue({ stage: Stage.Check, mergeState: MergeState.Merged }));
 
-    expect(stageExecutionRepo.create).toHaveBeenCalledWith('issue-1', Stage.Check);
+    expect(stageExecutionRepo.create).toHaveBeenCalledWith('issue-1', Stage.Integrate);
     expect(stageExecutionRepo.updateCheckResults).toHaveBeenCalledWith(
       'created-exec',
-      [expect.objectContaining({ name: 'health:postMerge', status: 'pass' })],
+      [expect.objectContaining({ name: 'health:integrate', status: 'pass' })],
     );
   });
 });
 
-describe('Recovery finalization cannot bypass postMerge health gate', () => {
-  it('runs shared finalizer for Stage.Check + MergeState.Merged recovery failures', async () => {
+describe('Recovery finalization cannot bypass Integrate final health gate', () => {
+  it('Stage.Check + MergeState.Merged issues transition to Integrate and run pipeline for final health verification', async () => {
     const issue = makeIssue({ stage: Stage.Check, mergeState: MergeState.Merged });
     const task = {
       id: 'task-1',
@@ -497,9 +497,10 @@ describe('Recovery finalization cannot bypass postMerge health gate', () => {
       findById: vi.fn().mockReturnValue(task),
       updateStatus: vi.fn(),
     } as any;
-    const finalizer = {
-      finalize: vi.fn().mockResolvedValue({ success: false, error: 'Post-merge health gate failed' }),
+    const worktreeManager = {
+      getPath: vi.fn().mockReturnValue('/tmp/worktree'),
     } as any;
+
     const service = new AgentRunnerService(
       eventBus,
       undefined,
@@ -508,25 +509,73 @@ describe('Recovery finalization cannot bypass postMerge health gate', () => {
       undefined,
       undefined,
       projectRepo,
-      {} as any,
+      worktreeManager,
       taskQueueRepo,
       undefined,
       undefined,
       undefined,
-      finalizer,
     );
 
     await (service as any).executeResumePipelineTask(task, issue);
 
-    expect(finalizer.finalize).toHaveBeenCalledWith(issue);
-    expect(issueRepo.updateStage).not.toHaveBeenCalledWith(issue.id, Stage.Done);
-    expect(issueRepo.updateStatus).not.toHaveBeenCalledWith(issue.id, IssueStatus.Completed);
-    expect(issueRepo.blockIssue).toHaveBeenCalledWith(issue.id, 'Post-merge health gate failed');
-    expect(taskQueueRepo.updateStatus).toHaveBeenCalledWith(
-      task.id,
-      'failed',
-      expect.objectContaining({ result: 'Post-merge health gate failed' }),
+    expect(issueRepo.updateStage).toHaveBeenCalledWith(issue.id, Stage.Integrate);
+    service.shutdown();
+  });
+
+  it('Stage.Integrate issues run the pipeline which includes final health verification', async () => {
+    const issue = makeIssue({ stage: Stage.Integrate, mergeState: MergeState.Merged });
+    const task = {
+      id: 'task-1',
+      issueId: issue.id,
+      issueNumber: issue.number,
+      projectId: issue.projectId,
+      taskType: 'resume-pipeline',
+      payload: '{}',
+      priority: 0,
+      status: 'pending',
+      enqueuedAt: new Date().toISOString(),
+      startedAt: null,
+      result: null,
+      completedAt: null,
+    } as import('../../src/db/issue-task-queue-repo').IssueTaskQueueRecord;
+    const eventBus = new EventBus();
+    const issueRepo = {
+      findById: vi.fn().mockReturnValue(issue),
+      findAll: vi.fn().mockReturnValue([]),
+      blockIssue: vi.fn(),
+      updateStage: vi.fn(),
+      updateStatus: vi.fn(),
+      clearApprovalState: vi.fn(),
+      updateBlockedReason: vi.fn(),
+    } as any;
+    const projectRepo = { findById: vi.fn().mockReturnValue({ id: issue.projectId, path: '/tmp/project', name: 'project', baseBranch: 'main' }) } as any;
+    const taskQueueRepo = {
+      findByStatus: vi.fn().mockReturnValue([]),
+      findById: vi.fn().mockReturnValue(task),
+      updateStatus: vi.fn(),
+    } as any;
+    const worktreeManager = {
+      getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+    } as any;
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      1,
+      undefined,
+      undefined,
+      projectRepo,
+      worktreeManager,
+      taskQueueRepo,
+      undefined,
+      undefined,
+      undefined,
     );
+
+    await (service as any).executeResumePipelineTask(task, issue);
+
+    expect(worktreeManager.getPath).toHaveBeenCalledWith('project', issue.number);
     service.shutdown();
   });
 });

@@ -129,13 +129,11 @@ async function main(): Promise<void> {
   const coderSessionRepo = stateManager.getCoderSessionRepo();
 
   const postMergeFinalizer = new PostMergeFinalizer(
-    issueRepo,
     stateManager.getProjectRepo(),
     stateManager.getStageExecutionRepo(),
-    eventBus,
   );
 
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps, sessionStreamLogRepo, stateManager.getStageExecutionRepo(), postMergeFinalizer);
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps, sessionStreamLogRepo, stateManager.getStageExecutionRepo());
 
   agentRunner.setLlmConfig(fileConfig);
 

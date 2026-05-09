@@ -175,6 +175,12 @@ The Check approval panel should read readiness/evidence from the latest Check st
 9. Update frontend issue cards, issue detail, approval panel, pipeline timeline, SSE event handling, and evidence rendering.
 10. Add regression tests for Check approval entering Integrate, dry-run conflict blocking approval, Integrate success path, each Integrate failure step, no agent conflict/build-fix in Integrate, final health gate failure blocking Done, and UI stage rendering.
 
+### Current T-006 Implementation Note
+
+T-006 has moved final health verification into `IntegrateStageRunner`: after spec sync, archive, and merge succeed, Integrate loads the existing `healthGates.postMerge` policy, executes it as final integration verification, records structured `health:integrate` evidence, and only then returns `Stage.Done`. Disabled post-merge policy is recorded as a disabled pass. Failures record command, timeout, duration, exit code or timeout state, summary, and log excerpt, then block Done.
+
+`PostMergeFinalizer` remains as a compatibility helper for older recovery paths, but it no longer updates issue stage/status to Done or emits completion itself. Recovery for `Stage.Check + MergeState.Merged` now routes back through Integrate so final verification ownership stays in the workflow runner.
+
 Rollback strategy: because this changes persisted stage values, rollback should include a small data repair script or migration note mapping active `integrate` issues back to `check` with a blocked reason such as “Integrate rollback required.” Completed Done issues do not need rollback. The implementation should avoid destructive DB schema changes; any added nullable evidence fields should be ignored safely by older code.
 
 ## Open Questions

@@ -98,7 +98,34 @@ describe('IntegrateStageRunner', () => {
   let runner: IntegrateStageRunner;
 
   beforeEach(() => {
+    vi.resetModules();
+    const execFileMock = vi.fn().mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+      const err = new Error('ENOENT');
+      (err as any).code = 'ENOENT';
+      process.nextTick(() => {
+        if (typeof opts === 'function') {
+          opts(err, { stdout: '', stderr: '' });
+        } else if (typeof cb === 'function') {
+          cb(err, { stdout: '', stderr: '' });
+        }
+      });
+      return {} as any;
+    });
+    vi.doMock('child_process', async () => ({
+      ...await vi.importActual<typeof import('child_process')>('child_process'),
+      execFile: execFileMock,
+    }));
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-integrate-test-'));
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({
+        scripts: {
+          build: 'node -e "process.exit(0)"',
+          test: 'node -e "process.exit(0)"',
+        },
+      }),
+      'utf-8',
+    );
     runner = new IntegrateStageRunner({ worktreePath: tmpDir });
   });
 
@@ -544,6 +571,295 @@ ML added scenario content.`);
 
       expect(result.success).toBe(false);
       expect(result.nextStage).toBeUndefined();
+    });
+  });
+
+  describe('final health gate', () => {
+    function createProjectRepo(baseBranch = 'main') {
+      return {
+        findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch, path: tmpDir }),
+      };
+    }
+
+    afterEach(() => {
+      vi.resetModules();
+    });
+
+    function setupPassingExecFileMock() {
+      const execFileMock = vi.fn().mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        process.nextTick(() => {
+          if (typeof opts === 'function') {
+            opts(null, { stdout: 'all checks passed', stderr: '' });
+          } else if (typeof cb === 'function') {
+            cb(null, { stdout: 'all checks passed', stderr: '' });
+          }
+        });
+        return {} as any;
+      });
+      vi.doMock('child_process', async () => ({
+        ...await vi.importActual<typeof import('child_process')>('child_process'),
+        execFile: execFileMock,
+      }));
+      return execFileMock;
+    }
+
+    function setupFailingExecFileMock(exitCode: number, stderr: string) {
+      const execFileMock = vi.fn().mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        const err = new Error('Build failed');
+        (err as any).code = exitCode;
+        (err as any).stdout = '';
+        (err as any).stderr = stderr;
+        process.nextTick(() => {
+          if (typeof opts === 'function') {
+            opts(err, { stdout: '', stderr });
+          } else if (typeof cb === 'function') {
+            cb(err, { stdout: '', stderr });
+          }
+        });
+        return {} as any;
+      });
+      vi.doMock('child_process', async () => ({
+        ...await vi.importActual<typeof import('child_process')>('child_process'),
+        execFile: execFileMock,
+      }));
+      return execFileMock;
+    }
+
+    it('runs final health gate after merge and records health:integrate result', async () => {
+      const issueNumber = 60;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'fh-cap', [
+        '### Requirement: FHReq\n\nFH content.\n\n#### Scenario: FH scenario\n\nFH scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'fh-cap', `## ADDED Requirements
+
+### Requirement: FHAdded
+
+FH added content.
+
+#### Scenario: FH added scenario
+FH added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: true,
+      });
+
+      const execFileMock = setupPassingExecFileMock();
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: createProjectRepo(),
+      });
+
+      const { IntegrateStageRunner } = await import('../../src/workflow/integrate-stage-runner');
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
+      expect(output.steps).toBeDefined();
+      const healthStep = output.steps?.find(s => s.step === 'final-health');
+      expect(healthStep).toBeDefined();
+      expect(healthStep!.status).toBe('completed');
+      const healthOutput = healthStep!.output as { kind?: string; stage?: string; command?: string; passed?: boolean };
+      expect(healthOutput.kind).toBe('health-gate');
+      expect(healthOutput.stage).toBe('integrate');
+      expect(healthOutput.passed).toBe(true);
+    });
+
+    it('final health gate failure leaves issue not Done and records failing step final-health', async () => {
+      const issueNumber = 61;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'fhf-cap', [
+        '### Requirement: FHFReq\n\nFHF content.\n\n#### Scenario: FHF scenario\n\nFHF scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'fhf-cap', `## ADDED Requirements
+
+### Requirement: FHFAdded
+
+FHF added content.
+
+#### Scenario: FHF added scenario
+FHF added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: true,
+      });
+
+      const execFileMock = setupFailingExecFileMock(1, 'build failed\nerror details');
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: createProjectRepo(),
+      });
+
+      const { IntegrateStageRunner } = await import('../../src/workflow/integrate-stage-runner');
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Final health gate failed');
+      expect(result.nextStage).toBeUndefined();
+    });
+
+    it('disabled final health policy records a disabled pass result and allows Done transition', async () => {
+      const issueNumber = 62;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'fhd-cap', [
+        '### Requirement: FHDReq\n\nFHD content.\n\n#### Scenario: FHD scenario\n\nFHD scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'fhd-cap', `## ADDED Requirements
+
+### Requirement: FHDAdded
+
+FHD added content.
+
+#### Scenario: FHD added scenario
+FHD added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: true,
+      });
+
+      const execFileMock = vi.fn();
+      vi.doMock('child_process', async () => ({
+        ...await vi.importActual<typeof import('child_process')>('child_process'),
+        execFile: execFileMock,
+      }));
+
+      const workflowYaml = path.join(tmpDir, 'workflow.yaml');
+      fs.writeFileSync(workflowYaml, `
+stages:
+  - stage: explore
+  - stage: plan
+  - stage: build
+  - stage: check
+  - stage: integrate
+  - stage: done
+healthGates:
+  postMerge:
+    enabled: false
+    command: npm run build
+    timeout: 300000
+    autoFix: false
+    maxFixAttempts: 0
+    fallbackReaction:
+      type: ask-user
+`);
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch: 'main', path: tmpDir }),
+        },
+      });
+
+      const { IntegrateStageRunner } = await import('../../src/workflow/integrate-stage-runner');
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      expect(execFileMock).not.toHaveBeenCalled();
+      const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
+      const healthStep = output.steps?.find(s => s.step === 'final-health');
+      expect(healthStep).toBeDefined();
+      expect(healthStep!.status).toBe('completed');
+      const healthOutput = healthStep!.output as { enabled?: boolean; passed?: boolean };
+      expect(healthOutput.enabled).toBe(false);
+      expect(healthOutput.passed).toBe(true);
+    });
+
+    it('postMerge config is used as default Integrate final health policy', async () => {
+      const issueNumber = 63;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'pmd-cap', [
+        '### Requirement: PMDReq\n\nPMD content.\n\n#### Scenario: PMD scenario\n\nPMD scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'pmd-cap', `## ADDED Requirements
+
+### Requirement: PMDAdded
+
+PMD added content.
+
+#### Scenario: PMD added scenario
+PMD added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: true,
+      });
+
+      let capturedCommand = '';
+      const execFileMock = vi.fn().mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        capturedCommand = cmd;
+        process.nextTick(() => cb?.(null, { stdout: 'ok', stderr: '' }));
+        return {} as any;
+      });
+      vi.doMock('child_process', async () => ({
+        ...await vi.importActual<typeof import('child_process')>('child_process'),
+        execFile: execFileMock,
+      }));
+
+      const workflowYaml = path.join(tmpDir, 'workflow.yaml');
+      fs.writeFileSync(workflowYaml, `
+stages:
+  - stage: explore
+  - stage: plan
+  - stage: build
+  - stage: check
+  - stage: integrate
+  - stage: done
+healthGates:
+  postMerge:
+    enabled: true
+    command: npm run custom-health-check
+    timeout: 600000
+    autoFix: false
+    maxFixAttempts: 0
+    fallbackReaction:
+      type: ask-user
+`);
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch: 'main', path: tmpDir }),
+        },
+      });
+
+      const { IntegrateStageRunner } = await import('../../src/workflow/integrate-stage-runner');
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      expect(capturedCommand).toBe('npm run custom-health-check');
     });
   });
 });
