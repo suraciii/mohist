@@ -1,4 +1,4 @@
-## Requirements
+# OpenSpec Capability: http-api
 
 ### Requirement: API 提供项目管理接口
 
@@ -116,6 +116,7 @@ Server SHALL 返回清晰的错误响应，基于 Hono 框架实现。
 - **AND** 记录错误日志
 
 ### Requirement: Status API reflects M1 stage model
+
 The status API SHALL only report stages used in M1: draft, designing, implementing, done. The response SHALL NOT include task-related fields (runningTasks, queuedTasks, activeWorkers) or waiting-stage counts (waitingDesignReview, waitingReview). The `ServerState` interface SHALL NOT contain `activeTasks` or `queuedTasks` fields.
 
 #### Scenario: Get current project status
@@ -133,6 +134,7 @@ The status API SHALL only report stages used in M1: draft, designing, implementi
 - **AND** the issue's current stage SHALL still be available in `issue.stage`
 
 ### Requirement: Removed endpoints return 404
+
 Endpoints that are removed (approve, resume, pause) SHALL return HTTP 404 instead of their previous behavior.
 
 #### Scenario: Removed endpoint accessed
@@ -259,3 +261,32 @@ Server SHALL 提供 `POST /api/issues/:number/messages` 端点，允许用户在
 - **AND** 用户 POST `POST /api/issues/:number/messages`
 - **THEN** 返回 409 Conflict
 - **AND** 错误信息 "Agent is not paused for issue #N"
+
+### Requirement: Coder session detail normalized transcript
+
+The coder session detail API SHALL return a canonical normalized transcript that the session page can render without re-projecting raw stream logs. The response SHALL preserve existing session metadata while exposing normalized turns, merged tool parts, transcript warnings, changed-file summaries, and raw-debug access where available.
+
+#### Scenario: Detail endpoint returns normalized transcript
+
+- **WHEN** the client requests `GET /api/issues/:number/coder-sessions/:sessionId`
+- **THEN** the response includes normalized Mohist/Coder turns with merged logical tool parts
+- **AND** the response includes metadata for status, last activity, event count, tool count, turn count, changed files, warnings, and unknown-tool presence when available
+
+#### Scenario: Historical replay uses persisted data
+
+- **WHEN** the session has persisted `session_stream_log` rows
+- **THEN** the endpoint assembles the transcript from `session_stream_log`
+- **AND** it does not require in-memory SSE state to render the completed session
+
+#### Scenario: Legacy fallback remains understandable
+
+- **WHEN** no session stream rows exist but filtered workflow log stream events exist
+- **THEN** the endpoint uses workflow log fallback events to assemble a best-effort transcript
+- **AND** missing prompts or ambiguous normalization are surfaced as incomplete state or transcript warnings
+
+#### Scenario: Running session metadata is not misleading
+
+- **WHEN** a session is still running or finalizing
+- **THEN** terminal fields such as completed timestamp and completed duration are not presented as completed-session facts
+- **AND** the response still exposes last activity and current display status data for the live page
+
