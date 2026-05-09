@@ -7,10 +7,12 @@ import { useQueryClient } from '@tanstack/react-query'
 
 const RECENT_KEY = 'mohist:recent-issue-models'
 const MAX_RECENT = 5
+const ISSUE_STAGES = ['explore', 'plan', 'build', 'check', 'integrate'] as const
 
 interface Props {
   issueNumber: number
   currentModel?: string | null
+  currentStageModels?: Record<string, string> | null
 }
 
 function getRecent(): string[] {
@@ -51,6 +53,22 @@ function ChevronDownIcon() {
   )
 }
 
+function ChevronRightIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M7.21 8.145a.75.75 0 011.06-.02L10 9.835l1.73-1.71a.75.75 0 011.04 1.08l-2.25 2.22a.75.75 0 01-1.04 0l-2.25-2.22a.75.75 0 01-.02-1.06z" clipRule="evenodd" />
+    </svg>
+  )
+}
+
+function XIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+    </svg>
+  )
+}
+
 function modelDisplayName(modelId: string): string {
   return modelId.split('/').pop() || modelId
 }
@@ -80,7 +98,7 @@ function ModelListItem({ modelId, isSelected, isHighlighted, onSelect, onMouseEn
   )
 }
 
-export function IssueModelSelector({ issueNumber, currentModel }: Props) {
+export function IssueModelSelector({ issueNumber, currentModel, currentStageModels }: Props) {
   const queryClient = useQueryClient()
   const { data: opencodeModels, isLoading, error } = useOpencodeModels()
   const { data: opencodeModelData } = useOpencodeModel()
@@ -88,6 +106,16 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (currentStageModels) {
+      setLocalStageModels(currentStageModels)
+    } else {
+      setLocalStageModels({})
+    }
+  }, [currentStageModels])
 
   const allModels: string[] = opencodeModels ?? []
   const recentModelIds = getRecent()
@@ -125,6 +153,36 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
       }
     },
     [issueNumber, queryClient],
+  )
+
+  const handleSetStageModel = useCallback(
+    async (stage: string, modelId: string) => {
+      try {
+        const updated = { ...localStageModels, [stage]: modelId }
+        await api.updateIssue(issueNumber, { stageModels: updated })
+        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+        queryClient.invalidateQueries({ queryKey: ['issues'] })
+      } catch (err) {
+        console.error('Failed to update stage model:', err)
+      }
+    },
+    [issueNumber, localStageModels, queryClient],
+  )
+
+  const handleClearStageModel = useCallback(
+    async (stage: string) => {
+      try {
+        const updated = { ...localStageModels }
+        delete updated[stage]
+        const stageModelsValue = Object.keys(updated).length > 0 ? updated : null
+        await api.updateIssue(issueNumber, { stageModels: stageModelsValue })
+        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+        queryClient.invalidateQueries({ queryKey: ['issues'] })
+      } catch (err) {
+        console.error('Failed to clear stage model:', err)
+      }
+    },
+    [issueNumber, localStageModels, queryClient],
   )
 
   const handleKeyDown = useCallback(
@@ -295,6 +353,104 @@ export function IssueModelSelector({ issueNumber, currentModel }: Props) {
           Override active. Falls back to default when cleared.
         </p>
       )}
+
+      <div className="pt-2 border-t border-gray-100">
+        <button
+          onClick={() => setAdvancedOpen(!advancedOpen)}
+          className="flex items-center gap-1.5 w-full text-left"
+        >
+          <ChevronRightIcon className={`h-3.5 w-3.5 text-gray-400 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
+          <span className="text-xs text-gray-500">Per-stage overrides</span>
+          {Object.keys(localStageModels).length > 0 && (
+            <span className="text-xs text-blue-500">({Object.keys(localStageModels).length})</span>
+          )}
+        </button>
+
+        {advancedOpen && (
+          <div className="mt-3 space-y-2 pl-5">
+            {ISSUE_STAGES.map((stage) => (
+              <div key={stage} className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-500 w-16 capitalize shrink-0">{stage}</span>
+                <div className="flex-1 flex items-center gap-1">
+                  <Popover as="div" className="relative flex-1">
+                    {({ open }) => (
+                      <>
+                        <Popover.Button
+                          className={`w-full inline-flex items-center justify-between gap-1 rounded-md border px-2 py-1 text-xs transition-colors ${
+                            open
+                              ? 'border-blue-500 bg-blue-50 text-blue-700'
+                              : localStageModels[stage]
+                                ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                : 'border-gray-200 bg-white text-gray-400 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className="truncate">
+                            {localStageModels[stage] ? modelDisplayName(localStageModels[stage]) : 'Default'}
+                          </span>
+                          <ChevronDownIcon />
+                        </Popover.Button>
+
+                        <Transition
+                          as={Fragment}
+                          enter="transition ease-out duration-100"
+                          enterFrom="transform opacity-0 scale-95"
+                          enterTo="transform opacity-100 scale-100"
+                          leave="transition ease-in duration-75"
+                          leaveFrom="transform opacity-100 scale-100"
+                          leaveTo="transform opacity-0 scale-95"
+                        >
+                          <Popover.Panel className="fixed inset-x-2 top-auto z-50 mt-1 md:absolute md:inset-x-auto md:right-0 md:w-64 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
+                            <div className="max-h-60 overflow-y-auto">
+                              {localStageModels[stage] && (
+                                <button
+                                  onClick={() => handleClearStageModel(stage)}
+                                  className="w-full flex items-center px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50 transition-colors"
+                                >
+                                  <span className="font-medium">Clear override</span>
+                                </button>
+                              )}
+                              {allModels.map((modelId) => (
+                                <button
+                                  key={modelId}
+                                  onClick={() => handleSetStageModel(stage, modelId)}
+                                  className={`w-full flex items-center justify-between px-3 py-1.5 text-xs transition-colors ${
+                                    localStageModels[stage] === modelId
+                                      ? 'bg-blue-50 text-blue-700'
+                                      : 'text-gray-700 hover:bg-gray-50'
+                                  }`}
+                                >
+                                  <div className="flex flex-col items-start">
+                                    <span className="font-medium">{modelDisplayName(modelId)}</span>
+                                    <span className="text-gray-400">{modelId}</span>
+                                  </div>
+                                </button>
+                              ))}
+                              {allModels.length === 0 && !isLoading && (
+                                <div className="px-3 py-4 text-center text-xs text-gray-400">
+                                  {isLoading ? 'Loading...' : 'No models available'}
+                                </div>
+                              )}
+                            </div>
+                          </Popover.Panel>
+                        </Transition>
+                      </>
+                    )}
+                  </Popover>
+                  {localStageModels[stage] && (
+                    <button
+                      onClick={() => handleClearStageModel(stage)}
+                      className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+                      title="Clear override"
+                    >
+                      <XIcon className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

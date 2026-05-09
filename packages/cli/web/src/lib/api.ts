@@ -46,13 +46,13 @@ export const api = {
   getIssue: (number: number) =>
     request<import('./types').Issue>(`/issues/${number}`),
 
-  createIssue: (data: { title: string; body?: string; labels?: string[] }) =>
+  createIssue: (data: { title: string; body?: string; labels?: string[]; model?: string }) =>
     request<import('./types').Issue>('/issues', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
-  updateIssue: (number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; model?: string | null }) =>
+  updateIssue: (number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; model?: string | null; stageModels?: Record<string, string> | null }) =>
     request<import('./types').Issue>(`/issues/${number}`, {
       method: 'PATCH',
       body: JSON.stringify(data),

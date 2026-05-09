@@ -8,7 +8,7 @@ import { ProviderConnectDialog } from './ProviderConnectDialog'
 import { CustomProviderDialog } from './CustomProviderDialog'
 
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-20250514'
-const STAGES = ['explore', 'plan', 'build', 'check', 'fix'] as const
+const STAGES = ['explore', 'plan', 'build', 'check', 'integrate'] as const
 
 function PlusIcon({ className }: { className?: string }) {
   return (
