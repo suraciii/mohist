@@ -266,7 +266,12 @@ export function setupIssueCommands(program: Command): void {
           if (executionsResponse.success && executionsResponse.data && executionsResponse.data.length > 0) {
             console.log(chalk.gray('\n  Stage Checks:'));
 
+            const latestByStage = new Map<string, any>();
             for (const execution of executionsResponse.data) {
+              latestByStage.set(execution.stage, execution);
+            }
+
+            for (const execution of latestByStage.values()) {
               if (execution.checkResults && execution.checkResults.length > 0) {
                 console.log(chalk.gray(`    [${execution.stage}]`));
                 for (const check of execution.checkResults) {
