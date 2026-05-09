@@ -110,11 +110,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the policy loop from T-001. It is independent of review fixing, but ordered after T-003 so the implementation can reuse any task-result helper patterns already established.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        123004
+      ]
     },
     {
       "id": "T-005",
