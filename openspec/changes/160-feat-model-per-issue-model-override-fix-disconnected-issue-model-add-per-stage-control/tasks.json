@@ -198,11 +198,14 @@
         "T-004",
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use existing test conventions under `packages/cli/tests`. If frontend test infrastructure is absent, verify frontend via typecheck/build rather than adding a new test stack.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        331441
+      ]
     },
     {
       "id": "T-008",
