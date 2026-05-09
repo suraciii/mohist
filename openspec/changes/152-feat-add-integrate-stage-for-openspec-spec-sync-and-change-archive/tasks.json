@@ -116,11 +116,14 @@
         "T-001",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes OpenSpecIntegrator.apply from T-001 and the Integrate runner skeleton from T-003. Keep archiveChange as a low-level directory move only.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1304414
+      ]
     },
     {
       "id": "T-005",
