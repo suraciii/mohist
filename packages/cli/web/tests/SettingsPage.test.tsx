@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from './test-utils'
+import { baseRender, screen, fireEvent } from './test-utils'
 import { SettingsPage } from '../src/components/SettingsPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
@@ -92,7 +92,7 @@ function renderWithQueryClient(
   initialEntries = ['/settings/ai'],
 ) {
   const queryClient = createMockQueryClient()
-  return render(
+  return baseRender(
     <MemoryRouter initialEntries={initialEntries}>
       <QueryClientProvider client={queryClient}>
         <Routes>
