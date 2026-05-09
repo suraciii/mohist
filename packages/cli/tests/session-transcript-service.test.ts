@@ -1222,6 +1222,21 @@ describe('SessionTranscriptAssembler', () => {
       expect(transcript.session.warnings).toBeDefined();
       expect(transcript.session.warnings!.some((w: TranscriptWarning) => w.code === 'UNKNOWN_TOOL')).toBe(true);
     });
+
+    it('should mark raw unknown tool as unknown with metadata warning when inference fails', () => {
+      const session = makeSession();
+      const events: SessionStreamLogEntry[] = [
+        makePromptEvent('Do something', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-unknown', 'unknown', undefined, '{}', '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.normalizedName).toBe('unknown');
+      expect(transcript.session.hasUnknownTools).toBe(true);
+      expect(transcript.session.warnings?.some((w: TranscriptWarning) => w.code === 'UNKNOWN_TOOL')).toBe(true);
+    });
   });
 
   describe('terminal closure', () => {
@@ -1652,6 +1667,81 @@ describe('SessionTranscriptAssembler', () => {
       expect(toolParts[0].tool.status).toBe('completed');
       expect(toolParts[0].tool.output).toBe('contents of file-a');
       expect(toolParts[0].tool.input).toBe('{"file_path":"file-a.txt"}');
+    });
+
+    it('should not name-only merge ambiguous no-id same-name terminal updates', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Read files', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'file-a.txt',
+            input: { file_path: 'file-a.txt' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'file-b.txt',
+            input: { file_path: 'file-b.txt' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.500Z',
+          },
+        }, '2024-01-01T10:00:01.500Z'),
+        makeEvent('tool_call_update', {
+          toolCall: {
+            toolName: 'Read',
+            output: 'ambiguous contents',
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(3);
+      expect(toolParts[0].tool.title).toBe('file-a.txt');
+      expect(toolParts[0].tool.status).toBe('running');
+      expect(toolParts[1].tool.title).toBe('file-b.txt');
+      expect(toolParts[1].tool.status).toBe('running');
+      expect(toolParts[2].tool.status).toBe('completed');
+      expect(toolParts[2].tool.output).toBe('ambiguous contents');
+      expect(transcript.session.warnings?.some((w: TranscriptWarning) => w.code === 'AMBIGUOUS_TOOL_CORRELATION')).toBe(true);
+    });
+
+    it('should warn when name-only no-id fallback is used for a single candidate', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Read file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Read',
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call_update', {
+          toolCall: {
+            toolName: 'Read',
+            output: 'contents',
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.status).toBe('completed');
+      expect(toolParts[0].tool.output).toBe('contents');
+      expect(transcript.session.warnings?.some((w: TranscriptWarning) => w.code === 'AMBIGUOUS_TOOL_CORRELATION')).toBe(true);
     });
 
     it('should not create orphan unknown running entry for inferable update-only payloads', () => {
