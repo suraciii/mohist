@@ -14,6 +14,8 @@ export interface CreateIssueInput {
   body?: string;
   labels?: string[];
   priority?: Priority;
+  model?: string;
+  stageModels?: Record<string, string>;
 }
 
 export interface ArchiveOptions {
@@ -53,6 +55,8 @@ export class IssueService {
       body: input.body,
       labels: input.labels,
       priority: input.priority || 'p2',
+      model: input.model,
+      stageModels: input.stageModels,
     });
   }
 
@@ -161,7 +165,7 @@ export class IssueService {
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Closed);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; priority: Priority; model: string | null }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; priority: Priority; model: string | null; stageModels: Record<string, string> | null }>): Issue | null {
     return this.issueRepo.update(issueId, data);
   }
 

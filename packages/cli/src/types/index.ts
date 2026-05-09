@@ -87,6 +87,7 @@ export interface Issue {
   blockedReason?: string;
   retryCount?: number;
   model?: string;
+  stageModels?: Record<string, string>;
   archivedAt?: string;
 }
 
