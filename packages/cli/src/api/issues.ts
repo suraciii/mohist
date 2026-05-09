@@ -1076,6 +1076,59 @@ export function createIssueRoutes(
       const approvalStage = issue.approvalState?.stage;
 
       if (approvalStage === Stage.Check) {
+        const approvalOutput = issue.approvalState?.output as Record<string, unknown> | undefined;
+
+        if (checkSuiteRepo) {
+          const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
+          if (activeSuite) {
+            const aiReviewCheck = activeSuite.checks['ai-review'];
+            if (aiReviewCheck?.status !== 'passed') {
+              return c.json({
+                success: false,
+                error: `Cannot approve: latest ai-review verdict is '${aiReviewCheck?.status || 'unknown'}', expected 'passed'. Re-run checks or wait for completion.`
+              } satisfies ApiResponse, 409);
+            }
+
+            const approvalSnapshotSha = approvalOutput?.snapshotSha;
+            if (typeof approvalSnapshotSha === 'string' && activeSuite.snapshotSha !== approvalSnapshotSha) {
+              return c.json({
+                success: false,
+                error: 'Cannot approve: approval snapshot does not match active CheckSuite snapshot. The check state may have changed since approval was requested.'
+              } satisfies ApiResponse, 409);
+            }
+          }
+        }
+
+        if (worktreeManager) {
+          const project = projectService.getById(projectId);
+          if (project) {
+            const worktreePath = worktreeManager.getPath(project.name, issue.number);
+            if (worktreePath) {
+              try {
+                const currentHead = await worktreeManager.getHeadSha(worktreePath);
+                const approvalSnapshotSha = approvalOutput?.snapshotSha;
+
+                if (typeof approvalSnapshotSha === 'string' && currentHead !== approvalSnapshotSha) {
+                  return c.json({
+                    success: false,
+                    error: 'Cannot approve: current HEAD does not match approval snapshot. The code may have changed since approval was requested.'
+                  } satisfies ApiResponse, 409);
+                }
+
+                const isClean = await worktreeManager.isWorktreeClean(worktreePath);
+                if (!isClean) {
+                  return c.json({
+                    success: false,
+                    error: 'Cannot approve: worktree has uncommitted changes. Commit or stash changes before approving.'
+                  } satisfies ApiResponse, 409);
+                }
+              } catch (err) {
+                log.warn('Failed to validate worktree state for approval', { error: err });
+              }
+            }
+          }
+        }
+
         if (issue.approvalState) {
           issueRepo.setApprovalState(issue.id, {
             ...issue.approvalState,
