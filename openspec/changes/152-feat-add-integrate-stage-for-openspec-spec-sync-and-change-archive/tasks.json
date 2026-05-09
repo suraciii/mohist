@@ -180,12 +180,11 @@
       ],
       "passes": true,
       "notes": "Consumes the merge step from T-005. It is acceptable to wrap or rename PostMergeFinalizer, but Done transition ownership must be the workflow/Integrate path, not a hidden finalizer side effect.",
-      "attempts": 2,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        1849107,
-        969249
+        1849107
       ]
     },
     {
@@ -216,7 +215,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        1483829
+        1769638
       ]
     },
     {
@@ -246,7 +245,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        615900
+        583793
       ]
     },
     {
@@ -272,11 +271,14 @@
       "dependsOn": [
         "T-008"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes backend API/event shapes from T-008. Preserve existing visual language; do not redesign unrelated issue detail surfaces.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        516501
+      ]
     },
     {
       "id": "T-010",
