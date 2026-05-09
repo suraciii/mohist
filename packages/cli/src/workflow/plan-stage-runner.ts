@@ -251,7 +251,7 @@ export class PlanStageRunner extends BaseStageRunner {
             taskId: task.type,
             title: task.label,
             status: 'skipped',
-            artifacts: [task.outputPath],
+            artifacts: [task.label],
             attempts: 0,
             duration: 0,
           });

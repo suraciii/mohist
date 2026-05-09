@@ -142,14 +142,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     const tasks: TaskConfig[] = [
       {
         type: 'review',
-        label: 'review',
+        label: 'review.md',
         outputPath: changeDir + '/' + reviewOutputPath,
         verifyArtifact: () => readReportFile(changeDir, reviewOutputPath) !== null,
         buildPrompt: (issue, dir) => buildReviewerPrompt(issue, dir),
       },
       {
         type: 'review-self-check',
-        label: 'review-self-check',
+        label: 'review-self-check.md',
         outputPath: changeDir + '/' + selfCheckOutputPath,
         verifyArtifact: () => readReportFile(changeDir, selfCheckOutputPath) !== null,
         buildPrompt: (issue, dir) => buildReviewSelfCheckPrompt(issue, dir),
@@ -250,7 +250,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
             taskId: task.type,
             title: task.label,
             status: 'skipped',
-            artifacts: [task.outputPath],
+            artifacts: [task.label],
             attempts: 0,
             duration: 0,
           });
