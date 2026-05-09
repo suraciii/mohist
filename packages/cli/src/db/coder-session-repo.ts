@@ -15,6 +15,10 @@ export interface CoderSession {
   stage: string | null;
   title: string | null;
   processPid: number | null;
+  lastDataAt: string | null;
+  probeSentAt: string | null;
+  probeDeadlineAt: string | null;
+  failureReason: string | null;
 }
 
 interface CoderSessionRow {
@@ -31,6 +35,10 @@ interface CoderSessionRow {
   stage: string | null;
   title: string | null;
   process_pid: number | null;
+  last_data_at: string | null;
+  probe_sent_at: string | null;
+  probe_deadline_at: string | null;
+  failure_reason: string | null;
 }
 
 function rowToCoderSession(row: CoderSessionRow): CoderSession {
@@ -48,6 +56,10 @@ function rowToCoderSession(row: CoderSessionRow): CoderSession {
     stage: row.stage,
     title: row.title,
     processPid: row.process_pid,
+    lastDataAt: row.last_data_at,
+    probeSentAt: row.probe_sent_at,
+    probeDeadlineAt: row.probe_deadline_at,
+    failureReason: row.failure_reason,
   };
 }
 
@@ -133,9 +145,9 @@ export class CoderSessionRepo {
     const now = new Date().toISOString();
 
     this.db.run(
-      `INSERT INTO coder_session (id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at, model, coder_type, stage, title, process_pid)
-       VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?, ?, ?)`,
-      [id, data.issueId, data.acpSessionId, data.executionId ?? null, data.taskDescription ?? null, now, data.model ?? null, data.coderType ?? null, data.stage ?? null, data.title ?? null, data.processPid ?? null]
+      `INSERT INTO coder_session (id, issue_id, acp_session_id, execution_id, task_description, status, created_at, completed_at, model, coder_type, stage, title, process_pid, last_data_at, probe_sent_at, probe_deadline_at, failure_reason)
+       VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, data.issueId, data.acpSessionId, data.executionId ?? null, data.taskDescription ?? null, now, data.model ?? null, data.coderType ?? null, data.stage ?? null, data.title ?? null, data.processPid ?? null, now, null, null, null]
     );
 
     const row = this.db.get<CoderSessionRow>(
@@ -216,5 +228,62 @@ export class CoderSessionRepo {
       'UPDATE coder_session SET process_pid = ? WHERE id = ?',
       [pid, id]
     );
+  }
+
+  markDataReceived(id: string): CoderSession {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE coder_session SET last_data_at = ?, status = CASE WHEN status = ? THEN ? ELSE status END WHERE id = ?',
+      [now, 'probing', 'running', id]
+    );
+
+    const row = this.db.get<CoderSessionRow>(
+      'SELECT * FROM coder_session WHERE id = ?',
+      [id]
+    );
+
+    if (!row) {
+      throw new Error(`Failed to read back coder_session entry after markDataReceived (id=${id})`);
+    }
+
+    return rowToCoderSession(row);
+  }
+
+  markProbing(id: string, probeDeadlineAt: string): CoderSession {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE coder_session SET status = ?, probe_sent_at = ?, probe_deadline_at = ? WHERE id = ?',
+      ['probing', now, probeDeadlineAt, id]
+    );
+
+    const row = this.db.get<CoderSessionRow>(
+      'SELECT * FROM coder_session WHERE id = ?',
+      [id]
+    );
+
+    if (!row) {
+      throw new Error(`Failed to read back coder_session entry after markProbing (id=${id})`);
+    }
+
+    return rowToCoderSession(row);
+  }
+
+  markFailed(id: string, failureReason: string): CoderSession {
+    const now = new Date().toISOString();
+    this.db.run(
+      'UPDATE coder_session SET status = ?, completed_at = ?, failure_reason = ? WHERE id = ?',
+      ['failed', now, failureReason, id]
+    );
+
+    const row = this.db.get<CoderSessionRow>(
+      'SELECT * FROM coder_session WHERE id = ?',
+      [id]
+    );
+
+    if (!row) {
+      throw new Error(`Failed to read back coder_session entry after markFailed (id=${id})`);
+    }
+
+    return rowToCoderSession(row);
   }
 }
