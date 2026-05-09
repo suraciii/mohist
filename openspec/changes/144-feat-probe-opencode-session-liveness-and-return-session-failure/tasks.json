@@ -49,11 +49,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Do not reuse coder_recovery_status for liveness probing; recovery and liveness are separate concepts.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        340735
+      ]
     },
     {
       "id": "T-003",
