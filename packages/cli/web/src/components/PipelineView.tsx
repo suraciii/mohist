@@ -17,7 +17,7 @@ function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   return 'UNKNOWN'
 }
 
-const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done] as const
+const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done] as const
 type PipelineStage = (typeof PIPELINE_STAGES)[number]
 
 interface PendingTask {
@@ -42,6 +42,13 @@ const CHECK_TASK_DEFS: { taskId: string; title: string }[] = [
   { taskId: 'review-self-check', title: 'Review Self-Check' },
 ]
 
+const INTEGRATE_TASK_DEFS: { taskId: string; title: string }[] = [
+  { taskId: 'integrate:spec-sync', title: 'Sync main specs' },
+  { taskId: 'integrate:archive-change', title: 'Archive OpenSpec change' },
+  { taskId: 'integrate:merge', title: 'Merge to target branch' },
+  { taskId: 'final-health', title: 'Run final integration health gate' },
+]
+
 function mergeTasksForStage(
   stage: PipelineStage,
   taskResults: StageTaskResult[],
@@ -49,7 +56,7 @@ function mergeTasksForStage(
 ): (StageTaskResult | PendingTask)[] {
   if (stage === Stage.Done) return taskResults
 
-  const defs = stage === Stage.Plan ? PLAN_TASK_DEFS : stage === Stage.Check ? CHECK_TASK_DEFS : null
+  const defs = stage === Stage.Plan ? PLAN_TASK_DEFS : stage === Stage.Check ? CHECK_TASK_DEFS : stage === Stage.Integrate ? INTEGRATE_TASK_DEFS : null
   if (!defs) return taskResults
 
   const resultById = new Map(taskResults.map((t) => [t.taskId, t]))
