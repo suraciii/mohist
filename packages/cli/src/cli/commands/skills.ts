@@ -6,6 +6,11 @@ import {
   getSharedSkillNames,
 } from '../../agent-skills/shared-agent-skills';
 
+const SKILL_TYPE_HELP = `
+These commands manage coder agent skills under .agents/skills.
+They do not execute, scan, or modify Mohist internal skills under .mohist/skills.
+`;
+
 function formatResult(results: { skill: string; result: string; reason?: string }[]): void {
   for (const r of results) {
     const icon = r.result === 'created' ? '✓' :
@@ -26,13 +31,15 @@ function formatResult(results: { skill: string; result: string; reason?: string 
 export function setupSkillsCommands(program: Command): void {
   const skills = program
     .command('skills')
-    .description('Manage shared coder agent skills in .agents/skills (not Mohist internal skills in .mohist/skills)');
+    .description('Manage shared coder agent skills in .agents/skills; do not execute, scan, or modify Mohist internal skills in .mohist/skills')
+    .addHelpText('after', SKILL_TYPE_HELP);
 
   skills
     .command('install')
-    .description('Install shared coder agent skills (mohist, mohist-explore) into .agents/skills')
+    .description('Install shared coder agent skills into .agents/skills; do not execute, scan, or modify Mohist internal skills in .mohist/skills')
     .option('--force', 'Overwrite existing user-edited skill files')
     .option('--path <repo>', 'Target repository path (defaults to current working directory)')
+    .addHelpText('after', SKILL_TYPE_HELP)
     .action(async (options) => {
       const results = installSharedAgentSkills({
         projectPath: options.path,
@@ -52,8 +59,9 @@ export function setupSkillsCommands(program: Command): void {
 
   skills
     .command('update')
-    .description('Update shared coder agent skills in .agents/skills (repairs missing skills, skips protected files)')
+    .description('Update shared coder agent skills in .agents/skills; do not execute, scan, or modify Mohist internal skills in .mohist/skills')
     .option('--path <repo>', 'Target repository path (defaults to current working directory)')
+    .addHelpText('after', SKILL_TYPE_HELP)
     .action(async (options) => {
       const results = updateSharedAgentSkills({
         projectPath: options.path,

@@ -18,7 +18,7 @@ function computeChecksum(content: string): string {
 }
 
 function parseFrontmatter(content: string): { name: string; description: string; body: string } | null {
-  const match = content.match(/(?:^|\n)---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return null;
 
   const frontmatterStr = match[1];
@@ -37,17 +37,11 @@ function parseFrontmatter(content: string): { name: string; description: string;
 }
 
 function extractContentWithoutMarker(content: string): string {
-  const markerIdx = content.indexOf(MOHIST_MARKER);
-  if (markerIdx === -1) return content;
-
-  const afterMarker = content.slice(markerIdx + MOHIST_MARKER.length).trim();
-  const checksumStart = afterMarker.indexOf(CHECKSUM_HEADER);
-  if (checksumStart === -1) return afterMarker;
-
-  const checksumEnd = afterMarker.indexOf(' -->', checksumStart);
-  if (checksumEnd === -1) return afterMarker;
-
-  return afterMarker.slice(checksumEnd + 4).trim();
+  return content
+    .split('\n')
+    .filter(line => line !== MOHIST_MARKER && !line.startsWith(CHECKSUM_HEADER))
+    .join('\n')
+    .trim();
 }
 
 function isGeneratedFile(content: string): boolean {
@@ -372,7 +366,13 @@ const SHARED_SKILLS: Record<string, string> = {
 
 function buildMarkedContent(template: string): string {
   const checksum = computeChecksum(template);
-  return `${MOHIST_MARKER}\n<!-- checksum: ${checksum} -->\n${template}`;
+  const frontmatterEnd = template.indexOf('\n---\n');
+  if (frontmatterEnd === -1) {
+    return `${template}\n\n${MOHIST_MARKER}\n<!-- checksum: ${checksum} -->`;
+  }
+
+  const insertAt = frontmatterEnd + '\n---\n'.length;
+  return `${template.slice(0, insertAt)}${MOHIST_MARKER}\n<!-- checksum: ${checksum} -->\n${template.slice(insertAt)}`;
 }
 
 function ensureDir(dirPath: string): void {
