@@ -46,6 +46,7 @@ function getSessionStatusKind(
     return 'failed'
   }
   if (rawStatus === 'completed') return 'completed'
+  if (rawStatus === 'probing') return 'probing'
   if (isRunning && completedAt) return 'finalizing'
   if (!isRunning) {
     return 'completed'
@@ -63,13 +64,14 @@ function getStageLabel(stage: string | null): string {
   return stage.charAt(0).toUpperCase() + stage.slice(1)
 }
 
-function StatusBadge({ kind }: { kind: StatusKind }) {
+function StatusBadge({ kind, failureReason }: { kind: StatusKind; failureReason?: string | null }) {
   const config: Record<StatusKind, { label: string; color: string; dot?: boolean }> = {
     loading: { label: 'Loading', color: 'bg-gray-100 text-gray-600' },
-    live: { label: 'Live', color: 'bg-blue-100 text-blue-700', dot: true },
+    live: { label: 'Running', color: 'bg-blue-100 text-blue-700', dot: true },
+    probing: { label: 'Checking session', color: 'bg-yellow-100 text-yellow-700', dot: true },
     finalizing: { label: 'Finalizing', color: 'bg-yellow-100 text-yellow-700' },
     completed: { label: 'Completed', color: 'bg-green-100 text-green-700' },
-    failed: { label: 'Failed', color: 'bg-red-100 text-red-700' },
+    failed: { label: 'Session failed', color: 'bg-red-100 text-red-700' },
     stale: { label: 'Stale', color: 'bg-orange-100 text-orange-700' },
   }
   const { label, color, dot } = config[kind]
@@ -82,6 +84,11 @@ function StatusBadge({ kind }: { kind: StatusKind }) {
         </span>
       )}
       {label}
+      {kind === 'failed' && failureReason && (
+        <span className="ml-1 text-red-500 truncate max-w-[200px]" title={failureReason}>
+          {failureReason}
+        </span>
+      )}
     </span>
   )
 }
@@ -234,7 +241,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
         </div>
 
         <div className="flex items-center gap-2 text-xs text-gray-500 ml-auto shrink-0 flex-wrap justify-end">
-          <StatusBadge kind={statusKind} />
+          <StatusBadge kind={statusKind} failureReason={meta?.failureReason} />
           <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
             {getStageLabel(meta?.stage ?? null)}
           </span>
@@ -246,6 +253,14 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
               <span className="text-gray-300">·</span>
               <span title={`Last activity: ${meta.lastActivityAt}`}>
                 {formatRelativeTime(meta.lastActivityAt)}
+              </span>
+            </>
+          )}
+          {statusKind === 'probing' && meta?.probeSentAt && (
+            <>
+              <span className="text-gray-300">·</span>
+              <span className="text-yellow-600" title={`Probe sent: ${meta.probeSentAt}`}>
+                Checking since {formatRelativeTime(meta.probeSentAt)}
               </span>
             </>
           )}
@@ -301,7 +316,7 @@ export function SessionPage() {
 
   const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
   const apiStatusKind = detail?.metadata?.statusKind
-  const isRunning = rawStatus === 'running' && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const isRunning = (rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
   const acpSessionId = detail?.acpSessionId ?? session?.acpSessionId ?? ''
 
   const statusKind: StatusKind = detail

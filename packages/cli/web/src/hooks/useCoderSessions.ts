@@ -32,8 +32,8 @@ export function useCoderSessions(issueNumber: number) {
     timerRef.current = setInterval(() => {
       if (!mountedRef.current) return
       setLiveSessions((prev) => {
-        const hasRunning = prev.some((s) => s.status === 'running')
-        if (!hasRunning) {
+        const hasActive = prev.some((s) => s.status === 'running' || s.status === 'probing')
+        if (!hasActive) {
           if (timerRef.current !== null) {
             clearInterval(timerRef.current)
             timerRef.current = null
@@ -72,6 +72,10 @@ export function useCoderSessions(issueNumber: number) {
           coderType: detail.coderType ?? null,
           stage: detail.stage ?? null,
           title: detail.title ?? null,
+          lastDataAt: null,
+          probeSentAt: null,
+          probeDeadlineAt: null,
+          failureReason: null,
           workflowLogs: [],
         }
         setLiveSessions((prev) => [...prev, newSession])
@@ -88,8 +92,33 @@ export function useCoderSessions(issueNumber: number) {
               ? { ...s, status: detail.status, completedAt: new Date().toISOString() }
               : s,
           )
-          const hasRunning = next.some((s) => s.status === 'running')
-          if (!hasRunning) stopTimer()
+          const hasActive = next.some((s) => s.status === 'running' || s.status === 'probing')
+          if (!hasActive) stopTimer()
+          return next
+        })
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('coder_session_status_changed', (detail) => {
+        if (!mountedRef.current) return
+        setLiveSessions((prev) => {
+          const idx = prev.findIndex((s) => s.id === detail.coderSessionId)
+          if (idx === -1) return prev
+          const existing = prev[idx]
+          const updated: CoderSessionItem = {
+            ...existing,
+            status: detail.status,
+            ...(detail.lastDataAt !== undefined && { lastDataAt: detail.lastDataAt }),
+            ...(detail.probeSentAt !== undefined && { probeSentAt: detail.probeSentAt }),
+            ...(detail.probeDeadlineAt !== undefined && { probeDeadlineAt: detail.probeDeadlineAt }),
+            ...(detail.failureReason !== undefined && { failureReason: detail.failureReason }),
+          }
+          const next = [...prev]
+          next[idx] = updated
+          const hasActive = next.some((s) => s.status === 'running' || s.status === 'probing')
+          if (!hasActive) stopTimer()
+          else startTimer()
           return next
         })
       }),

@@ -220,6 +220,7 @@ export type AgentDetailEventMap = {
   coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number }
   coder_session_failed: { issueId: string; projectId: string; coderSessionId: string; reason?: string }
   coder_session_cancelled: { issueId: string; projectId: string; coderSessionId: string; reason?: string }
+  coder_session_status_changed: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; status: string; lastDataAt?: string | null; probeSentAt?: string | null; probeDeadlineAt?: string | null; failureReason?: string | null }
   agent_paused: { issueId: string; projectId: string }
   question_asked: { issueId: string; projectId: string; questionId: string; question: string }
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
@@ -355,6 +356,10 @@ export interface CoderSessionItem {
   coderType: string | null
   stage: string | null
   title: string | null
+  lastDataAt: string | null
+  probeSentAt: string | null
+  probeDeadlineAt: string | null
+  failureReason: string | null
   workflowLogs: WorkflowLogItem[]
 }
 
@@ -400,6 +405,10 @@ export interface SessionMetadata {
   worktree?: string | null
   firstPromptSentAt?: string | null
   lastActivityAt?: string | null
+  lastDataAt?: string | null
+  probeSentAt?: string | null
+  probeDeadlineAt?: string | null
+  failureReason?: string | null
   eventCount?: number
   toolCount?: number
   turnCount?: number
@@ -408,7 +417,7 @@ export interface SessionMetadata {
   hasUnknownTools?: boolean
 }
 
-export type SessionStatusKind = 'loading' | 'live' | 'finalizing' | 'completed' | 'failed' | 'stale'
+export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
 export interface TextPart {
   id: string
