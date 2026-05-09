@@ -775,11 +775,17 @@ function StepList({
               <CheckItem key={check.name} check={check} />
             ))}
           </div>
-          {isAwaitingApproval && (
-            <div className="mt-3">
-              <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} approvalOutput={issue.approvalState?.output} />
+        </div>
+      )}
+
+      {isAwaitingApproval && (
+        <div className="space-y-3">
+          {checkResults.length === 0 && (
+            <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700">
+              Approval is awaiting, but this stage has no recorded check results. This usually means the issue was recovered from an interrupted state; rerun the stage if you need fresh verification before approving.
             </div>
           )}
+          <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} approvalOutput={issue.approvalState?.output} />
         </div>
       )}
     </div>

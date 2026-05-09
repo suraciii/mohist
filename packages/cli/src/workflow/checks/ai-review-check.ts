@@ -82,7 +82,11 @@ export class AiReviewCheck implements Check {
 
       const autoFixObservers = createWorkflowSessionObservers({
         eventBus: ctx.eventBus,
+        workflowLogRepo: ctx.workflowLogRepo,
+        sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+        coderSessionRepo: ctx.coderSessionRepo,
         stage: 'check',
+        taskDescription: autoFixPrompt,
         title: 'Auto-fix: review findings',
       });
 
@@ -105,7 +109,11 @@ export class AiReviewCheck implements Check {
 
       const reVerifyObservers = createWorkflowSessionObservers({
         eventBus: ctx.eventBus,
+        workflowLogRepo: ctx.workflowLogRepo,
+        sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+        coderSessionRepo: ctx.coderSessionRepo,
         stage: 'check',
+        taskDescription: reVerifyPrompt,
         title: 'Re-review after auto-fix',
       });
 

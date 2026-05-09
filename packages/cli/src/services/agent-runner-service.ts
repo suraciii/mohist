@@ -556,21 +556,28 @@ export class AgentRunnerService {
 
     const allPass = tasksFile.tasks.every(t => t.passes === true);
     if (allPass) {
-      this.issueRepo!.updateStage(issue.id, Stage.Check);
-      this.issueRepo!.setApprovalState(issue.id, {
-        stage: Stage.Check,
-        status: 'awaiting',
-        output: { recovered: true, reason: 'build completed, auto-advanced to check' },
-        requestedAt: new Date().toISOString(),
-      });
       this.issueRepo!.updateStatus(issue.id, IssueStatus.Active);
       this.issueRepo!.updateRetryCount(issue.id, 0);
       this.issueRepo!.updateBlockedReason(issue.id, null);
-      log.info('Recovered build-stage orphan — all tasks pass, auto-advanced to review', {
-        issueNumber: issue.number,
-        totalTasks: tasksFile.tasks.length,
-        action: 'stage=check, approval_state=awaiting, status remains active',
-      });
+      this.issueRepo!.clearApprovalState(issue.id);
+      this.closeActiveStageExecutions(issue, 'build all-pass recovery will resume pipeline');
+
+      try {
+        this.enqueue(issue.id, 'resume-pipeline');
+        log.info('Recovered build-stage orphan — all tasks pass, resume enqueued for verification', {
+          issueNumber: issue.number,
+          totalTasks: tasksFile.tasks.length,
+          action: 'resume-pipeline, build/check gates must run before approval',
+        });
+      } catch (enqueueErr) {
+        const failReason = `自动恢复启动失败: ${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)} (${tasksFile.tasks.length}/${tasksFile.tasks.length} 任务完成)`;
+        this.issueRepo!.blockIssue(issue.id, failReason);
+        this.emitBlocked(issue, failReason, issue.retryCount ?? 0);
+        log.info('Recovered build-stage orphan — all-pass resume enqueue failed', {
+          issueNumber: issue.number,
+          action: 'status=blocked, enqueue failed',
+        });
+      }
     } else {
       const passed = tasksFile.tasks.filter(t => t.passes === true).length;
       const pending = tasksFile.tasks.filter(t => t.passes !== true);
@@ -610,6 +617,25 @@ export class AgentRunnerService {
           });
         }
       }
+    }
+  }
+
+  private closeActiveStageExecutions(issue: Issue, reason: string): void {
+    if (!this.stageExecutionRepo) return;
+    try {
+      const closed = this.stageExecutionRepo.closeActiveByIssueId(issue.id, 'failed');
+      if (closed > 0) {
+        log.info('Closed stale active stage executions during recovery', {
+          issueNumber: issue.number,
+          closed,
+          reason,
+        });
+      }
+    } catch (err) {
+      log.warn('Failed to close stale active stage executions during recovery', {
+        issueNumber: issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

@@ -6,6 +6,8 @@ import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
+import { IssueTaskQueueRepo } from '../src/db/issue-task-queue-repo';
+import { StageExecutionRepo } from '../src/db/stage-execution-repo';
 import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
@@ -41,6 +43,8 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
   let db: DatabaseManager;
   let projectRepo: ProjectRepo;
   let issueRepo: IssueRepo;
+  let taskQueueRepo: IssueTaskQueueRepo;
+  let stageExecutionRepo: StageExecutionRepo;
   let issueService: IssueService;
   let eventBus: EventBus;
   let tmpDir: string;
@@ -50,6 +54,8 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
     initializeDatabase(db);
     projectRepo = new ProjectRepo(db);
     issueRepo = new IssueRepo(db);
+    taskQueueRepo = new IssueTaskQueueRepo(db);
+    stageExecutionRepo = new StageExecutionRepo(db);
     issueService = new IssueService(issueRepo);
     eventBus = new EventBus();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'recover-allpass-test-'));
@@ -60,7 +66,7 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('all-pass tasks.json auto-advances to Check stage with approval gate', () => {
+  it('all-pass tasks.json resumes pipeline instead of fabricating Check approval', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'All Pass Pipeline' });
 
@@ -80,31 +86,34 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       eventBus,
       undefined,
       issueRepo,
-      8,
+      0,
       undefined,
       undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
+      taskQueueRepo,
     );
-
-    const spy = vi.spyOn(service, 'enqueue');
 
     service.recoverIssues();
 
-    expect(spy).not.toHaveBeenCalled();
+    const queue = taskQueueRepo.findAllPending();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].issueId).toBe(issue.id);
+    expect(queue[0].taskType).toBe('resume-pipeline');
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Check);
+    expect(recovered?.stage).toBe(Stage.Build);
     expect(recovered?.status).toBe(IssueStatus.Active);
-    expect(recovered?.approvalState?.status).toBe('awaiting');
+    expect(recovered?.approvalState).toBeUndefined();
   });
 
-  it('all-pass sets Check stage with awaiting approval (enqueue not needed)', () => {
+  it('all-pass clears stale active stage executions before resuming', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Pipeline Full' });
 
     issueRepo.updateStatus(issue.id, IssueStatus.Active);
     issueRepo.updateStage(issue.id, Stage.Build);
+    const execution = stageExecutionRepo.create(issue.id, Stage.Build);
 
     createChangeDirWithTasks(
       tmpDir,
@@ -116,19 +125,26 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       eventBus,
       undefined,
       issueRepo,
-      8,
+      0,
       undefined,
       undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
+      taskQueueRepo,
+      undefined,
+      undefined,
+      stageExecutionRepo,
     );
 
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Check);
+    expect(recovered?.stage).toBe(Stage.Build);
     expect(recovered?.status).toBe(IssueStatus.Active);
-    expect(recovered?.approvalState?.status).toBe('awaiting');
+    expect(recovered?.approvalState).toBeUndefined();
+
+    const closedExecution = stageExecutionRepo.findById(execution.id);
+    expect(closedExecution?.status).toBe('failed');
   });
 
   it('partial-pass auto-retries by enqueuing resume-pipeline', () => {
@@ -151,18 +167,20 @@ describe('recoverBuildStageIssue — all-pass resumes review pipeline', () => {
       eventBus,
       undefined,
       issueRepo,
-      8,
+      0,
       undefined,
       undefined,
       projectRepo,
       createWorktreeMock(tmpDir),
+      taskQueueRepo,
     );
-
-    const spy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
-    expect(spy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+    const queue = taskQueueRepo.findAllPending();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].issueId).toBe(issue.id);
+    expect(queue[0].taskType).toBe('resume-pipeline');
 
     const recovered = issueRepo.findById(issue.id);
     expect(recovered?.stage).toBe(Stage.Build);

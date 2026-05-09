@@ -99,6 +99,17 @@ export class StageExecutionRepo {
     return this.findById(id);
   }
 
+  closeActiveByIssueId(issueId: string, status: StageExecutionStatus = 'failed'): number {
+    const now = new Date().toISOString();
+    const result = this.db.run(
+      `UPDATE stage_executions
+       SET status = ?, updated_at = ?
+       WHERE issue_id = ? AND status IN ('running', 'awaiting-approval')`,
+      [status, now, issueId]
+    ) as unknown as { changes?: number };
+    return result.changes ?? 0;
+  }
+
   findActiveByIssueId(issueId: string): StageExecution | null {
     const row = this.db.get<StageExecutionRow>(
       `SELECT * FROM stage_executions

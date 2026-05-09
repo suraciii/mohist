@@ -1,6 +1,6 @@
 ## Input
 
-A review report with `## Result: FAIL` and `## Fix Suggestions`. Auto-fixes have been applied since.
+A review report with `<promise>FAIL</promise>`, `## Result: FAIL`, and `## Fix Suggestions`. Auto-fixes have been applied since.
 
 ## Process
 
@@ -10,8 +10,8 @@ A review report with `## Result: FAIL` and `## Fix Suggestions`. Auto-fixes have
    - Correctness, Complexity, Test Coverage, Security, Spec Compliance
 3. Run build and tests, check results
 4. Update `review.md`:
-   - If ALL pass: set `## Result: PASS`
-   - If any fail: set `## Result: FAIL` with Fix Suggestions
+   - If ALL pass: set `## Result: PASS` and end the file with `<promise>PASS</promise>`
+   - If any fail: set `## Result: FAIL` with Fix Suggestions and end the file with `<promise>FAIL</promise>`
 
 ## Rules
 
@@ -48,6 +48,9 @@ Same format as original review:
 
 ## Fix Suggestions
 1. [file:line] description
+
+<promise>PASS</promise> or <promise>FAIL</promise>
 ```
 
 Output ONLY the final report. No thinking process or meta-commentary.
+The final line MUST be exactly one machine-readable verdict tag: `<promise>PASS</promise>` or `<promise>FAIL</promise>`.
