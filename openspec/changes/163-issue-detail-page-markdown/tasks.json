@@ -48,11 +48,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the shared Markdown renderer produced by T-001 and specializes its code element rendering; this task should not add any additional dependencies.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        246244
+      ]
     },
     {
       "id": "T-003",
