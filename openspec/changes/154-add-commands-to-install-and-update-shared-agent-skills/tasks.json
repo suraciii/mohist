@@ -1,7 +1,5 @@
 {
   "version": 1,
-  "project": "mohist",
-  "description": "Add local CLI commands to install and update shared coder agent skills under .agents/skills.",
   "tasks": [
     {
       "id": "T-001",
@@ -25,8 +23,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/cli/commands/skills.ts, packages/cli/src/agent-skills/shared-agent-skills.ts, packages/cli/src/cli/index.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Produces the command group and generation utility consumed by the tests and documentation tasks. Prefer a narrow utility API that returns per-skill result statuses for CLI formatting and testability."
+      "passes": true,
+      "notes": "Produces the command group and generation utility consumed by the tests and documentation tasks. Prefer a narrow utility API that returns per-skill result statuses for CLI formatting and testability.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        504545
+      ]
     },
     {
       "id": "T-002",
@@ -53,7 +57,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Consumes the generation utility and command behavior from T-001. If direct CLI process tests are too heavy, unit-test the utility thoroughly and verify command registration/help through lightweight Commander tests or build output."
+      "notes": "Consumes the generation utility and command behavior from T-001. If direct CLI process tests are too heavy, unit-test the utility thoroughly and verify command registration/help through lightweight Commander tests or build output.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -78,7 +85,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Consumes the command group from T-001 and should preserve the behavior covered by T-002 while improving user-facing descriptions."
+      "notes": "Consumes the command group from T-001 and should preserve the behavior covered by T-002 while improving user-facing descriptions.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -103,7 +113,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Final verification consumes every earlier output. If manual verification is needed, use temporary directories so repository .agents/skills files are not accidentally changed."
+      "notes": "Final verification consumes every earlier output. If manual verification is needed, use temporary directories so repository .agents/skills files are not accidentally changed.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
