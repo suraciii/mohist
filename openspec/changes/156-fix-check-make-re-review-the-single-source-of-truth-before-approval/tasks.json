@@ -76,11 +76,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use non-interactive git commands. Do not use --no-verify unless the implementation has an explicit existing project convention for this convergence commit; failed hooks should block approval.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        791083
+      ]
     },
     {
       "id": "T-004",
