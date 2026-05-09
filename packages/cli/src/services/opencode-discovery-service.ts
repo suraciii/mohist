@@ -1,16 +1,11 @@
-import { spawn } from 'child_process';
-import { Writable, Readable } from 'stream';
-import {
-  ClientSideConnection,
-  ndJsonStream,
-  PROTOCOL_VERSION,
-} from '@agentclientprotocol/sdk';
+import { execFile } from 'child_process';
 import { resolveOpencodeBinPath } from '../config/config-loader';
+import { isValidModelId } from '../config/model-resolution';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'opencode-discovery' });
 
-const DISCOVERY_TTL_MS = 5 * 60 * 1000;
+const DISCOVERY_TTL_MS = 30 * 60 * 1000;
 
 interface DiscoveryCache {
   models: string[];
@@ -19,105 +14,56 @@ interface DiscoveryCache {
 
 let cache: DiscoveryCache | null = null;
 
-async function probeModels(): Promise<string[]> {
+function probeModels(): Promise<string[]> {
   const binPath = resolveOpencodeBinPath() || 'opencode';
-  const cwd = process.cwd();
 
   return new Promise<string[]>((resolve, reject) => {
-    const proc = spawn(binPath, ['acp'], {
-      cwd,
-      stdio: ['pipe', 'pipe', 'inherit'],
-      env: Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([key]) =>
-            key !== 'OPENCODE_SERVER_PASSWORD' &&
-            key !== 'OPENCODE_SERVER_USERNAME'
-        )
-      ),
-    });
-
-    let procExited = false;
-    let sessionId = '';
-
-    const ensureKill = () => {
-      if (!procExited) {
-        procExited = true;
-        try {
-          proc.kill('SIGTERM');
-        } catch {
-          // already exited
-        }
-        setTimeout(() => {
-          try {
-            proc.kill('SIGKILL');
-          } catch {
-            // already exited
-          }
-        }, 5000);
-      }
-    };
-
-    const input = Writable.toWeb(proc.stdin) as WritableStream<Uint8Array>;
-    const output = Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>;
-    const stream = ndJsonStream(input, output);
-
-    const cleanup = async () => {
-      await Promise.allSettled([
-        stream.readable.cancel().catch(() => {}),
-        stream.writable.abort().catch(() => {}),
-      ]);
-      ensureKill();
-    };
-
-    const connection = new ClientSideConnection(
-      (_agent) => ({
-        sessionUpdate: async () => {},
-        requestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-      }),
-      stream
-    );
-
-    const timeout = setTimeout(async () => {
-      log.warn('model discovery probe timed out');
-      await cleanup();
+    const timeout = setTimeout(() => {
+      log.error('model discovery probe timed out');
       reject(new Error('model discovery probe timed out'));
     }, 30000);
 
-    proc.on('error', (err) => {
-      clearTimeout(timeout);
-      log.error('model discovery probe spawn error', { error: err.message });
-      reject(new Error(`probe spawn failed: ${err.message}`));
-    });
-
-    proc.on('exit', (code) => {
-      if (!sessionId) {
+    execFile(
+      binPath,
+      ['models'],
+      {
+        cwd: process.cwd(),
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) =>
+              key !== 'OPENCODE_SERVER_PASSWORD' &&
+              key !== 'OPENCODE_SERVER_USERNAME'
+          )
+        ),
+      },
+      (err, stdout, stderr) => {
         clearTimeout(timeout);
-        log.error('model discovery probe exited before session created', { exitCode: code });
-      }
-    });
 
-    (async () => {
-      try {
-        await connection.initialize({
-          protocolVersion: PROTOCOL_VERSION,
-          clientInfo: { name: 'mohist-discovery', version: '0.1.0' },
-        });
+        if (err) {
+          log.error('model discovery probe failed', {
+            error: err.message,
+            stderr: stderr?.slice(0, 500),
+          });
+          reject(new Error(`model discovery failed: ${err.message}`));
+          return;
+        }
 
-        const sessionResult = await connection.newSession({ cwd, mcpServers: [] });
-        sessionId = sessionResult.sessionId;
+        const lines = stdout.split(/\r?\n/);
+        const models = lines
+          .map((line) => line.trim())
+          .filter((line) => isValidModelId(line));
 
-        const rawModels = sessionResult.models?.availableModels ?? [];
-        const models = rawModels.map((m) => m.modelId);
+        if (models.length === 0) {
+          log.error('model discovery returned no parseable models', {
+            stdout: stdout.slice(0, 500),
+          });
+          reject(new Error('model discovery returned no parseable models'));
+          return;
+        }
 
-        clearTimeout(timeout);
-        await cleanup();
         resolve(models);
-      } catch (err) {
-        clearTimeout(timeout);
-        await cleanup();
-        reject(err instanceof Error ? err : new Error(String(err)));
       }
-    })();
+    );
   });
 }
 
@@ -133,7 +79,9 @@ export class OpencodeDiscoveryService {
       log.info('model discovery completed', { count: models.length });
       return models;
     } catch (err) {
-      log.error('model discovery probe failed', { error: err instanceof Error ? err.message : String(err) });
+      log.error('model discovery probe failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   }
