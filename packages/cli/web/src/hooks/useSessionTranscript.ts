@@ -15,7 +15,7 @@ interface UseSessionTranscriptOptions {
 interface LiveToolCall {
   toolCallId: string
   toolName: string
-  status: 'started' | 'completed' | 'failed'
+  status: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'
   title?: string
   target?: string
   input?: string
@@ -133,7 +133,7 @@ function createToolPart(tool: LiveToolCall): ToolPart {
       toolName: tool.toolName,
       displayTitle,
       displaySubtitle,
-      status: tool.status,
+      status: mapStatusToDisplay(tool.status),
       title: tool.title,
       target: tool.target,
       input,
@@ -146,6 +146,38 @@ function createToolPart(tool: LiveToolCall): ToolPart {
       changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
     },
   }
+}
+
+function mapStatusToDisplay(status: string): ToolPart['tool']['status'] {
+  switch (status) {
+    case 'started':
+      return 'running'
+    case 'completed':
+      return 'completed'
+    case 'failed':
+      return 'failed'
+    case 'timeout':
+      return 'failed'
+    case 'cancelled':
+      return 'cancelled'
+    default:
+      return 'pending'
+  }
+}
+
+function isTerminalState(state: string): boolean {
+  return state === 'completed' || state === 'failed' || state === 'timeout' || state === 'cancelled'
+}
+
+function getCorrelationKey(toolName: string, title?: string, target?: string): string {
+  const normalized = normalizeToolName(toolName, title)
+  const keyParts = [normalized]
+  if (target) {
+    keyParts.push(target)
+  } else if (title) {
+    keyParts.push(title)
+  }
+  return keyParts.join('|')
 }
 
 function createTemporaryTurn(at: string): SessionTurn {
@@ -187,7 +219,29 @@ function appendTextToTurn(turn: SessionTurn, text: string): SessionTurn {
   }
 }
 
-function updateToolInTurn(turn: SessionTurn, toolCallId: string, updates: Partial<LiveToolCall>): SessionTurn {
+function findToolByCorrelation(
+  turn: SessionTurn,
+  normalizedName: string,
+  target?: string,
+): number {
+  return turn.assistant.findIndex((p): p is ToolPart => {
+    if (p.type !== 'tool') return false
+    const toolNormalized = normalizeToolName(p.tool.toolName, p.tool.title, p.tool.rawInput, p.tool.rawOutput)
+    if (toolNormalized !== normalizedName) return false
+    const toolTarget = p.tool.target ?? p.tool.title
+    if (target && toolTarget) {
+      return target === toolTarget
+    }
+    return !isTerminalState(p.tool.status)
+  })
+}
+
+function updateToolInTurn(
+  turn: SessionTurn,
+  toolCallId: string,
+  updates: Partial<LiveToolCall>,
+  correlationKey?: string,
+): SessionTurn {
   const now = new Date().toISOString()
   const existingToolIndex = turn.assistant.findIndex(
     (p): p is ToolPart => p.type === 'tool' && p.tool.toolCallId === toolCallId,
@@ -212,6 +266,7 @@ function updateToolInTurn(turn: SessionTurn, toolCallId: string, updates: Partia
         const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
         const parsedEdit = parseEditInput(input)
         const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
+        const newStatus = updates.status ?? toolPart.tool.status
         return {
           ...toolPart,
           tool: {
@@ -224,10 +279,49 @@ function updateToolInTurn(turn: SessionTurn, toolCallId: string, updates: Partia
             rawOutput: output,
             changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
             startedAt,
-            completedAt: updates.status === 'completed' || updates.status === 'failed' ? now : toolPart.tool.completedAt,
+            completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
           },
         }
       }),
+    }
+  }
+
+  if (correlationKey) {
+    const [normalizedName, target] = correlationKey.split('|')
+    const correlatedIndex = findToolByCorrelation(turn, normalizedName, target)
+
+    if (correlatedIndex >= 0) {
+      return {
+        ...turn,
+        assistant: turn.assistant.map((p, i) => {
+          if (i !== correlatedIndex) return p
+          const toolPart = p as ToolPart
+          const rawInput = updates.rawInput ?? updates.input ?? toolPart.tool.rawInput ?? toolPart.tool.input
+          const rawOutput = updates.rawOutput ?? updates.output ?? toolPart.tool.rawOutput ?? toolPart.tool.output
+          const startedAt = updates.startedAt ?? toolPart.tool.startedAt
+          const input = stringifyPayload(rawInput) ?? toolPart.tool.input
+          const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
+          const parsedEdit = parseEditInput(input)
+          const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
+          const newStatus = updates.status ?? toolPart.tool.status
+          return {
+            ...toolPart,
+            tool: {
+              ...toolPart.tool,
+              ...updates,
+              toolCallId,
+              normalizedName,
+              input,
+              output,
+              rawInput: input,
+              rawOutput: output,
+              changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
+              startedAt,
+              completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
+            },
+          }
+        }),
+      }
     }
   }
 
@@ -247,7 +341,7 @@ function updateToolInTurn(turn: SessionTurn, toolCallId: string, updates: Partia
         rawInput: updates.rawInput,
         rawOutput: updates.rawOutput,
         startedAt: now,
-        completedAt: updates.status === 'completed' || updates.status === 'failed' ? now : null,
+        completedAt: isTerminalState(updates.status ?? 'started') ? now : null,
       }),
     ],
   }
@@ -271,6 +365,7 @@ export function useSessionTranscript({
   turnsRef.current = turns
 
   const liveToolCallMapRef = useRef<Map<string, LiveToolCall>>(new Map())
+  const pendingCorrelationRef = useRef<Map<string, { normalizedName: string; target?: string; turnIndex: number }>>(new Map())
   const mountedRef = useRef(true)
 
   const issueId = String(issueNumber)
@@ -298,9 +393,15 @@ export function useSessionTranscript({
     setNewContentAvailable(false)
   }, [])
 
+  const invalidateAndRefetch = useCallback(() => {
+    setIsFinalizing(true)
+    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
+  }, [queryClient, issueNumber, sessionId])
+
   useEffect(() => {
     setTurns(initialTurns)
     liveToolCallMapRef.current.clear()
+    pendingCorrelationRef.current.clear()
     setIsFinalizing(false)
     setTranscriptVersion((version) => version + 1)
   }, [initialTurns])
@@ -332,10 +433,14 @@ export function useSessionTranscript({
         if (detail.acpSessionId !== acpSessionId) return
 
         const now = new Date().toISOString()
+        const toolCallId = detail.toolCallId
+        const normalizedName = normalizeToolName(detail.toolName, detail.title, detail.rawInput, detail.rawOutput)
+        const target = detail.title
+        const correlationKey = getCorrelationKey(detail.toolName, detail.title, detail.title)
 
         if (detail.state === 'started') {
-          liveToolCallMapRef.current.set(detail.toolCallId, {
-            toolCallId: detail.toolCallId,
+          liveToolCallMapRef.current.set(toolCallId, {
+            toolCallId,
             toolName: detail.toolName,
             status: 'started',
             title: detail.title,
@@ -349,10 +454,12 @@ export function useSessionTranscript({
             completedAt: null,
           })
 
+          pendingCorrelationRef.current.set(toolCallId, { normalizedName, target, turnIndex: -1 })
+
           setTurns((prev) => {
             const next = ensureLiveTurn(prev, now)
             const lastTurn = next[next.length - 1]
-            next[next.length - 1] = updateToolInTurn(lastTurn, detail.toolCallId, {
+            next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
               toolName: detail.toolName,
               status: 'started',
               title: detail.title,
@@ -362,31 +469,38 @@ export function useSessionTranscript({
               rawInput: detail.rawInput,
               rawOutput: detail.rawOutput,
               startedAt: now,
-            })
+            }, correlationKey)
             return next
           })
           markNewContentRef.current()
-        } else {
-          const existing = liveToolCallMapRef.current.get(detail.toolCallId)
+        } else if (isTerminalState(detail.state)) {
+          const existing = liveToolCallMapRef.current.get(toolCallId)
           if (existing) {
-            existing.status = detail.state
+            existing.status = detail.state as LiveToolCall['status']
             existing.output = stringifyPayload(detail.rawOutput)
             existing.rawOutput = detail.rawOutput
             existing.completedAt = now
+            existing.error = detail.state === 'failed' ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed')) : existing.error
           }
 
           setTurns((prev) => {
             const next = ensureLiveTurn(prev, now)
             const lastTurn = next[next.length - 1]
-            next[next.length - 1] = updateToolInTurn(lastTurn, detail.toolCallId, {
+            const error = detail.state === 'failed' ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed')) : undefined
+            next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
               status: detail.state,
               output: stringifyPayload(detail.rawOutput),
               rawOutput: detail.rawOutput,
               completedAt: now,
-            })
+              error,
+            }, correlationKey)
             return next
           })
           markNewContentRef.current()
+
+          if (isTerminalState(detail.state)) {
+            invalidateAndRefetch()
+          }
         }
       }),
     )
@@ -407,10 +521,86 @@ export function useSessionTranscript({
           }
           return next
         })
-        setIsFinalizing(true)
+        invalidateAndRefetch()
         markNewContentRef.current()
+      }),
+    )
 
-        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
+    unsubs.push(
+      onAgentEvent('coder_session_failed', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (detail.coderSessionId !== sessionId) return
+
+        const now = new Date().toISOString()
+
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = {
+            ...lastTurn,
+            completedAt: now,
+          }
+          return next
+        })
+
+        const errorPart = createErrorPart(
+          detail.reason ?? 'Session failed',
+          'failed',
+          now,
+        )
+        setTurns((prev) => {
+          const next = [...prev]
+          if (next.length > 0) {
+            const lastTurn = next[next.length - 1]
+            next[next.length - 1] = {
+              ...lastTurn,
+              assistant: [...lastTurn.assistant, errorPart],
+            }
+          }
+          return next
+        })
+
+        invalidateAndRefetch()
+        markNewContentRef.current()
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('coder_session_cancelled', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (detail.coderSessionId !== sessionId) return
+
+        const now = new Date().toISOString()
+
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = {
+            ...lastTurn,
+            completedAt: now,
+          }
+          return next
+        })
+
+        const errorPart = createErrorPart(
+          detail.reason ?? 'Session cancelled',
+          'cancelled',
+          now,
+        )
+        setTurns((prev) => {
+          const next = [...prev]
+          if (next.length > 0) {
+            const lastTurn = next[next.length - 1]
+            next[next.length - 1] = {
+              ...lastTurn,
+              assistant: [...lastTurn.assistant, errorPart],
+            }
+          }
+          return next
+        })
+
+        invalidateAndRefetch()
+        markNewContentRef.current()
       }),
     )
 
@@ -444,7 +634,7 @@ export function useSessionTranscript({
         markNewContentRef.current()
 
         if (detail.status === 'recovered' || detail.status === 'failed') {
-          queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
+          invalidateAndRefetch()
         }
       }),
     )
@@ -453,7 +643,7 @@ export function useSessionTranscript({
       mountedRef.current = false
       for (const unsub of unsubs) unsub()
     }
-  }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient])
+  }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient, invalidateAndRefetch])
 
   return {
     turns,
