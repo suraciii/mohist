@@ -139,6 +139,58 @@ Duplicate scenario content.`);
       const mainSpecContent = fs.readFileSync(path.join(projectPath, 'openspec', 'specs', 'test-cap', 'spec.md'), 'utf-8');
       expect(mainSpecContent).not.toContain('Duplicate requirement content');
     });
+
+    it('rejects malformed delta sections with structured conflict output', async () => {
+      createChangeSpec('test-cap', `## CHANGED Requirements
+
+### Requirement: BrokenReq
+
+Broken content.
+
+#### Scenario: Broken scenario`);
+
+      const summary = await integrator.apply(changeDir, projectPath);
+
+      expect(summary.valid).toBe(false);
+      expect(summary.conflicts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            capability: 'test-cap',
+            type: 'malformed_delta',
+          }),
+        ]),
+      );
+      expect(summary.errors.some(error => error.includes('Unsupported delta section header'))).toBe(true);
+      expect(fs.existsSync(path.join(projectPath, 'openspec', 'specs', 'test-cap', 'spec.md'))).toBe(false);
+    });
+
+    it('does not write any candidate files when post-sync validation fails', async () => {
+      createMainSpec('test-cap', [
+        '### Requirement: ExistingReq\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.'
+      ]);
+      createChangeSpec('test-cap', `## ADDED Requirements
+
+### Requirement: AnotherReq
+
+Another content.
+
+#### Scenario: Added scenario
+Added scenario content.`);
+      createChangeSpec('second-cap', `## ADDED Requirements
+
+### Requirement: BrokenReq
+
+Broken content without a scenario.`);
+
+      const summary = await integrator.apply(changeDir, projectPath);
+
+      expect(summary.valid).toBe(false);
+      expect(summary.conflicts.some(c => c.type === 'missing_scenarios' && c.capability === 'second-cap')).toBe(true);
+
+      const existingSpec = fs.readFileSync(path.join(projectPath, 'openspec', 'specs', 'test-cap', 'spec.md'), 'utf-8');
+      expect(existingSpec).not.toContain('AnotherReq');
+      expect(fs.existsSync(path.join(projectPath, 'openspec', 'specs', 'second-cap', 'spec.md'))).toBe(false);
+    });
   });
 
   describe('RENAMED requirements', () => {
