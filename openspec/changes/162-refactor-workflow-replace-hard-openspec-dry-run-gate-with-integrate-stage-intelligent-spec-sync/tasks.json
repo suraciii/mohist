@@ -50,11 +50,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the extended SpecSyncSummary from T-001. Do not merge spec sync and archive behavior.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        267382
+      ]
     },
     {
       "id": "T-003",
