@@ -109,7 +109,7 @@ export function createIssueRoutes(
   _resolveConflictsDeps?: ConflictResolutionDeps,
   checkSuiteRepo?: CheckSuiteRepo,
   stageExecutionRepo?: StageExecutionRepo,
-  postMergeFinalizer?: PostMergeFinalizer,
+  _postMergeFinalizer?: PostMergeFinalizer,
 ): Hono {
   const app = new Hono();
 
@@ -1052,52 +1052,6 @@ export function createIssueRoutes(
       const approvalStage = issue.approvalState?.stage;
 
       if (approvalStage === Stage.Check) {
-        if (!mergeQueue) {
-          const response: ApiResponse = {
-            success: false,
-            error: 'MergeQueue not configured'
-          };
-          return c.json(response, 500);
-        }
-
-        const project = projectService.getById(projectId);
-
-        if (checkSuiteRepo && project) {
-          const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
-          if (activeSuite) {
-            let headSha: string | null = null;
-            try {
-              if (worktreeManager) {
-                const wtPath = worktreeManager.getPath(project.name, issue.number);
-                if (wtPath) {
-                  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: wtPath });
-                  headSha = stdout.trim();
-                }
-              }
-            } catch (err) {
-              log.warn('Failed to read HEAD SHA for approve validation', { issueNumber: number, error: err instanceof Error ? err.message : err });
-            }
-
-            if (headSha && headSha !== activeSuite.snapshotSha) {
-              checkSuiteRepo.updateStatus(activeSuite.id, 'running');
-              checkSuiteRepo.updateSnapshotSha(activeSuite.id, headSha);
-
-              if (agentRunner) {
-                agentRunner.enqueue(issue.id, 'resume-pipeline');
-              }
-
-              const response: ApiResponse = {
-                success: true,
-                data: {
-                  issue: issueService.getByNumber(projectId, number),
-                  message: 'Code has changed since last check, re-running checks'
-                }
-              };
-              return c.json(response, 202);
-            }
-          }
-        }
-
         if (issue.approvalState) {
           issueRepo.setApprovalState(issue.id, {
             ...issue.approvalState,
@@ -1106,13 +1060,18 @@ export function createIssueRoutes(
           });
         }
 
-        mergeQueue.enqueue(projectId, number);
+        issueRepo.updateStage(issue.id, Stage.Integrate);
+
+        const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
 
         const response: ApiResponse = {
           success: true,
           data: {
             issue: issueService.getByNumber(projectId, number),
-            message: `Issue #${number} approved, enqueued for merge`,
+            taskId: result.taskId,
+            status: result.status,
+            queuePosition: result.queuePosition,
+            message: `Issue #${number} approved, enqueued for resume-pipeline to Integrate stage`,
           }
         };
         return c.json(response, 202);
@@ -2431,47 +2390,29 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
       }
 
-      const project = projectService.getById(projectId);
-      if (!project) {
-        return c.json({ success: false, error: 'Project not found' } satisfies ApiResponse, 404);
-      }
-
-      if (!worktreeManager) {
-        return c.json({ success: false, error: 'WorktreeManager not configured' } satisfies ApiResponse, 500);
-      }
-
-      if (!worktreeManager.exists(project.name, issue.number)) {
-        return c.json({ success: false, error: `No worktree found for issue #${number}` } satisfies ApiResponse, 404);
-      }
-
-      const mergeResult = await worktreeManager.mergeBack(project.path, project.name, issue.number, project.baseBranch);
-
-      if (!mergeResult.success) {
-        return c.json({ success: false, error: mergeResult.message } satisfies ApiResponse, 409);
-      }
-
-      if (!postMergeFinalizer) {
-        return c.json({ success: false, error: 'PostMergeFinalizer not configured' } satisfies ApiResponse, 500);
-      }
-
-      const finalization = await postMergeFinalizer.finalize(issue);
-      if (!finalization.success) {
+      if (issue.stage !== Stage.Integrate) {
         return c.json({
           success: false,
-          error: finalization.error || 'Post-merge health gate failed',
-          data: { healthGateResult: finalization.healthGateResult },
-        } satisfies ApiResponse, 422);
+          error: `Direct merge is not allowed: issue is in ${issue.stage} stage. Use Check approval to route through Integrate stage, or retry a blocked Integrate issue.`
+        } satisfies ApiResponse, 409);
       }
-      const healthGateResult = finalization.healthGateResult;
-      const refreshedIssue = issueService.getByNumber(projectId, number);
+
+      if (!agentRunner) {
+        return c.json({ success: false, error: 'AgentRunnerService not configured' } satisfies ApiResponse, 500);
+      }
+
+      const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
+
       return c.json({
         success: true,
         data: {
-          issue: refreshedIssue ?? issue,
-          message: mergeResult.message,
-          healthGateResult,
+          issue: issueService.getByNumber(projectId, number),
+          taskId: result.taskId,
+          status: result.status,
+          queuePosition: result.queuePosition,
+          message: `Issue #${number} direct merge bypass prevented — routed to Integrate stage via resume-pipeline`,
         },
-      } satisfies ApiResponse);
+      } satisfies ApiResponse, 202);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
@@ -2590,7 +2531,7 @@ export function createIssueRoutes(
     }
   });
 
-  const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done];
+  const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done];
 
   app.post('/:number/rebase', async (c) => {
     try {

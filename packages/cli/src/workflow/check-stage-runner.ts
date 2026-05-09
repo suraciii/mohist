@@ -12,6 +12,9 @@ import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import { HealthGateCheck } from './checks/health-gate-check';
+import { OpenSpecSyncDryRunCheck } from './checks/openspec-sync-dry-run-check';
+import { MergeReadinessCheck } from './checks/merge-readiness-check';
+import { IntegrationHealthGatePreviewCheck } from './checks/integration-health-gate-preview-check';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
@@ -50,6 +53,9 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       : loadHealthGatePolicies(wf).check;
     this.preTaskChecks = options.checks ? [] : [
       new HealthGateCheck({ worktreePath: this.worktreePath, policy: this.checkHealthGatePolicy, stage: 'check' }),
+      new OpenSpecSyncDryRunCheck(),
+      new MergeReadinessCheck(),
+      new IntegrationHealthGatePreviewCheck(),
     ];
     this.postTaskChecks = options.checks ?? [
       new AiReviewCheck(),
@@ -317,24 +323,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected getNextStage(): Stage {
-    return Stage.Done;
-  }
-
-  async run(ctx: StageContext): Promise<StageRunResult> {
-    const result = await super.run(ctx);
-
-    if (result.success) {
-      try {
-        await ctx.artifactManager.archiveChange(ctx.issue.number);
-      } catch (err) {
-        log.error('Failed to archive change', {
-          issueNumber: ctx.issue.number,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-
-    return result;
+    return Stage.Integrate;
   }
 }
 

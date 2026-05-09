@@ -224,6 +224,7 @@ export function setupIssueCommands(program: Command): void {
             'not-merged': chalk.yellow,
             unknown: chalk.gray,
             'done-not-merged': chalk.red,
+            integrating: chalk.cyan,
           };
           const mergeColor = mergeStatusColors[mergeStatus] || chalk.white;
           const mergeStatusLabels: Record<MergeDeliveryStatus, string> = {
@@ -239,6 +240,7 @@ export function setupIssueCommands(program: Command): void {
             'not-merged': 'Not merged',
             unknown: 'Unknown',
             'done-not-merged': 'DONE BUT NOT MERGED',
+            integrating: 'Integrating',
           };
           console.log(`  Merge: ${mergeColor(mergeStatusLabels[mergeStatus])}`);
 

@@ -53,6 +53,10 @@ export type EventMap = {
   schedule_completed: { skillId: string; skillName: string; issueId: string };
   schedule_failed: { skillId: string; skillName: string; error: string };
   stage_task_update: { issueId: string; projectId: string; stage: string; taskId: string; taskTitle: string; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt: number; artifacts: string[] };
+  integration_started: { issueId: string; projectId: string; issueNumber: number };
+  integration_step_updated: { issueId: string; projectId: string; issueNumber: number; step: string; status: string; summary?: string; output?: unknown };
+  integration_completed: { issueId: string; projectId: string; issueNumber: number; steps: Array<{ step: string; status: string; output?: unknown }> };
+  integration_failed: { issueId: string; projectId: string; issueNumber: number; failingStep: string; error: string; output?: unknown };
 };
 
 export type EventName = keyof EventMap;

@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement deterministic OpenSpec spec sync service",
+      "spec": "specs/openspec-integration/spec.md#deterministic-spec-sync",
+      "description": "Add an OpenSpecIntegrator service that can preview and apply delta specs from an active change directory into openspec/specs. It must parse requirement blocks, validate added/modified/removed/renamed requirements, produce a structured sync summary, and fail closed on malformed or conflicting deltas.",
+      "acceptanceCriteria": [
+        "preview(changeDir, projectPath) reads change specs and main specs without modifying any files",
+        "apply(changeDir, projectPath) writes updated openspec/specs/<capability>/spec.md only after all validation passes",
+        "RENAMED requirements are processed before removed, modified, and added requirements",
+        "MODIFIED, REMOVED, and RENAMED FROM fail when the source requirement does not exist in the main spec",
+        "ADDED and RENAMED TO fail when the target requirement already exists",
+        "Duplicate requirement headers and requirement blocks without scenarios fail validation",
+        "Unit tests cover added, modified, removed, renamed, missing target spec, duplicate headers, missing scenarios, and no-write dry-run behavior",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/open-spec-integrator.ts, packages/cli/tests/openspec-integrator.test.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "This is the foundational service consumed by Check dry-run and Integrate apply. Keep ChangeArtifactsManager as a directory/artifact helper; do not put requirement semantics there.",
+      "attempts": 3,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1806747,
+        1811624,
+        1821721
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Add Check-stage integration readiness checks",
+      "spec": "specs/workflow-definition/spec.md#check-integration-readiness",
+      "description": "Add Check checks that prove a candidate is safe to integrate before user approval. The checks should dry-run OpenSpec sync, detect spec conflicts, check mergeability or clean rebase feasibility, and expose final integration health gate policy metadata without writing main specs, archiving changes, or merging.",
+      "acceptanceCriteria": [
+        "Check stage records an openspec-sync-dry-run result with touched capabilities, target files, counts by delta type, conflicts, and pass/fail status",
+        "Check stage records a mergeability result with target branch, base SHA, candidate head SHA, fast-forward status, clean rebase feasibility, and conflict files when known",
+        "Check stage records final integration health gate policy metadata using the existing postMerge policy as compatibility input",
+        "A spec sync dry-run conflict prevents user approval from being requested",
+        "A mergeability or clean rebase conflict prevents user approval from being requested",
+        "Dry-run checks do not modify openspec/specs, archive the change, merge, or run final integration health commands",
+        "Unit or integration tests cover successful readiness, spec conflict failure, mergeability failure, and no-write behavior",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/checks, packages/cli/src/workflow/check-stage-runner.ts, packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Consumes OpenSpecIntegrator.preview from T-001. These checks must run before UserApprovalCheck and remain read-only for canonical specs and archive state.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        341090
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Add Integrate stage model and runner skeleton",
+      "spec": "specs/pipeline-model/spec.md#integrate-stage-progression",
+      "description": "Add Stage.Integrate to backend types, transitions, workflow registration, and the initial IntegrateStageRunner path. Change CheckStageRunner to advance to Integrate and remove its archiveChange side effect so Check no longer completes, archives, or merges issues.",
+      "acceptanceCriteria": [
+        "Backend Stage enum, STAGE_ORDER, and STAGE_TRANSITIONS include integrate between check and done",
+        "CheckStageRunner returns Stage.Integrate on success and no longer calls artifactManager.archiveChange()",
+        "WorkflowEngine can run an IntegrateStageRunner and only marks IssueStatus.Completed after Stage.Done is reached",
+        "AgentRunnerService registers IntegrateStageRunner in the pipeline runner list",
+        "Stage execution records can be created with stage=integrate",
+        "Tests prove Check success transitions to Integrate rather than Done and that Check does not archive changes",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types/index.ts, packages/cli/src/workflow/integrate-stage-runner.ts, packages/cli/src/workflow/check-stage-runner.ts, packages/cli/src/services/agent-runner-service.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Consumes the readiness checks from T-002. The runner can initially fail with missing dependencies only in tests that do not exercise integration steps, but normal workflow registration should be in place.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1386353
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Run spec sync and change archive in Integrate",
+      "spec": "specs/openspec-integration/spec.md#spec-sync-before-change-archive",
+      "description": "Implement the first two Integrate steps: apply approved OpenSpec delta specs to main specs and then archive the active OpenSpec change. Record step evidence in the Integrate stage execution and fail the stage before archive, merge, or Done when spec sync or archive fails.",
+      "acceptanceCriteria": [
+        "Integrate applies delta specs to openspec/specs before attempting archive",
+        "Integrate writes a structured integrate:spec-sync result containing capabilities, counts, target files, and conflicts or success summary",
+        "Integrate archives to openspec/changes/archive/YYYY-MM-DD-<change>/ only after spec sync succeeds",
+        "Integrate writes a structured integrate:archive-change result containing archive path and success or failure summary",
+        "Spec sync failure blocks Integrate and does not archive, merge, run final health, or mark Done",
+        "Archive failure blocks Integrate and does not merge, run final health, or mark Done",
+        "Tests cover successful sync+archive, sync failure blocking archive, and archive failure blocking later steps",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/integrate-stage-runner.ts, packages/cli/src/artifacts/change-artifacts-manager.ts, packages/cli/tests/workflow/integrate-stage-runner.test.ts",
+      "dependsOn": [
+        "T-001",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Consumes OpenSpecIntegrator.apply from T-001 and the Integrate runner skeleton from T-003. Keep archiveChange as a low-level directory move only.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1304414
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Add no-code-fix integration merge path",
+      "spec": "specs/openspec-integration/spec.md#no-code-fix-integrate-merge",
+      "description": "Implement the Integrate merge step using a merge path that can fast-forward or cleanly rebase and then fast-forward without invoking agent conflict resolution, build-fix agents, --theirs auto-resolution, or product-code commits. Record merge truth and fail Integrate with actionable merge details when clean landing is not possible.",
+      "acceptanceCriteria": [
+        "Integrate merge succeeds when the candidate branch can fast-forward into the target branch",
+        "Integrate merge may perform a clean rebase with abort-on-conflict semantics before fast-forwarding",
+        "Merge conflicts fail with failing step merge and include conflicting files when available",
+        "Integrate merge does not call MergeQueue.resolveConflicts, conflict-resolution agents, fixBuildErrors, or health-gate auto-fix agents",
+        "Integrate merge records target branch, base SHA, candidate head SHA, and merge commit or landed head SHA in step output",
+        "Merge failure leaves the issue in Integrate and does not run final health or mark Done",
+        "Tests cover fast-forward success, clean rebase success, conflict failure, and proof that agent conflict/build-fix callbacks are not called",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/git/worktree-manager.ts, packages/cli/src/workflow/integrate-stage-runner.ts, packages/cli/tests/workflow/integrate-stage-runner.test.ts",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Consumes the Integrate step framework from T-004. Prefer a focused IntegrationMerger or WorktreeManager method instead of reusing MergeQueue.processItem, because MergeQueue currently owns auto-fix behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        627290
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Move final health verification into Integrate",
+      "spec": "specs/workflow-config/spec.md#integrate-final-health-gate",
+      "description": "Make Integrate own the final health gate after merge and before Done. Preserve healthGates.postMerge compatibility, present results as health:integrate, record the result under Stage.Integrate, and stop any finalizer path from directly setting Done outside the Integrate runner.",
+      "acceptanceCriteria": [
+        "Integrate runs final health verification after merge and before returning Stage.Done",
+        "Existing healthGates.postMerge config is still accepted and used as the default Integrate final health policy",
+        "Final health results are recorded as health:integrate with command, timeout, duration, enabled status, summary, exit code or timeout, and log excerpt",
+        "Disabled final health policy records a disabled pass result and allows Done transition",
+        "Final health failure leaves the issue not Done and records failing step final-health with actionable output",
+        "PostMergeFinalizer no longer directly updates issue stage/status to Done on normal pipeline paths",
+        "Regression tests cover final health pass, failure, disabled policy, and compatibility with postMerge config",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/post-merge-finalizer.ts, packages/cli/src/workflow/integrate-stage-runner.ts, packages/cli/src/workflow/workflow-loader.ts, packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "Consumes the merge step from T-005. It is acceptable to wrap or rename PostMergeFinalizer, but Done transition ownership must be the workflow/Integrate path, not a hidden finalizer side effect.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1849107
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Route approval and recovery through Integrate",
+      "spec": "specs/http-api/spec.md#integrate-approval-and-recovery",
+      "description": "Update API and agent recovery flows so Check approval transitions the issue to Integrate and resumes the pipeline instead of enqueueing hidden merge/finalization work. Ensure direct merge, retry, rebase, and recoverable issue paths cannot bypass Integrate verification or accidentally treat integrating issues as Done.",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/approve for Check approval marks approval approved, transitions issue stage to integrate, and enqueues resume-pipeline",
+        "Check approval no longer calls mergeQueue.enqueue on the normal workflow path",
+        "AgentRunnerService can resume issues in Stage.Integrate and run IntegrateStageRunner to completion or visible failure",
+        "Direct merge API either routes through the same Integrate service contract or returns a clear error that it cannot bypass Integrate",
+        "Retry/rebase/recovery rules include Integrate where appropriate and do not allow Done transition without successful Integrate evidence",
+        "Blocked Integrate failures retain stage=integrate and include blocked reason or step output with the failing step",
+        "API tests cover Check approval entering Integrate, resume from Integrate, direct merge bypass prevention, and recovery of an active Integrate issue",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts, packages/cli/src/services/agent-runner-service.ts, packages/cli/src/git/merge-queue.ts, packages/cli/tests/api-routes.test.ts, packages/cli/tests/recover-issues.test.ts",
+      "dependsOn": [
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "Consumes the full Integrate runner from T-006. This is the task that removes the hidden Check approve -> MergeQueue -> PostMergeFinalizer normal path.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1769638
+      ]
+    },
+    {
+      "id": "T-008",
+      "title": "Expose integration evidence and live events",
+      "spec": "specs/pipeline-session-events/spec.md#integration-progress-events",
+      "description": "Expose Integrate progress and evidence through backend event, SSE, and API surfaces. Add typed integration events and ensure issue detail/executions responses carry structured readiness and integration step evidence without requiring log scraping.",
+      "acceptanceCriteria": [
+        "EventBus defines integration_started, integration_step_updated, integration_completed, and integration_failed events",
+        "SSE event registration includes all integration events",
+        "IntegrateStageRunner emits integration events for start, each step status change, completion, and failure",
+        "GET /api/issues/:number and GET /api/issues/:number/executions expose enough structured data to render Check readiness and Integrate evidence",
+        "Integration event payloads include issueId, projectId, issueNumber, step, status, summary, and optional output where applicable",
+        "Tests cover event emission sequence for success and failure paths and API visibility of Integrate stage executions",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/event-bus.ts, packages/cli/src/api/events.ts, packages/cli/src/api/issues.ts, packages/cli/src/workflow/integrate-stage-runner.ts, packages/cli/tests",
+      "dependsOn": [
+        "T-007"
+      ],
+      "passes": true,
+      "notes": "Consumes the routed Integrate workflow from T-007. Prefer stage_executions as the primary evidence store unless list/card rendering proves a compact issue-level field is necessary.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        583793
+      ]
+    },
+    {
+      "id": "T-009",
+      "title": "Render Integrate stage and evidence in Web UI",
+      "spec": "specs/web-ui/spec.md#integrate-stage-visibility",
+      "description": "Update the frontend to treat Integrate as a distinct non-Done stage and render integration readiness, progress, failures, and Done evidence. The UI should show Check approval readiness before approval, Integrate step progress during integration, actionable failure details, and preserved evidence on Done issues.",
+      "acceptanceCriteria": [
+        "Frontend Stage enum and pipeline stage order include integrate between check and done",
+        "Issue cards and issue detail do not display Stage.Integrate issues as Done and show an integrating or integration-failed state",
+        "PipelineStatusTimeline displays Integrate between Check and Done",
+        "Check approval UI can display spec impact, sync dry-run result, merge readiness, target/base/head SHAs, and final health gate policy when available",
+        "Issue detail displays Integrate steps: Sync main specs, Archive OpenSpec change, Merge to target branch, Run final integration health gate, Complete issue",
+        "Integrate failure UI shows failing step, capability or conflicted files, requirement header or merge reason, health command summary/log excerpt when available, and next-action copy",
+        "Done issue detail displays review/approval output, spec sync summary, OpenSpec archive path, merge truth, and final health result when available",
+        "Frontend tests or snapshots cover Integrate timeline rendering, issue card non-Done behavior, failure rendering, and Done evidence rendering",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts, packages/cli/web/src/components, packages/cli/web/src/hooks, packages/cli/web/tests",
+      "dependsOn": [
+        "T-008"
+      ],
+      "passes": true,
+      "notes": "Consumes backend API/event shapes from T-008. Preserve existing visual language; do not redesign unrelated issue detail surfaces.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        516501
+      ]
+    },
+    {
+      "id": "T-010",
+      "title": "Add end-to-end Integrate regression coverage",
+      "spec": "specs/pipeline-model/spec.md#done-means-integration-completed",
+      "description": "Add regression coverage that exercises the full Check approve to Integrate to Done lifecycle and the key failure boundaries. The tests should prove Done means integration completed and that Integrate never launches code-fix or conflict-resolution agents.",
+      "acceptanceCriteria": [
+        "End-to-end or integration tests prove Check approval changes issue stage to integrate before Done",
+        "Tests prove successful Integrate syncs delta specs, archives the active change, merges the candidate, passes final health, and marks the issue Done/Completed",
+        "Tests prove spec-sync, archive, merge, and final-health failures each block Done with the correct failing step",
+        "Tests prove Integrate does not call agent conflict resolution or build-fix agent paths on merge or build failures",
+        "Tests prove Check no longer archives changes or triggers Done-side merge/finalization side effects",
+        "Tests prove Done issue evidence includes spec sync summary, archive path, merge truth, and final health result",
+        "Relevant backend and frontend test suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests, packages/cli/web/tests",
+      "dependsOn": [
+        "T-009"
+      ],
+      "passes": true,
+      "notes": "Consumes the complete backend and frontend implementation. Focus on high-value regressions that prevent hidden Check->Done, unsynced archived specs, and code-fix behavior during Integrate from returning.",
+      "attempts": 3,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1636666,
+        25783,
+        41096,
+        28871
+      ]
+    }
+  ]
+}

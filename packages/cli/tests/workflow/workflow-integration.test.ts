@@ -208,7 +208,7 @@ describe('Workflow Integration Tests', () => {
           new PassCheck('ai-review-passed'),
           new PassCheck('user-approval'),
         ],
-        nextStage: Stage.Done,
+        nextStage: Stage.Integrate,
         stage: Stage.Check,
       });
 
@@ -220,8 +220,14 @@ describe('Workflow Integration Tests', () => {
         updateStatus: vi.fn().mockReturnValue(makeIssue(Stage.Done)),
       } as unknown as IssueRepo;
 
+      const integrateRunner = new SimpleRunner({
+        checks: [],
+        nextStage: Stage.Done,
+        stage: Stage.Integrate,
+      });
+
       const engine = new WorkflowEngine({
-        runners: [planRunner, buildRunner, checkRunner],
+        runners: [planRunner, buildRunner, checkRunner, integrateRunner],
         issueRepo: mockIssueRepo,
         eventBus: ctx.eventBus,
         checkpointManager: ctx.checkpointManager,
@@ -230,8 +236,8 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(false);
-      expect(result.message).toContain('Check stage cannot transition directly to Done');
+      expect(result.completed).toBe(true);
+      expect(result.stage).toBe(Stage.Done);
 
       expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
         'issue-1',
@@ -240,6 +246,10 @@ describe('Workflow Integration Tests', () => {
       expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
         'issue-1',
         Stage.Check,
+      );
+      expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
+        'issue-1',
+        Stage.Integrate,
       );
     });
   });
@@ -323,7 +333,7 @@ describe('Workflow Integration Tests', () => {
 
       const checkRunner = new SimpleRunner({
         checks: [countingCheck],
-        nextStage: Stage.Done,
+        nextStage: Stage.Integrate,
         stage: Stage.Check,
       });
 
@@ -337,8 +347,14 @@ describe('Workflow Integration Tests', () => {
         updateStatus: vi.fn().mockReturnValue(makeIssue(Stage.Done)),
       } as unknown as IssueRepo;
 
+      const integrateRunner = new SimpleRunner({
+        checks: [],
+        nextStage: Stage.Done,
+        stage: Stage.Integrate,
+      });
+
       const engine = new WorkflowEngine({
-        runners: [planRunner, buildRunner, checkRunner],
+        runners: [planRunner, buildRunner, checkRunner, integrateRunner],
         issueRepo: mockIssueRepo,
         eventBus: ctx.eventBus,
         checkpointManager: ctx.checkpointManager,
@@ -347,8 +363,8 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(false);
-      expect(result.message).toContain('Check stage cannot transition directly to Done');
+      expect(result.completed).toBe(true);
+      expect(result.stage).toBe(Stage.Done);
     });
   });
 
@@ -675,9 +691,9 @@ describe('Workflow Integration Tests', () => {
         checks: [
           new PassCheck('build-test-passed'),
           new PassCheck('ai-review-passed'),
-          new PassCheck('user-approval'),
+          new PendingCheck(),
         ],
-        nextStage: Stage.Done,
+        nextStage: Stage.Integrate,
         stage: Stage.Check,
       });
 
@@ -687,12 +703,19 @@ describe('Workflow Integration Tests', () => {
           stageTransitions.push(stage);
           return makeIssue(stage);
         }),
+        setApprovalState: vi.fn(),
         clearApprovalState: vi.fn(),
         updateStatus: vi.fn().mockReturnValue(makeIssue(Stage.Done)),
       } as unknown as IssueRepo;
 
+      const integrateRunner = new SimpleRunner({
+        checks: [],
+        nextStage: Stage.Done,
+        stage: Stage.Integrate,
+      });
+
       const engine = new WorkflowEngine({
-        runners: [planRunner, buildRunner, checkRunner],
+        runners: [planRunner, buildRunner, checkRunner, integrateRunner],
         issueRepo: mockIssueRepo,
         eventBus: ctx.eventBus,
         checkpointManager: ctx.checkpointManager,
@@ -702,7 +725,7 @@ describe('Workflow Integration Tests', () => {
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
       expect(result.completed).toBe(false);
-      expect(result.message).toContain('Check stage cannot transition directly to Done');
+      expect(result.message).toContain('Waiting for user approval');
     });
   });
 
@@ -856,7 +879,7 @@ describe('Workflow Integration Tests', () => {
       });
       const checkRunner = new SimpleRunner({
         checks: [new PassCheck('ok')],
-        nextStage: Stage.Done,
+        nextStage: Stage.Integrate,
         stage: Stage.Check,
       });
 
@@ -868,8 +891,14 @@ describe('Workflow Integration Tests', () => {
         updateStatus: vi.fn().mockReturnValue(makeIssue(Stage.Done)),
       } as unknown as IssueRepo;
 
+      const integrateRunner = new SimpleRunner({
+        checks: [],
+        nextStage: Stage.Done,
+        stage: Stage.Integrate,
+      });
+
       const engine = new WorkflowEngine({
-        runners: [planRunner, buildRunner, checkRunner],
+        runners: [planRunner, buildRunner, checkRunner, integrateRunner],
         issueRepo: mockIssueRepo,
         eventBus: ctx.eventBus,
         checkpointManager: ctx.checkpointManager,
@@ -878,8 +907,8 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(false);
-      expect(result.message).toContain('Check stage cannot transition directly to Done');
+      expect(result.completed).toBe(true);
+      expect(result.stage).toBe(Stage.Done);
       expect((result as any).gateRequired).toBeUndefined();
     });
   });

@@ -74,6 +74,7 @@ export interface CheckContext {
   workflowLogRepo?: WorkflowLogRepo;
   sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
+  worktreeManager?: WorktreeManager;
   createWorkflowSessionObservers?: (options: WorkflowSessionObserverDeps) => import('../agent-runtime/session-observer').SessionObserver[];
 }
 
@@ -92,6 +93,7 @@ export interface WorktreeManager {
   list(projectPath: string): Promise<{ worktreePath: string; branch: string; issueNumber: number }[]>;
   getWorktreeStatus(projectPath: string, projectName: string, issueNumber: number): Promise<{ exists: boolean; branch: string; baseBranch?: string; ahead: number; behind: number; canFastForward: boolean; isRebaseInProgress: boolean; rebaseInProgress?: boolean; conflictingFiles?: string[] }>;
   prune(projectPath: string): Promise<void>;
+  mergeApprovedCandidate(projectPath: string, projectName: string, issueNumber: number, baseBranch?: string): Promise<{ targetBranch: string; baseSha: string; candidateHeadSha: string; landedSha: string; fastForward: boolean; rebased?: boolean } | { failingStep: 'merge'; targetBranch: string; baseSha: string; candidateHeadSha: string; conflictFiles?: string[]; error: string }>;
 }
 
 export interface ProjectRepo {
