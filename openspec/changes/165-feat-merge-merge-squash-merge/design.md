@@ -43,21 +43,19 @@ Callers already have the required context: integrate-stage has `ctx.issue.title`
 
 ### D3: Use a deterministic issue-level commit message format
 
-The squash commit subject should be derived from the issue title, with the issue number included for traceability. The body should summarize completed tasks from `tasks.json` when available, using stable ordering from the task file. A practical format is:
+The squash commit subject should be derived from the issue title, with the issue number included for traceability. The body should list all original commit messages from the feature branch using `git log --format=%s`. A practical format is:
 
 ```text
-<issue title>
+feat: {issue title} (#{number})
 
-Issue: #<number>
-
-Tasks:
-- [x] T-001 <title>
-- [x] T-002 <title>
+* {commit-1-message}
+* {commit-2-message}
+* {commit-3-message}
 ```
 
-If `tasks.json` is missing, malformed, or contains no tasks, fall back to a concise body with only the issue number. The merge must not fail solely because task metadata is unavailable.
+If there is only one commit (e.g., only a plan commit), the body may be omitted. The merge must not fail solely because commit message extraction is unavailable.
 
-**Alternatives considered:** Reusing the original branch commit messages was rejected because it keeps the noise this change is meant to remove. Making missing `tasks.json` a merge blocker was rejected because artifact validation belongs to earlier workflow gates and would make merge recovery harder.
+**Alternatives considered:** Using `tasks.json` was rejected because it introduces dependency on artifact files that may be missing or malformed. Using the original branch commit messages preserves the complete agent work narrative while keeping the base branch history clean.
 
 ### D4: Remove `fastForward` from successful merge results
 
