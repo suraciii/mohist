@@ -9,6 +9,7 @@ export interface SessionObserver {
   onRawNotification?(ctx: SessionContext, notification: SessionNotification): void;
   writeMohistPrompt?(ctx: SessionContext, prompt: MohistPromptEvent): void;
   nextToolCallId?(acpSessionId: string, toolName: string, state: 'started' | 'completed'): string;
+  onLivenessUpdate?(ctx: SessionContext, update: LivenessUpdate): void;
 }
 
 export interface MohistPromptEvent {
@@ -37,7 +38,15 @@ export interface SessionContext {
   readonly processPid: number | undefined;
 }
 
-export type SessionState = 'initializing' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'closed';
+export type SessionState = 'initializing' | 'running' | 'probing' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'closed';
+
+export interface LivenessUpdate {
+  status: SessionState;
+  lastDataAt?: string | null;
+  probeSentAt?: string | null;
+  probeDeadlineAt?: string | null;
+  failureReason?: string | null;
+}
 
 export interface ToolCallEvent {
   toolName: string;

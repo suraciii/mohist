@@ -167,6 +167,41 @@ export class WorkflowSessionObserver {
     }
   }
 
+  onLivenessUpdate(ctx: SessionContext, update: { status: string; lastDataAt?: string | null; probeSentAt?: string | null; probeDeadlineAt?: string | null; failureReason?: string | null }): void {
+    if (!this.coderSessionRepo || !this._coderSessionId) return;
+
+    try {
+      if (update.status === 'running' && update.lastDataAt) {
+        this.coderSessionRepo.markDataReceived(this._coderSessionId);
+      } else if (update.status === 'probing' && update.probeDeadlineAt) {
+        this.coderSessionRepo.markProbing(this._coderSessionId, update.probeDeadlineAt);
+      } else if (update.status === 'failed' && update.failureReason) {
+        this.coderSessionRepo.markFailed(this._coderSessionId, update.failureReason);
+      }
+    } catch (err) {
+      log.error('Failed to update coder_session liveness', { error: err instanceof Error ? err.message : String(err) });
+    }
+
+    if (this.eventBus) {
+      try {
+        const sseIssueId = ctx.issueNumber ? String(ctx.issueNumber) : (ctx.issueId ?? '');
+        this.eventBus.emit('coder_session_status_changed', {
+          issueId: sseIssueId,
+          projectId: ctx.projectId ?? '',
+          coderSessionId: this._coderSessionId,
+          acpSessionId: ctx.acpSessionId,
+          status: update.status,
+          lastDataAt: update.lastDataAt,
+          probeSentAt: update.probeSentAt,
+          probeDeadlineAt: update.probeDeadlineAt,
+          failureReason: update.failureReason,
+        });
+      } catch (err) {
+        log.error('Failed to emit coder_session_status_changed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  }
+
   onRawNotification(_ctx: SessionContext, _notification: SessionNotification): void {
   }
 

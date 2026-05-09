@@ -5,7 +5,8 @@ const log = Log.create({ service: 'session-state' });
 
 export const VALID_TRANSITIONS: Record<SessionState, SessionState[]> = {
   initializing: ['running', 'failed', 'timeout'],
-  running: ['completed', 'failed', 'timeout', 'cancelled'],
+  running: ['completed', 'failed', 'timeout', 'cancelled', 'probing'],
+  probing: ['running', 'failed', 'timeout', 'cancelled'],
   completed: ['closed'],
   failed: ['closed'],
   timeout: ['closed'],
