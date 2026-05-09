@@ -1,18 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
-import { Stage } from '../../types';
-
-const TASKS_COMPLETE_REACTION: ReactionConfig = {
-  type: 'retry-task',
-  maxAttempts: 3,
-  fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan },
-};
 
 export class AllTasksCompleteCheck implements Check {
   public readonly name = 'all-tasks-complete';
-  public readonly reaction: ReactionConfig = TASKS_COMPLETE_REACTION;
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     if (!ctx.changeDir) {

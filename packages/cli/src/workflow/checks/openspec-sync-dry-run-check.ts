@@ -1,14 +1,8 @@
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
 
 export class OpenSpecSyncDryRunCheck implements Check {
   public readonly name = 'openspec-sync-dry-run';
-  public readonly reaction: ReactionConfig = {
-    type: 'escalate',
-    escalateTarget: undefined,
-    fallbackReaction: { type: 'ask-user' },
-  };
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     const changeDir = ctx.changeDir;

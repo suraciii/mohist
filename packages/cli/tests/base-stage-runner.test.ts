@@ -1,32 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Stage } from '../src/types';
-import type { StageContext, StageRunResult, CheckResult, ReactionConfig, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, CheckpointManager } from '../src/workflow/stage-context';
+import type { StageContext, StageRunResult, CheckResult, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, CheckpointManager, CheckFailurePolicy, StageTaskResult } from '../src/workflow/stage-context';
 import type { Check, CheckContext } from '../src/workflow/checks';
 import { EventBus } from '../src/services/event-bus';
 import { BaseStageRunner } from '../src/workflow/base-stage-runner';
 
 class PassCheck implements Check {
   name: string;
-  reaction: ReactionConfig = { type: 'escalate' };
   constructor(name: string) { this.name = name; }
   async run(): Promise<CheckResult> { return { name: this.name, status: 'pass' }; }
 }
 
 class FailCheck implements Check {
   name: string;
-  reaction: ReactionConfig;
   runFn: () => Promise<CheckResult>;
-  fixFn?: () => Promise<void>;
 
-  constructor(name: string, reaction: ReactionConfig, runFn?: () => Promise<CheckResult>, fixFn?: () => Promise<void>) {
+  constructor(name: string, _reaction?: unknown, runFn?: () => Promise<CheckResult>) {
     this.name = name;
-    this.reaction = reaction;
     this.runFn = runFn ?? (async () => ({ name: this.name, status: 'fail', message: `${this.name} failed` }));
-    this.fixFn = fixFn;
   }
 
   async run(): Promise<CheckResult> { return this.runFn(); }
-  async fix(): Promise<void> { if (this.fixFn) await this.fixFn(); }
 }
 
 class TestStageRunner extends BaseStageRunner {
@@ -34,6 +28,9 @@ class TestStageRunner extends BaseStageRunner {
   private nextStage: Stage;
   private handledStage: Stage;
   private executeTasksFn: () => Promise<unknown>;
+  private failurePolicies: CheckFailurePolicy[];
+  private fixTaskFn: (taskId: string, failedCheck: CheckResult, attempt: number) => Promise<StageTaskResult | null>;
+  private approvalCheckNames: Set<string>;
   executeTasksCalls = 0;
 
   constructor(opts: {
@@ -41,15 +38,38 @@ class TestStageRunner extends BaseStageRunner {
     nextStage: Stage;
     stage?: Stage;
     executeTasksFn?: () => Promise<unknown>;
+    failurePolicies?: CheckFailurePolicy[];
+    fixTaskFn?: (taskId: string, failedCheck: CheckResult, attempt: number) => Promise<StageTaskResult | null>;
+    approvalCheckNames?: string[];
   }) {
     super();
     this.checks = opts.checks;
     this.nextStage = opts.nextStage;
     this.handledStage = opts.stage ?? Stage.Plan;
     this.executeTasksFn = opts.executeTasksFn ?? (async () => ({ done: true }));
+    this.failurePolicies = opts.failurePolicies ?? [];
+    this.fixTaskFn = opts.fixTaskFn ?? (async () => null);
+    this.approvalCheckNames = new Set(opts.approvalCheckNames ?? []);
   }
 
   canHandle(s: Stage): boolean { return s === this.handledStage; }
+
+  protected isApprovalCheck(checkName: string): boolean {
+    return this.approvalCheckNames.has(checkName);
+  }
+
+  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
+    return this.failurePolicies;
+  }
+
+  protected async runFixTask(
+    ctx: StageContext,
+    taskId: string,
+    failedCheck: CheckResult,
+    attempt: number,
+  ): Promise<StageTaskResult | null> {
+    return this.fixTaskFn(taskId, failedCheck, attempt);
+  }
 
   protected async executeTasks(): Promise<unknown> {
     this.executeTasksCalls++;
@@ -140,12 +160,9 @@ describe('BaseStageRunner', () => {
         },
       });
 
-      // Override check to track order
-      const origChecks = runner['checks'];
       runner['checks'] = [
         {
           name: 'check-a',
-          reaction: { type: 'escalate' as const },
           run: async () => { order.push('check'); return { name: 'check-a', status: 'pass' as const }; },
         },
       ];
@@ -156,102 +173,30 @@ describe('BaseStageRunner', () => {
     });
   });
 
-  describe('retry-task scenario', () => {
-    it('re-executes tasks and re-runs checks on retry-task reaction', async () => {
-      let failCount = 0;
-      const flakyCheck = new FailCheck(
-        'flaky',
-        { type: 'retry-task', maxAttempts: 2 },
-        async () => {
-          failCount++;
-          if (failCount <= 1) {
-            return { name: 'flaky', status: 'fail', message: 'flaky failed' };
-          }
-          return { name: 'flaky', status: 'pass' };
-        },
-      );
+  describe('failed check without policy', () => {
+    it('fails stage without escalation when check fails and no policy exists', async () => {
+      const failCheck = new FailCheck('always-fail');
 
       const runner = new TestStageRunner({
-        checks: [flakyCheck],
-        nextStage: Stage.Build,
-      });
-
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Build);
-      expect(runner.executeTasksCalls).toBe(2);
-    });
-
-    it('stops retrying after max attempts and returns failure', async () => {
-      const alwaysFail = new FailCheck(
-        'always-fail',
-        { type: 'retry-task', maxAttempts: 2 },
-      );
-
-      const runner = new TestStageRunner({
-        checks: [alwaysFail],
+        checks: [failCheck],
         nextStage: Stage.Build,
       });
 
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(runner.executeTasksCalls).toBe(3);
-    });
-
-    it('uses fallback reaction after max retries exhausted', async () => {
-      const alwaysFail = new FailCheck(
-        'always-fail',
-        {
-          type: 'retry-task',
-          maxAttempts: 1,
-          fallbackReaction: { type: 'escalate', escalateTarget: Stage.Draft },
-        },
-      );
-
-      const runner = new TestStageRunner({
-        checks: [alwaysFail],
-        nextStage: Stage.Build,
-      });
-
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Draft);
-    });
-  });
-
-  describe('escalate scenario', () => {
-    it('returns escalateToStage on escalate reaction', async () => {
-      const escalateCheck = new FailCheck(
-        'review',
-        { type: 'escalate', escalateTarget: Stage.Plan },
-      );
-
-      const runner = new TestStageRunner({
-        checks: [escalateCheck],
-        nextStage: Stage.Done,
-      });
-
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Plan);
+      expect(result.escalateToStage).toBeUndefined();
       expect(result.checkResults).toHaveLength(1);
       expect(result.checkResults[0].status).toBe('fail');
     });
 
     it('skips remaining checks after first failure', async () => {
-      const escalateCheck = new FailCheck(
-        'first',
-        { type: 'escalate', escalateTarget: Stage.Plan },
-      );
+      const failCheck = new FailCheck('first');
       const secondCheck = new PassCheck('second');
       const secondRunSpy = vi.spyOn(secondCheck, 'run');
 
       const runner = new TestStageRunner({
-        checks: [escalateCheck, secondCheck],
+        checks: [failCheck, secondCheck],
         nextStage: Stage.Done,
       });
 
@@ -260,19 +205,110 @@ describe('BaseStageRunner', () => {
       expect(result.success).toBe(false);
       expect(secondRunSpy).not.toHaveBeenCalled();
     });
+
+    it('does not re-execute tasks when check fails', async () => {
+      const failCheck = new FailCheck('flaky');
+
+      const runner = new TestStageRunner({
+        checks: [failCheck],
+        nextStage: Stage.Build,
+      });
+
+      await runner.run(ctx);
+
+      expect(runner.executeTasksCalls).toBe(1);
+    });
   });
 
-  describe('ask-user scenario', () => {
-    it('calls setApprovalState with awaiting status before emitting event', async () => {
+  describe('policy-driven fix task', () => {
+    it('runs fix task and re-runs check when policy exists', async () => {
+      let runCount = 0;
+      let fixCalled = false;
+      const flakyCheck = new FailCheck(
+        'build-test',
+        undefined,
+        async () => {
+          runCount++;
+          if (runCount <= 1) {
+            return { name: 'build-test', status: 'fail', message: 'build failed' };
+          }
+          return { name: 'build-test', status: 'pass' };
+        },
+      );
+
+      const runner = new TestStageRunner({
+        checks: [flakyCheck],
+        nextStage: Stage.Build,
+        failurePolicies: [{ checkName: 'build-test', fixTaskId: 'fix-build', maxAttempts: 2 }],
+        fixTaskFn: async () => {
+          fixCalled = true;
+          return { taskId: 'fix-build', title: 'Fix build', status: 'completed', artifacts: [], attempts: 1, duration: 100 };
+        },
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.nextStage).toBe(Stage.Build);
+      expect(fixCalled).toBe(true);
+      expect(runCount).toBe(2);
+    });
+
+    it('fails after max fix attempts exhausted', async () => {
+      let fixCount = 0;
+      const alwaysFail = new FailCheck(
+        'build-test',
+        undefined,
+        async () => ({ name: 'build-test', status: 'fail', message: 'still broken' }),
+      );
+
+      const runner = new TestStageRunner({
+        checks: [alwaysFail],
+        nextStage: Stage.Build,
+        failurePolicies: [{ checkName: 'build-test', fixTaskId: 'fix-build', maxAttempts: 2 }],
+        fixTaskFn: async () => {
+          fixCount++;
+          return { taskId: 'fix-build', title: 'Fix build', status: 'completed', artifacts: [], attempts: fixCount, duration: 100 };
+        },
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.escalateToStage).toBeUndefined();
+      expect(fixCount).toBe(2);
+    });
+
+    it('does not call executeTasks when running fix task', async () => {
+      const failCheck = new FailCheck('build-test');
+
+      const runner = new TestStageRunner({
+        checks: [failCheck],
+        nextStage: Stage.Build,
+        failurePolicies: [{ checkName: 'build-test', fixTaskId: 'fix-build', maxAttempts: 1 }],
+        fixTaskFn: async () => {
+          return { taskId: 'fix-build', title: 'Fix build', status: 'completed', artifacts: [], attempts: 1, duration: 100 };
+        },
+      });
+
+      await runner.run(ctx);
+
+      expect(runner.executeTasksCalls).toBe(1);
+    });
+  });
+
+  describe('ask-user / approval scenario', () => {
+    it('calls setApprovalState with awaiting status when approval check returns pending', async () => {
       const approvalCheck = new FailCheck(
         'user-approval',
-        { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } },
+        undefined,
         async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
       );
 
       const runner = new TestStageRunner({
         checks: [approvalCheck],
         nextStage: Stage.Done,
+        approvalCheckNames: ['user-approval'],
       });
 
       const result = await runner.run(ctx);
@@ -290,13 +326,14 @@ describe('BaseStageRunner', () => {
     it('emits approval_requested event', async () => {
       const approvalCheck = new FailCheck(
         'user-approval',
-        { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } },
+        undefined,
         async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
       );
 
       const runner = new TestStageRunner({
         checks: [approvalCheck],
         nextStage: Stage.Done,
+        approvalCheckNames: ['user-approval'],
       });
 
       const emitSpy = vi.spyOn(ctx.eventBus, 'emit');
@@ -312,13 +349,14 @@ describe('BaseStageRunner', () => {
     it('returns success false without nextStage (pipeline pauses)', async () => {
       const approvalCheck = new FailCheck(
         'user-approval',
-        { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } },
+        undefined,
         async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
       );
 
       const runner = new TestStageRunner({
         checks: [approvalCheck],
         nextStage: Stage.Done,
+        approvalCheckNames: ['user-approval'],
       });
 
       const result = await runner.run(ctx);
@@ -331,13 +369,14 @@ describe('BaseStageRunner', () => {
     it('calls setApprovalState before emitting approval_requested', async () => {
       const approvalCheck = new FailCheck(
         'user-approval',
-        { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan } },
+        undefined,
         async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
       );
 
       const runner = new TestStageRunner({
         checks: [approvalCheck],
         nextStage: Stage.Done,
+        approvalCheckNames: ['user-approval'],
       });
 
       const callOrder: string[] = [];
@@ -363,60 +402,6 @@ describe('BaseStageRunner', () => {
       expect(result.success).toBe(false);
       expect(result.message).toContain('task boom');
       expect(result.checkResults).toEqual([]);
-    });
-  });
-
-  describe('auto-fix scenario', () => {
-    it('calls fix and re-runs the check on auto-fix reaction', async () => {
-      let runCount = 0;
-      let fixCalled = false;
-      const autoFixCheck = new FailCheck(
-        'build-test',
-        { type: 'auto-fix', maxAttempts: 2 },
-        async () => {
-          runCount++;
-          if (runCount <= 1) {
-            return { name: 'build-test', status: 'fail', message: 'build failed' };
-          }
-          return { name: 'build-test', status: 'pass' };
-        },
-        async () => { fixCalled = true; },
-      );
-
-      const runner = new TestStageRunner({
-        checks: [autoFixCheck],
-        nextStage: Stage.Build,
-      });
-
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Build);
-      expect(fixCalled).toBe(true);
-      expect(runCount).toBe(2);
-    });
-
-    it('escalates after max auto-fix attempts exhausted', async () => {
-      const alwaysFailCheck = new FailCheck(
-        'build-test',
-        {
-          type: 'auto-fix',
-          maxAttempts: 2,
-          fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan },
-        },
-        async () => ({ name: 'build-test', status: 'fail', message: 'still broken' }),
-        async () => {},
-      );
-
-      const runner = new TestStageRunner({
-        checks: [alwaysFailCheck],
-        nextStage: Stage.Build,
-      });
-
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Plan);
     });
   });
 

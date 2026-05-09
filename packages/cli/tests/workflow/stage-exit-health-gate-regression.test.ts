@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Stage, IssueStatus, MergeState, type Issue } from '../../src/types';
-import type { CheckResult, CheckContext, ReactionConfig } from '../../src/workflow/checks';
+import type { CheckResult, CheckContext } from '../../src/workflow/checks';
 import type { StageContext, ChangeArtifactsManager, CheckpointManager, IssueRepo, ProjectRepo, WorktreeManager } from '../../src/workflow/stage-context';
 import { EventBus } from '../../src/services/event-bus';
 import { BaseStageRunner } from '../../src/workflow/base-stage-runner';
@@ -64,18 +64,15 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
 
 class PassCheck implements Check {
   name: string;
-  reaction: ReactionConfig = { type: 'escalate' };
   constructor(name: string) { this.name = name; }
   async run(): Promise<CheckResult> { return { name: this.name, status: 'pass' }; }
 }
 
 class FailCheck implements Check {
   name: string;
-  reaction: ReactionConfig;
   runFn: () => Promise<CheckResult>;
-  constructor(name: string, reaction: ReactionConfig, runFn?: () => Promise<CheckResult>) {
+  constructor(name: string, _reaction?: unknown, runFn?: () => Promise<CheckResult>) {
     this.name = name;
-    this.reaction = reaction;
     this.runFn = runFn ?? (async () => ({ name: this.name, status: 'fail', message: `${this.name} failed` }));
   }
   async run(): Promise<CheckResult> { return this.runFn(); }
@@ -87,7 +84,7 @@ class HealthGateCheckRunner extends BaseStageRunner {
   private handledStage: Stage;
   executeTasksCalls = 0;
 
-  constructor(opts: { checks: Check[]; nextStage: Stage; stage?: Stage }) {
+  constructor(opts: { checks: Check[]; nextStage: Stage; stage?: Stage; approvalCheckNames?: string[] }) {
     super();
     this.checks = opts.checks;
     this.nextStage = opts.nextStage;
@@ -95,6 +92,10 @@ class HealthGateCheckRunner extends BaseStageRunner {
   }
 
   canHandle(s: Stage): boolean { return s === this.handledStage; }
+
+  protected isApprovalCheck(checkName: string): boolean {
+    return checkName === 'user-approval';
+  }
 
   protected async executeTasks(): Promise<unknown> {
     this.executeTasksCalls++;
@@ -109,7 +110,7 @@ describe('Check-stage approval requires health:check pass', () => {
   it('UserApprovalCheck is NOT reached when health:check fails', async () => {
     const healthGateFailsCheck = new FailCheck(
       'health:check',
-      { type: 'escalate', escalateTarget: Stage.Build },
+      undefined,
       async () => ({ name: 'health:check', status: 'fail', message: 'health:check failed' }),
     );
     const aiReviewCheck = new PassCheck('ai-review');
@@ -174,7 +175,7 @@ describe('Check-stage approval requires health:check pass', () => {
   it('health:check failure blocks check-stage even when AI review would pass', async () => {
     const healthGateFailsCheck = new FailCheck(
       'health:check',
-      { type: 'escalate', escalateTarget: Stage.Build },
+      undefined,
     );
     const aiReviewCheck = new PassCheck('ai-review');
 
@@ -199,7 +200,6 @@ describe('Build-stage completion requires health:build pass', () => {
     const allTasksCompleteCheck = new PassCheck('all-tasks-complete');
     const healthGateFailsCheck = new FailCheck(
       'health:build',
-      { type: 'escalate', escalateTarget: Stage.Plan },
     );
 
     const runner = new HealthGateCheckRunner({
@@ -215,7 +215,6 @@ describe('Build-stage completion requires health:build pass', () => {
     expect(result.checkResults).toHaveLength(2);
     expect(result.checkResults[1].name).toBe('health:build');
     expect(result.checkResults[1].status).toBe('fail');
-    expect(result.escalateToStage).toBe(Stage.Plan);
   });
 
   it('Build stage produces success with nextStage=Check when health:build passes', async () => {
@@ -236,11 +235,10 @@ describe('Build-stage completion requires health:build pass', () => {
     expect(result.nextStage).toBe(Stage.Check);
   });
 
-  it('health:build failure escalates to plan as configured', async () => {
+  it('health:build failure fails stage without escalation', async () => {
     const allTasksCompleteCheck = new PassCheck('all-tasks-complete');
     const healthGateFailsCheck = new FailCheck(
       'health:build',
-      { type: 'escalate', escalateTarget: Stage.Plan },
     );
 
     const runner = new HealthGateCheckRunner({
@@ -253,7 +251,7 @@ describe('Build-stage completion requires health:build pass', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(false);
-    expect(result.escalateToStage).toBe(Stage.Plan);
+    expect(result.escalateToStage).toBeUndefined();
   });
 });
 
@@ -760,7 +758,7 @@ describe('Stage exit health guarantee integration', () => {
   });
 
   it('Failing health gate prevents later checks from running', async () => {
-    const healthCheck = new FailCheck('health:check', { type: 'escalate', escalateTarget: Stage.Build });
+    const healthCheck = new FailCheck('health:check');
     const aiReviewCheck = new PassCheck('ai-review');
     const userApprovalCheck = new PassCheck('user-approval');
 

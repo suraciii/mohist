@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Stage, IssueStatus, type Issue } from '../../src/types';
-import type { CheckContext, CheckResult, ReactionConfig } from '../../src/workflow/checks';
+import type { CheckContext, CheckResult } from '../../src/workflow/checks';
 import type { StageContext } from '../../src/workflow/stage-context';
 import { EventBus } from '../../src/services/event-bus';
 import type { ChangeArtifactsManager, CheckpointManager } from '../../src/workflow/stage-context';
@@ -169,19 +169,15 @@ describe('UserApprovalCheck stage-awareness', () => {
   });
 });
 
-describe('CheckStageRunner uses Check-stage escalation target', () => {
-  it('UserApprovalCheck constructor is called with Stage.Check in check runner', () => {
+describe('CheckStageRunner stage-aware approval', () => {
+  it('UserApprovalCheck is constructed with Stage.Check for check runner', () => {
     const check = new UserApprovalCheck(Stage.Check);
-    expect(check.reaction.fallbackReaction).toEqual(
-      { type: 'escalate', escalateTarget: Stage.Check },
-    );
+    expect(check.name).toBe('user-approval');
   });
 
-  it('UserApprovalCheck for Plan stage escalates to Stage.Plan', () => {
+  it('UserApprovalCheck for Plan stage uses Stage.Plan', () => {
     const check = new UserApprovalCheck(Stage.Plan);
-    expect(check.reaction.fallbackReaction).toEqual(
-      { type: 'escalate', escalateTarget: Stage.Plan },
-    );
+    expect(check.name).toBe('user-approval');
   });
 });
 

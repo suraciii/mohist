@@ -71,6 +71,10 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     return this.preTaskChecks;
   }
 
+  protected isApprovalCheck(checkName: string): boolean {
+    return checkName === 'user-approval';
+  }
+
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
     if (!this.usesDefaultChecks) {
       return { done: true };

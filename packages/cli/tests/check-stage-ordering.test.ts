@@ -3,20 +3,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Stage, IssueStatus } from '../src/types';
-import type { StageContext, ReactionConfig, CheckResult } from '../src/workflow/stage-context';
+import type { StageContext, CheckResult } from '../src/workflow/stage-context';
 import type { Check } from '../src/workflow/checks';
-import { CheckStageRunner } from '../src/workflow/check-stage-runner';
 import { EventBus } from '../src/services/event-bus';
 import { BaseStageRunner } from '../src/workflow/base-stage-runner';
+import { CheckStageRunner } from '../src/workflow/check-stage-runner';
 
-function makeCheck(name: string, reaction: ReactionConfig, runFn: () => Promise<CheckResult>, fixFn?: () => Promise<void>): Check {
-  return { name, reaction, run: runFn, fix: fixFn } as Check;
+function makeCheck(name: string, runFn: () => Promise<CheckResult>): Check {
+  return { name, run: runFn };
 }
 
 function makePassCheck(name: string): Check {
   return makeCheck(
     name,
-    { type: 'escalate', escalateTarget: Stage.Build },
     async () => ({ name, status: 'pass', message: `${name} passed` }),
   );
 }
@@ -24,17 +23,7 @@ function makePassCheck(name: string): Check {
 function makeFailCheck(name: string, message = `${name} failed`): Check {
   return makeCheck(
     name,
-    { type: 'escalate', escalateTarget: Stage.Build },
     async () => ({ name, status: 'fail', message }),
-  );
-}
-
-function makeAutoFixFailCheck(name: string, runFn: () => Promise<CheckResult>, fixFn?: () => Promise<void>, maxAttempts = 2): Check {
-  return makeCheck(
-    name,
-    { type: 'auto-fix', maxAttempts, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build } },
-    runFn,
-    fixFn,
   );
 }
 
@@ -101,6 +90,10 @@ class TestStageRunner extends BaseStageRunner {
   handledStage = Stage.Check;
 
   canHandle(s: Stage): boolean { return s === this.handledStage; }
+
+  protected isApprovalCheck(checkName: string): boolean {
+    return checkName === 'user-approval';
+  }
 
   protected async executeTasks(): Promise<unknown> {
     this.executeTasksCalls++;
@@ -201,15 +194,14 @@ describe('CheckStageRunner ordering', () => {
   describe('Build/test failure after max autofix attempts', () => {
     it('stops with failure when autofix exhausts max attempts', async () => {
       let runCount = 0;
-      const alwaysFail = makeAutoFixFailCheck(
+      const alwaysFail = makeFailCheck(
         'build-test',
-        async () => {
-          runCount++;
-          return { name: 'build-test', status: 'fail', message: 'Build failed', output: { buildLog: 'error log' } };
-        },
-        async () => {},
-        2,
+        'Build failed',
       );
+      alwaysFail.run = async () => {
+        runCount++;
+        return { name: 'build-test', status: 'fail', message: 'Build failed', output: { buildLog: 'error log' } };
+      };
 
       const runner = new TestStageRunner();
       runner.preTaskChecks = [alwaysFail];
@@ -219,16 +211,15 @@ describe('CheckStageRunner ordering', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(runCount).toBe(3);
+      expect(runCount).toBe(1);
     });
 
     it('failure includes concise message from check result', async () => {
-      const alwaysFail = makeAutoFixFailCheck(
+      const alwaysFail = makeFailCheck(
         'build-test',
-        async () => ({ name: 'build-test', status: 'fail', message: 'Build & test 失败 (exit code 1)', output: { buildLog: 'error' } }),
-        async () => {},
-        2,
+        'Build & test 失败 (exit code 1)',
       );
+      alwaysFail.run = async () => ({ name: 'build-test', status: 'fail', message: 'Build & test 失败 (exit code 1)', output: { buildLog: 'error' } });
 
       const runner = new TestStageRunner();
       runner.preTaskChecks = [alwaysFail];
@@ -242,12 +233,11 @@ describe('CheckStageRunner ordering', () => {
 
     it('failure output includes buildLog from check result', async () => {
       const longLog = 'line1\nline2\nerror TS2307\nline4\nerror TS2339\n';
-      const alwaysFail = makeAutoFixFailCheck(
+      const alwaysFail = makeFailCheck(
         'build-test',
-        async () => ({ name: 'build-test', status: 'fail', message: 'Build failed', output: { buildLog: longLog } }),
-        async () => {},
-        2,
+        'Build failed',
       );
+      alwaysFail.run = async () => ({ name: 'build-test', status: 'fail', message: 'Build failed', output: { buildLog: longLog } });
 
       const runner = new TestStageRunner();
       runner.preTaskChecks = [alwaysFail];
@@ -265,12 +255,7 @@ describe('CheckStageRunner ordering', () => {
 
   describe('review.md and review-self-check.md are not generated on build/test failure', () => {
     it('executeTasks not called means no review artifacts created', async () => {
-      const alwaysFail = makeAutoFixFailCheck(
-        'build-test',
-        async () => ({ name: 'build-test', status: 'fail', message: 'Build failed' }),
-        async () => {},
-        2,
-      );
+      const alwaysFail = makeFailCheck('build-test', 'Build failed');
 
       const runner = new TestStageRunner();
       runner.preTaskChecks = [alwaysFail];
@@ -307,18 +292,13 @@ describe('CheckStageRunner ordering', () => {
 
   describe('approval_requested is not emitted unless build/test and AI review have passed', () => {
     it('approval_requested not emitted when pre-task checks fail', async () => {
-      const alwaysFail = makeAutoFixFailCheck(
-        'build-test',
-        async () => ({ name: 'build-test', status: 'fail', message: 'Build failed' }),
-        async () => {},
-        2,
-      );
+      const alwaysFail = makeFailCheck('build-test', 'Build failed');
 
       const runner = new TestStageRunner();
       runner.preTaskChecks = [alwaysFail];
       runner.postTaskChecks = [
         makePassCheck('ai-review'),
-        makeCheck('user-approval', { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build } }, async () => ({
+        makeCheck('user-approval', async () => ({
           name: 'user-approval', status: 'pending', message: 'Waiting for approval',
         })),
       ];
@@ -336,7 +316,7 @@ describe('CheckStageRunner ordering', () => {
       runner.preTaskChecks = [makePassCheck('build-test')];
       runner.postTaskChecks = [
         makePassCheck('ai-review'),
-        makeCheck('user-approval', { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build } }, async () => ({
+        makeCheck('user-approval', async () => ({
           name: 'user-approval', status: 'pending', message: 'Waiting for approval',
         })),
       ];
@@ -355,7 +335,7 @@ describe('CheckStageRunner ordering', () => {
       runner.preTaskChecks = [makePassCheck('build-test')];
       runner.postTaskChecks = [
         makeFailCheck('ai-review', 'AI review failed'),
-        makeCheck('user-approval', { type: 'ask-user', fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build } }, async () => ({
+        makeCheck('user-approval', async () => ({
           name: 'user-approval', status: 'pending', message: 'Waiting for approval',
         })),
       ];
@@ -369,12 +349,7 @@ describe('CheckStageRunner ordering', () => {
     });
 
     it('ai-review check not run when build-test fails', async () => {
-      const alwaysFail = makeAutoFixFailCheck(
-        'build-test',
-        async () => ({ name: 'build-test', status: 'fail', message: 'Build failed' }),
-        async () => {},
-        2,
-      );
+      const alwaysFail = makeFailCheck('build-test', 'Build failed');
 
       const aiReviewCheck = makePassCheck('ai-review');
       const aiReviewRun = vi.spyOn(aiReviewCheck, 'run');
@@ -390,52 +365,27 @@ describe('CheckStageRunner ordering', () => {
     });
   });
 
-  describe('Build/test autofix success continues to AI review', () => {
-    it('when autofix succeeds, stage continues to post-task checks', async () => {
-      let runCount = 0;
-      const flakyBuild = makeAutoFixFailCheck(
-        'build-test',
-        async () => {
-          runCount++;
-          if (runCount <= 1) {
-            return { name: 'build-test', status: 'fail', message: 'Build failed' };
-          }
-          return { name: 'build-test', status: 'pass' };
-        },
-        async () => {},
-        2,
-      );
+  describe('Build/test failure stops pre-task checks', () => {
+    it('when build-test fails, stage fails without continuing to post-task checks', async () => {
+      const failCheck = makeFailCheck('build-test', 'Build failed');
 
       const aiReviewCheck = makePassCheck('ai-review');
       const aiReviewRun = vi.spyOn(aiReviewCheck, 'run');
 
       const runner = new TestStageRunner();
-      runner.preTaskChecks = [flakyBuild];
+      runner.preTaskChecks = [failCheck];
       runner.postTaskChecks = [aiReviewCheck];
 
       const ctx = createMockContext(tmpDir);
       const result = await runner.run(ctx);
 
-      expect(result.success).toBe(true);
-      expect(runCount).toBe(2);
-      expect(aiReviewRun).toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(aiReviewRun).not.toHaveBeenCalled();
     });
 
-    it('after autofix success, executeTasks is called', async () => {
-      let runCount = 0;
-      const flakyBuild = makeAutoFixFailCheck(
-        'build-test',
-        async () => {
-          runCount++;
-          if (runCount <= 1) return { name: 'build-test', status: 'fail', message: 'Build failed' };
-          return { name: 'build-test', status: 'pass' };
-        },
-        async () => {},
-        2,
-      );
-
+    it('after pre-task check passes, executeTasks is called', async () => {
       const runner = new TestStageRunner();
-      runner.preTaskChecks = [flakyBuild];
+      runner.preTaskChecks = [makePassCheck('build-test')];
       runner.postTaskChecks = [];
       runner.executeTasksFn = vi.fn().mockImplementation(() => {
         const reviewPath = path.join(tmpDir, 'openspec', 'changes', '42-test', 'review.md');
@@ -447,7 +397,6 @@ describe('CheckStageRunner ordering', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(runCount).toBe(2);
       expect(runner.executeTasksCalls).toBe(1);
       expect(artifactExists(tmpDir, 42, 'review.md')).toBe(true);
     });

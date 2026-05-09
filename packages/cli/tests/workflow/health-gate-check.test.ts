@@ -242,46 +242,6 @@ describe('HealthGateCheck', () => {
     });
   });
 
-  describe('reaction behavior', () => {
-    it('exposes auto-fix reaction when policy.autoFix is true', async () => {
-      const check = new HealthGateCheck({
-        worktreePath: '/tmp/worktree',
-        policy: createMockPolicy({ autoFix: true, maxFixAttempts: 2 }),
-        stage: 'build',
-      });
-
-      expect(check.reaction.type).toBe('auto-fix');
-      expect(check.reaction.maxAttempts).toBe(2);
-    });
-
-    it('exposes fallback reaction when policy.autoFix is false', async () => {
-      const check = new HealthGateCheck({
-        worktreePath: '/tmp/worktree',
-        policy: createMockPolicy({
-          autoFix: false,
-          fallbackReaction: { type: 'escalate', escalateTarget: 'plan' as any },
-        }),
-        stage: 'build',
-      });
-
-      expect(check.reaction.type).toBe('escalate');
-      expect(check.reaction.escalateTarget).toBe('plan');
-    });
-
-    it('exposes ask-user as default fallback reaction', async () => {
-      const check = new HealthGateCheck({
-        worktreePath: '/tmp/worktree',
-        policy: createMockPolicy({
-          autoFix: false,
-          fallbackReaction: { type: 'ask-user' },
-        }),
-        stage: 'plan',
-      });
-
-      expect(check.reaction.type).toBe('ask-user');
-    });
-  });
-
   describe('output structure', () => {
     it('pass output contains kind, stage, command, timeout, duration, enabled status, and log excerpt', async () => {
       execFileMock.mockImplementation((_cmd: any, _args: any, _opts: any, cb: any) => {

@@ -1,15 +1,8 @@
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
 import { parseVerdict, readReportFile } from '../utils';
-
-const ARTIFACT_REACTION: ReactionConfig = {
-  type: 'ask-user',
-  fallbackReaction: { type: 'escalate' },
-};
 
 export class SelfReviewPassedCheck implements Check {
   public readonly name = 'self-review-passed';
-  public readonly reaction: ReactionConfig = ARTIFACT_REACTION;
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     if (!ctx.changeDir) {
