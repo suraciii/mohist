@@ -243,7 +243,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
               leaveFrom="transform opacity-100 scale-100"
               leaveTo="transform opacity-0 scale-95"
             >
-              <Popover.Panel className="fixed inset-x-2 top-auto z-50 mt-2 md:absolute md:inset-x-auto md:right-0 md:w-80 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
+              <Popover.Panel portal={false} className="fixed inset-x-2 top-auto z-50 mt-2 md:absolute md:inset-x-auto md:right-0 md:w-80 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
                 <div className="p-2">
                   <div className="relative">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2">
@@ -399,7 +399,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                           leaveFrom="transform opacity-100 scale-100"
                           leaveTo="transform opacity-0 scale-95"
                         >
-                          <Popover.Panel className="fixed inset-x-2 top-auto z-50 mt-1 md:absolute md:inset-x-auto md:right-0 md:w-64 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
+                          <Popover.Panel portal={false} className="fixed inset-x-2 top-auto z-50 mt-1 md:absolute md:inset-x-auto md:right-0 md:w-64 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
                             <div className="max-h-60 overflow-y-auto">
                               {localStageModels[stage] && (
                                 <button
