@@ -81,11 +81,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep success:boolean backward compatible on AcpSessionResult while adding status/failureKind/failureReason metadata. Test thresholds should be injectable through AgentSessionOptions.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1421375
+      ]
     },
     {
       "id": "T-004",
