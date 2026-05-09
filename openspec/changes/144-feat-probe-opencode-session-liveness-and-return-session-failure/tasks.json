@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Probe opencode ACP session liveness, persist session call status, and return session failure to task/workflow callers without changing issue state directly.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/db/migrations.ts and packages/cli/src/db/coder-session-repo.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Do not add IssueSessionSummary or write session state into issues.stage/status. Treat probing as a non-terminal coder_session status."
+      "passes": true,
+      "notes": "Do not add IssueSessionSummary or write session state into issues.stage/status. Treat probing as a non-terminal coder_session status.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        758008
+      ]
     },
     {
       "id": "T-002",
@@ -45,7 +50,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Do not reuse coder_recovery_status for liveness probing; recovery and liveness are separate concepts."
+      "notes": "Do not reuse coder_recovery_status for liveness probing; recovery and liveness are separate concepts.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -71,7 +79,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Keep success:boolean backward compatible on AcpSessionResult while adding status/failureKind/failureReason metadata. Test thresholds should be injectable through AgentSessionOptions."
+      "notes": "Keep success:boolean backward compatible on AcpSessionResult while adding status/failureKind/failureReason metadata. Test thresholds should be injectable through AgentSessionOptions.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -94,7 +105,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "This task should not design a new retry/recovery workflow; use existing task failure policy."
+      "notes": "This task should not design a new retry/recovery workflow; use existing task failure policy.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -116,7 +130,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Do not add runtime health taxonomy or write session state into the issue domain."
+      "notes": "Do not add runtime health taxonomy or write session state into the issue domain.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -139,7 +156,10 @@
         "T-005"
       ],
       "passes": false,
-      "notes": "Do not expose healthy/quiet/stale/hung-suspected/recoverable as user-facing states."
+      "notes": "Do not expose healthy/quiet/stale/hung-suspected/recoverable as user-facing states.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -162,7 +182,10 @@
         "T-006"
       ],
       "passes": false,
-      "notes": "Do not expose healthy/quiet/stale/hung-suspected/recoverable as user-facing states."
+      "notes": "Do not expose healthy/quiet/stale/hung-suspected/recoverable as user-facing states.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -186,7 +209,10 @@
         "T-006"
       ],
       "passes": false,
-      "notes": "Preserve the existing visual language of the session UI; this is a state/metadata display change, not a redesign."
+      "notes": "Preserve the existing visual language of the session UI; this is a state/metadata display change, not a redesign.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-009",
@@ -212,7 +238,10 @@
         "T-008"
       ],
       "passes": false,
-      "notes": "Use injected short liveness thresholds and fake/mock ACP behavior to avoid slow or flaky tests."
+      "notes": "Use injected short liveness thresholds and fake/mock ACP behavior to avoid slow or flaky tests.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
