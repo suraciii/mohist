@@ -61,9 +61,12 @@ function mergeTasksForStage(
   if (!defs) return taskResults
 
   const resultById = new Map(taskResults.map((t) => [t.taskId, t]))
-  return defs.map((def) => {
+  const mapped: (StageTaskResult | PendingTask)[] = defs.map((def) => {
     const result = resultById.get(def.taskId)
-    if (result) return result
+    if (result) {
+      resultById.delete(def.taskId)
+      return result
+    }
     const isRunning = runningTaskIds.has(def.taskId)
     return {
       taskId: def.taskId,
@@ -74,6 +77,12 @@ function mergeTasksForStage(
       duration: 0,
     }
   })
+
+  for (const result of resultById.values()) {
+    mapped.push(result)
+  }
+
+  return mapped
 }
 
 function formatDuration(ms: number): string {
@@ -305,7 +314,9 @@ function TaskItem({
   const isPending = task.status === 'pending'
   const isRunning = task.status === 'running'
   const isFailed = task.status === 'failed'
-  const canExpand = task.artifacts.length > 0 || isFailed
+  const taskOutput = 'output' in task ? (task as StageTaskResult).output : undefined
+  const hasOutput = taskOutput != null
+  const canExpand = task.artifacts.length > 0 || isFailed || hasOutput
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
@@ -365,6 +376,11 @@ function TaskItem({
                 <span className="font-mono truncate">{a}</span>
               </div>
             ))}
+            {hasOutput && (
+              <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words font-mono bg-gray-100 rounded p-2 max-h-40 overflow-auto">
+                {typeof taskOutput === 'string' ? taskOutput : JSON.stringify(taskOutput, null, 2)}
+              </pre>
+            )}
           </div>
         </div>
       )}
@@ -377,7 +393,7 @@ function isHealthGateCheck(check: CheckResult): boolean {
   return output?.kind === 'health-gate' || check.name.startsWith('health:')
 }
 
-function CheckItem({ check }: { check: CheckResult }) {
+function CheckItem({ check, attemptLabel }: { check: CheckResult; attemptLabel?: string }) {
   const isPending = check.status === 'pending'
   const isFailed = check.status === 'fail' || check.status === 'error'
   const isHealthGate = isHealthGateCheck(check)
@@ -394,7 +410,8 @@ function CheckItem({ check }: { check: CheckResult }) {
     icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
   }
 
-  const displayName = isHealthGate ? `Health Gate: ${check.name.replace('health:', '')}` : check.name
+  const baseName = isHealthGate ? `Health Gate: ${check.name.replace('health:', '')}` : check.name
+  const displayName = attemptLabel ? `${baseName} (${attemptLabel})` : baseName
 
   return (
     <div
@@ -807,9 +824,20 @@ function StepList({
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Checks</h3>
           <div className="space-y-1.5">
-            {checkResults.map((check) => (
-              <CheckItem key={check.name} check={check} />
-            ))}
+            {(() => {
+              const nameCounts = new Map<string, number>()
+              for (const c of checkResults) {
+                nameCounts.set(c.name, (nameCounts.get(c.name) ?? 0) + 1)
+              }
+              const nameSeen = new Map<string, number>()
+              return checkResults.map((check, idx) => {
+                const total = nameCounts.get(check.name) ?? 1
+                const seen = (nameSeen.get(check.name) ?? 0) + 1
+                nameSeen.set(check.name, seen)
+                const attemptLabel = total > 1 ? `attempt ${seen}` : undefined
+                return <CheckItem key={`${check.name}-${idx}`} check={check} attemptLabel={attemptLabel} />
+              })
+            })()}
           </div>
         </div>
       )}
