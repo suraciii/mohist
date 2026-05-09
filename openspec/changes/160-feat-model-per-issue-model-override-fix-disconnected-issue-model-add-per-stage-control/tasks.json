@@ -227,11 +227,14 @@
         "T-006",
         "T-007"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "This is the integration gate for the change. Prefer `npm test` and `npm run build` from `packages/cli` unless project scripts indicate a narrower equivalent.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        206316
+      ]
     }
   ]
 }
