@@ -120,11 +120,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Final verification consumes every earlier output. If manual verification is needed, use temporary directories so repository .agents/skills files are not accidentally changed.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        190680
+      ]
     }
   ]
 }
