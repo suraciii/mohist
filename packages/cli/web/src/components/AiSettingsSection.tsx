@@ -462,7 +462,7 @@ export function AiSettingsSection() {
               <label className="block text-xs font-medium text-gray-700">
                 Coder Model
               </label>
-              <p className="text-xs text-gray-500">Used for plan/build/review/fix stages</p>
+              <p className="text-xs text-gray-500">Used for explore/plan/build/check/integrate stages</p>
               <ModelSelect
                 value={opencodeModelData?.model ?? null}
                 placeholder="Same as Mohist Model"
