@@ -110,11 +110,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the rendering, styling, and collapse behavior from T-001 through T-003; may adjust the output path to match existing test organization.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        441628
+      ]
     }
   ]
 }
