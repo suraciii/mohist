@@ -140,9 +140,12 @@
       ],
       "passes": true,
       "notes": "Consumes the complete implementation. Focus on user-visible regressions: no CHECK dead-end, auditable correction, strict validator failure, and distinct integration steps.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        491701
+      ]
     }
   ]
 }
