@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import Markdown from 'react-markdown'
-import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart, PromptSummary } from '../lib/types'
+import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart, PromptSummary, FileChangeSummary } from '../lib/types'
 import { ToolCallCard } from './ToolCallCard'
 import type { ToolCallEntry } from '../lib/types'
 
@@ -178,6 +178,60 @@ function ReasoningPartView({ part }: { part: ReasoningPart }) {
         {part.text}
       </pre>
     </details>
+  )
+}
+
+function TurnFileChangesView({ changes }: { changes: FileChangeSummary[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const count = changes.length
+
+  return (
+    <div className="max-w-[90%] rounded-md border border-green-200 bg-green-50/50 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-green-100/50 transition-colors"
+      >
+        <svg className="h-3.5 w-3.5 text-green-600 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+        </svg>
+        <span className="text-xs font-medium text-green-700">
+          {count === 1 ? '1 file changed' : `${count} files changed`}
+        </span>
+        {count <= 3 && (
+          <span className="text-xs text-green-600/70 truncate">
+            {changes.map(c => c.path.split('/').pop()).join(', ')}
+          </span>
+        )}
+        <svg className={`h-3 w-3 text-green-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="border-t border-green-200/50 px-3 py-2 space-y-1">
+          {changes.map((change, i) => {
+            const opBadge: Record<string, string> = { created: 'A', modified: 'M', deleted: 'D', moved: 'R' }
+            const opColor: Record<string, string> = { created: 'bg-green-100 text-green-700', modified: 'bg-blue-100 text-blue-700', deleted: 'bg-red-100 text-red-700', moved: 'bg-purple-100 text-purple-700' }
+            return (
+              <div key={i} className="flex items-center gap-2 py-0.5">
+                <span className={`inline-flex items-center px-1 py-0.5 rounded text-xs font-medium ${opColor[change.operation] ?? ''}`}>
+                  {opBadge[change.operation] ?? '?'}
+                </span>
+                <span className="text-xs font-mono text-gray-700 truncate flex-1">{change.path}</span>
+                {change.operation === 'moved' && change.oldPath && (
+                  <span className="text-xs text-gray-400">← {change.oldPath}</span>
+                )}
+                {change.additions !== undefined && change.additions > 0 && (
+                  <span className="text-xs text-green-600">+{change.additions}</span>
+                )}
+                {change.deletions !== undefined && change.deletions > 0 && (
+                  <span className="text-xs text-red-600">-{change.deletions}</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -405,77 +459,92 @@ function TodoUpdateCard({ part }: TodoUpdateCardProps) {
 }
 
 function SessionTurnView({ turn }: { turn: SessionTurn }) {
-  const renderParts = () => {
-    const parts: React.ReactNode[] = []
-    let i = 0
+    const renderParts = () => {
+      const parts: React.ReactNode[] = []
+      let i = 0
 
-    while (i < turn.assistant.length) {
-      const part = turn.assistant[i]
+      while (i < turn.assistant.length) {
+        const part = turn.assistant[i]
 
-      if (part.type === 'tool' && isTodowriteTool(getToolIdentity(part))) {
-        parts.push(<TodoUpdateCard key={part.id} part={part} />)
-        i++
-        continue
-      }
-
-      if (part.type === 'tool' && isContextTool(getToolIdentity(part))) {
-        const contextGroup: ToolPart[] = []
-        while (
-          i < turn.assistant.length &&
-          turn.assistant[i].type === 'tool' &&
-          isContextTool(getToolIdentity(turn.assistant[i] as ToolPart))
-        ) {
-          contextGroup.push(turn.assistant[i] as ToolPart)
+        if (part.type === 'tool' && isTodowriteTool(getToolIdentity(part))) {
+          parts.push(<TodoUpdateCard key={part.id} part={part} />)
           i++
+          continue
         }
-        if (contextGroup.length > 0) {
-          parts.push(<ContextGroupCard key={`ctx-${contextGroup[0].id}`} tools={contextGroup} />)
+
+        if (part.type === 'tool' && isContextTool(getToolIdentity(part))) {
+          const contextGroup: ToolPart[] = []
+          while (
+            i < turn.assistant.length &&
+            turn.assistant[i].type === 'tool' &&
+            isContextTool(getToolIdentity(turn.assistant[i] as ToolPart))
+          ) {
+            contextGroup.push(turn.assistant[i] as ToolPart)
+            i++
+          }
+          if (contextGroup.length > 0) {
+            parts.push(<ContextGroupCard key={`ctx-${contextGroup[0].id}`} tools={contextGroup} />)
+          }
+          continue
         }
-        continue
+
+        if (part.type === 'text') parts.push(<AssistantTextPartView key={part.id} part={part} />)
+        else if (part.type === 'reasoning') parts.push(<ReasoningPartView key={part.id} part={part} />)
+        else if (part.type === 'error') parts.push(<SessionErrorPartView key={part.id} part={part} />)
+        else if (part.type === 'tool') parts.push(<ToolPartView key={part.id} part={part} />)
+
+        i++
       }
 
-      if (part.type === 'text') parts.push(<AssistantTextPartView key={part.id} part={part} />)
-      else if (part.type === 'reasoning') parts.push(<ReasoningPartView key={part.id} part={part} />)
-      else if (part.type === 'error') parts.push(<SessionErrorPartView key={part.id} part={part} />)
-      else if (part.type === 'tool') parts.push(<ToolPartView key={part.id} part={part} />)
-
-      i++
+      return parts
     }
 
-    return parts
-  }
+    const changedFileSets: FileChangeSummary[][] = []
+    for (const part of turn.assistant) {
+      if (part.type === 'tool' && part.tool.changedFiles && part.tool.changedFiles.length > 0) {
+        changedFileSets.push(part.tool.changedFiles)
+      }
+    }
+    const allChanges = changedFileSets.flat()
+    const uniqueChanges = allChanges.filter((change, idx, arr) =>
+      idx === arr.findIndex(c => c.path === change.path)
+    )
 
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-xs text-gray-400">
-        <span className="font-medium text-gray-600">Mohist</span>
-        <span className="text-gray-300">·</span>
-        <span>{formatDateTime(turn.startedAt)}</span>
-        {turn.incomplete && (
-          <>
-            <span className="text-gray-300">·</span>
-            <span className="text-amber-500">Incomplete</span>
-          </>
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          <span className="font-medium text-gray-600">Mohist</span>
+          <span className="text-gray-300">·</span>
+          <span>{formatDateTime(turn.startedAt)}</span>
+          {turn.incomplete && (
+            <>
+              <span className="text-gray-300">·</span>
+              <span className="text-amber-500">Incomplete</span>
+            </>
+          )}
+        </div>
+
+        <PromptSummaryCard
+          summary={turn.user.summary}
+          kind={turn.user.kind}
+          sentAt={turn.user.sentAt}
+          rawText={turn.user.text}
+        />
+
+        {turn.assistant.length > 0 && (
+          <div className="flex items-center gap-2 text-xs text-gray-400 ml-2">
+            <span className="font-medium text-gray-600">Coder</span>
+          </div>
+        )}
+
+        {renderParts()}
+
+        {uniqueChanges.length > 0 && (
+          <TurnFileChangesView changes={uniqueChanges} />
         )}
       </div>
-
-      <PromptSummaryCard
-        summary={turn.user.summary}
-        kind={turn.user.kind}
-        sentAt={turn.user.sentAt}
-        rawText={turn.user.text}
-      />
-
-      {turn.assistant.length > 0 && (
-        <div className="flex items-center gap-2 text-xs text-gray-400 ml-2">
-          <span className="font-medium text-gray-600">Coder</span>
-        </div>
-      )}
-
-      {renderParts()}
-    </div>
-  )
-}
+    )
+  }
 
 export function SessionTranscriptView({
   turns,
