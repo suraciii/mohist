@@ -79,11 +79,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the Markdown-rendered and styled description produced by T-001 and T-002, then wraps it with local collapse UI.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        71372
+      ]
     },
     {
       "id": "T-004",
