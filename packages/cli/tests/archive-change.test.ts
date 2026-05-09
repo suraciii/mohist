@@ -275,8 +275,8 @@ describe('CheckStageRunner archive integration', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(true);
-    expect(result.nextStage).toBe(Stage.Done);
-    expect(archiveChange).toHaveBeenCalledWith(42);
+    expect(result.nextStage).toBe(Stage.Integrate);
+    expect(archiveChange).not.toHaveBeenCalled();
   });
 
   it('should not call archiveChange when checks fail', async () => {
@@ -311,8 +311,8 @@ describe('CheckStageRunner archive integration', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(true);
-    expect(result.nextStage).toBe(Stage.Done);
-    expect(archiveChange).toHaveBeenCalledWith(42);
+    expect(result.nextStage).toBe(Stage.Integrate);
+    expect(archiveChange).not.toHaveBeenCalled();
   });
 });
 

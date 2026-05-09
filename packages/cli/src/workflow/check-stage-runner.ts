@@ -323,24 +323,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected getNextStage(): Stage {
-    return Stage.Done;
-  }
-
-  async run(ctx: StageContext): Promise<StageRunResult> {
-    const result = await super.run(ctx);
-
-    if (result.success) {
-      try {
-        await ctx.artifactManager.archiveChange(ctx.issue.number);
-      } catch (err) {
-        log.error('Failed to archive change', {
-          issueNumber: ctx.issue.number,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-
-    return result;
+    return Stage.Integrate;
   }
 }
 
