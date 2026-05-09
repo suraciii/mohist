@@ -138,7 +138,7 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the complete implementation. Focus on user-visible regressions: no CHECK dead-end, auditable correction, strict validator failure, and distinct integration steps.",
       "attempts": 0,
       "order": 999999,
