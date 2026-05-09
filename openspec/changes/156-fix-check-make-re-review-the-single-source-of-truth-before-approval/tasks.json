@@ -1,0 +1,118 @@
+{
+  "project": "mohist",
+  "description": "Make check-stage re-review the authoritative snapshot-bound truth before user approval.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add authoritative AI review state helpers",
+      "spec": "specs/workflow-engine/spec.md#authoritative-ai-review-result",
+      "description": "Introduce the shared helpers and data shape needed to represent one current AI review result for a check cycle. The result must include verdict, review report, artifact paths, snapshot SHA, and convergence timestamp, and callers must select the latest authoritative AI review result instead of the first historical ai-review entry.",
+      "acceptanceCriteria": [
+        "A helper returns the latest ai-review result from check results and does not select stale earlier failures",
+        "Authoritative AI review output includes verdict, reviewReport, snapshotSha, reviewArtifactPath, selfCheckArtifactPath, and convergedAt when available",
+        "StageExecution check result persistence can replace the current ai-review truth without leaving contradictory current FAIL/PASS states",
+        "CheckSuite ai-review state is updated from the same authoritative result when an active CheckSuite exists",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/base-stage-runner.ts, packages/cli/src/workflow/stage-context.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep attempt history, if needed, explicitly non-authoritative. The important outcome is that API and approval code have one current ai-review truth to read."
+    },
+    {
+      "id": "T-002",
+      "title": "Regenerate re-review after review fixes",
+      "spec": "specs/pipeline-model/spec.md#re-review-regenerates-current-snapshot",
+      "description": "Change the ai-review fix-and-recheck flow so `fix-review-findings` invalidates stale check-stage review artifacts and regenerates `review.md` plus `review-self-check.md` before `AiReviewCheck` runs again. Re-review must evaluate the current fixed worktree, not an existing artifact that predates the fix.",
+      "acceptanceCriteria": [
+        "After fix-review-findings changes the worktree, review and review-self-check checkpoint skips are bypassed or cleared for the next check review pass",
+        "Re-review writes or overwrites review.md and review-self-check.md before AiReviewCheck parses verdict",
+        "AiReviewCheck recheck after auto-fix uses the regenerated review.md content, not the old failing artifact",
+        "Re-review FAIL persists the latest FAIL report and does not continue to user approval",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/check-stage-runner.ts, packages/cli/src/workflow/base-stage-runner.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Preserve normal resume behavior when no fix changed the code. Scope invalidation to review.md and review-self-check.md for the check stage."
+    },
+    {
+      "id": "T-003",
+      "title": "Converge worktree snapshot before approval",
+      "spec": "specs/check-suite/spec.md#snapshot-bound-approval-truth",
+      "description": "Add the pre-approval convergence guard for check stage. Before `UserApprovalCheck` can request approval, Mohist must ensure the latest PASS review result is bound to current HEAD and the worktree is clean; if review fix or artifact generation leaves changes, create a check convergence commit or block approval with a clear failure.",
+      "acceptanceCriteria": [
+        "Check-stage approval is requested only when latest ai-review verdict is PASS and approval output snapshotSha matches current HEAD",
+        "Pending auto-fix or review artifact worktree changes are committed before approval when commit succeeds",
+        "If the convergence commit fails or the worktree remains dirty after commit, approval is not requested",
+        "The blocking result clearly explains that uncommitted auto-fix or review artifact changes prevented approval",
+        "CheckSuite snapshotSha and ai-review output snapshotSha are updated to the committed convergence snapshot when CheckSuite exists",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/base-stage-runner.ts, packages/cli/src/git/worktree-manager.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Use non-interactive git commands. Do not use --no-verify unless the implementation has an explicit existing project convention for this convergence commit; failed hooks should block approval."
+    },
+    {
+      "id": "T-004",
+      "title": "Harden check approval API and issue display truth",
+      "spec": "specs/http-api/spec.md#check-approval-truth-convergence",
+      "description": "Update check-stage approval and display paths to consume the authoritative snapshot-bound AI review result. The approve endpoint must reject or rerun instead of advancing when approval output, CheckSuite state, current HEAD, or worktree cleanliness no longer match.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number exposes the latest ai-review PASS after auto-fix re-review instead of an earlier FAIL",
+        "GET /api/issues/:number/check-suite exposes ai-review output whose snapshotSha matches the active CheckSuite snapshotSha",
+        "CLI issue detail displays the current ai-review verdict consistently with approval output",
+        "POST /api/issues/:number/approve does not advance to Integrate when latest ai-review is not PASS",
+        "POST /api/issues/:number/approve does not advance to Integrate when current HEAD or worktree cleanliness does not match approval snapshot truth",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts, packages/cli/src/cli/commands/issue.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Approval validation is the final guard for restart, manual edit, and concurrent worker cases. Prefer a clear 409/400 response unless the existing rerun path can be used safely."
+    },
+    {
+      "id": "T-005",
+      "title": "Add check re-review convergence regressions",
+      "spec": "specs/workflow-engine/spec.md#authoritative-ai-review-result",
+      "description": "Add focused tests that prove the check-stage convergence contract end to end. Cover regenerated re-review after auto-fix, persisted PASS replacing stale FAIL, approval blocking on dirty or uncommittable fixes, and latest FAIL preservation when re-review fails.",
+      "acceptanceCriteria": [
+        "Test covers ai-review FAIL -> auto-fix -> regenerated re-review PASS -> persisted PASS -> approval requested",
+        "Test proves fix-review-findings changes code and old review.md is not reused for recheck truth",
+        "Test proves approval output uses the latest re-review report and matching snapshotSha",
+        "Test proves auto-fix changes that cannot be committed block ordinary approval with a clear message",
+        "Test proves re-review FAIL does not enter PASS or approval and preserves the latest FAIL truth",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/workflow/check-stage-re-review-convergence.test.ts",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "Prefer deterministic unit or integration tests around CheckStageRunner/BaseStageRunner with mocked AgentSession and git helpers rather than broad end-to-end LLM tests."
+    }
+  ]
+}
