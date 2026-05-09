@@ -7,6 +7,7 @@ import { setupQuickCommands } from './commands/quick';
 import { setupAttachCommand } from './commands/attach';
 import { setupProvidersCommands } from './commands/providers';
 import { setupProposeCommands } from './commands/propose';
+import { setupSkillsCommands } from './commands/skills';
 import { getVersionInfo } from '../version';
 export { requireServer, formatError } from './server-check';
 
@@ -87,5 +88,6 @@ setupQuickCommands(program);
 setupAttachCommand(program);
 setupProvidersCommands(program);
 setupProposeCommands(program);
+setupSkillsCommands(program);
 
 program.parse();
