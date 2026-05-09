@@ -82,11 +82,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The API transcript from T-002 remains authoritative; live state should be an optimistic incremental view that converges after refetch.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        952406
+      ]
     },
     {
       "id": "T-004",
