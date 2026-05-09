@@ -208,7 +208,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (model !== undefined && model !== null && typeof model === 'string' && !isValidModelId(model)) {
+      if (model !== undefined && model !== null && (typeof model !== 'string' || !isValidModelId(model))) {
         return c.json({ success: false, error: 'Invalid model format. Expected provider/model.' } satisfies ApiResponse, 400);
       }
 
@@ -489,7 +489,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (model !== undefined && model !== null && typeof model === 'string' && !isValidModelId(model)) {
+      if (model !== undefined && model !== null && (typeof model !== 'string' || !isValidModelId(model))) {
         return c.json({ success: false, error: 'Invalid model format. Expected provider/model.' } satisfies ApiResponse, 400);
       }
 
