@@ -25,7 +25,6 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
-import type { PostMergeFinalizer } from './post-merge-finalizer';
 
 const execFileAsync = promisify(execFile);
 
@@ -124,7 +123,6 @@ export class AgentRunnerService {
     private readonly conflictResolutionDeps?: ConflictResolutionDeps,
     private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
     private readonly stageExecutionRepo?: StageExecutionRepo,
-    private readonly postMergeFinalizer?: PostMergeFinalizer,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -1032,22 +1030,25 @@ export class AgentRunnerService {
       return;
     }
 
-    if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
-      if (!this.postMergeFinalizer) {
-        this.handlePipelineFailure(issue, this.issueRepo, issue.projectId, 'Post-merge finalizer not configured');
-        this.completeTask(task.id, 'failed', 'Post-merge finalizer not configured');
+    if (issue.stage === Stage.Integrate || (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged)) {
+      const project = this.projectRepo.findById(issue.projectId);
+      if (!project) {
+        this.completeTask(task.id, 'failed', `Project not found: ${issue.projectId}`);
         return;
       }
 
-      log.info('Finalizing previously merged issue before Done', { issueNumber: issue.number });
-      const finalization = await this.postMergeFinalizer.finalize(issue);
-      if (finalization.success) {
-        this.completeTask(task.id, 'completed', 'success');
-      } else {
-        const failure = finalization.error || finalization.healthGateResult?.summary || 'Post-merge health gate failed';
-        this.handlePipelineFailure(issue, this.issueRepo, issue.projectId, failure);
-        this.completeTask(task.id, 'failed', failure);
+      const worktreePath = this.worktreeManager.getPath(project.name, issue.number);
+      if (!worktreePath) {
+        this.completeTask(task.id, 'failed', `Worktree not found for issue #${issue.number}`);
+        return;
       }
+
+      if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
+        this.issueRepo.updateStage(issue.id, Stage.Integrate);
+      }
+
+      const acpOptions: AgentSessionOptions = { cwd: worktreePath };
+      await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
       return;
     }
 

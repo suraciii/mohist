@@ -12,3 +12,8 @@ The system SHALL run final integration health verification during Integrate afte
 - **WHEN** the final integration health command fails or times out
 - **THEN** Integrate records command, duration, summary, and log excerpt
 - **AND** the issue does not enter Done
+
+#### Scenario: Hidden post-merge finalizer cannot complete issues
+- **WHEN** a previously merged issue is recovered after Check
+- **THEN** recovery transitions or resumes the issue through Integrate
+- **AND** no post-merge finalizer directly marks the issue Done outside the Integrate runner
