@@ -402,8 +402,21 @@ describe('Task/Check/Artifact boundary regression', () => {
       expect(fixResult.artifacts).toEqual([]);
     });
 
-    it('re-check replaces failed result and fix task is recorded', async () => {
+    it('re-check preserves failed result history and appends the follow-up result', async () => {
       let reviewRunCount = 0;
+      const persistedCheckResults: CheckResult[][] = [];
+      ctx = makeContext({
+        stageExecutionRepo: {
+          create: vi.fn().mockReturnValue({ id: 'exec-1' }),
+          updateCheckResults: vi.fn().mockImplementation((_id: string, checkResults: CheckResult[]) => {
+            persistedCheckResults.push(checkResults.map(checkResult => ({ ...checkResult })));
+            return null;
+          }),
+          appendTaskResult: vi.fn(),
+          updateStatus: vi.fn(),
+        } as any,
+      });
+
       const reviewCheck = new FailCheck(
         'ai-review',
         async () => {
@@ -436,8 +449,18 @@ describe('Task/Check/Artifact boundary regression', () => {
       expect(reviewRunCount).toBe(2);
       expect(runner.fixTaskCalls).toHaveLength(1);
       expect(runner.fixTaskCalls[0].taskId).toBe('fix-review-findings');
-      const finalAiResult = result.checkResults.find(r => r.name === 'ai-review');
-      expect(finalAiResult?.status).toBe('pass');
+      expect(result.checkResults.filter(r => r.name === 'ai-review')).toEqual([
+        expect.objectContaining({ name: 'ai-review', status: 'fail' }),
+        expect.objectContaining({ name: 'ai-review', status: 'pass' }),
+      ]);
+      expect(persistedCheckResults).toHaveLength(2);
+      expect(persistedCheckResults[0]).toHaveLength(1);
+      expect(persistedCheckResults[0][0]).toMatchObject({ name: 'ai-review', status: 'fail' });
+      expect(persistedCheckResults[1]).toHaveLength(2);
+      expect(persistedCheckResults[1]).toEqual([
+        expect.objectContaining({ name: 'ai-review', status: 'fail' }),
+        expect.objectContaining({ name: 'ai-review', status: 'pass' }),
+      ]);
     });
   });
 
