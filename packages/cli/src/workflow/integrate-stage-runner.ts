@@ -62,8 +62,14 @@ export class IntegrateStageRunner extends BaseStageRunner {
     return [];
   }
 
-  protected async executeTasks(ctx: StageContext): Promise<unknown> {
+protected async executeTasks(ctx: StageContext): Promise<unknown> {
     const steps: IntegrateStepResult[] = [];
+
+    ctx.eventBus.emit('integration_started', {
+      issueId: ctx.issue.id,
+      projectId: ctx.issue.projectId,
+      issueNumber: ctx.issue.number,
+    });
 
     const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
     if (!changeDir) {
@@ -106,6 +112,19 @@ export class IntegrateStageRunner extends BaseStageRunner {
       };
 
       steps.push(specSyncResult);
+
+      ctx.eventBus.emit('integration_step_updated', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        step: 'integrate:spec-sync',
+        status: specSyncResult.status,
+        summary: summary.valid
+          ? `Spec sync completed: ${summary.capabilities.length} capabilities, ${summary.added} added, ${summary.modified} modified`
+          : `Spec sync failed: ${summary.errors.join('; ')}`,
+        output: specSyncOutput,
+      });
+
       this.appendTaskResult(ctx, {
         taskId: 'integrate:spec-sync',
         title: 'Sync OpenSpec delta specs to main specs',
@@ -140,6 +159,15 @@ export class IntegrateStageRunner extends BaseStageRunner {
       if (!steps.includes(specSyncResult)) {
         steps.push(specSyncResult);
       }
+
+      ctx.eventBus.emit('integration_failed', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        failingStep: 'integrate:spec-sync',
+        error: err instanceof Error ? err.message : String(err),
+        output: specSyncResult.output,
+      });
 
       log.warn('Integrate stage failed at spec-sync', {
         issueNumber: ctx.issue.number,
@@ -178,6 +206,17 @@ export class IntegrateStageRunner extends BaseStageRunner {
       };
 
       steps.push(archiveResult);
+
+      ctx.eventBus.emit('integration_step_updated', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        step: 'integrate:archive-change',
+        status: 'completed',
+        summary: `Archive completed: ${expectedArchivePath}`,
+        output: archiveResult.output,
+      });
+
       this.appendTaskResult(ctx, {
         taskId: 'integrate:archive-change',
         title: 'Archive OpenSpec change',
@@ -214,6 +253,15 @@ export class IntegrateStageRunner extends BaseStageRunner {
         artifacts: [],
         attempts: 1,
         duration,
+      });
+
+      ctx.eventBus.emit('integration_failed', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        failingStep: 'integrate:archive-change',
+        error: err instanceof Error ? err.message : String(err),
+        output: archiveResult.output,
       });
 
       log.warn('Integrate stage failed at archive-change', {
@@ -275,6 +323,15 @@ export class IntegrateStageRunner extends BaseStageRunner {
           duration,
         });
 
+        ctx.eventBus.emit('integration_failed', {
+          issueId: ctx.issue.id,
+          projectId: ctx.issue.projectId,
+          issueNumber: ctx.issue.number,
+          failingStep: 'integrate:merge',
+          error: `Merge failed at ${mergeTruth.failingStep}: ${mergeTruth.error}`,
+          output: mergeResult.output,
+        });
+
         log.warn('Integration merge failed', {
           issueNumber: ctx.issue.number,
           failingStep: mergeTruth.failingStep,
@@ -317,6 +374,16 @@ export class IntegrateStageRunner extends BaseStageRunner {
         duration,
       });
 
+      ctx.eventBus.emit('integration_step_updated', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        step: 'integrate:merge',
+        status: 'completed',
+        summary: `Merge completed: ${mergeTruth.landedSha} (fastForward=${mergeTruth.fastForward}, rebased=${mergeTruth.rebased})`,
+        output: mergeResult.output,
+      });
+
       log.info('Integration merge succeeded', {
         issueNumber: ctx.issue.number,
         targetBranch: mergeTruth.targetBranch,
@@ -344,6 +411,15 @@ export class IntegrateStageRunner extends BaseStageRunner {
       if (!steps.includes(mergeResult)) {
         steps.push(mergeResult);
       }
+
+      ctx.eventBus.emit('integration_failed', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        failingStep: 'integrate:merge',
+        error: err instanceof Error ? err.message : String(err),
+        output: mergeResult.output,
+      });
 
       log.warn('Integrate stage failed at merge', {
         issueNumber: ctx.issue.number,
@@ -385,6 +461,15 @@ export class IntegrateStageRunner extends BaseStageRunner {
         duration: finalHealthResult.duration,
       });
 
+      ctx.eventBus.emit('integration_failed', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        failingStep: 'final-health',
+        error: `Final health gate failed: ${finalHealthResult.summary}`,
+        output: failingStep.output,
+      });
+
       log.warn('Integrate stage failed at final-health', {
         issueNumber: ctx.issue.number,
         command: finalHealthResult.command,
@@ -423,10 +508,27 @@ export class IntegrateStageRunner extends BaseStageRunner {
       duration: finalHealthResult.duration,
     });
 
+    ctx.eventBus.emit('integration_step_updated', {
+      issueId: ctx.issue.id,
+      projectId: ctx.issue.projectId,
+      issueNumber: ctx.issue.number,
+      step: 'final-health',
+      status: 'completed',
+      summary: `Final health gate passed (command: ${finalHealthResult.command})`,
+      output: healthGateStep.output,
+    });
+
     log.info('Final health gate passed', {
       issueNumber: ctx.issue.number,
       command: finalHealthResult.command,
       duration: finalHealthResult.duration,
+    });
+
+    ctx.eventBus.emit('integration_completed', {
+      issueId: ctx.issue.id,
+      projectId: ctx.issue.projectId,
+      issueNumber: ctx.issue.number,
+      steps: steps.map(s => ({ step: s.step, status: s.status, output: s.output })),
     });
 
     return {

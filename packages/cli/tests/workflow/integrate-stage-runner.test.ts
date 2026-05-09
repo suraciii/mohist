@@ -70,6 +70,9 @@ function createMockContext(
       updateStatus: vi.fn(),
       updateCheckResults: vi.fn(),
       updateTaskResults: vi.fn(),
+      findByIssueId: vi.fn().mockReturnValue([
+        { id: 'exec-1', issueId: `issue-${issueNumber}`, stage: Stage.Integrate, status: 'passed', taskResults: [], checkResults: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      ]),
     } as any,
     ...overrides,
   } as StageContext;
@@ -860,6 +863,235 @@ healthGates:
 
       expect(result.success).toBe(true);
       expect(capturedCommand).toBe('npm run custom-health-check');
+    });
+  });
+
+  describe('integration events', () => {
+    function createProjectRepo(baseBranch = 'main') {
+      return {
+        findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch, path: tmpDir }),
+      };
+    }
+
+    it('emits integration_started, step updates, and integration_completed on success', async () => {
+      const issueNumber = 70;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'evt-cap', [
+        '### Requirement: EvtReq\n\nEvt content.\n\n#### Scenario: Evt scenario\n\nEvt scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'evt-cap', `## ADDED Requirements
+
+### Requirement: EvtAdded
+
+Evt added content.
+
+#### Scenario: Evt added scenario
+Evt added scenario content.`);
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        projectRepo: createProjectRepo(),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const eventNames = emitCalls.map(([name]) => name);
+
+      expect(eventNames).toContain('integration_started');
+      expect(eventNames).toContain('integration_step_updated');
+      expect(eventNames).toContain('integration_completed');
+      expect(eventNames).not.toContain('integration_failed');
+
+      const startedEvent = emitCalls.find(([name]) => name === 'integration_started');
+      expect(startedEvent?.[1]).toMatchObject({
+        issueId: `issue-${issueNumber}`,
+        projectId: 'test-project',
+        issueNumber,
+      });
+
+      const completedEvent = emitCalls.find(([name]) => name === 'integration_completed');
+      expect(completedEvent?.[1]).toMatchObject({
+        issueId: `issue-${issueNumber}`,
+        projectId: 'test-project',
+        issueNumber,
+      });
+      expect(completedEvent?.[1].steps).toBeDefined();
+      expect(Array.isArray(completedEvent?.[1].steps)).toBe(true);
+    });
+
+    it('emits integration_failed when spec sync fails', async () => {
+      const issueNumber = 71;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'evtfail-cap', [
+        '### Requirement: ExistingReq\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'evtfail-cap', `## ADDED Requirements
+
+### Requirement: ExistingReq
+
+Duplicate requirement content.
+
+#### Scenario: Duplicate scenario
+Duplicate scenario content.`);
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        projectRepo: createProjectRepo(),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const eventNames = emitCalls.map(([name]) => name);
+
+      expect(eventNames).toContain('integration_started');
+      expect(eventNames).toContain('integration_step_updated');
+      expect(eventNames).toContain('integration_failed');
+      expect(eventNames).not.toContain('integration_completed');
+
+      const failedEvent = emitCalls.find(([name]) => name === 'integration_failed');
+      expect(failedEvent?.[1]).toMatchObject({
+        issueId: `issue-${issueNumber}`,
+        projectId: 'test-project',
+        issueNumber,
+        failingStep: 'integrate:spec-sync',
+      });
+    });
+
+    it('emits integration_failed when merge fails', async () => {
+      const issueNumber = 72;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'evtmergefail-cap', [
+        '### Requirement: EMFReq\n\nEMF content.\n\n#### Scenario: EMF scenario\n\nEMF scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'evtmergefail-cap', `## ADDED Requirements
+
+### Requirement: EMFAdded
+
+EMF added content.
+
+#### Scenario: EMF added scenario
+EMF added scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        failingStep: 'merge' as const,
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        conflictFiles: ['src/foo.ts'],
+        error: 'Clean rebase with abort-on-conflict failed: conflicts detected',
+      });
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: createProjectRepo(),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const eventNames = emitCalls.map(([name]) => name);
+
+      expect(eventNames).toContain('integration_started');
+      expect(eventNames).toContain('integration_step_updated');
+      expect(eventNames).toContain('integration_failed');
+      expect(eventNames).not.toContain('integration_completed');
+
+      const failedEvent = emitCalls.find(([name]) => name === 'integration_failed');
+      expect(failedEvent?.[1]).toMatchObject({
+        issueId: `issue-${issueNumber}`,
+        failingStep: 'integrate:merge',
+      });
+    });
+
+    it('emits integration_step_updated with correct step, status, summary, and output', async () => {
+      const issueNumber = 73;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'evtstep-cap', [
+        '### Requirement: StepReq\n\nStep content.\n\n#### Scenario: Step scenario\n\nStep scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'evtstep-cap', `## ADDED Requirements
+
+### Requirement: StepAdded
+
+Step added content.
+
+#### Scenario: Step added scenario
+Step added scenario content.`);
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        projectRepo: createProjectRepo(),
+      });
+
+      await runner.run(ctx);
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const stepUpdatedEvents = emitCalls.filter(([name]) => name === 'integration_step_updated');
+
+      expect(stepUpdatedEvents.length).toBeGreaterThan(0);
+
+      const specSyncEvent = stepUpdatedEvents.find(([, data]) => (data as any).step === 'integrate:spec-sync');
+      expect(specSyncEvent).toBeDefined();
+      expect(specSyncEvent?.[1]).toMatchObject({
+        step: 'integrate:spec-sync',
+        status: 'completed',
+      });
+      expect((specSyncEvent?.[1] as any).summary).toContain('Spec sync completed');
+      expect((specSyncEvent?.[1] as any).output).toBeDefined();
+    });
+
+    it('API GET /api/issues/:number/executions returns stage executions for integrate stage', async () => {
+      const issueNumber = 74;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'apicap', [
+        '### Requirement: APIReq\n\nAPI content.\n\n#### Scenario: API scenario\n\nAPI scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'apicap', `## ADDED Requirements
+
+### Requirement: APIAdded
+
+API added content.
+
+#### Scenario: API added scenario
+API added scenario content.`);
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        projectRepo: createProjectRepo(),
+      });
+
+      await runner.run(ctx);
+
+      const stageExecutionRepo = ctx.stageExecutionRepo;
+      expect(stageExecutionRepo.create).toHaveBeenCalled();
+
+      const executions = stageExecutionRepo.findByIssueId(ctx.issue.id);
+      expect(executions.length).toBeGreaterThan(0);
+
+      const integrateExec = executions.find(e => e.stage === Stage.Integrate);
+      expect(integrateExec).toBeDefined();
+      expect(integrateExec?.status).toBe('passed');
+      expect(integrateExec?.taskResults).toBeDefined();
+      expect(Array.isArray(integrateExec?.taskResults)).toBe(true);
     });
   });
 });
