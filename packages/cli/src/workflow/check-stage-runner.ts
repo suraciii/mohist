@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Stage } from '../types';
 import type { CheckFailurePolicy, CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
 import { emitStageTaskUpdate } from './stage-context';
@@ -122,6 +124,36 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
   protected isApprovalCheck(checkName: string): boolean {
     return checkName === 'user-approval';
+  }
+
+  protected async beforeRecheckAfterFix(ctx: StageContext, checkName: string, fixTaskId: string): Promise<void> {
+    if (checkName !== 'ai-review' || fixTaskId !== 'fix-review-findings') return;
+
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+    if (!changeDir) return;
+
+    if (ctx.checkpointManager) {
+      const steps = ctx.checkpointManager.getResumeSteps(ctx.issue.number, 'check');
+      const filtered = steps.filter((s: string) => s !== 'review' && s !== 'review-self-check');
+      ctx.checkpointManager.upsert(ctx.issue.number, 'check', filtered, null);
+    }
+
+    for (const filename of ['review.md', 'review-self-check.md']) {
+      const filePath = path.join(changeDir, filename);
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    log.info('Regenerating review artifacts after fix-review-findings', {
+      issueNumber: ctx.issue.number,
+    });
+
+    await this.executeTasks(ctx);
   }
 
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
