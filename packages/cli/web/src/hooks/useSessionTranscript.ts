@@ -267,11 +267,12 @@ function updateToolInTurn(
         const parsedEdit = parseEditInput(input)
         const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
         const newStatus = updates.status ?? toolPart.tool.status
+        const { status: _updatesStatus, ...restUpdates } = updates
         return {
           ...toolPart,
           tool: {
             ...toolPart.tool,
-            ...updates,
+            ...restUpdates,
             normalizedName,
             input,
             output,
@@ -279,6 +280,7 @@ function updateToolInTurn(
             rawOutput: output,
             changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
             startedAt,
+            status: newStatus,
             completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
           },
         }
@@ -304,11 +306,12 @@ function updateToolInTurn(
           const parsedEdit = parseEditInput(input)
           const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
           const newStatus = updates.status ?? toolPart.tool.status
+          const { status: _updatesStatus, ...restUpdates } = updates
           return {
             ...toolPart,
             tool: {
               ...toolPart.tool,
-              ...updates,
+              ...restUpdates,
               toolCallId,
               normalizedName,
               input,
@@ -317,6 +320,7 @@ function updateToolInTurn(
               rawOutput: output,
               changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
               startedAt,
+              status: newStatus,
               completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
             },
           }
@@ -488,7 +492,7 @@ export function useSessionTranscript({
             const lastTurn = next[next.length - 1]
             const error = detail.state === 'failed' ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed')) : undefined
             next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-              status: detail.state,
+              status: mapStatusToDisplay(detail.state),
               output: stringifyPayload(detail.rawOutput),
               rawOutput: detail.rawOutput,
               completedAt: now,

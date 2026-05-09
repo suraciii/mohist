@@ -117,7 +117,11 @@
       "notes": "Consumes normalized API/live ToolPart fields from T-002 and T-003. Grouping is presentation-only; do not remove individual tool parts from transcript data.",
       "attempts": 0,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        631010,
+        28871
+      ]
     },
     {
       "id": "T-005",
