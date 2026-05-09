@@ -1,19 +1,37 @@
 import type { ConfigInfo } from './config-schema';
 
-/**
- * Resolve the effective model for a given pipeline stage.
- *
- * Priority chain (highest to lowest):
- * 1. config.opencode.stageModels[stage] — stage-specific override
- * 2. config.opencode.model — global coder model
- * 3. undefined — falls back to opencode default
- *
- * Stage matching is case-sensitive.
- */
+export type IssueModelOverride = {
+  model?: string | null;
+  stageModels?: Record<string, string> | null;
+};
+
+export const EXECUTABLE_MODEL_STAGES = [
+  'explore',
+  'plan',
+  'build',
+  'check',
+  'integrate',
+] as const;
+
+export type ExecutableModelStage = (typeof EXECUTABLE_MODEL_STAGES)[number];
+
+export function isValidModelId(value: string): boolean {
+  if (!value || typeof value !== 'string') return false;
+  const idx = value.indexOf('/');
+  return idx > 0 && idx < value.length - 1;
+}
+
 export function resolveStageModel(
   stage: string,
   config: ConfigInfo,
+  issueOverride?: IssueModelOverride,
 ): string | undefined {
+  if (issueOverride?.stageModels && stage in issueOverride.stageModels) {
+    return issueOverride.stageModels[stage];
+  }
+  if (issueOverride?.model) {
+    return issueOverride.model;
+  }
   const stageModels = config.opencode?.stageModels;
   if (stageModels && stage in stageModels) {
     return stageModels[stage];
