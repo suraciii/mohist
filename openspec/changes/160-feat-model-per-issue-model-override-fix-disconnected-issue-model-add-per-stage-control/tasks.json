@@ -108,11 +108,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Also update `packages/cli/src/services/conflict-resolution.ts` and `packages/cli/src/server/index.ts`. Keep real ACP model passing unchanged.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        134008
+      ]
     },
     {
       "id": "T-005",
