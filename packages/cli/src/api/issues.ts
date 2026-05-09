@@ -109,7 +109,7 @@ export function createIssueRoutes(
   _resolveConflictsDeps?: ConflictResolutionDeps,
   checkSuiteRepo?: CheckSuiteRepo,
   stageExecutionRepo?: StageExecutionRepo,
-  postMergeFinalizer?: PostMergeFinalizer,
+  _postMergeFinalizer?: PostMergeFinalizer,
 ): Hono {
   const app = new Hono();
 
@@ -2412,7 +2412,7 @@ export function createIssueRoutes(
           queuePosition: result.queuePosition,
           message: `Issue #${number} direct merge bypass prevented — routed to Integrate stage via resume-pipeline`,
         },
-      } satisfies ApiResponse);
+      } satisfies ApiResponse, 202);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

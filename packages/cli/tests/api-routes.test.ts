@@ -337,6 +337,52 @@ describe('API Routes', () => {
         expect(response.status).toBe(202);
         expect(response.body.success).toBe(true);
       });
+
+      it('Check approval should transition to Integrate and enqueue resume-pipeline', async () => {
+        const issue = issueService.create({ projectId, title: 'Check Approval Issue' });
+        issueService.transitionToStage(issue.id, Stage.Check);
+        issueService.setStatus(issue.id, IssueStatus.Active);
+
+        const issueRepo = stateManager.getIssueRepo();
+        issueRepo.setApprovalState(issue.id, {
+          stage: Stage.Check,
+          status: 'awaiting',
+          output: { test: true },
+          requestedAt: new Date().toISOString(),
+        });
+
+        const approveApp = new Hono();
+        const approveEventBus = new EventBus();
+        const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+        const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner));
+        const approveServer = createTestServer(approveApp);
+
+        const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+        expect(response.status).toBe(202);
+        expect(response.body.success).toBe(true);
+        expect(enqueueSpy).toHaveBeenCalledTimes(1);
+        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+      });
+
+      it('Direct merge for non-Integrate issue should return bypass error', async () => {
+        const issue = issueService.create({ projectId, title: 'Direct Merge Test' });
+        issueService.transitionToStage(issue.id, Stage.Check);
+        issueService.setStatus(issue.id, IssueStatus.Active);
+
+        const mergeApp = new Hono();
+        const mergeEventBus = new EventBus();
+        const mergeAgentRunner = new AgentRunnerService(mergeEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+        mergeApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, mergeAgentRunner));
+        const mergeServer = createTestServer(mergeApp);
+
+        const response = await request(mergeServer).post(`/api/issues/${issue.number}/merge`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('Direct merge is not allowed');
+        expect(response.body.error).toContain('check');
+      });
     });
 
     describe('POST /api/issues/:number/skip-to-review', () => {
@@ -919,14 +965,14 @@ describe('API Routes', () => {
     });
   });
 
-  describe('POST /api/issues/:number/merge health gate response', () => {
+  describe('POST /api/issues/:number/merge', () => {
     let server: http.Server;
 
     afterEach(() => {
       server?.close();
     });
 
-    function createMergeApp(worktreeManager: any, postMergeFinalizer?: any): http.Server {
+    function createMergeApp(worktreeManager: any): http.Server {
       const app = new Hono();
       app.route('/api/issues', createIssueRoutes(
         issueService,
@@ -944,99 +990,79 @@ describe('API Routes', () => {
         undefined,
         undefined,
         undefined,
-        postMergeFinalizer,
       ));
       return createTestServer(app);
     }
 
-    it('returns structured healthGateResult when post-merge finalization fails', async () => {
+    it('rejects direct merge when issue is not in Integrate stage with 409', async () => {
       const project = await projectService.create({ name: 'Test Project', path: '/tmp/test-project' });
       projectService.setCurrent(project);
       const issue = await issueService.create({ projectId: project.id, title: 'Merge Me' });
       const worktreeManager = {
         exists: vi.fn().mockReturnValue(true),
-        mergeBack: vi.fn().mockResolvedValue({ success: true, message: 'Merged' }),
       };
-      const healthGateResult = {
-        passed: false,
-        enabled: true,
-        command: 'npm run build && npm test',
-        timeout: 300000,
-        duration: 123,
-        timedOut: false,
-        summary: 'tests failed',
-        logExcerpt: 'failure excerpt',
-      };
-      const postMergeFinalizer = {
-        finalize: vi.fn().mockResolvedValue({ success: false, error: 'Post-merge health gate failed', healthGateResult }),
-      };
-      server = createMergeApp(worktreeManager, postMergeFinalizer);
+      server = createMergeApp(worktreeManager);
 
       const response = await request(server).post(`/api/issues/${issue.number}/merge`);
 
-      expect(response.status).toBe(422);
+      expect(response.status).toBe(409);
       expect(response.body.success).toBe(false);
-      expect(response.body.data.healthGateResult).toEqual(healthGateResult);
-      expect(issueRepo.findById(issue.id)?.stage).not.toBe(Stage.Done);
-      expect(issueRepo.findById(issue.id)?.status).not.toBe(IssueStatus.Completed);
+      expect(response.body.error).toContain('Direct merge is not allowed');
+      expect(response.body.error).toContain('Use Check approval');
     });
 
-    it('returns structured healthGateResult when direct merge succeeds', async () => {
+it('allows merge when issue is in Integrate stage and enqueues resume-pipeline', async () => {
       const project = await projectService.create({ name: 'Test Project', path: '/tmp/test-project' });
       projectService.setCurrent(project);
       const issue = await issueService.create({ projectId: project.id, title: 'Merge Me' });
-      const worktreeManager = {
-        exists: vi.fn().mockReturnValue(true),
-        mergeBack: vi.fn().mockResolvedValue({ success: true, message: 'Merged' }),
-      };
-      const healthGateResult = {
-        passed: true,
-        enabled: true,
-        command: 'npm run build && npm test',
-        timeout: 300000,
-        duration: 123,
-        timedOut: false,
-        summary: 'Post-merge health gate passed',
-        logExcerpt: 'ok',
-      };
-      const postMergeFinalizer = {
-        finalize: vi.fn().mockImplementation(async () => {
-          issueRepo.updateStage(issue.id, Stage.Done);
-          issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-          issueRepo.setMergeState(issue.id, MergeState.Merged);
-          return { success: true, healthGateResult };
-        }),
-      };
-      server = createMergeApp(worktreeManager, postMergeFinalizer);
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.updateStage(issue.id, Stage.Integrate);
+      issueRepo.setMergeState(issue.id, MergeState.Merged);
+
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+      ));
+      server = createTestServer(app);
 
       const response = await request(server).post(`/api/issues/${issue.number}/merge`);
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(202);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.healthGateResult).toEqual(healthGateResult);
-      expect(response.body.data.issue.stage).toBe(Stage.Done);
+      expect(response.body.data.message).toContain('routed to Integrate');
     });
 
-    it('fails closed when postMergeFinalizer is missing', async () => {
+    it('returns error when AgentRunnerService not configured', async () => {
       const project = await projectService.create({ name: 'Test Project', path: '/tmp/test-project' });
       projectService.setCurrent(project);
       const issue = await issueService.create({ projectId: project.id, title: 'Merge Me' });
-      const worktreeManager = {
-        exists: vi.fn().mockReturnValue(true),
-        mergeBack: vi.fn().mockResolvedValue({ success: true, message: 'Merged' }),
-      };
+      const issueRepo = stateManager.getIssueRepo();
+      issueRepo.updateStage(issue.id, Stage.Integrate);
+      issueRepo.setMergeState(issue.id, MergeState.Merged);
+
       const app = new Hono();
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager as any));
+      app.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        undefined,
+      ));
       server = createTestServer(app);
 
       const response = await request(server).post(`/api/issues/${issue.number}/merge`);
 
       expect(response.status).toBe(500);
-      expect(response.body.success).toBe(false);
-      expect(response.body.error).toContain('PostMergeFinalizer not configured');
-      expect(issueRepo.findById(issue.id)?.stage).not.toBe(Stage.Done);
-      expect(issueRepo.findById(issue.id)?.status).not.toBe(IssueStatus.Completed);
-      expect(issueRepo.findById(issue.id)?.mergeState).not.toBe(MergeState.Merged);
+      expect(response.body.error).toContain('AgentRunnerService not configured');
     });
   });
 

@@ -167,7 +167,7 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
       } as unknown as WorktreeManager;
 
       const eventBus = new EventBus();
-      const agentRunner = new AgentRunnerService(eventBus);
+      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, worktreeManager as any, stateManager.getIssueTaskQueueRepo());
       const postMergeFinalizer = {
         finalize: vi.fn().mockImplementation(async (issue) => {
           issueRepo.updateStage(issue.id, Stage.Done);
@@ -180,7 +180,7 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
       const app = new Hono();
       app.route('/api/issues', createIssueRoutes(
         issueService, projectService, stateManager,
-        worktreeManager, undefined, undefined, agentRunner,
+        worktreeManager, undefined, agentRunner,
         undefined, undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, postMergeFinalizer as any,
       ));
@@ -196,9 +196,9 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
       db.close();
     });
 
-    it('POST /api/issues/:number/merge finalizes issue Done/Completed/Merged without cleanup', async () => {
+    it('POST /api/issues/:number/merge routes to resume-pipeline for Integrate stage', async () => {
       const issue = await issueService.create({ projectId, title: 'Test Issue' });
-      issueRepo.updateStage(issue.id, Stage.Check);
+      issueRepo.updateStage(issue.id, Stage.Integrate);
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
       issueRepo.setMergeState(issue.id, MergeState.Pending);
 
@@ -206,17 +206,10 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
         .post(`/api/issues/${issue.number}/merge`)
         .send({});
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(202);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.issue.stage).toBe(Stage.Done);
-      expect(response.body.data.issue.status).toBe(IssueStatus.Completed);
-      expect(response.body.data.issue.mergeState).toBe(MergeState.Merged);
-      expect(worktreeManager.remove).not.toHaveBeenCalled();
-
-      const stored = issueRepo.findById(issue.id);
-      expect(stored?.stage).toBe(Stage.Done);
-      expect(stored?.status).toBe(IssueStatus.Completed);
-      expect(stored?.mergeState).toBe(MergeState.Merged);
+      expect(response.body.data.message).toContain('Integrate stage');
+      expect(response.body.data.message).toContain('resume-pipeline');
     });
   });
 
