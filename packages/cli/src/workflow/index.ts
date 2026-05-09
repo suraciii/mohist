@@ -24,6 +24,12 @@ export {
   type IssueRepo,
   type WorktreeManager,
   type ProjectRepo,
+  type CheckSuiteRepo,
+  type AuthoritativeAiReviewResult,
+  type AuthoritativeAiReviewOptions,
+  getLatestCheckResult,
+  replaceCurrentAiReviewTruth,
+  buildAuthoritativeAiReviewResult,
 } from './stage-context';
 
 export {

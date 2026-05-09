@@ -47,6 +47,7 @@ export interface StageContext {
   sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
   stageExecutionRepo?: StageExecutionRepo;
+  checkSuiteRepo?: CheckSuiteRepo;
   signal?: AbortSignal;
 }
 
@@ -126,6 +127,62 @@ export interface CheckFailurePolicy {
   checkName: string;
   fixTaskId: string;
   maxAttempts: number;
+}
+
+export interface AuthoritativeAiReviewResult {
+  verdict: string;
+  reviewReport?: string;
+  snapshotSha?: string;
+  reviewArtifactPath?: string;
+  selfCheckArtifactPath?: string;
+  convergedAt?: string;
+}
+
+export interface AuthoritativeAiReviewOptions {
+  snapshotSha?: string;
+  reviewArtifactPath?: string;
+  selfCheckArtifactPath?: string;
+}
+
+export function getLatestCheckResult(results: CheckResult[], name: string): CheckResult | undefined {
+  for (let i = results.length - 1; i >= 0; i--) {
+    if (results[i].name === name) {
+      return results[i];
+    }
+  }
+  return undefined;
+}
+
+export function replaceCurrentAiReviewTruth(results: CheckResult[]): CheckResult[] {
+  const latest = getLatestCheckResult(results, 'ai-review');
+  if (!latest) return results;
+  const filtered = results.filter(r => r.name !== 'ai-review');
+  filtered.push(latest);
+  return filtered;
+}
+
+export function buildAuthoritativeAiReviewResult(
+  checkResult: CheckResult,
+  options?: AuthoritativeAiReviewOptions,
+): AuthoritativeAiReviewResult | null {
+  if (checkResult.name !== 'ai-review') return null;
+  const output = checkResult.output as Record<string, unknown> | undefined;
+  if (!output) return null;
+
+  return {
+    verdict: output.verdict as string,
+    reviewReport: output.reviewReport as string | undefined,
+    snapshotSha: options?.snapshotSha ?? (output.snapshotSha as string | undefined),
+    reviewArtifactPath: options?.reviewArtifactPath ?? (output.reviewArtifactPath as string | undefined),
+    selfCheckArtifactPath: options?.selfCheckArtifactPath ?? (output.selfCheckArtifactPath as string | undefined),
+    convergedAt: new Date().toISOString(),
+  };
+}
+
+export interface CheckSuiteRepo {
+  findActiveByIssueId(issueId: string): import('../types').CheckSuite | null;
+  updateChecks(suiteId: string, checkName: string, checkState: import('../types').CheckState): import('../types').CheckSuite | null;
+  updateSnapshotSha(suiteId: string, newSha: string): import('../types').CheckSuite | null;
 }
 
 export function emitStageTaskUpdate(
