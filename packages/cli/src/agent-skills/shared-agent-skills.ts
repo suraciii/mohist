@@ -18,7 +18,7 @@ function computeChecksum(content: string): string {
 }
 
 function parseFrontmatter(content: string): { name: string; description: string; body: string } | null {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const match = content.match(/(?:^|\n)---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return null;
 
   const frontmatterStr = match[1];
@@ -410,17 +410,10 @@ export function installSharedAgentSkills(options: InstallOptions = {}): SkillOpe
       const existingContent = fs.readFileSync(skillFilePath, 'utf-8');
 
       if (isMohistGenerated(existingContent)) {
-        const frontmatter = parseFrontmatter(template);
-        const existingFrontmatter = parseFrontmatter(existingContent);
-
-        if (frontmatter && existingFrontmatter &&
-            frontmatter.name === existingFrontmatter.name &&
-            frontmatter.description === existingFrontmatter.description) {
-          const templateWithoutMarker = buildMarkedContent(template);
-          if (existingContent === templateWithoutMarker) {
-            results.push({ skill: skillName, result: 'unchanged' });
-            continue;
-          }
+        const templateContent = buildMarkedContent(template);
+        if (existingContent === templateContent) {
+          results.push({ skill: skillName, result: 'unchanged' });
+          continue;
         }
 
         const newContent = buildMarkedContent(template);
