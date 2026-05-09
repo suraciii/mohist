@@ -259,11 +259,15 @@
         "T-007",
         "T-008"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use injected short liveness thresholds and fake/mock ACP behavior to avoid slow or flaky tests.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        538962,
+        804989
+      ]
     }
   ]
 }
