@@ -42,7 +42,9 @@ export class MergeReadinessCheck implements Check {
         ctx.issue.number
       );
 
-      const status = canFastForward || worktreeStatus.canFastForward ? 'pass' : 'fail';
+      const canMerge = canFastForward || worktreeStatus.canFastForward ||
+        (!worktreeStatus.conflictingFiles || worktreeStatus.conflictingFiles.length === 0);
+      const status = canMerge ? 'pass' : 'fail';
 
       return {
         name: this.name,
