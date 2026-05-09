@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Add a visible Integrate stage that deterministically syncs approved OpenSpec deltas, archives changes, lands candidates, and records integration evidence before Done.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -22,8 +21,16 @@
       "type": "WRITE",
       "output": "packages/cli/src/openspec/open-spec-integrator.ts, packages/cli/tests/openspec-integrator.test.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This is the foundational service consumed by Check dry-run and Integrate apply. Keep ChangeArtifactsManager as a directory/artifact helper; do not put requirement semantics there."
+      "passes": true,
+      "notes": "This is the foundational service consumed by Check dry-run and Integrate apply. Keep ChangeArtifactsManager as a directory/artifact helper; do not put requirement semantics there.",
+      "attempts": 3,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1806747,
+        1811624,
+        1821721
+      ]
     },
     {
       "id": "T-002",
@@ -48,7 +55,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Consumes OpenSpecIntegrator.preview from T-001. These checks must run before UserApprovalCheck and remain read-only for canonical specs and archive state."
+      "notes": "Consumes OpenSpecIntegrator.preview from T-001. These checks must run before UserApprovalCheck and remain read-only for canonical specs and archive state.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -72,7 +82,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Consumes the readiness checks from T-002. The runner can initially fail with missing dependencies only in tests that do not exercise integration steps, but normal workflow registration should be in place."
+      "notes": "Consumes the readiness checks from T-002. The runner can initially fail with missing dependencies only in tests that do not exercise integration steps, but normal workflow registration should be in place.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -98,7 +111,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Consumes OpenSpecIntegrator.apply from T-001 and the Integrate runner skeleton from T-003. Keep archiveChange as a low-level directory move only."
+      "notes": "Consumes OpenSpecIntegrator.apply from T-001 and the Integrate runner skeleton from T-003. Keep archiveChange as a low-level directory move only.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -123,7 +139,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Consumes the Integrate step framework from T-004. Prefer a focused IntegrationMerger or WorktreeManager method instead of reusing MergeQueue.processItem, because MergeQueue currently owns auto-fix behavior."
+      "notes": "Consumes the Integrate step framework from T-004. Prefer a focused IntegrationMerger or WorktreeManager method instead of reusing MergeQueue.processItem, because MergeQueue currently owns auto-fix behavior.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -148,7 +167,10 @@
         "T-005"
       ],
       "passes": false,
-      "notes": "Consumes the merge step from T-005. It is acceptable to wrap or rename PostMergeFinalizer, but Done transition ownership must be the workflow/Integrate path, not a hidden finalizer side effect."
+      "notes": "Consumes the merge step from T-005. It is acceptable to wrap or rename PostMergeFinalizer, but Done transition ownership must be the workflow/Integrate path, not a hidden finalizer side effect.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -173,7 +195,10 @@
         "T-006"
       ],
       "passes": false,
-      "notes": "Consumes the full Integrate runner from T-006. This is the task that removes the hidden Check approve -> MergeQueue -> PostMergeFinalizer normal path."
+      "notes": "Consumes the full Integrate runner from T-006. This is the task that removes the hidden Check approve -> MergeQueue -> PostMergeFinalizer normal path.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-008",
@@ -197,7 +222,10 @@
         "T-007"
       ],
       "passes": false,
-      "notes": "Consumes the routed Integrate workflow from T-007. Prefer stage_executions as the primary evidence store unless list/card rendering proves a compact issue-level field is necessary."
+      "notes": "Consumes the routed Integrate workflow from T-007. Prefer stage_executions as the primary evidence store unless list/card rendering proves a compact issue-level field is necessary.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-009",
@@ -223,7 +251,10 @@
         "T-008"
       ],
       "passes": false,
-      "notes": "Consumes backend API/event shapes from T-008. Preserve existing visual language; do not redesign unrelated issue detail surfaces."
+      "notes": "Consumes backend API/event shapes from T-008. Preserve existing visual language; do not redesign unrelated issue detail surfaces.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-010",
@@ -248,7 +279,10 @@
         "T-009"
       ],
       "passes": false,
-      "notes": "Consumes the complete backend and frontend implementation. Focus on high-value regressions that prevent hidden Check->Done, unsynced archived specs, and code-fix behavior during Integrate from returning."
+      "notes": "Consumes the complete backend and frontend implementation. Focus on high-value regressions that prevent hidden Check->Done, unsynced archived specs, and code-fix behavior during Integrate from returning.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }

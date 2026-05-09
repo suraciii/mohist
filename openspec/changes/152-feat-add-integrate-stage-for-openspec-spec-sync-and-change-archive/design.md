@@ -60,6 +60,8 @@ interface OpenSpecIntegrator {
 
 The service owns parsing delta spec files, reading main specs, validating conflicts, applying deterministic mutations in memory or on disk, and returning a structured summary. `ChangeArtifactsManager.archiveChange()` remains a low-level directory move and is only called by Integrate after `apply()` succeeds.
 
+Implementation note from T-001: the first service implementation exists as `packages/cli/src/openspec/open-spec-integrator.ts` with focused coverage in `packages/cli/tests/openspec-integrator.test.ts`. It discovers canonical OpenSpec delta files under `specs/<capability>/spec.md` and keeps legacy flat `specs/<capability>.md` support only as a compatibility convenience for tests or older artifacts. T-002 and later tasks should consume this service instead of reparsing spec markdown in Check or Integrate runners.
+
 **Alternatives considered:** Put spec sync into `CheckStageRunner` or `ChangeArtifactsManager`. This was rejected because Check must be read-only for main specs, and `ChangeArtifactsManager` should not understand OpenSpec requirement semantics.
 
 ### D4: Implement Deterministic Requirement-Block Delta Apply
