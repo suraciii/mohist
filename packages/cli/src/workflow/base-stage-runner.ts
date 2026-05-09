@@ -1,5 +1,6 @@
 import { Stage } from '../types';
-import type { StageContext, StageRunResult, CheckResult, StageTaskResult, CheckFailurePolicy } from './stage-context';
+import type { StageContext, StageRunResult, CheckResult, StageTaskResult, CheckFailurePolicy, AuthoritativeAiReviewResult, AuthoritativeAiReviewOptions } from './stage-context';
+import { getLatestCheckResult, replaceCurrentAiReviewTruth, buildAuthoritativeAiReviewResult } from './stage-context';
 import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
@@ -261,7 +262,7 @@ export abstract class BaseStageRunner implements StageRunner {
         }
       }
     } else if (ctx.issue.stage === Stage.Check) {
-      const aiReviewResult = allResults.find(r => r.name === 'ai-review');
+      const aiReviewResult = getLatestCheckResult(allResults, 'ai-review');
       if (aiReviewResult?.output) {
         const output = aiReviewResult.output as { verdict?: string; reviewReport?: string };
         if (output.verdict && output.reviewReport) {
@@ -302,6 +303,60 @@ export abstract class BaseStageRunner implements StageRunner {
       ctx.stageExecutionRepo.updateStatus(this.stageExecutionId, status);
     } catch (e) {
       log.warn('updateStageExecutionStatus failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  protected persistAuthoritativeAiReview(
+    ctx: StageContext,
+    checkResults: CheckResult[],
+    options?: AuthoritativeAiReviewOptions,
+  ): CheckResult[] {
+    const latest = getLatestCheckResult(checkResults, 'ai-review');
+    if (!latest) return checkResults;
+
+    const authoritative = buildAuthoritativeAiReviewResult(latest, options);
+    if (!authoritative) return checkResults;
+
+    const updatedOutput = {
+      ...((latest.output as Record<string, unknown>) ?? {}),
+      snapshotSha: authoritative.snapshotSha,
+      reviewArtifactPath: authoritative.reviewArtifactPath,
+      selfCheckArtifactPath: authoritative.selfCheckArtifactPath,
+      convergedAt: authoritative.convergedAt,
+    };
+    const updatedResult: CheckResult = {
+      ...latest,
+      output: updatedOutput,
+    };
+
+    const deduped = replaceCurrentAiReviewTruth([...checkResults]);
+    const withoutStale = deduped.filter(r => r.name !== 'ai-review');
+    withoutStale.push(updatedResult);
+
+    this.persistCheckResults(ctx, withoutStale);
+    this.updateCheckSuiteAiReview(ctx, authoritative);
+
+    return withoutStale;
+  }
+
+  private updateCheckSuiteAiReview(ctx: StageContext, result: AuthoritativeAiReviewResult): void {
+    if (!ctx.checkSuiteRepo) return;
+    try {
+      const suite = ctx.checkSuiteRepo.findActiveByIssueId(ctx.issue.id);
+      if (!suite) return;
+
+      const status = result.verdict === 'PASS' ? 'passed' : 'failed';
+      ctx.checkSuiteRepo.updateChecks(suite.id, 'ai-review', {
+        status,
+        output: result,
+        ranAt: result.convergedAt,
+      });
+
+      if (result.snapshotSha && result.snapshotSha !== suite.snapshotSha) {
+        ctx.checkSuiteRepo.updateSnapshotSha(suite.id, result.snapshotSha);
+      }
+    } catch (e) {
+      log.warn('updateCheckSuiteAiReview failed', { error: e instanceof Error ? e.message : String(e) });
     }
   }
 
