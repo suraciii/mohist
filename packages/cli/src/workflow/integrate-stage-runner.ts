@@ -456,9 +456,18 @@ export class IntegrateStageRunner extends BaseStageRunner {
         taskId: 'integrate:merge',
         title: 'Merge approved candidate to target branch',
         status: 'completed',
-        artifacts: [mergeTruth.landedSha],
+        artifacts: [],
         attempts: 1,
         duration,
+        output: {
+          kind: 'integrate-merge',
+          targetBranch: mergeTruth.targetBranch,
+          baseSha: mergeTruth.baseSha,
+          candidateHeadSha: mergeTruth.candidateHeadSha,
+          landedSha: mergeTruth.landedSha,
+          fastForward: mergeTruth.fastForward,
+          rebased: mergeTruth.rebased,
+        },
       });
 
       ctx.eventBus.emit('integration_step_updated', {
@@ -546,6 +555,13 @@ export class IntegrateStageRunner extends BaseStageRunner {
         artifacts: [],
         attempts: 1,
         duration: finalHealthResult.duration,
+        output: {
+          kind: 'health-gate',
+          stage: 'integrate',
+          command: finalHealthResult.command,
+          passed: false,
+          summary: finalHealthResult.summary,
+        },
       });
 
       ctx.eventBus.emit('integration_failed', {
@@ -593,6 +609,13 @@ export class IntegrateStageRunner extends BaseStageRunner {
       artifacts: [],
       attempts: 1,
       duration: finalHealthResult.duration,
+      output: {
+        kind: 'health-gate',
+        stage: 'integrate',
+        command: finalHealthResult.command,
+        passed: true,
+        summary: finalHealthResult.summary,
+      },
     });
 
     ctx.eventBus.emit('integration_step_updated', {
