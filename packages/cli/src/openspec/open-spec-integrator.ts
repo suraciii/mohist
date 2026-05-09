@@ -42,6 +42,28 @@ export interface SpecConflict {
   requirementHeader?: string;
 }
 
+export interface SpecCorrection {
+  capability: string;
+  requirement: string;
+  from: DeltaType;
+  to: DeltaType;
+  reason: string;
+}
+
+export interface SpecSyncSummary {
+  capabilities: string[];
+  added: number;
+  modified: number;
+  removed: number;
+  renamed: number;
+  targetFiles: string[];
+  conflicts: SpecConflict[];
+  corrections: SpecCorrection[];
+  valid: boolean;
+  errors: string[];
+  mode: 'dry-run' | 'apply';
+}
+
 interface MainSpecState {
   requirements: Map<string, ParsedRequirement>;
 }
@@ -63,7 +85,7 @@ export class OpenSpecIntegrator {
   private async runSync(changeDir: string, projectPath: string, mode: 'dry-run' | 'apply'): Promise<SpecSyncSummary> {
     const specsDir = path.join(changeDir, 'specs');
     if (!fs.existsSync(specsDir)) {
-      return this.emptySummary([], []);
+      return this.emptySummary([], [], mode);
     }
 
     const mainSpecsDir = path.join(projectPath, 'openspec', 'specs');
@@ -89,8 +111,7 @@ export class OpenSpecIntegrator {
       }
     }
 
-    const conflicts: SpecConflict[] = [];
-
+    const corrections: SpecCorrection[] = [];
     const renamedFromTo = new Map<string, string>();
     const renamedToFrom = new Map<string, string>();
     for (const delta of deltas) {
@@ -99,6 +120,36 @@ export class OpenSpecIntegrator {
         renamedToFrom.set(`${delta.capability}:${rename.to}`, rename.from);
       }
     }
+
+    if (mode === 'apply') {
+      for (const delta of deltas) {
+        const mainState = mainStates.get(delta.capability);
+        const safeModified: ParsedRequirement[] = [];
+
+        for (const modified of delta.modified) {
+          const sourceName = renamedToFrom.get(`${delta.capability}:${modified.name}`) || modified.name;
+          const targetExists = mainState && mainState.requirements.has(modified.name);
+          const sourceExists = mainState && mainState.requirements.has(sourceName);
+
+          if (!sourceExists && !targetExists) {
+            corrections.push({
+              capability: delta.capability,
+              requirement: modified.name,
+              from: 'modified',
+              to: 'added',
+              reason: 'missing-source-treated-as-new-requirement'
+            });
+            delta.added.push(modified);
+          } else {
+            safeModified.push(modified);
+          }
+        }
+
+        delta.modified = safeModified;
+      }
+    }
+
+    const conflicts: SpecConflict[] = [];
 
     for (const delta of deltas) {
       const mainState = mainStates.get(delta.capability);
@@ -229,8 +280,10 @@ export class OpenSpecIntegrator {
         renamed: deltas.reduce((s, d) => s + d.renamed.length, 0),
         targetFiles: deltas.map(d => `openspec/specs/${d.capability}/spec.md`),
         conflicts,
+        corrections,
         valid: false,
-        errors: conflicts.map(c => `${c.capability}: ${c.detail}`)
+        errors: conflicts.map(c => `${c.capability}: ${c.detail}`),
+        mode
       };
     }
 
@@ -246,8 +299,10 @@ export class OpenSpecIntegrator {
       renamed: deltas.reduce((s, d) => s + d.renamed.length, 0),
       targetFiles: deltas.map(d => `openspec/specs/${d.capability}/spec.md`),
       conflicts: [],
+      corrections,
       valid: true,
-      errors: []
+      errors: [],
+      mode
     };
   }
 
@@ -491,7 +546,7 @@ export class OpenSpecIntegrator {
     }
   }
 
-  private emptySummary(capabilities: string[], errors: string[]): SpecSyncSummary {
+  private emptySummary(capabilities: string[], errors: string[], mode: 'dry-run' | 'apply'): SpecSyncSummary {
     return {
       capabilities,
       added: 0,
@@ -500,8 +555,10 @@ export class OpenSpecIntegrator {
       renamed: 0,
       targetFiles: [],
       conflicts: [],
+      corrections: [],
       valid: errors.length === 0,
-      errors
+      errors,
+      mode
     };
   }
 }

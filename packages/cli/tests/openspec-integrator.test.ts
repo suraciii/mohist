@@ -228,6 +228,106 @@ Modified scenario content.`);
     });
   });
 
+  describe('intelligent MODIFIED-to-ADDED correction', () => {
+    it('apply converts MODIFIED with missing source to ADDED when target does not exist', async () => {
+      createMainSpec('test-cap', [
+        '### Requirement: ExistingReq\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.'
+      ]);
+      createChangeSpec('test-cap', `## MODIFIED Requirements
+
+### Requirement: BrandNewReq
+
+New requirement content that was incorrectly marked as MODIFIED.
+
+#### Scenario: New requirement scenario
+New requirement scenario content.`);
+
+      const summary = await integrator.apply(changeDir, projectPath);
+
+      expect(summary.valid).toBe(true);
+      expect(summary.corrections.length).toBe(1);
+      expect(summary.corrections[0]).toEqual({
+        capability: 'test-cap',
+        requirement: 'BrandNewReq',
+        from: 'modified',
+        to: 'added',
+        reason: 'missing-source-treated-as-new-requirement'
+      });
+      const mainSpecContent = fs.readFileSync(path.join(projectPath, 'openspec', 'specs', 'test-cap', 'spec.md'), 'utf-8');
+      expect(mainSpecContent).toContain('BrandNewReq');
+      expect(mainSpecContent).toContain('ExistingReq');
+    });
+
+    it('apply does not correct MODIFIED when source exists (valid modification)', async () => {
+      createMainSpec('test-cap', [
+        '### Requirement: ExistingReq\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.'
+      ]);
+      createChangeSpec('test-cap', `## MODIFIED Requirements
+
+### Requirement: ExistingReq
+
+Modified content.
+
+#### Scenario: Modified scenario
+Modified scenario content.`);
+
+      const summary = await integrator.apply(changeDir, projectPath);
+
+      expect(summary.valid).toBe(true);
+      expect(summary.corrections.length).toBe(0);
+      const mainSpecContent = fs.readFileSync(path.join(projectPath, 'openspec', 'specs', 'test-cap', 'spec.md'), 'utf-8');
+      expect(mainSpecContent).toContain('ExistingReq');
+      expect(mainSpecContent).toContain('Modified content');
+    });
+
+    it('preview does not apply correction even if target does not exist', async () => {
+      createMainSpec('test-cap', [
+        '### Requirement: ExistingReq\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.'
+      ]);
+      createChangeSpec('test-cap', `## MODIFIED Requirements
+
+### Requirement: BrandNewReq
+
+New requirement content that was incorrectly marked as MODIFIED.
+
+#### Scenario: New requirement scenario
+New requirement scenario content.`);
+
+      const summary = await integrator.preview(changeDir, projectPath);
+
+      expect(summary.valid).toBe(false);
+      expect(summary.conflicts.some(c => c.type === 'missing_source')).toBe(true);
+      expect(summary.corrections.length).toBe(0);
+      const mainSpecContent = fs.readFileSync(path.join(projectPath, 'openspec', 'specs', 'test-cap', 'spec.md'), 'utf-8');
+      expect(mainSpecContent).not.toContain('BrandNewReq');
+    });
+
+    it('correction respects rename ambiguity', async () => {
+      createMainSpec('test-cap', [
+        '### Requirement: SourceReq\n\nSource content.\n\n#### Scenario: Source scenario\n\nSource scenario content.'
+      ]);
+      createChangeSpec('test-cap', `## RENAMED Requirements
+
+FROM: SourceReq
+TO: TargetReq
+
+## MODIFIED Requirements
+
+### Requirement: TargetReq
+
+Modified content for target.
+
+#### Scenario: Modified scenario
+Modified scenario content.`);
+
+      const summary = await integrator.apply(changeDir, projectPath);
+
+      expect(summary.valid).toBe(true);
+      expect(summary.corrections.length).toBe(0);
+      expect(summary.conflicts.length).toBe(0);
+    });
+  });
+
   describe('REMOVED requirements', () => {
     it('fail when source requirement does not exist in main spec', async () => {
       createChangeSpec('test-cap', `## REMOVED Requirements
