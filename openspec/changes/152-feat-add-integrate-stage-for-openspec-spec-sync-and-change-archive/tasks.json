@@ -147,11 +147,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the Integrate step framework from T-004. Prefer a focused IntegrationMerger or WorktreeManager method instead of reusing MergeQueue.processItem, because MergeQueue currently owns auto-fix behavior.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        627290
+      ]
     },
     {
       "id": "T-006",
