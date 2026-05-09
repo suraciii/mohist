@@ -1269,6 +1269,48 @@ Val scenario content.`);
       expect(specSyncTask.status).toBe('failed');
     });
 
+    it('persists integrate:spec-sync as transient output without durable artifacts', async () => {
+      const issueNumber = 77;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'artifact-cap', [
+        '### Requirement: ExistingReq\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'artifact-cap', `## ADDED Requirements
+
+### Requirement: AddedReq
+
+Added content.
+
+#### Scenario: Added scenario
+Added scenario content.`);
+
+      const appendedTaskResults: any[] = [];
+      const baseCtx = createMockContext(tmpDir, issueNumber);
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        projectRepo: createProjectRepo(),
+        stageExecutionRepo: {
+          ...baseCtx.stageExecutionRepo,
+          appendTaskResult: vi.fn().mockImplementation((_execId: string, result: any) => {
+            appendedTaskResults.push(result);
+          }),
+        },
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      const specSyncTask = appendedTaskResults.find((t: any) => t.taskId === 'integrate:spec-sync');
+      expect(specSyncTask).toBeDefined();
+      expect(specSyncTask.artifacts).toEqual([]);
+
+      const output = result.output as { steps?: Array<{ step: string; output: any }> };
+      const specSyncStep = output.steps?.find(step => step.step === 'integrate:spec-sync');
+      expect(specSyncStep?.output.targetFiles).toContain('openspec/specs/artifact-cap/spec.md');
+    });
+
     it('API GET /api/issues/:number/executions returns stage executions for integrate stage', async () => {
       const issueNumber = 74;
       const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);

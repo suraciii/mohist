@@ -180,7 +180,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
           taskId: 'integrate:spec-sync',
           title: 'Sync OpenSpec delta specs to main specs',
           status: summary.valid ? 'completed' : 'failed',
-          artifacts: summary.targetFiles,
+          artifacts: [],
           attempts: 1,
           duration,
         });
