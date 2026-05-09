@@ -1,13 +1,11 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { Stage, IssueStatus, MergeState, type Issue } from '../types';
+import { Stage, type Issue } from '../types';
 import { loadHealthGatePolicies, type HealthGatePolicy } from '../workflow/workflow-loader';
 import { loadWorkflow } from '../workflow/workflow-loader';
 import { Log } from '../util/log';
-import type { IssueRepo } from '../db/issue-repo';
 import type { ProjectRepo } from '../db/project-repo';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
-import type { EventBus } from './event-bus';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'post-merge-finalizer' });
@@ -40,10 +38,8 @@ export interface FinalizationResult {
 
 export class PostMergeFinalizer {
   constructor(
-    private readonly issueRepo: IssueRepo,
     private readonly projectRepo: ProjectRepo,
     private readonly stageExecutionRepo: StageExecutionRepo,
-    private readonly eventBus: EventBus,
   ) {}
 
   async finalize(issue: Issue): Promise<FinalizationResult> {
@@ -61,7 +57,7 @@ export class PostMergeFinalizer {
     const policy = policies.postMerge;
 
     if (!policy.enabled) {
-      log.info('PostMerge health gate disabled, completing without verification', {
+      log.info('PostMerge health gate disabled, returning pass result', {
         issueNumber: issue.number,
       });
       const disabledResult: HealthGateResult = {
@@ -75,8 +71,7 @@ export class PostMergeFinalizer {
         logExcerpt: '',
       };
 
-      this.recordHealthGateResult(issue, disabledResult);
-      this.completeIssue(issue);
+      this.recordHealthGateResult(issue, disabledResult, Stage.Integrate);
       return {
         success: true,
         healthGateResult: disabledResult,
@@ -86,13 +81,13 @@ export class PostMergeFinalizer {
     const healthResult = await this.runHealthGate(project.path, policy);
 
     if (!healthResult.passed) {
-      log.warn('PostMerge health gate failed, issue not completed', {
+      log.warn('PostMerge health gate failed', {
         issueNumber: issue.number,
         command: healthResult.command,
         summary: healthResult.summary,
       });
 
-      this.recordHealthGateResult(issue, healthResult);
+      this.recordHealthGateResult(issue, healthResult, Stage.Integrate);
 
       return {
         success: false,
@@ -101,8 +96,7 @@ export class PostMergeFinalizer {
       };
     }
 
-    this.recordHealthGateResult(issue, healthResult);
-    this.completeIssue(issue);
+    this.recordHealthGateResult(issue, healthResult, Stage.Integrate);
     return { success: true, healthGateResult: healthResult };
   }
 
@@ -207,38 +201,25 @@ export class PostMergeFinalizer {
     return parts.join(' — ');
   }
 
-  private completeIssue(issue: Issue): void {
-    this.issueRepo.updateStage(issue.id, Stage.Done);
-    this.issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-    this.issueRepo.clearApprovalState(issue.id);
-    this.issueRepo.setMergeState(issue.id, MergeState.Merged);
-    this.issueRepo.updateBlockedReason(issue.id, null);
-
-    this.eventBus.emit('agent_completed', {
-      issueId: issue.id,
-      projectId: issue.projectId,
-      issueNumber: issue.number,
-    });
-  }
-
-  private recordHealthGateResult(issue: Issue, result: HealthGateResult): void {
+  private recordHealthGateResult(issue: Issue, result: HealthGateResult, stage: Stage): void {
     if (!this.stageExecutionRepo) return;
 
     const execution = this.stageExecutionRepo.findActiveByIssueId(issue.id)
+      ?? this.stageExecutionRepo.findByIssueId(issue.id).filter(e => e.stage === Stage.Integrate).at(-1)
       ?? this.stageExecutionRepo.findByIssueId(issue.id).filter(e => e.stage === Stage.Check).at(-1)
-      ?? this.stageExecutionRepo.create(issue.id, Stage.Check);
+      ?? this.stageExecutionRepo.create(issue.id, stage);
 
     if (execution) {
       const status = result.passed ? 'pass' : 'fail';
       const healthGateCheckResult = {
-        name: 'health:postMerge',
+        name: 'health:integrate',
         status,
         message: result.summary,
         duration: result.duration,
         summary: result.summary,
         output: {
           kind: 'health-gate',
-          stage: 'postMerge',
+          stage: 'integrate',
           command: result.command,
           timeout: result.timeout,
           duration: result.duration,

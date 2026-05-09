@@ -6,7 +6,7 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskType } from '../db/issue-task-queue-repo';
-import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner } from '../workflow';
+import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner, IntegrateStageRunner } from '../workflow';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue, MergeState } from '../types';
@@ -25,7 +25,6 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
-import type { PostMergeFinalizer } from './post-merge-finalizer';
 
 const execFileAsync = promisify(execFile);
 
@@ -124,7 +123,6 @@ export class AgentRunnerService {
     private readonly conflictResolutionDeps?: ConflictResolutionDeps,
     private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
     private readonly stageExecutionRepo?: StageExecutionRepo,
-    private readonly postMergeFinalizer?: PostMergeFinalizer,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -384,11 +382,38 @@ export class AgentRunnerService {
         return;
       }
 
-      if (deliveryStatus === 'merged') {
-        log.info('Truly merged issue — no recovery action needed', {
+      if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
+        if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
+          this.issueRepo.updateStage(issue.id, Stage.Integrate);
+          log.info('Truly merged issue from Check stage — transitioning to Integrate', {
+            issueNumber: issue.number,
+            action: 'stage updated to integrate',
+          });
+          return;
+        }
+
+        if (issue.stage === Stage.Integrate) {
+          log.info('Integrating issue — recovery preserves Integrate stage', {
+            issueNumber: issue.number,
+            stage: issue.stage,
+            action: 'status remains active, stage preserved',
+          });
+          return;
+        }
+
+        if (issue.stage === Stage.Done) {
+          log.info('Done issue with merge evidence — no recovery action needed', {
+            issueNumber: issue.number,
+            action: 'status remains active',
+          });
+          return;
+        }
+
+        this.issueRepo.updateStage(issue.id, Stage.Integrate);
+        log.info('Issue with merge evidence — routing to Integrate', {
           issueNumber: issue.number,
           stage: issue.stage,
-          action: 'status remains active',
+          action: 'stage updated to integrate',
         });
         return;
       }
@@ -420,6 +445,14 @@ export class AgentRunnerService {
           issueNumber: issue.number,
           stage: issue.stage,
           action: 'status=active, approval restored',
+        });
+      } else if (issue.stage === Stage.Integrate) {
+        this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        this.issueRepo.updateBlockedReason(issue.id, null);
+        log.info('Recovered integrate-stage issue', {
+          issueNumber: issue.number,
+          stage: issue.stage,
+          action: 'status=active, stage preserved, Integrate stage can be resumed',
         });
       } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
         this.recoverBuildStageIssue(issue);
@@ -1032,22 +1065,25 @@ export class AgentRunnerService {
       return;
     }
 
-    if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
-      if (!this.postMergeFinalizer) {
-        this.handlePipelineFailure(issue, this.issueRepo, issue.projectId, 'Post-merge finalizer not configured');
-        this.completeTask(task.id, 'failed', 'Post-merge finalizer not configured');
+    if (issue.stage === Stage.Integrate || (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged)) {
+      const project = this.projectRepo.findById(issue.projectId);
+      if (!project) {
+        this.completeTask(task.id, 'failed', `Project not found: ${issue.projectId}`);
         return;
       }
 
-      log.info('Finalizing previously merged issue before Done', { issueNumber: issue.number });
-      const finalization = await this.postMergeFinalizer.finalize(issue);
-      if (finalization.success) {
-        this.completeTask(task.id, 'completed', 'success');
-      } else {
-        const failure = finalization.error || finalization.healthGateResult?.summary || 'Post-merge health gate failed';
-        this.handlePipelineFailure(issue, this.issueRepo, issue.projectId, failure);
-        this.completeTask(task.id, 'failed', failure);
+      const worktreePath = this.worktreeManager.getPath(project.name, issue.number);
+      if (!worktreePath) {
+        this.completeTask(task.id, 'failed', `Worktree not found for issue #${issue.number}`);
+        return;
       }
+
+      if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
+        this.issueRepo.updateStage(issue.id, Stage.Integrate);
+      }
+
+      const acpOptions: AgentSessionOptions = { cwd: worktreePath };
+      await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
       return;
     }
 
@@ -1100,6 +1136,7 @@ export class AgentRunnerService {
         new PlanStageRunner(),
         new BuildStageRunner({ worktreePath, projectId }),
         new CheckStageRunner({ worktreePath }),
+        new IntegrateStageRunner({ worktreePath }),
       ];
       const pipeline = new WorkflowEngine({
         runners,

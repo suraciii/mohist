@@ -33,6 +33,12 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   ) {
     return 'conflict'
   }
+  if (issue.stage === Stage.Integrate) {
+    if (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) {
+      return 'closed'
+    }
+    return 'running'
+  }
   if (issue.status === IssueStatus.Blocked) {
     return 'closed'
   }
@@ -79,6 +85,15 @@ function Badge({
     )
   }
   return null
+}
+
+function IntegrationBadge({ blockedReason }: { blockedReason?: string | null }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+      <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+      {blockedReason ? 'Integration Failed' : 'Integrating'}
+    </span>
+  )
 }
 
 export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
@@ -158,7 +173,10 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             )}
           </div>
           <div className="flex items-center gap-1">
-            {badge && badge !== 'closed' && (
+            {issue.stage === Stage.Integrate && (
+              <IntegrationBadge blockedReason={issue.blockedReason} />
+            )}
+            {badge && badge !== 'closed' && badge !== 'running' && (
               <Badge type={badge} mergeState={issue.mergeState} />
             )}
             {showArchiveButton && issue.status === IssueStatus.Completed && (

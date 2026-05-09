@@ -96,12 +96,10 @@ describe('WorktreePanel', () => {
     expect(screen.getByText('Rebase after completion')).toBeInTheDocument()
   })
 
-  it('shows loading skeleton while loading', () => {
+  it('returns null while loading', () => {
     mockWorktreeStatus(undefined, true)
-    render(<WorktreePanel issueNumber={1} isAgentRunning={false} />)
-    expect(screen.getByText('Worktree')).toBeInTheDocument()
-    const skeletons = document.querySelectorAll('.animate-pulse')
-    expect(skeletons.length).toBeGreaterThan(0)
+    const { container } = render(<WorktreePanel issueNumber={1} isAgentRunning={false} />)
+    expect(container.innerHTML).toBe('')
   })
 
   it('shows behind indicator when behind master', () => {

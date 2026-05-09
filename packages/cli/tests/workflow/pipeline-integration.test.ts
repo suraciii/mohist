@@ -200,12 +200,18 @@ describe('Full Pipeline: Plan -> Build -> Check -> Done', () => {
         new PassCheck('ai-review'),
         new PassCheck('user-approval'),
       ],
-      nextStage: Stage.Done,
+      nextStage: Stage.Integrate,
       stage: Stage.Check,
     });
 
+    const integrateRunner = new SimpleStageRunner({
+      checks: [],
+      nextStage: Stage.Done,
+      stage: Stage.Integrate,
+    });
+
     const ctx = makeEngineContext({
-      runners: [planRunner, buildRunner, checkRunner],
+      runners: [planRunner, buildRunner, checkRunner, integrateRunner],
     });
 
     const engine = new WorkflowEngine(ctx);
@@ -213,10 +219,11 @@ describe('Full Pipeline: Plan -> Build -> Check -> Done', () => {
 
     const result = await engine.run(issue, {} as any);
 
-    expect(result.completed).toBe(false);
-    expect(result.message).toContain('Check stage cannot transition directly to Done');
+    expect(result.completed).toBe(true);
+    expect(result.stage).toBe(Stage.Done);
     expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Build);
     expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Check);
+    expect(ctx.issueRepo.updateStage).toHaveBeenCalledWith(expect.any(String), Stage.Integrate);
   });
 
   it('Plan stage has no requiresApproval in result', async () => {
@@ -386,8 +393,14 @@ describe('User-Approval Check', () => {
 
     const checkRunner = new SimpleStageRunner({
       checks: [new PassCheck('build-test'), new PassCheck('ai-review'), new PassCheck('user-approval')],
-      nextStage: Stage.Done,
+      nextStage: Stage.Integrate,
       stage: Stage.Check,
+    });
+
+    const integrateRunner = new SimpleStageRunner({
+      checks: [],
+      nextStage: Stage.Done,
+      stage: Stage.Integrate,
     });
 
     const issueRepo: IssueRepo = {
@@ -400,7 +413,7 @@ describe('User-Approval Check', () => {
     const eventBus = new EventBus();
 
     const ctx = makeEngineContext({
-      runners: [planRunner, buildRunner, checkRunner],
+      runners: [planRunner, buildRunner, checkRunner, integrateRunner],
       issueRepo,
       eventBus,
     });
@@ -425,8 +438,8 @@ describe('User-Approval Check', () => {
 
     const result2 = await engine.run(issueAfterApproval, {} as any);
 
-    expect(result2.completed).toBe(false);
-    expect(result2.message).toContain('Check stage cannot transition directly to Done');
+    expect(result2.completed).toBe(true);
+    expect(result2.stage).toBe(Stage.Done);
   });
 
   it('emits approval_requested event when user-approval check is pending', async () => {
@@ -589,8 +602,15 @@ describe('Non-OpenSpec Issue (no openspec/changes/)', () => {
 
     const checkRunner = new SimpleStageRunner({
       checks: [new PassCheck('build-test'), new PassCheck('user-approval')],
-      nextStage: Stage.Done,
+      nextStage: Stage.Integrate,
       stage: Stage.Check,
+      executeTasksFn: async () => ({ simplified: true }),
+    });
+
+    const integrateRunner = new SimpleStageRunner({
+      checks: [],
+      nextStage: Stage.Done,
+      stage: Stage.Integrate,
       executeTasksFn: async () => ({ simplified: true }),
     });
 
@@ -602,7 +622,7 @@ describe('Non-OpenSpec Issue (no openspec/changes/)', () => {
     } as unknown as IssueRepo;
 
     const ctx = makeEngineContext({
-      runners: [planRunner, buildRunner, checkRunner],
+      runners: [planRunner, buildRunner, checkRunner, integrateRunner],
       issueRepo,
     });
 
@@ -611,11 +631,12 @@ describe('Non-OpenSpec Issue (no openspec/changes/)', () => {
 
     const result = await engine.run(issue, {} as any);
 
-    expect(result.completed).toBe(false);
-    expect(result.message).toContain('Check stage cannot transition directly to Done');
+    expect(result.completed).toBe(true);
+    expect(result.stage).toBe(Stage.Done);
     expect(planRunner.executeTasksCalls).toBe(1);
     expect(buildRunner.executeTasksCalls).toBe(1);
     expect(checkRunner.executeTasksCalls).toBe(1);
+    expect(integrateRunner.executeTasksCalls).toBe(1);
   });
 });
 

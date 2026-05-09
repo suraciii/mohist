@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { useIssueExecutions } from '../hooks/useQueries'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
-import type { Issue, StageExecution, StageTaskResult, CheckResult, AgentDetailEventMap } from '../lib/types'
+import type { Issue, StageExecution, StageTaskResult, CheckResult, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy } from '../lib/types'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
@@ -17,7 +17,7 @@ function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   return 'UNKNOWN'
 }
 
-const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done] as const
+const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done] as const
 type PipelineStage = (typeof PIPELINE_STAGES)[number]
 
 interface PendingTask {
@@ -42,6 +42,14 @@ const CHECK_TASK_DEFS: { taskId: string; title: string }[] = [
   { taskId: 'review-self-check', title: 'Review Self-Check' },
 ]
 
+const INTEGRATE_TASK_DEFS: { taskId: string; title: string }[] = [
+  { taskId: 'integrate:spec-sync', title: 'Sync main specs' },
+  { taskId: 'integrate:archive-change', title: 'Archive OpenSpec change' },
+  { taskId: 'integrate:merge', title: 'Merge to target branch' },
+  { taskId: 'final-health', title: 'Run final integration health gate' },
+  { taskId: 'integrate:complete', title: 'Complete issue' },
+]
+
 function mergeTasksForStage(
   stage: PipelineStage,
   taskResults: StageTaskResult[],
@@ -49,7 +57,7 @@ function mergeTasksForStage(
 ): (StageTaskResult | PendingTask)[] {
   if (stage === Stage.Done) return taskResults
 
-  const defs = stage === Stage.Plan ? PLAN_TASK_DEFS : stage === Stage.Check ? CHECK_TASK_DEFS : null
+  const defs = stage === Stage.Plan ? PLAN_TASK_DEFS : stage === Stage.Check ? CHECK_TASK_DEFS : stage === Stage.Integrate ? INTEGRATE_TASK_DEFS : null
   if (!defs) return taskResults
 
   const resultById = new Map(taskResults.map((t) => [t.taskId, t]))
@@ -898,7 +906,244 @@ function SpecialStatePanel({
     )
   }
 
-  return null
+return null
+}
+
+function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
+  const integrateExecution = executions.find(e => e.stage === Stage.Integrate)
+  const checkExecution = executions.find(e => e.stage === Stage.Check)
+
+  const checkOutput = checkExecution?.checkResults
+    ?.find(c => c.name === 'openspec-sync-dry-run')?.output as OpenSpecSyncOutput | undefined
+  const mergeReadinessOutput = checkExecution?.checkResults
+    ?.find(c => c.name === 'merge-readiness')?.output as MergeReadinessOutput | undefined
+  const healthGatePolicyOutput = checkExecution?.checkResults
+    ?.find(c => c.name === 'integration-health-gate-preview')?.output as IntegrationHealthGatePolicy | undefined
+
+  const specSyncResult = integrateExecution?.taskResults?.find(t => t.taskId === 'integrate:spec-sync')
+  const archiveResult = integrateExecution?.taskResults?.find(t => t.taskId === 'integrate:archive-change')
+  const mergeResult = integrateExecution?.taskResults?.find(t => t.taskId === 'integrate:merge')
+  const finalHealthResult = integrateExecution?.taskResults?.find(t => t.taskId === 'final-health')
+
+  const specSyncOutput = specSyncResult ? (specSyncResult as any).output as OpenSpecSyncOutput | undefined : undefined
+  const archiveOutput = archiveResult ? (archiveResult as any).output as { archivePath?: string } | undefined : undefined
+  const mergeOutput = mergeResult ? (mergeResult as any).output as { mergedSha?: string; targetBranch?: string; baseSha?: string; headSha?: string } | undefined : undefined
+  const healthOutput = finalHealthResult ? (finalHealthResult as any).output as { command?: string; duration?: number; summary?: string; passed?: boolean; exitCode?: number } | undefined : undefined
+
+  if (!integrateExecution && !checkExecution) return null
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
+      <h3 className="text-sm font-semibold text-gray-700">Integration Evidence</h3>
+
+      {(checkOutput || mergeReadinessOutput || healthGatePolicyOutput) && (
+        <div className="space-y-3">
+          <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">Check Readiness</h4>
+          {checkOutput && (
+            <div className="rounded-md bg-blue-50 border border-blue-100 p-3 space-y-1.5">
+              <div className="text-xs font-medium text-blue-800">Spec Sync Dry-Run</div>
+              <div className="text-xs text-blue-700">
+                {checkOutput.valid ? (
+                  <>
+                    {checkOutput.capabilities.length > 0 && (
+                      <span>Capabilities: {checkOutput.capabilities.join(', ')}</span>
+                    )}
+                    {checkOutput.targetFiles.length > 0 && (
+                      <span className="block">Target files: {checkOutput.targetFiles.length}</span>
+                    )}
+                    {checkOutput.counts && (
+                      <span className="block">
+                        {checkOutput.counts.added} added, {checkOutput.counts.modified} modified,{' '}
+                        {checkOutput.counts.removed} removed, {checkOutput.counts.renamed} renamed
+                      </span>
+                    )}
+                    {checkOutput.conflicts && checkOutput.conflicts.length > 0 && (
+                      <span className="block text-red-600">
+                        Conflicts: {checkOutput.conflicts.length}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-red-600">Dry-run failed</span>
+                )}
+              </div>
+            </div>
+          )}
+          {mergeReadinessOutput && (
+            <div className="rounded-md bg-purple-50 border border-purple-100 p-3 space-y-1.5">
+              <div className="text-xs font-medium text-purple-800">Merge Readiness</div>
+              <div className="text-xs text-purple-700">
+                <span>Fast-forward: {mergeReadinessOutput.canFastForward ? 'Yes' : 'No'}</span>
+                <span className="block">Clean rebase: {mergeReadinessOutput.cleanRebaseFeasible ? 'Yes' : 'No'}</span>
+                {mergeReadinessOutput.conflictFiles && mergeReadinessOutput.conflictFiles.length > 0 && (
+                  <span className="block text-red-600">
+                    Conflicts: {mergeReadinessOutput.conflictFiles.join(', ')}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+          {healthGatePolicyOutput && (
+            <div className="rounded-md bg-green-50 border border-green-100 p-3 space-y-1.5">
+              <div className="text-xs font-medium text-green-800">Final Health Gate Policy</div>
+              <div className="text-xs text-green-700">
+                <span className="font-mono">{healthGatePolicyOutput.command}</span>
+                <span className="block">Timeout: {healthGatePolicyOutput.timeout}s</span>
+                <span className="block">Enabled: {healthGatePolicyOutput.enabled ? 'Yes' : 'No'}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {integrateExecution && (
+        <div className="space-y-3">
+          <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">Integrate Steps</h4>
+          {specSyncResult && specSyncResult.status === 'completed' && (
+            <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <CheckmarkIcon className="h-3.5 w-3.5 text-green-500" />
+                <span className="text-xs font-medium text-gray-800">Spec Sync</span>
+              </div>
+              {specSyncOutput && (
+                <div className="text-xs text-gray-600 ml-5">
+                  {specSyncOutput.capabilities.length > 0 && (
+                    <span>Capabilities: {specSyncOutput.capabilities.join(', ')}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {archiveResult && archiveResult.status === 'completed' && (
+            <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <CheckmarkIcon className="h-3.5 w-3.5 text-green-500" />
+                <span className="text-xs font-medium text-gray-800">Archive OpenSpec Change</span>
+              </div>
+              {archiveOutput?.archivePath && (
+                <div className="text-xs text-gray-600 ml-5 font-mono">{archiveOutput.archivePath}</div>
+              )}
+            </div>
+          )}
+          {mergeResult && mergeResult.status === 'completed' && (
+            <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <CheckmarkIcon className="h-3.5 w-3.5 text-green-500" />
+                <span className="text-xs font-medium text-gray-800">Merge to Target Branch</span>
+              </div>
+              {mergeOutput && (
+                <div className="text-xs text-gray-600 ml-5 font-mono">
+                  {mergeOutput.targetBranch}: {mergeOutput.baseSha?.slice(0, 7)} → {mergeOutput.headSha?.slice(0, 7)}
+                  {mergeOutput.mergedSha && ` → ${mergeOutput.mergedSha.slice(0, 7)}`}
+                </div>
+              )}
+            </div>
+          )}
+          {finalHealthResult && finalHealthResult.status === 'completed' && (
+            <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <CheckmarkIcon className="h-3.5 w-3.5 text-green-500" />
+                <span className="text-xs font-medium text-gray-800">Final Health Gate</span>
+              </div>
+              {healthOutput && (
+                <div className="text-xs text-gray-600 ml-5">
+                  {healthOutput.summary}
+                  <span className="block font-mono">{healthOutput.command}</span>
+                </div>
+              )}
+            </div>
+          )}
+          {finalHealthResult && finalHealthResult.status === 'failed' && (
+            <div className="rounded-md bg-red-50 border border-red-200 p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <CrossIcon className="h-3.5 w-3.5 text-red-500" />
+                <span className="text-xs font-medium text-red-800">Final Health Gate Failed</span>
+              </div>
+              {healthOutput && (
+                <div className="text-xs text-red-600 ml-5">
+                  {healthOutput.summary}
+                  <span className="block font-mono">{healthOutput.command}</span>
+                  {healthOutput.exitCode != null && <span className="block">Exit code: {healthOutput.exitCode}</span>}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IntegrateFailurePanel({ issue }: { issue: Issue }) {
+  if (issue.stage !== Stage.Integrate) return null
+  if (issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Interrupted) return null
+
+  const blockedReason = issue.blockedReason ?? 'Integration step failed'
+
+  let failingStep = 'unknown'
+  let capabilityOrFiles = ''
+  let requirementHeader = ''
+  let mergeReason = ''
+  let healthCommand = ''
+  let healthSummary = ''
+  let healthLogExcerpt = ''
+  let nextAction = 'Review the failure above and take action to resolve the issue.'
+
+  if (blockedReason) {
+    if (blockedReason.includes('spec-sync') || blockedReason.includes('spec sync')) {
+      failingStep = 'Sync main specs'
+      nextAction = 'Check the OpenSpec delta specs for conflicts with existing requirements. Return to Build to fix spec issues.'
+    } else if (blockedReason.includes('archive')) {
+      failingStep = 'Archive OpenSpec change'
+      nextAction = 'Check disk space and permissions. Retry the archive step or return to Build.'
+    } else if (blockedReason.includes('merge') || blockedReason.includes('Merge')) {
+      failingStep = 'Merge to target branch'
+      nextAction = 'Resolve any merge conflicts and return to Build for re-check.'
+    } else if (blockedReason.includes('health') || blockedReason.includes('final-health') || blockedReason.includes('health gate')) {
+      failingStep = 'Run final integration health gate'
+      nextAction = 'Review the health gate failure and fix the underlying issue. Return to Build for re-check.'
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <CrossIcon className="h-4 w-4 text-red-500" />
+        <span className="text-sm font-semibold text-red-800">Integration Failed</span>
+      </div>
+      <div className="space-y-1.5">
+        <div className="text-xs text-red-700">
+          <span className="font-medium">Failing step:</span> {failingStep}
+        </div>
+        {capabilityOrFiles && (
+          <div className="text-xs text-red-700">
+            <span className="font-medium">Affected:</span> {capabilityOrFiles}
+          </div>
+        )}
+        {(requirementHeader || mergeReason) && (
+          <div className="text-xs text-red-700">
+            {requirementHeader || mergeReason}
+          </div>
+        )}
+        {(healthCommand || healthSummary) && (
+          <div className="rounded bg-red-100 p-2 space-y-1">
+            {healthCommand && (
+              <div className="text-xs font-mono text-red-800">{healthCommand}</div>
+            )}
+            {healthSummary && (
+              <div className="text-xs text-red-700">{healthSummary}</div>
+            )}
+            {healthLogExcerpt && (
+              <div className="text-xs text-red-600 mt-1 font-mono whitespace-pre-wrap">{healthLogExcerpt}</div>
+            )}
+          </div>
+        )}
+        <div className="pt-1 border-t border-red-200">
+          <p className="text-xs text-red-600">{nextAction}</p>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function PipelineView({ issue }: { issue: Issue }) {
@@ -1029,6 +1274,14 @@ export function PipelineView({ issue }: { issue: Issue }) {
           liveElapsedByTask={liveElapsed}
           runningTaskIds={runningTaskIds}
         />
+      )}
+
+      {isCompleted && (
+        <DoneEvidencePanel executions={executions} />
+      )}
+
+      {issue.stage === Stage.Integrate && (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (
+        <IntegrateFailurePanel issue={issue} />
       )}
     </div>
   )

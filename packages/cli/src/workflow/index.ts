@@ -85,6 +85,8 @@ export { PlanStageRunner } from './plan-stage-runner';
 
 export { BuildStageRunner } from './build-stage-runner';
 
+export { IntegrateStageRunner } from './integrate-stage-runner';
+
 export {
   parseVerdict,
   parseResult,

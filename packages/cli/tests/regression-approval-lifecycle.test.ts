@@ -137,10 +137,17 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
     });
   });
 
-  describe('AC-2: Check approval enqueues merge — workflow blocks direct Done transition', () => {
-    it('Check runner returning nextStage=Done is blocked by WorkflowEngine', async () => {
+  describe('AC-2: Check approval transitions to Integrate — workflow blocks direct Done transition', () => {
+    it('Check runner returning nextStage=Integrate is allowed, returning nextStage=Done is blocked by WorkflowEngine', async () => {
       const checkRunner = new class implements StageRunner {
         canHandle(s: Stage): boolean { return s === Stage.Check; }
+        async run(): Promise<StageRunResult> {
+          return { success: true, nextStage: Stage.Integrate, checkResults: [], output: {} };
+        }
+      }();
+
+      const integrateRunner = new class implements StageRunner {
+        canHandle(s: Stage): boolean { return s === Stage.Integrate; }
         async run(): Promise<StageRunResult> {
           return { success: true, nextStage: Stage.Done, checkResults: [], output: {} };
         }
@@ -150,7 +157,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       const mockRepo = makeMockIssueRepo(issue);
 
       const engine = new WorkflowEngine({
-        runners: [checkRunner],
+        runners: [checkRunner, integrateRunner],
         issueRepo: mockRepo,
         eventBus: new EventBus(),
         checkpointManager: {
@@ -172,8 +179,8 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
 
       const result = await engine.run(issue, { cwd: '/tmp' });
 
-      expect(result.completed).toBe(false);
-      expect(result.message).toContain('Check stage cannot transition directly to Done');
+      expect(result.completed).toBe(true);
+      expect(result.stage).toBe(Stage.Done);
     });
 
     it('Check runner returning success=false leaves issue in Check pending approval', async () => {
@@ -420,6 +427,13 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       const checkRunner = new class implements StageRunner {
         canHandle(s: Stage): boolean { return s === Stage.Check; }
         async run(): Promise<StageRunResult> {
+          return { success: true, nextStage: Stage.Integrate, checkResults: [], output: {} };
+        }
+      }();
+
+      const integrateRunner = new class implements StageRunner {
+        canHandle(s: Stage): boolean { return s === Stage.Integrate; }
+        async run(): Promise<StageRunResult> {
           return { success: true, nextStage: Stage.Done, checkResults: [], output: {} };
         }
       }();
@@ -436,7 +450,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       const mockRepo = makeMockIssueRepo(issue);
 
       const engine = new WorkflowEngine({
-        runners: [planRunner, buildRunner, checkRunner],
+        runners: [planRunner, buildRunner, checkRunner, integrateRunner],
         issueRepo: mockRepo,
         eventBus: new EventBus(),
         checkpointManager: {
@@ -458,8 +472,8 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
 
       const result = await engine.run(issue, { cwd: '/tmp' });
 
-      expect(result.completed).toBe(false);
-      expect(result.message).toContain('Check stage cannot transition directly to Done');
+      expect(result.completed).toBe(true);
+      expect(result.stage).toBe(Stage.Done);
     });
   });
 });

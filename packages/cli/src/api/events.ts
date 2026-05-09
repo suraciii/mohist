@@ -42,6 +42,10 @@ const ALL_EVENT_TYPES: EventName[] = [
   'schedule_completed',
   'schedule_failed',
   'stage_task_update',
+  'integration_started',
+  'integration_step_updated',
+  'integration_completed',
+  'integration_failed',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {

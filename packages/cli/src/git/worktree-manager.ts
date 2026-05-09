@@ -116,6 +116,24 @@ export interface RebaseResult {
   conflicts: string[];
 }
 
+export interface MergeTruth {
+  targetBranch: string;
+  baseSha: string;
+  candidateHeadSha: string;
+  landedSha: string;
+  fastForward: boolean;
+  rebased?: boolean;
+}
+
+export interface IntegrationFailure {
+  failingStep: 'merge';
+  targetBranch: string;
+  baseSha: string;
+  candidateHeadSha: string;
+  conflictFiles?: string[];
+  error: string;
+}
+
 export class WorktreeManager {
 
   async create(
@@ -660,6 +678,160 @@ export class WorktreeManager {
   exists(projectName: string, issueNumber: number): boolean {
     const worktreePath = getWorktreePath(projectName, issueNumber);
     return fs.existsSync(worktreePath);
+  }
+
+  async mergeApprovedCandidate(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<MergeTruth | IntegrationFailure> {
+    const branch = getBranchName(issueNumber);
+    const worktreePath = getWorktreePath(projectName, issueNumber);
+
+    if (!this.exists(projectName, issueNumber)) {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha: '',
+        candidateHeadSha: '',
+        error: `Worktree for issue #${issueNumber} not found`,
+      };
+    }
+
+    await smartFetch(projectPath);
+
+    let baseSha = '';
+    let candidateHeadSha = '';
+    try {
+      const { stdout: baseOut } = await execFileAsync(
+        'git', ['merge-base', baseBranch, branch],
+        { cwd: projectPath }
+      );
+      baseSha = baseOut.trim();
+    } catch {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha: '',
+        candidateHeadSha: '',
+        error: `Could not determine merge base for ${branch} vs ${baseBranch}`,
+      };
+    }
+
+    try {
+      const { stdout: headOut } = await execFileAsync(
+        'git', ['rev-parse', branch],
+        { cwd: projectPath }
+      );
+      candidateHeadSha = headOut.trim();
+    } catch {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha: '',
+        error: `Could not resolve branch ${branch}`,
+      };
+    }
+
+    const canFF = await this.canFastForward(projectPath, projectName, issueNumber, baseBranch);
+    if (canFF) {
+      try {
+        await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
+        await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
+        const { stdout: landedOut } = await execFileAsync(
+          'git', ['rev-parse', 'HEAD'],
+          { cwd: projectPath }
+        );
+        const landedSha = landedOut.trim();
+        log.info('Fast-forward merge succeeded', { issueNumber, branch, baseBranch, landedSha });
+        return {
+          targetBranch: baseBranch,
+          baseSha,
+          candidateHeadSha,
+          landedSha,
+          fastForward: true,
+        };
+      } catch (err) {
+        return {
+          failingStep: 'merge',
+          targetBranch: baseBranch,
+          baseSha,
+          candidateHeadSha,
+          error: `Fast-forward merge failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+
+    try {
+      await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
+    } catch { /* no stale rebase */ }
+
+    const rebaseResult = await this.rebaseOntoMaster(
+      projectPath,
+      projectName,
+      issueNumber,
+      baseBranch,
+      { abortOnConflict: true }
+    );
+
+    if (!rebaseResult.success) {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        conflictFiles: rebaseResult.conflicts.length > 0 ? rebaseResult.conflicts : undefined,
+        error: `Clean rebase with abort-on-conflict failed: conflicts detected`,
+      };
+    }
+
+    try {
+      const { stdout: newHead } = await execFileAsync(
+        'git', ['rev-parse', branch],
+        { cwd: projectPath }
+      );
+      candidateHeadSha = newHead.trim();
+    } catch { /* use original */ }
+
+    const canFFAfterRebase = await this.canFastForward(projectPath, projectName, issueNumber, baseBranch);
+    if (!canFFAfterRebase) {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        error: 'Rebase succeeded but branch still cannot fast-forward',
+      };
+    }
+
+    try {
+      await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
+      await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
+      const { stdout: landedOut } = await execFileAsync(
+        'git', ['rev-parse', 'HEAD'],
+        { cwd: projectPath }
+      );
+      const landedSha = landedOut.trim();
+      log.info('Merge succeeded after clean rebase', { issueNumber, branch, baseBranch, landedSha });
+      return {
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        landedSha,
+        fastForward: false,
+        rebased: true,
+      };
+    } catch (err) {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        error: `Merge after rebase failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   async prune(projectPath: string): Promise<void> {

@@ -4,6 +4,7 @@ export enum Stage {
   Plan = 'plan',
   Build = 'build',
   Check = 'check',
+  Integrate = 'integrate',
   Done = 'done',
   Backlog = 'backlog'
 }
@@ -14,6 +15,7 @@ export const STAGE_ORDER: Stage[] = [
   Stage.Plan,
   Stage.Build,
   Stage.Check,
+  Stage.Integrate,
   Stage.Done
 ];
 
@@ -22,7 +24,8 @@ export const STAGE_TRANSITIONS: Record<Stage, Stage[]> = {
   [Stage.Explore]: [Stage.Plan],
   [Stage.Plan]: [Stage.Build],
   [Stage.Build]: [Stage.Check],
-  [Stage.Check]: [Stage.Done, Stage.Build],
+  [Stage.Check]: [Stage.Integrate, Stage.Build],
+  [Stage.Integrate]: [Stage.Done, Stage.Build],
   [Stage.Done]: [],
   [Stage.Backlog]: [Stage.Plan]
 };

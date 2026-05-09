@@ -1152,4 +1152,54 @@ describe('recoverIssues — false-done detection', () => {
     expect(recovered?.blockedReason).toContain('False-done anomaly');
     expect(blockedEvents.some(e => e.issueNumber === falseDoneIssue.number)).toBe(true);
   });
+
+  it('integrate-stage active issue: preserved and can be resumed', () => {
+    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
+    const issue = issueService.create({ projectId: project.id, title: 'Integrate Active' });
+    issueRepo.updateStatus(issue.id, IssueStatus.Active);
+    issueRepo.updateStage(issue.id, Stage.Integrate);
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+      undefined,
+      undefined,
+      projectRepo,
+      createWorktreeMock(tmpDir),
+    );
+
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.stage).toBe(Stage.Integrate);
+    expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.blockedReason).toBeUndefined();
+  });
+
+  it('check-stage with mergeState=merged: transitioned to integrate during recovery', () => {
+    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
+    const issue = issueService.create({ projectId: project.id, title: 'Check Merged' });
+    issueRepo.updateStatus(issue.id, IssueStatus.Active);
+    issueRepo.updateStage(issue.id, Stage.Check);
+    issueRepo.setMergeState(issue.id, MergeState.Merged);
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+      undefined,
+      undefined,
+      projectRepo,
+      createWorktreeMock(tmpDir),
+    );
+
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.stage).toBe(Stage.Integrate);
+    expect(recovered?.status).toBe(IssueStatus.Active);
+  });
 });
