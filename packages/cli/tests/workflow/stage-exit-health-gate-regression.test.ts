@@ -152,25 +152,41 @@ describe('Check-stage approval requires health:check pass', () => {
     expect(result.checkResults[2].status).toBe('pending');
   });
 
-  it('health:check pass followed by all checks pass results in pending approval', async () => {
-    const healthGatePassCheck = new PassCheck('health:check');
-    const aiReviewCheck = new PassCheck('ai-review');
-    const userApprovalCheck = new UserApprovalCheck(Stage.Check);
+    it('health:check pass followed by all checks pass results in pending approval', async () => {
+      const healthGatePassCheck = new PassCheck('health:check');
+      const aiReviewCheck: Check = {
+        name: 'ai-review',
+        run: async () => ({
+          name: 'ai-review',
+          status: 'pass' as const,
+          output: { verdict: 'PASS', reviewReport: 'Mock review report' },
+        }),
+      };
+      const userApprovalCheck = new UserApprovalCheck(Stage.Check);
 
-    const runner = new HealthGateCheckRunner({
-      checks: [healthGatePassCheck, aiReviewCheck, userApprovalCheck],
-      nextStage: Stage.Done,
-      stage: Stage.Check,
+      const runner = new HealthGateCheckRunner({
+        checks: [healthGatePassCheck, aiReviewCheck, userApprovalCheck],
+        nextStage: Stage.Done,
+        stage: Stage.Check,
+      });
+
+      const ctx = makeContext({
+        issue: makeIssue({ stage: Stage.Check }),
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({ id: 'proj-1', name: 'test-project', path: '/tmp/project' }),
+        } as unknown as ProjectRepo,
+        worktreeManager: {
+          getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+          createCheckConvergenceCommit: vi.fn().mockResolvedValue({ success: true, headSha: 'abc123' }),
+        } as unknown as WorktreeManager,
+      });
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.checkResults).toHaveLength(3);
+      expect(result.checkResults[2].status).toBe('pending');
+      expect(ctx.issueRepo.setApprovalState).toHaveBeenCalled();
     });
-
-    const ctx = makeContext({ issue: makeIssue({ stage: Stage.Check }) });
-    const result = await runner.run(ctx);
-
-    expect(result.success).toBe(false);
-    expect(result.checkResults).toHaveLength(3);
-    expect(result.checkResults[2].status).toBe('pending');
-    expect(ctx.issueRepo.setApprovalState).toHaveBeenCalled();
-  });
 
   it('health:check failure blocks check-stage even when AI review would pass', async () => {
     const healthGateFailsCheck = new FailCheck(

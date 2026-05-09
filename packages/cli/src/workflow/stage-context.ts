@@ -88,6 +88,9 @@ export interface WorktreeManager {
   getWorktreeStatus(projectPath: string, projectName: string, issueNumber: number): Promise<{ exists: boolean; branch: string; baseBranch?: string; ahead: number; behind: number; canFastForward: boolean; isRebaseInProgress: boolean; rebaseInProgress?: boolean; conflictingFiles?: string[] }>;
   prune(projectPath: string): Promise<void>;
   mergeApprovedCandidate(projectPath: string, projectName: string, issueNumber: number, baseBranch?: string): Promise<{ targetBranch: string; baseSha: string; candidateHeadSha: string; landedSha: string; fastForward: boolean; rebased?: boolean } | { failingStep: 'merge'; targetBranch: string; baseSha: string; candidateHeadSha: string; conflictFiles?: string[]; error: string }>;
+  getHeadSha(worktreePath: string): Promise<string>;
+  isWorktreeClean(worktreePath: string): Promise<boolean>;
+  createCheckConvergenceCommit(worktreePath: string, issueNumber: number): Promise<import('../git/worktree-manager').ConvergenceCommitResult>;
 }
 
 export interface ProjectRepo {
@@ -183,6 +186,7 @@ export interface CheckSuiteRepo {
   findActiveByIssueId(issueId: string): import('../types').CheckSuite | null;
   updateChecks(suiteId: string, checkName: string, checkState: import('../types').CheckState): import('../types').CheckSuite | null;
   updateSnapshotSha(suiteId: string, newSha: string): import('../types').CheckSuite | null;
+  updateSnapshotShaPreservingChecks(suiteId: string, newSha: string): import('../types').CheckSuite | null;
 }
 
 export function emitStageTaskUpdate(
