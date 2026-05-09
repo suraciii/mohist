@@ -1,0 +1,158 @@
+{
+  "project": "mohist",
+  "description": "Improve the dedicated coder session page into a clean opencode-style Mohist/coder conversation transcript.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Normalize tool lifecycle projection",
+      "spec": "specs/coder-session-tracking/spec.md#tool-lifecycle-normalization",
+      "description": "Refactor transcript assembly so raw tool lifecycle events become one logical tool part per provider call or correlation key. The assembler should merge start/update fragments, normalize status, infer useful tool names/titles, and hide internal lifecycle events from visible transcript output.",
+      "acceptanceCriteria": [
+        "A persisted session with tool_call plus tool_call_update for the same call id produces exactly one ToolPart",
+        "Update-only or no-id tool payloads merge with pending tools by normalized name plus target/title when inferable",
+        "Internal step, lifecycle, or bookkeeping events do not render as visible tool parts",
+        "Inferable payloads no longer render as orphan `unknown running...` entries",
+        "Backend tests cover id-based merge, no-id correlation, update-only fallback, status normalization, and hidden internal events",
+        "Tests pass: cd packages/cli && npm test",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/session-transcript-service.ts, packages/cli/tests/session-transcript-service.test.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This produces the canonical normalized tool lifecycle behavior consumed by all later API, live, and UI work. Keep existing transcript fields backward-compatible while adding normalized fields or warnings as needed."
+    },
+    {
+      "id": "T-002",
+      "title": "Expose canonical transcript metadata",
+      "spec": "specs/http-api/spec.md#coder-session-detail-normalized-transcript",
+      "description": "Update the coder session detail API to expose the canonical normalized transcript and metadata needed by the session page. The endpoint should preserve existing callers while returning warnings, changed-file summaries, stable tool statuses, and raw-debug data only behind explicit fields.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/coder-sessions/:sessionId returns normalized turns with merged tool parts from the assembler",
+        "The response includes transcript warnings, hasUnknownTools, event/tool/turn counts, lastActivityAt, and changedFiles when available",
+        "The endpoint reads session_stream_log first and falls back to workflow_log stream events for legacy sessions",
+        "Running sessions do not expose misleading terminal completedAt metadata",
+        "API tests prove completed sessions replay from persisted data without SSE state",
+        "Existing coder session list consumers remain compatible",
+        "Tests pass: cd packages/cli && npm test",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts, packages/cli/web/src/lib/types.ts, packages/cli/tests/api/session-transcript.test.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Consumes the canonical assembler output from T-001 and makes it the API contract for historical replay and frontend rendering."
+    },
+    {
+      "id": "T-003",
+      "title": "Align live updates with canonical transcript",
+      "spec": "specs/pipeline-session-events/spec.md#live-transcript-convergence",
+      "description": "Refactor live SSE handling so the session page updates the same normalized transcript shape returned by the API. Live tool start/update events must update existing logical tool parts instead of appending duplicate or orphan cards, then reconcile with the canonical detail response after terminal events.",
+      "acceptanceCriteria": [
+        "Live coder_tool_call start/update events merge into one visible tool card when ids or correlation fields match",
+        "A running session shows only real active tools as running and does not create orphan unknown cards during streaming",
+        "Terminal completion, failure, timeout, cancellation, and recovery events invalidate or refetch the session detail transcript",
+        "Live append followed by refetch preserves equivalent visible transcript order and tool grouping for representative fixtures",
+        "Near-bottom auto-scroll and away-from-bottom new-content behavior still work for text and tool updates",
+        "Frontend tests cover live duplicate prevention and refetch convergence",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useSessionTranscript.ts, packages/cli/web/src/components/SessionPage.tsx, packages/cli/web/tests/SessionPage.test.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "The API transcript from T-002 remains authoritative; live state should be an optimistic incremental view that converges after refetch."
+    },
+    {
+      "id": "T-004",
+      "title": "Render semantic tool conversation parts",
+      "spec": "specs/agent-session-ui/spec.md#semantic-tool-parts",
+      "description": "Update the transcript renderer and tool cards to consume normalized ToolPart data directly and present tools as readable assistant parts. Context tools should group compactly, bash should show command/status/output preview, file-changing tools should show changed-file summaries, and raw payloads should stay collapsed by default.",
+      "acceptanceCriteria": [
+        "Consecutive read, grep, glob, list, search, and memory-read tools render as a compact Gathered context group with expandable details",
+        "Bash tool cards show a human title, command, terminal status, duration when available, concise output preview, and expandable full output",
+        "Edit, write, and apply_patch tool cards show changed file count, operation, path, additions/deletions when available, and expandable raw patch/input/output",
+        "Unknown tools use displayTitle, title, target, source name, or another useful fallback before showing unknown",
+        "Pending/running tools use a restrained active state and do not expose half-formed raw payloads as the primary content",
+        "Frontend tests cover context grouping, bash summary, apply_patch summary, edit/write summary, unknown fallback, and raw detail disclosure",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/SessionTranscriptView.tsx, packages/cli/web/src/components/ToolCallCard.tsx, packages/cli/web/tests/SessionPage.test.tsx",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Consumes normalized API/live ToolPart fields from T-002 and T-003. Grouping is presentation-only; do not remove individual tool parts from transcript data."
+    },
+    {
+      "id": "T-005",
+      "title": "Polish conversation transcript page",
+      "spec": "specs/agent-session-ui/spec.md#readable-mohist-coder-transcript",
+      "description": "Polish `/issue/:number/session/:sessionId` so the page reads top-to-bottom as Mohist prompts followed by Coder responses and resulting output. The final page should foreground speaker labels, collapsed reasoning, compact changed-file output, useful empty/error states, and avoid workflow-dashboard or event-log presentation.",
+      "acceptanceCriteria": [
+        "Mohist prompt cards render as user-side messages with prompt kind, readable summary, sent time, and collapsed full prompt disclosure",
+        "Coder text renders as assistant prose with reasoning collapsed by default",
+        "Each assistant turn surfaces resulting file changes as compact transcript output when available",
+        "Session header shows issue/session/stage/status context without becoming a workflow dashboard",
+        "Loading, waiting-for-activity, empty-history, legacy-missing-prompt, API-error, completed, failed, live, finalizing, and stale states are visually distinct",
+        "The page contains no composer, continue-conversation affordance, stop/steer controls, or stage-control dashboard elements",
+        "Frontend tests cover speaker structure, collapsed reasoning, file-change output, and state rendering",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/SessionPage.tsx, packages/cli/web/src/components/SessionTranscriptView.tsx, packages/cli/web/tests/SessionPage.test.tsx",
+      "dependsOn": [
+        "T-002",
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "Consumes semantic tool rendering from T-004 and canonical metadata from T-002 to complete the opencode-style reading experience."
+    },
+    {
+      "id": "T-006",
+      "title": "Verify end-to-end transcript quality",
+      "spec": "specs/session-timeline-ui/spec.md#session-transcript-quality-regression",
+      "description": "Add focused regression coverage and run final verification for the normalized transcript experience. The tests should model realistic active and historical sessions that previously produced orphan unknown/running cards, noisy context logs, or unreadable file-change output.",
+      "acceptanceCriteria": [
+        "Regression fixtures cover pending plus update tool events, update-only events, no-id correlation, internal lifecycle events, context bursts, bash output, apply_patch, edit/write, reasoning, and multi-turn prompts",
+        "Tests prove completed tools appear once with stable name, title, and terminal status after refresh",
+        "Tests prove live updates do not create duplicate or orphan tool cards before canonical refetch",
+        "Tests prove context gathering is grouped and file changes are visible as compact transcript output",
+        "Tests prove raw input/output remains accessible behind explicit disclosure",
+        "Tests pass: cd packages/cli && npm test",
+        "Build passes: cd packages/cli && npm run build",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/session-transcript-service.test.ts, packages/cli/tests/api/session-transcript.test.ts, packages/cli/web/tests/SessionPage.test.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "Final verification consumes all earlier outputs. Keep fixtures realistic but local to existing backend/API/frontend test suites unless a shared fixture location already exists."
+    }
+  ]
+}
