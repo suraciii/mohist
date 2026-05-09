@@ -84,11 +84,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the readiness checks from T-002. The runner can initially fail with missing dependencies only in tests that do not exercise integration steps, but normal workflow registration should be in place.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1386353
+      ]
     },
     {
       "id": "T-004",
