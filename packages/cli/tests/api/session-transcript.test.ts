@@ -376,6 +376,150 @@ describe('Session Transcript API', () => {
         expect(response.status).toBe(200);
         expect(response.body.data.metadata.completedAt).not.toBeNull();
       });
+
+      it('includes eventCount, toolCount, turnCount, and lastActivityAt in metadata', async () => {
+        const { issue } = await setupProjectAndIssue();
+        const session = createSession(issue.id, { status: 'completed' });
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'mohist_prompt', {
+          role: 'mohist',
+          text: 'Task',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        }, '2024-01-01T10:00:00.000Z');
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'agent_message_chunk', {
+          content: { text: 'Response' },
+        }, '2024-01-01T10:00:01.000Z');
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'tool_call', {
+          toolCallId: 'tc-1',
+          toolName: 'Read',
+          title: 'src/index.ts',
+          input: '{"file_path":"src/index.ts"}',
+        }, '2024-01-01T10:00:02.000Z');
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'tool_call_update', {
+          toolCallId: 'tc-1',
+          status: 'completed',
+          output: 'file contents',
+        }, '2024-01-01T10:00:03.000Z');
+
+        const response = await request(server).get(`/api/issues/${issue.number}/coder-sessions/${session.id}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.metadata.eventCount).toBe(4);
+        expect(response.body.data.metadata.toolCount).toBe(1);
+        expect(response.body.data.metadata.turnCount).toBe(1);
+        expect(response.body.data.metadata.lastActivityAt).toBe('2024-01-01T10:00:03.000Z');
+      });
+
+      it('returns warnings and hasUnknownTools when tool normalization is ambiguous', async () => {
+        const { issue } = await setupProjectAndIssue();
+        const session = createSession(issue.id, { status: 'completed' });
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'mohist_prompt', {
+          role: 'mohist',
+          text: 'Task',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        }, '2024-01-01T10:00:00.000Z');
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'tool_call', {
+          toolCallId: 'tc-unknown',
+          toolName: 'UnknownCustomTool',
+          status: 'completed',
+          output: '{}',
+        }, '2024-01-01T10:00:02.000Z');
+
+        const response = await request(server).get(`/api/issues/${issue.number}/coder-sessions/${session.id}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.metadata.warnings).toBeDefined();
+        expect(response.body.data.metadata.warnings.length).toBeGreaterThan(0);
+        expect(response.body.data.metadata.hasUnknownTools).toBe(true);
+      });
+
+      it('returns changedFiles when apply_patch tool changes files', async () => {
+        const { issue } = await setupProjectAndIssue();
+        const session = createSession(issue.id, { status: 'completed' });
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'mohist_prompt', {
+          role: 'mohist',
+          text: 'Task',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        }, '2024-01-01T10:00:00.000Z');
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'tool_call', {
+          toolCallId: 'tc-patch',
+          toolName: 'apply_patch',
+          input: JSON.stringify({
+            patchText: 'Add File: src/new.ts\n+ line1\n+ line2\n\nUpdate File: src/existing.ts\n- old line\n+ new line',
+          }),
+        }, '2024-01-01T10:00:02.000Z');
+
+        const response = await request(server).get(`/api/issues/${issue.number}/coder-sessions/${session.id}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.metadata.changedFiles).toBeDefined();
+        expect(response.body.data.metadata.changedFiles.length).toBe(2);
+        expect(response.body.data.metadata.changedFiles[0].path).toBe('src/new.ts');
+        expect(response.body.data.metadata.changedFiles[0].operation).toBe('created');
+        expect(response.body.data.metadata.changedFiles[1].path).toBe('src/existing.ts');
+        expect(response.body.data.metadata.changedFiles[1].operation).toBe('modified');
+      });
+    });
+
+    describe('running sessions do not expose misleading completedAt', () => {
+      it('returns null completedAt and live statusKind for running sessions', async () => {
+        const { issue } = await setupProjectAndIssue();
+        const session = createSession(issue.id, { status: 'running' });
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'mohist_prompt', {
+          role: 'mohist',
+          text: 'Running task',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        }, '2024-01-01T10:00:00.000Z');
+
+        const now = new Date().toISOString();
+        insertStreamEvent(session.acpSessionId, issue.id, 'tool_call', {
+          toolCallId: 'tc-running',
+          toolName: 'Bash',
+          status: 'running',
+        }, now);
+
+        const response = await request(server).get(`/api/issues/${issue.number}/coder-sessions/${session.id}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.metadata.completedAt).toBeNull();
+        expect(response.body.data.metadata.statusKind).toBe('live');
+        expect(response.body.data.turns[0].assistant[0].type).toBe('tool');
+        expect(response.body.data.turns[0].assistant[0].tool.status).toBe('running');
+      });
+
+      it('returns stale statusKind when last activity is beyond 2 minutes', async () => {
+        const { issue } = await setupProjectAndIssue();
+        const session = createSession(issue.id, { status: 'running' });
+
+        insertStreamEvent(session.acpSessionId, issue.id, 'mohist_prompt', {
+          role: 'mohist',
+          text: 'Stale task',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        }, '2024-01-01T10:00:00.000Z');
+
+        const staleTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        insertStreamEvent(session.acpSessionId, issue.id, 'agent_message_chunk', {
+          content: { text: 'Stale response' },
+        }, staleTime);
+
+        const response = await request(server).get(`/api/issues/${issue.number}/coder-sessions/${session.id}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.metadata.statusKind).toBe('stale');
+      });
     });
   });
 });

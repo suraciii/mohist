@@ -433,7 +433,7 @@ export interface ToolPart {
     displaySubtitle?: string
     category?: string
     toolName: string
-    status: 'started' | 'completed' | 'failed'
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
     title?: string
     target?: string
     input?: string
