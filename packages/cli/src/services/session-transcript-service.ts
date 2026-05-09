@@ -528,6 +528,12 @@ interface ActiveParts {
   reasoningPart: ReasoningPart | null;
 }
 
+interface PendingNoIdTool {
+  id: string;
+  nameKey: string;
+  correlationKey?: string;
+}
+
 export class SessionTranscriptAssembler {
   private session: SessionMetadata;
   private turns: SessionTurn[] = [];
@@ -539,8 +545,8 @@ export class SessionTranscriptAssembler {
   private currentEventId: string = 'session';
   private partIndexByEventId: Map<string, number> = new Map();
   private syntheticToolIdCounter = 0;
-  private pendingToolNames = new Map<string, string>();
-  private pendingToolByTitle = new Map<string, string>();
+  private pendingNoIdToolsByName = new Map<string, PendingNoIdTool[]>();
+  private pendingNoIdToolsByCorrelation = new Map<string, PendingNoIdTool[]>();
   private eventCount = 0;
   private toolCount = 0;
   private warnings: TranscriptWarning[] = [];
@@ -768,6 +774,7 @@ export class SessionTranscriptAssembler {
     this.turns.push(this.currentTurn);
     this.activeParts = { textPart: null, reasoningPart: null };
     this.toolPartsById.clear();
+    this.clearPendingNoIdTools();
   }
 
   private handleTextChunk(text: string, createdAt: string): void {
@@ -812,27 +819,79 @@ export class SessionTranscriptAssembler {
     if (hasId) return;
     const toolName = typeof d.toolName === 'string' ? d.toolName : (typeof d.name === 'string' ? d.name : 'unknown');
     const title = typeof d.title === 'string' ? d.title : undefined;
-    const key = toolName;
-    const pendingId = this.pendingToolNames.get(key);
-    const titleKey = title ? `${toolName}:${title}` : undefined;
-    const pendingByTitle = titleKey ? this.pendingToolByTitle.get(titleKey) : undefined;
-    if (pendingByTitle) {
-      this.pendingToolNames.delete(key);
-      this.pendingToolByTitle.delete(titleKey!);
-      this.setToolCallIdOnData(data, pendingByTitle);
-    } else if ((d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled') && pendingId) {
-      this.pendingToolNames.delete(key);
-      this.setToolCallIdOnData(data, pendingId);
+    const normalizedName = inferNormalizedToolName(d);
+    const nameKey = normalizedName.toLowerCase();
+    const rawInput = d.rawInput ?? d.input;
+    const input = stringifyPayload(rawInput);
+    const target = deriveToolTarget(normalizedName !== 'unknown' ? normalizedName : toolName, input);
+    const correlationValue = title ?? target;
+    const correlationKey = correlationValue ? `${nameKey}:${correlationValue}` : undefined;
+    const terminal = d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled';
+    const pendingByCorrelation = correlationKey ? this.shiftPendingNoIdToolByCorrelation(correlationKey) : undefined;
+
+    if (pendingByCorrelation) {
+      this.setToolCallIdOnData(data, pendingByCorrelation.id);
+    } else if (terminal) {
+      const candidates = this.pendingNoIdToolsByName.get(nameKey) ?? [];
+      if (!correlationKey && candidates.length === 1) {
+        const candidate = this.shiftPendingNoIdToolByName(nameKey)!;
+        this.warnings.push({ code: 'AMBIGUOUS_TOOL_CORRELATION', message: `Merged no-id ${toolName} update by name only; target or title was missing.` });
+        this.setToolCallIdOnData(data, candidate.id);
+      } else {
+        if (!correlationKey || candidates.length > 1) {
+          this.warnings.push({ code: 'AMBIGUOUS_TOOL_CORRELATION', message: `Could not safely correlate no-id ${toolName} update; target or title was missing or ambiguous.` });
+        }
+        this.setToolCallIdOnData(data, `synthetic-${this.syntheticToolIdCounter++}`);
+      }
     } else {
       const newId = `synthetic-${this.syntheticToolIdCounter++}`;
       this.setToolCallIdOnData(data, newId);
-      if (d.status !== 'completed' && d.status !== 'failed' && d.status !== 'cancelled') {
-        this.pendingToolNames.set(key, newId);
-        if (titleKey) {
-          this.pendingToolByTitle.set(titleKey, newId);
-        }
-      }
+      this.pushPendingNoIdTool({ id: newId, nameKey, correlationKey });
     }
+  }
+
+  private pushPendingNoIdTool(candidate: PendingNoIdTool): void {
+    this.pendingNoIdToolsByName.set(candidate.nameKey, [...(this.pendingNoIdToolsByName.get(candidate.nameKey) ?? []), candidate]);
+    if (candidate.correlationKey) {
+      this.pendingNoIdToolsByCorrelation.set(candidate.correlationKey, [...(this.pendingNoIdToolsByCorrelation.get(candidate.correlationKey) ?? []), candidate]);
+    }
+  }
+
+  private shiftPendingNoIdToolByCorrelation(correlationKey: string): PendingNoIdTool | undefined {
+    const queue = this.pendingNoIdToolsByCorrelation.get(correlationKey);
+    if (!queue) return undefined;
+    const candidate = queue.shift();
+    if (!candidate) return undefined;
+    if (queue.length === 0) this.pendingNoIdToolsByCorrelation.delete(correlationKey);
+    this.removePendingNoIdTool(candidate);
+    return candidate;
+  }
+
+  private shiftPendingNoIdToolByName(nameKey: string): PendingNoIdTool | undefined {
+    const queue = this.pendingNoIdToolsByName.get(nameKey);
+    if (!queue) return undefined;
+    const candidate = queue.shift();
+    if (!candidate) return undefined;
+    if (queue.length === 0) this.pendingNoIdToolsByName.delete(nameKey);
+    if (candidate.correlationKey) {
+      const correlated = this.pendingNoIdToolsByCorrelation.get(candidate.correlationKey) ?? [];
+      const remaining = correlated.filter(item => item !== candidate);
+      if (remaining.length > 0) this.pendingNoIdToolsByCorrelation.set(candidate.correlationKey, remaining);
+      else this.pendingNoIdToolsByCorrelation.delete(candidate.correlationKey);
+    }
+    return candidate;
+  }
+
+  private removePendingNoIdTool(candidate: PendingNoIdTool): void {
+    const byName = this.pendingNoIdToolsByName.get(candidate.nameKey) ?? [];
+    const remainingByName = byName.filter(item => item !== candidate);
+    if (remainingByName.length > 0) this.pendingNoIdToolsByName.set(candidate.nameKey, remainingByName);
+    else this.pendingNoIdToolsByName.delete(candidate.nameKey);
+  }
+
+  private clearPendingNoIdTools(): void {
+    this.pendingNoIdToolsByName.clear();
+    this.pendingNoIdToolsByCorrelation.clear();
   }
 
   private setToolCallIdOnData(data: Record<string, unknown>, id: string): void {
@@ -849,6 +908,12 @@ export class SessionTranscriptAssembler {
     const displayTitle = inferDisplayTitle(d);
     const category = getToolCategory(normalizedName);
     return { normalizedName, displayTitle, displaySubtitle: undefined, category };
+  }
+
+  private recordUnknownTool(sourceName: string | undefined, displayTitle: string | undefined, target: string | undefined): void {
+    this.hasUnknownTools = true;
+    const fallback = displayTitle ?? target ?? sourceName ?? this.currentEventId;
+    this.warnings.push({ code: 'UNKNOWN_TOOL', message: `Could not normalize tool from: ${fallback}` });
   }
 
   private handleToolCallStart(start: ToolCallStartData): void {
@@ -892,9 +957,9 @@ export class SessionTranscriptAssembler {
     }
     const { normalizedName, displayTitle, category } = this.computeToolNormalization(d);
 
-    if (normalizedName === 'unknown' && start.toolName !== 'unknown') {
-      this.hasUnknownTools = true;
-      this.warnings.push({ code: 'UNKNOWN_TOOL', message: `Could not normalize tool name from: ${start.toolName}` });
+    const target = deriveToolTarget(start.toolName, start.input);
+    if (normalizedName === 'unknown') {
+      this.recordUnknownTool(start.toolName, displayTitle ?? start.title, target);
     }
 
     const toolPart: ToolPart = {
@@ -908,7 +973,7 @@ export class SessionTranscriptAssembler {
         toolName: start.toolName,
         status: 'running',
         title: start.title,
-        target: deriveToolTarget(start.toolName, start.input),
+        target,
         input: start.input,
         startedAt: start.createdAt,
         completedAt: null,
@@ -1024,9 +1089,9 @@ export class SessionTranscriptAssembler {
       }
       const { normalizedName, displayTitle, category } = this.computeToolNormalization(d);
 
-      if (normalizedName === 'unknown' && update.toolName !== 'unknown' && update.toolName !== undefined) {
-        this.hasUnknownTools = true;
-        this.warnings.push({ code: 'UNKNOWN_TOOL', message: `Could not normalize tool name from: ${update.toolName}` });
+      const target = deriveToolTarget(update.toolName ?? normalizedName, update.input);
+      if (normalizedName === 'unknown') {
+        this.recordUnknownTool(update.toolName, displayTitle ?? update.title, target);
       }
 
       const toolPart: ToolPart = {
@@ -1055,9 +1120,7 @@ export class SessionTranscriptAssembler {
         },
       };
 
-      if (toolPart.tool.target === undefined && toolPart.tool.input) {
-        toolPart.tool.target = deriveToolTarget(toolPart.tool.toolName, toolPart.tool.input);
-      }
+      toolPart.tool.target = target;
 
       const changedFiles = this.extractChangedFiles(normalizedName, update.input, update.rawInput);
       if (changedFiles.length > 0) {
