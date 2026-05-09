@@ -146,8 +146,10 @@ export class IntegrateStageRunner extends BaseStageRunner {
           },
           targetFiles: summary.targetFiles,
           conflicts: summary.conflicts,
+          corrections: summary.corrections,
           valid: summary.valid,
           errors: summary.errors,
+          mode: summary.mode,
         };
 
         const duration = Date.now() - new Date(specSyncStartedAt).getTime();
