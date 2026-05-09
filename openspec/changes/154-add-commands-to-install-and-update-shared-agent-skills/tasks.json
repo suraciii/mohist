@@ -89,11 +89,14 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the command group from T-001 and should preserve the behavior covered by T-002 while improving user-facing descriptions.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        158029
+      ]
     },
     {
       "id": "T-004",
