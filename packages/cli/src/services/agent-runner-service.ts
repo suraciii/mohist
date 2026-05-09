@@ -382,11 +382,38 @@ export class AgentRunnerService {
         return;
       }
 
-      if (deliveryStatus === 'merged') {
-        log.info('Truly merged issue — no recovery action needed', {
+      if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
+        if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
+          this.issueRepo.updateStage(issue.id, Stage.Integrate);
+          log.info('Truly merged issue from Check stage — transitioning to Integrate', {
+            issueNumber: issue.number,
+            action: 'stage updated to integrate',
+          });
+          return;
+        }
+
+        if (issue.stage === Stage.Integrate) {
+          log.info('Integrating issue — recovery preserves Integrate stage', {
+            issueNumber: issue.number,
+            stage: issue.stage,
+            action: 'status remains active, stage preserved',
+          });
+          return;
+        }
+
+        if (issue.stage === Stage.Done) {
+          log.info('Done issue with merge evidence — no recovery action needed', {
+            issueNumber: issue.number,
+            action: 'status remains active',
+          });
+          return;
+        }
+
+        this.issueRepo.updateStage(issue.id, Stage.Integrate);
+        log.info('Issue with merge evidence — routing to Integrate', {
           issueNumber: issue.number,
           stage: issue.stage,
-          action: 'status remains active',
+          action: 'stage updated to integrate',
         });
         return;
       }
@@ -418,6 +445,14 @@ export class AgentRunnerService {
           issueNumber: issue.number,
           stage: issue.stage,
           action: 'status=active, approval restored',
+        });
+      } else if (issue.stage === Stage.Integrate) {
+        this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        this.issueRepo.updateBlockedReason(issue.id, null);
+        log.info('Recovered integrate-stage issue', {
+          issueNumber: issue.number,
+          stage: issue.stage,
+          action: 'status=active, stage preserved, Integrate stage can be resumed',
         });
       } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
         this.recoverBuildStageIssue(issue);
