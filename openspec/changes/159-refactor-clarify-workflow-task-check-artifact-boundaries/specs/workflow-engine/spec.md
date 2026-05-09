@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: REQ-WFE-001 Checks are read-only validators
 
