@@ -3,6 +3,17 @@ import { ApiResponse } from '../types';
 import { AgentRunnerService, ProjectService } from '../services';
 import { CoderSessionRepo } from '../db/coder-session-repo';
 
+export interface SessionStatus {
+  sessionId: string | null;
+  acpSessionId: string | null;
+  status: string | null;
+  currentSessionState: 'Running' | 'Checking session' | 'Session failed' | 'No active session';
+  lastDataAt: string | null;
+  probeSentAt: string | null;
+  probeDeadlineAt: string | null;
+  failureReason: string | null;
+}
+
 export function createAgentRoutes(
   agentRunner: AgentRunnerService,
   coderSessionRepo?: CoderSessionRepo,
@@ -36,6 +47,66 @@ export function createAgentRoutes(
       success: true,
       data: sessions,
     });
+  });
+
+  app.get('/session-status', async (c) => {
+    const projectId = projectService?.getCurrentId();
+    if (!projectId) {
+      return c.json({
+        success: true,
+        data: {
+          sessionId: null,
+          acpSessionId: null,
+          status: null,
+          currentSessionState: 'No active session' as const,
+          lastDataAt: null,
+          probeSentAt: null,
+          probeDeadlineAt: null,
+          failureReason: null,
+        },
+      });
+    }
+
+    const runningSessions = coderSessionRepo?.findAllRunning() ?? [];
+    const activeSession = runningSessions
+      .filter(s => s.issueId === projectId || projectId === undefined)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+    if (!activeSession) {
+      return c.json({
+        success: true,
+        data: {
+          sessionId: null,
+          acpSessionId: null,
+          status: null,
+          currentSessionState: 'No active session' as const,
+          lastDataAt: null,
+          probeSentAt: null,
+          probeDeadlineAt: null,
+          failureReason: null,
+        } satisfies SessionStatus,
+      });
+    }
+
+    const currentSessionState = (status: string): SessionStatus['currentSessionState'] => {
+      if (status === 'failed') return 'Session failed';
+      if (status === 'probing') return 'Checking session';
+      if (status === 'running') return 'Running';
+      return 'No active session';
+    };
+
+    const data: SessionStatus = {
+      sessionId: activeSession.id,
+      acpSessionId: activeSession.acpSessionId,
+      status: activeSession.status,
+      currentSessionState: currentSessionState(activeSession.status),
+      lastDataAt: activeSession.lastDataAt,
+      probeSentAt: activeSession.probeSentAt,
+      probeDeadlineAt: activeSession.probeDeadlineAt,
+      failureReason: activeSession.failureReason,
+    };
+
+    return c.json({ success: true, data });
   });
 
   return app;

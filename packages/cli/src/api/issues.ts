@@ -2157,6 +2157,10 @@ export function createIssueRoutes(
           coderType: session.coderType,
           stage: session.stage,
           title: session.title,
+          lastDataAt: session.lastDataAt,
+          probeSentAt: session.probeSentAt,
+          probeDeadlineAt: session.probeDeadlineAt,
+          failureReason: session.failureReason,
           workflowLogs: logs.map(l => ({
             id: l.id,
             eventType: l.eventType,
@@ -2269,6 +2273,7 @@ export function createIssueRoutes(
         if (failedStatuses.has(session.status)) return 'failed';
         if (session.status === 'completed') return 'completed';
         if (session.completedAt) return 'finalizing';
+        if (session.status === 'probing') return 'live';
         const lastActivityAt = transcript.session.lastActivityAt;
         if (lastActivityAt) {
           const lastActivityTime = new Date(lastActivityAt).getTime();
@@ -2277,6 +2282,13 @@ export function createIssueRoutes(
           }
         }
         return 'live';
+      };
+
+      const currentSessionState = (): string => {
+        if (session.status === 'failed') return 'Session failed';
+        if (session.status === 'probing') return 'Checking session';
+        if (session.status === 'running') return 'Running';
+        return 'No active session';
       };
 
       const data = {
@@ -2299,6 +2311,7 @@ export function createIssueRoutes(
           executionId: session.executionId,
           title: session.title,
           status: session.status,
+          currentSessionState: currentSessionState(),
           statusKind: deriveStatusKind(),
           model: session.model,
           stage: session.stage,
@@ -2308,6 +2321,10 @@ export function createIssueRoutes(
           worktree: worktreeManager?.getPath(projectService.getById(projectId)?.name ?? '', issue.number) ?? null,
           firstPromptSentAt: typeof firstPromptData?.sentAt === 'string' ? firstPromptData.sentAt : null,
           lastActivityAt: transcript.session.lastActivityAt ?? null,
+          lastDataAt: session.lastDataAt,
+          probeSentAt: session.probeSentAt,
+          probeDeadlineAt: session.probeDeadlineAt,
+          failureReason: session.failureReason,
           eventCount: transcript.session.eventCount ?? null,
           toolCount: transcript.session.toolCount ?? null,
           turnCount: transcript.session.turnCount ?? null,
