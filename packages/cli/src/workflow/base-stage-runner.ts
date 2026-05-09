@@ -136,6 +136,7 @@ export abstract class BaseStageRunner implements StageRunner {
       sessionStreamLogRepo: ctx.sessionStreamLogRepo,
       coderSessionRepo: ctx.coderSessionRepo,
       worktreeManager: ctx.worktreeManager,
+      projectRepo: ctx.projectRepo,
     };
   }
 

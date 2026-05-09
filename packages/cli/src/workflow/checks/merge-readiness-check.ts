@@ -17,18 +17,34 @@ export class MergeReadinessCheck implements Check {
         message: 'worktreeManager not available in CheckContext',
       };
     }
+    if (!ctx.projectRepo) {
+      return {
+        name: this.name,
+        status: 'error',
+        message: 'projectRepo not available in CheckContext',
+      };
+    }
+
+    const project = ctx.projectRepo.findById(ctx.issue.projectId);
+    if (!project) {
+      return {
+        name: this.name,
+        status: 'error',
+        message: `Project not found: ${ctx.issue.projectId}`,
+      };
+    }
 
     try {
       const canFastForward = await ctx.worktreeManager.canFastForward(
-        ctx.acpOptions.cwd,
-        ctx.issue.projectId,
+        project.path,
+        project.name,
         ctx.issue.number,
-        'main'
+        project.baseBranch
       );
 
       const worktreeStatus = await ctx.worktreeManager.getWorktreeStatus(
-        ctx.acpOptions.cwd,
-        ctx.issue.projectId,
+        project.path,
+        project.name,
         ctx.issue.number
       );
 
@@ -42,7 +58,7 @@ export class MergeReadinessCheck implements Check {
           : 'Merge readiness check failed — candidate cannot be cleanly merged',
         output: {
           kind: 'merge-readiness',
-          targetBranch: 'main',
+          targetBranch: project.baseBranch,
           canFastForward: canFastForward || worktreeStatus.canFastForward,
           cleanRebaseFeasible: !worktreeStatus.conflictingFiles || worktreeStatus.conflictingFiles.length === 0,
           conflictFiles: worktreeStatus.conflictingFiles ?? [],
