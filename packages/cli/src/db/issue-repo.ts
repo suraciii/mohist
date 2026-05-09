@@ -18,6 +18,7 @@ interface IssueRow {
   merge_state: string | null;
   conflict_retry_count: number | null;
   model: string | null;
+  stage_models: string | null;
   archived_at: string | null;
   blocked_reason: string | null;
   retry_count: number | null;
@@ -40,6 +41,18 @@ function rowToIssue(row: IssueRow): Issue {
     }
   }
 
+  let stageModels: Record<string, string> | undefined;
+  if (row.stage_models) {
+    try {
+      const parsed = JSON.parse(row.stage_models);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        stageModels = parsed;
+      }
+    } catch {
+      stageModels = undefined;
+    }
+  }
+
   return {
     id: row.id,
     number: row.number,
@@ -56,6 +69,7 @@ function rowToIssue(row: IssueRow): Issue {
     mergeState: (row.merge_state as MergeState) || undefined,
     conflictRetryCount: row.conflict_retry_count ?? undefined,
     model: row.model ?? undefined,
+    stageModels,
     archivedAt: row.archived_at ?? undefined,
     blockedReason: row.blocked_reason ?? undefined,
     retryCount: row.retry_count ?? 0,
@@ -69,6 +83,8 @@ export interface CreateIssueData {
   body?: string;
   labels?: string[];
   priority?: Priority;
+  model?: string;
+  stageModels?: Record<string, string>;
 }
 
 export interface IssueQueryOptions {
@@ -88,13 +104,16 @@ export class IssueRepo {
     const id = uuidv4();
     const labels = JSON.stringify(data.labels || []);
     const priority = data.priority || 'p2';
-    
+    const stageModelsValue = data.stageModels && Object.keys(data.stageModels).length > 0
+      ? JSON.stringify(data.stageModels)
+      : null;
+
     this.db.run(
-      `INSERT INTO issues (id, number, project_id, title, body, stage, status, labels, priority, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, data.number, data.projectId, data.title, data.body || null, Stage.Backlog, IssueStatus.Active, labels, priority, now, now]
+      `INSERT INTO issues (id, number, project_id, title, body, stage, status, labels, priority, model, stage_models, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, data.number, data.projectId, data.title, data.body || null, Stage.Backlog, IssueStatus.Active, labels, priority, data.model ?? null, stageModelsValue, now, now]
     );
-    
+
     return {
       id,
       number: data.number,
@@ -105,6 +124,8 @@ export class IssueRepo {
       projectId: data.projectId,
       labels: data.labels || [],
       priority: priority as Priority,
+      model: data.model,
+      stageModels: data.stageModels,
       createdAt: now,
       updatedAt: now,
     };
@@ -215,7 +236,7 @@ export class IssueRepo {
     return this.findById(issueId);
   }
 
-  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState; priority: Priority; model: string | null }>): Issue | null {
+  update(issueId: string, data: Partial<{ title: string; body: string; stage: Stage; status: IssueStatus; labels: string[]; mergeState: MergeState; priority: Priority; model: string | null; stageModels: Record<string, string> | null }>): Issue | null {
     const existing = this.findById(issueId);
     if (!existing) return null;
     
@@ -253,6 +274,13 @@ export class IssueRepo {
     if (data.model !== undefined) {
       updates.push('model = ?');
       values.push(data.model);
+    }
+    if (data.stageModels !== undefined) {
+      updates.push('stage_models = ?');
+      const normalized = data.stageModels && Object.keys(data.stageModels).length > 0
+        ? JSON.stringify(data.stageModels)
+        : null;
+      values.push(normalized);
     }
     
     if (updates.length === 0) return existing;
