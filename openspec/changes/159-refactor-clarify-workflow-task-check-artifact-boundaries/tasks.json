@@ -52,11 +52,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the policy loop and fix-task hook from T-001. Reuse existing health auto-fix prompt behavior, but execute it as a task rather than a check method.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        0
+      ]
     },
     {
       "id": "T-003",

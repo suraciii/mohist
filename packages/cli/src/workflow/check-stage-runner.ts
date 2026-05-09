@@ -1,5 +1,5 @@
 import { Stage } from '../types';
-import type { StageContext, StageRunResult } from './stage-context';
+import type { CheckFailurePolicy, CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
 import { emitStageTaskUpdate } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
 import type { Check } from './checks';
@@ -15,6 +15,7 @@ import { HealthGateCheck } from './checks/health-gate-check';
 import { OpenSpecSyncDryRunCheck } from './checks/openspec-sync-dry-run-check';
 import { MergeReadinessCheck } from './checks/merge-readiness-check';
 import { IntegrationHealthGatePreviewCheck } from './checks/integration-health-gate-preview-check';
+import { runHealthFixTask } from './health-fix-task';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
@@ -69,6 +70,35 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
   protected getPreTaskChecks(): Check[] {
     return this.preTaskChecks;
+  }
+
+  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
+    if (!this.checkHealthGatePolicy.enabled || !this.checkHealthGatePolicy.autoFix) {
+      return [];
+    }
+    return [{
+      checkName: 'health:check',
+      fixTaskId: 'fix-check-health',
+      maxAttempts: this.checkHealthGatePolicy.maxFixAttempts,
+    }];
+  }
+
+  protected async runFixTask(
+    ctx: StageContext,
+    taskId: string,
+    failedCheck: CheckResult,
+    attempt: number,
+  ): Promise<StageTaskResult | null> {
+    if (taskId !== 'fix-check-health') return null;
+    return runHealthFixTask(ctx, {
+      taskId: 'fix-check-health',
+      title: 'Fix check health',
+      stage: 'check',
+      worktreePath: this.worktreePath,
+      healthCommand: this.checkHealthGatePolicy.command,
+      failedCheck,
+      attempt,
+    });
   }
 
   protected isApprovalCheck(checkName: string): boolean {
