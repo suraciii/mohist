@@ -62,6 +62,20 @@ describe('Shared Agent Skills', () => {
       expect(exploreNameMatch[1].trim()).toBe('mohist-explore');
     });
 
+    it('generated content starts with AgentSkills frontmatter', () => {
+      installSharedAgentSkills({ projectPath: tmpDir });
+
+      for (const skillName of getSharedSkillNames()) {
+        const skillPath = path.join(tmpDir, '.agents', 'skills', skillName, 'SKILL.md');
+        const content = fs.readFileSync(skillPath, 'utf-8');
+        const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
+
+        expect(content.startsWith('---\n')).toBe(true);
+        expect(frontmatterMatch).toBeTruthy();
+        expect(frontmatterMatch?.[1].match(/^name:\s*(.+)$/m)?.[1].trim()).toBe(skillName);
+      }
+    });
+
     it('repeated install leaves contents unchanged', () => {
       installSharedAgentSkills({ projectPath: tmpDir });
 
@@ -215,6 +229,25 @@ describe('Shared Agent Skills', () => {
       const updateCmd = skillsCmd?.commands.find(cmd => cmd.name() === 'update');
 
       expect(updateCmd?.options.some(opt => opt.long === '--path')).toBe(true);
+    });
+
+    it('help distinguishes coder agent skills from internal Mohist skills for all skills commands', () => {
+      const program = new Command();
+      program.name('mo');
+      setupSkillsCommands(program);
+
+      const skillsCmd = program.commands.find(cmd => cmd.name() === 'skills');
+      const installCmd = skillsCmd?.commands.find(cmd => cmd.name() === 'install');
+      const updateCmd = skillsCmd?.commands.find(cmd => cmd.name() === 'update');
+
+      for (const help of [skillsCmd, installCmd, updateCmd].map(cmd => cmd?.helpInformation())) {
+        const normalizedHelp = help?.replace(/\s+/g, ' ');
+        expect(help).toContain('.agents/skills');
+        expect(help).toContain('coder agent skills');
+        expect(help).toContain('.mohist/skills');
+        expect(help).toContain('do not execute');
+        expect(normalizedHelp).toContain('do not execute, scan, or modify Mohist internal skills');
+      }
     });
   });
 });
