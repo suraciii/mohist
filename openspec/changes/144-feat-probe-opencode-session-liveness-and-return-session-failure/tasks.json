@@ -167,11 +167,14 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Do not expose healthy/quiet/stale/hung-suspected/recoverable as user-facing states.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        115657
+      ]
     },
     {
       "id": "T-007",
