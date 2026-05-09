@@ -1158,6 +1158,159 @@ Step added scenario content.`);
       expect((specSyncEvent?.[1] as any).output).toBeDefined();
     });
 
+    it('records corrections from MODIFIED-without-source to ADDED in spec-sync task output and event', async () => {
+      const issueNumber = 75;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'corr-cap', [
+        '### Requirement: ExistingReq\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'corr-cap', `## MODIFIED Requirements
+
+### Requirement: NewReqAsModified
+
+New requirement that was mistakenly marked as MODIFIED.
+
+#### Scenario: New scenario
+New scenario content.`);
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        projectRepo: createProjectRepo(),
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+
+      const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
+      const specSyncStep = output.steps?.find(s => s.step === 'integrate:spec-sync');
+      expect(specSyncStep).toBeDefined();
+      const specSyncOutput = specSyncStep!.output as { corrections?: Array<{ capability: string; requirement: string; from: string; to: string; reason: string }>; counts?: { added: number; modified: number } };
+      expect(specSyncOutput.corrections).toBeDefined();
+      expect(specSyncOutput.corrections!.length).toBeGreaterThan(0);
+      expect(specSyncOutput.corrections![0]).toMatchObject({
+        capability: 'corr-cap',
+        requirement: 'NewReqAsModified',
+        from: 'modified',
+        to: 'added',
+        reason: 'missing-source-treated-as-new-requirement',
+      });
+      expect(specSyncOutput.counts?.added).toBe(1);
+      expect(specSyncOutput.counts?.modified).toBe(0);
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const specSyncEvent = emitCalls.find(([name, data]) =>
+        name === 'integration_step_updated' && (data as any).step === 'integrate:spec-sync'
+      );
+      expect(specSyncEvent).toBeDefined();
+      const eventOutput = (specSyncEvent as any)?.[1].output as { corrections?: Array<{ capability: string; requirement: string; from: string; to: string; reason: string }> };
+      expect(eventOutput.corrections).toBeDefined();
+      expect(eventOutput.corrections!.length).toBeGreaterThan(0);
+    });
+
+    it('fails spec-sync and emits integration_failed with failingStep integrate:spec-sync when post-sync validation fails', async () => {
+      const issueNumber = 76;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'valfail-cap', [
+        '### Requirement: ValFailReq\n\nValFail content.\n\n#### Scenario: ValFail scenario\n\nValFail scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'valfail-cap', `## ADDED Requirements
+
+### Requirement: ValFailReq
+
+Duplicate requirement that should cause validation to fail.
+
+#### Scenario: Val scenario
+Val scenario content.`);
+
+      let appendedTaskResults: any[] = [];
+      const baseCtx = createMockContext(tmpDir, issueNumber);
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        projectRepo: createProjectRepo(),
+        stageExecutionRepo: {
+          ...baseCtx.stageExecutionRepo,
+          appendTaskResult: vi.fn().mockImplementation((execId: string, result: any) => {
+            appendedTaskResults.push(result);
+          }),
+          findByIssueId: vi.fn().mockReturnValue([{
+            id: 'exec-1',
+            issueId: `issue-${issueNumber}`,
+            stage: Stage.Integrate,
+            status: 'failed',
+            taskResults: appendedTaskResults,
+            checkResults: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }]),
+        },
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Spec sync failed');
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const eventNames = emitCalls.map(([name]) => name);
+
+      expect(eventNames).toContain('integration_failed');
+      const failedEvent = emitCalls.find(([name]) => name === 'integration_failed');
+      expect(failedEvent?.[1]).toMatchObject({
+        failingStep: 'integrate:spec-sync',
+      });
+
+      const specSyncTask = appendedTaskResults.find((t: any) => t.taskId === 'integrate:spec-sync');
+      expect(specSyncTask).toBeDefined();
+      expect(specSyncTask.status).toBe('failed');
+    });
+
+    it('persists integrate:spec-sync as transient output without durable artifacts', async () => {
+      const issueNumber = 77;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'artifact-cap', [
+        '### Requirement: ExistingReq\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.'
+      ]);
+
+      createChangeSpec(changeDir, 'artifact-cap', `## ADDED Requirements
+
+### Requirement: AddedReq
+
+Added content.
+
+#### Scenario: Added scenario
+Added scenario content.`);
+
+      const appendedTaskResults: any[] = [];
+      const baseCtx = createMockContext(tmpDir, issueNumber);
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        projectRepo: createProjectRepo(),
+        stageExecutionRepo: {
+          ...baseCtx.stageExecutionRepo,
+          appendTaskResult: vi.fn().mockImplementation((_execId: string, result: any) => {
+            appendedTaskResults.push(result);
+          }),
+        },
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      const specSyncTask = appendedTaskResults.find((t: any) => t.taskId === 'integrate:spec-sync');
+      expect(specSyncTask).toBeDefined();
+      expect(specSyncTask.artifacts).toEqual([]);
+
+      const output = result.output as { steps?: Array<{ step: string; output: any }> };
+      const specSyncStep = output.steps?.find(step => step.step === 'integrate:spec-sync');
+      expect(specSyncStep?.output.targetFiles).toContain('openspec/specs/artifact-cap/spec.md');
+    });
+
     it('API GET /api/issues/:number/executions returns stage executions for integrate stage', async () => {
       const issueNumber = 74;
       const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);

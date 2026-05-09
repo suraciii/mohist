@@ -336,3 +336,66 @@ healthGates:
     expect(output.policyName).toBe('postMerge');
   });
 });
+
+describe('CHECK non-blocking OpenSpec preview', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-nonblocking-openspec-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('OpenSpecSyncDryRunCheck returns fail for missing_source conflict but this is non-blocking in default CHECK', async () => {
+    const changeDir = path.join(tmpDir, 'change');
+    fs.mkdirSync(changeDir, { recursive: true });
+
+    const projectPath = tmpDir;
+    const specDir = path.join(projectPath, 'openspec', 'specs', 'test-cap');
+    fs.mkdirSync(specDir, { recursive: true });
+    fs.writeFileSync(path.join(specDir, 'spec.md'), '# OpenSpec Capability: test-cap\n\n', 'utf-8');
+
+    const specsDir = path.join(changeDir, 'specs');
+    fs.mkdirSync(specsDir, { recursive: true });
+    const capabilityDir = path.join(specsDir, 'test-cap');
+    fs.mkdirSync(capabilityDir, { recursive: true });
+    fs.writeFileSync(path.join(capabilityDir, 'spec.md'), `## MODIFIED Requirements
+
+### Requirement: NewReq
+
+New requirement content.
+
+#### Scenario: Test
+Content.`, 'utf-8');
+
+    const check = new OpenSpecSyncDryRunCheck();
+    const ctx = makeCheckContext({ changeDir, acpOptions: { cwd: projectPath } });
+    const result = await check.run(ctx);
+
+    expect(result.status).toBe('fail');
+    expect(result.output).toMatchObject({
+      kind: 'openspec-sync-dry-run',
+      valid: false,
+    });
+    const conflicts = (result.output as any).conflicts;
+    expect(conflicts.length).toBeGreaterThan(0);
+    expect(conflicts[0].type).toBe('missing_source');
+  });
+
+  it('CheckStageRunner default preTaskChecks does not include openspec-sync-dry-run', async () => {
+    const worktreePath = tmpDir;
+    fs.mkdirSync(worktreePath, { recursive: true });
+    fs.writeFileSync(path.join(worktreePath, 'workflow.yaml'), 'stages:\n  - stage: check\n', 'utf-8');
+
+    const { CheckStageRunner } = await import('../../src/workflow/check-stage-runner');
+    const runner = new CheckStageRunner({ worktreePath });
+    const preChecks = runner.getPreTaskChecks();
+    const checkNames = preChecks.map((c: any) => c.name);
+
+    expect(checkNames).not.toContain('openspec-sync-dry-run');
+    expect(checkNames).toContain('health:check');
+    expect(checkNames).toContain('merge-readiness');
+  });
+});
