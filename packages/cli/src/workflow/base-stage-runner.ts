@@ -197,7 +197,7 @@ export abstract class BaseStageRunner implements StageRunner {
     const recheckResult = await check.run(checkCtx);
 
     if (recheckResult.status === 'pass') {
-      const continuedResults = [...allResults.slice(0, -1), recheckResult];
+      const continuedResults = [...allResults, recheckResult];
       this.persistCheckResults(ctx, continuedResults);
 
       if (isPreTask) {
@@ -229,7 +229,7 @@ export abstract class BaseStageRunner implements StageRunner {
       };
     }
 
-    const updatedResults = [...allResults.slice(0, -1), recheckResult];
+    const updatedResults = [...allResults, recheckResult];
     this.persistCheckResults(ctx, updatedResults);
 
     return this.runFixAndRecheck(ctx, check, recheckResult, updatedResults, taskOutput, isPreTask, activeChecks, policy, attempt + 1);
