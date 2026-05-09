@@ -54,11 +54,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes OpenSpecIntegrator.preview from T-001. These checks must run before UserApprovalCheck and remain read-only for canonical specs and archive state.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        341090
+      ]
     },
     {
       "id": "T-003",
