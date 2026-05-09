@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
 import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSessions, useCreateExploreSession } from '../hooks/useQueries'
@@ -17,6 +19,33 @@ import { formatTime } from '../lib/format-time'
 import { statusBadge } from '../lib/status-badge'
 import { ChangesPanel } from './ChangesPanel'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
+
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <Markdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        code({ children, className }) {
+          const match = /language-(\w+)/.exec(className ?? '')
+          const isInline = !match && !className
+          if (isInline) {
+            return <code className="px-1 py-0.5 bg-gray-100 rounded text-gray-800 text-xs font-mono">{children}</code>
+          }
+          return (
+            <code className={`${className ?? ''} block overflow-x-auto rounded bg-gray-50 p-3 text-xs font-mono`}>
+              {children}
+            </code>
+          )
+        },
+        pre({ children }) {
+          return <pre className="overflow-x-auto rounded bg-gray-50 p-3 text-xs font-mono">{children}</pre>
+        },
+      }}
+    >
+      {content}
+    </Markdown>
+  )
+}
 
 function formatRelativeTime(iso: string): string {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime())
@@ -274,7 +303,7 @@ export function IssueDetailPage() {
               {issue.body && (
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
-                  <div className="text-sm text-gray-600 whitespace-pre-wrap">{issue.body}</div>
+                  <div className="text-sm text-gray-600"><MarkdownContent content={issue.body} /></div>
                 </div>
               )}
 
@@ -310,9 +339,7 @@ export function IssueDetailPage() {
                             <div className="text-xs text-gray-400 mb-1">
                               {formatTime(comment.createdAt)}
                             </div>
-                            <div className="text-sm text-gray-700 whitespace-pre-wrap">
-                              {comment.body}
-                            </div>
+                            <div className="text-sm text-gray-700"><MarkdownContent content={comment.body} /></div>
                           </div>
                           <button
                             onClick={() => {
