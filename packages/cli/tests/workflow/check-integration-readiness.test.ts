@@ -11,6 +11,7 @@ function makeCheckContext(overrides?: Partial<{
   issue: any;
   acpOptions: any;
   worktreeManager: any;
+  projectRepo: any;
 }>) {
   return {
     issue: {
@@ -32,6 +33,16 @@ function makeCheckContext(overrides?: Partial<{
     workflowLogRepo: undefined,
     sessionStreamLogRepo: undefined,
     coderSessionRepo: undefined,
+    projectRepo: {
+      findById: vi.fn().mockReturnValue({
+        id: 'proj-1',
+        name: 'test-project',
+        path: '/tmp/project',
+        baseBranch: 'master',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    },
     worktreeManager: {
       canFastForward: vi.fn().mockResolvedValue(true),
       getWorktreeStatus: vi.fn().mockResolvedValue({
@@ -196,7 +207,7 @@ describe('MergeReadinessCheck', () => {
       expect(result.name).toBe('merge-readiness');
       expect(result.output).toMatchObject({
         kind: 'merge-readiness',
-        targetBranch: 'main',
+        targetBranch: 'master',
         canFastForward: true,
       });
     });
