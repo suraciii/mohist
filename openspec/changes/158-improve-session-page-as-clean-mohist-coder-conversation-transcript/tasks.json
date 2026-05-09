@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Improve the dedicated coder session page into a clean opencode-style Mohist/coder conversation transcript.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -21,8 +20,14 @@
       "type": "WRITE",
       "output": "packages/cli/src/services/session-transcript-service.ts, packages/cli/tests/session-transcript-service.test.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "This produces the canonical normalized tool lifecycle behavior consumed by all later API, live, and UI work. Keep existing transcript fields backward-compatible while adding normalized fields or warnings as needed."
+      "passes": true,
+      "notes": "This produces the canonical normalized tool lifecycle behavior consumed by all later API, live, and UI work. Keep existing transcript fields backward-compatible while adding normalized fields or warnings as needed.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        518088
+      ]
     },
     {
       "id": "T-002",
@@ -47,7 +52,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Consumes the canonical assembler output from T-001 and makes it the API contract for historical replay and frontend rendering."
+      "notes": "Consumes the canonical assembler output from T-001 and makes it the API contract for historical replay and frontend rendering.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -72,7 +80,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "The API transcript from T-002 remains authoritative; live state should be an optimistic incremental view that converges after refetch."
+      "notes": "The API transcript from T-002 remains authoritative; live state should be an optimistic incremental view that converges after refetch.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -97,7 +108,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Consumes normalized API/live ToolPart fields from T-002 and T-003. Grouping is presentation-only; do not remove individual tool parts from transcript data."
+      "notes": "Consumes normalized API/live ToolPart fields from T-002 and T-003. Grouping is presentation-only; do not remove individual tool parts from transcript data.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -123,7 +137,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Consumes semantic tool rendering from T-004 and canonical metadata from T-002 to complete the opencode-style reading experience."
+      "notes": "Consumes semantic tool rendering from T-004 and canonical metadata from T-002 to complete the opencode-style reading experience.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -152,7 +169,10 @@
         "T-005"
       ],
       "passes": false,
-      "notes": "Final verification consumes all earlier outputs. Keep fixtures realistic but local to existing backend/API/frontend test suites unless a shared fixture location already exists."
+      "notes": "Final verification consumes all earlier outputs. Keep fixtures realistic but local to existing backend/API/frontend test suites unless a shared fixture location already exists.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
