@@ -70,6 +70,7 @@ export function IssueDetailPage() {
   const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false)
 
 
   useEffect(() => {
@@ -303,7 +304,22 @@ export function IssueDetailPage() {
               {issue.body && (
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
-                  <div className="text-sm text-gray-600"><MarkdownContent content={issue.body} /></div>
+                  <div className={descriptionExpanded ? '' : 'max-h-[600px] overflow-hidden relative'}>
+                    <div className={descriptionExpanded ? '' : 'max-h-[600px] overflow-hidden'}>
+                      <MarkdownContent content={issue.body} />
+                    </div>
+                    {!descriptionExpanded && (
+                      <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white to-transparent" />
+                    )}
+                    <div className="mt-2">
+                      <button
+                        onClick={() => setDescriptionExpanded(!descriptionExpanded)}
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        {descriptionExpanded ? 'Collapse' : 'Expand'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
