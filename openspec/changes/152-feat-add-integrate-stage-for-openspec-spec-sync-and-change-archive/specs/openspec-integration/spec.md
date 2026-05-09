@@ -3,6 +3,11 @@
 ### Requirement: deterministic spec sync
 The system SHALL deterministically synchronize approved OpenSpec delta specs from an active change into `openspec/specs/` without using an agent or LLM to interpret requirements.
 
+#### Scenario: Discover canonical change spec files
+- **WHEN** the system reads an active OpenSpec change
+- **THEN** it discovers delta specs from `openspec/changes/<change>/specs/<capability>/spec.md`
+- **AND** maps each directory name to the target `openspec/specs/<capability>/spec.md`
+
 #### Scenario: Preview delta application
 - **WHEN** Check evaluates an active OpenSpec change
 - **THEN** the system previews the delta application in memory
