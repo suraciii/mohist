@@ -25,6 +25,109 @@ describe('CoderSessionRepo title', () => {
     db.close();
   });
 
+  it('migration adds liveness columns to coder_session', () => {
+    const tableInfo = db.all<{ name: string }>("PRAGMA table_info(coder_session)");
+    const hasLastDataAt = tableInfo.some(col => col.name === 'last_data_at');
+    const hasProbeSentAt = tableInfo.some(col => col.name === 'probe_sent_at');
+    const hasProbeDeadlineAt = tableInfo.some(col => col.name === 'probe_deadline_at');
+    const hasFailureReason = tableInfo.some(col => col.name === 'failure_reason');
+    expect(hasLastDataAt).toBe(true);
+    expect(hasProbeSentAt).toBe(true);
+    expect(hasProbeDeadlineAt).toBe(true);
+    expect(hasFailureReason).toBe(true);
+  });
+
+  it('insert initializes status as running and lastDataAt to non-null timestamp', () => {
+    const session = repo.insert({
+      issueId,
+      acpSessionId: 'acp-liveness-1',
+      executionId: 'build-1-T-001',
+      taskDescription: 'some task',
+    });
+
+    expect(session.status).toBe('running');
+    expect(session.lastDataAt).toBeTruthy();
+    expect(session.lastDataAt).not.toBeNull();
+    expect(session.probeSentAt).toBeNull();
+    expect(session.probeDeadlineAt).toBeNull();
+    expect(session.failureReason).toBeNull();
+  });
+
+  it('markDataReceived updates lastDataAt and can transition from probing back to running', () => {
+    const session = repo.insert({
+      issueId,
+      acpSessionId: 'acp-liveness-2',
+    });
+
+    repo.markProbing(session.id, new Date(Date.now() + 30000).toISOString());
+    let updated = repo.findById(session.id);
+    expect(updated!.status).toBe('probing');
+    expect(updated!.probeSentAt).not.toBeNull();
+    expect(updated!.probeDeadlineAt).not.toBeNull();
+
+    repo.markDataReceived(session.id);
+    updated = repo.findById(session.id);
+    expect(updated!.status).toBe('running');
+    expect(updated!.lastDataAt).not.toBeNull();
+  });
+
+  it('markProbing transitions to probing and stores probe timestamps', () => {
+    const session = repo.insert({
+      issueId,
+      acpSessionId: 'acp-liveness-3',
+    });
+
+    const probeDeadline = new Date(Date.now() + 30000).toISOString();
+    const updated = repo.markProbing(session.id, probeDeadline);
+
+    expect(updated.status).toBe('probing');
+    expect(updated.probeSentAt).not.toBeNull();
+    expect(updated.probeDeadlineAt).toBe(probeDeadline);
+  });
+
+  it('markFailed transitions to failed and stores failureReason', () => {
+    const session = repo.insert({
+      issueId,
+      acpSessionId: 'acp-liveness-4',
+    });
+
+    const updated = repo.markFailed(session.id, 'probe_timeout');
+
+    expect(updated.status).toBe('failed');
+    expect(updated.completedAt).not.toBeNull();
+    expect(updated.failureReason).toBe('probe_timeout');
+  });
+
+  it('findById returns liveness fields for existing rows', () => {
+    const session = repo.insert({
+      issueId,
+      acpSessionId: 'acp-liveness-5',
+    });
+
+    repo.markProbing(session.id, new Date(Date.now() + 30000).toISOString());
+    const found = repo.findById(session.id);
+
+    expect(found).not.toBeNull();
+    expect(found!.status).toBe('probing');
+    expect(found!.probeSentAt).not.toBeNull();
+    expect(found!.probeDeadlineAt).not.toBeNull();
+    expect(found!.failureReason).toBeNull();
+  });
+
+  it('findByIssueId returns liveness fields for each session', () => {
+    repo.insert({
+      issueId,
+      acpSessionId: 'acp-liveness-6',
+    });
+
+    const sessions = repo.findByIssueId(issueId);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].lastDataAt).not.toBeNull();
+    expect(sessions[0].probeSentAt).toBeNull();
+    expect(sessions[0].probeDeadlineAt).toBeNull();
+    expect(sessions[0].failureReason).toBeNull();
+  });
+
   it('insert with title stores correctly', () => {
     const session = repo.insert({
       issueId,

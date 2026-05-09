@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 26;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -206,6 +206,9 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 25) {
     migrateToVersion25(db);
+  }
+  if (currentVersion < 26) {
+    migrateToVersion26(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -982,5 +985,30 @@ function migrateToVersion25(db: DatabaseManager): void {
     }
 
     setSchemaVersion(db, 25);
+  });
+}
+
+function migrateToVersion26(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>("PRAGMA table_info(coder_session)");
+    const hasLastDataAt = tableInfo.some(col => col.name === 'last_data_at');
+    const hasProbeSentAt = tableInfo.some(col => col.name === 'probe_sent_at');
+    const hasProbeDeadlineAt = tableInfo.some(col => col.name === 'probe_deadline_at');
+    const hasFailureReason = tableInfo.some(col => col.name === 'failure_reason');
+
+    if (!hasLastDataAt) {
+      db.exec("ALTER TABLE coder_session ADD COLUMN last_data_at TEXT");
+    }
+    if (!hasProbeSentAt) {
+      db.exec("ALTER TABLE coder_session ADD COLUMN probe_sent_at TEXT");
+    }
+    if (!hasProbeDeadlineAt) {
+      db.exec("ALTER TABLE coder_session ADD COLUMN probe_deadline_at TEXT");
+    }
+    if (!hasFailureReason) {
+      db.exec("ALTER TABLE coder_session ADD COLUMN failure_reason TEXT");
+    }
+
+    setSchemaVersion(db, 26);
   });
 }
