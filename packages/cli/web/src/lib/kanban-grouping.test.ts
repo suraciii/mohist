@@ -20,7 +20,7 @@ function makeIssue(overrides: Partial<Issue> & { id: string }): Issue {
 describe('groupIssuesByStage', () => {
   it('returns empty columns when no issues', () => {
     const cols = groupIssuesByStage([])
-    expect(cols).toHaveLength(5)
+    expect(cols).toHaveLength(6)
     for (const col of cols) {
       expect(col.issues).toEqual([])
     }
