@@ -1,19 +1,11 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
-import { Stage } from '../../types';
 import { loadWorkflow, loadChecksConfig, DEFAULT_CHECKS_CONFIG } from '../workflow-loader';
 import { Log } from '../../util/log';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'code-compiles-check' });
-
-const CODE_COMPILES_REACTION: ReactionConfig = {
-  type: 'auto-fix',
-  maxAttempts: 2,
-  fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan },
-};
 
 export interface CodeCompilesCheckOptions {
   worktreePath: string;
@@ -21,7 +13,6 @@ export interface CodeCompilesCheckOptions {
 
 export class CodeCompilesCheck implements Check {
   public readonly name = 'code-compiles';
-  public readonly reaction: ReactionConfig = CODE_COMPILES_REACTION;
   private worktreePath: string;
 
   constructor(options: CodeCompilesCheckOptions) {
@@ -65,68 +56,6 @@ export class CodeCompilesCheck implements Check {
           buildLog: output.length > 10000 ? output.slice(0, 5000) + '\n...\n' + output.slice(-5000) : output,
         },
       };
-    }
-  }
-
-  async fix(ctx: CheckContext): Promise<void> {
-    try {
-      const { withSession } = await import('../../agent-runtime/agent-session');
-      const { createWorkflowSessionObservers } = await import('../../agent-runtime');
-      const prompt = [
-        '## Task',
-        '',
-        'Build check failed. Fix the compilation errors so the build passes.',
-        '',
-        '## Process',
-        '',
-        '1. Run the build command to see the errors',
-        '2. Fix each compilation error',
-        '3. Verify the build passes',
-        '',
-        '## Rules',
-        '',
-        '- Apply ONLY the minimal fixes needed',
-        '- Do NOT refactor or change unrelated code',
-      ].join('\n');
-
-      const fixObservers = createWorkflowSessionObservers({
-        eventBus: ctx.eventBus,
-        stage: 'build',
-        title: 'Auto-fix: compilation errors',
-      });
-
-      await withSession({
-        cwd: this.worktreePath,
-        task: prompt,
-        taskId: `build-auto-fix-${ctx.issue.number}`,
-        issueId: ctx.issue.id,
-        projectId: ctx.projectId,
-        issueNumber: ctx.issue.number,
-        opencodeBinPath: ctx.acpOptions?.opencodeBinPath,
-        model: ctx.acpOptions?.model,
-        stage: 'build',
-        timeout: 10 * 60 * 1000,
-        title: 'Auto-fix: compilation errors',
-        observers: fixObservers,
-        onBeforeKill: async (cwd: string) => {
-          try {
-            const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
-            if (!statusOut.trim()) return false;
-            await execFileAsync('git', ['add', '-A'], { cwd });
-            const { stdout: remaining } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
-            if (!remaining.trim()) return false;
-            await execFileAsync('git', ['commit', '-m', `WIP: build-auto-fix-${ctx.issue.number} timeout`, '--no-verify'], { cwd });
-            return true;
-          } catch {
-            return false;
-          }
-        },
-      });
-    } catch (err) {
-      log.error('Auto-fix agent failed', {
-        issueNumber: ctx.issue.number,
-        error: err instanceof Error ? err.message : String(err),
-      });
     }
   }
 

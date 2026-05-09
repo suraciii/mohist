@@ -1,17 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
-
-const ARTIFACT_REACTION: ReactionConfig = {
-  type: 'retry-task',
-  maxAttempts: 3,
-  fallbackReaction: { type: 'escalate' },
-};
 
 export class DesignCompleteCheck implements Check {
   public readonly name = 'design-complete';
-  public readonly reaction: ReactionConfig = ARTIFACT_REACTION;
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     if (!ctx.changeDir) {

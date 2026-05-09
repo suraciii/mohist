@@ -1,8 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
-import { Stage } from '../../types';
 import { loadChecksConfig, DEFAULT_CHECKS_CONFIG, loadWorkflow } from '../workflow-loader';
 import { Log } from '../../util/log';
 
@@ -71,50 +69,12 @@ function formatBuildErrorMessage(err: any): string {
   return parts.join(' — ');
 }
 
-function buildCheckAutoFixPrompt(buildLog: string): string {
-  const truncatedLog = buildLog.length > 8000
-    ? buildLog.slice(0, 4000) + '\n\n...[truncated]...\n\n' + buildLog.slice(-4000)
-    : buildLog;
-
-  return [
-    '## Task',
-    '',
-    'Build & test 检查失败，请修复代码使 build 和 test 通过。',
-    '',
-    '## Build/Test Error Output',
-    '',
-    '```',
-    truncatedLog,
-    '```',
-    '',
-    '## Process',
-    '',
-    '1. Read the error output above carefully',
-    '2. Identify the root cause of each error',
-    '3. Fix the source code files that cause the errors',
-    '4. Do NOT modify test expectations to hide real bugs — only fix the source code',
-    '5. If a test is genuinely wrong, fix the test',
-    '',
-    '## Rules',
-    '',
-    '- Apply ONLY the minimal fixes needed to resolve the errors',
-    '- Do NOT refactor or change unrelated code',
-    '- If the error is in a dependency, update the dependency or work around it',
-    '- If you cannot fix an error, leave a TODO comment explaining why',
-  ].join('\n');
-}
-
 export interface BuildTestCheckOptions {
   worktreePath: string;
 }
 
 export class BuildTestCheck implements Check {
   public readonly name = 'build-test';
-  public readonly reaction: ReactionConfig = {
-    type: 'auto-fix',
-    maxAttempts: 2,
-    fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build },
-  };
   private worktreePath: string;
 
   constructor(options: BuildTestCheckOptions) {
@@ -170,87 +130,4 @@ export class BuildTestCheck implements Check {
     }
   }
 
-  async fix(ctx: CheckContext): Promise<void> {
-    const workflow = loadWorkflow(this.worktreePath);
-    const config = typeof workflow === 'string'
-      ? DEFAULT_CHECKS_CONFIG.buildTest
-      : loadChecksConfig(workflow).buildTest;
-
-    // Run build once to capture the error log for the auto-fix prompt
-    let buildLog = '';
-    try {
-      await execFileAsync(config.command, [], {
-        cwd: this.worktreePath,
-        timeout: config.timeout,
-        maxBuffer: 10 * 1024 * 1024,
-        shell: true,
-      });
-      // Build passed unexpectedly — nothing to fix
-      log.info('BuildTestCheck auto-fix: build passed unexpectedly', {
-        issueNumber: ctx.issue.number,
-      });
-      return;
-    } catch (err: any) {
-      buildLog = [err.stdout, err.stderr, err.message].filter(Boolean).join('\n');
-    }
-
-    log.info('BuildTestCheck auto-fix: spawning coder agent', {
-      issueNumber: ctx.issue.number,
-    });
-
-    try {
-      const { withSession } = await import('../../agent-runtime/agent-session');
-      const { createWorkflowSessionObservers } = await import('../../agent-runtime');
-      const prompt = buildCheckAutoFixPrompt(buildLog);
-
-      const observerFactory = ctx.createWorkflowSessionObservers ?? createWorkflowSessionObservers;
-      const fixObservers = observerFactory({
-        eventBus: ctx.eventBus,
-        workflowLogRepo: ctx.workflowLogRepo,
-        sessionStreamLogRepo: ctx.sessionStreamLogRepo,
-        coderSessionRepo: ctx.coderSessionRepo,
-        stage: 'check',
-        title: 'Auto-fix: test failures',
-      });
-
-      const result = await withSession({
-        cwd: this.worktreePath,
-        task: prompt,
-        taskId: `check-auto-fix-${ctx.issue.number}`,
-        issueId: ctx.issue.id,
-        projectId: ctx.projectId,
-        issueNumber: ctx.issue.number,
-        opencodeBinPath: ctx.acpOptions?.opencodeBinPath,
-        model: ctx.acpOptions?.model,
-        stage: 'check',
-        timeout: 10 * 60 * 1000,
-        title: 'Auto-fix: test failures',
-        observers: fixObservers,
-        onBeforeKill: async (cwd: string) => {
-          try {
-            const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
-            if (!statusOut.trim()) return false;
-            await execFileAsync('git', ['add', '-A'], { cwd });
-            const { stdout: remaining } = await execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd });
-            if (!remaining.trim()) return false;
-            await execFileAsync('git', ['commit', '-m', `WIP: check-auto-fix-${ctx.issue.number} timeout`, '--no-verify'], { cwd });
-            return true;
-          } catch {
-            return false;
-          }
-        },
-      });
-
-      log.info('Auto-fix agent completed', {
-        issueNumber: ctx.issue.number,
-        success: result.success,
-        textLength: result.text?.length ?? 0,
-      });
-    } catch (err) {
-      log.error('Auto-fix agent failed', {
-        issueNumber: ctx.issue.number,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
 }

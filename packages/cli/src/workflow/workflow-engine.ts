@@ -147,13 +147,6 @@ export class WorkflowEngine {
         } else {
           return { completed: false, stage: currentIssue.stage, message: 'Stage completed but no next stage specified' };
         }
-      } else if (result.escalateToStage !== undefined) {
-        const updated = this.issueRepo.updateStage(currentIssue.id, result.escalateToStage);
-        if (updated) {
-          currentIssue = updated;
-        } else {
-          return { completed: false, stage: currentIssue.stage, message: `Failed to escalate to stage ${result.escalateToStage}` };
-        }
       } else {
         return { completed: false, stage: currentIssue.stage, message: result.message };
       }

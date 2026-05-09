@@ -4,12 +4,13 @@ import type {
   StageContext,
   StageRunResult,
   CheckResult,
-  ReactionConfig,
   IssueRepo,
   ChangeArtifactsManager,
   WorktreeManager,
   ProjectRepo,
   CheckpointManager,
+  CheckFailurePolicy,
+  StageTaskResult,
 } from '../../src/workflow/stage-context';
 import type { Check, CheckContext } from '../../src/workflow/checks';
 import { EventBus } from '../../src/services/event-bus';
@@ -21,7 +22,6 @@ import {
 
 class PassCheck implements Check {
   name: string;
-  reaction: ReactionConfig = { type: 'escalate' };
   constructor(name: string) {
     this.name = name;
   }
@@ -32,18 +32,13 @@ class PassCheck implements Check {
 
 class FailCheck implements Check {
   name: string;
-  reaction: ReactionConfig;
   private runFn: () => Promise<CheckResult>;
-  private fixFn?: () => Promise<void>;
 
   constructor(
     name: string,
-    reaction: ReactionConfig,
     runFn?: () => Promise<CheckResult>,
-    fixFn?: () => Promise<void>,
   ) {
     this.name = name;
-    this.reaction = reaction;
     this.runFn =
       runFn ??
       (async () => ({
@@ -51,23 +46,15 @@ class FailCheck implements Check {
         status: 'fail',
         message: `${this.name} failed`,
       }));
-    this.fixFn = fixFn;
   }
 
   async run(): Promise<CheckResult> {
     return this.runFn();
   }
-  async fix(): Promise<void> {
-    if (this.fixFn) await this.fixFn();
-  }
 }
 
 class PendingCheck implements Check {
   name = 'user-approval';
-  reaction: ReactionConfig = {
-    type: 'ask-user',
-    fallbackReaction: { type: 'escalate', escalateTarget: Stage.Plan },
-  };
 
   async run(): Promise<CheckResult> {
     return {
@@ -84,22 +71,35 @@ class SimpleRunner extends BaseStageRunner {
   private handledStage: Stage;
   private executeTasksFn: () => Promise<unknown>;
   executeTasksCalls = 0;
+  private failurePolicies: CheckFailurePolicy[];
+  private fixTaskResults: Map<string, StageTaskResult>;
+  private _isApprovalCheck: (checkName: string) => boolean;
 
   constructor(opts: {
     checks: Check[];
     nextStage: Stage;
     stage?: Stage;
     executeTasksFn?: () => Promise<unknown>;
+    failurePolicies?: CheckFailurePolicy[];
+    fixTaskResults?: Map<string, StageTaskResult>;
+    isApprovalCheck?: (checkName: string) => boolean;
   }) {
     super();
     this.checks = opts.checks;
     this.nextStage = opts.nextStage;
     this.handledStage = opts.stage ?? Stage.Plan;
     this.executeTasksFn = opts.executeTasksFn ?? (async () => ({ done: true }));
+    this.failurePolicies = opts.failurePolicies ?? [];
+    this.fixTaskResults = opts.fixTaskResults ?? new Map();
+    this._isApprovalCheck = opts.isApprovalCheck ?? (() => false);
   }
 
   canHandle(s: Stage): boolean {
     return s === this.handledStage;
+  }
+
+  protected isApprovalCheck(checkName: string): boolean {
+    return this._isApprovalCheck(checkName);
   }
 
   protected async executeTasks(): Promise<unknown> {
@@ -112,6 +112,20 @@ class SimpleRunner extends BaseStageRunner {
   }
   protected getNextStage(): Stage {
     return this.nextStage;
+  }
+
+  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
+    return this.failurePolicies;
+  }
+
+  protected async runFixTask(
+    _ctx: StageContext,
+    taskId: string,
+    _failedCheck: CheckResult,
+    _attempt: number,
+  ): Promise<StageTaskResult | null> {
+    const result = this.fixTaskResults.get(taskId);
+    return result ?? null;
   }
 }
 
@@ -254,23 +268,11 @@ describe('Workflow Integration Tests', () => {
     });
   });
 
-  describe('escalation paths', () => {
-    it('CHECK build-test failure (after auto-fix exhausted) escalates to BUILD', async () => {
+  describe('check failure without policy', () => {
+    it('CHECK build-test failure without policy fails the stage without escalation', async () => {
       const checkRunner = new SimpleRunner({
         checks: [
-          new FailCheck(
-            'build-test-passed',
-            {
-              type: 'auto-fix',
-              maxAttempts: 1,
-              fallbackReaction: {
-                type: 'escalate',
-                escalateTarget: Stage.Build,
-              },
-            },
-            undefined,
-            async () => {},
-          ),
+          new FailCheck('build-test-passed'),
         ],
         nextStage: Stage.Done,
         stage: Stage.Check,
@@ -279,19 +281,14 @@ describe('Workflow Integration Tests', () => {
       const result = await checkRunner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Build);
+      expect(result.nextStage).toBeUndefined();
     });
 
-    it('CHECK ai-review failure auto-fixes before falling back to BUILD', async () => {
-      let fixCalled = false;
+    it('CHECK ai-review failure without policy fails the stage without escalation', async () => {
       const checkRunner = new SimpleRunner({
         checks: [
           new PassCheck('build-test-passed'),
-          new FailCheck('ai-review-passed', {
-            type: 'auto-fix',
-            maxAttempts: 1,
-            fallbackReaction: { type: 'escalate', escalateTarget: Stage.Build },
-          }, undefined, async () => { fixCalled = true; }),
+          new FailCheck('ai-review-passed'),
         ],
         nextStage: Stage.Done,
         stage: Stage.Check,
@@ -300,13 +297,10 @@ describe('Workflow Integration Tests', () => {
       const result = await checkRunner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Build);
-      expect(fixCalled).toBe(true);
+      expect(result.nextStage).toBeUndefined();
     });
 
-    it('engine handles CHECK→Build escalation and continues pipeline', async () => {
-      let checkRunCount = 0;
-
+    it('engine stops at the failing stage when check has no policy', async () => {
       const planRunner = new SimpleRunner({
         checks: [new PassCheck('proposal-complete')],
         nextStage: Stage.Build,
@@ -319,20 +313,8 @@ describe('Workflow Integration Tests', () => {
         stage: Stage.Build,
       });
 
-      const countingCheck: Check = {
-        name: 'build-test-passed',
-        reaction: { type: 'escalate', escalateTarget: Stage.Build },
-        run: async () => {
-          checkRunCount++;
-          if (checkRunCount === 1) {
-            return { name: 'build-test-passed', status: 'fail', message: 'First call fails' };
-          }
-          return { name: 'build-test-passed', status: 'pass' };
-        },
-      };
-
       const checkRunner = new SimpleRunner({
-        checks: [countingCheck],
+        checks: [new FailCheck('build-test-passed')],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
       });
@@ -347,14 +329,8 @@ describe('Workflow Integration Tests', () => {
         updateStatus: vi.fn().mockReturnValue(makeIssue(Stage.Done)),
       } as unknown as IssueRepo;
 
-      const integrateRunner = new SimpleRunner({
-        checks: [],
-        nextStage: Stage.Done,
-        stage: Stage.Integrate,
-      });
-
       const engine = new WorkflowEngine({
-        runners: [planRunner, buildRunner, checkRunner, integrateRunner],
+        runners: [planRunner, buildRunner, checkRunner],
         issueRepo: mockIssueRepo,
         eventBus: ctx.eventBus,
         checkpointManager: ctx.checkpointManager,
@@ -363,8 +339,10 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(true);
-      expect(result.stage).toBe(Stage.Done);
+      expect(result.completed).toBe(false);
+      expect(result.stage).toBe(Stage.Check);
+      expect(stageHistory).toContain(Stage.Build);
+      expect(stageHistory).toContain(Stage.Check);
     });
   });
 
@@ -377,13 +355,13 @@ describe('Workflow Integration Tests', () => {
         ],
         nextStage: Stage.Build,
         stage: Stage.Plan,
+        isApprovalCheck: (name) => name === 'user-approval',
       });
 
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
       expect(result.nextStage).toBeUndefined();
-      expect(result.escalateToStage).toBeUndefined();
       expect(ctx.issueRepo.setApprovalState).toHaveBeenCalledWith(
         'issue-1',
         expect.objectContaining({ status: 'awaiting' }),
@@ -395,13 +373,6 @@ describe('Workflow Integration Tests', () => {
 
       const approvalCheck: Check = {
         name: 'user-approval',
-        reaction: {
-          type: 'ask-user',
-          fallbackReaction: {
-            type: 'escalate',
-            escalateTarget: Stage.Plan,
-          },
-        },
         run: async () => {
           callCount++;
           if (callCount === 1) {
@@ -423,6 +394,7 @@ describe('Workflow Integration Tests', () => {
         checks: [new PassCheck('proposal-complete'), approvalCheck],
         nextStage: Stage.Build,
         stage: Stage.Plan,
+        isApprovalCheck: (name) => name === 'user-approval',
       });
 
       const firstResult = await runner.run(ctx);
@@ -440,13 +412,6 @@ describe('Workflow Integration Tests', () => {
       const approvalCtx = makeContext({ issue: approvedIssue });
       const approvalRunnerCheck: Check = {
         name: 'user-approval',
-        reaction: {
-          type: 'ask-user',
-          fallbackReaction: {
-            type: 'escalate',
-            escalateTarget: Stage.Plan,
-          },
-        },
         run: async () => ({
           name: 'user-approval',
           status: 'pass' as const,
@@ -461,6 +426,7 @@ describe('Workflow Integration Tests', () => {
         ],
         nextStage: Stage.Build,
         stage: Stage.Plan,
+        isApprovalCheck: (name) => name === 'user-approval',
       });
 
       const secondResult = await resumeRunner.run(approvalCtx);
@@ -475,6 +441,7 @@ describe('Workflow Integration Tests', () => {
         checks: [new PendingCheck()],
         nextStage: Stage.Build,
         stage: Stage.Plan,
+        isApprovalCheck: (name) => name === 'user-approval',
       });
 
       await runner.run(ctx);
@@ -487,186 +454,144 @@ describe('Workflow Integration Tests', () => {
     });
   });
 
-  describe('retry-task reaction with max retries', () => {
-    it('retries tasks up to maxAttempts then stops', async () => {
-      let failCount = 0;
-      const alwaysFailAfter3 = new FailCheck(
-        'flaky-check',
-        { type: 'retry-task', maxAttempts: 3 },
-        async () => {
-          failCount++;
-          return {
-            name: 'flaky-check',
-            status: 'fail',
-            message: `Attempt ${failCount} failed`,
-          };
-        },
-      );
-
-      const runner = new SimpleRunner({
-        checks: [alwaysFailAfter3],
-        nextStage: Stage.Build,
-      });
-
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(false);
-      expect(failCount).toBe(4);
-      expect(runner.executeTasksCalls).toBe(4);
-      expect(result.message).toContain('Attempt 4 failed');
-    });
-
-    it('uses fallback reaction after max retries exhausted', async () => {
-      const alwaysFail = new FailCheck(
-        'always-fail',
-        {
-          type: 'retry-task',
-          maxAttempts: 2,
-          fallbackReaction: {
-            type: 'escalate',
-            escalateTarget: Stage.Plan,
-          },
-        },
-      );
-
-      const runner = new SimpleRunner({
-        checks: [alwaysFail],
-        nextStage: Stage.Build,
-      });
-
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Plan);
-    });
-
-    it('succeeds if check passes within retry limit', async () => {
-      let failCount = 0;
-      const flakyCheck = new FailCheck(
-        'flaky',
-        { type: 'retry-task', maxAttempts: 3 },
-        async () => {
-          failCount++;
-          if (failCount <= 2) {
-            return {
-              name: 'flaky',
-              status: 'fail',
-              message: 'Temporary failure',
-            };
-          }
-          return { name: 'flaky', status: 'pass' };
-        },
-      );
-
-      const runner = new SimpleRunner({
-        checks: [flakyCheck],
-        nextStage: Stage.Build,
-      });
-
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Build);
-      expect(runner.executeTasksCalls).toBe(3);
-    });
-  });
-
-  describe('auto-fix reaction with fallback escalate', () => {
-    it('re-runs check after fix and passes if fix works', async () => {
+  describe('policy-driven fix task behavior', () => {
+    it('runs fix task and re-checks when policy matches', async () => {
       let runCount = 0;
-      let fixCalled = false;
 
-      const autoFixCheck = new FailCheck(
-        'build-test',
-        { type: 'auto-fix', maxAttempts: 2 },
-        async () => {
+      const flakyCheck: Check = {
+        name: 'build-test',
+        run: async () => {
           runCount++;
           if (runCount <= 1) {
-            return {
-              name: 'build-test',
-              status: 'fail',
-              message: 'Build failed',
-            };
+            return { name: 'build-test', status: 'fail', message: 'Build failed' };
           }
           return { name: 'build-test', status: 'pass' };
         },
-        async () => {
-          fixCalled = true;
-        },
-      );
+      };
+
+      const fixResult: StageTaskResult = {
+        taskId: 'fix-build-health',
+        title: 'Fix build health',
+        status: 'completed',
+        artifacts: [],
+        attempts: 1,
+        duration: 1000,
+      };
 
       const runner = new SimpleRunner({
-        checks: [autoFixCheck],
+        checks: [flakyCheck],
         nextStage: Stage.Check,
+        failurePolicies: [
+          { checkName: 'build-test', fixTaskId: 'fix-build-health', maxAttempts: 2 },
+        ],
+        fixTaskResults: new Map([['fix-build-health', fixResult]]),
       });
 
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
       expect(result.nextStage).toBe(Stage.Check);
-      expect(fixCalled).toBe(true);
       expect(runCount).toBe(2);
     });
 
-    it('falls back to escalate after max auto-fix attempts', async () => {
-      const alwaysFailCheck = new FailCheck(
-        'build-test',
-        {
-          type: 'auto-fix',
-          maxAttempts: 2,
-          fallbackReaction: {
-            type: 'escalate',
-            escalateTarget: Stage.Build,
-          },
-        },
-        async () => ({
+    it('fails after max fix attempts exhausted', async () => {
+      const alwaysFail: Check = {
+        name: 'build-test',
+        run: async () => ({
           name: 'build-test',
           status: 'fail',
           message: 'Still broken',
         }),
-        async () => {},
-      );
+      };
+
+      const fixResult: StageTaskResult = {
+        taskId: 'fix-build-health',
+        title: 'Fix build health',
+        status: 'completed',
+        artifacts: [],
+        attempts: 1,
+        duration: 1000,
+      };
 
       const runner = new SimpleRunner({
-        checks: [alwaysFailCheck],
+        checks: [alwaysFail],
         nextStage: Stage.Check,
+        failurePolicies: [
+          { checkName: 'build-test', fixTaskId: 'fix-build-health', maxAttempts: 2 },
+        ],
+        fixTaskResults: new Map([['fix-build-health', fixResult]]),
       });
 
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Build);
+      expect(result.nextStage).toBeUndefined();
     });
 
-    it('auto-fix with escalate to Plan fallback', async () => {
-      const alwaysFailCheck = new FailCheck(
-        'code-compiles',
-        {
-          type: 'auto-fix',
-          maxAttempts: 2,
-          fallbackReaction: {
-            type: 'escalate',
-            escalateTarget: Stage.Plan,
-          },
+    it('succeeds if check passes within fix attempt limit', async () => {
+      let failCount = 0;
+
+      const flakyCheck: Check = {
+        name: 'flaky',
+        run: async () => {
+          failCount++;
+          if (failCount <= 2) {
+            return { name: 'flaky', status: 'fail', message: 'Temporary failure' };
+          }
+          return { name: 'flaky', status: 'pass' };
         },
-        async () => ({
-          name: 'code-compiles',
-          status: 'fail',
-          message: 'Compilation errors',
-        }),
-        async () => {},
-      );
+      };
+
+      const fixResult: StageTaskResult = {
+        taskId: 'fix-flaky',
+        title: 'Fix flaky',
+        status: 'completed',
+        artifacts: [],
+        attempts: 1,
+        duration: 1000,
+      };
 
       const runner = new SimpleRunner({
-        checks: [alwaysFailCheck],
-        nextStage: Stage.Check,
-        stage: Stage.Build,
+        checks: [flakyCheck],
+        nextStage: Stage.Build,
+        failurePolicies: [
+          { checkName: 'flaky', fixTaskId: 'fix-flaky', maxAttempts: 3 },
+        ],
+        fixTaskResults: new Map([['fix-flaky', fixResult]]),
       });
 
       const result = await runner.run(ctx);
 
-      expect(result.success).toBe(false);
-      expect(result.escalateToStage).toBe(Stage.Plan);
+      expect(result.success).toBe(true);
+      expect(result.nextStage).toBe(Stage.Build);
+    });
+
+    it('continues when fix task returns null and check passes on re-run', async () => {
+      let runCount = 0;
+
+      const check: Check = {
+        name: 'build-test',
+        run: async () => {
+          runCount++;
+          if (runCount <= 1) {
+            return { name: 'build-test', status: 'fail', message: 'Build failed' };
+          }
+          return { name: 'build-test', status: 'pass' };
+        },
+      };
+
+      const runner = new SimpleRunner({
+        checks: [check],
+        nextStage: Stage.Check,
+        failurePolicies: [
+          { checkName: 'build-test', fixTaskId: 'fix-build-health', maxAttempts: 1 },
+        ],
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.nextStage).toBe(Stage.Check);
     });
   });
 
@@ -695,6 +620,7 @@ describe('Workflow Integration Tests', () => {
         ],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
+        isApprovalCheck: (name) => name === 'user-approval',
       });
 
       const stageTransitions: Stage[] = [];
@@ -736,13 +662,9 @@ describe('Workflow Integration Tests', () => {
       const runner = new SimpleRunner({
         checks: [
           new PassCheck('check-a'),
-          new FailCheck('check-b', {
-            type: 'escalate',
-            escalateTarget: Stage.Plan,
-          }),
+          new FailCheck('check-b'),
           {
             name: 'check-c',
-            reaction: { type: 'escalate', escalateTarget: Stage.Plan },
             run: async () => {
               secondRunSpy();
               return { name: 'check-c', status: 'pass' as const };
@@ -778,52 +700,10 @@ describe('Workflow Integration Tests', () => {
       expect(result.message).toContain('cannot handle stage');
     });
 
-    it('handles escalation in engine loop', async () => {
-      const escalateRunner = new SimpleRunner({
-        checks: [
-          new FailCheck('check-fail', {
-            type: 'escalate',
-            escalateTarget: Stage.Plan,
-          }),
-        ],
-        nextStage: Stage.Done,
-        stage: Stage.Check,
-      });
-
-      const passRunner = new SimpleRunner({
-        checks: [new PassCheck('ok')],
-        nextStage: Stage.Done,
-        stage: Stage.Plan,
-      });
-
-      const stageHistory: Stage[] = [];
-      const mockIssueRepo = {
-        updateStage: vi.fn().mockImplementation((_id: string, stage: Stage) => {
-          stageHistory.push(stage);
-          return makeIssue(stage);
-        }),
-        clearApprovalState: vi.fn(),
-        updateStatus: vi.fn().mockReturnValue(makeIssue(Stage.Done)),
-      } as unknown as IssueRepo;
-
-      const engine = new WorkflowEngine({
-        runners: [passRunner, escalateRunner],
-        issueRepo: mockIssueRepo,
-        eventBus: ctx.eventBus,
-        checkpointManager: ctx.checkpointManager,
-        artifactManager: ctx.artifactManager,
-      });
-
-      const result = await engine.run(makeIssue(Stage.Check), {} as any);
-
-      expect(result.completed).toBe(true);
-      expect(stageHistory[0]).toBe(Stage.Plan);
-    });
-
-    it('returns incomplete when stage result has no nextStage and no escalate', async () => {
+    it('returns incomplete when check fails without next stage', async () => {
       const runner = new SimpleRunner({
         checks: [
-          new FailCheck('fail', { type: 'retry-task', maxAttempts: 0 }),
+          new FailCheck('fail'),
         ],
         nextStage: Stage.Build,
       });
@@ -848,13 +728,10 @@ describe('Workflow Integration Tests', () => {
       expect((result as any).gateRequired).toBeUndefined();
     });
 
-    it('failed result with escalation has no requiresApproval field', async () => {
+    it('failed result without escalation has no requiresApproval field', async () => {
       const runner = new SimpleRunner({
         checks: [
-          new FailCheck('fail', {
-            type: 'escalate',
-            escalateTarget: Stage.Plan,
-          }),
+          new FailCheck('fail'),
         ],
         nextStage: Stage.Build,
       });

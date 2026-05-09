@@ -1,13 +1,7 @@
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
 
 export class MergeReadinessCheck implements Check {
   public readonly name = 'merge-readiness';
-  public readonly reaction: ReactionConfig = {
-    type: 'escalate',
-    escalateTarget: undefined,
-    fallbackReaction: { type: 'ask-user' },
-  };
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     if (!ctx.worktreeManager) {

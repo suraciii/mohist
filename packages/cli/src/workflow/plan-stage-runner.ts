@@ -50,6 +50,10 @@ export class PlanStageRunner extends BaseStageRunner {
     return stage === Stage.Plan || stage === Stage.Draft || stage === Stage.Backlog;
   }
 
+  protected isApprovalCheck(checkName: string): boolean {
+    return checkName === 'user-approval';
+  }
+
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
     const { issue, acpOptions, artifactManager, eventBus, checkpointManager } = ctx;
 

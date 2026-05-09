@@ -1,16 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
-
-const NO_OP_REACTION: ReactionConfig = {
-  type: 'retry-task',
-  maxAttempts: 0,
-};
 
 export class SpecsCompleteCheck implements Check {
   public readonly name = 'specs-complete';
-  public readonly reaction: ReactionConfig = NO_OP_REACTION;
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     if (!ctx.changeDir) {

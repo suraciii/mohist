@@ -1,5 +1,5 @@
 import { Stage } from '../types';
-import type { StageContext, StageRunResult, CheckResult, StageTaskResult } from './stage-context';
+import type { StageContext, StageRunResult, CheckResult, StageTaskResult, CheckFailurePolicy } from './stage-context';
 import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
@@ -18,6 +18,23 @@ export abstract class BaseStageRunner implements StageRunner {
   }
 
   protected abstract getNextStage(): Stage;
+
+  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
+    return [];
+  }
+
+  protected async runFixTask(
+    _ctx: StageContext,
+    _taskId: string,
+    _failedCheck: CheckResult,
+    _attempt: number,
+  ): Promise<StageTaskResult | null> {
+    return null;
+  }
+
+  protected isApprovalCheck(_checkName: string): boolean {
+    return false;
+  }
 
   private stageExecutionId?: string;
 
@@ -49,7 +66,7 @@ export abstract class BaseStageRunner implements StageRunner {
     let checkResults: CheckResult[] = [];
     const preTaskChecks = this.getPreTaskChecks();
     if (preTaskChecks.length > 0) {
-      const preTaskResult = await this.runChecksPhase(ctx, [], preTaskChecks, null, 0, true);
+      const preTaskResult = await this.runChecksPhase(ctx, [], preTaskChecks, null, true);
       checkResults = preTaskResult.checkResults ?? [];
       if (!preTaskResult.success) {
         this.updateStageExecutionStatus(ctx, 'failed');
@@ -73,12 +90,12 @@ export abstract class BaseStageRunner implements StageRunner {
     }
 
     const postTaskChecks = this.getChecks();
-    const result = await this.runChecksPhase(ctx, checkResults, postTaskChecks, taskOutput, 0, false);
+    const result = await this.runChecksPhase(ctx, checkResults, postTaskChecks, taskOutput, false);
     if (result.success) {
       this.updateStageExecutionStatus(ctx, 'passed');
     } else {
       const hasApproval = result.checkResults?.some(
-        (cr: CheckResult) => cr.status === 'fail' && result.message?.includes('approval')
+        (cr: CheckResult) => cr.status === 'pending' && this.isApprovalCheck(cr.name),
       );
       this.updateStageExecutionStatus(ctx, hasApproval ? 'awaiting-approval' : 'failed');
     }
@@ -90,7 +107,6 @@ export abstract class BaseStageRunner implements StageRunner {
     priorResults: CheckResult[],
     checks: Check[],
     taskOutput: unknown,
-    taskRetryCount: number,
     isPreTask: boolean,
   ): Promise<StageRunResult> {
     const checkCtx = this.buildCheckContext(ctx);
@@ -102,7 +118,7 @@ export abstract class BaseStageRunner implements StageRunner {
 
       if (result.status !== 'pass') {
         this.persistCheckResults(ctx, results);
-        return this.dispatchReaction(ctx, check, result, results, taskOutput, taskRetryCount, isPreTask, checks);
+        return this.handleCheckFailure(ctx, check, result, results, taskOutput, isPreTask, checks);
       }
     }
 
@@ -115,137 +131,68 @@ export abstract class BaseStageRunner implements StageRunner {
     };
   }
 
-  private updateStageExecutionStatus(ctx: StageContext, status: StageExecutionStatus): void {
-    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
-    try {
-      ctx.stageExecutionRepo.updateStatus(this.stageExecutionId, status);
-    } catch (e) {
-      log.warn('updateStageExecutionStatus failed', { error: e instanceof Error ? e.message : String(e) });
-    }
-  }
-
-  private buildCheckContext(ctx: StageContext): CheckContext {
-    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-    return {
-      issue: ctx.issue,
-      changeDir: changeDir ?? '',
-      eventBus: ctx.eventBus,
-      projectId: ctx.issue.projectId,
-      acpOptions: ctx.acpOptions,
-      workflowLogRepo: ctx.workflowLogRepo,
-      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
-      coderSessionRepo: ctx.coderSessionRepo,
-      worktreeManager: ctx.worktreeManager,
-      projectRepo: ctx.projectRepo,
-    };
-  }
-
-  private async dispatchReaction(
+  private async handleCheckFailure(
     ctx: StageContext,
     check: Check,
     result: CheckResult,
     allResults: CheckResult[],
     taskOutput: unknown,
-    taskRetryCount: number,
     isPreTask: boolean,
     activeChecks: Check[],
   ): Promise<StageRunResult> {
-    switch (check.reaction.type) {
-      case 'retry-task':
-        return this.handleRetryTask(ctx, check, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
-      case 'auto-fix':
-        return this.handleAutoFix(ctx, check, result, allResults, taskOutput, taskRetryCount, 0, isPreTask, activeChecks);
-      case 'escalate':
-        return {
-          success: false,
-          escalateToStage: check.reaction.escalateTarget,
-          output: taskOutput,
-          checkResults: allResults,
-          message: result.message ?? `Check "${check.name}" failed, escalating`,
-        };
-      case 'ask-user':
-        if (result.status === 'fail' && check.reaction.fallbackReaction) {
-          return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
-        }
-        return this.handleAskUser(ctx, check, result, allResults, taskOutput);
+    if (this.isApprovalCheck(check.name)) {
+      return this.handleApprovalCheck(ctx, check, result, allResults, taskOutput);
     }
+
+    const policies = this.getCheckFailurePolicies();
+    const policy = policies.find(p => p.checkName === check.name);
+
+    if (!policy) {
+      return {
+        success: false,
+        output: taskOutput,
+        checkResults: allResults,
+        message: result.message ?? `Check "${check.name}" failed`,
+      };
+    }
+
+    return this.runFixAndRecheck(ctx, check, result, allResults, taskOutput, isPreTask, activeChecks, policy, 0);
   }
 
-  private async handleRetryTask(
+  private async runFixAndRecheck(
     ctx: StageContext,
     check: Check,
-    result: CheckResult,
+    failedResult: CheckResult,
     allResults: CheckResult[],
     taskOutput: unknown,
-    taskRetryCount: number,
     isPreTask: boolean,
     activeChecks: Check[],
+    policy: CheckFailurePolicy,
+    attempt: number,
   ): Promise<StageRunResult> {
-    const maxAttempts = check.reaction.maxAttempts ?? 3;
-
-    if (taskRetryCount >= maxAttempts) {
-      if (check.reaction.fallbackReaction) {
-        return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
-      }
+    if (attempt >= policy.maxAttempts) {
       return {
         success: false,
         output: taskOutput,
         checkResults: allResults,
-        message: result.message ?? `Check "${check.name}" failed after ${maxAttempts} retries`,
+        message: failedResult.message ?? `Check "${check.name}" failed after ${policy.maxAttempts} fix attempt(s)`,
       };
     }
 
-    let newTaskOutput: unknown;
-    try {
-      newTaskOutput = await this.executeTasks(ctx);
-    } catch (err: any) {
-      return {
-        success: false,
-        output: taskOutput,
-        checkResults: allResults,
-        message: `Task execution failed on retry ${taskRetryCount + 1}: ${err.message}`,
-      };
-    }
+    const fixResult = await this.runFixTask(ctx, policy.fixTaskId, failedResult, attempt + 1);
 
-    return this.runChecksPhase(ctx, allResults, activeChecks, newTaskOutput, taskRetryCount + 1, isPreTask);
-  }
-
-  private async handleAutoFix(
-    ctx: StageContext,
-    check: Check,
-    result: CheckResult,
-    allResults: CheckResult[],
-    taskOutput: unknown,
-    taskRetryCount: number,
-    autoFixAttempt: number,
-    isPreTask: boolean,
-    activeChecks: Check[],
-  ): Promise<StageRunResult> {
-    const maxAttempts = check.reaction.maxAttempts ?? 2;
-
-    if (autoFixAttempt >= maxAttempts) {
-      if (check.reaction.fallbackReaction) {
-        return this.dispatchFallbackReaction(ctx, check, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
-      }
-      return {
-        success: false,
-        output: taskOutput,
-        checkResults: allResults,
-        message: result.message ?? `Check "${check.name}" failed after ${maxAttempts} auto-fix attempts`,
-      };
+    if (fixResult) {
+      this.appendTaskResult(ctx, fixResult);
     }
 
     const checkCtx = this.buildCheckContext(ctx);
-
-    if ('fix' in check && typeof check.fix === 'function') {
-      await check.fix(checkCtx);
-    }
-
     const recheckResult = await check.run(checkCtx);
 
     if (recheckResult.status === 'pass') {
+      const continuedResults = [...allResults.slice(0, -1), recheckResult];
+      this.persistCheckResults(ctx, continuedResults);
+
       if (isPreTask) {
-        const continuedResults = [...allResults.slice(0, -1), recheckResult];
         return {
           success: true,
           nextStage: undefined,
@@ -253,16 +200,16 @@ export abstract class BaseStageRunner implements StageRunner {
           checkResults: continuedResults,
         };
       }
-      const checks = activeChecks;
-      const currentIndex = checks.findIndex(c => c.name === check.name);
-      const remaining = checks.slice(currentIndex + 1);
-      const continuedResults = [...allResults.slice(0, -1), recheckResult];
+
+      const currentIndex = activeChecks.findIndex(c => c.name === check.name);
+      const remaining = activeChecks.slice(currentIndex + 1);
 
       for (const nextCheck of remaining) {
         const nextResult = await nextCheck.run(checkCtx);
         continuedResults.push(nextResult);
         if (nextResult.status !== 'pass') {
-          return this.dispatchReaction(ctx, nextCheck, nextResult, continuedResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
+          this.persistCheckResults(ctx, continuedResults);
+          return this.handleCheckFailure(ctx, nextCheck, nextResult, continuedResults, taskOutput, isPreTask, activeChecks);
         }
       }
 
@@ -275,12 +222,14 @@ export abstract class BaseStageRunner implements StageRunner {
     }
 
     const updatedResults = [...allResults.slice(0, -1), recheckResult];
-    return this.handleAutoFix(ctx, check, recheckResult, updatedResults, taskOutput, taskRetryCount, autoFixAttempt + 1, isPreTask, activeChecks);
+    this.persistCheckResults(ctx, updatedResults);
+
+    return this.runFixAndRecheck(ctx, check, recheckResult, updatedResults, taskOutput, isPreTask, activeChecks, policy, attempt + 1);
   }
 
-  private handleAskUser(
+  private handleApprovalCheck(
     ctx: StageContext,
-    check: Check,
+    _check: Check,
     result: CheckResult,
     allResults: CheckResult[],
     taskOutput: unknown,
@@ -335,27 +284,33 @@ export abstract class BaseStageRunner implements StageRunner {
       success: false,
       output: taskOutput,
       checkResults: allResults,
-      message: result.message ?? `Check "${check.name}" requires user approval`,
+      message: result.message ?? `User approval required`,
     };
   }
 
-  private dispatchFallbackReaction(
-    ctx: StageContext,
-    check: Check,
-    result: CheckResult,
-    allResults: CheckResult[],
-    taskOutput: unknown,
-    taskRetryCount: number,
-    isPreTask: boolean,
-    activeChecks: Check[],
-  ): Promise<StageRunResult> {
-    const fallback = check.reaction.fallbackReaction!;
-    const fallbackCheck: Check = {
-      name: check.name,
-      reaction: fallback,
-      run: async () => result,
+  private updateStageExecutionStatus(ctx: StageContext, status: StageExecutionStatus): void {
+    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
+    try {
+      ctx.stageExecutionRepo.updateStatus(this.stageExecutionId, status);
+    } catch (e) {
+      log.warn('updateStageExecutionStatus failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  private buildCheckContext(ctx: StageContext): CheckContext {
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+    return {
+      issue: ctx.issue,
+      changeDir: changeDir ?? '',
+      eventBus: ctx.eventBus,
+      projectId: ctx.issue.projectId,
+      acpOptions: ctx.acpOptions,
+      workflowLogRepo: ctx.workflowLogRepo,
+      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+      coderSessionRepo: ctx.coderSessionRepo,
+      worktreeManager: ctx.worktreeManager,
+      projectRepo: ctx.projectRepo,
     };
-    return this.dispatchReaction(ctx, fallbackCheck, result, allResults, taskOutput, taskRetryCount, isPreTask, activeChecks);
   }
 
   private persistCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {

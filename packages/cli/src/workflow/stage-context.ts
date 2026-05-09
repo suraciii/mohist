@@ -26,20 +26,12 @@ export interface IssueRepo {
   findById(id: string): Issue | null;
 }
 
-export interface ReactionConfig {
-  type: 'retry-task' | 'auto-fix' | 'escalate' | 'ask-user';
-  maxAttempts?: number;
-  escalateTarget?: Stage;
-  fallbackReaction?: ReactionConfig;
-}
-
 export interface StageRunResult {
   success: boolean;
   output: unknown;
   checkResults: CheckResult[];
   message?: string;
   nextStage?: Stage;
-  escalateToStage?: Stage;
 }
 
 export interface StageContext {
@@ -125,8 +117,15 @@ export interface StageTaskResult {
   title: string;
   status: 'completed' | 'failed' | 'skipped';
   artifacts: string[];
+  output?: unknown;
   attempts: number;
   duration: number;
+}
+
+export interface CheckFailurePolicy {
+  checkName: string;
+  fixTaskId: string;
+  maxAttempts: number;
 }
 
 export function emitStageTaskUpdate(

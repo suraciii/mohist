@@ -1,15 +1,9 @@
 import type { Check, CheckContext, CheckResult } from './index';
-import type { ReactionConfig } from '../stage-context';
 import type { HealthGatePolicy } from '../workflow-loader';
 import { loadHealthGatePolicies, loadWorkflow } from '../workflow-loader';
 
 export class IntegrationHealthGatePreviewCheck implements Check {
   public readonly name = 'integration-health-gate-preview';
-  public readonly reaction: ReactionConfig = {
-    type: 'escalate',
-    escalateTarget: undefined,
-    fallbackReaction: { type: 'ask-user' },
-  };
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     try {
