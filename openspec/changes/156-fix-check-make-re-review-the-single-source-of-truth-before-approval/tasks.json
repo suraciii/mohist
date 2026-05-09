@@ -135,11 +135,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Prefer deterministic unit or integration tests around CheckStageRunner/BaseStageRunner with mocked AgentSession and git helpers rather than broad end-to-end LLM tests.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        203864
+      ]
     }
   ]
 }
