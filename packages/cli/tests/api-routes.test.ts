@@ -693,6 +693,41 @@ describe('API Routes', () => {
     });
 
     describe('POST /api/issues/:number/retry', () => {
+      it('should reject retry for merged blocked issue and require manual intervention', async () => {
+        const issue = createBlockedIssue('Merged Blocked');
+        issueRepo.updateStage(issue.id, Stage.Done);
+        issueRepo.update(issue.id, { mergeState: MergeState.Merged });
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/retry`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('manual intervention');
+
+        const updated = stateManager.getIssueRepo().findById(issue.id);
+        expect(updated?.stage).toBe(Stage.Done);
+        expect(updated?.status).toBe(IssueStatus.Blocked);
+      });
+
+      it('should reject retry for integrate-stage blocked issue and require manual intervention', async () => {
+        const issue = createBlockedIssue('Integrate Blocked');
+        issueRepo.updateStage(issue.id, Stage.Integrate);
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/retry`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('manual intervention');
+
+        const updated = stateManager.getIssueRepo().findById(issue.id);
+        expect(updated?.stage).toBe(Stage.Integrate);
+        expect(updated?.status).toBe(IssueStatus.Blocked);
+      });
+
       it('should retry a blocked issue — no checkpoint falls back to draft reset', async () => {
         const issue = createBlockedIssue('Retry Test');
         const eventBus = new EventBus();
@@ -817,6 +852,41 @@ describe('API Routes', () => {
     });
 
     describe('POST /api/issues/:number/restart', () => {
+      it('should reject restart for merged blocked issue and require manual intervention', async () => {
+        const issue = createBlockedIssue('Merged Restart');
+        issueRepo.updateStage(issue.id, Stage.Done);
+        issueRepo.update(issue.id, { mergeState: MergeState.Merged });
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/restart`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('manual intervention');
+
+        const updated = stateManager.getIssueRepo().findById(issue.id);
+        expect(updated?.stage).toBe(Stage.Done);
+        expect(updated?.status).toBe(IssueStatus.Blocked);
+      });
+
+      it('should reject restart for integrate-stage blocked issue and require manual intervention', async () => {
+        const issue = createBlockedIssue('Integrate Restart');
+        issueRepo.updateStage(issue.id, Stage.Integrate);
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus);
+        server = createRetryServer(agentRunner);
+
+        const response = await request(server).post(`/api/issues/${issue.number}/restart`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('manual intervention');
+
+        const updated = stateManager.getIssueRepo().findById(issue.id);
+        expect(updated?.stage).toBe(Stage.Integrate);
+        expect(updated?.status).toBe(IssueStatus.Blocked);
+      });
+
       it('should restart a blocked issue to backlog and return 200', async () => {
         const issue = createBlockedIssue('Restart Test');
         const eventBus = new EventBus();

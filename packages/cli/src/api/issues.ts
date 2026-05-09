@@ -21,7 +21,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Log } from '../util/log';
 import type { IssueQueueStatus } from '../services/agent-runner-service';
-import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
+import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { assembleSessionTranscript } from '../services/session-transcript-service';
 import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
 
@@ -2602,6 +2602,14 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} is not blocked (current: ${issue.status})` } satisfies ApiResponse, 409);
       }
 
+      const deliveryStatus = classifyMergeDelivery(issue);
+      if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
+        return c.json({
+          success: false,
+          error: `Issue #${number} has already been merged or is in integrate stage. Automatic retry is disabled; manual intervention is required.`,
+        } satisfies ApiResponse, 409);
+      }
+
       const issueRepo = stateManager.getIssueRepo();
 
       issueRepo.updateRetryCount(issue.id, 0);
@@ -2671,6 +2679,14 @@ export function createIssueRoutes(
 
       if (issue.status !== IssueStatus.Blocked) {
         return c.json({ success: false, error: `Issue #${number} is not blocked (current: ${issue.status})` } satisfies ApiResponse, 409);
+      }
+
+      const deliveryStatus = classifyMergeDelivery(issue);
+      if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
+        return c.json({
+          success: false,
+          error: `Issue #${number} has already been merged or is in integrate stage. Automatic restart is disabled; manual intervention is required.`,
+        } satisfies ApiResponse, 409);
       }
 
       if (agentRunner) {
@@ -2780,6 +2796,14 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} is not blocked` } satisfies ApiResponse, 409);
       }
 
+      const deliveryStatus = classifyMergeDelivery(issue);
+      if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
+        return c.json({
+          success: false,
+          error: `Issue #${number} has already been merged or is in integrate stage. Automatic retry is disabled; manual intervention is required.`,
+        } satisfies ApiResponse, 409);
+      }
+
       if (agentRunner) {
         const queueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
         if (queueStatus.running) {
@@ -2844,6 +2868,14 @@ export function createIssueRoutes(
 
       if (issue.status !== IssueStatus.Blocked) {
         return c.json({ success: false, error: `Issue #${number} is not blocked` } satisfies ApiResponse, 409);
+      }
+
+      const deliveryStatus = classifyMergeDelivery(issue);
+      if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
+        return c.json({
+          success: false,
+          error: `Issue #${number} has already been merged or is in integrate stage. Automatic restart is disabled; manual intervention is required.`,
+        } satisfies ApiResponse, 409);
       }
 
       if (agentRunner) {
