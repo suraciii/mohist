@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Make check-stage re-review the authoritative snapshot-bound truth before user approval.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -19,8 +18,15 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/base-stage-runner.ts, packages/cli/src/workflow/stage-context.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Keep attempt history, if needed, explicitly non-authoritative. The important outcome is that API and approval code have one current ai-review truth to read."
+      "passes": true,
+      "notes": "Keep attempt history, if needed, explicitly non-authoritative. The important outcome is that API and approval code have one current ai-review truth to read.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        175393,
+        83390
+      ]
     },
     {
       "id": "T-002",
@@ -42,7 +48,10 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Preserve normal resume behavior when no fix changed the code. Scope invalidation to review.md and review-self-check.md for the check stage."
+      "notes": "Preserve normal resume behavior when no fix changed the code. Scope invalidation to review.md and review-self-check.md for the check stage.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -65,7 +74,10 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Use non-interactive git commands. Do not use --no-verify unless the implementation has an explicit existing project convention for this convergence commit; failed hooks should block approval."
+      "notes": "Use non-interactive git commands. Do not use --no-verify unless the implementation has an explicit existing project convention for this convergence commit; failed hooks should block approval.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -88,7 +100,10 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Approval validation is the final guard for restart, manual edit, and concurrent worker cases. Prefer a clear 409/400 response unless the existing rerun path can be used safely."
+      "notes": "Approval validation is the final guard for restart, manual edit, and concurrent worker cases. Prefer a clear 409/400 response unless the existing rerun path can be used safely.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -112,7 +127,10 @@
         "T-004"
       ],
       "passes": false,
-      "notes": "Prefer deterministic unit or integration tests around CheckStageRunner/BaseStageRunner with mocked AgentSession and git helpers rather than broad end-to-end LLM tests."
+      "notes": "Prefer deterministic unit or integration tests around CheckStageRunner/BaseStageRunner with mocked AgentSession and git helpers rather than broad end-to-end LLM tests.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
