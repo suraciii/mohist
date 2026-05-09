@@ -74,6 +74,42 @@ function formatLabels(labels: string[]): string {
   return labels.map(l => chalk.blue(`[${l}]`)).join(' ');
 }
 
+export interface CoderSessionResponse {
+  id: string;
+  acpSessionId: string;
+  status: string;
+  createdAt: string;
+  lastDataAt: string | null;
+  probeSentAt: string | null;
+  probeDeadlineAt: string | null;
+  failureReason: string | null;
+}
+
+export function formatSessionState(session: CoderSessionResponse | null): string {
+  if (!session) return chalk.gray('No active session');
+
+  if (session.status === 'running') return chalk.green('Running');
+  if (session.status === 'probing') {
+    let label = chalk.cyan('Checking session');
+    if (session.probeSentAt && session.probeDeadlineAt) {
+      const probeDeadline = new Date(session.probeDeadlineAt);
+      const remaining = Math.max(0, Math.floor((probeDeadline.getTime() - Date.now()) / 1000));
+      if (remaining > 0) {
+        label = chalk.cyan(`Checking session (${remaining}s remaining)`);
+      }
+    }
+    return label;
+  }
+  if (session.status === 'failed') {
+    let label = chalk.red('Session failed');
+    if (session.failureReason) {
+      label = chalk.red(`Session failed: ${session.failureReason}`);
+    }
+    return label;
+  }
+  return chalk.gray('No active session');
+}
+
 function parseLabelFlags(flags: string[] | undefined): { add: string[]; remove: string[] } {
   const add: string[] = [];
   const remove: string[] = [];
@@ -272,6 +308,19 @@ export function setupIssueCommands(program: Command): void {
           if (issue.archivedAt) {
             console.log(`  Archived: ${chalk.gray(new Date(issue.archivedAt).toLocaleString())}`);
           }
+
+          const sessionsResponse = await apiClient<ApiResponse<CoderSessionResponse[]>>(
+            'GET',
+            `/issues/${number}/coder-sessions`
+          );
+          let currentSession: CoderSessionResponse | null = null;
+          if (sessionsResponse.success && sessionsResponse.data) {
+            const activeStatuses = ['running', 'probing', 'failed'];
+            currentSession = sessionsResponse.data
+              .filter(s => activeStatuses.includes(s.status))
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] || null;
+          }
+          console.log(`  Session: ${formatSessionState(currentSession)}`);
 
           const executionsResponse = await apiClient<ApiResponse<any[]>>(
             'GET',
