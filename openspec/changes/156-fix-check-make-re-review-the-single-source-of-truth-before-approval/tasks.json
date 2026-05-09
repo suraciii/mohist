@@ -47,11 +47,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Preserve normal resume behavior when no fix changed the code. Scope invalidation to review.md and review-self-check.md for the check stage.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        311953
+      ]
     },
     {
       "id": "T-003",
