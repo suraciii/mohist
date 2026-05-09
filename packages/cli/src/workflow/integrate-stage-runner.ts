@@ -275,7 +275,10 @@ protected async executeTasks(ctx: StageContext): Promise<unknown> {
     let mergeResult: IntegrateStepResult | undefined;
 
     const project = ctx.projectRepo.findById(ctx.issue.projectId);
-    const baseBranch = project?.baseBranch ?? 'main';
+    if (!project) {
+      throw new Error(`Project not found: ${ctx.issue.projectId}`);
+    }
+    const baseBranch = project.baseBranch;
 
     try {
       log.info('Running integration merge', {
@@ -289,8 +292,8 @@ protected async executeTasks(ctx: StageContext): Promise<unknown> {
       }
 
       const mergeTruth = await ctx.worktreeManager.mergeApprovedCandidate(
-        this.worktreePath,
-        ctx.issue.projectId,
+        project.path,
+        project.name,
         ctx.issue.number,
         baseBranch
       );
