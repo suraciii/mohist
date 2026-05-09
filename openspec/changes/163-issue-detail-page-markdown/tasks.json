@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Improve Issue Detail Page readability by rendering descriptions and comments as styled Markdown with collapsible long descriptions.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Consumes react-markdown and current issue/comment body strings; produces the reusable renderer used by later styling and collapse work. Add remark-gfm only if needed for required GFM behavior."
+      "passes": true,
+      "notes": "Consumes react-markdown and current issue/comment body strings; produces the reusable renderer used by later styling and collapse work. Add remark-gfm only if needed for required GFM behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        170997
+      ]
     },
     {
       "id": "T-002",
@@ -40,9 +45,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Consumes the shared Markdown renderer produced by T-001 and specializes its code element rendering; this task should not add any additional dependencies."
+      "notes": "Consumes the shared Markdown renderer produced by T-001 and specializes its code element rendering; this task should not add any additional dependencies.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +72,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Consumes the Markdown-rendered and styled description produced by T-001 and T-002, then wraps it with local collapse UI."
+      "notes": "Consumes the Markdown-rendered and styled description produced by T-001 and T-002, then wraps it with local collapse UI.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -83,9 +99,16 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/web/src/components/IssueDetailPage.test.tsx",
-      "dependsOn": ["T-001", "T-002", "T-003"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Consumes the rendering, styling, and collapse behavior from T-001 through T-003; may adjust the output path to match existing test organization."
+      "notes": "Consumes the rendering, styling, and collapse behavior from T-001 through T-003; may adjust the output path to match existing test organization.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
