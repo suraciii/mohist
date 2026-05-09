@@ -923,6 +923,354 @@ New scenario content.`);
     });
   });
 
+  describe('AC-7: integrate:spec-sync failure preserves failure locality', () => {
+    it('failed spec sync leaves issue in integrate state with blocked status', async () => {
+      const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
+
+      const issueNumber = 150;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cap-locality', [
+        '### Requirement: ExistingLocal\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'cap-locality', `## ADDED Requirements
+
+### Requirement: ExistingLocal
+
+Duplicate requirement content.
+
+#### Scenario: Duplicate scenario
+Duplicate scenario content.`);
+
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const ctx = createMockContext(tmpDir, issueNumber);
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Spec sync failed');
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const eventNames = emitCalls.map(([name]) => name);
+
+      expect(eventNames).toContain('integration_failed');
+      const failedEvent = emitCalls.find(([name]) => name === 'integration_failed');
+      expect(failedEvent?.[1]).toMatchObject({
+        failingStep: 'integrate:spec-sync',
+      });
+      expect(failedEvent?.[1].issueNumber).toBe(issueNumber);
+
+      const specSyncTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:spec-sync');
+      expect(specSyncTask).toBeDefined();
+      expect(specSyncTask.status).toBe('failed');
+
+      expect(ctx.artifactManager.archiveChange).not.toHaveBeenCalled();
+    });
+
+    it('failed spec sync emits integration_failed with failure reason category', async () => {
+      const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
+
+      const issueNumber = 151;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cap-reason', [
+        '### Requirement: ExistingReason\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'cap-reason', `## ADDED Requirements
+
+### Requirement: ExistingReason
+
+Duplicate target content.
+
+#### Scenario: Duplicate scenario
+Duplicate scenario content.`);
+
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const ctx = createMockContext(tmpDir, issueNumber);
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const failedEvent = emitCalls.find(([name]) => name === 'integration_failed');
+      const eventOutput = failedEvent?.[1]?.output as { conflicts?: Array<{ type: string; detail: string }> };
+      expect(eventOutput?.conflicts).toBeDefined();
+      expect(eventOutput?.conflicts!.length).toBeGreaterThan(0);
+      expect(eventOutput?.conflicts![0]?.type).toBe('duplicate_target');
+    });
+
+    it('failed spec sync does not trigger archive, merge, or final-health', async () => {
+      const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
+
+      const issueNumber = 152;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cap-no-follow', [
+        '### Requirement: ExistingFollow\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'cap-no-follow', `## ADDED Requirements
+
+### Requirement: ExistingFollow
+
+Duplicate target content.
+
+#### Scenario: Duplicate scenario
+Duplicate scenario content.`);
+
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const ctx = createMockContext(tmpDir, issueNumber);
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+
+      expect(ctx.artifactManager.archiveChange).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.mergeApprovedCandidate).not.toHaveBeenCalled();
+
+      const archiveTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:archive-change');
+      const mergeTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:merge');
+      const healthTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'final-health');
+
+      expect(archiveTask).toBeUndefined();
+      expect(mergeTask).toBeUndefined();
+      expect(healthTask).toBeUndefined();
+    });
+
+    it('retrying INTEGRATE re-executes spec-sync after explicit resume', async () => {
+      const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
+
+      const issueNumber = 153;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cap-retry', [
+        '### Requirement: ExistingRetry\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'cap-retry', `## ADDED Requirements
+
+### Requirement: NewRetry
+
+New requirement content.
+
+#### Scenario: New scenario
+New scenario content.`);
+
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const ctx = createMockContext(tmpDir, issueNumber);
+
+      const result1 = await runner.run(ctx);
+      expect(result1.success).toBe(true);
+      expect(result1.nextStage).toBe(Stage.Done);
+
+      const specSyncCall1 = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:spec-sync');
+      expect(specSyncCall1?.status).toBe('completed');
+
+      fs.writeFileSync(
+        path.join(changeDir, 'specs', 'cap-retry', 'spec.md'),
+        `## ADDED Requirements
+
+### Requirement: AnotherNew
+
+Another new requirement.
+
+#### Scenario: Another scenario
+Another scenario content.`,
+        'utf-8'
+      );
+
+      const ctx2 = createMockContext(tmpDir, issueNumber);
+      const result2 = await runner.run(ctx2);
+      expect(result2.success).toBe(true);
+
+      const specSyncCall2 = appendedTaskResults(ctx2).find((t: any) => t.taskId === 'integrate:spec-sync');
+      expect(specSyncCall2).toBeDefined();
+      expect(specSyncCall2?.status).toBe('completed');
+    });
+
+    it('spec sync failure does not automatically enqueue or run PLAN, BUILD, CHECK', async () => {
+      const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
+
+      const issueNumber = 154;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cap-no-fallback', [
+        '### Requirement: ExistingFallback\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'cap-no-fallback', `## ADDED Requirements
+
+### Requirement: ExistingFallback
+
+Duplicate target.
+
+#### Scenario: Duplicate scenario
+Duplicate scenario content.`);
+
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const ctx = createMockContext(tmpDir, issueNumber);
+
+      const result = await runner.run(ctx);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Spec sync failed');
+
+      const taskResultIds = appendedTaskResults(ctx).map((t: any) => t.taskId);
+      expect(taskResultIds).not.toContain('start-pipeline');
+      expect(taskResultIds).not.toContain('resume-pipeline');
+      expect(taskResultIds).not.toContain('plan');
+      expect(taskResultIds).not.toContain('build');
+      expect(taskResultIds).not.toContain('check');
+    });
+  });
+
+  describe('AC-8: existing integrate archive, merge, final-health success/failure tests still pass', () => {
+    it('archive success still works after spec sync passes', async () => {
+      const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
+
+      const issueNumber = 160;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cap-archive-ok', [
+        '### Requirement: ArchiveOk\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'cap-archive-ok', `## ADDED Requirements
+
+### Requirement: NewArchiveOk
+
+New requirement content.
+
+#### Scenario: New scenario
+New scenario content.`);
+
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const ctx = createMockContext(tmpDir, issueNumber);
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      expect(ctx.artifactManager.archiveChange).toHaveBeenCalled();
+
+      const archiveTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:archive-change');
+      expect(archiveTask).toBeDefined();
+      expect(archiveTask.status).toBe('completed');
+    });
+
+    it('merge failure still blocks at integrate:merge', async () => {
+      const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
+
+      const issueNumber = 161;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cap-merge-fail', [
+        '### Requirement: MergeFail\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'cap-merge-fail', `## ADDED Requirements
+
+### Requirement: NewMergeFail
+
+New requirement content.
+
+#### Scenario: New scenario
+New scenario content.`);
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        failingStep: 'merge' as const,
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        conflictFiles: ['src/conflict.ts'],
+        error: 'Merge conflict detected',
+      });
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+      });
+
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Merge failed');
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const failedEvent = emitCalls.find(([name]) => name === 'integration_failed');
+      expect(failedEvent?.[1]).toMatchObject({
+        failingStep: 'integrate:merge',
+      });
+
+      const mergeTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:merge');
+      expect(mergeTask).toBeDefined();
+      expect(mergeTask.status).toBe('failed');
+    });
+
+    it('final-health failure still blocks at final-health', async () => {
+      const execFileMock = vi.fn().mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        const err = new Error('Build failed');
+        (err as any).code = 1;
+        (err as any).stdout = '';
+        (err as any).stderr = 'build failed\nerror details';
+        process.nextTick(() => {
+          if (typeof opts === 'function') {
+            opts(err, { stdout: '', stderr: 'build failed\nerror details' });
+          } else if (typeof cb === 'function') {
+            cb(err, { stdout: '', stderr: 'build failed\nerror details' });
+          }
+        });
+        return {} as any;
+      });
+      vi.doMock('child_process', async () => ({
+        ...await vi.importActual<typeof import('child_process')>('child_process'),
+        execFile: execFileMock,
+      }));
+
+      createEnabledHealthGateWorkflow(tmpDir);
+
+      const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
+
+      const issueNumber = 162;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'cap-health-fail', [
+        '### Requirement: HealthFail\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'cap-health-fail', `## ADDED Requirements
+
+### Requirement: NewHealthFail
+
+New requirement content.
+
+#### Scenario: New scenario
+New scenario content.`);
+
+      const ctx = createMockContext(tmpDir, issueNumber);
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Final health gate failed');
+
+      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
+      const failedEvent = emitCalls.find(([name]) => name === 'integration_failed');
+      expect(failedEvent?.[1]).toMatchObject({
+        failingStep: 'final-health',
+      });
+
+      const healthTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'final-health');
+      expect(healthTask).toBeDefined();
+      expect(healthTask.status).toBe('failed');
+    });
+  });
+
   describe('AC-6: Done issue evidence includes spec sync summary, archive path, merge truth, and final health result', () => {
     it('stage execution for Done issue contains all integration evidence steps', async () => {
       const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');

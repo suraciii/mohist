@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement intelligent OpenSpec sync resolution",
+      "spec": "specs/workflow-engine/spec.md#REQ-WFE-005",
+      "description": "Extend the OpenSpec spec sync service so apply-time sync can resolve clear requirement-level delta classification mistakes before writing main specs. The first supported correction is treating a safe missing-source MODIFIED requirement as ADDED, while preserving strict failures for ambiguous removals, renames, duplicate targets, malformed deltas, and missing scenarios.",
+      "acceptanceCriteria": [
+        "OpenSpecIntegrator.apply() converts a MODIFIED requirement with no source requirement into an added main-spec requirement when the target name does not already exist and no rename ambiguity exists",
+        "The sync summary records each intelligent correction with capability, requirement, original operation, resolved operation, and reason",
+        "REMOVED and RENAMED requirements with missing sources still fail with structured conflicts",
+        "ADDED requirements with duplicate targets still fail with structured conflicts",
+        "Missing scenario, duplicate header, and malformed delta validation failures prevent writes to openspec/specs",
+        "Unit tests cover safe MODIFIED-to-ADDED correction and strict failure cases",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/open-spec-integrator.ts, packages/cli/tests/openspec-integrator.test.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Keep OpenSpecIntegrator.preview/apply as the public API. Hide parsing, resolution, validation, and write ordering behind that interface. No schema migration is expected.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        348667
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Record intelligent sync evidence in Integrate",
+      "spec": "specs/change-artifacts/spec.md#REQ-CA-003",
+      "description": "Update the INTEGRATE spec-sync step to surface the intelligent sync result as auditable task output. The runner must keep integrate:spec-sync distinct from archive, merge, and final health, and must stop at integrate:spec-sync with clear output when sync or post-sync validation fails.",
+      "acceptanceCriteria": [
+        "integrate:spec-sync task output includes capabilities, target files, original counts, resolved operation counts or corrections, conflicts, errors, and validation status",
+        "Corrections produced by OpenSpecIntegrator.apply() are visible in StageTaskResult output and integration_step_updated event output",
+        "Spec sync validation failure records taskId integrate:spec-sync with status failed and emits integration_failed with failingStep integrate:spec-sync",
+        "When integrate:spec-sync fails, integrate:archive-change, integrate:merge, and final-health are not executed",
+        "A successful sync still leaves integrate:archive-change as a separate task result after integrate:spec-sync",
+        "Integrate-stage tests cover successful correction evidence and failed validation evidence",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/integrate-stage-runner.ts, packages/cli/tests/workflow/integrate-stage-runner.test.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Consumes the extended SpecSyncSummary from T-001. Do not merge spec sync and archive behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        267382
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Make CHECK OpenSpec preview non-blocking",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-003",
+      "description": "Change the default CHECK behavior so OpenSpec sync preview no longer hard-blocks issue progress on repairable delta-shape conflicts such as missing_source. The implementation may remove OpenSpecSyncDryRunCheck from default pre-task checks or convert it to advisory output that does not fail the stage for known integration-resolvable conflicts.",
+      "acceptanceCriteria": [
+        "A missing_source conflict from OpenSpec preview no longer causes the default CHECK stage to fail before user approval",
+        "CHECK still does not write openspec/specs or archive the active change",
+        "If preview is retained, its output clearly marks advisory status, would-pass status, conflicts, and errors without hiding the issue from audit logs",
+        "Non-OpenSpec CHECK gates such as health:check, merge readiness, AI review, and user approval keep their existing blocking semantics",
+        "Check-stage ordering or readiness tests are updated to reflect the non-blocking preview behavior",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/check-stage-runner.ts, packages/cli/src/workflow/checks/openspec-sync-dry-run-check.ts, packages/cli/tests/workflow/check-integration-readiness.test.ts, packages/cli/tests/check-stage-ordering.test.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Consumes the INTEGRATE sync/evidence path from T-002 so CHECK can safely defer repairable spec sync conflicts to INTEGRATE. Keep CHECK read-only.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        302723
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Preserve Integrate failure locality",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-004",
+      "description": "Harden workflow failure handling around integrate:spec-sync so sync and validator failures remain local to INTEGRATE. The issue must not automatically fall back to PLAN, BUILD, or CHECK, and rerunning must be explicit through existing stage recovery paths.",
+      "acceptanceCriteria": [
+        "A failed integrate:spec-sync leaves the issue in integrate or interrupted/blocked-at-integrate state according to existing Integrate failure conventions",
+        "Failure output identifies whether the reason is sync resolution, conflict validation, or post-sync main-spec validation",
+        "Spec sync failure does not automatically enqueue or run PLAN, BUILD, CHECK, archive, merge, or final-health work",
+        "Recovery or rerun tests prove that retrying INTEGRATE re-executes integrate:spec-sync only after explicit resume/retry behavior",
+        "Existing integrate archive, merge, and final-health success/failure regression tests still pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/integrate-stage-runner.ts, packages/cli/src/services/agent-runner-service.ts, packages/cli/tests/integrate-regression.test.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Consumes the CHECK deferral behavior from T-003. Avoid broad workflow-engine rewrites unless a test proves the current failure path violates the Integrate contract.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        367396
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Add end-to-end regression coverage for intelligent spec sync",
+      "spec": "specs/workflow-definition/spec.md#REQ-WD-001",
+      "description": "Add regression coverage for the full CHECK-to-INTEGRATE behavior introduced by this change. The tests should model #159/#160-style delta classification mistakes and prove they no longer require manual markdown repair in CHECK while still preserving strict validation at integrate:spec-sync.",
+      "acceptanceCriteria": [
+        "A test proves CHECK does not block on a missing_source preview caused by a new requirement incorrectly placed under MODIFIED Requirements",
+        "A test proves INTEGRATE applies that incorrectly classified requirement as a new main-spec requirement and records a correction in integrate:spec-sync output",
+        "A test proves malformed or invalid sync output fails at integrate:spec-sync and does not archive, merge, run final-health, or mark Done",
+        "A test proves integrate:spec-sync and integrate:archive-change remain separate task history entries",
+        "Existing integrate, archive, merge, and final-health regression tests pass",
+        "Relevant backend test suite passes",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/openspec-integrator.test.ts, packages/cli/tests/workflow/check-integration-readiness.test.ts, packages/cli/tests/workflow/integrate-stage-runner.test.ts, packages/cli/tests/integrate-regression.test.ts",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Consumes the complete implementation. Focus on user-visible regressions: no CHECK dead-end, auditable correction, strict validator failure, and distinct integration steps.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        491701
+      ]
+    }
+  ]
+}

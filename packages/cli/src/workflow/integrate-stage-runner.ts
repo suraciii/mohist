@@ -146,8 +146,10 @@ export class IntegrateStageRunner extends BaseStageRunner {
           },
           targetFiles: summary.targetFiles,
           conflicts: summary.conflicts,
+          corrections: summary.corrections,
           valid: summary.valid,
           errors: summary.errors,
+          mode: summary.mode,
         };
 
         const duration = Date.now() - new Date(specSyncStartedAt).getTime();
@@ -178,7 +180,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
           taskId: 'integrate:spec-sync',
           title: 'Sync OpenSpec delta specs to main specs',
           status: summary.valid ? 'completed' : 'failed',
-          artifacts: summary.targetFiles,
+          artifacts: [],
           attempts: 1,
           duration,
         });
