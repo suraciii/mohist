@@ -227,11 +227,14 @@
       "dependsOn": [
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Preserve the existing visual language of the session UI; this is a state/metadata display change, not a redesign.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        461477
+      ]
     },
     {
       "id": "T-009",
