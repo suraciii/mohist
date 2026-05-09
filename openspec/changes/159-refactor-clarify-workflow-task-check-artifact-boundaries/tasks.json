@@ -1,0 +1,155 @@
+{
+  "project": "mohist",
+  "description": "Clarify workflow task/check/artifact boundaries by making checks read-only and moving fix behavior into explicit auditable tasks.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement policy-driven read-only check orchestration",
+      "spec": "specs/workflow-engine/spec.md#REQ-WFE-001",
+      "description": "Refactor the workflow runner so checks expose only read-only verification behavior and failed checks are handled through stage-local check failure policies. Add optional transient `StageTaskResult.output`, remove normal use of `Check.fix?()`, and replace retry/auto-fix dispatch in `BaseStageRunner` with a policy lookup plus fix-task hook.",
+      "acceptanceCriteria": [
+        "The main `Check` interface contains `name` and `run(ctx)` but no required `reaction` and no `fix?()` method",
+        "`StageTaskResult` supports optional `output` while preserving existing task result JSON persistence",
+        "`BaseStageRunner` no longer calls `executeTasks()` as a check retry and no longer calls `check.fix()` from check failure handling",
+        "A failed check without a matching fix policy persists the failed `CheckResult` and fails or pauses the current stage without escalating to another stage",
+        "User approval still records awaiting approval state and does not use a generic fallback chain",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/base-stage-runner.ts; packages/cli/src/workflow/stage-context.ts; packages/cli/src/workflow/checks/index.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Produces the core orchestration contract consumed by all later fix-task work. Also supports REQ-WFE-002 and REQ-PM-001."
+    },
+    {
+      "id": "T-002",
+      "title": "Move health gate fixes into explicit stage tasks",
+      "spec": "specs/workflow-engine/spec.md#REQ-WFE-002",
+      "description": "Replace `HealthGateCheck.fix()` with explicit health fix tasks for plan, build, and check stages. Failed health checks with an enabled policy should run `fix-plan-health`, `fix-build-health`, or `fix-check-health`, append visible task results with transient output, and then re-run the failed health check.",
+      "acceptanceCriteria": [
+        "`HealthGateCheck` only runs the health command and returns `CheckResult` evidence; it does not spawn coder agents or expose `fix()`",
+        "A failed `health:build` check with auto-fix enabled appends a `fix-build-health` task result with `artifacts: []` and useful transient `output`",
+        "A failed `health:check` check with auto-fix enabled appends a `fix-check-health` task result with `artifacts: []` and useful transient `output`",
+        "A failed `health:plan` check only runs `fix-plan-health` when the stage-local policy enables it",
+        "After a health fix task completes, only the failed health check is re-run before remaining checks continue",
+        "Max health fix attempts stop the current stage with the failed check result and fix task results visible, without fallback escalation",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/checks/health-gate-check.ts; packages/cli/src/workflow/*stage-runner.ts; shared health fix task executor if needed",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Consumes the policy loop and fix-task hook from T-001. Reuse existing health auto-fix prompt behavior, but execute it as a task rather than a check method."
+    },
+    {
+      "id": "T-003",
+      "title": "Move AI review fixes into an explicit check-stage task",
+      "spec": "specs/workflow-engine/spec.md#REQ-WFE-003",
+      "description": "Make AI review verification read-only and move review finding repair into a named `fix-review-findings` task. The fix task should consume the failed `ai-review` check output, run the coder session as check-stage task work, append a task result, and let the runner re-run `ai-review` afterward.",
+      "acceptanceCriteria": [
+        "`AiReviewCheck` only reads `review.md`, parses the verdict, and returns `CheckResult.output`; it does not spawn coder agents or expose `fix()`",
+        "A failed `ai-review` check schedules and runs exactly one `fix-review-findings` task attempt by default",
+        "`fix-review-findings` records `artifacts: []` unless it intentionally updates durable workflow files",
+        "After `fix-review-findings` completes, `ai-review` is re-run and the repeated check result is persisted",
+        "If the review fix attempt fails or the re-check still fails, the stage stops in check with visible check and task results and no fallback-to-build behavior",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/checks/ai-review-check.ts; packages/cli/src/workflow/check-stage-runner.ts; shared agent fix task executor if reused",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Depends on T-002 for the shared explicit agent fix-task execution pattern and task result recording conventions."
+    },
+    {
+      "id": "T-004",
+      "title": "Replace plan artifact retries with a repair task",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-001",
+      "description": "Replace `retry-task` behavior for plan artifact checks with an explicit `repair-plan-artifacts` task. The repair task should receive the failed check evidence, repair missing or invalid durable plan artifacts, append one visible task result, and let the failed check re-run.",
+      "acceptanceCriteria": [
+        "Plan artifact checks such as proposal, specs, design, tasks, and self-review do not cause `BaseStageRunner` to re-run the whole plan `executeTasks()` method",
+        "A failed plan artifact check with a repair policy appends a `repair-plan-artifacts` task result",
+        "`repair-plan-artifacts` lists only durable workflow files it creates or updates in `artifacts`",
+        "After `repair-plan-artifacts` completes, the originally failed plan artifact check is re-run before remaining plan checks continue",
+        "Max repair attempts stop the current plan stage with the failed check result and repair task result visible",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/plan-stage-runner.ts; packages/cli/src/workflow/checks/*complete-check.ts; packages/cli/src/workflow/checks/tasks-valid-check.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Consumes the policy loop from T-001. It is independent of review fixing, but ordered after T-003 so the implementation can reuse any task-result helper patterns already established."
+    },
+    {
+      "id": "T-005",
+      "title": "Normalize durable artifacts and transient outputs across stage results",
+      "spec": "specs/change-artifacts/spec.md#REQ-CA-001",
+      "description": "Audit stage task result creation so `artifacts` only contains durable workflow files and transient logs or command evidence are stored in `output` or existing logs. Ensure build and fix tasks can complete with empty artifact lists without being treated as incomplete.",
+      "acceptanceCriteria": [
+        "Build-stage task results can complete successfully with `artifacts: []`",
+        "Health fix, review fix, and final health task results use `artifacts: []` by default and store summaries or excerpts in `output` when needed",
+        "Plan and check artifact generation tasks preserve durable artifact paths for `proposal.md`, `specs/`, `design.md`, `tasks.json`, `self-review.md`, `review.md`, and `review-self-check.md`",
+        "Command stdout/stderr, build logs, test output, health gate evidence, review verdict data, and agent session stream data are not listed as durable artifacts",
+        "Existing stage execution API responses still deserialize older task results that do not have `output`",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/*stage-runner.ts; packages/cli/src/openspec/ralph-executor.ts; packages/cli/src/db/stage-execution-repo.ts",
+      "dependsOn": ["T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Consumes all explicit fix task implementations so artifact/output semantics can be normalized consistently across regular tasks and fix tasks."
+    },
+    {
+      "id": "T-006",
+      "title": "Show explicit fix tasks and repeated checks in the pipeline UI",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-001",
+      "description": "Update the web pipeline view and shared types so dynamic fix tasks appear in task history and repeated check results are visible rather than collapsed away. The UI should treat empty artifact lists as normal and use check/task output for transient evidence display.",
+      "acceptanceCriteria": [
+        "Dynamic task results such as `fix-build-health`, `fix-check-health`, `fix-review-findings`, and `repair-plan-artifacts` render in the task list even when they are not static stage definitions",
+        "Repeated check results with the same name are displayed in recorded order or otherwise distinguishable as separate attempts",
+        "Tasks with `artifacts: []` still render as valid completed or failed tasks",
+        "Health gate and review evidence continue to render from `CheckResult.output` rather than artifact paths",
+        "Web typecheck or build passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/PipelineView.tsx; packages/cli/web/src/lib/types.ts",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Consumes the final task/check result shape from T-005 and should not synthesize hidden auto-fix behavior in the UI."
+    },
+    {
+      "id": "T-007",
+      "title": "Add regression coverage for task/check/artifact boundaries",
+      "spec": "specs/workflow-engine/spec.md#REQ-WFE-002",
+      "description": "Add tests that lock in the new workflow semantics across runner behavior, fix task scheduling, artifact classification, and max-attempt handling. The tests should prove checks do not directly fix, fixes are task results, build tasks may have no artifacts, and no fallback chain is introduced.",
+      "acceptanceCriteria": [
+        "Tests fail if `BaseStageRunner` calls `check.fix()` or re-runs `executeTasks()` because a check failed",
+        "Tests cover failed health check -> explicit fix task -> re-check behavior",
+        "Tests cover failed AI review -> `fix-review-findings` -> re-check behavior",
+        "Tests cover build task results with empty durable artifact lists",
+        "Tests cover durable artifact preservation for plan and review reports",
+        "Tests cover max fix attempts stopping the current stage without fallback escalation",
+        "CLI tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/workflow task/check/artifact boundary regression tests",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "Final verification task depends on backend semantics and UI type updates so regression tests can target the completed contract, including REQ-PM-002 and REQ-WUI-002."
+    }
+  ]
+}
