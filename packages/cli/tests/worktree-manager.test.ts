@@ -364,6 +364,56 @@ describe('WorktreeManager', () => {
     });
   });
 
+  describe('mergeApprovedCandidate', () => {
+    it('commits integration artifacts before fast-forward merging the issue branch', async () => {
+      fs.mkdirSync(getWorktreeDir(9), { recursive: true });
+      const wm = new WorktreeManager();
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd !== 'git') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+
+        if (args?.[0] === 'status' && args?.includes('--porcelain')) {
+          cb?.(null, mockStdout(' M openspec/specs/cap/spec.md\nR  openspec/changes/9-test openspec/changes/archive/2026-05-09-9-test\n'), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'rev-parse') {
+          cb?.(null, mockStdout(args[1] === 'HEAD' ? 'landed-sha\n' : 'candidate-after-artifacts\n'), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'merge-base') {
+          cb?.(null, mockStdout('base-sha\n'), '');
+          return undefined as any;
+        }
+
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.mergeApprovedCandidate(tmpDir, PROJECT_NAME, 9, 'main');
+
+      expect(result).toMatchObject({
+        targetBranch: 'main',
+        candidateHeadSha: 'candidate-after-artifacts',
+        landedSha: 'landed-sha',
+        fastForward: true,
+      });
+      expect(execFileMock).toHaveBeenCalledWith(
+        'git',
+        ['commit', '-m', 'chore: integrate issue #9 artifacts', '--no-verify'],
+        { cwd: getWorktreeDir(9) },
+        expect.any(Function),
+      );
+
+      const commitCallIndex = execFileMock.mock.calls.findIndex((call: any) => call[1]?.[0] === 'commit');
+      const mergeCallIndex = execFileMock.mock.calls.findIndex((call: any) => call[1]?.[0] === 'merge' && call[1]?.[1] === '--ff-only');
+      expect(commitCallIndex).toBeGreaterThan(-1);
+      expect(mergeCallIndex).toBeGreaterThan(commitCallIndex);
+    });
+  });
+
   describe('abortRebase', () => {
     it('should call git rebase --abort in worktree', async () => {
       const wm = new WorktreeManager();

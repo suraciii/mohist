@@ -28,6 +28,10 @@ export interface WipCommitInfo {
 const WIP_AUTHOR_NAME = 'mohist-wip';
 const WIP_AUTHOR_EMAIL = 'mohist@wip';
 
+function parseStatusLines(stdout: string): string[] {
+  return stdout.trim().split('\n').map(l => l.trim()).filter(Boolean);
+}
+
 function getWorktreeBaseDir(projectName: string): string {
   const home = process.env.HOME || '';
   const slug = slugify(projectName);
@@ -701,8 +705,43 @@ export class WorktreeManager {
 
     await smartFetch(projectPath);
 
-    let baseSha = '';
     let candidateHeadSha = '';
+    try {
+      const { stdout: statusOut } = await execFileAsync(
+        'git',
+        ['status', '--porcelain', '--ignore-submodules'],
+        { cwd: worktreePath }
+      );
+      const uncommitted = parseStatusLines(statusOut);
+      if (uncommitted.length > 0) {
+        await execFileAsync('git', ['add', '--', ':!.opencode/'], { cwd: worktreePath });
+        const { stdout: stagedStatusOut } = await execFileAsync(
+          'git',
+          ['status', '--porcelain', '--ignore-submodules'],
+          { cwd: worktreePath }
+        );
+        const stagedChanges = parseStatusLines(stagedStatusOut).filter(line => line[0] !== '?' && line[0] !== ' ');
+        if (stagedChanges.length > 0) {
+          await execFileAsync('git', ['commit', '-m', `chore: integrate issue #${issueNumber} artifacts`, '--no-verify'], { cwd: worktreePath });
+          const { stdout: committedHeadOut } = await execFileAsync(
+            'git',
+            ['rev-parse', branch],
+            { cwd: projectPath }
+          );
+          candidateHeadSha = committedHeadOut.trim();
+        }
+      }
+    } catch (err) {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha: '',
+        candidateHeadSha,
+        error: `Failed to commit integration artifacts: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    let baseSha = '';
     try {
       const { stdout: baseOut } = await execFileAsync(
         'git', ['merge-base', baseBranch, branch],

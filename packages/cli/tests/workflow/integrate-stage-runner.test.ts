@@ -294,6 +294,50 @@ Arc added scenario content.`);
       expect(archiveOutput.success).toBe(true);
     });
 
+    it('continues to merge when a previous integrate attempt already archived the change', async () => {
+      const issueNumber = 48;
+      const archivedChangeDir = path.join(
+        tmpDir,
+        'openspec',
+        'changes',
+        'archive',
+        `2026-05-09-${issueNumber}-test-change`,
+      );
+      fs.mkdirSync(path.join(archivedChangeDir, 'specs'), { recursive: true });
+
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        targetBranch: 'main',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: true,
+      });
+
+      const baseCtx = createMockContext(tmpDir, issueNumber);
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        artifactManager: {
+          ...baseCtx.artifactManager,
+          getChangeDir: vi.fn().mockReturnValue(null),
+          archiveChange: vi.fn(),
+        },
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      expect(ctx.artifactManager.archiveChange).not.toHaveBeenCalled();
+      expect(mergeApprovedCandidateMock).toHaveBeenCalled();
+
+      const output = result.output as { steps?: Array<{ step: string; status: string; output: any }> };
+      const specSyncStep = output.steps?.find(s => s.step === 'integrate:spec-sync');
+      const archiveStep = output.steps?.find(s => s.step === 'integrate:archive-change');
+      expect(specSyncStep?.status).toBe('completed');
+      expect(specSyncStep?.output).toMatchObject({ skipped: true, reason: 'change-already-archived' });
+      expect(archiveStep?.status).toBe('completed');
+      expect(archiveStep?.output).toMatchObject({ skipped: true, reason: 'change-already-archived' });
+    });
+
     it('spec sync failure blocks Integrate and does not archive, merge, run final health, or mark Done', async () => {
       const issueNumber = 46;
       const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
