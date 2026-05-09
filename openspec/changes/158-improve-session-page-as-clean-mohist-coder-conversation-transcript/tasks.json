@@ -147,11 +147,14 @@
         "T-002",
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes semantic tool rendering from T-004 and canonical metadata from T-002 to complete the opencode-style reading experience.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        881647
+      ]
     },
     {
       "id": "T-006",
