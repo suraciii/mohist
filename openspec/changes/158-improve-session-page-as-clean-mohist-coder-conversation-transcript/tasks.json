@@ -113,14 +113,15 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes normalized API/live ToolPart fields from T-002 and T-003. Grouping is presentation-only; do not remove individual tool parts from transcript data.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
         631010,
-        28871
+        28871,
+        369165
       ]
     },
     {
