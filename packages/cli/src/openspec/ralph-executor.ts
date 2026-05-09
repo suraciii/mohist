@@ -33,7 +33,7 @@ import type { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { SessionObserver } from '../agent-runtime/session-observer';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 
-export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip' | 'hang_unrecoverable';
+export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip' | 'hang_unrecoverable' | 'session_failed';
 
 export interface FailureCategoryConfig {
   maxAttempts: number;
@@ -47,10 +47,15 @@ export const FAILURE_CATEGORY_CONFIGS: Record<FailureCategory, FailureCategoryCo
   timeout: { maxAttempts: 3, retryable: true },
   timeout_with_wip: { maxAttempts: 2, retryable: true },
   hang_unrecoverable: { maxAttempts: 1, retryable: false },
+  session_failed: { maxAttempts: 2, retryable: true },
 };
 
-export function categorizeFailure(error: string, options?: { wipCommitted?: boolean }): FailureCategory {
+export function categorizeFailure(error: string, options?: { wipCommitted?: boolean; failureKind?: string }): FailureCategory {
   const lowerError = error.toLowerCase();
+
+  if (options?.failureKind === 'session_failed') {
+    return 'session_failed';
+  }
 
   if (error.includes('[HANG_UNRECOVERABLE]')) {
     return 'hang_unrecoverable';
@@ -760,7 +765,18 @@ export async function runRalphLoop(
         break;
       } else {
         lastError = result.error ?? 'Unknown error';
-        lastCategory = categorizeFailure(lastError, { wipCommitted: result.wipCommitted });
+        lastCategory = categorizeFailure(lastError, { wipCommitted: result.wipCommitted, failureKind: result.failureKind });
+
+        if (result.failureKind === 'session_failed') {
+          log.warn('Task attempt failed due to session failure', {
+            issueId: logIssueId,
+            taskId: nextTask.id,
+            attempt,
+            failureKind: result.failureKind,
+            failureReason: result.failureReason,
+            error: lastError.slice(0, 200),
+          });
+        }
 
         if (lastCategory === 'timeout_with_wip' && context.worktreeManager) {
           const wipInfo = await context.worktreeManager.findWipCommit(context.worktreePath, nextTask.id);

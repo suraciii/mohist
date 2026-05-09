@@ -837,6 +837,147 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
   });
 });
 
+describe('session failure propagation', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-session-fail-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    resetAcpSessionRunner();
+  });
+
+  function createChangeWithTasks(taskCount: number): OpenSpecChange {
+    const changeDir = path.join(tempDir, 'openspec', 'changes', '42-test');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.mkdirSync(path.join(changeDir, 'session-memories'), { recursive: true });
+
+    const tasks = Array.from({ length: taskCount }, (_, i) => ({
+      id: `T-${String(i + 1).padStart(3, '0')}`,
+      order: i + 1,
+      title: `Task ${i + 1}`,
+      description: `desc`,
+      passes: false,
+      attempts: 0,
+    }));
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks }));
+    fs.writeFileSync(path.join(changeDir, 'proposal.md'), '# Test');
+    fs.writeFileSync(path.join(changeDir, 'design.md'), '# Design');
+
+    return {
+      changePath: changeDir,
+      tasksPath: path.join(changeDir, 'tasks.json'),
+      sessionMemoriesPath: path.join(changeDir, 'session-memories'),
+      proposalPath: path.join(changeDir, 'proposal.md'),
+      designPath: path.join(changeDir, 'design.md'),
+      specsPath: path.join(changeDir, 'specs'),
+    };
+  }
+
+  it('session_failed result records task attempt failure and passes failureReason to caller', async () => {
+    setAcpSessionRunner(vi.fn().mockResolvedValue({
+      success: false,
+      error: 'Session liveness probe timed out',
+      failureKind: 'session_failed',
+      failureReason: 'probe_timeout',
+    }));
+
+    const change = createChangeWithTasks(1);
+    const onAskUser = vi.fn().mockResolvedValue('abort');
+    const context = {
+      worktreePath: tempDir,
+      projectPath: tempDir,
+      issueId: 'issue-42',
+      onAskUser,
+    };
+
+    const result = await runRalphLoop(change, context, { maxRetries: 0 });
+
+    expect(result.failed).toBe(1);
+    expect(result.success).toBe(false);
+    expect(result.taskResults[0].status).toBe('failed');
+    expect(result.taskResults[0].error).toBe('Session liveness probe timed out');
+  });
+
+  it('session_failed does not set passes=true on the task', async () => {
+    setAcpSessionRunner(vi.fn().mockResolvedValue({
+      success: false,
+      error: 'Session liveness probe timed out',
+      failureKind: 'session_failed',
+      failureReason: 'probe_timeout',
+    }));
+
+    const change = createChangeWithTasks(1);
+    const onAskUser = vi.fn().mockResolvedValue('abort');
+    const context = {
+      worktreePath: tempDir,
+      projectPath: tempDir,
+      issueId: 'issue-42',
+      onAskUser,
+    };
+
+    await runRalphLoop(change, context, { maxRetries: 0 });
+
+    const updated = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
+    expect(updated.tasks[0].passes).toBe(false);
+  });
+
+  it('session_failed task retried when retryable with maxRetries>0', async () => {
+    let callCount = 0;
+    setAcpSessionRunner(vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          success: false,
+          error: 'Session liveness probe timed out',
+          failureKind: 'session_failed',
+          failureReason: 'probe_timeout',
+        });
+      }
+      return Promise.resolve({ success: true, text: 'done' });
+    }));
+
+    const change = createChangeWithTasks(1);
+    const context = {
+      worktreePath: tempDir,
+      projectPath: tempDir,
+      issueId: 'issue-42',
+    };
+
+    const result = await runRalphLoop(change, context, { maxRetries: 2 });
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.success).toBe(true);
+    expect(callCount).toBe(2);
+  });
+
+  it('distinguishes session_failed from timeout in failureKind metadata', async () => {
+    const results: any[] = [];
+    setAcpSessionRunner(vi.fn().mockImplementation((opts: any) => {
+      results.push(opts);
+      return Promise.resolve({
+        success: false,
+        error: 'Timed out',
+        failureKind: 'timeout',
+      });
+    }));
+
+    const change = createChangeWithTasks(1);
+    const context = {
+      worktreePath: tempDir,
+      projectPath: tempDir,
+      issueId: 'issue-42',
+    };
+
+    await runRalphLoop(change, context, { maxRetries: 0 });
+
+    expect(results[0].observers?.[0]?.onLivenessUpdate).toBeDefined();
+  });
+});
+
 describe('v4 bug fix: stage timeout calculation', () => {
   let tempDir: string;
 
