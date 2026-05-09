@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 23;
+const SCHEMA_VERSION = 24;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -198,6 +198,10 @@ export function initializeDatabase(db: DatabaseManager): void {
 
   if (currentVersion < 23) {
     migrateToVersion23(db);
+  }
+
+  if (currentVersion < 24) {
+    migrateToVersion24(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -954,5 +958,12 @@ function migrateToVersion23(db: DatabaseManager): void {
     }
 
     setSchemaVersion(db, 23);
+  });
+}
+
+function migrateToVersion24(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workflow_log_session_created ON workflow_log(session_id, created_at);');
+    setSchemaVersion(db, 24);
   });
 }
