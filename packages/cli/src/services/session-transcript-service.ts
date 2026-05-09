@@ -104,7 +104,7 @@ export interface ToolPart {
     displaySubtitle?: string;
     category?: string;
     toolName: string;
-    status: 'started' | 'completed' | 'failed';
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
     title?: string;
     target?: string;
     input?: string;
@@ -820,13 +820,13 @@ export class SessionTranscriptAssembler {
       this.pendingToolNames.delete(key);
       this.pendingToolByTitle.delete(titleKey!);
       this.setToolCallIdOnData(data, pendingByTitle);
-    } else if ((d.status === 'completed' || d.status === 'failed') && pendingId) {
+    } else if ((d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled') && pendingId) {
       this.pendingToolNames.delete(key);
       this.setToolCallIdOnData(data, pendingId);
     } else {
       const newId = `synthetic-${this.syntheticToolIdCounter++}`;
       this.setToolCallIdOnData(data, newId);
-      if (d.status !== 'completed' && d.status !== 'failed') {
+      if (d.status !== 'completed' && d.status !== 'failed' && d.status !== 'cancelled') {
         this.pendingToolNames.set(key, newId);
         if (titleKey) {
           this.pendingToolByTitle.set(titleKey, newId);
@@ -906,7 +906,7 @@ export class SessionTranscriptAssembler {
         displayTitle: displayTitle ?? start.title,
         category,
         toolName: start.toolName,
-        status: 'started',
+        status: 'running',
         title: start.title,
         target: deriveToolTarget(start.toolName, start.input),
         input: start.input,
@@ -966,6 +966,8 @@ export class SessionTranscriptAssembler {
       if (update.status) {
         existing.tool.status = update.status === 'completed' ? 'completed'
           : update.status === 'failed' ? 'failed'
+          : update.status === 'cancelled' ? 'cancelled'
+          : update.status === 'running' ? 'running'
           : existing.tool.status;
       }
       if (update.title !== undefined) existing.tool.title = update.title;
@@ -1038,7 +1040,9 @@ export class SessionTranscriptAssembler {
           toolName: update.toolName ?? 'unknown',
           status: update.status === 'completed' ? 'completed'
             : update.status === 'failed' ? 'failed'
-            : 'started',
+            : update.status === 'cancelled' ? 'cancelled'
+            : update.status === 'running' ? 'running'
+            : 'pending',
           title: update.title,
           input: update.input,
           output: update.output,
