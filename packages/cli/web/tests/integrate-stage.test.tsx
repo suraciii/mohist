@@ -67,25 +67,21 @@ describe('CheckReadinessOutput types', () => {
     const readinessOutput = {
       specImpact: {
         capabilities: ['test-capability'],
-        added: 1,
-        modified: 0,
-        removed: 0,
-        renamed: 0,
         targetFiles: ['openspec/specs/test-capability/spec.md'],
+        counts: { added: 1, modified: 0, removed: 0, renamed: 0 },
         conflicts: [],
-        success: true,
+        valid: true,
       },
       mergeReadiness: {
         targetBranch: 'main',
-        baseSha: 'abc123',
-        headSha: 'def456',
-        fastForwardPossible: true,
-        cleanRebasePossible: true,
+        canFastForward: true,
+        cleanRebaseFeasible: true,
       },
       healthGatePolicy: {
-        name: 'integrate',
+        policyName: 'postMerge',
         command: 'npm test',
         timeout: 300000,
+        enabled: true,
       },
     }
 
@@ -166,13 +162,10 @@ describe('IntegrationStepResult type', () => {
       status: 'completed' as const,
       output: {
         capabilities: ['cap1'],
-        added: 2,
-        modified: 1,
-        removed: 0,
-        renamed: 0,
+        counts: { added: 2, modified: 1, removed: 0, renamed: 0 },
         targetFiles: ['file1.md'],
         conflicts: [],
-        success: true,
+        valid: true,
       },
       startedAt: '2026-05-09T10:00:00Z',
       completedAt: '2026-05-09T10:00:05Z',
