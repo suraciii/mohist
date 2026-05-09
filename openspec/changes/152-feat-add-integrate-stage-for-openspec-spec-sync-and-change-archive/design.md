@@ -181,6 +181,10 @@ T-006 has moved final health verification into `IntegrateStageRunner`: after spe
 
 `PostMergeFinalizer` remains as a compatibility helper for older recovery paths, but it no longer updates issue stage/status to Done or emits completion itself. Recovery for `Stage.Check + MergeState.Merged` now routes back through Integrate so final verification ownership stays in the workflow runner.
 
+### Current T-010 Implementation Note
+
+T-010 adds `packages/cli/tests/integrate-regression.test.ts` as the end-to-end regression layer for the Integrate contract. The test suite covers Check entering Integrate before Done, successful Integrate evidence for spec sync/archive/merge/final health, each failure boundary blocking Done, no conflict/build-fix agent event path during Integrate merge failures, and Done evidence availability. This suite complements the focused runner/API/UI tests added by earlier tasks.
+
 Rollback strategy: because this changes persisted stage values, rollback should include a small data repair script or migration note mapping active `integrate` issues back to `check` with a blocked reason such as “Integrate rollback required.” Completed Done issues do not need rollback. The implementation should avoid destructive DB schema changes; any added nullable evidence fields should be ignored safely by older code.
 
 ## Open Questions

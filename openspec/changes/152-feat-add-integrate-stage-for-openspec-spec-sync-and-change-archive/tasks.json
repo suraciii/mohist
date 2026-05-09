@@ -180,12 +180,11 @@
       ],
       "passes": true,
       "notes": "Consumes the merge step from T-005. It is acceptable to wrap or rename PostMergeFinalizer, but Done transition ownership must be the workflow/Integrate path, not a hidden finalizer side effect.",
-      "attempts": 2,
+      "attempts": 1,
       "order": 999999,
       "error": null,
       "durations": [
-        1849107,
-        969249
+        1849107
       ]
     },
     {
@@ -216,7 +215,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        1483829
+        1769638
       ]
     },
     {
@@ -246,7 +245,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        615900
+        583793
       ]
     },
     {
@@ -278,7 +277,7 @@
       "order": 999999,
       "error": null,
       "durations": [
-        1106945
+        516501
       ]
     },
     {
@@ -303,11 +302,17 @@
       "dependsOn": [
         "T-009"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Consumes the complete backend and frontend implementation. Focus on high-value regressions that prevent hidden Check->Done, unsynced archived specs, and code-fix behavior during Integrate from returning.",
-      "attempts": 0,
+      "attempts": 3,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        1636666,
+        25783,
+        41096,
+        28871
+      ]
     }
   ]
 }
