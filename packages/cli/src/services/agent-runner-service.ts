@@ -1145,6 +1145,8 @@ export class AgentRunnerService {
         eventBus: this.eventBus,
         projectId,
         checkpointManager,
+        worktreeManager: this.worktreeManager,
+        projectRepo: this.projectRepo,
         signal: abortController.signal,
         coderSessionRepo: this.coderSessionRepo,
         workflowLogRepo: this.workflowLogRepo,
