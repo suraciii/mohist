@@ -77,11 +77,14 @@
       "dependsOn": [
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Do not validate model IDs against live discovery results. Shape and provider/model format validation is sufficient.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        155458
+      ]
     },
     {
       "id": "T-004",
