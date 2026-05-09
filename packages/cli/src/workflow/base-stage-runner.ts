@@ -37,6 +37,12 @@ export abstract class BaseStageRunner implements StageRunner {
     return false;
   }
 
+  protected async beforeRecheckAfterFix(
+    _ctx: StageContext,
+    _checkName: string,
+    _fixTaskId: string,
+  ): Promise<void> {}
+
   private stageExecutionId?: string;
 
   protected getStageExecutionId(): string | undefined {
@@ -193,6 +199,8 @@ export abstract class BaseStageRunner implements StageRunner {
         };
       }
     }
+
+    await this.beforeRecheckAfterFix(ctx, check.name, policy.fixTaskId);
 
     const checkCtx = this.buildCheckContext(ctx);
     const recheckResult = await check.run(checkCtx);
