@@ -1,6 +1,6 @@
 ## Input
 
-A review report with `## Result: FAIL` and `## Fix Suggestions` listing file paths and line numbers.
+A review report with `<promise>FAIL</promise>`, `## Result: FAIL`, and `## Fix Suggestions` listing file paths and line numbers.
 
 ## Process
 

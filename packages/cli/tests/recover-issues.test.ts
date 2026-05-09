@@ -60,7 +60,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('build-stage all-pass: auto-advance to review', () => {
+  it('build-stage all-pass: resumes pipeline for verification', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'All Pass' });
 
@@ -85,12 +85,14 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Check);
+    expect(recovered?.stage).toBe(Stage.Build);
+    expect(recovered?.approvalState).toBeUndefined();
+    expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
   });
 
   it('build-stage with check approval: reconciles to check without blocking', () => {
@@ -153,7 +155,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -417,7 +419,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -426,7 +428,9 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(service.isIssueAwaitingApproval(awaitingIssue.id)).toBe(true);
 
     const rBuild = issueRepo.findById(buildIssue.id);
-    expect(rBuild?.stage).toBe(Stage.Check);
+    expect(rBuild?.stage).toBe(Stage.Build);
+    expect(rBuild?.approvalState).toBeUndefined();
+    expect(enqueueSpy).toHaveBeenCalledWith(buildIssue.id, 'resume-pipeline');
 
     const rPlan = issueRepo.findById(planIssue.id);
     expect(rPlan?.status).toBe(IssueStatus.Active);
@@ -434,7 +438,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(rPlan?.approvalState?.status).toBe('awaiting');
   });
 
-  it('build-stage empty tasks array: all-pass edge case advances to review', () => {
+  it('build-stage empty tasks array: resumes pipeline for verification', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Empty Tasks' });
 
@@ -454,12 +458,14 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Check);
+    expect(recovered?.stage).toBe(Stage.Build);
+    expect(recovered?.approvalState).toBeUndefined();
+    expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
   });
 });
 
@@ -631,7 +637,7 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -656,7 +662,7 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -680,7 +686,7 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
@@ -905,15 +911,17 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       projectRepo,
       createWorktreeMock(tmpDir),
     );
-    vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
 
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
     expect(recovered?.status).toBe(IssueStatus.Active);
-    expect(recovered?.stage).toBe(Stage.Check);
+    expect(recovered?.stage).toBe(Stage.Build);
     expect(recovered?.retryCount).toBe(0);
     expect(recovered?.blockedReason).toBeUndefined();
+    expect(recovered?.approvalState).toBeUndefined();
+    expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
   });
 
   it('agent_blocked event emitted with correct payload on non-retryable failure', () => {

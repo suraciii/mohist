@@ -275,6 +275,12 @@ describe('buildAutoFixPrompt', () => {
     expect(result).toContain('FAIL: missing tests');
   });
 
+  it('should describe machine-readable failed review input', () => {
+    const result = buildAutoFixPrompt(mockIssue, '/tmp/change', '<promise>FAIL</promise>', 'review.md');
+
+    expect(result).toContain('<promise>FAIL</promise>');
+  });
+
   it('should include contract with fix-only constraint', () => {
     const result = buildAutoFixPrompt(mockIssue, '/tmp/change', 'FAIL: missing tests', 'review.md');
 
@@ -300,6 +306,14 @@ describe('buildReVerifyPrompt', () => {
     expect(result).toContain('/tmp/change');
     expect(result).toContain('Previous review content');
     expect(result).toContain('Re-verify');
+  });
+
+  it('should require a machine-readable verdict tag in re-verified review output', () => {
+    const result = buildReVerifyPrompt(mockIssue, '/tmp/change', 'Previous review content');
+
+    expect(result).toContain('<promise>PASS</promise>');
+    expect(result).toContain('<promise>FAIL</promise>');
+    expect(result).toContain('final line MUST be exactly one machine-readable verdict tag');
   });
 
   it('should include <project_context> when agentConfig is provided', () => {
