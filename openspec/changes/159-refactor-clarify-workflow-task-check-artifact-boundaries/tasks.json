@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Clarify workflow task/check/artifact boundaries by making checks read-only and moving fix behavior into explicit auditable tasks.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,17 @@
       "type": "WRITE",
       "output": "packages/cli/src/workflow/base-stage-runner.ts; packages/cli/src/workflow/stage-context.ts; packages/cli/src/workflow/checks/index.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Produces the core orchestration contract consumed by all later fix-task work. Also supports REQ-WFE-002 and REQ-PM-001."
+      "passes": true,
+      "notes": "Produces the core orchestration contract consumed by all later fix-task work. Also supports REQ-WFE-002 and REQ-PM-001.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1467088,
+        78014,
+        195644,
+        870485
+      ]
     },
     {
       "id": "T-002",
@@ -41,9 +49,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/checks/health-gate-check.ts; packages/cli/src/workflow/*stage-runner.ts; shared health fix task executor if needed",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Consumes the policy loop and fix-task hook from T-001. Reuse existing health auto-fix prompt behavior, but execute it as a task rather than a check method."
+      "notes": "Consumes the policy loop and fix-task hook from T-001. Reuse existing health auto-fix prompt behavior, but execute it as a task rather than a check method.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +75,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/checks/ai-review-check.ts; packages/cli/src/workflow/check-stage-runner.ts; shared agent fix task executor if reused",
-      "dependsOn": ["T-002"],
+      "dependsOn": [
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Depends on T-002 for the shared explicit agent fix-task execution pattern and task result recording conventions."
+      "notes": "Depends on T-002 for the shared explicit agent fix-task execution pattern and task result recording conventions.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -83,9 +101,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/plan-stage-runner.ts; packages/cli/src/workflow/checks/*complete-check.ts; packages/cli/src/workflow/checks/tasks-valid-check.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Consumes the policy loop from T-001. It is independent of review fixing, but ordered after T-003 so the implementation can reuse any task-result helper patterns already established."
+      "notes": "Consumes the policy loop from T-001. It is independent of review fixing, but ordered after T-003 so the implementation can reuse any task-result helper patterns already established.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -104,9 +127,16 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/*stage-runner.ts; packages/cli/src/openspec/ralph-executor.ts; packages/cli/src/db/stage-execution-repo.ts",
-      "dependsOn": ["T-002", "T-003", "T-004"],
+      "dependsOn": [
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
       "passes": false,
-      "notes": "Consumes all explicit fix task implementations so artifact/output semantics can be normalized consistently across regular tasks and fix tasks."
+      "notes": "Consumes all explicit fix task implementations so artifact/output semantics can be normalized consistently across regular tasks and fix tasks.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -124,9 +154,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/PipelineView.tsx; packages/cli/web/src/lib/types.ts",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Consumes the final task/check result shape from T-005 and should not synthesize hidden auto-fix behavior in the UI."
+      "notes": "Consumes the final task/check result shape from T-005 and should not synthesize hidden auto-fix behavior in the UI.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-007",
@@ -147,9 +182,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests/workflow task/check/artifact boundary regression tests",
-      "dependsOn": ["T-006"],
+      "dependsOn": [
+        "T-006"
+      ],
       "passes": false,
-      "notes": "Final verification task depends on backend semantics and UI type updates so regression tests can target the completed contract, including REQ-PM-002 and REQ-WUI-002."
+      "notes": "Final verification task depends on backend semantics and UI type updates so regression tests can target the completed contract, including REQ-PM-002 and REQ-WUI-002.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
