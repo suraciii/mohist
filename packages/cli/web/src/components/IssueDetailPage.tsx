@@ -562,7 +562,7 @@ export function IssueDetailPage() {
                   )}
 
                   <div className="pt-2 border-t border-gray-100">
-                    <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} />
+                    <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} currentStageModels={issue.stageModels} />
                   </div>
                 </div>
               </div>

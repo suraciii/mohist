@@ -54,6 +54,7 @@ export interface Issue {
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | 'rebasing' | 'resolving' | 'blocked' | null
   priority?: string | null
   model?: string | null
+  stageModels?: Record<string, string> | null
   archivedAt?: string
   blockedReason?: string
   checkSuite?: CheckSuite | null
