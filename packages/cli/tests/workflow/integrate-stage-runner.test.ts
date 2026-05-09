@@ -413,6 +413,63 @@ FF added scenario content.`);
       expect(mergeOutput.fastForward).toBe(true);
     });
 
+    it('merges using project path and name instead of issue project id or worktree path', async () => {
+      const issueNumber = 55;
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
+      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
+
+      createMainSpec(tmpDir, 'identity-cap', [
+        '### Requirement: IdentityReq\n\nIdentity content.\n\n#### Scenario: Identity scenario\n\nIdentity scenario content.',
+      ]);
+
+      createChangeSpec(changeDir, 'identity-cap', `## ADDED Requirements
+
+### Requirement: IdentityAdded
+
+Identity added content.
+
+#### Scenario: Identity added scenario
+Identity added scenario content.`);
+
+      const projectPath = path.join(tmpDir, 'actual-project');
+      fs.mkdirSync(projectPath, { recursive: true });
+      const mergeApprovedCandidateMock = vi.fn().mockResolvedValue({
+        targetBranch: 'master',
+        baseSha: 'abc123',
+        candidateHeadSha: 'def456',
+        landedSha: 'ghi789',
+        fastForward: true,
+      });
+
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        issue: {
+          ...createMockContext(tmpDir, issueNumber).issue,
+          projectId: 'project-uuid-123',
+        },
+        worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({
+            id: 'project-uuid-123',
+            name: 'mohist',
+            path: projectPath,
+            baseBranch: 'master',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }),
+        } as any,
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      expect(mergeApprovedCandidateMock).toHaveBeenCalledWith(
+        projectPath,
+        'mohist',
+        issueNumber,
+        'master',
+      );
+    });
+
     it('clean rebase succeeds when fast-forward is not possible but rebase is clean', async () => {
       const issueNumber = 51;
       const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
