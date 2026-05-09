@@ -167,11 +167,14 @@
       "dependsOn": [
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Also update `packages/cli/web/src/lib/types.ts`, `packages/cli/web/src/lib/api.ts`, `packages/cli/web/src/components/IssueDetailPage.tsx`, `packages/cli/web/src/components/AiSettingsSection.tsx`, and `packages/cli/web/src/components/CreateIssueDialog.tsx`.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        289835
+      ]
     },
     {
       "id": "T-007",
