@@ -200,11 +200,14 @@
       "dependsOn": [
         "T-006"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Final verification task depends on backend semantics and UI type updates so regression tests can target the completed contract, including REQ-PM-002 and REQ-WUI-002.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        248958
+      ]
     }
   ]
 }
