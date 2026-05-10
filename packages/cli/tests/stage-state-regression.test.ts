@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
@@ -305,13 +308,15 @@ describe('stage-state regression: tasks.json build task mirroring', () => {
   let db: DatabaseManager;
   let stageStateService: StageStateService;
   let issueId: string;
+  let projectPath: string;
 
   beforeEach(() => {
     db = new DatabaseManager({ inMemory: true });
     initializeDatabase(db);
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-stage-state-regression-'));
 
     const projectRepo = new ProjectRepo(db);
-    const project = projectRepo.create({ name: 'Test', path: '/test' });
+    const project = projectRepo.create({ name: 'Test', path: projectPath });
 
     const issueRepo = new IssueRepo(db);
     const issue = issueRepo.create({ number: 1, projectId: project.id, title: 'Test Issue' });
@@ -322,6 +327,7 @@ describe('stage-state regression: tasks.json build task mirroring', () => {
 
   afterEach(() => {
     db.close();
+    fs.rmSync(projectPath, { recursive: true, force: true });
   });
 
   it('mirrors tasks.json-style build tasks into normalized stage-state rows', () => {
@@ -380,6 +386,46 @@ describe('stage-state regression: tasks.json build task mirroring', () => {
       expect((task as any).passes).toBeUndefined();
       expect(['pending', 'running', 'completed', 'failed', 'skipped']).toContain(task.status);
     }
+  });
+
+  it('mirrors failed legacy tasks as failed and preserves error output', () => {
+    const projectRepo = new ProjectRepo(db);
+    const project = projectRepo.findById(
+      db.get<{ project_id: string }>('SELECT project_id FROM issues WHERE id = ?', [issueId])!.project_id,
+    )!;
+    const issueRepo = new IssueRepo(db);
+    const issue = issueRepo.findById(issueId)!;
+
+    const changeDir = path.join(project.path, 'openspec', 'changes', `${issue.number}-test-issue`);
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({
+      version: 1,
+      tasks: [
+        {
+          id: 'T-002',
+          order: 2,
+          title: 'Expose endpoint',
+          description: 'Serve stage state',
+          passes: false,
+          attempts: 3,
+          error: 'TypeScript build failed',
+        },
+      ],
+    }));
+    issueRepo.updateStage(issue.id, Stage.Build);
+
+    const states = stageStateService.getIssueStageState(issue.id);
+    const buildState = states.find(state => state.stage === Stage.Build);
+
+    expect(buildState).toBeDefined();
+    expect(buildState!.tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        taskId: 'T-002',
+        status: 'failed',
+        attempts: 3,
+        output: { error: 'TypeScript build failed' },
+      }),
+    ]));
   });
 
   it('updates mirrored build tasks when tasks.json changes between executions', () => {

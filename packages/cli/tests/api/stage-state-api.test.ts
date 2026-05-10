@@ -337,7 +337,15 @@ describe('GET /api/issues/:number/stage-state', () => {
       version: 1,
       tasks: [
         { id: 'T-001', order: 1, title: 'Add persistence', description: 'Persist stage state', passes: true, attempts: 1 },
-        { id: 'T-002', order: 2, title: 'Expose endpoint', description: 'Serve stage state', passes: false, attempts: 1 },
+        {
+          id: 'T-002',
+          order: 2,
+          title: 'Expose endpoint',
+          description: 'Serve stage state',
+          passes: false,
+          attempts: 1,
+          error: 'TypeScript build failed',
+        },
       ],
     }));
 
@@ -353,7 +361,7 @@ describe('GET /api/issues/:number/stage-state', () => {
     expect(buildStage.status).toBe('running');
     expect(buildStage.tasks).toEqual(expect.arrayContaining([
       expect.objectContaining({ taskId: 'T-001', status: 'completed' }),
-      expect.objectContaining({ taskId: 'T-002', status: 'pending' }),
+      expect.objectContaining({ taskId: 'T-002', status: 'failed', output: { error: 'TypeScript build failed' } }),
     ]));
   });
 
@@ -418,6 +426,65 @@ describe('GET /api/issues/:number/stage-state', () => {
     ]));
     expect(checkStage.tasks).toEqual(expect.arrayContaining([
       expect.objectContaining({ taskId: 'fix-review-findings', status: 'completed' }),
+    ]));
+  });
+
+  it('prefers current approval and suite state over stale failed execution during lazy projection', async () => {
+    const project = await projectService.create({ name: 'Test', path: makeProjectPath() });
+    projectService.setCurrent(project);
+    const issue = await issueService.create({ projectId: project.id, title: 'Test Issue' });
+
+    const failedAt = '2026-01-01T00:00:00.000Z';
+    const retryAt = '2026-01-01T01:00:00.000Z';
+    db.run(
+      `INSERT INTO stage_executions (id, issue_id, stage, status, task_results, check_results, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'exec-stale-failed',
+        issue.id,
+        Stage.Check,
+        'failed',
+        JSON.stringify([]),
+        JSON.stringify([{ name: 'ai-review', status: 'fail', message: 'First attempt failed' }]),
+        failedAt,
+        failedAt,
+      ],
+    );
+    db.run(
+      `INSERT INTO check_suites (id, issue_id, snapshot_sha, status, checks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'suite-retry',
+        issue.id,
+        'def456',
+        'awaiting-approval',
+        JSON.stringify({
+          'ai-review': { status: 'passed', ranAt: retryAt, output: { verdict: 'PASS' } },
+          'user-approval': { status: 'pending' },
+        }),
+        retryAt,
+        retryAt,
+      ],
+    );
+    db.run('UPDATE issues SET stage = ?, approval_state = ?, updated_at = ? WHERE id = ?', [
+      Stage.Check,
+      JSON.stringify({ stage: Stage.Check, status: 'awaiting', requestedAt: retryAt, output: { verdict: 'PASS' } }),
+      retryAt,
+      issue.id,
+    ]);
+
+    server = createApp();
+
+    const response = await request(server).get(`/api/issues/${issue.number}/stage-state`);
+
+    expect(response.status).toBe(200);
+    const checkStage = response.body.data.stages.find((s: any) => s.stage === 'check');
+    expect(checkStage).toBeDefined();
+    expect(checkStage.status).toBe('awaiting-approval');
+    expect(checkStage.approval).toEqual(expect.objectContaining({ status: 'awaiting', requestedAt: retryAt }));
+    expect(checkStage.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ checkName: 'ai-review', status: 'passed' }),
+      expect.objectContaining({ checkName: 'user-approval', status: 'pending' }),
     ]));
   });
 });

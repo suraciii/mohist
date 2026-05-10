@@ -612,13 +612,19 @@ export abstract class BaseStageRunner implements StageRunner {
     if (!tasksFile) return;
     for (const t of tasksFile.tasks) {
       try {
+        const status = t.passes
+          ? 'completed'
+          : t.error
+            ? 'failed'
+            : 'pending';
         ctx.stageStateService.upsertTask(ctx.issue.id, ctx.issue.stage, {
           taskId: t.id,
           title: t.title,
-          status: t.passes ? 'completed' : 'pending',
+          status,
           source: 'dynamic',
           order: t.order,
           attempts: t.attempts,
+          output: t.error ? { error: t.error } : undefined,
         });
       } catch (e) {
         log.warn('mirrorTasksJson task failed', { taskId: t.id, error: e instanceof Error ? e.message : String(e) });

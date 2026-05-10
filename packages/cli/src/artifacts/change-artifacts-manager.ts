@@ -402,13 +402,19 @@ export class ChangeArtifactsManager {
     if (!tasksFile) return;
 
     for (const t of tasksFile.tasks) {
+      const status = t.passes
+        ? 'completed'
+        : t.error
+          ? 'failed'
+          : 'pending';
       stageStateService.upsertTask(issueId, stage, {
         taskId: t.id,
         title: t.title,
-        status: t.passes ? 'completed' : 'pending',
+        status,
         source: 'dynamic',
         order: t.order,
         attempts: t.attempts,
+        output: t.error ? { error: t.error } : undefined,
       });
     }
   }
