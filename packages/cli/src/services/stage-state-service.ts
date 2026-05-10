@@ -144,11 +144,6 @@ interface ProjectedStageSeed {
   updatedAt: string;
 }
 
-interface ProjectedExecutionEvidence {
-  taskResults: StageTaskResult[];
-  checkResults: CheckResult[];
-}
-
 function rowToStageTask(row: StageTaskRow): StageTaskState {
   return {
     taskId: row.task_id,
@@ -463,6 +458,21 @@ export class StageStateService {
     );
   }
 
+  clearApproval(issueId: string, stage: Stage): void {
+    const now = new Date().toISOString();
+    this.ensureStageRowExists(issueId, stage);
+    this.db.run(
+      `UPDATE stage_states SET
+         approval_status = NULL,
+         approval_output = NULL,
+         approval_requested_at = NULL,
+         approval_responded_at = NULL,
+         updated_at = ?
+       WHERE issue_id = ? AND stage = ?`,
+      [now, issueId, stage],
+    );
+  }
+
   getStageState(issueId: string, stage: Stage): StageStateRead | null {
     const stateRow = this.db.get<StageStateRow>(
       'SELECT * FROM stage_states WHERE issue_id = ? AND stage = ?',
@@ -586,77 +596,126 @@ export class StageStateService {
     if (!projected) return;
 
     this.db.transaction(() => {
-      this.db.run(
-        `INSERT OR IGNORE INTO stage_states
-         (issue_id, stage, status, started_at, completed_at, approval_status, approval_output, approval_requested_at, approval_responded_at, attempts, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          issueId,
-          stage,
-          projected.status,
-          projected.startedAt,
-          projected.completedAt,
-          approvalState?.stage === stage ? approvalState.status : null,
-          approvalState?.stage === stage && approvalState.output != null ? JSON.stringify(approvalState.output) : null,
-          approvalState?.stage === stage ? approvalState.requestedAt ?? null : null,
-          approvalState?.stage === stage ? approvalState.respondedAt ?? null : null,
-          projected.attempts,
-          projected.updatedAt,
-        ],
-      );
-
+      this.insertProjectedStageState(issueId, stage, projected, approvalState);
       this.seedStaticTasks(issueId, stage);
 
-      if (stage === Stage.Build && tasksFile) {
-        for (const task of tasksFile.tasks) {
-          this.upsertTask(issueId, stage, {
-            taskId: task.id,
-            title: task.title,
-            status: task.passes ? 'completed' : 'pending',
-            source: 'dynamic',
-            order: task.order,
-            attempts: task.attempts,
-          });
-        }
-      }
-
-      for (const evidence of this.collectProjectedExecutionEvidence(stageExecutions)) {
-        for (const result of evidence.taskResults) {
-          this.upsertTask(issueId, stage, {
-            taskId: result.taskId,
-            title: result.title,
-            status: result.status,
-            artifacts: result.artifacts,
-            output: result.output,
-            attempts: result.attempts,
-            duration: result.duration,
-          });
-        }
-
-        for (const result of evidence.checkResults) {
-          this.upsertCheck(issueId, stage, {
-            checkName: result.name,
-            status: normalizeCheckStatus(result.status),
-            message: result.message ?? null,
-            output: result.output,
-          });
-        }
-      }
-
-      if (stage === Stage.Check && suiteRow) {
-        const checks = this.parseJson<CheckSuiteChecks | null>(suiteRow.checks, null);
-        if (checks) {
-          for (const [checkName, state] of Object.entries(checks)) {
-            this.upsertCheck(issueId, stage, {
-              checkName,
-              status: this.normalizeProjectedCheckSuiteStatus(state),
-              output: state.output,
-              lastRunAt: state.ranAt ?? suiteRow.updated_at,
-            });
-          }
-        }
-      }
+      this.projectLegacyBuildTasks(issueId, stage, tasksFile);
+      this.projectExecutionEvidence(issueId, stage, stageExecutions);
+      this.projectSuiteChecks(issueId, stage, suiteRow);
     });
+  }
+
+  private insertProjectedStageState(
+    issueId: string,
+    stage: Stage,
+    projected: ProjectedStageSeed,
+    approvalState: LegacyApprovalState | null,
+  ): void {
+    this.db.run(
+      `INSERT OR IGNORE INTO stage_states
+       (issue_id, stage, status, started_at, completed_at, approval_status, approval_output, approval_requested_at, approval_responded_at, attempts, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        issueId,
+        stage,
+        projected.status,
+        projected.startedAt,
+        projected.completedAt,
+        approvalState?.stage === stage ? approvalState.status : null,
+        approvalState?.stage === stage && approvalState.output != null ? JSON.stringify(approvalState.output) : null,
+        approvalState?.stage === stage ? approvalState.requestedAt ?? null : null,
+        approvalState?.stage === stage ? approvalState.respondedAt ?? null : null,
+        projected.attempts,
+        projected.updatedAt,
+      ],
+    );
+  }
+
+  private projectLegacyBuildTasks(issueId: string, stage: Stage, tasksFile: TasksFile | null): void {
+    if (stage !== Stage.Build || !tasksFile) return;
+
+    for (const task of tasksFile.tasks) {
+      const status = task.passes
+        ? 'completed'
+        : task.error
+          ? 'failed'
+          : 'pending';
+      this.upsertTask(issueId, stage, {
+        taskId: task.id,
+        title: task.title,
+        status,
+        source: 'dynamic',
+        order: task.order,
+        attempts: task.attempts,
+        output: task.error ? { error: task.error } : undefined,
+      });
+    }
+  }
+
+  private projectExecutionEvidence(
+    issueId: string,
+    stage: Stage,
+    stageExecutions: StageExecutionProjectionRow[],
+  ): void {
+    for (const execution of stageExecutions) {
+      this.projectExecutionTaskEvidence(issueId, stage, execution);
+      this.projectExecutionCheckEvidence(issueId, stage, execution);
+    }
+  }
+
+  private projectExecutionTaskEvidence(
+    issueId: string,
+    stage: Stage,
+    execution: StageExecutionProjectionRow,
+  ): void {
+    const taskResults = this.parseJson<StageTaskResult[]>(execution.task_results, []);
+    for (const result of taskResults) {
+      this.upsertTask(issueId, stage, {
+        taskId: result.taskId,
+        title: result.title,
+        status: result.status,
+        artifacts: result.artifacts,
+        output: result.output,
+        attempts: result.attempts,
+        duration: result.duration,
+      });
+    }
+  }
+
+  private projectExecutionCheckEvidence(
+    issueId: string,
+    stage: Stage,
+    execution: StageExecutionProjectionRow,
+  ): void {
+    const checkResults = this.parseJson<CheckResult[]>(execution.check_results, []);
+    for (const result of checkResults) {
+      this.upsertCheck(issueId, stage, {
+        checkName: result.name,
+        status: normalizeCheckStatus(result.status),
+        message: result.message ?? null,
+        output: result.output,
+      });
+    }
+  }
+
+  private projectSuiteChecks(
+    issueId: string,
+    stage: Stage,
+    suiteRow: CheckSuiteProjectionRow | undefined,
+  ): void {
+    if (stage !== Stage.Check || !suiteRow) return;
+
+    const checks = this.parseJson<CheckSuiteChecks | null>(suiteRow.checks, null);
+    if (!checks) return;
+
+    for (const [checkName, state] of Object.entries(checks)) {
+      this.upsertCheck(issueId, stage, {
+        checkName,
+        status: this.normalizeProjectedCheckSuiteStatus(state),
+        output: state.output,
+        lastRunAt: state.ranAt ?? suiteRow.updated_at,
+      });
+    }
   }
 
   private buildProjectedStageSeed(
@@ -667,18 +726,11 @@ export class StageStateService {
     issueStage: Stage,
   ): ProjectedStageSeed | null {
     const latestExecution = stageExecutions.at(-1);
-    const executionStatus = latestExecution ? normalizeStageStateStatus(latestExecution.status) : null;
-    const suiteStatus = stage === Stage.Check && suiteRow ? normalizeStageStateStatus(suiteRow.status) : null;
-    const approvalStatus = approvalState?.stage === stage && approvalState.status === 'awaiting'
-      ? 'awaiting-approval'
-      : null;
-    const liveStatus = issueStage === stage ? 'running' : null;
-
-    const status = executionStatus ?? suiteStatus ?? approvalStatus ?? liveStatus ?? 'pending';
-    const startedAt = latestExecution?.created_at ?? (status === 'running' || status === 'awaiting-approval' ? suiteRow?.updated_at ?? null : null);
+    const status = this.resolveProjectedStageStatus(stage, latestExecution, suiteRow, approvalState, issueStage);
     const completedAt = status === 'passed' || status === 'failed' || status === 'skipped'
       ? latestExecution?.updated_at ?? null
       : null;
+    const startedAt = this.resolveProjectedStageStartedAt(status, latestExecution, suiteRow);
     const updatedAt = suiteRow?.updated_at ?? latestExecution?.updated_at ?? new Date().toISOString();
 
     if (!latestExecution && !suiteRow && approvalState?.stage !== stage && status === 'pending') {
@@ -694,13 +746,33 @@ export class StageStateService {
     };
   }
 
-  private collectProjectedExecutionEvidence(
-    stageExecutions: StageExecutionProjectionRow[],
-  ): ProjectedExecutionEvidence[] {
-    return stageExecutions.map(execution => ({
-      taskResults: this.parseJson<StageTaskResult[]>(execution.task_results, []),
-      checkResults: this.parseJson<CheckResult[]>(execution.check_results, []),
-    }));
+  private resolveProjectedStageStatus(
+    stage: Stage,
+    latestExecution: StageExecutionProjectionRow | undefined,
+    suiteRow: CheckSuiteProjectionRow | undefined,
+    approvalState: LegacyApprovalState | null,
+    issueStage: Stage,
+  ): StageStateStatus {
+    const executionStatus = latestExecution ? normalizeStageStateStatus(latestExecution.status) : null;
+    const suiteStatus = stage === Stage.Check && suiteRow ? normalizeStageStateStatus(suiteRow.status) : null;
+    const approvalStatus = approvalState?.stage === stage && approvalState.status === 'awaiting'
+      ? 'awaiting-approval'
+      : null;
+    const liveStatus = issueStage === stage ? 'running' : null;
+
+    return approvalStatus ?? suiteStatus ?? liveStatus ?? executionStatus ?? 'pending';
+  }
+
+  private resolveProjectedStageStartedAt(
+    status: StageStateStatus,
+    latestExecution: StageExecutionProjectionRow | undefined,
+    suiteRow: CheckSuiteProjectionRow | undefined,
+  ): string | null {
+    if (latestExecution) return latestExecution.created_at;
+    if (status === 'running' || status === 'awaiting-approval') {
+      return suiteRow?.updated_at ?? null;
+    }
+    return null;
   }
 
   private normalizeProjectedCheckSuiteStatus(state: CheckState): StageCheckStatus {

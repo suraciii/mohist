@@ -129,6 +129,14 @@ export function createIssueRoutes(
 ): Hono {
   const app = new Hono();
 
+  const clearApprovalEverywhere = (issueId: string, stage?: Stage) => {
+    const issueRepo = stateManager.getIssueRepo();
+    issueRepo.clearApprovalState(issueId);
+    if (stageStateService && stage) {
+      stageStateService.clearApproval(issueId, stage);
+    }
+  };
+
   const getCurrentProjectId = (): string | null => {
     return projectService.getCurrentId();
   };
@@ -2812,7 +2820,7 @@ export function createIssueRoutes(
 
       issueRepo.updateRetryCount(issue.id, 0);
       issueRepo.updateBlockedReason(issue.id, null);
-      issueRepo.clearApprovalState(issue.id);
+      clearApprovalEverywhere(issue.id, issue.stage);
 
       let hasCheckpoint = false;
       let checkpointStage: string | null = null;
@@ -2900,7 +2908,7 @@ export function createIssueRoutes(
       const issueRepo = stateManager.getIssueRepo();
       issueRepo.updateRetryCount(issue.id, 0);
       issueRepo.updateBlockedReason(issue.id, null);
-      issueRepo.clearApprovalState(issue.id);
+      clearApprovalEverywhere(issue.id, issue.stage);
       issueService.transitionToStage(issue.id, Stage.Backlog);
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
 
@@ -2954,7 +2962,7 @@ export function createIssueRoutes(
       agentRunner.cancelAll(issue.id);
 
       const issueRepo = stateManager.getIssueRepo();
-      issueRepo.clearApprovalState(issue.id);
+      clearApprovalEverywhere(issue.id, issue.stage);
       issueRepo.updateBlockedReason(issue.id, null);
       issueRepo.updateRetryCount(issue.id, 0);
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
@@ -3086,7 +3094,7 @@ export function createIssueRoutes(
       const issueRepo = stateManager.getIssueRepo();
       issueRepo.updateBlockedReason(issue.id, null);
       issueRepo.updateRetryCount(issue.id, 0);
-      issueRepo.clearApprovalState(issue.id);
+      clearApprovalEverywhere(issue.id, issue.stage);
       issueRepo.updateStage(issue.id, Stage.Backlog);
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
 
