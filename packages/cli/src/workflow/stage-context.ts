@@ -1,6 +1,7 @@
 import type { Stage, Issue, Project, IssueStatus } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { AgentSessionOptions } from '../agent-runtime/agent-session';
+import type { MergeBackResult, MergeMetadata } from '../git/worktree-manager';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
@@ -82,12 +83,12 @@ export interface WorktreeManager {
   createWipCommit(worktreePath: string, taskId: string, attemptNumber: number): Promise<string | null>;
   abortRebase(projectName: string, issueNumber: number): Promise<void>;
   isRebaseInProgress(projectName: string, issueNumber: number): Promise<boolean>;
-  mergeBack(projectPath: string, projectName: string, issueNumber: number, baseBranch: string): Promise<{ success: boolean; message: string }>;
+  mergeBack(projectPath: string, projectName: string, issueNumber: number, baseBranch: string, metadata: MergeMetadata): Promise<MergeBackResult>;
   create(projectPath: string, projectName: string, issueNumber: number, baseBranch?: string): Promise<string>;
   list(projectPath: string): Promise<{ worktreePath: string; branch: string; issueNumber: number }[]>;
   getWorktreeStatus(projectPath: string, projectName: string, issueNumber: number): Promise<{ exists: boolean; branch: string; baseBranch?: string; ahead: number; behind: number; canFastForward: boolean; isRebaseInProgress: boolean; rebaseInProgress?: boolean; conflictingFiles?: string[] }>;
   prune(projectPath: string): Promise<void>;
-  mergeApprovedCandidate(projectPath: string, projectName: string, issueNumber: number, baseBranch?: string): Promise<{ targetBranch: string; baseSha: string; candidateHeadSha: string; landedSha: string; fastForward: boolean; rebased?: boolean } | { failingStep: 'merge'; targetBranch: string; baseSha: string; candidateHeadSha: string; conflictFiles?: string[]; error: string }>;
+  mergeApprovedCandidate(projectPath: string, projectName: string, issueNumber: number, baseBranch?: string, metadata?: MergeMetadata): Promise<{ targetBranch: string; baseSha: string; candidateHeadSha: string; landedSha: string; rebased?: boolean } | { failingStep: 'merge'; targetBranch: string; baseSha: string; candidateHeadSha: string; conflictFiles?: string[]; error: string }>;
   getHeadSha(worktreePath: string): Promise<string>;
   isWorktreeClean(worktreePath: string): Promise<boolean>;
   createCheckConvergenceCommit(worktreePath: string, issueNumber: number): Promise<import('../git/worktree-manager').ConvergenceCommitResult>;

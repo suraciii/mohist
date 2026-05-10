@@ -118,6 +118,10 @@ describe('T-005: Archive Lifecycle Regression Tests', () => {
         },
         resolveConflicts: vi.fn().mockResolvedValue({ success: true }),
         fixBuildErrors: vi.fn().mockResolvedValue({ success: true }),
+        getMergeMetadata: vi.fn().mockResolvedValue({
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+        }),
         postMergeFinalizer: {
           finalize: vi.fn().mockImplementation(async (issue) => {
             issueRepo.updateStage(issue.id, Stage.Done);

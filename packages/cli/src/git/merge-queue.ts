@@ -1,7 +1,7 @@
 import { execFile } from 'child_process';
 import * as path from 'path';
 import { promisify } from 'util';
-import { WorktreeManager } from './worktree-manager';
+import { WorktreeManager, type MergeMetadata } from './worktree-manager';
 import { EventBus } from '../services/event-bus';
 import { IssueRepo } from '../db/issue-repo';
 import { MergeState } from '../types';
@@ -34,6 +34,7 @@ interface MergeQueueDeps {
   resolveConflicts: (entry: MergeEntry, worktreePath: string, conflictFiles: string[]) => Promise<{ success: boolean; error?: string }>;
   fixBuildErrors: (entry: MergeEntry, worktreePath: string, buildOutput: string) => Promise<{ success: boolean; error?: string }>;
   postMergeFinalizer?: PostMergeFinalizer;
+  getMergeMetadata: (projectId: string, issueNumber: number) => Promise<MergeMetadata | undefined>;
 }
 
 export class MergeQueue {
@@ -294,18 +295,25 @@ export class MergeQueue {
       });
     }
 
-    log.info('Performing fast-forward merge', {
+    log.info('Performing squash merge', {
       issueNumber: entry.issueNumber,
     });
 
     entry.mergeState = MergeState.Merging;
     this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
 
+    const mergeMetadata = await this.deps.getMergeMetadata(entry.projectId, entry.issueNumber);
+    if (!mergeMetadata) {
+      this.handleFailure(entry, `Merge metadata not found for issue #${entry.issueNumber}`);
+      return;
+    }
+
     const mergeResult = await this.deps.worktreeManager.mergeBack(
       project.path,
       project.name,
       entry.issueNumber,
       project.baseBranch,
+      mergeMetadata,
     );
 
     if (!mergeResult.success) {
@@ -314,7 +322,7 @@ export class MergeQueue {
       return;
     }
 
-    log.info('Fast-forward merge succeeded; retaining worktree until archive', {
+    log.info('Squash merge succeeded; retaining worktree until archive', {
       issueNumber: entry.issueNumber,
     });
 
@@ -346,6 +354,10 @@ export class MergeQueue {
     });
 
     log.info('Merge completed successfully', { issueNumber: entry.issueNumber });
+  }
+
+  private isStructuredMergeFailure(result: MergeBackResult): result is Extract<MergeBackResult, { success: false }> {
+    return result.success === false;
   }
 
   private async handleConflictResolution(

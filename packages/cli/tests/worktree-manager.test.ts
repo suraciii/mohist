@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { smartFetch, WorktreeManager } from '../src/git/worktree-manager';
+import { smartFetch, WorktreeManager, formatSquashCommitMessage, MergeMetadata } from '../src/git/worktree-manager';
 import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -365,7 +365,7 @@ describe('WorktreeManager', () => {
   });
 
   describe('mergeApprovedCandidate', () => {
-    it('commits integration artifacts before fast-forward merging the issue branch', async () => {
+    it('commits integration artifacts and squash merges the issue branch', async () => {
       fs.mkdirSync(getWorktreeDir(9), { recursive: true });
       const wm = new WorktreeManager();
 
@@ -398,8 +398,8 @@ describe('WorktreeManager', () => {
         targetBranch: 'main',
         candidateHeadSha: 'candidate-after-artifacts',
         landedSha: 'landed-sha',
-        fastForward: true,
       });
+      expect(result).not.toHaveProperty('fastForward');
       expect(execFileMock).toHaveBeenCalledWith(
         'git',
         ['commit', '-m', 'chore: integrate issue #9 artifacts', '--no-verify'],
@@ -407,10 +407,252 @@ describe('WorktreeManager', () => {
         expect.any(Function),
       );
 
-      const commitCallIndex = execFileMock.mock.calls.findIndex((call: any) => call[1]?.[0] === 'commit');
-      const mergeCallIndex = execFileMock.mock.calls.findIndex((call: any) => call[1]?.[0] === 'merge' && call[1]?.[1] === '--ff-only');
-      expect(commitCallIndex).toBeGreaterThan(-1);
-      expect(mergeCallIndex).toBeGreaterThan(commitCallIndex);
+      const squashCalls = execFileMock.mock.calls.filter((call: any) =>
+        call[1]?.[0] === 'merge' && call[1]?.[1] === '--squash'
+      );
+      expect(squashCalls.length).toBe(1);
+      expect(squashCalls[0][1]).toEqual(['merge', '--squash', 'mo/issue-9']);
+    });
+  });
+
+  describe('formatSquashCommitMessage', () => {
+    it('should format message with issue title, number, and task summaries', () => {
+      const metadata: MergeMetadata = {
+        issueNumber: 42,
+        issueTitle: 'Add user authentication',
+        tasks: [
+          { id: 'T-001', title: 'Create auth middleware' },
+          { id: 'T-002', title: 'Add login endpoint' },
+          { id: 'T-003', title: 'Write auth tests' },
+        ],
+      };
+
+      const message = formatSquashCommitMessage(metadata);
+
+      expect(message).toBe(
+        'Add user authentication (#42)\n\n' +
+        'Issue: #42\n' +
+        '* T-001: Create auth middleware\n' +
+        '* T-002: Add login endpoint\n' +
+        '* T-003: Write auth tests'
+      );
+    });
+
+    it('should return subject-only message when tasks are missing', () => {
+      const metadata: MergeMetadata = {
+        issueNumber: 7,
+        issueTitle: 'Fix login bug',
+      };
+
+      const message = formatSquashCommitMessage(metadata);
+
+      expect(message).toBe('Fix login bug (#7)');
+    });
+
+    it('should return subject-only message when tasks array is empty', () => {
+      const metadata: MergeMetadata = {
+        issueNumber: 15,
+        issueTitle: 'Update dependencies',
+        tasks: [],
+      };
+
+      const message = formatSquashCommitMessage(metadata);
+
+      expect(message).toBe('Update dependencies (#15)');
+    });
+
+    it('should handle single task', () => {
+      const metadata: MergeMetadata = {
+        issueNumber: 3,
+        issueTitle: 'Add CI pipeline',
+        tasks: [
+          { id: 'T-001', title: 'Configure GitHub Actions' },
+        ],
+      };
+
+      const message = formatSquashCommitMessage(metadata);
+
+      expect(message).toBe(
+        'Add CI pipeline (#3)\n\n' +
+        'Issue: #3\n' +
+        '* T-001: Configure GitHub Actions'
+      );
+    });
+  });
+
+  describe('mergeBack', () => {
+    it('should perform squash merge with metadata commit message', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+
+      const squashCalls: string[][] = [];
+      const commitMessages: string[] = [];
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+          cb?.(null, mockStdout('abc123 feat: add login\n'), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'merge' && args?.[1] === '--squash') {
+          squashCalls.push([...args]);
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'commit') {
+          commitMessages.push(args[2]);
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const metadata = {
+        issueNumber: 1,
+        issueTitle: 'Add user auth',
+        tasks: [{ id: 'T-001', title: 'Create middleware' }],
+      };
+
+      const result = await wm.mergeBack(tmpDir, PROJECT_NAME, 1, 'main', metadata);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('squash');
+      expect(squashCalls.length).toBe(1);
+      expect(squashCalls[0]).toEqual(['merge', '--squash', 'mo/issue-1']);
+      expect(commitMessages.length).toBe(1);
+      expect(commitMessages[0]).toBe('Add user auth (#1)\n\nIssue: #1\n* T-001: Create middleware');
+    });
+
+    it('should return no-op when no commits to merge', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.mergeBack(tmpDir, PROJECT_NAME, 1, 'main', {
+        issueNumber: 1,
+        issueTitle: 'No-op merge',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('No commits to merge');
+    });
+
+    it('should return failure when squash merge fails', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+          cb?.(null, mockStdout('abc123 feat: add login\n'), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'merge' && args?.[1] === '--squash') {
+          cb?.(new Error('CONFLICT: merge conflict in src/foo.ts') as any, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'merge' && args?.[1] === '--abort') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.mergeBack(tmpDir, PROJECT_NAME, 1, 'main', {
+        issueNumber: 1,
+        issueTitle: 'Add user auth',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Squash merge failed');
+      expect(execFileMock).toHaveBeenCalledWith(
+        'git',
+        ['reset', '--merge'],
+        { cwd: tmpDir },
+        expect.any(Function),
+      );
+      if (!result.success) {
+        expect(result.targetBranch).toBe('main');
+        expect(result.baseSha).toBe('');
+        expect(result.candidateHeadSha).toBe('');
+      }
+    });
+
+    it('should return failure when commit after squash fails', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+          cb?.(null, mockStdout('abc123 feat: add login\n'), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'merge' && args?.[1] === '--squash') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'commit') {
+          cb?.(new Error('nothing to commit') as any, mockStdout(''), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.mergeBack(tmpDir, PROJECT_NAME, 1, 'main', {
+        issueNumber: 1,
+        issueTitle: 'Add user auth',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Squash commit failed');
+      expect(result.message).toContain('manual cleanup');
+      expect(execFileMock).toHaveBeenCalledWith(
+        'git',
+        ['reset', '--merge'],
+        { cwd: tmpDir },
+        expect.any(Function),
+      );
+    });
+
+    it('should use issue title when tasks metadata is unavailable', async () => {
+      fs.mkdirSync(getWorktreeDir(1), { recursive: true });
+      const wm = new WorktreeManager();
+
+      const commitMessages: string[] = [];
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+          cb?.(null, mockStdout('abc123 feat: add login\n'), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'merge' && args?.[1] === '--squash') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'commit') {
+          commitMessages.push(args[2]);
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.mergeBack(tmpDir, PROJECT_NAME, 1, 'main', {
+        issueNumber: 1,
+        issueTitle: 'Add login flow',
+      });
+
+      expect(result.success).toBe(true);
+      expect(commitMessages[0]).toBe('Add login flow (#1)');
     });
   });
 
@@ -430,6 +672,207 @@ describe('WorktreeManager', () => {
         expect.objectContaining({ cwd: expect.any(String) }),
         expect.any(Function),
       );
+    });
+  });
+
+  describe('squash merge regression', () => {
+    it('mergeApprovedCandidate does not call git merge --ff-only', async () => {
+      fs.mkdirSync(getWorktreeDir(9), { recursive: true });
+      const wm = new WorktreeManager();
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd !== 'git') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'status' && args?.includes('--porcelain')) {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'rev-parse') {
+          cb?.(null, mockStdout(args[1] === 'HEAD' ? 'landed-sha\n' : 'candidate-sha\n'), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'merge-base') {
+          cb?.(null, mockStdout('base-sha\n'), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      await wm.mergeApprovedCandidate(tmpDir, PROJECT_NAME, 9, 'main', {
+        issueNumber: 9,
+        issueTitle: 'Add feature X',
+      });
+
+      const ffOnlyCalls = execFileMock.mock.calls.filter((call: any) =>
+        call[0] === 'git' && Array.isArray(call[1]) && call[1][0] === 'merge' && call[1].includes('--ff-only')
+      );
+      expect(ffOnlyCalls.length).toBe(0);
+    });
+
+    it('mergeApprovedCandidate creates exactly one landed commit via squash', async () => {
+      fs.mkdirSync(getWorktreeDir(10), { recursive: true });
+      const wm = new WorktreeManager();
+
+      const squashCalls: string[][] = [];
+      const commitCalls: string[][] = [];
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd !== 'git') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'status' && args?.includes('--porcelain')) {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'rev-parse') {
+          cb?.(null, mockStdout(args[1] === 'HEAD' ? 'landed-sha\n' : 'candidate-sha\n'), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'merge-base') {
+          cb?.(null, mockStdout('base-sha\n'), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'merge' && args?.[1] === '--squash') {
+          squashCalls.push([...args]);
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'commit' && args?.[1] === '-m') {
+          commitCalls.push([...args]);
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.mergeApprovedCandidate(tmpDir, PROJECT_NAME, 10, 'main', {
+        issueNumber: 10,
+        issueTitle: 'Add feature Y',
+        tasks: [
+          { id: 'T-001', title: 'Implement feature' },
+          { id: 'T-002', title: 'Add tests' },
+        ],
+      });
+
+      expect(result).toMatchObject({ landedSha: 'landed-sha' });
+      expect(squashCalls.length).toBe(1);
+      expect(squashCalls[0]).toEqual(['merge', '--squash', 'mo/issue-10']);
+      expect(commitCalls.length).toBe(1);
+      expect(commitCalls[0][2]).toBe('Add feature Y (#10)\n\nIssue: #10\n* T-001: Implement feature\n* T-002: Add tests');
+    });
+
+    it('mergeApprovedCandidate with metadata generates commit message including issue title and task summaries', async () => {
+      fs.mkdirSync(getWorktreeDir(11), { recursive: true });
+      const wm = new WorktreeManager();
+
+      let capturedCommitMessage = '';
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd !== 'git') {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'status' && args?.includes('--porcelain')) {
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'rev-parse') {
+          cb?.(null, mockStdout(args[1] === 'HEAD' ? 'landed-sha\n' : 'candidate-sha\n'), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'merge-base') {
+          cb?.(null, mockStdout('base-sha\n'), '');
+          return undefined as any;
+        }
+        if (args?.[0] === 'commit' && args?.[1] === '-m') {
+          capturedCommitMessage = args[2];
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      await wm.mergeApprovedCandidate(tmpDir, PROJECT_NAME, 11, 'main', {
+        issueNumber: 11,
+        issueTitle: 'Fix critical bug',
+        tasks: [
+          { id: 'T-001', title: 'Root cause analysis' },
+          { id: 'T-002', title: 'Apply fix' },
+          { id: 'T-003', title: 'Regression tests' },
+        ],
+      });
+
+      expect(capturedCommitMessage).toContain('Fix critical bug (#11)');
+      expect(capturedCommitMessage).toContain('Issue: #11');
+      expect(capturedCommitMessage).toContain('* T-001: Root cause analysis');
+      expect(capturedCommitMessage).toContain('* T-002: Apply fix');
+      expect(capturedCommitMessage).toContain('* T-003: Regression tests');
+    });
+
+    it('mergeBack does not call git merge --ff-only', async () => {
+      fs.mkdirSync(getWorktreeDir(12), { recursive: true });
+      const wm = new WorktreeManager();
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+          cb?.(null, mockStdout('abc123 commit msg\n'), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      await wm.mergeBack(tmpDir, PROJECT_NAME, 12, 'main', {
+        issueNumber: 12,
+        issueTitle: 'Another issue',
+      });
+
+      const ffOnlyCalls = execFileMock.mock.calls.filter((call: any) =>
+        call[0] === 'git' && Array.isArray(call[1]) && call[1][0] === 'merge' && call[1].includes('--ff-only')
+      );
+      expect(ffOnlyCalls.length).toBe(0);
+    });
+
+    it('mergeBack creates exactly one squash commit with correct message', async () => {
+      fs.mkdirSync(getWorktreeDir(13), { recursive: true });
+      const wm = new WorktreeManager();
+
+      const squashCalls: string[][] = [];
+      const commitCalls: string[][] = [];
+
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+          cb?.(null, mockStdout('abc123 commit msg\n'), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'merge' && args?.[1] === '--squash') {
+          squashCalls.push([...args]);
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        if (cmd === 'git' && args?.[0] === 'commit') {
+          commitCalls.push([...args]);
+          cb?.(null, mockStdout(''), '');
+          return undefined as any;
+        }
+        cb?.(null, mockStdout(''), '');
+        return undefined as any;
+      });
+
+      const result = await wm.mergeBack(tmpDir, PROJECT_NAME, 13, 'main', {
+        issueNumber: 13,
+        issueTitle: 'Refactor module',
+        tasks: [{ id: 'T-001', title: 'Rewrite core' }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(squashCalls.length).toBe(1);
+      expect(squashCalls[0]).toEqual(['merge', '--squash', 'mo/issue-13']);
+      expect(commitCalls.length).toBe(1);
+      expect(commitCalls[0][2]).toBe('Refactor module (#13)\n\nIssue: #13\n* T-001: Rewrite core');
     });
   });
 });
