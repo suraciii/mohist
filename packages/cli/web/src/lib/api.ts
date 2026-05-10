@@ -342,7 +342,10 @@ export const api = {
   getSystemInfo: () =>
     request<import('./types').SystemInfo>('/system/info'),
 
+  getIssueStageState: (number: number) =>
+    request<import('./types').IssueStageStateResponse>(`/issues/${number}/stage-state`),
+
   rebuildSystem: () =>
     request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
 
-}
+  }
