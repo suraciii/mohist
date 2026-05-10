@@ -3,6 +3,8 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { slugify } from '../utils/slugify';
+import type { StageStateService } from '../services/stage-state-service';
+import type { Stage } from '../types';
 
 const execFileAsync = promisify(execFile);
 
@@ -387,6 +389,33 @@ export class ChangeArtifactsManager {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  syncTasksToStageState(
+    issueNumber: number,
+    issueId: string,
+    stage: Stage,
+    stageStateService: StageStateService,
+  ): void {
+    const tasksFile = this.readTasks(issueNumber);
+    if (!tasksFile) return;
+
+    for (const t of tasksFile.tasks) {
+      const status = t.passes
+        ? 'completed'
+        : t.error
+          ? 'failed'
+          : 'pending';
+      stageStateService.upsertTask(issueId, stage, {
+        taskId: t.id,
+        title: t.title,
+        status,
+        source: 'dynamic',
+        order: t.order,
+        attempts: t.attempts,
+        output: t.error ? { error: t.error } : undefined,
+      });
     }
   }
 }

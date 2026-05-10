@@ -126,8 +126,9 @@ export abstract class BaseStageRunner implements StageRunner {
 
       if (check.name === 'ai-review') {
         const authoritativeResults = await this.persistCurrentAiReviewTruth(ctx, results);
+        const snapshot = [...authoritativeResults];
         results.length = 0;
-        results.push(...authoritativeResults);
+        results.push(...snapshot);
       }
 
       if (result.status !== 'pass') {
@@ -260,8 +261,10 @@ export abstract class BaseStageRunner implements StageRunner {
     const latest = getLatestCheckResult(checkResults, 'ai-review');
     if (!latest) return checkResults;
 
-    const project = ctx.projectRepo.findById(ctx.issue.projectId);
-    const worktreePath = project
+    const project = typeof ctx.projectRepo?.findById === 'function'
+      ? ctx.projectRepo.findById(ctx.issue.projectId)
+      : null;
+    const worktreePath = project && typeof ctx.worktreeManager?.getPath === 'function'
       ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
       : null;
     const snapshotSha = worktreePath ? await this.getHeadShaSafe(ctx, worktreePath) : undefined;
