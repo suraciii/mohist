@@ -1,6 +1,5 @@
 {
-  "project": "mohist",
-  "description": "Make stage tasks and checks first-class current-state entities with one backend API and one Issue Detail data source.",
+  "version": 1,
   "tasks": [
     {
       "id": "T-001",
@@ -20,8 +19,14 @@
       "type": "MIGRATE",
       "output": "packages/cli/src/db/migrations.ts; packages/cli/src/services/stage-state-service.ts",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Keep the service interface narrow: callers should not need to know whether state came from new rows, seeded definitions, or legacy projection."
+      "passes": true,
+      "notes": "Keep the service interface narrow: callers should not need to know whether state came from new rows, seeded definitions, or legacy projection.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        380036
+      ]
     },
     {
       "id": "T-002",
@@ -40,9 +45,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/api/issues.ts",
-      "dependsOn": ["T-001"],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Do not make API routes aggregate raw tasks.json, check_suites, and stage_executions directly; keep that complexity behind StageStateService."
+      "notes": "Do not make API routes aggregate raw tasks.json, check_suites, and stage_executions directly; keep that complexity behind StageStateService.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-003",
@@ -62,9 +72,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/src/workflow/base-stage-runner.ts; packages/cli/src/workflow/stage-context.ts; packages/cli/src/artifacts/change-artifacts-manager.ts",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
-      "notes": "Current-state writes should be best-effort logged like existing audit writes, but failures must not silently corrupt stage_executions history."
+      "notes": "Current-state writes should be best-effort logged like existing audit writes, but failures must not silently corrupt stage_executions history.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-004",
@@ -82,9 +98,15 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/lib/types.ts; packages/cli/web/src/lib/api.ts; packages/cli/web/src/hooks/useQueries.ts",
-      "dependsOn": ["T-002", "T-003"],
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
-      "notes": "Keep status conversion out of frontend types; the backend response should already be normalized."
+      "notes": "Keep status conversion out of frontend types; the backend response should already be normalized.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-005",
@@ -103,9 +125,14 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "packages/cli/web/src/components/PipelineView.tsx; packages/cli/web/src/components/TaskProgressPanel.tsx",
-      "dependsOn": ["T-004"],
+      "dependsOn": [
+        "T-004"
+      ],
       "passes": false,
-      "notes": "The visual behavior can stay close to the existing UI; the important outcome is a single current-state source."
+      "notes": "The visual behavior can stay close to the existing UI; the important outcome is a single current-state source.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     },
     {
       "id": "T-006",
@@ -124,9 +151,14 @@
       "mode": "AFK",
       "type": "TEST",
       "output": "packages/cli/tests; packages/cli/web/src/components/*.test.tsx",
-      "dependsOn": ["T-005"],
+      "dependsOn": [
+        "T-005"
+      ],
       "passes": false,
-      "notes": "Use small fixtures that model issue #156/#163 symptoms: repeated executions and contradictory old data sources."
+      "notes": "Use small fixtures that model issue #156/#163 symptoms: repeated executions and contradictory old data sources.",
+      "attempts": 0,
+      "order": 999999,
+      "error": null
     }
   ]
 }
