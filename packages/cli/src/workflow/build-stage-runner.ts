@@ -164,6 +164,10 @@ export class BuildStageRunner extends BaseStageRunner {
       model: acpOptions.model,
       stage: 'build',
       observers: executorObservers,
+      syncTasksToStageState: () => {
+        if (!ctx.stageStateService) return;
+        ctx.artifactManager.syncTasksToStageState(issue.number, issue.id, Stage.Build, ctx.stageStateService);
+      },
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];

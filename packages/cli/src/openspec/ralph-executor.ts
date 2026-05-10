@@ -148,6 +148,7 @@ export interface RalphExecutorContext {
   sessionStreamLogRepo?: import('../db/session-stream-log-repo').SessionStreamLogRepo;
   coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
   observers?: SessionObserver[];
+  syncTasksToStageState?: () => void;
 }
 
 export interface RalphLoopResult {
@@ -217,6 +218,11 @@ function writeTasksFile(tasksPath: string, tasks: Task[]): void {
   } catch (e) {
     log.error('writeTasksFile failed', { tasksPath, error: e instanceof Error ? e.message : String(e) });
   }
+}
+
+function persistTasks(context: RalphExecutorContext, tasksPath: string, tasks: Task[]): void {
+  writeTasksFile(tasksPath, tasks);
+  context.syncTasksToStageState?.();
 }
 
 async function commitTasksFile(
@@ -739,7 +745,7 @@ export async function runRalphLoop(
       if (result.success) {
         taskSuccess = true;
         updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null, durations: [attemptDuration] });
-        writeTasksFile(change.tasksPath, tasks);
+        persistTasks(context, change.tasksPath, tasks);
         await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
         emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'completed', attempt);
         completed++;
@@ -822,7 +828,7 @@ export async function runRalphLoop(
           shouldPause = true;
           pauseReason = `${lastCategory} failure: ${lastError}. This cannot be retried automatically.`;
           updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError, durations: [attemptDuration] });
-          writeTasksFile(change.tasksPath, tasks);
+          persistTasks(context, change.tasksPath, tasks);
           break;
         }
 
@@ -830,12 +836,12 @@ export async function runRalphLoop(
           shouldPause = true;
           pauseReason = `Max retries (${effectiveMaxAttempts}) exceeded for ${lastCategory} failure: ${lastError}`;
           updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError, durations: [attemptDuration] });
-          writeTasksFile(change.tasksPath, tasks);
+          persistTasks(context, change.tasksPath, tasks);
           break;
         }
 
         updateTaskInList(tasks, nextTask.id, { durations: [attemptDuration] });
-        writeTasksFile(change.tasksPath, tasks);
+        persistTasks(context, change.tasksPath, tasks);
 
         emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'retrying', attempt);
 
@@ -854,7 +860,7 @@ export async function runRalphLoop(
     if (!taskSuccess) {
       if (attemptsUsed === nextTask.attempts) {
         updateTaskInList(tasks, nextTask.id, { passes: false, attempts: nextTask.attempts, error: `Skipped: task was not executed (attemptsUsed=${attemptsUsed}, no attempts made)` });
-        writeTasksFile(change.tasksPath, tasks);
+        persistTasks(context, change.tasksPath, tasks);
       }
       taskResults.push({
         taskId: nextTask.id,
@@ -872,7 +878,7 @@ export async function runRalphLoop(
 
         if (answer.toLowerCase().includes('skip')) {
           updateTaskInList(tasks, nextTask.id, { passes: true, error: `Skipped: ${lastError}` });
-          writeTasksFile(change.tasksPath, tasks);
+          persistTasks(context, change.tasksPath, tasks);
           taskResults[taskResults.length - 1].status = 'skipped';
         } else if (answer.toLowerCase().includes('retry')) {
           taskResults.pop();
@@ -895,7 +901,7 @@ export async function runRalphLoop(
         }
       } else if (shouldPause && !context.onAskUser) {
         updateTaskInList(tasks, nextTask.id, { passes: false, error: `Auto-skipped (no onAskUser): ${lastError}` });
-        writeTasksFile(change.tasksPath, tasks);
+        persistTasks(context, change.tasksPath, tasks);
         taskResults[taskResults.length - 1].status = 'skipped';
         failed++;
         skipped++;

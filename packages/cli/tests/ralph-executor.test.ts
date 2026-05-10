@@ -816,6 +816,76 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
     expect(result.taskResults[0].status).toBe('completed');
   });
 
+  it('syncs stage-state after retry, failure, and success task writes', async () => {
+    let callCount = 0;
+    setAcpSessionRunner(vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({ success: false, error: 'Timed out' });
+      }
+      return Promise.resolve({ success: true, text: 'done' });
+    }));
+
+    const change = createChangeWithTasks(1);
+    const snapshots: Array<Array<{ passes: boolean; attempts: number; error: string | null }>> = [];
+    const context = {
+      worktreePath: tempDir,
+      projectPath: tempDir,
+      onAskUser: vi.fn().mockResolvedValue('retry'),
+      syncTasksToStageState: vi.fn(() => {
+        const updated = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
+        snapshots.push(updated.tasks.map((task: any) => ({
+          passes: task.passes,
+          attempts: task.attempts,
+          error: task.error ?? null,
+        })));
+      }),
+    };
+
+    const result = await runRalphLoop(change, context, { maxRetries: 0 });
+
+    expect(result.success).toBe(true);
+    expect(context.syncTasksToStageState).toHaveBeenCalledTimes(3);
+    expect(snapshots).toEqual([
+      [{ passes: false, attempts: 1, error: 'Timed out' }],
+      [{ passes: false, attempts: 1, error: 'Skipped: task was not executed (attemptsUsed=1, no attempts made)' }],
+      [{ passes: true, attempts: 2, error: null }],
+    ]);
+  });
+
+  it('syncs stage-state when task fails without retry approval', async () => {
+    setAcpSessionRunner(vi.fn().mockResolvedValue({
+      success: false,
+      error: 'Timed out after 1800000ms',
+    }));
+
+    const change = createChangeWithTasks(1);
+    const snapshots: Array<Array<{ passes: boolean; attempts: number; error: string | null }>> = [];
+    const context = {
+      worktreePath: tempDir,
+      projectPath: tempDir,
+      syncTasksToStageState: vi.fn(() => {
+        const updated = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
+        snapshots.push(updated.tasks.map((task: any) => ({
+          passes: task.passes,
+          attempts: task.attempts,
+          error: task.error ?? null,
+        })));
+      }),
+    };
+
+    const result = await runRalphLoop(change, context, { maxRetries: 0 });
+
+    expect(result.success).toBe(false);
+    expect(result.taskResults[0].status).toBe('skipped');
+    expect(context.syncTasksToStageState).toHaveBeenCalledTimes(3);
+    expect(snapshots).toEqual([
+      [{ passes: false, attempts: 1, error: 'Timed out after 1800000ms' }],
+      [{ passes: false, attempts: 1, error: 'Skipped: task was not executed (attemptsUsed=1, no attempts made)' }],
+      [{ passes: false, attempts: 1, error: 'Auto-skipped (no onAskUser): Timed out after 1800000ms' }],
+    ]);
+  });
+
   it('genuinely failed task (abort) increments failed counter', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({
       success: false,
