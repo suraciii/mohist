@@ -520,6 +520,33 @@ describe('API Routes', () => {
         expect(enqueueSpy).toHaveBeenCalledTimes(1);
         expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
       });
+
+      it('should enqueue resume-pipeline even when reopen recovery restores awaiting approval', async () => {
+        const issue = issueService.create({ projectId, title: 'Awaiting Review Issue' });
+        const issueRepo = stateManager.getIssueRepo();
+        issueRepo.updateStage(issue.id, Stage.Check);
+        issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+
+        const reopenApp = new Hono();
+        const reopenEventBus = new EventBus();
+        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        const enqueueSpy = vi.spyOn(reopenAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+        reopenApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, reopenAgentRunner));
+        const reopenServer = createTestServer(reopenApp);
+
+        const response = await request(reopenServer).post(`/api/issues/${issue.number}/reopen`);
+
+        expect(response.status).toBe(202);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.message).toContain('resume-pipeline');
+        expect(enqueueSpy).toHaveBeenCalledTimes(1);
+        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+
+        const reopened = issueRepo.findById(issue.id);
+        expect(reopened?.status).toBe(IssueStatus.Active);
+        expect(reopened?.stage).toBe(Stage.Check);
+        expect(reopened?.approvalState?.status).toBe('awaiting');
+      });
     });
 
     describe('POST /api/issues/:number/comments', () => {
