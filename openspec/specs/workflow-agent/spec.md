@@ -1,6 +1,7 @@
-## Requirements
+# OpenSpec Capability: workflow-agent
 
 ### Requirement: Per-issue Main Agent session
+
 The system SHALL maintain one Main Agent session per active issue. M1: sessions are in-memory only, NOT persisted to SQLite. Server restart loses all session data — running issues must be re-started.
 
 #### Scenario: Issue started
@@ -13,6 +14,7 @@ The system SHALL maintain one Main Agent session per active issue. M1: sessions 
 - **THEN** the Main Agent session SHALL be closed
 
 ### Requirement: Workflow orchestration
+
 The Main Agent SHALL orchestrate the workflow by: evaluating the current stage (hardcoded: design → implement → done), spawning opencode via spawn_agent for each stage, evaluating the subprocess output, and calling advance_stage to progress. M1: all gates are auto — no pause for approval.
 
 #### Scenario: Stage advance
@@ -28,9 +30,24 @@ The Main Agent SHALL orchestrate the workflow by: evaluating the current stage (
 - **THEN** the Main Agent SHALL analyze the failure and decide: retry or mark failed
 
 ### Requirement: Main Agent system prompt
+
 The Main Agent SHALL have a system prompt that includes: its role as workflow orchestrator, available tools (spawn_agent, advance_stage, add_comment, get_issue), current issue context (title, description, stage), workflow stages (hardcoded: design → implement → done), and error handling guidelines.
 
 #### Scenario: Dynamic prompt generation
 - **WHEN** the Main Agent makes an LLM call
 - **THEN** the system prompt SHALL include the current issue information
 - **THEN** the prompt SHALL be dynamically generated per issue
+
+### Requirement: REQ-WA-001 Workflow consumes session results without judging liveness
+
+Workflow orchestration SHALL consume completed, failed, or cancelled session call results from tasks and SHALL NOT independently determine whether opencode is alive.
+
+#### Scenario: Workflow receives session failure
+- **WHEN** a task reports that its opencode session failed
+- **THEN** workflow SHALL handle that as a task/session execution result
+- **AND** workflow SHALL decide retry, block, interruption, or user action through existing workflow policy
+
+#### Scenario: Session state does not mutate issue state directly
+- **WHEN** a session enters `probing` or `failed`
+- **THEN** issue `stage` and `status` SHALL remain unchanged unless a separate workflow decision changes them later
+

@@ -1,6 +1,7 @@
-## ADDED Requirements
+# OpenSpec Capability: ralph-task-execution
 
 ### Requirement: Ralph-style task loop execution
+
 The system SHALL execute tasks from tasks.json in a loop, one at a time, until all are complete.
 
 **Loop Driver:** Mohist Main-agent (not a single long-running coder process)
@@ -18,6 +19,7 @@ The system SHALL execute tasks from tasks.json in a loop, one at a time, until a
 - **AND** repeats until all tasks are complete
 
 ### Requirement: Task execution context assembly
+
 The system SHALL assemble complete context for each task execution.
 
 **Context Components:**
@@ -53,6 +55,7 @@ The system SHALL assemble complete context for each task execution.
   ```
 
 ### Requirement: Task result verification
+
 The system SHALL verify that task execution meets the acceptance criteria.
 
 #### Scenario: Verify task completion
@@ -65,6 +68,7 @@ The system SHALL verify that task execution meets the acceptance criteria.
 - **AND** if failed, captures error details for retry logic
 
 ### Requirement: Task failure handling with retry
+
 The system SHALL handle task failures with categorized retry logic.
 
 **Failure Categories:**
@@ -96,6 +100,7 @@ The system SHALL handle task failures with categorized retry logic.
 - **AND** stores the dependency issue in learning
 
 ### Requirement: Task status persistence
+
 The system SHALL persist task execution status in tasks.json for recovery.
 
 **File:** `{change-path}/tasks.json`
@@ -119,6 +124,7 @@ The system SHALL persist task execution status in tasks.json for recovery.
 - **AND** continues execution from T-003
 
 ### Requirement: Loop back from check to build
+
 The system SHALL support looping back from check stage to build stage if issues are found.
 
 #### Scenario: Fix issues in check stage
@@ -127,3 +133,22 @@ The system SHALL support looping back from check stage to build stage if issues 
 - **THEN** the system transitions back to build stage
 - **AND** the agent can append new tasks to tasks.json
 - **AND** continues the build loop
+
+### Requirement: REQ-RTE-001 Task attempts consume session failure results
+
+Build task execution SHALL treat session liveness failure as a failed session call result and apply existing task failure policy outside the session layer.
+
+#### Scenario: Session failed result fails task attempt
+- **WHEN** an opencode session call returns `success=false` with session failure metadata
+- **THEN** the current task attempt SHALL be recorded as failed
+- **AND** the failure reason SHALL be available to retry/block/user-action policy
+
+#### Scenario: Session failure does not complete task
+- **WHEN** a session fails before normal completion
+- **THEN** the task SHALL NOT be marked passed solely because the session produced partial text or previous events
+
+#### Scenario: Retry policy remains task-owned
+- **WHEN** a task attempt fails because the session failed
+- **THEN** task/workflow policy MAY retry, block, or request user action
+- **AND** the session runtime SHALL NOT choose the workflow recovery strategy
+
