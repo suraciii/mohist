@@ -48,11 +48,14 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Do not make API routes aggregate raw tasks.json, check_suites, and stage_executions directly; keep that complexity behind StageStateService.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        216970
+      ]
     },
     {
       "id": "T-003",
