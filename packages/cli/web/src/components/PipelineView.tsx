@@ -98,7 +98,7 @@ function getStageStatus(
   executions: StageExecution[],
   issue: Issue,
 ): 'pending' | 'running' | 'completed' | 'failed' | 'awaiting-approval' {
-  const execution = executions.find((e) => e.stage === stage)
+  const execution = executions.filter((e) => e.stage === stage).at(-1)
   const stageOrder = PIPELINE_STAGES.indexOf(stage)
   const currentStageIdx = PIPELINE_STAGES.indexOf(issue.stage as PipelineStage)
 
@@ -119,7 +119,7 @@ function getStageStatus(
 }
 
 function getStageDuration(stage: PipelineStage, executions: StageExecution[]): number | null {
-  const execution = executions.find((e) => e.stage === stage)
+  const execution = executions.filter((e) => e.stage === stage).at(-1)
   if (!execution) return null
   if (execution.taskResults.length === 0) return null
   const total = execution.taskResults.reduce((sum, t) => sum + (t.duration || 0), 0)
@@ -782,7 +782,7 @@ function StepList({
   liveElapsedByTask: Map<string, number>
   runningTaskIds: Set<string>
 }) {
-  const execution = executions.find((e) => e.stage === stage)
+  const execution = executions.filter((e) => e.stage === stage).at(-1)
   const rawTaskResults: StageTaskResult[] = execution?.taskResults ?? []
   const checkResults: CheckResult[] = execution?.checkResults ?? []
   const taskResults = mergeTasksForStage(stage, rawTaskResults, runningTaskIds)
@@ -938,8 +938,8 @@ return null
 }
 
 function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
-  const integrateExecution = executions.find(e => e.stage === Stage.Integrate)
-  const checkExecution = executions.find(e => e.stage === Stage.Check)
+  const integrateExecution = executions.filter(e => e.stage === Stage.Integrate).at(-1)
+  const checkExecution = executions.filter(e => e.stage === Stage.Check).at(-1)
 
   const checkOutput = checkExecution?.checkResults
     ?.find(c => c.name === 'openspec-sync-dry-run')?.output as OpenSpecSyncOutput | undefined
