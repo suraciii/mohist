@@ -23,6 +23,7 @@ import { createIssueRoutes } from '../src/api/issues';
 import { Stage, IssueStatus, MergeState } from '../src/types';
 import { createStatusRoutes } from '../src/api/status';
 import { createConfigRoutes } from '../src/api/config';
+import { StageExecutionRepo } from '../src/db/stage-execution-repo';
 
 function createTestServer(app: Hono): http.Server {
   return http.createServer(async (req, res) => {
@@ -208,12 +209,14 @@ describe('API Routes', () => {
   describe('Issue Routes', () => {
     let server: http.Server;
     let projectId: string;
+    let stageExecutionRepo: StageExecutionRepo;
 
     beforeEach(async () => {
       const app = new Hono();
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, projectRepo, undefined, stateManager.getIssueTaskQueueRepo());
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner));
+      stageExecutionRepo = stateManager.getStageExecutionRepo();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo));
       server = createTestServer(app);
       
       const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
@@ -338,7 +341,7 @@ describe('API Routes', () => {
         expect(response.body.success).toBe(true);
       });
 
-      it('Check approval should transition to Integrate and enqueue resume-pipeline', async () => {
+      it('Check approval should reject when authoritative PASS review is missing', async () => {
         const issue = issueService.create({ projectId, title: 'Check Approval Issue' });
         issueService.transitionToStage(issue.id, Stage.Check);
         issueService.setStatus(issue.id, IssueStatus.Active);
@@ -355,7 +358,57 @@ describe('API Routes', () => {
         const approveEventBus = new EventBus();
         const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
         const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner));
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo));
+        const approveServer = createTestServer(approveApp);
+
+        const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.success).toBe(false);
+        expect(response.body.error).toContain("latest ai-review verdict");
+        expect(enqueueSpy).not.toHaveBeenCalled();
+      });
+
+      it('Check approval should transition to Integrate and enqueue resume-pipeline when authoritative PASS matches snapshot', async () => {
+        const issue = issueService.create({ projectId, title: 'Check Approval Ready Issue' });
+        issueService.transitionToStage(issue.id, Stage.Check);
+        issueService.setStatus(issue.id, IssueStatus.Active);
+
+        const issueRepo = stateManager.getIssueRepo();
+        issueRepo.setApprovalState(issue.id, {
+          stage: Stage.Check,
+          status: 'awaiting',
+          output: { snapshotSha: 'sha-pass-001', result: 'PASS' },
+          requestedAt: new Date().toISOString(),
+        });
+
+        const execution = stageExecutionRepo.create(issue.id, Stage.Check);
+        stageExecutionRepo.updateCheckResults(execution.id, [
+          {
+            name: 'ai-review',
+            status: 'pass',
+            output: {
+              verdict: 'PASS',
+              reviewReport: '# Review\n<promise>PASS</promise>',
+              snapshotSha: 'sha-pass-001',
+              reviewArtifactPath: '/tmp/change/review.md',
+              selfCheckArtifactPath: '/tmp/change/review-self-check.md',
+            },
+          },
+        ]);
+        stageExecutionRepo.updateStatus(execution.id, 'awaiting-approval');
+
+        const worktreeManager = {
+          getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+          getHeadSha: vi.fn().mockResolvedValue('sha-pass-001'),
+          isWorktreeClean: vi.fn().mockResolvedValue(true),
+        } as any;
+
+        const approveApp = new Hono();
+        const approveEventBus = new EventBus();
+        const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+        const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo));
         const approveServer = createTestServer(approveApp);
 
         const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);

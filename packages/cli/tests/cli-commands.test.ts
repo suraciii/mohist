@@ -1,10 +1,18 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Command } from 'commander';
+vi.mock('../src/cli/api-client', () => ({ apiClient: vi.fn() }));
+vi.mock('../src/cli/server-check', () => ({ requireServer: vi.fn().mockResolvedValue(undefined) }));
+
 import { setupProjectCommands } from '../src/cli/commands/project';
 import { setupIssueCommands } from '../src/cli/commands/issue';
 import { setupQuickCommands } from '../src/cli/commands/quick';
+import { apiClient } from '../src/cli/api-client';
 
 describe('CLI Commands', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   describe('Project Commands', () => {
     it('should setup project commands', () => {
       const program = new Command();
@@ -54,6 +62,51 @@ describe('CLI Commands', () => {
       const deleteCommentCmd = issueCmd?.commands.find(cmd => cmd.name() === 'delete-comment');
       expect(deleteCommentCmd).toBeDefined();
       expect(deleteCommentCmd?.name()).toBe('delete-comment');
+    });
+
+    it('issue show renders only the latest ai-review truth per stage', async () => {
+      const mockedApiClient = vi.mocked(apiClient);
+      mockedApiClient
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            number: 1,
+            title: 'Test Issue',
+            priority: 'p2',
+            stage: 'check',
+            status: 'active',
+            projectName: 'demo',
+            baseBranch: 'main',
+            labels: [],
+            comments: [],
+          },
+        } as any)
+        .mockResolvedValueOnce({
+          success: true,
+          data: [
+            {
+              stage: 'check',
+              checkResults: [
+                { name: 'ai-review', status: 'fail', message: 'old fail' },
+                { name: 'ai-review', status: 'pass', message: 'new pass' },
+                { name: 'user-approval', status: 'pending', message: 'awaiting' },
+              ],
+            },
+          ],
+        } as any);
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const program = new Command();
+      setupIssueCommands(program);
+
+      await program.parseAsync(['node', 'test', 'issue', 'show', '1']);
+
+      const output = logSpy.mock.calls.map(call => call.join(' ')).join('\n');
+      expect(output.match(/ai-review/g)?.length ?? 0).toBe(1);
+      expect(output).toContain('ai-review');
+      expect(output).toContain('user-approval');
+      expect(errorSpy).not.toHaveBeenCalled();
     });
   });
   

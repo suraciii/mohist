@@ -6,6 +6,7 @@ import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
 import { Log } from '../util/log';
 import { parseVerdict, parseDimensions, readReportFile } from './utils';
+import * as path from 'path';
 
 const log = Log.create({ service: 'base-stage-runner' });
 
@@ -123,6 +124,12 @@ export abstract class BaseStageRunner implements StageRunner {
       const result = await check.run(checkCtx);
       results.push(result);
 
+      if (check.name === 'ai-review') {
+        const authoritativeResults = await this.persistCurrentAiReviewTruth(ctx, results);
+        results.length = 0;
+        results.push(...authoritativeResults);
+      }
+
       if (result.status !== 'pass') {
         this.persistCheckResults(ctx, results);
         return this.handleCheckFailure(ctx, check, result, results, taskOutput, isPreTask, checks);
@@ -205,8 +212,13 @@ export abstract class BaseStageRunner implements StageRunner {
     const checkCtx = this.buildCheckContext(ctx);
     const recheckResult = await check.run(checkCtx);
 
+    const nextResults = [...allResults, recheckResult];
+    const authoritativeResults = check.name === 'ai-review'
+      ? await this.persistCurrentAiReviewTruth(ctx, nextResults)
+      : nextResults;
+
     if (recheckResult.status === 'pass') {
-      const continuedResults = [...allResults, recheckResult];
+      const continuedResults = [...authoritativeResults];
       this.persistCheckResults(ctx, continuedResults);
 
       if (isPreTask) {
@@ -238,10 +250,43 @@ export abstract class BaseStageRunner implements StageRunner {
       };
     }
 
-    const updatedResults = [...allResults, recheckResult];
+    const updatedResults = [...authoritativeResults];
     this.persistCheckResults(ctx, updatedResults);
 
     return this.runFixAndRecheck(ctx, check, recheckResult, updatedResults, taskOutput, isPreTask, activeChecks, policy, attempt + 1);
+  }
+
+  private async persistCurrentAiReviewTruth(ctx: StageContext, checkResults: CheckResult[]): Promise<CheckResult[]> {
+    const latest = getLatestCheckResult(checkResults, 'ai-review');
+    if (!latest) return checkResults;
+
+    const project = ctx.projectRepo.findById(ctx.issue.projectId);
+    const worktreePath = project
+      ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+      : null;
+    const snapshotSha = worktreePath ? await this.getHeadShaSafe(ctx, worktreePath) : undefined;
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+
+    return this.persistAuthoritativeAiReview(ctx, checkResults, {
+      snapshotSha,
+      reviewArtifactPath: changeDir ? path.join(changeDir, 'review.md') : undefined,
+      selfCheckArtifactPath: changeDir ? path.join(changeDir, 'review-self-check.md') : undefined,
+    });
+  }
+
+  private async getHeadShaSafe(ctx: StageContext, worktreePath: string): Promise<string | undefined> {
+    if (typeof ctx.worktreeManager.getHeadSha !== 'function') {
+      return undefined;
+    }
+
+    try {
+      return await ctx.worktreeManager.getHeadSha(worktreePath);
+    } catch (e) {
+      log.warn('getHeadSha failed for authoritative ai-review persistence', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+      return undefined;
+    }
   }
 
   private async handleApprovalCheck(

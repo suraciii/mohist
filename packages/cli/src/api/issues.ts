@@ -25,6 +25,7 @@ import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue
 import { assembleSessionTranscript } from '../services/session-transcript-service';
 import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
 import { isValidModelId } from '../config/model-resolution';
+import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 
@@ -93,6 +94,18 @@ function unavailableChangesData(issue: Issue, message: string) {
 const log = Log.create({ service: 'issue' });
 
 const execFileAsync = promisify(execFile);
+
+function getLatestCheckStageAiReview(issueId: string, stageExecutionRepo?: StageExecutionRepo): CheckResult | undefined {
+  if (!stageExecutionRepo) return undefined;
+
+  const latestCheckExecution = stageExecutionRepo
+    .findByIssueId(issueId)
+    .filter(execution => execution.stage === Stage.Check)
+    .at(-1);
+
+  if (!latestCheckExecution) return undefined;
+  return getLatestCheckResult(latestCheckExecution.checkResults as CheckResult[], 'ai-review');
+}
 
 export function createIssueRoutes(
   issueService: IssueService,
@@ -1077,6 +1090,36 @@ export function createIssueRoutes(
 
       if (approvalStage === Stage.Check) {
         const approvalOutput = issue.approvalState?.output as Record<string, unknown> | undefined;
+        const latestAiReview = getLatestCheckStageAiReview(issue.id, stageExecutionRepo);
+        const latestAiReviewOutput = latestAiReview?.output as Record<string, unknown> | undefined;
+
+        if (!latestAiReview || latestAiReview.status !== 'pass' || latestAiReviewOutput?.verdict !== 'PASS') {
+          return c.json({
+            success: false,
+            error: `Cannot approve: latest ai-review verdict is '${latestAiReviewOutput?.verdict ?? latestAiReview?.status ?? 'unknown'}', expected 'PASS'. Re-run checks or wait for completion.`
+          } satisfies ApiResponse, 409);
+        }
+
+        if (typeof approvalOutput?.snapshotSha !== 'string' || approvalOutput.snapshotSha.length === 0) {
+          return c.json({
+            success: false,
+            error: 'Cannot approve: approval snapshot is missing. Re-run checks to regenerate an authoritative ai-review result.'
+          } satisfies ApiResponse, 409);
+        }
+
+        if (typeof latestAiReviewOutput?.snapshotSha !== 'string' || latestAiReviewOutput.snapshotSha.length === 0) {
+          return c.json({
+            success: false,
+            error: 'Cannot approve: latest ai-review snapshot is missing. Re-run checks to regenerate an authoritative ai-review result.'
+          } satisfies ApiResponse, 409);
+        }
+
+        if (latestAiReviewOutput.snapshotSha !== approvalOutput.snapshotSha) {
+          return c.json({
+            success: false,
+            error: 'Cannot approve: approval snapshot does not match the latest authoritative ai-review snapshot. The check state may have changed since approval was requested.'
+          } satisfies ApiResponse, 409);
+        }
 
         if (checkSuiteRepo) {
           const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
@@ -1089,7 +1132,7 @@ export function createIssueRoutes(
               } satisfies ApiResponse, 409);
             }
 
-            const approvalSnapshotSha = approvalOutput?.snapshotSha;
+            const approvalSnapshotSha = approvalOutput.snapshotSha;
             if (typeof approvalSnapshotSha === 'string' && activeSuite.snapshotSha !== approvalSnapshotSha) {
               return c.json({
                 success: false,
@@ -1106,7 +1149,7 @@ export function createIssueRoutes(
             if (worktreePath) {
               try {
                 const currentHead = await worktreeManager.getHeadSha(worktreePath);
-                const approvalSnapshotSha = approvalOutput?.snapshotSha;
+                const approvalSnapshotSha = approvalOutput.snapshotSha;
 
                 if (typeof approvalSnapshotSha === 'string' && currentHead !== approvalSnapshotSha) {
                   return c.json({

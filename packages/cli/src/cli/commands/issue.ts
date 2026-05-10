@@ -9,6 +9,21 @@ import { apiClient } from '../api-client';
 import { requireServer } from '../server-check';
 import { classifyMergeDelivery, type MergeDeliveryStatus } from '../../workflow/issue-lifecycle';
 
+function latestCurrentTruthChecks(checkResults: any[]): any[] {
+  const latestByName = new Map<string, any>();
+  for (const check of checkResults) {
+    latestByName.set(check.name, check);
+  }
+
+  const rendered = new Set<string>();
+  return checkResults.filter((check) => {
+    if (latestByName.get(check.name) !== check) return false;
+    if (rendered.has(check.name)) return false;
+    rendered.add(check.name);
+    return true;
+  });
+}
+
 function formatStage(stage: string): string {
   const colors: Record<string, typeof chalk.green> = {
     draft: chalk.gray,
@@ -274,7 +289,7 @@ export function setupIssueCommands(program: Command): void {
             for (const execution of latestByStage.values()) {
               if (execution.checkResults && execution.checkResults.length > 0) {
                 console.log(chalk.gray(`    [${execution.stage}]`));
-                for (const check of execution.checkResults) {
+                for (const check of latestCurrentTruthChecks(execution.checkResults)) {
                   const isHealthGate = check.name.startsWith('health:') || (check.output && (check.output as any).kind === 'health-gate');
                   const checkIcon = check.status === 'pass' ? chalk.green('✓') : check.status === 'fail' ? chalk.red('✗') : check.status === 'error' ? chalk.red('✗') : chalk.gray('○');
                   const displayName = isHealthGate ? `health:${execution.stage}` : check.name;
