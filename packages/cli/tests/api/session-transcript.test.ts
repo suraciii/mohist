@@ -319,10 +319,10 @@ describe('Session Transcript API', () => {
         expect(response.body.data.metadata.model).toBe('claude-3-opus');
         expect(response.body.data.metadata.stage).toBe('build');
         expect(response.body.data.metadata.title).toBe('Test Session Title');
-        expect(response.body.data.metadata.statusKind).toBe('completed');
+        expect(response.body.data.metadata.statusKind).toBeUndefined();
       });
 
-      it('derives finalizing status when running session has terminal timing before refetch', async () => {
+      it('does not expose internal status taxonomy when running session has terminal timing before refetch', async () => {
         const { issue } = await setupProjectAndIssue();
         const session = createSession(issue.id, {
           status: 'running',
@@ -340,7 +340,7 @@ describe('Session Transcript API', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.data.metadata.status).toBe('running');
-        expect(response.body.data.metadata.statusKind).toBe('finalizing');
+        expect(response.body.data.metadata.statusKind).toBeUndefined();
       });
 
       it('completedAt is null for running sessions', async () => {
@@ -472,7 +472,7 @@ describe('Session Transcript API', () => {
     });
 
     describe('running sessions do not expose misleading completedAt', () => {
-      it('returns null completedAt and live statusKind for running sessions', async () => {
+      it('returns null completedAt without statusKind for running sessions', async () => {
         const { issue } = await setupProjectAndIssue();
         const session = createSession(issue.id, { status: 'running' });
 
@@ -494,12 +494,12 @@ describe('Session Transcript API', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.data.metadata.completedAt).toBeNull();
-        expect(response.body.data.metadata.statusKind).toBe('live');
+        expect(response.body.data.metadata.statusKind).toBeUndefined();
         expect(response.body.data.turns[0].assistant[0].type).toBe('tool');
         expect(response.body.data.turns[0].assistant[0].tool.status).toBe('running');
       });
 
-      it('returns stale statusKind when last activity is beyond 2 minutes', async () => {
+      it('does not expose stale taxonomy when last activity is beyond 2 minutes', async () => {
         const { issue } = await setupProjectAndIssue();
         const session = createSession(issue.id, { status: 'running' });
 
@@ -518,7 +518,7 @@ describe('Session Transcript API', () => {
         const response = await request(server).get(`/api/issues/${issue.number}/coder-sessions/${session.id}`);
 
         expect(response.status).toBe(200);
-        expect(response.body.data.metadata.statusKind).toBe('stale');
+        expect(response.body.data.metadata.statusKind).toBeUndefined();
       });
     });
   });
