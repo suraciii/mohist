@@ -333,7 +333,7 @@ describe('MergeQueue', () => {
       expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
     });
 
-    it('should fail before mergeBack when merge metadata is unavailable', async () => {
+    it('should fall back to issue title when merge metadata is unavailable', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id, {
@@ -346,9 +346,18 @@ describe('MergeQueue', () => {
       queue.enqueue(project.id, issue.number);
       await waitForQueueToSettle(queue);
 
-      expect(worktreeManager.mergeBack).not.toHaveBeenCalled();
-      expect(issueRepo.findById(issue.id)?.mergeState).toBe('build-failed');
-      expect(failedEvents).toHaveLength(1);
+      expect(worktreeManager.mergeBack).toHaveBeenCalledWith(
+        PROJECT_PATH,
+        PROJECT_NAME,
+        issue.number,
+        BASE_BRANCH,
+        {
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+        },
+      );
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
+      expect(failedEvents).toHaveLength(0);
     });
 
     it('should rebase then squash merge when canFastForward is false', async () => {

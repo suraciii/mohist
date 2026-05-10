@@ -151,23 +151,31 @@ export interface MergeTaskSummary {
 export interface MergeMetadata {
   issueNumber: number;
   issueTitle: string;
+  commitMessages?: string[];
   tasks?: MergeTaskSummary[];
 }
 
 export type MergeBackResult =
-  | { success: true; message: string; targetBranch?: string; baseSha?: string; candidateHeadSha?: string; landedSha?: string }
+  | { success: true; message: string; targetBranch: string; baseSha: string; candidateHeadSha: string; landedSha: string }
   | { success: false; message: string; targetBranch: string; baseSha: string; candidateHeadSha: string };
 
 export function formatSquashCommitMessage(metadata: MergeMetadata): string {
   const subject = `${metadata.issueTitle} (#${metadata.issueNumber})`;
-  if (!metadata.tasks || metadata.tasks.length === 0) {
+  const commitMessages = metadata.commitMessages?.map(m => m.trim()).filter(Boolean) ?? [];
+  if (commitMessages.length === 0) {
     return subject;
   }
-  const body = [
-    `Issue: #${metadata.issueNumber}`,
-    ...metadata.tasks.map(t => `* ${t.id}: ${t.title}`),
-  ].join('\n');
+  const body = commitMessages.map(message => `* ${message}`).join('\n');
   return `${subject}\n\n${body}`;
+}
+
+async function getCandidateCommitMessages(projectPath: string, baseBranch: string, branch: string): Promise<string[]> {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['log', '--format=%s', `${baseBranch}..${branch}`],
+    { cwd: projectPath },
+  );
+  return stdout.split('\n').map(line => line.trim()).filter(Boolean);
 }
 
 async function cleanupFailedSquashMerge(projectPath: string): Promise<void> {
@@ -265,14 +273,16 @@ export class WorktreeManager {
     let baseSha = '';
     let candidateHeadSha = '';
 
-    try {
-      const { stdout: logOut } = await execFileAsync('git', ['log', `${baseBranch}..${branch}`, '--oneline'], { cwd: projectPath });
-      if (logOut.trim().length === 0) {
-        log.info('No commits to merge back', { issueNumber, branch, baseBranch });
-        return { success: true, message: `No commits to merge for issue #${issueNumber}` };
-      }
-    } catch {
-      // ignore, proceed to merge attempt
+    const commitMessages = await getCandidateCommitMessages(projectPath, baseBranch, branch).catch(() => []);
+    if (commitMessages.length === 0) {
+      log.warn('No candidate commits to squash merge', { issueNumber, branch, baseBranch });
+      return {
+        success: false,
+        message: `No candidate commits to squash merge for issue #${issueNumber}`,
+        targetBranch: baseBranch,
+        baseSha: '',
+        candidateHeadSha: '',
+      };
     }
 
     try {
@@ -319,7 +329,10 @@ export class WorktreeManager {
       };
     }
 
-    const commitMessage = formatSquashCommitMessage(metadata);
+    const commitMessage = formatSquashCommitMessage({
+      ...metadata,
+      commitMessages,
+    });
 
     try {
       await execFileAsync('git', ['merge', '--squash', branch], { cwd: projectPath });
@@ -847,46 +860,24 @@ export class WorktreeManager {
       };
     }
 
-    let rebased = false;
-    const canFF = await this.canFastForward(projectPath, projectName, issueNumber, baseBranch);
-    if (!canFF) {
-      try {
-        await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
-      } catch { /* no stale rebase */ }
-
-      const rebaseResult = await this.rebaseOntoMaster(
-        projectPath,
-        projectName,
-        issueNumber,
-        baseBranch,
-        { abortOnConflict: true }
-      );
-
-      if (!rebaseResult.success) {
-        return {
-          failingStep: 'merge',
-          targetBranch: baseBranch,
-          baseSha,
-          candidateHeadSha,
-          conflictFiles: rebaseResult.conflicts.length > 0 ? rebaseResult.conflicts : undefined,
-          error: `Clean rebase with abort-on-conflict failed: conflicts detected`,
-        };
-      }
-
-      try {
-        const { stdout: newHead } = await execFileAsync(
-          'git', ['rev-parse', branch],
-          { cwd: projectPath }
-        );
-        candidateHeadSha = newHead.trim();
-      } catch { /* use original */ }
-
-      rebased = true;
+    const commitMessages = await getCandidateCommitMessages(projectPath, baseBranch, branch).catch(() => []);
+    if (commitMessages.length === 0) {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        error: `No candidate commits to squash merge for issue #${issueNumber}`,
+      };
     }
 
     const commitMessage = metadata
-      ? formatSquashCommitMessage(metadata)
-      : `Merge issue #${issueNumber}`;
+      ? formatSquashCommitMessage({ ...metadata, commitMessages })
+      : formatSquashCommitMessage({
+        issueNumber,
+        issueTitle: `Merge issue #${issueNumber}`,
+        commitMessages,
+      });
 
     try {
       await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
@@ -932,13 +923,12 @@ export class WorktreeManager {
         { cwd: projectPath }
       );
       const landedSha = landedOut.trim();
-      log.info('Squash merge succeeded', { issueNumber, branch, baseBranch, landedSha, rebased });
+      log.info('Squash merge succeeded', { issueNumber, branch, baseBranch, landedSha });
       return {
         targetBranch: baseBranch,
         baseSha,
         candidateHeadSha,
         landedSha,
-        rebased: rebased || undefined,
       };
     } catch (err) {
       return {

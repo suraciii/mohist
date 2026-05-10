@@ -387,6 +387,10 @@ describe('WorktreeManager', () => {
           cb?.(null, mockStdout('base-sha\n'), '');
           return undefined as any;
         }
+        if (args?.[0] === 'log' && args?.[1] === '--format=%s') {
+          cb?.(null, mockStdout('chore: integrate issue #9 artifacts\n'), '');
+          return undefined as any;
+        }
 
         cb?.(null, mockStdout(''), '');
         return undefined as any;
@@ -416,14 +420,14 @@ describe('WorktreeManager', () => {
   });
 
   describe('formatSquashCommitMessage', () => {
-    it('should format message with issue title, number, and task summaries', () => {
+    it('should format message with issue title, number, and commit subjects', () => {
       const metadata: MergeMetadata = {
         issueNumber: 42,
         issueTitle: 'Add user authentication',
-        tasks: [
-          { id: 'T-001', title: 'Create auth middleware' },
-          { id: 'T-002', title: 'Add login endpoint' },
-          { id: 'T-003', title: 'Write auth tests' },
+        commitMessages: [
+          'plan(issue-42): add user authentication',
+          'T-001: Create auth middleware',
+          'T-002: Add login endpoint',
         ],
       };
 
@@ -431,10 +435,9 @@ describe('WorktreeManager', () => {
 
       expect(message).toBe(
         'Add user authentication (#42)\n\n' +
-        'Issue: #42\n' +
+        '* plan(issue-42): add user authentication\n' +
         '* T-001: Create auth middleware\n' +
-        '* T-002: Add login endpoint\n' +
-        '* T-003: Write auth tests'
+        '* T-002: Add login endpoint'
       );
     });
 
@@ -461,7 +464,7 @@ describe('WorktreeManager', () => {
       expect(message).toBe('Update dependencies (#15)');
     });
 
-    it('should handle single task', () => {
+    it('should ignore legacy tasks when commit messages are missing', () => {
       const metadata: MergeMetadata = {
         issueNumber: 3,
         issueTitle: 'Add CI pipeline',
@@ -472,11 +475,7 @@ describe('WorktreeManager', () => {
 
       const message = formatSquashCommitMessage(metadata);
 
-      expect(message).toBe(
-        'Add CI pipeline (#3)\n\n' +
-        'Issue: #3\n' +
-        '* T-001: Configure GitHub Actions'
-      );
+      expect(message).toBe('Add CI pipeline (#3)');
     });
   });
 
@@ -489,7 +488,7 @@ describe('WorktreeManager', () => {
       const commitMessages: string[] = [];
 
       execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[1] === '--format=%s') {
           cb?.(null, mockStdout('abc123 feat: add login\n'), '');
           return undefined as any;
         }
@@ -520,15 +519,15 @@ describe('WorktreeManager', () => {
       expect(squashCalls.length).toBe(1);
       expect(squashCalls[0]).toEqual(['merge', '--squash', 'mo/issue-1']);
       expect(commitMessages.length).toBe(1);
-      expect(commitMessages[0]).toBe('Add user auth (#1)\n\nIssue: #1\n* T-001: Create middleware');
+      expect(commitMessages[0]).toBe('Add user auth (#1)\n\n* abc123 feat: add login');
     });
 
-    it('should return no-op when no commits to merge', async () => {
+    it('should fail when there are no candidate commits to squash merge', async () => {
       fs.mkdirSync(getWorktreeDir(1), { recursive: true });
       const wm = new WorktreeManager();
 
       execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[1] === '--format=%s') {
           cb?.(null, mockStdout(''), '');
           return undefined as any;
         }
@@ -541,8 +540,8 @@ describe('WorktreeManager', () => {
         issueTitle: 'No-op merge',
       });
 
-      expect(result.success).toBe(true);
-      expect(result.message).toContain('No commits to merge');
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('No candidate commits to squash merge');
     });
 
     it('should return failure when squash merge fails', async () => {
@@ -550,7 +549,7 @@ describe('WorktreeManager', () => {
       const wm = new WorktreeManager();
 
       execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[1] === '--format=%s') {
           cb?.(null, mockStdout('abc123 feat: add login\n'), '');
           return undefined as any;
         }
@@ -591,7 +590,7 @@ describe('WorktreeManager', () => {
       const wm = new WorktreeManager();
 
       execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[1] === '--format=%s') {
           cb?.(null, mockStdout('abc123 feat: add login\n'), '');
           return undefined as any;
         }
@@ -629,7 +628,7 @@ describe('WorktreeManager', () => {
 
       const commitMessages: string[] = [];
       execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[1] === '--format=%s') {
           cb?.(null, mockStdout('abc123 feat: add login\n'), '');
           return undefined as any;
         }
@@ -652,7 +651,7 @@ describe('WorktreeManager', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(commitMessages[0]).toBe('Add login flow (#1)');
+      expect(commitMessages[0]).toBe('Add login flow (#1)\n\n* abc123 feat: add login');
     });
   });
 
@@ -736,6 +735,10 @@ describe('WorktreeManager', () => {
           cb?.(null, mockStdout('base-sha\n'), '');
           return undefined as any;
         }
+        if (args?.[0] === 'log' && args?.[1] === '--format=%s') {
+          cb?.(null, mockStdout('plan(issue-10): add feature y\nT-001: Implement feature\nT-002: Add tests\n'), '');
+          return undefined as any;
+        }
         if (args?.[0] === 'merge' && args?.[1] === '--squash') {
           squashCalls.push([...args]);
           cb?.(null, mockStdout(''), '');
@@ -763,10 +766,15 @@ describe('WorktreeManager', () => {
       expect(squashCalls.length).toBe(1);
       expect(squashCalls[0]).toEqual(['merge', '--squash', 'mo/issue-10']);
       expect(commitCalls.length).toBe(1);
-      expect(commitCalls[0][2]).toBe('Add feature Y (#10)\n\nIssue: #10\n* T-001: Implement feature\n* T-002: Add tests');
+      expect(commitCalls[0][2]).toBe(
+        'Add feature Y (#10)\n\n' +
+        '* plan(issue-10): add feature y\n' +
+        '* T-001: Implement feature\n' +
+        '* T-002: Add tests'
+      );
     });
 
-    it('mergeApprovedCandidate with metadata generates commit message including issue title and task summaries', async () => {
+    it('mergeApprovedCandidate with metadata generates commit message from branch commit subjects', async () => {
       fs.mkdirSync(getWorktreeDir(11), { recursive: true });
       const wm = new WorktreeManager();
 
@@ -788,6 +796,10 @@ describe('WorktreeManager', () => {
           cb?.(null, mockStdout('base-sha\n'), '');
           return undefined as any;
         }
+        if (args?.[0] === 'log' && args?.[1] === '--format=%s') {
+          cb?.(null, mockStdout('plan(issue-11): fix critical bug\nT-001: Root cause analysis\nT-002: Apply fix\nT-003: Regression tests\n'), '');
+          return undefined as any;
+        }
         if (args?.[0] === 'commit' && args?.[1] === '-m') {
           capturedCommitMessage = args[2];
         }
@@ -806,7 +818,7 @@ describe('WorktreeManager', () => {
       });
 
       expect(capturedCommitMessage).toContain('Fix critical bug (#11)');
-      expect(capturedCommitMessage).toContain('Issue: #11');
+      expect(capturedCommitMessage).toContain('* plan(issue-11): fix critical bug');
       expect(capturedCommitMessage).toContain('* T-001: Root cause analysis');
       expect(capturedCommitMessage).toContain('* T-002: Apply fix');
       expect(capturedCommitMessage).toContain('* T-003: Regression tests');
@@ -817,7 +829,7 @@ describe('WorktreeManager', () => {
       const wm = new WorktreeManager();
 
       execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[1] === '--format=%s') {
           cb?.(null, mockStdout('abc123 commit msg\n'), '');
           return undefined as any;
         }
@@ -844,7 +856,7 @@ describe('WorktreeManager', () => {
       const commitCalls: string[][] = [];
 
       execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (cmd === 'git' && args?.[0] === 'log' && args?.[2] === '--oneline') {
+        if (cmd === 'git' && args?.[0] === 'log' && args?.[1] === '--format=%s') {
           cb?.(null, mockStdout('abc123 commit msg\n'), '');
           return undefined as any;
         }
@@ -872,7 +884,7 @@ describe('WorktreeManager', () => {
       expect(squashCalls.length).toBe(1);
       expect(squashCalls[0]).toEqual(['merge', '--squash', 'mo/issue-13']);
       expect(commitCalls.length).toBe(1);
-      expect(commitCalls[0][2]).toBe('Refactor module (#13)\n\nIssue: #13\n* T-001: Rewrite core');
+      expect(commitCalls[0][2]).toBe('Refactor module (#13)\n\n* abc123 commit msg');
     });
   });
 });

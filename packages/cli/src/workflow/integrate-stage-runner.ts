@@ -446,7 +446,6 @@ export class IntegrateStageRunner extends BaseStageRunner {
           baseSha: mergeTruth.baseSha,
           candidateHeadSha: mergeTruth.candidateHeadSha,
           landedSha: mergeTruth.landedSha,
-          fastForward: mergeTruth.fastForward,
           rebased: mergeTruth.rebased,
         },
         startedAt: mergeStartedAt,
@@ -467,7 +466,6 @@ export class IntegrateStageRunner extends BaseStageRunner {
           baseSha: mergeTruth.baseSha,
           candidateHeadSha: mergeTruth.candidateHeadSha,
           landedSha: mergeTruth.landedSha,
-          fastForward: mergeTruth.fastForward,
           rebased: mergeTruth.rebased,
         },
       });
@@ -478,7 +476,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         issueNumber: ctx.issue.number,
         step: 'integrate:merge',
         status: 'completed',
-        summary: `Merge completed: ${mergeTruth.landedSha} (fastForward=${mergeTruth.fastForward}, rebased=${mergeTruth.rebased})`,
+        summary: `Squash merge completed: ${mergeTruth.landedSha}${mergeTruth.rebased ? ' (rebased=true)' : ''}`,
         output: mergeResult.output,
       });
 
@@ -488,7 +486,6 @@ export class IntegrateStageRunner extends BaseStageRunner {
         baseSha: mergeTruth.baseSha,
         candidateHeadSha: mergeTruth.candidateHeadSha,
         landedSha: mergeTruth.landedSha,
-        fastForward: mergeTruth.fastForward,
         rebased: mergeTruth.rebased,
       });
 

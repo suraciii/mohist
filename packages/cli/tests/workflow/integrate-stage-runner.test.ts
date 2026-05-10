@@ -50,7 +50,6 @@ function createMockContext(
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       }),
     } as any,
     projectRepo: {
@@ -310,7 +309,6 @@ Arc added scenario content.`);
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       });
 
       const baseCtx = createMockContext(tmpDir, issueNumber);
@@ -434,7 +432,6 @@ FF added scenario content.`);
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       });
 
       const ctx = createMockContext(tmpDir, issueNumber, {
@@ -454,7 +451,7 @@ FF added scenario content.`);
       expect(mergeOutput.baseSha).toBe('abc123');
       expect(mergeOutput.candidateHeadSha).toBe('def456');
       expect(mergeOutput.landedSha).toBe('ghi789');
-      expect(mergeOutput.fastForward).toBe(true);
+      expect(mergeOutput.fastForward).toBeUndefined();
     });
 
     it('merges using project path and name instead of issue project id or worktree path', async () => {
@@ -482,7 +479,6 @@ Identity added scenario content.`);
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       });
 
       const ctx = createMockContext(tmpDir, issueNumber, {
@@ -537,7 +533,6 @@ RB added scenario content.`);
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: false,
         rebased: true,
       });
 
@@ -553,7 +548,7 @@ RB added scenario content.`);
       const mergeStep = output.steps?.find(s => s.step === 'integrate:merge');
       expect(mergeStep).toBeDefined();
       const mergeOutput = mergeStep!.output as { fastForward?: boolean; rebased?: boolean };
-      expect(mergeOutput.fastForward).toBe(false);
+      expect(mergeOutput.fastForward).toBeUndefined();
       expect(mergeOutput.rebased).toBe(true);
     });
 
@@ -752,7 +747,6 @@ FH added scenario content.`);
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       });
 
       const execFileMock = setupPassingExecFileMock();
@@ -801,7 +795,6 @@ FHF added scenario content.`);
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       });
 
       const execFileMock = setupFailingExecFileMock(1, 'build failed\nerror details');
@@ -843,7 +836,6 @@ FHD added scenario content.`);
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       });
 
       const execFileMock = vi.fn();
@@ -917,7 +909,6 @@ PMD added scenario content.`);
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       });
 
       let capturedCommand = '';

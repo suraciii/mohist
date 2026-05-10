@@ -228,6 +228,14 @@ async function main(): Promise<void> {
       }
     },
     postMergeFinalizer,
+    getMergeMetadata: async (projectId: string, issueNumber: number) => {
+      const issue = issueRepo.findByNumber(projectId, issueNumber);
+      if (!issue) return undefined;
+      return {
+        issueNumber,
+        issueTitle: issue.title,
+      };
+    },
   });
 
   mergeQueue.recoverFromDB();
