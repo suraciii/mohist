@@ -2895,6 +2895,23 @@ export function createIssueRoutes(
         checkpointRepo.delete(issue.number, issue.stage);
       }
 
+      if (issue.stage === Stage.Check && worktreeManager) {
+        const worktreePath = worktreeManager.getPath(project.name, issue.number);
+        if (worktreePath) {
+          const changeDir = findChangeDir(worktreePath, issue.number);
+          if (changeDir) {
+            for (const filename of ['review.md', 'review-self-check.md']) {
+              const artifactPath = path.join(changeDir, filename);
+              try {
+                if (fs.existsSync(artifactPath)) {
+                  fs.unlinkSync(artifactPath);
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+
       agentRunner.cancelAll(issue.id);
 
       const issueRepo = stateManager.getIssueRepo();

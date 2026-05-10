@@ -580,6 +580,52 @@ describe('API Routes', () => {
       });
     });
 
+    describe('POST /api/issues/:number/rerun', () => {
+      it('clears check checkpoint and stale review artifacts before rerunning check stage', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-rerun-check-test-'));
+
+        try {
+          const project = await projectService.create({ name: 'RerunCheckTest', path: tmpDir });
+          projectService.setCurrent(project);
+
+          const issue = issueService.create({ projectId: project.id, title: 'Rerun Check Issue' });
+          issueService.transitionToStage(issue.id, Stage.Check);
+          issueService.setStatus(issue.id, IssueStatus.Active);
+
+          const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [] }));
+          fs.writeFileSync(path.join(changeDir, 'review.md'), '# stale review');
+          fs.writeFileSync(path.join(changeDir, 'review-self-check.md'), '# stale self check');
+
+          const checkpointRepo = stateManager.getPipelineCheckpointRepo();
+          checkpointRepo.upsert(issue.number, 'check', ['review', 'review-self-check'], null);
+
+          const worktreeManager = {
+            getPath: vi.fn().mockReturnValue(tmpDir),
+          } as any;
+
+          const rerunApp = new Hono();
+          const rerunEventBus = new EventBus();
+          const rerunAgentRunner = new AgentRunnerService(rerunEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(rerunAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          rerunApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, rerunAgentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
+          const rerunServer = createTestServer(rerunApp);
+
+          const response = await request(rerunServer).post(`/api/issues/${issue.number}/rerun`);
+
+          expect(response.status).toBe(202);
+          expect(response.body.success).toBe(true);
+          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+          expect(checkpointRepo.get(issue.number, 'check')).toBeNull();
+          expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
+          expect(fs.existsSync(path.join(changeDir, 'review-self-check.md'))).toBe(false);
+        } finally {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+    });
+
     describe('POST /api/issues/:number/comments', () => {
       it('should add a comment to an issue', async () => {
         const issue = issueService.create({ projectId, title: 'Comment Test' });
