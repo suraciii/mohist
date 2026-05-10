@@ -233,7 +233,6 @@ describe('Session liveness end-to-end regression', () => {
     expect(probeDeadline - probeSent).toBeGreaterThanOrEqual(PROBE_TIMEOUT_MS - 10);
 
     await session.close().catch(() => {});
-    await executePromise.catch(() => {});
   });
 
   it('probing session returns to running when new data arrives', async () => {
@@ -284,6 +283,53 @@ describe('Session liveness end-to-end regression', () => {
 
     await session.close().catch(() => {});
   }, 10000);
+
+  it('successful probe response without sessionUpdate returns session to running', async () => {
+    const stateChanges: Array<{ from: string; to: string }> = [];
+    const livenessUpdates: LivenessUpdate[] = [];
+
+    let promptCallCount = 0;
+    mockPromptFn.mockImplementation(() => {
+      promptCallCount++;
+      if (promptCallCount === 1) {
+        return new Promise(() => {});
+      }
+      return Promise.resolve({ ok: true });
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      livenessQuietThresholdMs: QUIET_THRESHOLD_MS,
+      probeTimeoutMs: PROBE_TIMEOUT_MS,
+      observers: [{
+        onStateChange(_ctx, from, to) {
+          stateChanges.push({ from, to });
+        },
+        onLivenessUpdate(_ctx, update) {
+          livenessUpdates.push(update);
+        },
+      }],
+    });
+
+    void session.execute('test');
+
+    await vi.advanceTimersByTimeAsync(QUIET_THRESHOLD_MS + 10);
+    expect(stateChanges.some(c => c.to === 'probing')).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(stateChanges.some(c => c.from === 'probing' && c.to === 'running')).toBe(true);
+    expect(livenessUpdates.some(u => u.status === 'running')).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + 20);
+    expect(stateChanges.some(c => c.to === 'failed')).toBe(false);
+
+    await session.close().catch(() => {});
+  });
 
   it('probe timeout marks session failed with failureReason and returns session_failed', async () => {
     const stateChanges: Array<{ from: string; to: string }> = [];

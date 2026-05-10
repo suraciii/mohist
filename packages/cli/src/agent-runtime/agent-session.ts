@@ -566,7 +566,11 @@ export class AgentSession {
       return;
     }
 
-    probePromise.catch((err) => {
+    probePromise.then(() => {
+      if (this._activeProbe && !this._closed) {
+        this.refreshLastDataAt({ notifyRunning: true });
+      }
+    }).catch((err) => {
       log.warn('probe prompt failed', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
       this._probeSendFailure = err instanceof Error ? err : new Error(String(err));
       this._resolveProbeSendFailure?.();

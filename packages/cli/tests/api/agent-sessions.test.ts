@@ -376,6 +376,29 @@ describe('GET /api/agent/sessions', () => {
     });
   });
 
+  it('returns No active session on /session-status for a stale failed session on an inactive issue', async () => {
+    const issue = createIssue('Stale failed issue');
+    stateManager.getIssueRepo().update(issue.id, { status: 'done' as any });
+
+    const session = createSession(issue.id, { acpSessionId: 'acp-stale-failed' });
+    coderSessionRepo.markFailed(session.id, 'probe_timeout');
+
+    const response = await request(server).get('/api/agent/session-status');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({
+      sessionId: null,
+      acpSessionId: null,
+      status: null,
+      currentSessionState: 'No active session',
+      lastDataAt: null,
+      probeSentAt: null,
+      probeDeadlineAt: null,
+      failureReason: null,
+    });
+  });
+
   it('returns No active session on /session-status when no current project', async () => {
     projectService.clearCurrent();
 
