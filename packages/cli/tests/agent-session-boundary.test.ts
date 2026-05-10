@@ -764,12 +764,14 @@ describe('Timeout path cleanup and cancellation', () => {
 
     expect(mockCancelFn).toHaveBeenCalled();
     expect(onBeforeKillFn).toHaveBeenCalled();
-    expect(stateChanges.some(c => c.to === 'timeout')).toBe(true);
+    expect(stateChanges.some(c => c.to === 'failed')).toBe(true);
     expect(result.success).toBe(false);
     expect(result.error).toContain('Timed out');
+    expect(result.failureKind).toBe('timeout');
+    expect(result.failureReason).toBe('timeout');
   });
 
-  it('should emit timeout terminal state to observers', async () => {
+  it('should emit failed terminal state to observers on timeout', async () => {
     const { withSession } = await import('../src/agent-runtime/agent-session');
 
     mockCancelFn.mockResolvedValue(undefined);
@@ -791,7 +793,7 @@ describe('Timeout path cleanup and cancellation', () => {
 
     await resultPromise;
 
-    expect(stateChanges.some(c => c.to === 'timeout')).toBe(true);
+    expect(stateChanges.some(c => c.to === 'failed')).toBe(true);
   });
 });
 
