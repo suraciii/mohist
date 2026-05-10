@@ -97,7 +97,7 @@ describe('WorkflowSessionObserver onLivenessUpdate', () => {
     expect(mockCoderSessionRepo.markDataReceived).toHaveBeenCalledWith('cs-1');
   });
 
-  it('should call markProbing when status is probing with probeDeadlineAt', () => {
+  it('should call markProbing when status is probing with emitted probe timestamps', () => {
     const observer = new WorkflowSessionObserver({
       eventBus: mockEventBus,
       coderSessionRepo: mockCoderSessionRepo,
@@ -106,12 +106,17 @@ describe('WorkflowSessionObserver onLivenessUpdate', () => {
 
     const update: LivenessUpdate = {
       status: 'probing',
+      probeSentAt: '2024-01-01T00:00:30.000Z',
       probeDeadlineAt: '2024-01-01T00:01:00.000Z',
     };
 
     observer.onLivenessUpdate({ issueId: 'issue-1', issueNumber: 42, projectId: 'proj-1', acpSessionId: 'acp-1', executionId: 'exec-1', stage: undefined, model: undefined, processPid: undefined }, update);
 
-    expect(mockCoderSessionRepo.markProbing).toHaveBeenCalledWith('cs-1', '2024-01-01T00:01:00.000Z');
+    expect(mockCoderSessionRepo.markProbing).toHaveBeenCalledWith(
+      'cs-1',
+      '2024-01-01T00:00:30.000Z',
+      '2024-01-01T00:01:00.000Z'
+    );
   });
 
   it('should call markFailed when status is failed with failureReason', () => {

@@ -21,6 +21,24 @@ export function createAgentRoutes(
 ): Hono {
   const app = new Hono();
 
+  const noActiveSession = (): SessionStatus => ({
+    sessionId: null,
+    acpSessionId: null,
+    status: null,
+    currentSessionState: 'No active session',
+    lastDataAt: null,
+    probeSentAt: null,
+    probeDeadlineAt: null,
+    failureReason: null,
+  });
+
+  const currentSessionState = (status: string | null): SessionStatus['currentSessionState'] => {
+    if (status === 'failed') return 'Session failed';
+    if (status === 'probing') return 'Checking session';
+    if (status === 'running') return 'Running';
+    return 'No active session';
+  };
+
   app.get('/status', async (c) => {
     const status = agentRunner.getStatus();
 
@@ -54,46 +72,18 @@ export function createAgentRoutes(
     if (!projectId) {
       return c.json({
         success: true,
-        data: {
-          sessionId: null,
-          acpSessionId: null,
-          status: null,
-          currentSessionState: 'No active session' as const,
-          lastDataAt: null,
-          probeSentAt: null,
-          probeDeadlineAt: null,
-          failureReason: null,
-        },
+        data: noActiveSession(),
       });
     }
 
-    const runningSessions = coderSessionRepo?.findAllRunning() ?? [];
-    const activeSession = runningSessions
-      .filter(s => s.issueId === projectId || projectId === undefined)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    const activeSession = coderSessionRepo?.findLatestCurrentByProjectId(projectId) ?? null;
 
     if (!activeSession) {
       return c.json({
         success: true,
-        data: {
-          sessionId: null,
-          acpSessionId: null,
-          status: null,
-          currentSessionState: 'No active session' as const,
-          lastDataAt: null,
-          probeSentAt: null,
-          probeDeadlineAt: null,
-          failureReason: null,
-        } satisfies SessionStatus,
+        data: noActiveSession(),
       });
     }
-
-    const currentSessionState = (status: string): SessionStatus['currentSessionState'] => {
-      if (status === 'failed') return 'Session failed';
-      if (status === 'probing') return 'Checking session';
-      if (status === 'running') return 'Running';
-      return 'No active session';
-    };
 
     const data: SessionStatus = {
       sessionId: activeSession.id,

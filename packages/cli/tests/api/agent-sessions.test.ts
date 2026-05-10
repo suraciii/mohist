@@ -309,4 +309,70 @@ describe('GET /api/agent/sessions', () => {
     expect(response.body.success).toBe(true);
     expect(response.body.data).toEqual([]);
   });
+
+  it('returns Running for the latest running session on /session-status', async () => {
+    const issue = createIssue('Running issue');
+    const session = createSession(issue.id, { status: 'running', acpSessionId: 'acp-running' });
+
+    const response = await request(server).get('/api/agent/session-status');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.sessionId).toBe(session.id);
+    expect(response.body.data.status).toBe('running');
+    expect(response.body.data.currentSessionState).toBe('Running');
+  });
+
+  it('returns Checking session for a probing session on /session-status', async () => {
+    const issue = createIssue('Probing issue');
+    const session = createSession(issue.id, { acpSessionId: 'acp-probing' });
+    const probeSentAt = '2026-05-10T10:00:00.000Z';
+    const probeDeadlineAt = '2026-05-10T10:00:30.000Z';
+    coderSessionRepo.markProbing(session.id, probeSentAt, probeDeadlineAt);
+
+    const response = await request(server).get('/api/agent/session-status');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.sessionId).toBe(session.id);
+    expect(response.body.data.status).toBe('probing');
+    expect(response.body.data.currentSessionState).toBe('Checking session');
+    expect(response.body.data.probeSentAt).toBe(probeSentAt);
+    expect(response.body.data.probeDeadlineAt).toBe(probeDeadlineAt);
+  });
+
+  it('returns Session failed for a failed session on /session-status', async () => {
+    const issue = createIssue('Failed issue');
+    const session = createSession(issue.id, { acpSessionId: 'acp-failed' });
+    coderSessionRepo.markFailed(session.id, 'probe_timeout');
+
+    const response = await request(server).get('/api/agent/session-status');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.sessionId).toBe(session.id);
+    expect(response.body.data.status).toBe('failed');
+    expect(response.body.data.currentSessionState).toBe('Session failed');
+    expect(response.body.data.failureReason).toBe('probe_timeout');
+  });
+
+  it('returns No active session on /session-status when only completed sessions exist', async () => {
+    const issue = createIssue('Completed issue');
+    createSession(issue.id, { status: 'completed', acpSessionId: 'acp-completed' });
+
+    const response = await request(server).get('/api/agent/session-status');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({
+      sessionId: null,
+      acpSessionId: null,
+      status: null,
+      currentSessionState: 'No active session',
+      lastDataAt: null,
+      probeSentAt: null,
+      probeDeadlineAt: null,
+      failureReason: null,
+    });
+  });
 });

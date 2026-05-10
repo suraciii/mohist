@@ -59,7 +59,7 @@ describe('CoderSessionRepo title', () => {
       acpSessionId: 'acp-liveness-2',
     });
 
-    repo.markProbing(session.id, new Date(Date.now() + 30000).toISOString());
+    repo.markProbing(session.id, new Date().toISOString(), new Date(Date.now() + 30000).toISOString());
     let updated = repo.findById(session.id);
     expect(updated!.status).toBe('probing');
     expect(updated!.probeSentAt).not.toBeNull();
@@ -78,10 +78,11 @@ describe('CoderSessionRepo title', () => {
     });
 
     const probeDeadline = new Date(Date.now() + 30000).toISOString();
-    const updated = repo.markProbing(session.id, probeDeadline);
+    const probeSentAt = new Date().toISOString();
+    const updated = repo.markProbing(session.id, probeSentAt, probeDeadline);
 
     expect(updated.status).toBe('probing');
-    expect(updated.probeSentAt).not.toBeNull();
+    expect(updated.probeSentAt).toBe(probeSentAt);
     expect(updated.probeDeadlineAt).toBe(probeDeadline);
   });
 
@@ -104,7 +105,7 @@ describe('CoderSessionRepo title', () => {
       acpSessionId: 'acp-liveness-5',
     });
 
-    repo.markProbing(session.id, new Date(Date.now() + 30000).toISOString());
+    repo.markProbing(session.id, new Date().toISOString(), new Date(Date.now() + 30000).toISOString());
     const found = repo.findById(session.id);
 
     expect(found).not.toBeNull();

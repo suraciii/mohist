@@ -173,8 +173,8 @@ export class WorkflowSessionObserver {
     try {
       if (update.status === 'running' && update.lastDataAt) {
         this.coderSessionRepo.markDataReceived(this._coderSessionId);
-      } else if (update.status === 'probing' && update.probeDeadlineAt) {
-        this.coderSessionRepo.markProbing(this._coderSessionId, update.probeDeadlineAt);
+      } else if (update.status === 'probing' && update.probeSentAt && update.probeDeadlineAt) {
+        this.coderSessionRepo.markProbing(this._coderSessionId, update.probeSentAt, update.probeDeadlineAt);
       } else if (update.status === 'failed' && update.failureReason) {
         this.coderSessionRepo.markFailed(this._coderSessionId, update.failureReason);
       }
