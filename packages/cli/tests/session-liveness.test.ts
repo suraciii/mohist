@@ -112,6 +112,7 @@ describe('Session liveness metadata in AcpSessionResult', () => {
     const result = await resultPromise;
     expect(result.success).toBe(false);
     expect(result.failureKind).toBe('timeout');
+    expect(result.failureReason).toBe('timeout');
   });
 
   it('should include failureKind cancelled in result on abort via ExecutePromptOptions.signal', async () => {

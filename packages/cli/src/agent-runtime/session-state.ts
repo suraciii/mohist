@@ -4,12 +4,11 @@ import { Log } from '../util/log';
 const log = Log.create({ service: 'session-state' });
 
 export const VALID_TRANSITIONS: Record<SessionState, SessionState[]> = {
-  initializing: ['running', 'failed', 'timeout'],
-  running: ['completed', 'failed', 'timeout', 'cancelled', 'probing'],
-  probing: ['running', 'failed', 'timeout', 'cancelled'],
+  initializing: ['running', 'failed'],
+  running: ['completed', 'failed', 'cancelled', 'probing'],
+  probing: ['running', 'failed', 'cancelled'],
   completed: ['closed'],
   failed: ['closed'],
-  timeout: ['closed'],
   cancelled: ['closed'],
   closed: [],
 };

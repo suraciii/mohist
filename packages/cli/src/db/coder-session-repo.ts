@@ -165,7 +165,7 @@ export class CoderSessionRepo {
   }
 
   updateStatus(id: string, status: string): CoderSession {
-    const terminalStatuses = new Set(['completed', 'failed', 'timeout', 'cancelled']);
+    const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
     const now = new Date().toISOString();
 
     if (terminalStatuses.has(status)) {

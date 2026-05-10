@@ -130,6 +130,8 @@ export class AgentSession {
   private _probeSentAt: number | null = null;
   private _probeDeadlineAt: number | null = null;
   private _activeProbe = false;
+  private _probeSendFailure: Error | null = null;
+  private _resolveProbeSendFailure: (() => void) | null = null;
   private _failureReason: string | null = null;
   private _livenessQuietThresholdMs: number;
   private _probeTimeoutMs: number;
@@ -270,6 +272,134 @@ export class AgentSession {
     };
   }
 
+  private createAbortPromise(signal: AbortSignal | undefined): Promise<'aborted'> {
+    if (!signal) {
+      return new Promise<'aborted'>(() => {});
+    }
+
+    return new Promise<'aborted'>((resolve) => {
+      if (signal.aborted) {
+        resolve('aborted');
+        return;
+      }
+      const onAbort = () => resolve('aborted');
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private createProbeDeadlinePromise(): Promise<'probe_deadline'> {
+    if (!this._probeDeadlineAt) {
+      return new Promise<'probe_deadline'>(() => {});
+    }
+
+    return new Promise<'probe_deadline'>((resolve) => {
+      const ms = this._probeDeadlineAt! - Date.now();
+      if (ms <= 0) {
+        resolve('probe_deadline');
+        return;
+      }
+      setTimeout(() => resolve('probe_deadline'), ms);
+    });
+  }
+
+  private shouldProbeForQuietThreshold(): boolean {
+    return Date.now() - this._lastDataAt >= this._livenessQuietThresholdMs
+      && this._stateMachine.current === 'running';
+  }
+
+  private async handleQuietThreshold(quietThresholdMonitor: QuietThresholdMonitor): Promise<void> {
+    if (this.shouldProbeForQuietThreshold()) {
+      quietThresholdMonitor.clear();
+      await this.startProbe();
+      quietThresholdMonitor.start();
+      return;
+    }
+
+    quietThresholdMonitor.restart();
+  }
+
+  private async waitForPromptProgress(
+    promptPromise: Promise<unknown>,
+    timeout: number,
+    abortPromise: Promise<'aborted'>,
+    quietThresholdMonitor: QuietThresholdMonitor,
+  ): Promise<unknown | 'timeout' | 'aborted' | 'probe_deadline' | 'quiet_threshold' | 'probe_send_failed'> {
+    return Promise.race([
+      promptPromise,
+      createTimeout(timeout),
+      abortPromise,
+      this._acpProcess.exitFailure,
+      this.createProbeDeadlinePromise(),
+      quietThresholdMonitor.promise(),
+      this.createProbeSendFailurePromise(),
+    ]);
+  }
+
+  private async monitorPromptExecution(
+    promptPromise: Promise<unknown>,
+    roundStartIndex: number,
+    timeout: number,
+    abortPromise: Promise<'aborted'>,
+    quietThresholdMonitor: QuietThresholdMonitor,
+  ): Promise<AcpSessionResult> {
+    while (true) {
+      const result = await this.waitForPromptProgress(promptPromise, timeout, abortPromise, quietThresholdMonitor);
+
+      if (result === 'quiet_threshold') {
+        await this.handleQuietThreshold(quietThresholdMonitor);
+        continue;
+      }
+
+      if (result === 'probe_deadline') {
+        const deadlineResult = await this.handleProbeDeadline(roundStartIndex, quietThresholdMonitor);
+        if (deadlineResult) return deadlineResult;
+        continue;
+      }
+
+      if (result === 'probe_send_failed') {
+        return this.handleProbeSendFailure(roundStartIndex, quietThresholdMonitor);
+      }
+
+      if (result === 'aborted') {
+        return this.handleAbort(roundStartIndex, quietThresholdMonitor);
+      }
+
+      if (result === 'timeout') {
+        return this.handleTimeout(roundStartIndex, timeout, quietThresholdMonitor);
+      }
+
+      quietThresholdMonitor.clear();
+      return this.createPromptResult(roundStartIndex, { success: true });
+    }
+  }
+
+  private async handleExecuteError(
+    err: unknown,
+    roundStartIndex: number,
+  ): Promise<AcpSessionResult> {
+    const duration = Date.now() - this._sessionStartTime;
+    log.error('ACP execute failed', {
+      sessionId: this._sessionId, elapsedMs: duration, error: err instanceof Error ? err.message : String(err),
+    });
+    this._failureReason = err instanceof Error ? err.message : String(err);
+    this.transitionToFailed('Execute error');
+    const failCtx = this.makeCtx();
+    for (const obs of this._observers) {
+      try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch (obsErr) {
+        log.error('onStateChange observer failed', { error: obsErr instanceof Error ? obsErr.message : String(obsErr) });
+      }
+    }
+    let wipCommitted = false;
+    if (this._options.onBeforeKill) {
+      try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (killErr) {
+        log.warn('onBeforeKill failed on error', { error: killErr instanceof Error ? killErr.message : String(killErr) });
+      }
+    }
+    await this._acpProcess.cleanup();
+    const message = err instanceof Error ? err.message : String(err);
+    return this.createPromptResult(roundStartIndex, { success: false, error: message, wipCommitted, failureKind: 'session_failed', failureReason: this._failureReason });
+  }
+
   private async handleProbeDeadline(roundStartIndex: number, quietThresholdMonitor: QuietThresholdMonitor): Promise<AcpSessionResult | null> {
     if (!this._activeProbe || this._closed) {
       this._probeDeadlineAt = null;
@@ -290,6 +420,37 @@ export class AgentSession {
     return this.createPromptResult(roundStartIndex, {
       success: false,
       error: 'Session liveness probe timed out',
+      failureKind: 'session_failed',
+      failureReason: this._failureReason,
+    });
+  }
+
+  private createProbeSendFailurePromise(): Promise<'probe_send_failed'> {
+    if (this._probeSendFailure) {
+      return Promise.resolve('probe_send_failed');
+    }
+    return new Promise<'probe_send_failed'>((resolve) => {
+      this._resolveProbeSendFailure = () => resolve('probe_send_failed');
+    });
+  }
+
+  private async handleProbeSendFailure(roundStartIndex: number, quietThresholdMonitor: QuietThresholdMonitor): Promise<AcpSessionResult> {
+    quietThresholdMonitor.clear();
+    const error = this._probeSendFailure;
+    this._probeSendFailure = null;
+    this._failureReason = error?.message ?? 'probe_send_failed';
+    this.transitionToFailed('Probe send failed');
+    const failCtx = this.makeCtx();
+    for (const obs of this._observers) {
+      try { obs.onStateChange?.(failCtx, 'probing', 'failed'); } catch (err) {
+        log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    await this._acpProcess.cleanup();
+    this._closed = true;
+    return this.createPromptResult(roundStartIndex, {
+      success: false,
+      error: this._failureReason,
       failureKind: 'session_failed',
       failureReason: this._failureReason,
     });
@@ -330,12 +491,11 @@ export class AgentSession {
     quietThresholdMonitor.clear();
     const duration = Date.now() - this._sessionStartTime;
     log.error('ACP prompt timed out', { sessionId: this._sessionId, timeout, elapsedMs: duration });
-    try { this._stateMachine.transition('timeout'); } catch (err) {
-      log.warn('stateMachine transition to timeout failed', { error: err instanceof Error ? err.message : String(err) });
-    }
+    this._failureReason = 'timeout';
+    this.transitionToFailed('timeout');
     const failCtx = this.makeCtx();
     for (const obs of this._observers) {
-      try { obs.onStateChange?.(failCtx, 'running', 'timeout'); } catch (err) {
+      try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch (err) {
         log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
       }
     }
@@ -355,6 +515,7 @@ export class AgentSession {
       error: `Timed out after ${timeout / 1000}s`,
       wipCommitted,
       failureKind: 'timeout',
+      failureReason: this._failureReason,
     });
   }
 
@@ -385,6 +546,9 @@ export class AgentSession {
       prompt: [{ type: 'text', text: probeText }],
     }).catch((err) => {
       log.warn('probe prompt failed', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
+      this._probeSendFailure = err instanceof Error ? err : new Error(String(err));
+      this._resolveProbeSendFailure?.();
+      this._resolveProbeSendFailure = null;
     });
   }
 
@@ -665,16 +829,8 @@ export class AgentSession {
       wfObs2.writeMohistPrompt!(this.makeCtx(), promptData);
     }
 
-    const execSignal = meta?.signal ?? this._options.signal;
-    const abortPromise = execSignal
-      ? new Promise<'aborted'>((resolve) => {
-          if (execSignal.aborted) { resolve('aborted'); return; }
-          const onAbort = () => resolve('aborted');
-          execSignal.addEventListener('abort', onAbort, { once: true });
-        })
-      : new Promise<'aborted'>(() => {});
-
     const quietThresholdMonitor = this.createQuietThresholdMonitor();
+    const abortPromise = this.createAbortPromise(meta?.signal ?? this._options.signal);
 
     this._resetQuietTimer = () => quietThresholdMonitor.restart();
     quietThresholdMonitor.start();
@@ -685,82 +841,16 @@ export class AgentSession {
         prompt: [{ type: 'text', text: prompt }],
       });
 
-      while (true) {
-        const checkQuiet = () => {
-          if (Date.now() - this._lastDataAt >= this._livenessQuietThresholdMs && this._stateMachine.current === 'running') {
-            return true;
-          }
-          return false;
-        };
-
-        const probeDeadlinePromise = this._probeDeadlineAt
-          ? new Promise<'probe_deadline'>((resolve) => {
-              const ms = this._probeDeadlineAt! - Date.now();
-              if (ms <= 0) { resolve('probe_deadline'); return; }
-              setTimeout(() => resolve('probe_deadline'), ms);
-            })
-          : new Promise<'probe_deadline'>(() => {});
-
-        const result = await Promise.race([
-          promptPromise,
-          createTimeout(timeout),
-          abortPromise,
-          this._acpProcess.exitFailure,
-          probeDeadlinePromise,
-          quietThresholdMonitor.promise(),
-        ]);
-
-        if (result === 'quiet_threshold') {
-          if (checkQuiet()) {
-            quietThresholdMonitor.clear();
-            await this.startProbe();
-            quietThresholdMonitor.start();
-          } else {
-            quietThresholdMonitor.restart();
-          }
-          continue;
-        }
-
-        if (result === 'probe_deadline') {
-          const deadlineResult = await this.handleProbeDeadline(roundStartIndex, quietThresholdMonitor);
-          if (deadlineResult) return deadlineResult;
-          continue;
-        }
-
-        if (result === 'aborted') {
-          return this.handleAbort(roundStartIndex, quietThresholdMonitor);
-        }
-
-        if (result === 'timeout') {
-          return this.handleTimeout(roundStartIndex, timeout, quietThresholdMonitor);
-        }
-
-        quietThresholdMonitor.clear();
-        return this.createPromptResult(roundStartIndex, { success: true });
-      }
+      return await this.monitorPromptExecution(
+        promptPromise,
+        roundStartIndex,
+        timeout,
+        abortPromise,
+        quietThresholdMonitor,
+      );
     } catch (err) {
       quietThresholdMonitor.clear();
-      const duration = Date.now() - this._sessionStartTime;
-      log.error('ACP execute failed', {
-        sessionId: this._sessionId, elapsedMs: duration, error: err instanceof Error ? err.message : String(err),
-      });
-      this._failureReason = err instanceof Error ? err.message : String(err);
-      this.transitionToFailed('Execute error');
-      const failCtx = this.makeCtx();
-      for (const obs of this._observers) {
-        try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch (obsErr) {
-          log.error('onStateChange observer failed', { error: obsErr instanceof Error ? obsErr.message : String(obsErr) });
-        }
-      }
-      let wipCommitted = false;
-      if (this._options.onBeforeKill) {
-        try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (killErr) {
-          log.warn('onBeforeKill failed on error', { error: killErr instanceof Error ? killErr.message : String(killErr) });
-        }
-      }
-      await this._acpProcess.cleanup();
-      const message = err instanceof Error ? err.message : String(err);
-      return this.createPromptResult(roundStartIndex, { success: false, error: message, wipCommitted, failureKind: 'session_failed', failureReason: this._failureReason });
+      return this.handleExecuteError(err, roundStartIndex);
     } finally {
       this._resetQuietTimer = null;
     }
@@ -787,12 +877,20 @@ export class AgentSession {
     this._closed = true;
     const duration = Date.now() - this._sessionStartTime;
     log.info('Agent session closed', { sessionId: this._sessionId, elapsedMs: duration });
+    const fromState = this._stateMachine.current;
+    if (fromState === 'failed' || fromState === 'cancelled' || fromState === 'closed') {
+      try { this._stateMachine.transition('closed'); } catch (err) {
+        log.warn('stateMachine transition to closed failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+      await this._acpProcess.cleanup();
+      return;
+    }
     try { this._stateMachine.transition('completed'); } catch (err) {
       log.warn('stateMachine transition to completed failed', { error: err instanceof Error ? err.message : String(err) });
     }
     const ctx = this.makeCtx();
     for (const obs of this._observers) {
-      try { obs.onStateChange?.(ctx, 'running', 'completed'); } catch (err) {
+      try { obs.onStateChange?.(ctx, fromState, 'completed'); } catch (err) {
         log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
       }
     }

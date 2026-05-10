@@ -158,7 +158,7 @@ export class WorkflowSessionObserver {
   onStateChange(_ctx: SessionContext, _from: SessionState, to: SessionState): void {
     if (!this.coderSessionRepo || !this._coderSessionId) return;
 
-    if (to === 'completed' || to === 'failed' || to === 'timeout' || to === 'cancelled') {
+    if (to === 'completed' || to === 'failed' || to === 'cancelled') {
       try {
         this.coderSessionRepo.updateStatus(this._coderSessionId, to);
       } catch (err) {
