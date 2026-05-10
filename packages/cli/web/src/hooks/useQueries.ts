@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '../lib/api'
-import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, StageExecution, SystemInfo } from '../lib/types'
+import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, IssueStageStateResponse, StageExecution, SystemInfo } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 
 export function useProjects() {
@@ -571,5 +571,14 @@ export function useIssueExecutions(number: number) {
     queryKey: ['issues', number, 'executions'],
     queryFn: () => api.getIssueExecutions(number),
     enabled: number > 0,
+  })
+}
+
+export function useIssueStageState(number: number) {
+  return useQuery<IssueStageStateResponse>({
+    queryKey: ['issues', number, 'stage-state'],
+    queryFn: () => api.getIssueStageState(number),
+    enabled: number > 0,
+    refetchInterval: 5000,
   })
 }
