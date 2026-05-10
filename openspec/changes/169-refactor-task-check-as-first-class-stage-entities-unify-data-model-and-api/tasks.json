@@ -166,11 +166,14 @@
       "dependsOn": [
         "T-005"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Use small fixtures that model issue #156/#163 symptoms: repeated executions and contradictory old data sources.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        447946
+      ]
     }
   ]
 }
