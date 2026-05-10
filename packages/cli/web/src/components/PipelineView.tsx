@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { useIssueExecutions } from '../hooks/useQueries'
+import { useIssueExecutions, useIssueStageState } from '../hooks/useQueries'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
-import type { Issue, StageExecution, StageTaskResult, CheckResult, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy } from '../lib/types'
+import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy } from '../lib/types'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
@@ -20,71 +20,6 @@ function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
 const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done] as const
 type PipelineStage = (typeof PIPELINE_STAGES)[number]
 
-interface PendingTask {
-  taskId: string
-  title: string
-  status: 'pending' | 'running'
-  artifacts: never[]
-  attempts: 0
-  duration: 0
-}
-
-const PLAN_TASK_DEFS: { taskId: string; title: string }[] = [
-  { taskId: 'proposal', title: 'Write Proposal' },
-  { taskId: 'specs', title: 'Write Specs' },
-  { taskId: 'design', title: 'Write Design' },
-  { taskId: 'tasks', title: 'Break into Tasks' },
-  { taskId: 'self-review', title: 'Self-Review' },
-]
-
-const CHECK_TASK_DEFS: { taskId: string; title: string }[] = [
-  { taskId: 'review', title: 'AI Code Review' },
-  { taskId: 'review-self-check', title: 'Review Self-Check' },
-]
-
-const INTEGRATE_TASK_DEFS: { taskId: string; title: string }[] = [
-  { taskId: 'integrate:spec-sync', title: 'Sync main specs' },
-  { taskId: 'integrate:archive-change', title: 'Archive OpenSpec change' },
-  { taskId: 'integrate:merge', title: 'Merge to target branch' },
-  { taskId: 'final-health', title: 'Run final integration health gate' },
-  { taskId: 'integrate:complete', title: 'Complete issue' },
-]
-
-function mergeTasksForStage(
-  stage: PipelineStage,
-  taskResults: StageTaskResult[],
-  runningTaskIds: Set<string>,
-): (StageTaskResult | PendingTask)[] {
-  if (stage === Stage.Done) return taskResults
-
-  const defs = stage === Stage.Plan ? PLAN_TASK_DEFS : stage === Stage.Check ? CHECK_TASK_DEFS : stage === Stage.Integrate ? INTEGRATE_TASK_DEFS : null
-  if (!defs) return taskResults
-
-  const resultById = new Map(taskResults.map((t) => [t.taskId, t]))
-  const mapped: (StageTaskResult | PendingTask)[] = defs.map((def) => {
-    const result = resultById.get(def.taskId)
-    if (result) {
-      resultById.delete(def.taskId)
-      return result
-    }
-    const isRunning = runningTaskIds.has(def.taskId)
-    return {
-      taskId: def.taskId,
-      title: def.title,
-      status: isRunning ? 'running' as const : 'pending' as const,
-      artifacts: [] as never[],
-      attempts: 0,
-      duration: 0,
-    }
-  })
-
-  for (const result of resultById.values()) {
-    mapped.push(result)
-  }
-
-  return mapped
-}
-
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
@@ -95,21 +30,22 @@ function formatDuration(ms: number): string {
 
 function getStageStatus(
   stage: PipelineStage,
-  executions: StageExecution[],
+  stageStateMap: Map<string, StageStateRead>,
   issue: Issue,
 ): 'pending' | 'running' | 'completed' | 'failed' | 'awaiting-approval' {
-  const execution = executions.find((e) => e.stage === stage)
+  const stageState = stageStateMap.get(stage)
   const stageOrder = PIPELINE_STAGES.indexOf(stage)
   const currentStageIdx = PIPELINE_STAGES.indexOf(issue.stage as PipelineStage)
 
-  if (execution) {
-    if (execution.status === 'running') return 'running'
-    if (execution.status === 'awaiting-approval') return 'awaiting-approval'
-    if (execution.status === 'passed') return 'completed'
-    if (execution.status === 'failed') return 'failed'
+  if (stageState) {
+    if (stageState.status === 'running') return 'running'
+    if (stageState.status === 'awaiting-approval') return 'awaiting-approval'
+    if (stageState.status === 'passed') return 'completed'
+    if (stageState.status === 'failed') return 'failed'
+    if (stageState.status === 'skipped') return 'pending'
   }
 
-  if (issue.stage === stage && !execution) return 'running'
+  if (issue.stage === stage && !stageState) return 'running'
 
   if (issue.status === IssueStatus.Completed && stage === Stage.Done) return 'completed'
 
@@ -118,11 +54,10 @@ function getStageStatus(
   return 'pending'
 }
 
-function getStageDuration(stage: PipelineStage, executions: StageExecution[]): number | null {
-  const execution = executions.find((e) => e.stage === stage)
-  if (!execution) return null
-  if (execution.taskResults.length === 0) return null
-  const total = execution.taskResults.reduce((sum, t) => sum + (t.duration || 0), 0)
+function getStageDuration(stage: PipelineStage, stageStateMap: Map<string, StageStateRead>): number | null {
+  const stageState = stageStateMap.get(stage)
+  if (!stageState || stageState.tasks.length === 0) return null
+  const total = stageState.tasks.reduce((sum, t) => sum + (t.duration || 0), 0)
   return total > 0 ? total : null
 }
 
@@ -251,14 +186,14 @@ function StageBarCell({
 }
 
 function StageBar({
-  executions,
+  stageStateMap,
   issue,
   selectedStage,
   onSelectStage,
   readOnly,
   runningDurations,
 }: {
-  executions: StageExecution[]
+  stageStateMap: Map<string, StageStateRead>
   issue: Issue
   selectedStage: PipelineStage
   onSelectStage: (stage: PipelineStage) => void
@@ -268,8 +203,8 @@ function StageBar({
   return (
     <div className="flex items-stretch gap-2">
       {PIPELINE_STAGES.map((stage, idx) => {
-        const status = getStageStatus(stage, executions, issue)
-        let duration = getStageDuration(stage, executions)
+        const status = getStageStatus(stage, stageStateMap, issue)
+        let duration = getStageDuration(stage, stageStateMap)
         if (status === 'running' && runningDurations.has(stage)) {
           duration = runningDurations.get(stage)!
         }
@@ -306,7 +241,7 @@ function TaskItem({
   readOnly,
   liveElapsed,
 }: {
-  task: StageTaskResult | PendingTask
+  task: StageTaskState
   readOnly: boolean
   liveElapsed?: number | null
 }) {
@@ -314,7 +249,7 @@ function TaskItem({
   const isPending = task.status === 'pending'
   const isRunning = task.status === 'running'
   const isFailed = task.status === 'failed'
-  const taskOutput = 'output' in task ? (task as StageTaskResult).output : undefined
+  const taskOutput = task.output
   const hasOutput = taskOutput != null
   const canExpand = task.artifacts.length > 0 || isFailed || hasOutput
 
@@ -388,19 +323,19 @@ function TaskItem({
   )
 }
 
-function isHealthGateCheck(check: CheckResult): boolean {
+function isHealthGateCheck(check: StageCheckState): boolean {
   const output = check.output as { kind?: string } | undefined
-  return output?.kind === 'health-gate' || check.name.startsWith('health:')
+  return output?.kind === 'health-gate' || check.checkName.startsWith('health:')
 }
 
-function CheckItem({ check, attemptLabel }: { check: CheckResult; attemptLabel?: string }) {
+function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLabel?: string }) {
   const isPending = check.status === 'pending'
-  const isFailed = check.status === 'fail' || check.status === 'error'
+  const isFailed = check.status === 'failed' || check.status === 'error'
   const isHealthGate = isHealthGateCheck(check)
   const healthOutput = check.output as { command?: string; duration?: number; summary?: string; logExcerpt?: string; enabled?: boolean; exitCode?: number; timedOut?: boolean } | undefined
 
   let icon: React.ReactNode
-  if (check.status === 'pass') {
+  if (check.status === 'passed') {
     icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
   } else if (isFailed) {
     icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
@@ -410,7 +345,7 @@ function CheckItem({ check, attemptLabel }: { check: CheckResult; attemptLabel?:
     icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
   }
 
-  const baseName = isHealthGate ? `Health Gate: ${check.name.replace('health:', '')}` : check.name
+  const baseName = isHealthGate ? `Health Gate: ${check.checkName.replace('health:', '')}` : check.checkName
   const displayName = attemptLabel ? `${baseName} (${attemptLabel})` : baseName
 
   return (
@@ -434,9 +369,6 @@ function CheckItem({ check, attemptLabel }: { check: CheckResult; attemptLabel?:
             <span className="text-xs text-red-400 flex-shrink-0 truncate max-w-48" title={healthOutput.summary}>{healthOutput.summary}</span>
           )}
         </>
-      )}
-      {check.duration != null && !isHealthGate && (
-        <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(check.duration)}</span>
       )}
     </div>
   )
@@ -472,6 +404,7 @@ function InlineApproval({
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
     },
   })
 
@@ -481,6 +414,7 @@ function InlineApproval({
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
       setFeedback('')
     },
   })
@@ -769,28 +703,25 @@ function InlineApproval({
 
 function StepList({
   stage,
-  executions,
+  stageStateMap,
   issue,
   readOnly,
   liveElapsedByTask,
-  runningTaskIds,
 }: {
   stage: PipelineStage
-  executions: StageExecution[]
+  stageStateMap: Map<string, StageStateRead>
   issue: Issue
   readOnly: boolean
   liveElapsedByTask: Map<string, number>
-  runningTaskIds: Set<string>
 }) {
-  const execution = executions.find((e) => e.stage === stage)
-  const rawTaskResults: StageTaskResult[] = execution?.taskResults ?? []
-  const checkResults: CheckResult[] = execution?.checkResults ?? []
-  const taskResults = mergeTasksForStage(stage, rawTaskResults, runningTaskIds)
+  const stageState = stageStateMap.get(stage)
+  const taskResults: StageTaskState[] = stageState?.tasks ?? []
+  const checkResults: StageCheckState[] = stageState?.checks ?? []
 
   const healthGateChecks = checkResults.filter(c =>
-    c.name.startsWith('health:') || (c.output && (c.output as any).kind === 'health-gate')
+    c.checkName.startsWith('health:') || (c.output && (c.output as Record<string, unknown>).kind === 'health-gate')
   )
-  const failedHealthGates = healthGateChecks.filter(c => c.status === 'fail' || c.status === 'error')
+  const failedHealthGates = healthGateChecks.filter(c => c.status === 'failed' || c.status === 'error')
 
   const isAwaitingApproval =
     failedHealthGates.length === 0 &&
@@ -820,22 +751,22 @@ function StepList({
         </div>
       )}
 
-      {(checkResults.length > 0 || stage === Stage.Done) && stage !== Stage.Done && (
+      {checkResults.length > 0 && stage !== Stage.Done && (
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Checks</h3>
           <div className="space-y-1.5">
             {(() => {
               const nameCounts = new Map<string, number>()
               for (const c of checkResults) {
-                nameCounts.set(c.name, (nameCounts.get(c.name) ?? 0) + 1)
+                nameCounts.set(c.checkName, (nameCounts.get(c.checkName) ?? 0) + 1)
               }
               const nameSeen = new Map<string, number>()
               return checkResults.map((check, idx) => {
-                const total = nameCounts.get(check.name) ?? 1
-                const seen = (nameSeen.get(check.name) ?? 0) + 1
-                nameSeen.set(check.name, seen)
+                const total = nameCounts.get(check.checkName) ?? 1
+                const seen = (nameSeen.get(check.checkName) ?? 0) + 1
+                nameSeen.set(check.checkName, seen)
                 const attemptLabel = total > 1 ? `attempt ${seen}` : undefined
-                return <CheckItem key={`${check.name}-${idx}`} check={check} attemptLabel={attemptLabel} />
+                return <CheckItem key={`${check.checkName}-${idx}`} check={check} attemptLabel={attemptLabel} />
               })
             })()}
           </div>
@@ -953,10 +884,10 @@ function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
   const mergeResult = integrateExecution?.taskResults?.find(t => t.taskId === 'integrate:merge')
   const finalHealthResult = integrateExecution?.taskResults?.find(t => t.taskId === 'final-health')
 
-  const specSyncOutput = specSyncResult ? (specSyncResult as any).output as OpenSpecSyncOutput | undefined : undefined
-  const archiveOutput = archiveResult ? (archiveResult as any).output as { archivePath?: string } | undefined : undefined
-  const mergeOutput = mergeResult ? (mergeResult as any).output as { mergedSha?: string; targetBranch?: string; baseSha?: string; headSha?: string } | undefined : undefined
-  const healthOutput = finalHealthResult ? (finalHealthResult as any).output as { command?: string; duration?: number; summary?: string; passed?: boolean; exitCode?: number } | undefined : undefined
+  const specSyncOutput = specSyncResult ? (specSyncResult as StageTaskResult).output as OpenSpecSyncOutput | undefined : undefined
+  const archiveOutput = archiveResult ? (archiveResult as StageTaskResult).output as { archivePath?: string } | undefined : undefined
+  const mergeOutput = mergeResult ? (mergeResult as StageTaskResult).output as { mergedSha?: string; targetBranch?: string; baseSha?: string; headSha?: string } | undefined : undefined
+  const healthOutput = finalHealthResult ? (finalHealthResult as StageTaskResult).output as { command?: string; duration?: number; summary?: string; passed?: boolean; exitCode?: number } | undefined : undefined
 
   if (!integrateExecution && !checkExecution) return null
 
@@ -1175,7 +1106,18 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
 }
 
 export function PipelineView({ issue }: { issue: Issue }) {
+  const { data: stageStateData } = useIssueStageState(issue.number)
   const { data: executions = [] } = useIssueExecutions(issue.number)
+
+  const stageStateMap = useMemo(() => {
+    const map = new Map<string, StageStateRead>()
+    if (stageStateData?.stages) {
+      for (const ss of stageStateData.stages) {
+        map.set(ss.stage, ss)
+      }
+    }
+    return map
+  }, [stageStateData])
 
   const isClosed = issue.status === IssueStatus.Closed
   const isCompleted = issue.status === IssueStatus.Completed
@@ -1257,18 +1199,16 @@ export function PipelineView({ issue }: { issue: Issue }) {
   const runningDurations = useMemo(() => {
     const map = new Map<string, number>()
     for (const [taskId, elapsed] of liveElapsed) {
-      const taskExec = executions.find((e) =>
-        e.taskResults.some((t) => t.taskId === taskId),
-      )
-      if (taskExec) {
-        const existing = map.get(taskExec.stage) ?? 0
-        map.set(taskExec.stage, existing + elapsed)
+      for (const [stageKey, ss] of stageStateMap) {
+        if (ss.tasks.some(t => t.taskId === taskId)) {
+          const existing = map.get(stageKey) ?? 0
+          map.set(stageKey, existing + elapsed)
+          break
+        }
       }
     }
     return map
-  }, [liveElapsed, executions])
-
-  const runningTaskIds = new Set(runningTaskStarts.keys())
+  }, [liveElapsed, stageStateMap])
 
   const handleSelectStage = useCallback(
     (stage: PipelineStage) => {
@@ -1281,7 +1221,7 @@ export function PipelineView({ issue }: { issue: Issue }) {
   return (
     <div className="space-y-4">
       <StageBar
-        executions={executions}
+        stageStateMap={stageStateMap}
         issue={issue}
         selectedStage={selectedStage}
         onSelectStage={handleSelectStage}
@@ -1296,11 +1236,10 @@ export function PipelineView({ issue }: { issue: Issue }) {
       {!isBacklog && (
         <StepList
           stage={selectedStage}
-          executions={executions}
+          stageStateMap={stageStateMap}
           issue={issue}
           readOnly={readOnly}
           liveElapsedByTask={liveElapsed}
-          runningTaskIds={runningTaskIds}
         />
       )}
 
