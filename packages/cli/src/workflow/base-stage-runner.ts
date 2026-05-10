@@ -4,6 +4,7 @@ import { getLatestCheckResult, replaceCurrentAiReviewTruth, buildAuthoritativeAi
 import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
+import { normalizeCheckStatus, normalizeTaskStatus, type StageStateStatus } from '../services/stage-state-service';
 import { Log } from '../util/log';
 import { parseVerdict, parseDimensions, readReportFile } from './utils';
 import * as path from 'path';
@@ -57,6 +58,7 @@ export abstract class BaseStageRunner implements StageRunner {
     } catch (e) {
       log.warn('appendTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
     }
+    this.mirrorTaskResult(ctx, result);
   }
 
   async run(ctx: StageContext): Promise<StageRunResult> {
@@ -68,6 +70,19 @@ export abstract class BaseStageRunner implements StageRunner {
         this.stageExecutionId = execution.id;
       } catch (e) {
         log.warn('create stage execution failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    if (ctx.stageStateService) {
+      try {
+        ctx.stageStateService.ensureStage(ctx.issue.id, ctx.issue.stage);
+      } catch (e) {
+        log.warn('ensureStage failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+      try {
+        this.mirrorTasksJson(ctx);
+      } catch (e) {
+        log.warn('mirrorTasksJson failed', { error: e instanceof Error ? e.message : String(e) });
       }
     }
 
@@ -405,6 +420,13 @@ export abstract class BaseStageRunner implements StageRunner {
     } catch (e) {
       log.warn('updateStageExecutionStatus failed', { error: e instanceof Error ? e.message : String(e) });
     }
+    if (ctx.stageStateService) {
+      try {
+        ctx.stageStateService.setStageStatus(ctx.issue.id, ctx.issue.stage, status as StageStateStatus);
+      } catch (e) {
+        log.warn('setStageStatus failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
   }
 
   protected persistAuthoritativeAiReview(
@@ -533,6 +555,65 @@ export abstract class BaseStageRunner implements StageRunner {
       ctx.stageExecutionRepo.updateCheckResults(this.stageExecutionId, checkResults);
     } catch (e) {
       log.warn('persistCheckResults failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+    this.mirrorCheckResults(ctx, checkResults);
+  }
+
+  private mirrorTaskResult(ctx: StageContext, result: StageTaskResult): void {
+    if (!ctx.stageStateService) return;
+    try {
+      ctx.stageStateService.upsertTask(ctx.issue.id, ctx.issue.stage, {
+        taskId: result.taskId,
+        title: result.title,
+        status: normalizeTaskStatus(result.status),
+        source: 'dynamic',
+        attempts: result.attempts,
+        duration: result.duration,
+        artifacts: result.artifacts,
+        output: result.output,
+      });
+    } catch (e) {
+      log.warn('mirrorTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  private mirrorCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {
+    if (!ctx.stageStateService) return;
+    const seen = new Map<string, CheckResult>();
+    for (const cr of checkResults) {
+      seen.set(cr.name, cr);
+    }
+    for (const [, cr] of seen) {
+      try {
+        ctx.stageStateService.upsertCheck(ctx.issue.id, ctx.issue.stage, {
+          checkName: cr.name,
+          status: normalizeCheckStatus(cr.status),
+          message: cr.message ?? null,
+          output: cr.output,
+        });
+      } catch (e) {
+        log.warn('mirrorCheckResult failed', { checkName: cr.name, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  }
+
+  private mirrorTasksJson(ctx: StageContext): void {
+    if (!ctx.stageStateService) return;
+    const tasksFile = ctx.artifactManager.readTasks(ctx.issue.number);
+    if (!tasksFile) return;
+    for (const t of tasksFile.tasks) {
+      try {
+        ctx.stageStateService.upsertTask(ctx.issue.id, ctx.issue.stage, {
+          taskId: t.id,
+          title: t.title,
+          status: t.passes ? 'completed' : 'pending',
+          source: 'dynamic',
+          order: t.order,
+          attempts: t.attempts,
+        });
+      } catch (e) {
+        log.warn('mirrorTasksJson task failed', { taskId: t.id, error: e instanceof Error ? e.message : String(e) });
+      }
     }
   }
 }
