@@ -686,6 +686,30 @@ describe('Session liveness end-to-end regression', () => {
     await session.close().catch(() => {});
   }, 10000);
 
+  it('preserves concrete process-exit failure reason instead of Execute error', async () => {
+    mockPromptFn.mockRejectedValue(new Error('[PROCESS_EXIT] opencode process exited unexpectedly (exit code: 9)'));
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      livenessQuietThresholdMs: QUIET_THRESHOLD_MS,
+      probeTimeoutMs: PROBE_TIMEOUT_MS,
+    });
+
+    const result = await session.execute('test');
+
+    expect(result.success).toBe(false);
+    expect(result.failureKind).toBe('session_failed');
+    expect(result.failureReason).toContain('[PROCESS_EXIT]');
+    expect(result.failureReason).toContain('exit code: 9');
+    expect(result.failureReason).not.toBe('Execute error');
+
+    await session.close().catch(() => {});
+  });
+
   it('close preserves failed terminal state after session failure', async () => {
     const stateChanges: Array<{ from: string; to: string }> = [];
     const observer: SessionObserver = {

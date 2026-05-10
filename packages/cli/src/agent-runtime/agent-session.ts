@@ -224,8 +224,10 @@ export class AgentSession {
     }
   }
 
-  private transitionToFailed(reason: string): void {
-    this._failureReason = reason ?? 'unknown';
+  private transitionToFailed(reason?: string | null): void {
+    if (!this._failureReason) {
+      this._failureReason = reason ?? 'unknown';
+    }
     try {
       this._stateMachine.transition('failed');
     } catch (err) {
@@ -391,7 +393,7 @@ export class AgentSession {
       sessionId: this._sessionId, elapsedMs: duration, error: err instanceof Error ? err.message : String(err),
     });
     this._failureReason = err instanceof Error ? err.message : String(err);
-    this.transitionToFailed('Execute error');
+    this.transitionToFailed();
     const failCtx = this.makeCtx();
     for (const obs of this._observers) {
       try { obs.onStateChange?.(failCtx, 'running', 'failed'); } catch (obsErr) {
@@ -417,7 +419,7 @@ export class AgentSession {
 
     quietThresholdMonitor.clear();
     this._failureReason = 'probe_timeout';
-    this.transitionToFailed('Probe deadline expired');
+    this.transitionToFailed();
     const failCtx = this.makeCtx();
     for (const obs of this._observers) {
       try { obs.onStateChange?.(failCtx, 'probing', 'failed'); } catch (err) {
@@ -448,7 +450,7 @@ export class AgentSession {
     const error = this._probeSendFailure;
     this._probeSendFailure = null;
     this._failureReason = error?.message ?? 'probe_send_failed';
-    this.transitionToFailed('Probe send failed');
+    this.transitionToFailed();
     const failCtx = this.makeCtx();
     for (const obs of this._observers) {
       try { obs.onStateChange?.(failCtx, 'probing', 'failed'); } catch (err) {

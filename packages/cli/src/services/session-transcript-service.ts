@@ -25,7 +25,6 @@ export interface SessionMetadata {
   executionId: string | null;
   title: string | null;
   status: string;
-  statusKind?: 'loading' | 'live' | 'finalizing' | 'completed' | 'failed' | 'stale';
   model: string | null;
   stage: string | null;
   createdAt: string;
