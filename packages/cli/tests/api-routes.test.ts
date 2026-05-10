@@ -549,6 +549,63 @@ describe('API Routes', () => {
       });
     });
 
+    describe('POST /api/issues/:number/reject', () => {
+      it('clears check checkpoint and stale review artifacts before restarting from build', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-reject-check-test-'));
+
+        try {
+          const project = await projectService.create({ name: 'RejectCheckTest', path: tmpDir });
+          projectService.setCurrent(project);
+
+          const issue = issueService.create({ projectId: project.id, title: 'Reject Check Issue' });
+          issueService.transitionToStage(issue.id, Stage.Check);
+          issueService.setStatus(issue.id, IssueStatus.Active);
+
+          const issueRepo = stateManager.getIssueRepo();
+          issueRepo.setApprovalState(issue.id, {
+            stage: Stage.Check,
+            status: 'awaiting',
+            output: null,
+            requestedAt: new Date().toISOString(),
+          });
+
+          const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [] }));
+          fs.writeFileSync(path.join(changeDir, 'review.md'), '# stale review');
+          fs.writeFileSync(path.join(changeDir, 'review-self-check.md'), '# stale self check');
+
+          const checkpointRepo = stateManager.getPipelineCheckpointRepo();
+          checkpointRepo.upsert(issue.number, 'check', ['review', 'review-self-check'], null);
+
+          const worktreeManager = {
+            getPath: vi.fn().mockReturnValue(tmpDir),
+          } as any;
+
+          const rejectApp = new Hono();
+          const rejectEventBus = new EventBus();
+          const rejectAgentRunner = new AgentRunnerService(rejectEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(rejectAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          rejectApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, rejectAgentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
+          const rejectServer = createTestServer(rejectApp);
+
+          const response = await request(rejectServer)
+            .post(`/api/issues/${issue.number}/reject`)
+            .send({ message: 'rerun review on latest code' });
+
+          expect(response.status).toBe(202);
+          expect(response.body.success).toBe(true);
+          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+          expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Build);
+          expect(checkpointRepo.get(issue.number, 'check')).toBeNull();
+          expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
+          expect(fs.existsSync(path.join(changeDir, 'review-self-check.md'))).toBe(false);
+        } finally {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+    });
+
     describe('POST /api/issues/:number/comments', () => {
       it('should add a comment to an issue', async () => {
         const issue = issueService.create({ projectId, title: 'Comment Test' });
