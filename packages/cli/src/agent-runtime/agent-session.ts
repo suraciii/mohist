@@ -140,6 +140,12 @@ export class AgentSession {
   get state(): SessionState { return this._stateMachine.current; }
   get acpSessionId(): string { return this._sessionId; }
 
+  canClose(): boolean {
+    return this._stateMachine.current === 'running'
+      || this._stateMachine.current === 'probing'
+      || this._stateMachine.current === 'initializing';
+  }
+
   private constructor(
     options: AgentSessionOptions,
     acpProcess: AcpProcess,
@@ -177,7 +183,7 @@ export class AgentSession {
     );
   }
 
-  private refreshLastDataAt(): void {
+  private refreshLastDataAt(options: { notifyRunning?: boolean } = {}): void {
     this._lastDataAt = Date.now();
     if (this._stateMachine.current === 'probing') {
       this._activeProbe = false;
@@ -194,6 +200,8 @@ export class AgentSession {
         }
       }
       this.notifyLivenessUpdate(ctx, 'running');
+    } else if (options.notifyRunning && this._stateMachine.current === 'running') {
+      this.notifyLivenessUpdate(this.makeCtx(), 'running');
     }
     if (this._resetQuietTimer && this._stateMachine.current === 'running') {
       this._resetQuietTimer();
@@ -369,6 +377,7 @@ export class AgentSession {
       }
 
       quietThresholdMonitor.clear();
+      this.refreshLastDataAt({ notifyRunning: true });
       return this.createPromptResult(roundStartIndex, { success: true });
     }
   }
@@ -541,10 +550,21 @@ export class AgentSession {
 
     const probeText = 'If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work.';
 
-    this._connection.prompt({
-      sessionId: this._sessionId,
-      prompt: [{ type: 'text', text: probeText }],
-    }).catch((err) => {
+    let probePromise: Promise<unknown>;
+    try {
+      probePromise = this._connection.prompt({
+        sessionId: this._sessionId,
+        prompt: [{ type: 'text', text: probeText }],
+      });
+    } catch (err) {
+      log.warn('probe prompt failed', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
+      this._probeSendFailure = err instanceof Error ? err : new Error(String(err));
+      this._resolveProbeSendFailure?.();
+      this._resolveProbeSendFailure = null;
+      return;
+    }
+
+    probePromise.catch((err) => {
       log.warn('probe prompt failed', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
       this._probeSendFailure = err instanceof Error ? err : new Error(String(err));
       this._resolveProbeSendFailure?.();
@@ -763,6 +783,7 @@ export class AgentSession {
       }
 
       log.info('ACP initialized, creating session');
+      session.refreshLastDataAt();
 
       const sessionResult = await Promise.race([
         session._connection.newSession({ cwd, mcpServers: [] }),
@@ -783,12 +804,14 @@ export class AgentSession {
 
       session._sessionId = sessionResult.sessionId;
       log.info('ACP session created', { sessionId: session._sessionId });
+      session.refreshLastDataAt();
 
       if (model) {
         try {
           await session._connection.setSessionConfigOption({
             sessionId: session._sessionId, configId: 'model', value: model,
           });
+          session.refreshLastDataAt();
           log.info('ACP session model set', { sessionId: session._sessionId, model });
         } catch (err) {
           session._options = { ...session._options, model: undefined };
@@ -878,7 +901,7 @@ export class AgentSession {
     const duration = Date.now() - this._sessionStartTime;
     log.info('Agent session closed', { sessionId: this._sessionId, elapsedMs: duration });
     const fromState = this._stateMachine.current;
-    if (fromState === 'failed' || fromState === 'cancelled' || fromState === 'closed') {
+    if (!this.canClose()) {
       try { this._stateMachine.transition('closed'); } catch (err) {
         log.warn('stateMachine transition to closed failed', { error: err instanceof Error ? err.message : String(err) });
       }
@@ -923,6 +946,8 @@ export async function withSession<T = AcpSessionResult>(
     if (fn) return await fn(session);
     return await session.execute(options.task ?? '', { kind: 'initial' });
   } finally {
-    await session.close();
+    if (session.canClose()) {
+      await session.close();
+    }
   }
 }

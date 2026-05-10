@@ -115,6 +115,39 @@ describe('Session liveness metadata in AcpSessionResult', () => {
     expect(result.failureReason).toBe('timeout');
   });
 
+  it('should fail immediately when the probe send rejects', async () => {
+    let promptCallCount = 0;
+    mockPromptFn.mockImplementation(() => {
+      promptCallCount++;
+      if (promptCallCount === 1) {
+        return new Promise(() => {});
+      }
+      return Promise.reject(new Error('Probe send failed: connection reset'));
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      livenessQuietThresholdMs: 100,
+      probeTimeoutMs: 5000,
+      observers: [],
+    });
+
+    const executePromise = session.execute('test');
+
+    await vi.advanceTimersByTimeAsync(150);
+
+    const result = await executePromise;
+    expect(result.success).toBe(false);
+    expect(result.failureKind).toBe('session_failed');
+    expect(result.failureReason).toContain('Probe send failed');
+
+    await session.close().catch(() => {});
+  });
+
   it('should include failureKind cancelled in result on abort via ExecutePromptOptions.signal', async () => {
     const stateObserver: SessionObserver = {};
 

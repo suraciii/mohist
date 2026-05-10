@@ -44,7 +44,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
   PROTOCOL_VERSION: '0.1',
 }));
 
-import { AgentSession } from '../src/agent-runtime/agent-session';
+import { AgentSession, withSession } from '../src/agent-runtime/agent-session';
 import type { SessionObserver, LivenessUpdate } from '../src/agent-runtime/session-observer';
 import { DatabaseManager } from '../src/db/database';
 import { StateManager } from '../src/server/state-manager';
@@ -144,6 +144,41 @@ describe('Session liveness end-to-end regression', () => {
 
     const probingChanges = stateChanges.filter(c => c.to === 'probing');
     expect(probingChanges).toHaveLength(0);
+
+    await session.close();
+  });
+
+  it('successful ACP protocol responses refresh persisted lastDataAt without session updates', async () => {
+    const issue = createIssue('build', 'active');
+    const wfObserver = new WorkflowSessionObserver({
+      eventBus: new EventBus(),
+      coderSessionRepo,
+    });
+
+    mockPromptFn.mockResolvedValue(undefined);
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: issue.id,
+      projectId,
+      executionId: 'exec-protocol-data',
+      livenessQuietThresholdMs: 99999999,
+      probeTimeoutMs: PROBE_TIMEOUT_MS,
+      observers: [wfObserver],
+    });
+
+    const afterStart = coderSessionRepo.findByIssueId(issue.id)[0];
+    expect(afterStart.lastDataAt).not.toBeNull();
+    const startLastDataAt = afterStart.lastDataAt;
+
+    await vi.advanceTimersByTimeAsync(10);
+    await session.execute('test');
+
+    const afterPrompt = coderSessionRepo.findByIssueId(issue.id)[0];
+    expect(afterPrompt.status).toBe('running');
+    expect(afterPrompt.lastDataAt).not.toBeNull();
+    expect(new Date(afterPrompt.lastDataAt!).getTime()).toBeGreaterThan(new Date(startLastDataAt!).getTime());
 
     await session.close();
   });
@@ -692,4 +727,51 @@ describe('Session liveness end-to-end regression', () => {
     expect(stateChanges.some(c => c.to === 'failed')).toBe(true);
     expect(stateChanges.some(c => c.to === 'completed')).toBe(false);
   }, 10000);
+
+  it('withSession does not emit completed after terminal timeout failure', async () => {
+    const issue = createIssue('build', 'active');
+    const eventBus = new EventBus();
+    const wfObserver = new WorkflowSessionObserver({
+      eventBus,
+      coderSessionRepo,
+    });
+    const stateChanges: Array<{ from: string; to: string }> = [];
+
+    mockCancelFn.mockResolvedValue(undefined);
+    mockPromptFn.mockImplementation(() => new Promise(() => {}));
+
+    const resultPromise = withSession({
+      cwd: '/tmp/test',
+      task: 'test',
+      issueId: issue.id,
+      projectId,
+      executionId: 'exec-timeout',
+      timeout: 50,
+      observers: [{
+        onSessionStart(ctx) {
+          wfObserver.onSessionStart(ctx);
+        },
+        onStateChange(ctx, from, to) {
+          stateChanges.push({ from, to });
+          wfObserver.onStateChange(ctx, from, to);
+        },
+        onLivenessUpdate(ctx, update) {
+          wfObserver.onLivenessUpdate(ctx, update);
+        },
+      }],
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    const result = await resultPromise;
+    expect(result.success).toBe(false);
+    expect(result.failureKind).toBe('timeout');
+
+    expect(stateChanges.some(c => c.to === 'failed')).toBe(true);
+    expect(stateChanges.some(c => c.to === 'completed')).toBe(false);
+
+    const persisted = coderSessionRepo.findByIssueId(issue.id);
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].status).toBe('failed');
+  });
 });
