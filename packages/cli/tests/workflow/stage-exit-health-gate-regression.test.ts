@@ -40,8 +40,14 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
       updateTaskPasses: vi.fn(),
       archiveChange: vi.fn(),
     } as unknown as ChangeArtifactsManager,
-    worktreeManager: {} as WorktreeManager,
-    projectRepo: {} as ProjectRepo,
+    worktreeManager: {
+      getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+      getHeadSha: vi.fn().mockResolvedValue('abc123'),
+      createCheckConvergenceCommit: vi.fn().mockResolvedValue({ success: true, headSha: 'abc123' }),
+    } as unknown as WorktreeManager,
+    projectRepo: {
+      findById: vi.fn().mockReturnValue({ name: 'test-project' }),
+    } as unknown as ProjectRepo,
     eventBus: new EventBus() as any,
     checkpointManager: {
       save: vi.fn(),
@@ -64,8 +70,14 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
 
 class PassCheck implements Check {
   name: string;
-  constructor(name: string) { this.name = name; }
-  async run(): Promise<CheckResult> { return { name: this.name, status: 'pass' }; }
+  private output?: Record<string, unknown>;
+  constructor(name: string, output?: Record<string, unknown>) {
+    this.name = name;
+    this.output = output;
+  }
+  async run(): Promise<CheckResult> {
+    return { name: this.name, status: 'pass', output: this.output };
+  }
 }
 
 class FailCheck implements Check {
@@ -113,7 +125,7 @@ describe('Check-stage approval requires health:check pass', () => {
       undefined,
       async () => ({ name: 'health:check', status: 'fail', message: 'health:check failed' }),
     );
-    const aiReviewCheck = new PassCheck('ai-review');
+    const aiReviewCheck = new PassCheck('ai-review', { verdict: 'PASS', reviewReport: 'LGTM' });
     const userApprovalCheck = new PassCheck('user-approval');
 
     const runner = new HealthGateCheckRunner({
@@ -134,7 +146,7 @@ describe('Check-stage approval requires health:check pass', () => {
 
   it('UserApprovalCheck IS reached only after health:check passes', async () => {
     const healthGatePassCheck = new PassCheck('health:check');
-    const aiReviewCheck = new PassCheck('ai-review');
+    const aiReviewCheck = new PassCheck('ai-review', { verdict: 'PASS', reviewReport: 'LGTM' });
     const userApprovalCheck = new UserApprovalCheck(Stage.Check);
 
     const runner = new HealthGateCheckRunner({
@@ -193,7 +205,7 @@ describe('Check-stage approval requires health:check pass', () => {
       'health:check',
       undefined,
     );
-    const aiReviewCheck = new PassCheck('ai-review');
+    const aiReviewCheck = new PassCheck('ai-review', { verdict: 'PASS', reviewReport: 'LGTM' });
 
     const runner = new HealthGateCheckRunner({
       checks: [healthGateFailsCheck, aiReviewCheck],
@@ -719,7 +731,7 @@ describe('Disabled gates are recorded as disabled policy results and do not bloc
 describe('Stage exit health guarantee integration', () => {
   it('Check stage check order is health:check before user-approval', async () => {
     const healthCheck = new PassCheck('health:check');
-    const aiReviewCheck = new PassCheck('ai-review');
+    const aiReviewCheck = new PassCheck('ai-review', { verdict: 'PASS', reviewReport: 'LGTM' });
     const userApprovalCheck = new PassCheck('user-approval');
 
     const runner = new HealthGateCheckRunner({
@@ -775,7 +787,7 @@ describe('Stage exit health guarantee integration', () => {
 
   it('Failing health gate prevents later checks from running', async () => {
     const healthCheck = new FailCheck('health:check');
-    const aiReviewCheck = new PassCheck('ai-review');
+    const aiReviewCheck = new PassCheck('ai-review', { verdict: 'PASS', reviewReport: 'LGTM' });
     const userApprovalCheck = new PassCheck('user-approval');
 
     const aiReviewRun = vi.spyOn(aiReviewCheck, 'run');
@@ -800,7 +812,7 @@ describe('Stage exit health guarantee integration', () => {
     const allTasksComplete = new PassCheck('all-tasks-complete');
     const healthBuild = new PassCheck('health:build');
     const healthCheck = new PassCheck('health:check');
-    const aiReview = new PassCheck('ai-review');
+    const aiReview = new PassCheck('ai-review', { verdict: 'PASS', reviewReport: 'LGTM' });
     const userApproval = new PassCheck('user-approval');
 
     const runner = new HealthGateCheckRunner({
