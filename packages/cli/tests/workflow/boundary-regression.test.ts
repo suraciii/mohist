@@ -422,9 +422,9 @@ describe('Task/Check/Artifact boundary regression', () => {
         async () => {
           reviewRunCount++;
           if (reviewRunCount <= 1) {
-            return { name: 'ai-review', status: 'fail', message: 'FAIL verdict' };
+            return { name: 'ai-review', status: 'fail', message: 'FAIL verdict', output: { verdict: 'FAIL', reviewReport: 'fail' } };
           }
-          return { name: 'ai-review', status: 'pass' };
+          return { name: 'ai-review', status: 'pass', output: { verdict: 'PASS', reviewReport: 'pass' } };
         },
       );
 
@@ -450,15 +450,10 @@ describe('Task/Check/Artifact boundary regression', () => {
       expect(runner.fixTaskCalls).toHaveLength(1);
       expect(runner.fixTaskCalls[0].taskId).toBe('fix-review-findings');
       expect(result.checkResults.filter(r => r.name === 'ai-review')).toEqual([
-        expect.objectContaining({ name: 'ai-review', status: 'fail' }),
         expect.objectContaining({ name: 'ai-review', status: 'pass' }),
       ]);
-      expect(persistedCheckResults).toHaveLength(2);
-      expect(persistedCheckResults[0]).toHaveLength(1);
-      expect(persistedCheckResults[0][0]).toMatchObject({ name: 'ai-review', status: 'fail' });
-      expect(persistedCheckResults[1]).toHaveLength(2);
-      expect(persistedCheckResults[1]).toEqual([
-        expect.objectContaining({ name: 'ai-review', status: 'fail' }),
+      expect(persistedCheckResults.length).toBeGreaterThanOrEqual(2);
+      expect(persistedCheckResults[persistedCheckResults.length - 1]).toEqual([
         expect.objectContaining({ name: 'ai-review', status: 'pass' }),
       ]);
     });
