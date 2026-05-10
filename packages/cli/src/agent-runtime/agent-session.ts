@@ -73,6 +73,13 @@ function createTimeout(ms: number): Promise<'timeout'> {
   return new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), ms));
 }
 
+interface QuietThresholdMonitor {
+  start(): void;
+  restart(): void;
+  clear(): void;
+  promise(): Promise<'quiet_threshold'>;
+}
+
 class ToolCallIdGenerator {
   private counters = new Map<string, number>();
   private ids = new Map<string, string[]>();
@@ -216,6 +223,139 @@ export class AgentSession {
     }
     const ctx = this.makeCtx();
     this.notifyLivenessUpdate(ctx, 'failed');
+  }
+
+  private createQuietThresholdMonitor(): QuietThresholdMonitor {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let currentPromise: Promise<'quiet_threshold'> | null = null;
+
+    const start = () => {
+      if (timer) return;
+      currentPromise = new Promise<'quiet_threshold'>((resolve) => {
+        timer = setTimeout(() => {
+          timer = null;
+          resolve('quiet_threshold');
+        }, this._livenessQuietThresholdMs);
+      });
+    };
+
+    const restart = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      currentPromise = null;
+      start();
+    };
+
+    const clear = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      currentPromise = null;
+    };
+
+    const promise = () => currentPromise ?? new Promise<'quiet_threshold'>(() => {});
+
+    return { start, restart, clear, promise };
+  }
+
+  private createPromptResult(roundStartIndex: number, overrides: Omit<Partial<AcpSessionResult>, 'text'> = {}): AcpSessionResult {
+    return {
+      text: this._agentText.slice(roundStartIndex),
+      success: overrides.success ?? false,
+      acpSessionId: overrides.acpSessionId ?? this._sessionId,
+      ...overrides,
+    };
+  }
+
+  private async handleProbeDeadline(roundStartIndex: number, quietThresholdMonitor: QuietThresholdMonitor): Promise<AcpSessionResult | null> {
+    if (!this._activeProbe || this._closed) {
+      this._probeDeadlineAt = null;
+      return null;
+    }
+
+    quietThresholdMonitor.clear();
+    this._failureReason = 'probe_timeout';
+    this.transitionToFailed('Probe deadline expired');
+    const failCtx = this.makeCtx();
+    for (const obs of this._observers) {
+      try { obs.onStateChange?.(failCtx, 'probing', 'failed'); } catch (err) {
+        log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    await this._acpProcess.cleanup();
+    this._closed = true;
+    return this.createPromptResult(roundStartIndex, {
+      success: false,
+      error: 'Session liveness probe timed out',
+      failureKind: 'session_failed',
+      failureReason: this._failureReason,
+    });
+  }
+
+  private async handleAbort(roundStartIndex: number, quietThresholdMonitor: QuietThresholdMonitor): Promise<AcpSessionResult> {
+    quietThresholdMonitor.clear();
+    log.info('ACP prompt aborted by signal', { sessionId: this._sessionId });
+    try { this._stateMachine.transition('cancelled'); } catch (err) {
+      log.warn('stateMachine transition to cancelled failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+    const cancelCtx = this.makeCtx();
+    for (const obs of this._observers) {
+      try { obs.onStateChange?.(cancelCtx, 'running', 'cancelled'); } catch (err) {
+        log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    try { await this._connection.cancel({ sessionId: this._sessionId }); } catch (err) {
+      log.warn('cancel failed on abort', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
+    }
+    let wipCommitted = false;
+    if (this._options.onBeforeKill) {
+      try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (err) {
+        log.warn('onBeforeKill failed on abort', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    await this._acpProcess.cleanup();
+    this._closed = true;
+    return this.createPromptResult(roundStartIndex, {
+      success: false,
+      error: 'Agent stopped by user',
+      wipCommitted,
+      failureKind: 'cancelled',
+    });
+  }
+
+  private async handleTimeout(roundStartIndex: number, timeout: number, quietThresholdMonitor: QuietThresholdMonitor): Promise<AcpSessionResult> {
+    quietThresholdMonitor.clear();
+    const duration = Date.now() - this._sessionStartTime;
+    log.error('ACP prompt timed out', { sessionId: this._sessionId, timeout, elapsedMs: duration });
+    try { this._stateMachine.transition('timeout'); } catch (err) {
+      log.warn('stateMachine transition to timeout failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+    const failCtx = this.makeCtx();
+    for (const obs of this._observers) {
+      try { obs.onStateChange?.(failCtx, 'running', 'timeout'); } catch (err) {
+        log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    try { await this._connection.cancel({ sessionId: this._sessionId }); } catch (err) {
+      log.warn('cancel failed on timeout', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
+    }
+    let wipCommitted = false;
+    if (this._options.onBeforeKill) {
+      try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (err) {
+        log.warn('onBeforeKill failed on timeout', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    this._closed = true;
+    await this._acpProcess.cleanup();
+    return this.createPromptResult(roundStartIndex, {
+      success: false,
+      error: `Timed out after ${timeout / 1000}s`,
+      wipCommitted,
+      failureKind: 'timeout',
+    });
   }
 
   private async startProbe(): Promise<void> {
@@ -534,35 +674,7 @@ export class AgentSession {
         })
       : new Promise<'aborted'>(() => {});
 
-    const quietThresholdMonitor = (() => {
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      let currentPromise: Promise<'quiet_threshold'> | null = null;
-
-      const start = () => {
-        if (timer) return;
-        currentPromise = new Promise<'quiet_threshold'>((resolve) => {
-          timer = setTimeout(() => {
-            timer = null;
-            resolve('quiet_threshold');
-          }, this._livenessQuietThresholdMs);
-        });
-      };
-
-      const restart = () => {
-        if (timer !== null) { clearTimeout(timer); timer = null; }
-        currentPromise = null;
-        start();
-      };
-
-      const clear = () => {
-        if (timer !== null) { clearTimeout(timer); timer = null; }
-        currentPromise = null;
-      };
-
-      const promise = () => currentPromise ?? new Promise<'quiet_threshold'>(() => {});
-
-      return { start, restart, clear, promise };
-    })();
+    const quietThresholdMonitor = this.createQuietThresholdMonitor();
 
     this._resetQuietTimer = () => quietThresholdMonitor.restart();
     quietThresholdMonitor.start();
@@ -610,104 +722,21 @@ export class AgentSession {
         }
 
         if (result === 'probe_deadline') {
-          if (this._activeProbe && !this._closed) {
-            quietThresholdMonitor.clear();
-            this._failureReason = 'probe_timeout';
-            this.transitionToFailed('Probe deadline expired');
-            const failCtx = this.makeCtx();
-            for (const obs of this._observers) {
-              try { obs.onStateChange?.(failCtx, 'probing', 'failed'); } catch (err) {
-                log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
-              }
-            }
-            await this._acpProcess.cleanup();
-            this._closed = true;
-            return {
-              text: this._agentText.slice(roundStartIndex),
-              success: false,
-              error: 'Session liveness probe timed out',
-              acpSessionId: this._sessionId,
-              failureKind: 'session_failed',
-              failureReason: this._failureReason,
-            };
-          }
-          this._probeDeadlineAt = null;
+          const deadlineResult = await this.handleProbeDeadline(roundStartIndex, quietThresholdMonitor);
+          if (deadlineResult) return deadlineResult;
           continue;
         }
 
         if (result === 'aborted') {
-          quietThresholdMonitor.clear();
-          log.info('ACP prompt aborted by signal', { sessionId: this._sessionId });
-          try { this._stateMachine.transition('cancelled'); } catch (err) {
-            log.warn('stateMachine transition to cancelled failed', { error: err instanceof Error ? err.message : String(err) });
-          }
-          const cancelCtx = this.makeCtx();
-          for (const obs of this._observers) {
-            try { obs.onStateChange?.(cancelCtx, 'running', 'cancelled'); } catch (err) {
-              log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
-            }
-          }
-          try { await this._connection.cancel({ sessionId: this._sessionId }); } catch (err) {
-            log.warn('cancel failed on abort', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
-          }
-          let wipCommitted = false;
-          if (this._options.onBeforeKill) {
-            try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (err) {
-              log.warn('onBeforeKill failed on abort', { error: err instanceof Error ? err.message : String(err) });
-            }
-          }
-          await this._acpProcess.cleanup();
-          this._closed = true;
-          return {
-            text: this._agentText.slice(roundStartIndex),
-            success: false,
-            error: 'Agent stopped by user',
-            acpSessionId: this._sessionId,
-            wipCommitted,
-            failureKind: 'cancelled',
-          };
+          return this.handleAbort(roundStartIndex, quietThresholdMonitor);
         }
 
         if (result === 'timeout') {
-          quietThresholdMonitor.clear();
-          const duration = Date.now() - this._sessionStartTime;
-          log.error('ACP prompt timed out', { sessionId: this._sessionId, timeout, elapsedMs: duration });
-          try { this._stateMachine.transition('timeout'); } catch (err) {
-            log.warn('stateMachine transition to timeout failed', { error: err instanceof Error ? err.message : String(err) });
-          }
-          const failCtx = this.makeCtx();
-          for (const obs of this._observers) {
-            try { obs.onStateChange?.(failCtx, 'running', 'timeout'); } catch (err) {
-              log.error('onStateChange observer failed', { error: err instanceof Error ? err.message : String(err) });
-            }
-          }
-          try { await this._connection.cancel({ sessionId: this._sessionId }); } catch (err) {
-            log.warn('cancel failed on timeout', { sessionId: this._sessionId, error: err instanceof Error ? err.message : String(err) });
-          }
-          let wipCommitted = false;
-          if (this._options.onBeforeKill) {
-            try { wipCommitted = await this._options.onBeforeKill(this._options.cwd); } catch (err) {
-              log.warn('onBeforeKill failed on timeout', { error: err instanceof Error ? err.message : String(err) });
-            }
-          }
-          this._closed = true;
-          await this._acpProcess.cleanup();
-          return {
-            text: this._agentText.slice(roundStartIndex),
-            success: false,
-            error: `Timed out after ${timeout / 1000}s`,
-            acpSessionId: this._sessionId,
-            wipCommitted,
-            failureKind: 'timeout',
-          };
+          return this.handleTimeout(roundStartIndex, timeout, quietThresholdMonitor);
         }
 
         quietThresholdMonitor.clear();
-        return {
-          text: this._agentText.slice(roundStartIndex),
-          success: true,
-          acpSessionId: this._sessionId,
-        };
+        return this.createPromptResult(roundStartIndex, { success: true });
       }
     } catch (err) {
       quietThresholdMonitor.clear();
@@ -731,7 +760,7 @@ export class AgentSession {
       }
       await this._acpProcess.cleanup();
       const message = err instanceof Error ? err.message : String(err);
-      return { text: this._agentText.slice(roundStartIndex), success: false, error: message, wipCommitted, failureKind: 'session_failed', failureReason: this._failureReason };
+      return this.createPromptResult(roundStartIndex, { success: false, error: message, wipCommitted, failureKind: 'session_failed', failureReason: this._failureReason });
     } finally {
       this._resetQuietTimer = null;
     }

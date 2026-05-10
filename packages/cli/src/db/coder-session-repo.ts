@@ -89,6 +89,8 @@ export interface SessionWithIssueInfo {
   title: string | null;
 }
 
+const CURRENT_SESSION_STATUSES = ['running', 'probing', 'failed'] as const;
+
 interface SessionWithIssueInfoRow {
   issue_number: number;
   issue_title: string;
@@ -223,6 +225,20 @@ export class CoderSessionRepo {
     return rows.map(rowToCoderSession);
   }
 
+  findLatestCurrentByProjectId(projectId: string): CoderSession | null {
+    const placeholders = CURRENT_SESSION_STATUSES.map(() => '?').join(', ');
+    const row = this.db.get<CoderSessionRow>(
+      `SELECT cs.*
+       FROM coder_session cs
+       JOIN issues i ON cs.issue_id = i.id
+       WHERE i.project_id = ? AND cs.status IN (${placeholders})
+       ORDER BY cs.created_at DESC
+       LIMIT 1`,
+      [projectId, ...CURRENT_SESSION_STATUSES]
+    );
+    return row ? rowToCoderSession(row) : null;
+  }
+
   updateProcessPid(id: string, pid: number): void {
     this.db.run(
       'UPDATE coder_session SET process_pid = ? WHERE id = ?',
@@ -249,11 +265,10 @@ export class CoderSessionRepo {
     return rowToCoderSession(row);
   }
 
-  markProbing(id: string, probeDeadlineAt: string): CoderSession {
-    const now = new Date().toISOString();
+  markProbing(id: string, probeSentAt: string, probeDeadlineAt: string): CoderSession {
     this.db.run(
       'UPDATE coder_session SET status = ?, probe_sent_at = ?, probe_deadline_at = ? WHERE id = ?',
-      ['probing', now, probeDeadlineAt, id]
+      ['probing', probeSentAt, probeDeadlineAt, id]
     );
 
     const row = this.db.get<CoderSessionRow>(

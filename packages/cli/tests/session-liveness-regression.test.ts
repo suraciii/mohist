@@ -465,6 +465,9 @@ describe('Session liveness end-to-end regression', () => {
 
     const probingEvents = emittedEvents.filter(e => e.data.status === 'probing');
     expect(probingEvents.length).toBeGreaterThanOrEqual(1);
+    const emittedProbeEvent = probingEvents[probingEvents.length - 1].data;
+    expect(persisted.probeSentAt).toBe(emittedProbeEvent.probeSentAt);
+    expect(persisted.probeDeadlineAt).toBe(emittedProbeEvent.probeDeadlineAt);
 
     emitAgentMessageChunk('recovery');
 
@@ -522,18 +525,20 @@ describe('Session liveness end-to-end regression', () => {
     expect(afterData.lastDataAt).not.toBeNull();
     expect(afterData.status).toBe('running');
 
+    const probeSentAt = new Date().toISOString();
     const deadline = new Date(Date.now() + PROBE_TIMEOUT_MS).toISOString();
-    const afterProbing = coderSessionRepo.markProbing(session.id, deadline);
+    const afterProbing = coderSessionRepo.markProbing(session.id, probeSentAt, deadline);
     expect(afterProbing.status).toBe('probing');
-    expect(afterProbing.probeSentAt).not.toBeNull();
+    expect(afterProbing.probeSentAt).toBe(probeSentAt);
     expect(afterProbing.probeDeadlineAt).toBe(deadline);
 
     const afterRecovery = coderSessionRepo.markDataReceived(session.id);
     expect(afterRecovery.status).toBe('running');
     expect(afterRecovery.lastDataAt).not.toBeNull();
 
+    const probeSentAt2 = new Date().toISOString();
     const deadline2 = new Date(Date.now() + PROBE_TIMEOUT_MS).toISOString();
-    coderSessionRepo.markProbing(session.id, deadline2);
+    coderSessionRepo.markProbing(session.id, probeSentAt2, deadline2);
 
     const afterFailed = coderSessionRepo.markFailed(session.id, 'probe_timeout');
     expect(afterFailed.status).toBe('failed');
