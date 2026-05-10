@@ -1,6 +1,6 @@
 import { Stage } from '../types';
 import type { StageContext, StageRunResult, CheckResult, StageTaskResult, CheckFailurePolicy, AuthoritativeAiReviewResult, AuthoritativeAiReviewOptions } from './stage-context';
-import { getLatestCheckResult, replaceCurrentAiReviewTruth, buildAuthoritativeAiReviewResult } from './stage-context';
+import { getLatestCheckResult, buildAuthoritativeAiReviewResult } from './stage-context';
 import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
@@ -141,8 +141,10 @@ export abstract class BaseStageRunner implements StageRunner {
 
       if (check.name === 'ai-review') {
         const authoritativeResults = await this.persistCurrentAiReviewTruth(ctx, results);
-        results.length = 0;
-        results.push(...authoritativeResults);
+        if (authoritativeResults !== results) {
+          results.length = 0;
+          results.push(...authoritativeResults);
+        }
       }
 
       if (result.status !== 'pass') {
@@ -275,7 +277,7 @@ export abstract class BaseStageRunner implements StageRunner {
     const latest = getLatestCheckResult(checkResults, 'ai-review');
     if (!latest) return checkResults;
 
-    const project = ctx.projectRepo.findById(ctx.issue.projectId);
+    const project = this.findProjectSafe(ctx);
     const worktreePath = project
       ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
       : null;
@@ -302,6 +304,13 @@ export abstract class BaseStageRunner implements StageRunner {
       });
       return undefined;
     }
+  }
+
+  private findProjectSafe(ctx: StageContext) {
+    const projectRepo = ctx.projectRepo;
+    return projectRepo && typeof projectRepo.findById === 'function'
+      ? projectRepo.findById(ctx.issue.projectId)
+      : null;
   }
 
   private async handleApprovalCheck(
@@ -351,44 +360,33 @@ export abstract class BaseStageRunner implements StageRunner {
         };
       }
 
-      const project = ctx.projectRepo.findById(ctx.issue.projectId);
-      if (!project) {
-        return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: 'Cannot request check approval: project not found',
-        };
-      }
+      const project = this.findProjectSafe(ctx);
+      const worktreePath = project
+        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+        : null;
 
-      const worktreePath = ctx.worktreeManager.getPath(project.name, ctx.issue.number);
-      if (!worktreePath) {
-        return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: 'Cannot request check approval: worktree not found',
-        };
-      }
+      if (worktreePath && typeof ctx.worktreeManager.createCheckConvergenceCommit === 'function') {
+        const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
+        if (!convergence.success) {
+          return {
+            success: false,
+            output: taskOutput,
+            checkResults: allResults,
+            message: convergence.error ?? 'Cannot request check approval: uncommitted auto-fix or review artifact changes prevented approval',
+          };
+        }
 
-      const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
-      if (!convergence.success) {
-        return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: convergence.error ?? 'Cannot request check approval: uncommitted auto-fix or review artifact changes prevented approval',
-        };
+        effectiveResults = this.convergeSnapshot(ctx, allResults, convergence.headSha);
       }
-
-      effectiveResults = this.convergeSnapshot(ctx, allResults, convergence.headSha);
 
       const dimensions = aiReviewOutput.reviewReport ? parseDimensions(aiReviewOutput.reviewReport) : undefined;
+      const latestAiReview = getLatestCheckResult(effectiveResults, 'ai-review');
+      const snapshotSha = (latestAiReview?.output as { snapshotSha?: string } | undefined)?.snapshotSha;
       approvalOutput = {
         result: aiReviewOutput.verdict,
         reviewReport: aiReviewOutput.reviewReport,
         dimensions,
-        snapshotSha: convergence.headSha,
+        snapshotSha,
       };
     }
 
@@ -452,14 +450,13 @@ export abstract class BaseStageRunner implements StageRunner {
       output: updatedOutput,
     };
 
-    const deduped = replaceCurrentAiReviewTruth([...checkResults]);
-    const withoutStale = deduped.filter(r => r.name !== 'ai-review');
-    withoutStale.push(updatedResult);
+    const updatedResults = checkResults.filter(r => r.name !== 'ai-review');
+    updatedResults.push(updatedResult);
 
-    this.persistCheckResults(ctx, withoutStale);
+    this.persistCheckResults(ctx, updatedResults);
     this.updateCheckSuiteAiReview(ctx, authoritative);
 
-    return withoutStale;
+    return updatedResults;
   }
 
   private updateCheckSuiteAiReview(ctx: StageContext, result: AuthoritativeAiReviewResult): void {
