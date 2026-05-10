@@ -231,7 +231,9 @@ export class CoderSessionRepo {
       `SELECT cs.*
        FROM coder_session cs
        JOIN issues i ON cs.issue_id = i.id
-       WHERE i.project_id = ? AND cs.status IN (${placeholders})
+       WHERE i.project_id = ?
+         AND i.status = 'active'
+         AND cs.status IN (${placeholders})
        ORDER BY cs.created_at DESC
        LIMIT 1`,
       [projectId, ...CURRENT_SESSION_STATUSES]
