@@ -5,7 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
-    exclude: ['web/tests/**', 'web/src/**/*.test.{ts,tsx}', 'web/node_modules/**', 'node_modules/**', 'dist/**'],
+    exclude: ['web/tests/**', 'web/node_modules/**', 'node_modules/**', 'dist/**'],
     pool: 'forks',
     poolOptions: {
       forks: {
