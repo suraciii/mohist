@@ -83,6 +83,10 @@ describe('CLI Commands', () => {
         } as any)
         .mockResolvedValueOnce({
           success: true,
+          data: [],
+        } as any)
+        .mockResolvedValueOnce({
+          success: true,
           data: [
             {
               stage: 'check',
