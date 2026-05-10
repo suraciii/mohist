@@ -120,6 +120,8 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
     } as unknown as ChangeArtifactsManager,
     worktreeManager: {
       getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+      getHeadSha: vi.fn().mockResolvedValue('sha-head-001'),
+      isWorktreeClean: vi.fn().mockResolvedValue(true),
       createCheckConvergenceCommit: vi.fn().mockResolvedValue({ success: true, headSha: 'sha-converged-001' }),
     } as unknown as WorktreeManager,
     projectRepo: {
@@ -239,6 +241,10 @@ describe('Check-stage re-review convergence regressions', () => {
       expect(latestAiReview!.status).toBe('pass');
       expect((latestAiReview!.output as any).verdict).toBe('PASS');
       expect((latestAiReview!.output as any).reviewReport).toBe(PASS_REVIEW_REPORT);
+      expect(result.checkResults.filter(r => r.name === 'ai-review')).toHaveLength(1);
+      expect((latestAiReview!.output as any).snapshotSha).toBeDefined();
+      expect((latestAiReview!.output as any).reviewArtifactPath).toBe('/tmp/change/review.md');
+      expect((latestAiReview!.output as any).selfCheckArtifactPath).toBe('/tmp/change/review-self-check.md');
 
       expect(approvalCalls).toHaveLength(1);
       const approvalState = approvalCalls[0] as { stage: Stage; status: string; output: any };
@@ -355,10 +361,7 @@ describe('Check-stage re-review convergence regressions', () => {
         reviewReports.push((r.output as any).reviewReport);
       }
 
-      expect(reviewReports).toHaveLength(2);
-      expect(reviewReports[0]).toBe(FAIL_REVIEW_REPORT);
-      expect(reviewReports[1]).toBe(PASS_REVIEW_REPORT);
-      expect(reviewReports[0]).not.toBe(reviewReports[1]);
+      expect(reviewReports).toEqual([PASS_REVIEW_REPORT]);
     });
   });
 
@@ -665,6 +668,7 @@ describe('Check-stage re-review convergence regressions', () => {
       expect(latest!.status).toBe('fail');
       expect((latest!.output as any).verdict).toBe('FAIL');
       expect((latest!.output as any).reviewReport).toBe(FAIL_REVIEW_REPORT_V2);
+      expect(result.checkResults.filter(r => r.name === 'ai-review')).toHaveLength(1);
     });
 
     it('latest FAIL report is the re-reviewed one, not the initial one', async () => {
