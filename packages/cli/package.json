@@ -17,6 +17,7 @@
     "start:server": "node bin/mo-server",
     "start:cli": "node bin/mo",
     "test": "vitest run",
+    "test:stage-state": "vitest run tests/stage-state-service.test.ts tests/stage-state-regression.test.ts tests/api/stage-state-api.test.ts && npm --prefix web run test:run -- src/components/stage-state-consistency.test.tsx",
     "test:web": "npm --prefix web run test:run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
