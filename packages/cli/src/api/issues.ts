@@ -26,6 +26,7 @@ import { assembleSessionTranscript } from '../services/session-transcript-servic
 import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
 import { isValidModelId } from '../config/model-resolution';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
+import type { StageStateService } from '../services/stage-state-service';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 
@@ -124,6 +125,7 @@ export function createIssueRoutes(
   checkSuiteRepo?: CheckSuiteRepo,
   stageExecutionRepo?: StageExecutionRepo,
   _postMergeFinalizer?: PostMergeFinalizer,
+  stageStateService?: StageStateService,
 ): Hono {
   const app = new Hono();
 
@@ -398,6 +400,39 @@ export function createIssueRoutes(
 
       const executions = stageExecutionRepo.findByIssueId(issue.id);
       return c.json({ success: true, data: executions } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.get('/:number/stage-state', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (!stageStateService) {
+        return c.json({ success: false, error: 'StageStateService not configured' } satisfies ApiResponse, 500);
+      }
+
+      const stages = stageStateService.getIssueStageState(issue.id);
+
+      return c.json({
+        success: true,
+        data: {
+          issueId: issue.id,
+          issueNumber: issue.number,
+          stages,
+        },
+      } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
