@@ -1,0 +1,14 @@
+{
+  "task_id": "T-001",
+  "timestamp": "2026-05-10T13:46:18.661Z",
+  "insights": [],
+  "adjustments": [
+    "Consider breaking this task into smaller subtasks",
+    "The task may be too complex for a single execution"
+  ],
+  "success": false,
+  "execution_summary": "Failed on attempt 1: Timed out after 1800s",
+  "failure_reason": "Timed out after 1800s",
+  "failed_attempts": 1,
+  "failure_category": "timeout"
+}

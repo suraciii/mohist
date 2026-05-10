@@ -71,6 +71,8 @@ vi.mock('../src/lib/api', () => ({
 
 let queryClient: QueryClient
 
+let scrollHeightSpy: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.issue = null
@@ -82,10 +84,13 @@ beforeEach(() => {
       mutations: { retry: false },
     },
   })
+  scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+  scrollHeightSpy.mockReturnValue(700)
 })
 
 afterEach(() => {
   queryClient.clear()
+  scrollHeightSpy?.mockRestore()
 })
 
 function renderWithQueryClient(ui: React.ReactElement) {
@@ -335,13 +340,14 @@ describe('IssueDetailPage Markdown rendering', () => {
       })
     })
 
-    it('shows Expand for short descriptions too', async () => {
+    it('does not show expand button for short description that fits within threshold', async () => {
+      scrollHeightSpy.mockReturnValue(300)
       mocks.issue = makeIssue({
         body: 'Short content',
       })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Expand')).toBeInTheDocument()
+        expect(screen.queryByText('Expand')).not.toBeInTheDocument()
       })
     })
 

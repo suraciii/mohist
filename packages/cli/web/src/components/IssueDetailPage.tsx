@@ -71,7 +71,8 @@ export function IssueDetailPage() {
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
   const [descriptionExpanded, setDescriptionExpanded] = useState(false)
-
+  const descriptionBodyRef = useRef<HTMLDivElement>(null)
+  const [isOverflowing, setIsOverflowing] = useState(false)
 
   useEffect(() => {
     if (!forceStopConfirming) return
@@ -91,6 +92,12 @@ export function IssueDetailPage() {
   const { data: issue, isLoading, isError } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
+
+  useEffect(() => {
+    if (descriptionBodyRef.current) {
+      setIsOverflowing(descriptionBodyRef.current.scrollHeight > 600)
+    }
+  }, [issue?.body])
 
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
@@ -302,25 +309,27 @@ export function IssueDetailPage() {
             <div className="lg:col-span-2 space-y-6">
               <BranchBar issueNumber={issueNumber} stage={issue.stage} isAgentRunning={isAgentRunningOnThis} />
               {issue.body && (
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
-                  <div className={descriptionExpanded ? '' : 'max-h-[600px] overflow-hidden relative'}>
-                    <div className={descriptionExpanded ? '' : 'max-h-[600px] overflow-hidden'}>
-                      <MarkdownContent content={issue.body} />
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
+                    <div className="relative">
+                      <div ref={descriptionBodyRef} className={descriptionExpanded ? '' : 'max-h-[600px] overflow-hidden'}>
+                        <MarkdownContent content={issue.body} />
+                      </div>
+                      {!descriptionExpanded && (
+                        <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white to-transparent pointer-events-none" />
+                      )}
                     </div>
-                    {!descriptionExpanded && (
-                      <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white to-transparent" />
+                    {isOverflowing && (
+                      <div className="mt-2">
+                        <button
+                          onClick={() => setDescriptionExpanded(!descriptionExpanded)}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                        >
+                          {descriptionExpanded ? 'Collapse' : 'Expand'}
+                        </button>
+                      </div>
                     )}
-                    <div className="mt-2">
-                      <button
-                        onClick={() => setDescriptionExpanded(!descriptionExpanded)}
-                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                      >
-                        {descriptionExpanded ? 'Collapse' : 'Expand'}
-                      </button>
-                    </div>
                   </div>
-                </div>
               )}
 
               <div id="changes-panel">
