@@ -9,6 +9,7 @@ import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { ConfigInfo } from '../config/config-schema';
+import type { StageStateService } from '../services/stage-state-service';
 import { resolveStageModel } from '../config/model-resolution';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 
@@ -32,6 +33,7 @@ export interface WorkflowEngineOptions {
   sessionStreamLogRepo?: SessionStreamLogRepo;
   coderSessionRepo?: CoderSessionRepo;
   stageExecutionRepo?: StageExecutionRepo;
+  stageStateService?: StageStateService;
   config?: ConfigInfo;
 }
 
@@ -48,6 +50,7 @@ export class WorkflowEngine {
   private sessionStreamLogRepo?: SessionStreamLogRepo;
   private coderSessionRepo?: CoderSessionRepo;
   private stageExecutionRepo?: StageExecutionRepo;
+  private stageStateService?: StageStateService;
   private config?: ConfigInfo;
 
   constructor(options: WorkflowEngineOptions) {
@@ -63,6 +66,7 @@ export class WorkflowEngine {
     this.sessionStreamLogRepo = options.sessionStreamLogRepo;
     this.coderSessionRepo = options.coderSessionRepo;
     this.stageExecutionRepo = options.stageExecutionRepo;
+    this.stageStateService = options.stageStateService;
     this.config = options.config;
   }
 
@@ -92,6 +96,7 @@ export class WorkflowEngine {
       sessionStreamLogRepo: this.sessionStreamLogRepo,
       coderSessionRepo: this.coderSessionRepo,
       stageExecutionRepo: this.stageExecutionRepo,
+      stageStateService: this.stageStateService,
       signal: this.signal,
     };
   }

@@ -17,6 +17,7 @@ import { maskSensitiveData } from '../utils/sensitive-data';
 import { Log } from '../util/log';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { StageExecutionRepo } from '../db/stage-execution-repo';
+import type { StageStateService } from './stage-state-service';
 import { findChangeDir } from '../openspec/detector';
 import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
@@ -123,6 +124,7 @@ export class AgentRunnerService {
     private readonly conflictResolutionDeps?: ConflictResolutionDeps,
     private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
     private readonly stageExecutionRepo?: StageExecutionRepo,
+    private readonly stageStateService?: StageStateService,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -1152,6 +1154,7 @@ export class AgentRunnerService {
         workflowLogRepo: this.workflowLogRepo,
         sessionStreamLogRepo: this.sessionStreamLogRepo,
         stageExecutionRepo: this.stageExecutionRepo,
+        stageStateService: this.stageStateService,
         config: load(),
       });
 
