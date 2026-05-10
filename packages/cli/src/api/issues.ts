@@ -909,13 +909,11 @@ export function createIssueRoutes(
       }
 
       const refreshedIssue = issueService.getByNumber(projectId, number);
-      const isAwaitingApproval = refreshedIssue?.approvalState?.status === 'awaiting';
-
-      if (agentRunner && !isAwaitingApproval) {
+      if (agentRunner) {
         const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
         const response: ApiResponse = {
           success: true,
-          data: {
+            data: {
             issue: refreshedIssue,
             taskId: result.taskId,
             status: result.status,
@@ -930,7 +928,7 @@ export function createIssueRoutes(
         success: true,
         data: {
           issue: refreshedIssue ?? issue,
-          message: `Issue #${number} reopened at stage ${issue.stage}. Awaiting approval.`,
+          message: `Issue #${number} reopened at stage ${issue.stage}.`,
         }
       };
       return c.json(response);
