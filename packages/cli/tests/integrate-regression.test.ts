@@ -86,7 +86,6 @@ function createMockContext(tmpDir: string, issueNumber = 42, overrides?: Partial
         baseSha: 'abc123',
         candidateHeadSha: 'def456',
         landedSha: 'ghi789',
-        fastForward: true,
       }),
     } as any,
     projectRepo: {

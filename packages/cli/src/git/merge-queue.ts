@@ -302,11 +302,16 @@ export class MergeQueue {
     entry.mergeState = MergeState.Merging;
     this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merging);
 
-    const mergeMetadata = await this.deps.getMergeMetadata(entry.projectId, entry.issueNumber);
-    if (!mergeMetadata) {
-      this.handleFailure(entry, `Merge metadata not found for issue #${entry.issueNumber}`);
+    const issue = this.deps.issueRepo.findById(entry.issueId);
+    if (!issue) {
+      this.handleFailure(entry, 'Issue not found for merge metadata');
       return;
     }
+
+    const mergeMetadata = await this.deps.getMergeMetadata(entry.projectId, entry.issueNumber) ?? {
+      issueNumber: entry.issueNumber,
+      issueTitle: issue.title,
+    };
 
     const mergeResult = await this.deps.worktreeManager.mergeBack(
       project.path,
@@ -325,12 +330,6 @@ export class MergeQueue {
     log.info('Squash merge succeeded; retaining worktree until archive', {
       issueNumber: entry.issueNumber,
     });
-
-    const issue = this.deps.issueRepo.findById(entry.issueId);
-    if (!issue) {
-      this.handleFailure(entry, 'Issue not found for post-merge finalization');
-      return;
-    }
 
     if (!this.deps.postMergeFinalizer) {
       this.handleFailure(entry, 'PostMergeFinalizer not configured');
@@ -354,10 +353,6 @@ export class MergeQueue {
     });
 
     log.info('Merge completed successfully', { issueNumber: entry.issueNumber });
-  }
-
-  private isStructuredMergeFailure(result: MergeBackResult): result is Extract<MergeBackResult, { success: false }> {
-    return result.success === false;
   }
 
   private async handleConflictResolution(
