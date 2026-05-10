@@ -1359,6 +1359,30 @@ export function createIssueRoutes(
       if (rejectedStage === Stage.Check) {
         issueRepo.updateStage(issue.id, Stage.Build);
 
+        if (checkpointRepo) {
+          checkpointRepo.delete(issue.number, Stage.Check);
+        }
+
+        if (worktreeManager) {
+          const project = projectService.getById(projectId);
+          if (project) {
+            const worktreePath = worktreeManager.getPath(project.name, issue.number);
+            if (worktreePath) {
+              const changeDir = findChangeDir(worktreePath, issue.number);
+              if (changeDir) {
+                for (const filename of ['review.md', 'review-self-check.md']) {
+                  const artifactPath = path.join(changeDir, filename);
+                  try {
+                    if (fs.existsSync(artifactPath)) {
+                      fs.unlinkSync(artifactPath);
+                    }
+                  } catch {}
+                }
+              }
+            }
+          }
+        }
+
         if (checkSuiteRepo) {
           const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
           if (activeSuite) {
