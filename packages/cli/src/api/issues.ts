@@ -2266,9 +2266,9 @@ export function createIssueRoutes(
         ? (() => { try { return JSON.parse(firstPromptEvent.data) as Record<string, unknown>; } catch { return {}; } })()
         : null;
 
-      const terminalStatuses = new Set(['completed', 'failed', 'timeout', 'cancelled']);
+      const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
       const isTerminal = terminalStatuses.has(session.status);
-      const failedStatuses = new Set(['failed', 'timeout', 'cancelled']);
+      const failedStatuses = new Set(['failed', 'cancelled']);
       const deriveStatusKind = (): 'live' | 'finalizing' | 'completed' | 'failed' | 'stale' => {
         if (failedStatuses.has(session.status)) return 'failed';
         if (session.status === 'completed') return 'completed';

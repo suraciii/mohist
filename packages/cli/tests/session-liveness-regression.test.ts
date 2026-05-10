@@ -413,6 +413,7 @@ describe('Session liveness end-to-end regression', () => {
   it('full liveness lifecycle: running -> probing -> running -> probing -> failed with persistence', async () => {
     const eventBus = new EventBus();
     const emittedEvents: Array<{ event: string; data: any }> = [];
+    const observedLivenessUpdates: LivenessUpdate[] = [];
     eventBus.on('coder_session_status_changed', (data: any) => {
       emittedEvents.push({ event: 'coder_session_status_changed', data });
     });
@@ -428,6 +429,7 @@ describe('Session liveness end-to-end regression', () => {
         wfObserver.onSessionStart(ctx);
       },
       onLivenessUpdate(ctx, update) {
+        observedLivenessUpdates.push(update);
         wfObserver.onLivenessUpdate(ctx, update);
       },
       onStateChange(ctx, from, to) {
@@ -462,6 +464,11 @@ describe('Session liveness end-to-end regression', () => {
     expect(persisted.status).toBe('probing');
     expect(persisted.probeSentAt).not.toBeNull();
     expect(persisted.probeDeadlineAt).not.toBeNull();
+
+    const observedProbeUpdate = observedLivenessUpdates.find(u => u.status === 'probing');
+    expect(observedProbeUpdate).toBeDefined();
+    expect(persisted.probeSentAt).toBe(observedProbeUpdate!.probeSentAt);
+    expect(persisted.probeDeadlineAt).toBe(observedProbeUpdate!.probeDeadlineAt);
 
     const probingEvents = emittedEvents.filter(e => e.data.status === 'probing');
     expect(probingEvents.length).toBeGreaterThanOrEqual(1);
@@ -591,11 +598,15 @@ describe('Session liveness end-to-end regression', () => {
     await session.close().catch(() => {});
   });
 
-  it('probe send failure returns session_failed', async () => {
+  it('probe send failure returns session_failed immediately', async () => {
     const livenessUpdates: LivenessUpdate[] = [];
+    const stateChanges: Array<{ from: string; to: string }> = [];
     const observer: SessionObserver = {
       onLivenessUpdate(_ctx, update) {
         livenessUpdates.push(update);
+      },
+      onStateChange(_ctx, from, to) {
+        stateChanges.push({ from, to });
       },
     };
 
@@ -622,17 +633,63 @@ describe('Session liveness end-to-end regression', () => {
     const executePromise = session.execute('test');
 
     await vi.advanceTimersByTimeAsync(QUIET_THRESHOLD_MS + 50);
-    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + 50);
+    await vi.advanceTimersByTimeAsync(1);
 
     const result = await executePromise;
 
     expect(result.success).toBe(false);
     expect(result.failureKind).toBe('session_failed');
+    expect(result.failureReason).toContain('Probe send failed');
 
     const failedUpdate = livenessUpdates.find(u => u.status === 'failed');
     expect(failedUpdate).toBeDefined();
-    expect(failedUpdate!.failureReason).not.toBeNull();
+    expect(failedUpdate!.failureReason).toContain('Probe send failed');
+
+    const failedChange = stateChanges.find(c => c.from === 'probing' && c.to === 'failed');
+    expect(failedChange).toBeDefined();
 
     await session.close().catch(() => {});
+  }, 10000);
+
+  it('close preserves failed terminal state after session failure', async () => {
+    const stateChanges: Array<{ from: string; to: string }> = [];
+    const observer: SessionObserver = {
+      onStateChange(_ctx, from, to) {
+        stateChanges.push({ from, to });
+      },
+    };
+
+    let promptCallCount = 0;
+    mockPromptFn.mockImplementation(() => {
+      promptCallCount++;
+      if (promptCallCount === 1) {
+        return new Promise(() => {});
+      }
+      return Promise.reject(new Error('Probe send failed: connection reset'));
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      livenessQuietThresholdMs: QUIET_THRESHOLD_MS,
+      probeTimeoutMs: PROBE_TIMEOUT_MS,
+      observers: [observer],
+    });
+
+    const executePromise = session.execute('test');
+
+    await vi.advanceTimersByTimeAsync(QUIET_THRESHOLD_MS + 50);
+    await vi.advanceTimersByTimeAsync(1);
+
+    const result = await executePromise;
+    expect(result.failureKind).toBe('session_failed');
+
+    await session.close();
+
+    expect(stateChanges.some(c => c.to === 'failed')).toBe(true);
+    expect(stateChanges.some(c => c.to === 'completed')).toBe(false);
   }, 10000);
 });

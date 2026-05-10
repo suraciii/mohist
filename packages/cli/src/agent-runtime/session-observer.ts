@@ -38,7 +38,7 @@ export interface SessionContext {
   readonly processPid: number | undefined;
 }
 
-export type SessionState = 'initializing' | 'running' | 'probing' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'closed';
+export type SessionState = 'initializing' | 'running' | 'probing' | 'completed' | 'failed' | 'cancelled' | 'closed';
 
 export interface LivenessUpdate {
   status: SessionState;

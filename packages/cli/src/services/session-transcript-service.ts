@@ -135,7 +135,7 @@ interface RawEvent {
   createdAt: string;
 }
 
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled']);
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
 const EVENT_PRIORITY: Record<string, number> = {
   mohist_prompt: 0,
