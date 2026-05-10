@@ -137,11 +137,14 @@
       "dependsOn": [
         "T-004"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "The visual behavior can stay close to the existing UI; the important outcome is a single current-state source.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        477910
+      ]
     },
     {
       "id": "T-006",
