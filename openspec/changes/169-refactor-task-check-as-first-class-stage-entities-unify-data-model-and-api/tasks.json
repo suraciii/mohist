@@ -108,11 +108,14 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Keep status conversion out of frontend types; the backend response should already be normalized.",
-      "attempts": 0,
+      "attempts": 1,
       "order": 999999,
-      "error": null
+      "error": null,
+      "durations": [
+        114792
+      ]
     },
     {
       "id": "T-005",
