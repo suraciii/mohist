@@ -36,8 +36,9 @@ describe('StageStateService', () => {
       const state = service.getStageState(issueId, Stage.Plan);
       expect(state).not.toBeNull();
       expect(state!.stage).toBe(Stage.Plan);
-      expect(state!.status).toBe('pending');
+      expect(state!.status).toBe('running');
       expect(state!.attempts).toBe(0);
+      expect(state!.startedAt).toBeTruthy();
     });
 
     it('should seed static tasks for plan stage', () => {

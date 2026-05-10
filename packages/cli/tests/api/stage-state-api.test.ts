@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { Hono } from 'hono';
 import request from 'supertest';
 import { DatabaseManager } from '../../src/db/database';
@@ -52,6 +55,7 @@ describe('GET /api/issues/:number/stage-state', () => {
   let stageStateService: StageStateService;
   let server: http.Server;
   let savedApiKeys: Record<string, string | undefined> = {};
+  let tempDirs: string[] = [];
 
   beforeEach(() => {
     savedApiKeys = {};
@@ -79,6 +83,10 @@ describe('GET /api/issues/:number/stage-state', () => {
   afterEach(() => {
     server?.close();
     db.close();
+    for (const dir of tempDirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs = [];
     for (const [key, val] of Object.entries(savedApiKeys)) {
       if (val === undefined) {
         delete process.env[key];
@@ -87,6 +95,12 @@ describe('GET /api/issues/:number/stage-state', () => {
       }
     }
   });
+
+  function makeProjectPath(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-stage-state-'));
+    tempDirs.push(dir);
+    return dir;
+  }
 
   function createApp(): http.Server {
     const app = new Hono();
@@ -142,7 +156,7 @@ describe('GET /api/issues/:number/stage-state', () => {
   });
 
   it('returns normalized stage state with tasks, checks, approval, and updatedAt', async () => {
-    const project = await projectService.create({ name: 'Test', path: '/tmp/test' });
+    const project = await projectService.create({ name: 'Test', path: makeProjectPath() });
     projectService.setCurrent(project);
     const issue = await issueService.create({ projectId: project.id, title: 'Test Issue' });
 
@@ -171,7 +185,7 @@ describe('GET /api/issues/:number/stage-state', () => {
 
     const planStage = data.stages[0];
     expect(planStage.stage).toBe('plan');
-    expect(planStage.status).toBe('pending');
+    expect(planStage.status).toBe('running');
     expect(planStage.updatedAt).toBeTruthy();
     expect(Array.isArray(planStage.tasks)).toBe(true);
     expect(Array.isArray(planStage.checks)).toBe(true);
@@ -309,5 +323,101 @@ describe('GET /api/issues/:number/stage-state', () => {
       expect(typeof check.status).toBe('string');
       expect(['pending', 'running', 'passed', 'failed', 'error']).toContain(check.status);
     }
+  });
+
+  it('lazily projects legacy build tasks from tasks.json when stage-state rows are missing', async () => {
+    const projectPath = makeProjectPath();
+    const project = await projectService.create({ name: 'Test', path: projectPath });
+    projectService.setCurrent(project);
+    const issue = await issueService.create({ projectId: project.id, title: 'Test Issue' });
+
+    const changeDir = path.join(projectPath, 'openspec', 'changes', `${issue.number}-test-issue`);
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({
+      version: 1,
+      tasks: [
+        { id: 'T-001', order: 1, title: 'Add persistence', description: 'Persist stage state', passes: true, attempts: 1 },
+        { id: 'T-002', order: 2, title: 'Expose endpoint', description: 'Serve stage state', passes: false, attempts: 1 },
+      ],
+    }));
+
+    db.run('UPDATE issues SET stage = ?, updated_at = ? WHERE id = ?', [Stage.Build, new Date().toISOString(), issue.id]);
+
+    server = createApp();
+
+    const response = await request(server).get(`/api/issues/${issue.number}/stage-state`);
+
+    expect(response.status).toBe(200);
+    const buildStage = response.body.data.stages.find((s: any) => s.stage === 'build');
+    expect(buildStage).toBeDefined();
+    expect(buildStage.status).toBe('running');
+    expect(buildStage.tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ taskId: 'T-001', status: 'completed' }),
+      expect.objectContaining({ taskId: 'T-002', status: 'pending' }),
+    ]));
+  });
+
+  it('lazily projects legacy check execution and approval state when stage-state rows are missing', async () => {
+    const project = await projectService.create({ name: 'Test', path: makeProjectPath() });
+    projectService.setCurrent(project);
+    const issue = await issueService.create({ projectId: project.id, title: 'Test Issue' });
+
+    const now = '2026-01-01T00:00:00.000Z';
+    const executionId = 'exec-1';
+    db.run(
+      `INSERT INTO stage_executions (id, issue_id, stage, status, task_results, check_results, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        executionId,
+        issue.id,
+        Stage.Check,
+        'awaiting-approval',
+        JSON.stringify([{ taskId: 'fix-review-findings', title: 'Fix review findings', status: 'completed', artifacts: [], attempts: 1, duration: 25 }]),
+        JSON.stringify([{ name: 'ai-review', status: 'pass', message: 'LGTM', output: { verdict: 'PASS' } }]),
+        now,
+        now,
+      ],
+    );
+    db.run(
+      `INSERT INTO check_suites (id, issue_id, snapshot_sha, status, checks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'suite-1',
+        issue.id,
+        'abc123',
+        'awaiting-approval',
+        JSON.stringify({
+          'build-test': { status: 'passed', ranAt: now },
+          'ai-review': { status: 'passed', ranAt: now, output: { verdict: 'PASS' } },
+          'user-approval': { status: 'pending' },
+        }),
+        now,
+        now,
+      ],
+    );
+    db.run('UPDATE issues SET stage = ?, approval_state = ?, updated_at = ? WHERE id = ?', [
+      Stage.Check,
+      JSON.stringify({ stage: Stage.Check, status: 'awaiting', output: { verdict: 'PASS' }, requestedAt: now }),
+      now,
+      issue.id,
+    ]);
+
+    server = createApp();
+
+    const response = await request(server).get(`/api/issues/${issue.number}/stage-state`);
+
+    expect(response.status).toBe(200);
+    const checkStage = response.body.data.stages.find((s: any) => s.stage === 'check');
+    expect(checkStage).toBeDefined();
+    expect(checkStage.status).toBe('awaiting-approval');
+    expect(checkStage.approval).toEqual(expect.objectContaining({ status: 'awaiting', requestedAt: now }));
+    expect(checkStage.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ checkName: 'ai-review', status: 'passed' }),
+      expect.objectContaining({ checkName: 'build-test', status: 'passed' }),
+      expect.objectContaining({ checkName: 'user-approval', status: 'pending' }),
+    ]));
+    expect(checkStage.tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ taskId: 'fix-review-findings', status: 'completed' }),
+    ]));
   });
 });
