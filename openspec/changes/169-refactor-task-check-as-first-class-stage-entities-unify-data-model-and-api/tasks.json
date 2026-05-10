@@ -1,0 +1,132 @@
+{
+  "project": "mohist",
+  "description": "Make stage tasks and checks first-class current-state entities with one backend API and one Issue Detail data source.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add stage-state persistence service",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-006",
+      "description": "Create the durable current-state model for stage tasks, checks, and approval state keyed by issue and stage. Add the database migration, repository, normalized status types, backend-owned static task definitions, and service methods to ensure stages and upsert current task/check state without changing execution history behavior.",
+      "acceptanceCriteria": [
+        "Database migration creates current-state storage for stages, tasks, and checks with uniqueness by issue, stage, and task/check identity",
+        "StageStateService can ensure a stage, seed backend task definitions, upsert a task, upsert a check, and read all stage states for an issue",
+        "Task and check status normalization is implemented in one backend boundary rather than in API routes or UI components",
+        "Existing stage_executions schema and repository behavior remain available for audit history",
+        "Relevant unit tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/cli/src/db/migrations.ts; packages/cli/src/services/stage-state-service.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the service interface narrow: callers should not need to know whether state came from new rows, seeded definitions, or legacy projection."
+    },
+    {
+      "id": "T-002",
+      "title": "Expose unified stage-state API",
+      "spec": "specs/http-api/spec.md#REQ-HTTP-001",
+      "description": "Add the issue stage-state API endpoint backed by StageStateService and return the normalized shape needed by Issue Detail. Rework `/tasks` and `/build-status` only as compatibility projections or leave them intact, but ensure the new endpoint is the authoritative read path for current task/check progress.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/stage-state returns all available stage states for the issue with tasks, checks, approval, status, and updatedAt fields",
+        "The endpoint returns normalized task statuses and normalized check statuses without exposing tasks.json passes or CheckResult pass/fail variants",
+        "Missing current-state rows are handled by StageStateService lazy seeding or projection instead of returning contradictory empty data",
+        "GET /api/issues/:number/executions still returns execution history for audit consumers",
+        "API tests or route-level tests cover the new response shape and a not-found issue case",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Do not make API routes aggregate raw tasks.json, check_suites, and stage_executions directly; keep that complexity behind StageStateService."
+    },
+    {
+      "id": "T-003",
+      "title": "Mirror runner progress into stage state",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-005",
+      "description": "Wire StageStateService into stage execution so plan, build, check, integrate, and fix task progress update current stage entities in place. Preserve the existing stage_executions audit writes while making task and check retries update the same current task/check identity.",
+      "acceptanceCriteria": [
+        "BaseStageRunner ensures current stage state when a stage attempt starts while still creating a stage_executions row",
+        "Task result recording writes both the audit snapshot and the current stage task row",
+        "Check result recording writes both the audit snapshot and the current stage check row",
+        "Repeated fix/check attempts update attempts or run counts on the current row rather than requiring UI aggregation across executions",
+        "Build tasks generated from tasks.json are mirrored into normalized stage task state without removing tasks.json artifact compatibility",
+        "Existing plan/build/check/integrate flow tests continue to pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/base-stage-runner.ts; packages/cli/src/workflow/stage-context.ts; packages/cli/src/artifacts/change-artifacts-manager.ts",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Current-state writes should be best-effort logged like existing audit writes, but failures must not silently corrupt stage_executions history."
+    },
+    {
+      "id": "T-004",
+      "title": "Add frontend stage-state client model",
+      "spec": "specs/http-api/spec.md#REQ-HTTP-001",
+      "description": "Add frontend TypeScript types, API client method, and React Query hook for the unified stage-state endpoint. The hook should be the shared data source that Issue Detail components use for task/check progress refreshes.",
+      "acceptanceCriteria": [
+        "Frontend types represent normalized StageState, StageTaskState, StageCheckState, and approval state returned by the backend endpoint",
+        "api.getIssueStageState calls GET /api/issues/:number/stage-state and returns typed data",
+        "useIssueStageState exists with a stable React Query key and polling or invalidation behavior appropriate for live progress",
+        "No Issue Detail component is required to call the new endpoint manually outside the shared hook",
+        "Frontend typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/types.ts; packages/cli/web/src/lib/api.ts; packages/cli/web/src/hooks/useQueries.ts",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Keep status conversion out of frontend types; the backend response should already be normalized."
+    },
+    {
+      "id": "T-005",
+      "title": "Migrate Issue Detail progress UI",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-004",
+      "description": "Update PipelineView and TaskProgressPanel so both render task/check progress from the unified stage-state hook. Remove frontend hardcoded stage task definitions as the source of truth and stop using execution lookup for primary current-state rendering.",
+      "acceptanceCriteria": [
+        "PipelineView renders tasks and checks from stage-state data instead of executions.find for current task/check status",
+        "TaskProgressPanel renders the same normalized stage task data as PipelineView and no longer prefers /build-status or /tasks as its primary data source",
+        "PLAN_TASK_DEFS, CHECK_TASK_DEFS, and INTEGRATE_TASK_DEFS are removed from frontend current-state rendering",
+        "Dynamic tasks such as fix-check-health render when present in stage-state data even if they are not static backend definitions",
+        "Execution history remains available only for explicit audit/debug usage if still rendered",
+        "Frontend typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/PipelineView.tsx; packages/cli/web/src/components/TaskProgressPanel.tsx",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "The visual behavior can stay close to the existing UI; the important outcome is a single current-state source."
+    },
+    {
+      "id": "T-006",
+      "title": "Add stage-state regression coverage",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-001",
+      "description": "Add targeted regression tests for the contradictory-state cases that motivated this change. Cover multiple stage executions, dynamic fix tasks, normalized status mapping, and frontend consistency between PipelineView and TaskProgressPanel.",
+      "acceptanceCriteria": [
+        "A backend test proves multiple executions for the same issue and stage resolve to the latest current task/check state without reading only the first execution",
+        "A backend test proves dynamic fix tasks are included in stage-state output",
+        "A backend test proves tasks.json build task state is projected or mirrored into normalized stage-state task rows",
+        "A frontend test proves PipelineView and TaskProgressPanel consume the same stage-state data for task progress",
+        "Relevant test suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests; packages/cli/web/src/components/*.test.tsx",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Use small fixtures that model issue #156/#163 symptoms: repeated executions and contradictory old data sources."
+    }
+  ]
+}
