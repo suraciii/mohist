@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Refactor description expand/collapse layout and conditional visibility",
+      "spec": "openspec/specs/web-ui/spec.md#REQ-WUI-ISSUE-MARKDOWN-003",
+      "description": "Move the Expand/Collapse button outside the overflow-hidden description container so it is always visible and clickable. Add a ref-based DOM measurement to only render the button when rendered content exceeds ~600px. Preserve existing expand/collapse state behavior and gradient overlay in collapsed state.",
+      "acceptanceCriteria": [
+        "Expand button is positioned outside the overflow-clipped container and is never obscured by the gradient overlay",
+        "Expand button only appears when scrollHeight > 600px; short descriptions show no button",
+        "Clicking Expand removes the height constraint and gradient, revealing full Markdown",
+        "Clicking Collapse restores the 600px height limit and gradient overlay",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Use useEffect/useLayoutEffect with a ref on the inner Markdown container to measure scrollHeight after initial render. Toggle an isOverflowing boolean to conditionally render the control.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1910274,
+        221426
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Update expand/collapse interaction tests",
+      "spec": "openspec/specs/web-ui/spec.md#REQ-WUI-ISSUE-MARKDOWN-003",
+      "description": "Update IssueDetailPage tests to verify the expand/collapse button is conditionally rendered based on content height. Remove or adjust the test asserting the button appears for short descriptions. Add a test confirming the button is absent when rendered content fits within the threshold.",
+      "acceptanceCriteria": [
+        "Test verifies Expand button is absent for short descriptions (scrollHeight <= 600px)",
+        "Test verifies Expand button is present for long descriptions (scrollHeight > 600px)",
+        "Test verifies Expand/Collapse toggle still works after layout change",
+        "All existing description-related tests continue to pass",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/web/tests/IssueDetailPage.test.tsx",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "jsdom may not compute scrollHeight accurately; stub the ref element's scrollHeight in tests where needed, or drive assertions via mocked ref behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        228996
+      ]
+    }
+  ]
+}
