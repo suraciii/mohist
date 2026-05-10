@@ -135,7 +135,7 @@ async function main(): Promise<void> {
 
   const stageStateService = new StageStateService(db);
 
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps, sessionStreamLogRepo, stateManager.getStageExecutionRepo());
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps, sessionStreamLogRepo, stateManager.getStageExecutionRepo(), stageStateService);
 
   agentRunner.setLlmConfig(fileConfig);
 

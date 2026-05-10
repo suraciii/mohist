@@ -245,6 +245,17 @@ const STATIC_TASK_DEFS: Partial<Record<Stage, StaticTaskDef[]>> = {
 export class StageStateService {
   constructor(private db: DatabaseManager) {}
 
+  setStageStatus(issueId: string, stage: Stage, status: StageStateStatus): void {
+    const now = new Date().toISOString();
+    const completedAt = (status === 'passed' || status === 'failed' || status === 'skipped') ? now : null;
+
+    this.db.run(
+      `UPDATE stage_states SET status = ?, completed_at = COALESCE(?, completed_at), updated_at = ?
+       WHERE issue_id = ? AND stage = ?`,
+      [status, completedAt, now, issueId, stage],
+    );
+  }
+
   ensureStage(issueId: string, stage: Stage): void {
     const now = new Date().toISOString();
     this.db.transaction(() => {
