@@ -131,7 +131,6 @@ export interface MergeTruth {
   baseSha: string;
   candidateHeadSha: string;
   landedSha: string;
-  fastForward: boolean;
   rebased?: boolean;
 }
 
@@ -142,6 +141,44 @@ export interface IntegrationFailure {
   candidateHeadSha: string;
   conflictFiles?: string[];
   error: string;
+}
+
+export interface MergeTaskSummary {
+  id: string;
+  title: string;
+}
+
+export interface MergeMetadata {
+  issueNumber: number;
+  issueTitle: string;
+  tasks?: MergeTaskSummary[];
+}
+
+export type MergeBackResult =
+  | { success: true; message: string; targetBranch?: string; baseSha?: string; candidateHeadSha?: string; landedSha?: string }
+  | { success: false; message: string; targetBranch: string; baseSha: string; candidateHeadSha: string };
+
+export function formatSquashCommitMessage(metadata: MergeMetadata): string {
+  const subject = `${metadata.issueTitle} (#${metadata.issueNumber})`;
+  if (!metadata.tasks || metadata.tasks.length === 0) {
+    return subject;
+  }
+  const body = [
+    `Issue: #${metadata.issueNumber}`,
+    ...metadata.tasks.map(t => `* ${t.id}: ${t.title}`),
+  ].join('\n');
+  return `${subject}\n\n${body}`;
+}
+
+async function cleanupFailedSquashMerge(projectPath: string): Promise<void> {
+  try {
+    await execFileAsync('git', ['reset', '--merge'], { cwd: projectPath });
+  } catch (err) {
+    log.warn('Failed to clean up squash merge state', {
+      projectPath,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export class WorktreeManager {
@@ -219,11 +256,14 @@ export class WorktreeManager {
 
   async mergeBack(
     projectPath: string,
-    projectName: string,
+    _projectName: string,
     issueNumber: number,
-    baseBranch: string = 'main'
-  ): Promise<{ success: boolean; message: string }> {
+    baseBranch: string = 'main',
+    metadata: MergeMetadata
+  ): Promise<MergeBackResult> {
     const branch = getBranchName(issueNumber);
+    let baseSha = '';
+    let candidateHeadSha = '';
 
     try {
       const { stdout: logOut } = await execFileAsync('git', ['log', `${baseBranch}..${branch}`, '--oneline'], { cwd: projectPath });
@@ -236,71 +276,97 @@ export class WorktreeManager {
     }
 
     try {
-      await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
-    } catch (err) {
-      return { success: false, message: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}` };
-    }
-
-    try {
-      await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
-      log.info('Fast-forward merge succeeded', { issueNumber, branch, baseBranch });
-      return { success: true, message: `Merged ${branch} into ${baseBranch} (fast-forward)` };
+      const { stdout: baseOut } = await execFileAsync(
+        'git', ['merge-base', baseBranch, branch],
+        { cwd: projectPath }
+      );
+      baseSha = baseOut.trim();
     } catch {
-      log.info('Fast-forward not possible, attempting rebase then merge', { issueNumber, branch, baseBranch });
+      return {
+        success: false,
+        message: `Could not determine merge base for ${branch} vs ${baseBranch}`,
+        targetBranch: baseBranch,
+        baseSha: '',
+        candidateHeadSha: '',
+      };
     }
 
-    const worktreePath = getWorktreePath(projectName, issueNumber);
-    if (!worktreePath) {
-      return { success: false, message: `Worktree not found for issue #${issueNumber}` };
-    }
-
-    await smartFetch(projectPath);
-
     try {
-      await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
-    } catch { /* no rebase in progress */ }
-
-    try {
-      await execFileAsync('git', ['rebase', baseBranch], { cwd: worktreePath });
-      log.info('Rebase succeeded cleanly', { issueNumber, branch, baseBranch });
+      const { stdout: headOut } = await execFileAsync(
+        'git', ['rev-parse', branch],
+        { cwd: projectPath }
+      );
+      candidateHeadSha = headOut.trim();
     } catch {
-      log.info('Rebase has conflicts, auto-resolving with theirs', { issueNumber });
-
-      for (let attempt = 0; attempt < 50; attempt++) {
-        try {
-          await execFileAsync('git', ['checkout', '--theirs', '.'], { cwd: worktreePath });
-          await execFileAsync('git', ['add', '.'], { cwd: worktreePath });
-          await execFileAsync('git', ['rebase', '--continue'], {
-            cwd: worktreePath,
-            env: { ...process.env, GIT_EDITOR: 'true' },
-          });
-          log.info('Rebase continued after auto-resolve', { issueNumber, attempt });
-          break;
-        } catch (continueErr) {
-          const stillRebasing = await this.isRebaseInProgress(projectName, issueNumber).catch(() => false);
-          if (!stillRebasing) {
-            log.warn('Rebase aborted during auto-resolve', { issueNumber, attempt });
-            try { await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath }); } catch { /* */ }
-            return { success: false, message: `Rebase failed during auto-resolve: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}` };
-          }
-          log.info('More conflicts after continue, retrying', { issueNumber, attempt });
-        }
-      }
-
-      const stillRebasing = await this.isRebaseInProgress(projectName, issueNumber).catch(() => false);
-      if (stillRebasing) {
-        try { await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath }); } catch { /* */ }
-        return { success: false, message: `Rebase auto-resolve exceeded max attempts for issue #${issueNumber}` };
-      }
+      return {
+        success: false,
+        message: `Could not resolve branch ${branch}`,
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha: '',
+      };
     }
 
     try {
       await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
-      await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
-      log.info('Merge succeeded after rebase', { issueNumber, branch, baseBranch });
-      return { success: true, message: `Merged ${branch} into ${baseBranch} (rebase + fast-forward)` };
     } catch (err) {
-      return { success: false, message: `Merge failed after rebase: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        message: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}`,
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+      };
+    }
+
+    const commitMessage = formatSquashCommitMessage(metadata);
+
+    try {
+      await execFileAsync('git', ['merge', '--squash', branch], { cwd: projectPath });
+    } catch (err) {
+      await cleanupFailedSquashMerge(projectPath);
+      return {
+        success: false,
+        message: `Squash merge failed for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}`,
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+      };
+    }
+
+    try {
+      await execFileAsync('git', ['commit', '-m', commitMessage], { cwd: projectPath });
+    } catch (err) {
+      await cleanupFailedSquashMerge(projectPath);
+      return {
+        success: false,
+        message: `Squash commit failed for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}. The base branch may need manual cleanup.`,
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+      };
+    }
+
+    try {
+      const { stdout: landedOut } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: projectPath });
+      const landedSha = landedOut.trim();
+      log.info('Squash merge succeeded', { issueNumber, branch, baseBranch, landedSha });
+      return {
+        success: true,
+        message: `Merged ${branch} into ${baseBranch} (squash)`,
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        landedSha,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: `Failed to resolve landed SHA after squash commit: ${err instanceof Error ? err.message : String(err)}`,
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+      };
     }
   }
 
@@ -694,7 +760,8 @@ export class WorktreeManager {
     projectPath: string,
     projectName: string,
     issueNumber: number,
-    baseBranch: string = 'main'
+    baseBranch: string = 'main',
+    metadata?: MergeMetadata
   ): Promise<MergeTruth | IntegrationFailure> {
     const branch = getBranchName(issueNumber);
     const worktreePath = getWorktreePath(projectName, issueNumber);
@@ -780,93 +847,98 @@ export class WorktreeManager {
       };
     }
 
+    let rebased = false;
     const canFF = await this.canFastForward(projectPath, projectName, issueNumber, baseBranch);
-    if (canFF) {
+    if (!canFF) {
       try {
-        await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
-        await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
-        const { stdout: landedOut } = await execFileAsync(
-          'git', ['rev-parse', 'HEAD'],
-          { cwd: projectPath }
-        );
-        const landedSha = landedOut.trim();
-        log.info('Fast-forward merge succeeded', { issueNumber, branch, baseBranch, landedSha });
-        return {
-          targetBranch: baseBranch,
-          baseSha,
-          candidateHeadSha,
-          landedSha,
-          fastForward: true,
-        };
-      } catch (err) {
+        await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
+      } catch { /* no stale rebase */ }
+
+      const rebaseResult = await this.rebaseOntoMaster(
+        projectPath,
+        projectName,
+        issueNumber,
+        baseBranch,
+        { abortOnConflict: true }
+      );
+
+      if (!rebaseResult.success) {
         return {
           failingStep: 'merge',
           targetBranch: baseBranch,
           baseSha,
           candidateHeadSha,
-          error: `Fast-forward merge failed: ${err instanceof Error ? err.message : String(err)}`,
+          conflictFiles: rebaseResult.conflicts.length > 0 ? rebaseResult.conflicts : undefined,
+          error: `Clean rebase with abort-on-conflict failed: conflicts detected`,
         };
       }
+
+      try {
+        const { stdout: newHead } = await execFileAsync(
+          'git', ['rev-parse', branch],
+          { cwd: projectPath }
+        );
+        candidateHeadSha = newHead.trim();
+      } catch { /* use original */ }
+
+      rebased = true;
     }
 
-    try {
-      await execFileAsync('git', ['rebase', '--abort'], { cwd: worktreePath });
-    } catch { /* no stale rebase */ }
-
-    const rebaseResult = await this.rebaseOntoMaster(
-      projectPath,
-      projectName,
-      issueNumber,
-      baseBranch,
-      { abortOnConflict: true }
-    );
-
-    if (!rebaseResult.success) {
-      return {
-        failingStep: 'merge',
-        targetBranch: baseBranch,
-        baseSha,
-        candidateHeadSha,
-        conflictFiles: rebaseResult.conflicts.length > 0 ? rebaseResult.conflicts : undefined,
-        error: `Clean rebase with abort-on-conflict failed: conflicts detected`,
-      };
-    }
-
-    try {
-      const { stdout: newHead } = await execFileAsync(
-        'git', ['rev-parse', branch],
-        { cwd: projectPath }
-      );
-      candidateHeadSha = newHead.trim();
-    } catch { /* use original */ }
-
-    const canFFAfterRebase = await this.canFastForward(projectPath, projectName, issueNumber, baseBranch);
-    if (!canFFAfterRebase) {
-      return {
-        failingStep: 'merge',
-        targetBranch: baseBranch,
-        baseSha,
-        candidateHeadSha,
-        error: 'Rebase succeeded but branch still cannot fast-forward',
-      };
-    }
+    const commitMessage = metadata
+      ? formatSquashCommitMessage(metadata)
+      : `Merge issue #${issueNumber}`;
 
     try {
       await execFileAsync('git', ['checkout', baseBranch], { cwd: projectPath });
-      await execFileAsync('git', ['merge', '--ff-only', branch], { cwd: projectPath });
+    } catch (err) {
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        error: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    try {
+      await execFileAsync('git', ['merge', '--squash', branch], { cwd: projectPath });
+    } catch (err) {
+      await cleanupFailedSquashMerge(projectPath);
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        error: `Squash merge failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    try {
+      await execFileAsync('git', ['commit', '-m', commitMessage], { cwd: projectPath });
+    } catch (err) {
+      await cleanupFailedSquashMerge(projectPath);
+      return {
+        failingStep: 'merge',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        error: `Squash commit failed: ${err instanceof Error ? err.message : String(err)}. The base branch may need manual cleanup.`,
+      };
+    }
+
+    try {
       const { stdout: landedOut } = await execFileAsync(
         'git', ['rev-parse', 'HEAD'],
         { cwd: projectPath }
       );
       const landedSha = landedOut.trim();
-      log.info('Merge succeeded after clean rebase', { issueNumber, branch, baseBranch, landedSha });
+      log.info('Squash merge succeeded', { issueNumber, branch, baseBranch, landedSha, rebased });
       return {
         targetBranch: baseBranch,
         baseSha,
         candidateHeadSha,
         landedSha,
-        fastForward: false,
-        rebased: true,
+        rebased: rebased || undefined,
       };
     } catch (err) {
       return {
@@ -874,7 +946,7 @@ export class WorktreeManager {
         targetBranch: baseBranch,
         baseSha,
         candidateHeadSha,
-        error: `Merge after rebase failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Failed to resolve landed SHA after squash commit: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }

@@ -91,7 +91,7 @@ describe('MergeQueue', () => {
     return projectRepo.create({ name: PROJECT_NAME, path: PROJECT_PATH, baseBranch: BASE_BRANCH });
   }
 
-  function createQueue(projectId: string) {
+  function createQueue(projectId: string, extraDeps?: Record<string, any>) {
     return new MergeQueue({
       worktreeManager,
       eventBus,
@@ -108,6 +108,15 @@ describe('MergeQueue', () => {
           return { success: true, healthGateResult: { passed: true, enabled: true } };
         }),
       } as any,
+      getMergeMetadata: vi.fn().mockImplementation(async (_projectId: string, issueNumber: number) => {
+        const issue = issueRepo.findByNumber(projectId, issueNumber);
+        if (!issue) return undefined;
+        return {
+          issueNumber,
+          issueTitle: issue.title,
+        };
+      }),
+      ...extraDeps,
     });
   }
 
@@ -192,6 +201,10 @@ describe('MergeQueue', () => {
       const finalizer = {
         finalize: vi.fn().mockResolvedValue({ success: false, error: 'postMerge failed' }),
       };
+      const getMergeMetadata = vi.fn().mockResolvedValue({
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+      });
       const queue = new MergeQueue({
         worktreeManager,
         eventBus,
@@ -203,6 +216,7 @@ describe('MergeQueue', () => {
         resolveConflicts: resolveConflictsMock,
         fixBuildErrors: fixBuildErrorsMock,
         postMergeFinalizer: finalizer as any,
+        getMergeMetadata,
       });
 
       const completedEvents: any[] = [];
@@ -232,6 +246,10 @@ describe('MergeQueue', () => {
         },
         resolveConflicts: resolveConflictsMock,
         fixBuildErrors: fixBuildErrorsMock,
+        getMergeMetadata: vi.fn().mockResolvedValue({
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+        }),
       });
 
       const completedEvents: any[] = [];
@@ -251,7 +269,7 @@ describe('MergeQueue', () => {
       expect(issueRepo.findById(issue.id)?.mergeState).toBe(MergeState.BuildFailed);
     });
 
-    it('should FF merge when canFastForward is true, skipping rebase', async () => {
+    it('should squash merge when canFastForward is true, skipping rebase', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
@@ -273,13 +291,67 @@ describe('MergeQueue', () => {
       );
       expect(worktreeManager.rebaseOntoMaster).not.toHaveBeenCalled();
       expect(worktreeManager.mergeBack).toHaveBeenCalledWith(
-        PROJECT_PATH, PROJECT_NAME, issue.number, BASE_BRANCH,
+        PROJECT_PATH,
+        PROJECT_NAME,
+        issue.number,
+        BASE_BRANCH,
+        expect.objectContaining({
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+        }),
       );
       expect(completedEvents).toHaveLength(1);
       expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
     });
 
-    it('should rebase then FF merge when canFastForward is false', async () => {
+    it('should pass getMergeMetadata result to mergeBack', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+
+      const metadata = {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        tasks: [{ id: 'T-001', title: 'Do the thing' }],
+      };
+
+      const queue = createQueue(project.id, {
+        getMergeMetadata: vi.fn().mockResolvedValue(metadata),
+      });
+
+      worktreeManager.canFastForward = vi.fn().mockResolvedValue(true);
+      execFileMock.mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb?.(null, '', '');
+        return undefined as any;
+      });
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(worktreeManager.mergeBack).toHaveBeenCalledWith(
+        PROJECT_PATH, PROJECT_NAME, issue.number, BASE_BRANCH, metadata,
+      );
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('merged');
+    });
+
+    it('should fail before mergeBack when merge metadata is unavailable', async () => {
+      const project = setupProject();
+      const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
+      const queue = createQueue(project.id, {
+        getMergeMetadata: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const failedEvents: any[] = [];
+      eventBus.on('merge_failed', (data) => failedEvents.push(data));
+
+      queue.enqueue(project.id, issue.number);
+      await waitForQueueToSettle(queue);
+
+      expect(worktreeManager.mergeBack).not.toHaveBeenCalled();
+      expect(issueRepo.findById(issue.id)?.mergeState).toBe('build-failed');
+      expect(failedEvents).toHaveLength(1);
+    });
+
+    it('should rebase then squash merge when canFastForward is false', async () => {
       const project = setupProject();
       const issue = issueService.create({ projectId: project.id, title: 'Test Issue' });
       const queue = createQueue(project.id);
@@ -564,6 +636,9 @@ describe('MergeQueue', () => {
       worktreeManager.mergeBack = vi.fn().mockResolvedValue({
         success: false,
         message: 'Merge conflict for issue #1: CONFLICT (content): Merge conflict in src/foo.ts',
+        targetBranch: 'main',
+        baseSha: 'base-sha',
+        candidateHeadSha: 'candidate-sha',
       });
 
       const failedEvents: any[] = [];
@@ -589,6 +664,9 @@ describe('MergeQueue', () => {
       worktreeManager.mergeBack = vi.fn().mockResolvedValue({
         success: false,
         message: 'Failed to checkout main: some error',
+        targetBranch: 'main',
+        baseSha: 'base-sha',
+        candidateHeadSha: 'candidate-sha',
       });
 
       queue.enqueue(project.id, issue.number);
@@ -609,7 +687,13 @@ describe('MergeQueue', () => {
       worktreeManager.mergeBack = vi.fn().mockImplementation(async () => {
         callCount++;
         if (callCount === 1) {
-          return { success: false, message: 'Build failed' };
+          return {
+            success: false,
+            message: 'Build failed',
+            targetBranch: 'main',
+            baseSha: 'base-sha',
+            candidateHeadSha: 'candidate-sha',
+          };
         }
         return { success: true, message: 'Merged' };
       });
@@ -645,7 +729,13 @@ describe('MergeQueue', () => {
       worktreeManager.mergeBack = vi.fn().mockImplementation(async () => {
         callCount++;
         if (callCount === 1) {
-          return { success: false, message: 'Merge conflict: CONFLICT in file.ts' };
+          return {
+            success: false,
+            message: 'Merge conflict: CONFLICT in file.ts',
+            targetBranch: 'main',
+            baseSha: 'base-sha',
+            candidateHeadSha: 'candidate-sha',
+          };
         }
         return { success: true, message: 'Merged' };
       });
@@ -849,6 +939,10 @@ describe('MergeQueue', () => {
         getProjectPath: () => null,
         resolveConflicts: resolveConflictsMock,
         fixBuildErrors: fixBuildErrorsMock,
+        getMergeMetadata: vi.fn().mockResolvedValue({
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+        }),
       });
 
       const failedEvents: any[] = [];
