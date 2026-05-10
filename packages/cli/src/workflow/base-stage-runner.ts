@@ -397,6 +397,18 @@ export abstract class BaseStageRunner implements StageRunner {
       requestedAt: new Date().toISOString(),
     });
 
+    if (ctx.stageStateService) {
+      try {
+        ctx.stageStateService.setApproval(ctx.issue.id, ctx.issue.stage, {
+          status: 'awaiting',
+          output: approvalOutput,
+          requestedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        log.warn('setApproval failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
     ctx.eventBus.emit('approval_requested', {
       issueId: ctx.issue.id,
       projectId: ctx.issue.projectId,

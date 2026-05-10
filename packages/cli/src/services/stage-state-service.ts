@@ -144,6 +144,11 @@ interface ProjectedStageSeed {
   updatedAt: string;
 }
 
+interface ProjectedExecutionEvidence {
+  taskResults: StageTaskResult[];
+  checkResults: CheckResult[];
+}
+
 function rowToStageTask(row: StageTaskRow): StageTaskState {
   return {
     taskId: row.task_id,
@@ -615,10 +620,8 @@ export class StageStateService {
         }
       }
 
-      const latestExecution = stageExecutions.at(-1);
-      if (latestExecution) {
-        const taskResults = this.parseJson<StageTaskResult[]>(latestExecution.task_results, []);
-        for (const result of taskResults) {
+      for (const evidence of this.collectProjectedExecutionEvidence(stageExecutions)) {
+        for (const result of evidence.taskResults) {
           this.upsertTask(issueId, stage, {
             taskId: result.taskId,
             title: result.title,
@@ -630,8 +633,7 @@ export class StageStateService {
           });
         }
 
-        const checkResults = this.parseJson<CheckResult[]>(latestExecution.check_results, []);
-        for (const result of checkResults) {
+        for (const result of evidence.checkResults) {
           this.upsertCheck(issueId, stage, {
             checkName: result.name,
             status: normalizeCheckStatus(result.status),
@@ -690,6 +692,15 @@ export class StageStateService {
       attempts: Math.max(0, stageExecutions.length - 1),
       updatedAt,
     };
+  }
+
+  private collectProjectedExecutionEvidence(
+    stageExecutions: StageExecutionProjectionRow[],
+  ): ProjectedExecutionEvidence[] {
+    return stageExecutions.map(execution => ({
+      taskResults: this.parseJson<StageTaskResult[]>(execution.task_results, []),
+      checkResults: this.parseJson<CheckResult[]>(execution.check_results, []),
+    }));
   }
 
   private normalizeProjectedCheckSuiteStatus(state: CheckState): StageCheckStatus {

@@ -139,6 +139,45 @@ describe('stage-state regression: multi-execution latest-state resolution', () =
     expect(readCtx!.status).toBe('failed');
     expect(planState!.tasks.length).toBe(5);
   });
+
+  it('projects legacy split retry evidence across multiple execution rows', () => {
+    const issueRepo = new IssueRepo(db);
+    const issue = issueRepo.findById(issueId)!;
+    issueRepo.updateStage(issue.id, Stage.Check);
+
+    const firstExecution = stageExecutionRepo.create(issueId, Stage.Check);
+    stageExecutionRepo.updateTaskResults(firstExecution.id, [
+      {
+        taskId: 'fix-check-health',
+        title: 'Fix check health issues',
+        status: 'completed',
+        attempts: 1,
+        duration: 1200,
+        artifacts: [],
+        output: { attempt: 1 },
+      },
+    ]);
+    stageExecutionRepo.updateStatus(firstExecution.id, 'failed');
+
+    const secondExecution = stageExecutionRepo.create(issueId, Stage.Check);
+    stageExecutionRepo.updateCheckResults(secondExecution.id, [
+      {
+        name: 'ai-review',
+        status: 'pass',
+        message: 'LGTM',
+        output: { verdict: 'PASS' },
+      },
+    ]);
+    stageExecutionRepo.updateStatus(secondExecution.id, 'awaiting-approval');
+
+    const states = stageStateService.getIssueStageState(issueId);
+    const checkState = states.find(state => state.stage === Stage.Check);
+
+    expect(checkState).toBeDefined();
+    expect(checkState!.tasks.find(task => task.taskId === 'fix-check-health')?.status).toBe('completed');
+    expect(checkState!.checks.find(check => check.checkName === 'ai-review')?.status).toBe('passed');
+    expect(checkState!.attempts).toBe(1);
+  });
 });
 
 describe('stage-state regression: dynamic fix tasks', () => {
