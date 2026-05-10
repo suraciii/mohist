@@ -988,13 +988,77 @@ function migrateToVersion25(db: DatabaseManager): void {
   });
 }
 
+const CREATE_STAGE_STATES_TABLE = `
+CREATE TABLE IF NOT EXISTS stage_states (
+  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  stage         TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'pending',
+  started_at    TEXT,
+  completed_at  TEXT,
+  approval_status TEXT,
+  approval_output TEXT,
+  approval_requested_at TEXT,
+  approval_responded_at TEXT,
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  updated_at    TEXT NOT NULL,
+  PRIMARY KEY (issue_id, stage)
+);
+`;
+
+const CREATE_STAGE_STATES_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_stage_states_issue_id ON stage_states(issue_id);',
+];
+
+const CREATE_STAGE_TASKS_TABLE = `
+CREATE TABLE IF NOT EXISTS stage_tasks (
+  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  stage         TEXT NOT NULL,
+  task_id       TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'pending',
+  source        TEXT NOT NULL DEFAULT 'static',
+  task_order    INTEGER NOT NULL DEFAULT 0,
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  duration      INTEGER NOT NULL DEFAULT 0,
+  artifacts     TEXT NOT NULL DEFAULT '[]',
+  output        TEXT,
+  started_at    TEXT,
+  completed_at  TEXT,
+  updated_at    TEXT NOT NULL,
+  PRIMARY KEY (issue_id, stage, task_id)
+);
+`;
+
+const CREATE_STAGE_TASKS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_stage_tasks_issue_stage ON stage_tasks(issue_id, stage);',
+];
+
+const CREATE_STAGE_CHECKS_TABLE = `
+CREATE TABLE IF NOT EXISTS stage_checks (
+  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  stage         TEXT NOT NULL,
+  check_name    TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'pending',
+  message       TEXT,
+  output        TEXT,
+  run_count     INTEGER NOT NULL DEFAULT 0,
+  last_run_at   TEXT,
+  updated_at    TEXT NOT NULL,
+  PRIMARY KEY (issue_id, stage, check_name)
+);
+`;
+
+const CREATE_STAGE_CHECKS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_stage_checks_issue_stage ON stage_checks(issue_id, stage);',
+];
+
 function migrateToVersion26(db: DatabaseManager): void {
   db.transaction(() => {
-    const tableInfo = db.all<{ name: string }>("PRAGMA table_info(coder_session)");
-    const hasLastDataAt = tableInfo.some(col => col.name === 'last_data_at');
-    const hasProbeSentAt = tableInfo.some(col => col.name === 'probe_sent_at');
-    const hasProbeDeadlineAt = tableInfo.some(col => col.name === 'probe_deadline_at');
-    const hasFailureReason = tableInfo.some(col => col.name === 'failure_reason');
+    const coderTableInfo = db.all<{ name: string }>("PRAGMA table_info(coder_session)");
+    const hasLastDataAt = coderTableInfo.some(col => col.name === 'last_data_at');
+    const hasProbeSentAt = coderTableInfo.some(col => col.name === 'probe_sent_at');
+    const hasProbeDeadlineAt = coderTableInfo.some(col => col.name === 'probe_deadline_at');
+    const hasFailureReason = coderTableInfo.some(col => col.name === 'failure_reason');
 
     if (!hasLastDataAt) {
       db.exec("ALTER TABLE coder_session ADD COLUMN last_data_at TEXT");
@@ -1009,6 +1073,18 @@ function migrateToVersion26(db: DatabaseManager): void {
       db.exec("ALTER TABLE coder_session ADD COLUMN failure_reason TEXT");
     }
 
+    db.exec(CREATE_STAGE_STATES_TABLE);
+    for (const indexSql of CREATE_STAGE_STATES_INDEXES) {
+      db.exec(indexSql);
+    }
+    db.exec(CREATE_STAGE_TASKS_TABLE);
+    for (const indexSql of CREATE_STAGE_TASKS_INDEXES) {
+      db.exec(indexSql);
+    }
+    db.exec(CREATE_STAGE_CHECKS_TABLE);
+    for (const indexSql of CREATE_STAGE_CHECKS_INDEXES) {
+      db.exec(indexSql);
+    }
     setSchemaVersion(db, 26);
   });
 }
