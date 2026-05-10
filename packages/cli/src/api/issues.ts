@@ -1208,10 +1208,17 @@ export function createIssueRoutes(
         }
 
         if (issue.approvalState) {
+          const respondedAt = new Date().toISOString();
           issueRepo.setApprovalState(issue.id, {
             ...issue.approvalState,
             status: 'approved',
-            respondedAt: new Date().toISOString(),
+            respondedAt,
+          });
+          stageStateService?.setApproval(issue.id, issue.approvalState.stage, {
+            status: 'approved',
+            output: issue.approvalState.output,
+            requestedAt: issue.approvalState.requestedAt,
+            respondedAt,
           });
         }
 
@@ -1235,10 +1242,17 @@ export function createIssueRoutes(
       // Plan stage: just set approval state and resume pipeline; runner will auto-advance
       if (approvalStage === Stage.Plan) {
         if (issue.approvalState) {
+          const respondedAt = new Date().toISOString();
           issueRepo.setApprovalState(issue.id, {
             ...issue.approvalState,
             status: 'approved',
-            respondedAt: new Date().toISOString(),
+            respondedAt,
+          });
+          stageStateService?.setApproval(issue.id, issue.approvalState.stage, {
+            status: 'approved',
+            output: issue.approvalState.output,
+            requestedAt: issue.approvalState.requestedAt,
+            respondedAt,
           });
         }
       }
@@ -1328,13 +1342,20 @@ export function createIssueRoutes(
       }
 
       const rejectedStage = issue.approvalState!.stage;
+      const respondedAt = new Date().toISOString();
 
       issueRepo.setApprovalState(issue.id, {
         stage: rejectedStage,
         status: 'rejected',
         output: issue.approvalState!.output,
         requestedAt: issue.approvalState!.requestedAt,
-        respondedAt: new Date().toISOString(),
+        respondedAt,
+      });
+      stageStateService?.setApproval(issue.id, rejectedStage, {
+        status: 'rejected',
+        output: issue.approvalState!.output,
+        requestedAt: issue.approvalState!.requestedAt,
+        respondedAt,
       });
 
       if (rejectedStage === Stage.Check) {

@@ -119,6 +119,13 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
       clearApprovalState: vi.fn(),
       updateStatus: vi.fn(),
     } as unknown as IssueRepo,
+    stageStateService: {
+      ensureStage: vi.fn(),
+      upsertTask: vi.fn(),
+      upsertCheck: vi.fn(),
+      setApproval: vi.fn(),
+      setStageStatus: vi.fn(),
+    } as any,
     ...overrides,
   } as StageContext;
 }
@@ -351,6 +358,13 @@ describe('BaseStageRunner', () => {
         'issue-1',
         expect.objectContaining({
           stage: Stage.Plan,
+          status: 'awaiting',
+        }),
+      );
+      expect(ctx.stageStateService!.setApproval).toHaveBeenCalledWith(
+        'issue-1',
+        Stage.Plan,
+        expect.objectContaining({
           status: 'awaiting',
         }),
       );
