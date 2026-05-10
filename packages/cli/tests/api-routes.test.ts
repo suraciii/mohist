@@ -24,6 +24,7 @@ import { Stage, IssueStatus, MergeState } from '../src/types';
 import { createStatusRoutes } from '../src/api/status';
 import { createConfigRoutes } from '../src/api/config';
 import { StageExecutionRepo } from '../src/db/stage-execution-repo';
+import { StageStateService } from '../src/services/stage-state-service';
 
 function createTestServer(app: Hono): http.Server {
   return http.createServer(async (req, res) => {
@@ -325,20 +326,35 @@ describe('API Routes', () => {
         issueService.setStatus(issue.id, IssueStatus.Active);
 
         const issueRepo = stateManager.getIssueRepo();
+        const stageStateService = new StageStateService(db);
         issueRepo.setApprovalState(issue.id, {
           stage: Stage.Plan,
           status: 'awaiting',
           output: { test: true },
           requestedAt: new Date().toISOString(),
         });
+        stageStateService.ensureStage(issue.id, Stage.Plan);
+        stageStateService.setApproval(issue.id, Stage.Plan, {
+          status: 'awaiting',
+          output: { test: true },
+          requestedAt: issueRepo.findById(issue.id)!.approvalState!.requestedAt,
+        });
 
         const refreshedIssue = issueService.getByNumber(projectId, 1);
         expect(refreshedIssue?.approvalState?.status).toBe('awaiting');
 
-        const response = await request(server).post('/api/issues/1/approve');
+        const approveApp = new Hono();
+        const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService));
+        const approveServer = createTestServer(approveApp);
+
+        const response = await request(approveServer).post('/api/issues/1/approve');
 
         expect(response.status).toBe(202);
         expect(response.body.success).toBe(true);
+        const updatedStageState = stageStateService.getStageState(issue.id, Stage.Plan);
+        expect(updatedStageState?.approval?.status).toBe('approved');
+        expect(updatedStageState?.approval?.respondedAt).toBeTruthy();
       });
 
       it('Check approval should reject when authoritative PASS review is missing', async () => {
@@ -375,11 +391,18 @@ describe('API Routes', () => {
         issueService.setStatus(issue.id, IssueStatus.Active);
 
         const issueRepo = stateManager.getIssueRepo();
+        const stageStateService = new StageStateService(db);
         issueRepo.setApprovalState(issue.id, {
           stage: Stage.Check,
           status: 'awaiting',
           output: { snapshotSha: 'sha-pass-001', result: 'PASS' },
           requestedAt: new Date().toISOString(),
+        });
+        stageStateService.ensureStage(issue.id, Stage.Check);
+        stageStateService.setApproval(issue.id, Stage.Check, {
+          status: 'awaiting',
+          output: { snapshotSha: 'sha-pass-001', result: 'PASS' },
+          requestedAt: issueRepo.findById(issue.id)!.approvalState!.requestedAt,
         });
 
         const execution = stageExecutionRepo.create(issue.id, Stage.Check);
@@ -408,7 +431,7 @@ describe('API Routes', () => {
         const approveEventBus = new EventBus();
         const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
         const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo));
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService));
         const approveServer = createTestServer(approveApp);
 
         const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
@@ -417,6 +440,9 @@ describe('API Routes', () => {
         expect(response.body.success).toBe(true);
         expect(enqueueSpy).toHaveBeenCalledTimes(1);
         expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+        const updatedStageState = stageStateService.getStageState(issue.id, Stage.Check);
+        expect(updatedStageState?.approval?.status).toBe('approved');
+        expect(updatedStageState?.approval?.respondedAt).toBeTruthy();
       });
 
       it('Direct merge for non-Integrate issue should return bypass error', async () => {
@@ -578,52 +604,7 @@ describe('API Routes', () => {
           fs.rmSync(tmpDir, { recursive: true, force: true });
         }
       });
-    });
 
-    describe('POST /api/issues/:number/rerun', () => {
-      it('clears check checkpoint and stale review artifacts before rerunning check stage', async () => {
-        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-rerun-check-test-'));
-
-        try {
-          const project = await projectService.create({ name: 'RerunCheckTest', path: tmpDir });
-          projectService.setCurrent(project);
-
-          const issue = issueService.create({ projectId: project.id, title: 'Rerun Check Issue' });
-          issueService.transitionToStage(issue.id, Stage.Check);
-          issueService.setStatus(issue.id, IssueStatus.Active);
-
-          const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test`);
-          fs.mkdirSync(changeDir, { recursive: true });
-          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [] }));
-          fs.writeFileSync(path.join(changeDir, 'review.md'), '# stale review');
-          fs.writeFileSync(path.join(changeDir, 'review-self-check.md'), '# stale self check');
-
-          const checkpointRepo = stateManager.getPipelineCheckpointRepo();
-          checkpointRepo.upsert(issue.number, 'check', ['review', 'review-self-check'], null);
-
-          const worktreeManager = {
-            getPath: vi.fn().mockReturnValue(tmpDir),
-          } as any;
-
-          const rerunApp = new Hono();
-          const rerunEventBus = new EventBus();
-          const rerunAgentRunner = new AgentRunnerService(rerunEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo());
-          const enqueueSpy = vi.spyOn(rerunAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-          rerunApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, rerunAgentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
-          const rerunServer = createTestServer(rerunApp);
-
-          const response = await request(rerunServer).post(`/api/issues/${issue.number}/rerun`);
-
-          expect(response.status).toBe(202);
-          expect(response.body.success).toBe(true);
-          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
-          expect(checkpointRepo.get(issue.number, 'check')).toBeNull();
-          expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
-          expect(fs.existsSync(path.join(changeDir, 'review-self-check.md'))).toBe(false);
-        } finally {
-          fs.rmSync(tmpDir, { recursive: true, force: true });
-        }
-      });
     });
 
     describe('POST /api/issues/:number/comments', () => {

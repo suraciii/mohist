@@ -7,6 +7,9 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { WorkflowSessionObserverDeps } from '../services/session-observers';
+import type { StageStateService } from '../services/stage-state-service';
+
+type StageType = Stage;
 
 export interface ChangeArtifactsManager {
   getChangeDir(issueNumber: number): string | null;
@@ -16,6 +19,7 @@ export interface ChangeArtifactsManager {
   exists(changeDir: string): boolean;
   readTasks(issueNumber: number): TasksFile | null;
   updateTaskPasses(issueNumber: number, taskId: string, passes: boolean, error?: string | null): boolean;
+  syncTasksToStageState(issueNumber: number, issueId: string, stage: StageType, stageStateService: StageStateService): void;
   archiveChange(issueNumber: number): Promise<void>;
 }
 
@@ -49,6 +53,7 @@ export interface StageContext {
   coderSessionRepo?: CoderSessionRepo;
   stageExecutionRepo?: StageExecutionRepo;
   checkSuiteRepo?: CheckSuiteRepo;
+  stageStateService?: StageStateService;
   signal?: AbortSignal;
 }
 

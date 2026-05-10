@@ -790,3 +790,57 @@ export interface DoneEvidenceOutput {
     timedOut?: boolean
   }
 }
+
+export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
+export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped'
+
+export interface StageTaskState {
+  taskId: string
+  title: string
+  status: StageTaskStatus
+  source: 'static' | 'dynamic'
+  order: number
+  attempts: number
+  duration: number
+  artifacts: string[]
+  output: unknown
+  startedAt: string | null
+  completedAt: string | null
+  updatedAt: string
+}
+
+export interface StageCheckState {
+  checkName: string
+  status: StageCheckStatus
+  message: string | null
+  output: unknown
+  runCount: number
+  lastRunAt: string | null
+  updatedAt: string
+}
+
+export interface StageApprovalState {
+  status: string
+  output: unknown
+  requestedAt: string | null
+  respondedAt: string | null
+}
+
+export interface StageStateRead {
+  stage: Stage
+  status: StageStateStatus
+  tasks: StageTaskState[]
+  checks: StageCheckState[]
+  approval: StageApprovalState | null
+  attempts: number
+  startedAt: string | null
+  completedAt: string | null
+  updatedAt: string
+}
+
+export interface IssueStageStateResponse {
+  issueId: string
+  issueNumber: number
+  stages: StageStateRead[]
+}

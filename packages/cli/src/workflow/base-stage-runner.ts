@@ -1,9 +1,10 @@
 import { Stage } from '../types';
 import type { StageContext, StageRunResult, CheckResult, StageTaskResult, CheckFailurePolicy, AuthoritativeAiReviewResult, AuthoritativeAiReviewOptions } from './stage-context';
-import { getLatestCheckResult, replaceCurrentAiReviewTruth, buildAuthoritativeAiReviewResult } from './stage-context';
+import { getLatestCheckResult, buildAuthoritativeAiReviewResult } from './stage-context';
 import type { StageRunner } from './check-stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
+import { normalizeCheckStatus, normalizeTaskStatus, type StageStateStatus } from '../services/stage-state-service';
 import { Log } from '../util/log';
 import { parseVerdict, parseDimensions, readReportFile } from './utils';
 import * as path from 'path';
@@ -57,6 +58,7 @@ export abstract class BaseStageRunner implements StageRunner {
     } catch (e) {
       log.warn('appendTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
     }
+    this.mirrorTaskResult(ctx, result);
   }
 
   async run(ctx: StageContext): Promise<StageRunResult> {
@@ -68,6 +70,19 @@ export abstract class BaseStageRunner implements StageRunner {
         this.stageExecutionId = execution.id;
       } catch (e) {
         log.warn('create stage execution failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    if (ctx.stageStateService) {
+      try {
+        ctx.stageStateService.ensureStage(ctx.issue.id, ctx.issue.stage);
+      } catch (e) {
+        log.warn('ensureStage failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+      try {
+        this.mirrorTasksJson(ctx);
+      } catch (e) {
+        log.warn('mirrorTasksJson failed', { error: e instanceof Error ? e.message : String(e) });
       }
     }
 
@@ -126,9 +141,10 @@ export abstract class BaseStageRunner implements StageRunner {
 
       if (check.name === 'ai-review') {
         const authoritativeResults = await this.persistCurrentAiReviewTruth(ctx, results);
-        const snapshot = [...authoritativeResults];
-        results.length = 0;
-        results.push(...snapshot);
+        if (authoritativeResults !== results) {
+          results.length = 0;
+          results.push(...authoritativeResults);
+        }
       }
 
       if (result.status !== 'pass') {
@@ -261,10 +277,8 @@ export abstract class BaseStageRunner implements StageRunner {
     const latest = getLatestCheckResult(checkResults, 'ai-review');
     if (!latest) return checkResults;
 
-    const project = typeof ctx.projectRepo?.findById === 'function'
-      ? ctx.projectRepo.findById(ctx.issue.projectId)
-      : null;
-    const worktreePath = project && typeof ctx.worktreeManager?.getPath === 'function'
+    const project = this.findProjectSafe(ctx);
+    const worktreePath = project
       ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
       : null;
     const snapshotSha = worktreePath ? await this.getHeadShaSafe(ctx, worktreePath) : undefined;
@@ -290,6 +304,13 @@ export abstract class BaseStageRunner implements StageRunner {
       });
       return undefined;
     }
+  }
+
+  private findProjectSafe(ctx: StageContext) {
+    const projectRepo = ctx.projectRepo;
+    return projectRepo && typeof projectRepo.findById === 'function'
+      ? projectRepo.findById(ctx.issue.projectId)
+      : null;
   }
 
   private async handleApprovalCheck(
@@ -339,44 +360,33 @@ export abstract class BaseStageRunner implements StageRunner {
         };
       }
 
-      const project = ctx.projectRepo.findById(ctx.issue.projectId);
-      if (!project) {
-        return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: 'Cannot request check approval: project not found',
-        };
-      }
+      const project = this.findProjectSafe(ctx);
+      const worktreePath = project
+        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+        : null;
 
-      const worktreePath = ctx.worktreeManager.getPath(project.name, ctx.issue.number);
-      if (!worktreePath) {
-        return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: 'Cannot request check approval: worktree not found',
-        };
-      }
+      if (worktreePath && typeof ctx.worktreeManager.createCheckConvergenceCommit === 'function') {
+        const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
+        if (!convergence.success) {
+          return {
+            success: false,
+            output: taskOutput,
+            checkResults: allResults,
+            message: convergence.error ?? 'Cannot request check approval: uncommitted auto-fix or review artifact changes prevented approval',
+          };
+        }
 
-      const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
-      if (!convergence.success) {
-        return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: convergence.error ?? 'Cannot request check approval: uncommitted auto-fix or review artifact changes prevented approval',
-        };
+        effectiveResults = this.convergeSnapshot(ctx, allResults, convergence.headSha);
       }
-
-      effectiveResults = this.convergeSnapshot(ctx, allResults, convergence.headSha);
 
       const dimensions = aiReviewOutput.reviewReport ? parseDimensions(aiReviewOutput.reviewReport) : undefined;
+      const latestAiReview = getLatestCheckResult(effectiveResults, 'ai-review');
+      const snapshotSha = (latestAiReview?.output as { snapshotSha?: string } | undefined)?.snapshotSha;
       approvalOutput = {
         result: aiReviewOutput.verdict,
         reviewReport: aiReviewOutput.reviewReport,
         dimensions,
-        snapshotSha: convergence.headSha,
+        snapshotSha,
       };
     }
 
@@ -386,6 +396,18 @@ export abstract class BaseStageRunner implements StageRunner {
       output: approvalOutput,
       requestedAt: new Date().toISOString(),
     });
+
+    if (ctx.stageStateService) {
+      try {
+        ctx.stageStateService.setApproval(ctx.issue.id, ctx.issue.stage, {
+          status: 'awaiting',
+          output: approvalOutput,
+          requestedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        log.warn('setApproval failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
 
     ctx.eventBus.emit('approval_requested', {
       issueId: ctx.issue.id,
@@ -407,6 +429,13 @@ export abstract class BaseStageRunner implements StageRunner {
       ctx.stageExecutionRepo.updateStatus(this.stageExecutionId, status);
     } catch (e) {
       log.warn('updateStageExecutionStatus failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+    if (ctx.stageStateService) {
+      try {
+        ctx.stageStateService.setStageStatus(ctx.issue.id, ctx.issue.stage, status as StageStateStatus);
+      } catch (e) {
+        log.warn('setStageStatus failed', { error: e instanceof Error ? e.message : String(e) });
+      }
     }
   }
 
@@ -433,14 +462,13 @@ export abstract class BaseStageRunner implements StageRunner {
       output: updatedOutput,
     };
 
-    const deduped = replaceCurrentAiReviewTruth([...checkResults]);
-    const withoutStale = deduped.filter(r => r.name !== 'ai-review');
-    withoutStale.push(updatedResult);
+    const updatedResults = checkResults.filter(r => r.name !== 'ai-review');
+    updatedResults.push(updatedResult);
 
-    this.persistCheckResults(ctx, withoutStale);
+    this.persistCheckResults(ctx, updatedResults);
     this.updateCheckSuiteAiReview(ctx, authoritative);
 
-    return withoutStale;
+    return updatedResults;
   }
 
   private updateCheckSuiteAiReview(ctx: StageContext, result: AuthoritativeAiReviewResult): void {
@@ -536,6 +564,71 @@ export abstract class BaseStageRunner implements StageRunner {
       ctx.stageExecutionRepo.updateCheckResults(this.stageExecutionId, checkResults);
     } catch (e) {
       log.warn('persistCheckResults failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+    this.mirrorCheckResults(ctx, checkResults);
+  }
+
+  private mirrorTaskResult(ctx: StageContext, result: StageTaskResult): void {
+    if (!ctx.stageStateService) return;
+    try {
+      ctx.stageStateService.upsertTask(ctx.issue.id, ctx.issue.stage, {
+        taskId: result.taskId,
+        title: result.title,
+        status: normalizeTaskStatus(result.status),
+        source: 'dynamic',
+        attempts: result.attempts,
+        duration: result.duration,
+        artifacts: result.artifacts,
+        output: result.output,
+      });
+    } catch (e) {
+      log.warn('mirrorTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  private mirrorCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {
+    if (!ctx.stageStateService) return;
+    const seen = new Map<string, CheckResult>();
+    for (const cr of checkResults) {
+      seen.set(cr.name, cr);
+    }
+    for (const [, cr] of seen) {
+      try {
+        ctx.stageStateService.upsertCheck(ctx.issue.id, ctx.issue.stage, {
+          checkName: cr.name,
+          status: normalizeCheckStatus(cr.status),
+          message: cr.message ?? null,
+          output: cr.output,
+        });
+      } catch (e) {
+        log.warn('mirrorCheckResult failed', { checkName: cr.name, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  }
+
+  private mirrorTasksJson(ctx: StageContext): void {
+    if (!ctx.stageStateService) return;
+    const tasksFile = ctx.artifactManager.readTasks(ctx.issue.number);
+    if (!tasksFile) return;
+    for (const t of tasksFile.tasks) {
+      try {
+        const status = t.passes
+          ? 'completed'
+          : t.error
+            ? 'failed'
+            : 'pending';
+        ctx.stageStateService.upsertTask(ctx.issue.id, ctx.issue.stage, {
+          taskId: t.id,
+          title: t.title,
+          status,
+          source: 'dynamic',
+          order: t.order,
+          attempts: t.attempts,
+          output: t.error ? { error: t.error } : undefined,
+        });
+      } catch (e) {
+        log.warn('mirrorTasksJson task failed', { taskId: t.id, error: e instanceof Error ? e.message : String(e) });
+      }
     }
   }
 }
