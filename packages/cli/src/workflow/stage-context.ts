@@ -29,6 +29,7 @@ export interface IssueRepo {
   clearApprovalState(id: string): void;
   updateStatus(id: string, status: IssueStatus): Issue | null;
   findById(id: string): Issue | null;
+  setMergeState?(id: string, mergeState: string): Issue | null;
 }
 
 export interface StageRunResult {
