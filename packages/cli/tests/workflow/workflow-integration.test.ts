@@ -671,7 +671,7 @@ describe('Workflow Integration Tests', () => {
   });
 
   describe('serial check execution', () => {
-    it('stops executing checks after first failure', async () => {
+    it('collects checks after first failure before deciding stage result', async () => {
       const secondRunSpy = vi.fn();
 
       const runner = new SimpleRunner({
@@ -692,10 +692,11 @@ describe('Workflow Integration Tests', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(secondRunSpy).not.toHaveBeenCalled();
-      expect(result.checkResults).toHaveLength(2);
+      expect(secondRunSpy).toHaveBeenCalledOnce();
+      expect(result.checkResults).toHaveLength(3);
       expect(result.checkResults[0].status).toBe('pass');
       expect(result.checkResults[1].status).toBe('fail');
+      expect(result.checkResults[2].status).toBe('pass');
     });
   });
 
