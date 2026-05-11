@@ -135,15 +135,16 @@ export class IssueService {
     if (!issue) return null;
     if (issue.status === IssueStatus.Completed) return null;
     if (issue.status === IssueStatus.Closed) return null;
-    
+    if (issue.status !== IssueStatus.Paused && issue.status !== IssueStatus.Interrupted) return null;
+
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
   }
 
   reopen(projectId: string, number: number): Issue | null {
     const issue = this.issueRepo.findByNumber(projectId, number);
     if (!issue) return null;
-    if (issue.status !== IssueStatus.Closed && issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Paused && issue.status !== IssueStatus.Interrupted) return null;
-    
+    if (issue.status !== IssueStatus.Closed) return null;
+
     this.issueRepo.clearApprovalState(issue.id);
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
   }

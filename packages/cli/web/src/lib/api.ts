@@ -67,6 +67,12 @@ export const api = {
   reopenIssue: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/reopen`, { method: 'POST' }),
 
+  resumeIssue: (number: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/resume`, { method: 'POST' }),
+
+  retryIssue: (number: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/retry`, { method: 'POST' }),
+
   approveIssue: (number: number) =>
     request<{ issue: import('./types').Issue; context: string | null; message: string }>(`/issues/${number}/approve`, { method: 'POST' }),
 

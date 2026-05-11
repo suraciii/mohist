@@ -16,7 +16,7 @@ import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
 import { TaskProgressPanel } from './TaskProgressPanel'
 import { formatTime } from '../lib/format-time'
-import { statusBadge } from '../lib/status-badge'
+import { statusBadge, statusLabel } from '../lib/status-badge'
 import { ChangesPanel } from './ChangesPanel'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
@@ -137,6 +137,22 @@ export function IssueDetailPage() {
     },
   })
 
+  const resumeMutation = useMutation({
+    mutationFn: () => api.resumeIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
+  const retryMutation = useMutation({
+    mutationFn: () => api.retryIssue(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
   const rerunMutation = useMutation({
     mutationFn: () => api.rerunIssue(issueNumber),
     onSuccess: () => {
@@ -237,7 +253,7 @@ export function IssueDetailPage() {
               <span
                 className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(issue.status)}`}
               >
-                {issue.status}
+                {statusLabel(issue.status)}
               </span>
               {isAgentRunningOnThis && (
                 <span className="inline-flex items-center gap-1 text-xs text-blue-600">
@@ -430,7 +446,7 @@ export function IssueDetailPage() {
                     <dd
                       className={`font-medium capitalize ${statusBadge(issue.status)}`}
                     >
-                      {issue.status}
+                      {statusLabel(issue.status)}
                     </dd>
                   </div>
                   {issue.projectName && (
@@ -563,22 +579,29 @@ export function IssueDetailPage() {
                         </div>
                       )}
                       <button
-                        onClick={() => reopenMutation.mutate()}
-                        disabled={reopenMutation.isPending}
+                        onClick={() => retryMutation.mutate()}
+                        disabled={retryMutation.isPending}
+                        className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                      >
+                        {retryMutation.isPending ? 'Retrying...' : 'Retry'}
+                      </button>
+                      <button
+                        onClick={() => rerunMutation.mutate()}
+                        disabled={rerunMutation.isPending}
                         className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                       >
-                        {reopenMutation.isPending ? 'Reopening...' : 'Reopen'}
+                        {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
                       </button>
                     </div>
                   )}
 
                   {issue.status === IssueStatus.Interrupted && (
                     <button
-                      onClick={() => reopenMutation.mutate()}
-                      disabled={reopenMutation.isPending}
+                      onClick={() => resumeMutation.mutate()}
+                      disabled={resumeMutation.isPending}
                       className="w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
                     >
-                      {reopenMutation.isPending ? 'Resuming...' : 'Resume Pipeline'}
+                      {resumeMutation.isPending ? 'Resuming...' : 'Resume Pipeline'}
                     </button>
                   )}
 

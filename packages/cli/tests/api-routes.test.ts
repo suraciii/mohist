@@ -498,7 +498,33 @@ describe('API Routes', () => {
     });
 
     describe('POST /api/issues/:number/reopen', () => {
-      it('should preserve stage and resume pipeline for blocked issue', async () => {
+      it('reopens closed issue and does not auto-enqueue resume-pipeline', async () => {
+        const issue = issueService.create({ projectId, title: 'Closed Issue' });
+        const issueRepo = stateManager.getIssueRepo();
+        issueRepo.updateStage(issue.id, Stage.Build);
+        issueRepo.updateStatus(issue.id, IssueStatus.Closed);
+
+        const reopenApp = new Hono();
+        const reopenEventBus = new EventBus();
+        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        const enqueueSpy = vi.spyOn(reopenAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+        reopenApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, reopenAgentRunner));
+        const reopenServer = createTestServer(reopenApp);
+
+        const response = await request(reopenServer).post(`/api/issues/${issue.number}/reopen`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.message).not.toContain('resume-pipeline');
+
+        expect(enqueueSpy).not.toHaveBeenCalled();
+
+        const reopened = issueRepo.findById(issue.id);
+        expect(reopened?.status).toBe(IssueStatus.Active);
+        expect(reopened?.stage).toBe(Stage.Build);
+      });
+
+      it('returns 404 for blocked issue — reopen is only for closed issues', async () => {
         const issue = issueService.create({ projectId, title: 'Blocked Issue' });
         const issueRepo = stateManager.getIssueRepo();
         issueRepo.updateStage(issue.id, Stage.Build);
@@ -506,46 +532,14 @@ describe('API Routes', () => {
 
         const reopenApp = new Hono();
         const reopenEventBus = new EventBus();
-        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-        const enqueueSpy = vi.spyOn(reopenAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8);
         reopenApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, reopenAgentRunner));
         const reopenServer = createTestServer(reopenApp);
 
         const response = await request(reopenServer).post(`/api/issues/${issue.number}/reopen`);
 
-        expect(response.status).toBe(202);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('resume-pipeline');
-
-        expect(enqueueSpy).toHaveBeenCalledTimes(1);
-        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
-      });
-
-      it('should enqueue resume-pipeline even when reopen recovery restores awaiting approval', async () => {
-        const issue = issueService.create({ projectId, title: 'Awaiting Review Issue' });
-        const issueRepo = stateManager.getIssueRepo();
-        issueRepo.updateStage(issue.id, Stage.Check);
-        issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
-
-        const reopenApp = new Hono();
-        const reopenEventBus = new EventBus();
-        const reopenAgentRunner = new AgentRunnerService(reopenEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-        const enqueueSpy = vi.spyOn(reopenAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-        reopenApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, reopenAgentRunner));
-        const reopenServer = createTestServer(reopenApp);
-
-        const response = await request(reopenServer).post(`/api/issues/${issue.number}/reopen`);
-
-        expect(response.status).toBe(202);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('resume-pipeline');
-        expect(enqueueSpy).toHaveBeenCalledTimes(1);
-        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
-
-        const reopened = issueRepo.findById(issue.id);
-        expect(reopened?.status).toBe(IssueStatus.Active);
-        expect(reopened?.stage).toBe(Stage.Check);
-        expect(reopened?.approvalState?.status).toBe('awaiting');
+        expect(response.status).toBe(404);
+        expect(response.body.error).toContain('not reopenable');
       });
     });
 
@@ -892,7 +886,7 @@ describe('API Routes', () => {
         expect(updated?.status).toBe(IssueStatus.Blocked);
       });
 
-      it('should retry a blocked issue — no checkpoint falls back to draft reset', async () => {
+      it('should reject retry when no checkpoint found', async () => {
         const issue = createBlockedIssue('Retry Test');
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
@@ -900,16 +894,14 @@ describe('API Routes', () => {
 
         const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('no checkpoint found');
+        expect(response.status).toBe(409);
+        expect(response.body.success).toBe(false);
+        expect(response.body.error).toContain('checkpoint');
 
         const issueRepo = stateManager.getIssueRepo();
         const updated = issueRepo.findById(issue.id);
-        expect(updated?.status).toBe(IssueStatus.Active);
-        expect(updated?.stage).toBe(Stage.Backlog);
-        expect(updated?.blockedReason).toBeUndefined();
-        expect(updated?.retryCount).toBe(0);
+        expect(updated?.status).toBe(IssueStatus.Blocked);
+        expect(updated?.stage).not.toBe(Stage.Backlog);
       });
 
       it('should retry from checkpoint when worktree has tasks.json', async () => {
@@ -972,7 +964,7 @@ describe('API Routes', () => {
         expect(response.body.error).toContain('not blocked');
       });
 
-      it('should retry even when issue has a running slot (queue handles concurrency)', async () => {
+      it('should reject retry when issue has a running slot and no checkpoint', async () => {
         const issue = createBlockedIssue('Running Agent');
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
@@ -981,9 +973,8 @@ describe('API Routes', () => {
 
         const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('no checkpoint found');
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('checkpoint');
       });
 
       it('should return 404 when issue not found', async () => {
@@ -996,7 +987,7 @@ describe('API Routes', () => {
         expect(response.status).toBe(404);
       });
 
-      it('should reset to backlog when no checkpoint found', async () => {
+      it('should reject retry and keep stage when no checkpoint found', async () => {
         const issue = createBlockedIssue('No Checkpoint');
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
@@ -1004,19 +995,18 @@ describe('API Routes', () => {
 
         const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
-        expect(response.status).toBe(200);
-        expect(response.body.data.message).toContain('no checkpoint found');
-        expect(response.body.data.message).toContain('reset to draft');
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain('checkpoint');
 
         const issueRepo = stateManager.getIssueRepo();
         const updated = issueRepo.findById(issue.id);
-        expect(updated?.stage).toBe(Stage.Backlog);
-        expect(updated?.status).toBe(IssueStatus.Active);
+        expect(updated?.stage).not.toBe(Stage.Backlog);
+        expect(updated?.status).toBe(IssueStatus.Blocked);
       });
     });
 
     describe('POST /api/issues/:number/restart', () => {
-      it('should reject restart for merged blocked issue and require manual intervention', async () => {
+      it('returns deprecation error for any issue — restart has been removed', async () => {
         const issue = createBlockedIssue('Merged Restart');
         issueRepo.updateStage(issue.id, Stage.Done);
         issueRepo.update(issue.id, { mergeState: MergeState.Merged });
@@ -1026,15 +1016,14 @@ describe('API Routes', () => {
 
         const response = await request(server).post(`/api/issues/${issue.number}/restart`);
 
-        expect(response.status).toBe(409);
-        expect(response.body.error).toContain('manual intervention');
-
-        const updated = stateManager.getIssueRepo().findById(issue.id);
-        expect(updated?.stage).toBe(Stage.Done);
-        expect(updated?.status).toBe(IssueStatus.Blocked);
+        expect(response.status).toBe(410);
+        expect(response.body.success).toBe(false);
+        expect(response.body.error).toContain('restart has been removed');
+        expect(response.body.error).toContain('retry');
+        expect(response.body.error).toContain('rerun');
       });
 
-      it('should reject restart for integrate-stage blocked issue and require manual intervention', async () => {
+      it('returns deprecation error for integrate-stage issue', async () => {
         const issue = createBlockedIssue('Integrate Restart');
         issueRepo.updateStage(issue.id, Stage.Integrate);
         const eventBus = new EventBus();
@@ -1043,62 +1032,33 @@ describe('API Routes', () => {
 
         const response = await request(server).post(`/api/issues/${issue.number}/restart`);
 
-        expect(response.status).toBe(409);
-        expect(response.body.error).toContain('manual intervention');
+        expect(response.status).toBe(410);
+        expect(response.body.error).toContain('restart has been removed');
 
         const updated = stateManager.getIssueRepo().findById(issue.id);
         expect(updated?.stage).toBe(Stage.Integrate);
         expect(updated?.status).toBe(IssueStatus.Blocked);
       });
 
-      it('should restart a blocked issue to backlog and return 200', async () => {
+      it('returns deprecation error without mutating stage', async () => {
         const issue = createBlockedIssue('Restart Test');
+        issueRepo.updateStage(issue.id, Stage.Build);
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus);
         server = createRetryServer(agentRunner);
 
         const response = await request(server).post(`/api/issues/${issue.number}/restart`);
 
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('reset to draft');
-        expect(response.body.data.message).toContain('start to begin again');
+        expect(response.status).toBe(410);
+        expect(response.body.success).toBe(false);
+        expect(response.body.error).toContain('restart has been removed');
 
-        const issueRepo = stateManager.getIssueRepo();
-        const updated = issueRepo.findById(issue.id);
-        expect(updated?.stage).toBe(Stage.Backlog);
-        expect(updated?.status).toBe(IssueStatus.Active);
-        expect(updated?.blockedReason).toBeUndefined();
-        expect(updated?.retryCount).toBe(0);
-        expect(updated?.approvalState).toBeUndefined();
+        const updated = stateManager.getIssueRepo().findById(issue.id);
+        expect(updated?.stage).toBe(Stage.Build);
+        expect(updated?.status).toBe(IssueStatus.Blocked);
       });
 
-      it('should return 409 when issue is not blocked', async () => {
-        await issueService.create({ projectId, title: 'Active Issue' });
-        const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus);
-        server = createRetryServer(agentRunner);
-
-        const response = await request(server).post('/api/issues/1/restart');
-
-        expect(response.status).toBe(409);
-        expect(response.body.error).toContain('not blocked');
-      });
-
-      it('should return 409 when agent is already running', async () => {
-        const issue = createBlockedIssue('Running Restart');
-        const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-        (agentRunner as any).runningSlots.set(issue.id, { id: 'fake-task', issueId: issue.id });
-        server = createRetryServer(agentRunner);
-
-        const response = await request(server).post(`/api/issues/${issue.number}/restart`);
-
-        expect(response.status).toBe(409);
-        expect(response.body.error).toContain('already has a running task');
-      });
-
-      it('should return 404 when issue not found', async () => {
+      it('returns 404 when issue not found', async () => {
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus);
         server = createRetryServer(agentRunner);

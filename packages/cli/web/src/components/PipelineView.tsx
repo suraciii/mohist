@@ -806,8 +806,8 @@ function SpecialStatePanel({
     },
   })
 
-  const reopenMutation = useMutation({
-    mutationFn: () => api.reopenIssue(issueNumber),
+  const resumeMutation = useMutation({
+    mutationFn: () => api.resumeIssue(issueNumber),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -835,7 +835,7 @@ function SpecialStatePanel({
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2">
         <div className="flex items-center gap-2">
           <CrossIcon className="h-4 w-4 text-red-500" />
-          <span className="text-sm font-semibold text-red-800">Blocked</span>
+          <span className="text-sm font-semibold text-red-800">Needs Action</span>
         </div>
         {issue.blockedReason && (
           <p className="text-sm text-red-600">{issue.blockedReason}</p>
@@ -855,11 +855,11 @@ function SpecialStatePanel({
           The pipeline was interrupted. Click &quot;Resume&quot; to continue from where it left off.
         </p>
         <button
-          onClick={() => reopenMutation.mutate()}
-          disabled={reopenMutation.isPending}
+          onClick={() => resumeMutation.mutate()}
+          disabled={resumeMutation.isPending}
           className="rounded-md bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
         >
-          {reopenMutation.isPending ? 'Resuming...' : 'Resume'}
+          {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
         </button>
       </div>
     )
