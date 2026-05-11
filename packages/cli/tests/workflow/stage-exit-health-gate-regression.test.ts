@@ -119,7 +119,7 @@ class HealthGateCheckRunner extends BaseStageRunner {
 }
 
 describe('Check-stage approval requires health:check pass', () => {
-  it('UserApprovalCheck is NOT reached when health:check fails', async () => {
+  it('collects later checks but does not request approval when health:check fails', async () => {
     const healthGateFailsCheck = new FailCheck(
       'health:check',
       undefined,
@@ -138,7 +138,7 @@ describe('Check-stage approval requires health:check pass', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(false);
-    expect(result.checkResults).toHaveLength(1);
+    expect(result.checkResults).toHaveLength(3);
     expect(result.checkResults[0].name).toBe('health:check');
     expect(result.checkResults[0].status).toBe('fail');
     expect(ctx.issueRepo.setApprovalState).not.toHaveBeenCalled();
@@ -218,7 +218,7 @@ describe('Check-stage approval requires health:check pass', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(false);
-    expect(result.checkResults).toHaveLength(1);
+    expect(result.checkResults).toHaveLength(2);
     expect(result.checkResults[0].name).toBe('health:check');
     expect(ctx.issueRepo.setApprovalState).not.toHaveBeenCalled();
   });
@@ -786,7 +786,7 @@ describe('Stage exit health guarantee integration', () => {
     expect(result.checkResults.map(r => r.name)).toEqual(['all-tasks-complete', 'health:build']);
   });
 
-  it('Failing health gate prevents later checks from running', async () => {
+  it('Failing health gate collects later checks but still blocks the stage', async () => {
     const healthCheck = new FailCheck('health:check');
     const aiReviewCheck = new PassCheck('ai-review', { verdict: 'PASS', reviewReport: 'LGTM' });
     const userApprovalCheck = new PassCheck('user-approval');
@@ -804,9 +804,9 @@ describe('Stage exit health guarantee integration', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(false);
-    expect(result.checkResults).toHaveLength(1);
-    expect(aiReviewRun).not.toHaveBeenCalled();
-    expect(userApprovalRun).not.toHaveBeenCalled();
+    expect(result.checkResults).toHaveLength(3);
+    expect(aiReviewRun).toHaveBeenCalledTimes(1);
+    expect(userApprovalRun).toHaveBeenCalledTimes(1);
   });
 
   it('All checks run when all pass including health gates', async () => {

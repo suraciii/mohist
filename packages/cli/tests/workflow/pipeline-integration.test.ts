@@ -694,8 +694,8 @@ describe('Serial check execution', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(false);
-    expect(thirdRunSpy).not.toHaveBeenCalled();
-    expect(result.checkResults).toHaveLength(2);
+    expect(thirdRunSpy).toHaveBeenCalledTimes(1);
+    expect(result.checkResults).toHaveLength(3);
   });
 
   it('all checks run when all pass', async () => {

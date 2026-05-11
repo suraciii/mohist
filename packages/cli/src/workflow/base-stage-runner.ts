@@ -137,20 +137,67 @@ export abstract class BaseStageRunner implements StageRunner {
     for (const check of checks) {
       const result = await check.run(checkCtx);
       results.push(result);
-
-      if (result.status !== 'pass') {
-        this.persistCheckResults(ctx, results);
-        return this.handleCheckFailure(ctx, check, result, results, taskOutput, isPreTask, checks);
-      }
     }
 
     this.persistCheckResults(ctx, results);
+
+    const classification = this.classifyPhaseResults(results);
+
+    if (classification.unrepairedFailures.length > 0) {
+      const first = classification.unrepairedFailures[0];
+      const failedCheck = checks.find(c => c.name === first.name);
+      if (failedCheck) {
+        return this.handleCheckFailure(ctx, failedCheck, first, results, taskOutput, isPreTask, checks);
+      }
+    }
+
+    if (classification.repairableFailures.length > 0) {
+      const first = classification.repairableFailures[0];
+      const failedCheck = checks.find(c => c.name === first.name);
+      if (failedCheck) {
+        return this.handleCheckFailure(ctx, failedCheck, first, results, taskOutput, isPreTask, checks);
+      }
+    }
+
+    if (classification.pendingApproval) {
+      return this.handleApprovalCheck(ctx, checks.find(c => c.name === 'user-approval')!, classification.pendingApproval, results, taskOutput);
+    }
+
     return {
       success: true,
       nextStage: isPreTask ? undefined : this.getNextStage(),
       output: isPreTask ? undefined : taskOutput,
       checkResults: results,
     };
+  }
+
+  private classifyPhaseResults(results: CheckResult[]): {
+    repairableFailures: CheckResult[];
+    unrepairedFailures: CheckResult[];
+    pendingApproval: CheckResult | undefined;
+  } {
+    const policies = this.getCheckFailurePolicies();
+    const repairableFailures: CheckResult[] = [];
+    const unrepairedFailures: CheckResult[] = [];
+    let pendingApproval: CheckResult | undefined;
+
+    for (const r of results) {
+      if (r.status === 'pass') continue;
+      if (r.status === 'pending' && this.isApprovalCheck(r.name)) {
+        pendingApproval = r;
+        continue;
+      }
+      if (r.status === 'pending') continue;
+
+      const hasPolicy = policies.some(p => p.checkName === r.name);
+      if (hasPolicy) {
+        repairableFailures.push(r);
+      } else {
+        unrepairedFailures.push(r);
+      }
+    }
+
+    return { repairableFailures, unrepairedFailures, pendingApproval };
   }
 
   private async handleCheckFailure(
