@@ -797,7 +797,7 @@ describe('Timeout path cleanup and cancellation', () => {
   });
 });
 
-describe('QuietThresholdMonitor: restart preserves promise for Promise.race', () => {
+describe('QuietThresholdMonitor: restart creates fresh cycles for Promise.race', () => {
   it('should resolve after threshold when no restart occurs', async () => {
     const { createQuietThresholdMonitorForTest } = await import('../src/agent-runtime/quiet-threshold-monitor');
     vi.useFakeTimers();
@@ -815,7 +815,7 @@ describe('QuietThresholdMonitor: restart preserves promise for Promise.race', ()
     vi.useRealTimers();
   });
 
-  it('should keep same promise reference after restart', async () => {
+  it('should keep same promise reference before the current cycle settles', async () => {
     const { createQuietThresholdMonitorForTest } = await import('../src/agent-runtime/quiet-threshold-monitor');
     vi.useFakeTimers();
     const monitor = createQuietThresholdMonitorForTest(100);
@@ -830,6 +830,30 @@ describe('QuietThresholdMonitor: restart preserves promise for Promise.race', ()
     await vi.advanceTimersByTimeAsync(0);
     expect(resolved).toBe(false);
     vi.advanceTimersByTime(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('should create a fresh promise after a settled cycle restarts', async () => {
+    const { createQuietThresholdMonitorForTest } = await import('../src/agent-runtime/quiet-threshold-monitor');
+    vi.useFakeTimers();
+    const monitor = createQuietThresholdMonitorForTest(100);
+    monitor.start();
+    const p1 = monitor.promise();
+    vi.advanceTimersByTime(101);
+    await vi.advanceTimersByTimeAsync(0);
+
+    monitor.start();
+    const p2 = monitor.promise();
+    expect(p2).not.toBe(p1);
+
+    let resolved = false;
+    p2.then(() => { resolved = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+
+    vi.advanceTimersByTime(101);
     await vi.advanceTimersByTimeAsync(0);
     expect(resolved).toBe(true);
     vi.useRealTimers();

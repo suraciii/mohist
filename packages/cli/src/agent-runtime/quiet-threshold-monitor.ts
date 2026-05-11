@@ -9,7 +9,12 @@ export function createQuietThresholdMonitor(thresholdMs: number): QuietThreshold
   let timer: ReturnType<typeof setTimeout> | null = null;
   let settled = false;
   let resolveFn: ((v: 'quiet_threshold') => void) | null = null;
-  const thePromise = new Promise<'quiet_threshold'>((resolve) => { resolveFn = resolve; });
+  let thePromise = new Promise<'quiet_threshold'>((resolve) => { resolveFn = resolve; });
+
+  const resetPromise = () => {
+    settled = false;
+    thePromise = new Promise<'quiet_threshold'>((resolve) => { resolveFn = resolve; });
+  };
 
   const fire = () => {
     timer = null;
@@ -19,7 +24,9 @@ export function createQuietThresholdMonitor(thresholdMs: number): QuietThreshold
 
   const start = () => {
     if (timer) return;
-    settled = false;
+    if (settled) {
+      resetPromise();
+    }
     timer = setTimeout(fire, thresholdMs);
   };
 
