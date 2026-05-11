@@ -1,189 +1,173 @@
 # OpenSpec Workflow Usage Guide
 
-This guide explains how to use Mohist's OpenSpec workflow for structured issue handling with AI agents.
+Mohist 的 OpenSpec 工作流：结构化 Change 产物 + Ralph 式任务执行。
 
-## Overview
-
-The OpenSpec workflow introduces structured **Change** artifacts and **Ralph-style task execution** to Mohist:
+## 概述
 
 ```
-plan → review → build → check → done
+Plan → Build → Check → Integrate → Done
 ```
 
-- **plan**: Generate Change artifacts (proposal, design, specs, tasks.json) with self-review
-- **review**: Human review and approval gate
-- **build**: Ralph-style task loop execution
-- **check**: Auto tests + human acceptance + Change archival
+- **Plan**: AI 生成 Change 产物 (proposal, design, specs, tasks.json)，含自审
+- **Build**: Ralph 式任务循环执行
+- **Check**: AI 代码审查 + merge-ready 检查
+- **Integrate**: 规格同步 + 归档 + 合并 + 集成后健康检查
 
-## Key Concepts
+## 核心概念
 
 ### Change
 
-A **Change** is a structured artifact directory containing:
+Change 是结构化产物目录：
 
 ```
 openspec/changes/{issue-number}-{slug}/
-├── proposal.md      # Why this change, what problem it solves
-├── design.md        # Technical design and decisions
-├── specs/           # Detailed specifications per capability
+├── proposal.md        # 为什么做这个变更，解决什么问题
+├── design.md          # 技术方案和决策
+├── specs/             # 按能力拆分的详细规格
 │   ├── capability-a/spec.md
 │   └── capability-b/spec.md
-├── tasks.json       # Task list with execution state (Ralph-style)
-└── session-memories/ # Learnings from task execution
+├── tasks.json         # 带执行状态的任务列表 (Ralph 式)
+├── self-review.md     # Plan 阶段 Agent 自审报告
+├── review.md          # Check 阶段 AI 审查报告
+└── session-memories/  # 任务执行的学习记录
     └── T-001.json
 ```
 
 ### Ralph Loop
 
-Ralph-style execution iterates through tasks in `tasks.json`:
+Ralph 式执行按顺序遍历 `tasks.json` 中的任务：
 
-1. Select next pending task by order
-2. Assemble full context (proposal + design + spec + learnings)
-3. Execute with AI agent
-4. Verify acceptance criteria
-5. Store learning
-6. Repeat until all tasks done
+1. 按 order 选择下一个待执行任务
+2. 组装完整上下文 (proposal + design + spec + learnings)
+3. 使用 AI agent 执行
+4. 验证验收标准
+5. 存储学习记录
+6. 重复直到所有任务完成
 
-## Commands
+## 命令
 
 ### `mo propose <issue-number>`
 
-Creates a new Change for an issue and starts the plan stage.
+为 Issue 创建 Change 并启动 Plan 阶段。
 
 ```bash
-# Create Change for issue #42
+# 为 Issue #42 创建 Change
 mo propose 42
 
-# Force recreate (overwrites existing)
+# 强制重建（覆盖已有 Change）
 mo propose 42 --force
 ```
 
-The command:
-1. Creates `openspec/changes/{issue-number}-{slug}/`
-2. Launches AI agent to explore codebase
-3. Agent generates proposal, design, specs
-4. Agent performs self-review (up to 3 iterations)
-5. If self-review passes, generates `tasks.json`
+该命令：
+1. 创建 `openspec/changes/{issue-number}-{slug}/`
+2. 启动 AI agent 探索代码库
+3. Agent 生成 proposal, design, specs
+4. Agent 执行自审（最多 3 次迭代）
+5. 自审通过后生成 `tasks.json`
 
-### `mo issue resume <id>`
+### `mo issue resume <number>`
 
-Resumes an issue from where it left off.
+从断点恢复 Issue 执行。
 
 ```bash
-# Resume issue #42
+# 恢复 Issue #42
 mo issue resume 42
 
-# Skip plan stage and go directly to review
-# (after manual fixes to plan artifacts)
+# 跳过 Plan review 直接进入 Build
+# （在手动修复 Plan 产物后使用）
 mo issue resume 42 --skip-to-review
 ```
 
-### Workflow Stages
+## 工作流阶段
 
-#### Plan Stage
+### Plan 阶段
 
-Agent explores the issue and codebase, then generates:
+Agent 探索 Issue 和代码库，生成：
 
-- **proposal.md**: Motivation, goals, non-goals
-- **design.md**: Architecture decisions, trade-offs
-- **specs/**: Detailed requirements per capability
-- **tasks.json**: Task list derived from specs
+- **proposal.md**: 动机、目标、非目标
+- **design.md**: 架构决策、权衡
+- **specs/**: 每个能力的详细需求
+- **tasks.json**: 从 specs 派生的任务列表
+- **self-review.md**: Agent 自审 report（最多 3 次迭代）
 
-Self-review happens within this stage (max 3 iterations).
+Plan gate 包含用户审批和健康门控（`npm run typecheck`）。
 
-#### Review Stage
+### Build 阶段
 
-Human reviews the Change artifacts:
+Ralph loop 执行 `tasks.json` 中的任务：
 
-1. Read proposal, design, and specs
-2. Edit directly if needed
-3. Approve with `mo issue approve 42` to proceed to build
+- 任务按 `order` 字段顺序执行
+- 每个任务获得完整上下文 (proposal, design, spec, learnings)
+- 失败分析后带有失败上下文重试
+- 任务状态通过每个任务上的 `passes`/`attempts`/`error` 追踪
 
-#### Build Stage
+Build gate 包含健康门控（`npm run build`）和全部任务完成检查。
 
-Ralph loop executes tasks from `tasks.json`:
+### Check 阶段
 
-- Tasks run sequentially by `order` field
-- Each task gets full context (proposal, design, spec, learnings)
-- Failures are analyzed and retried with failure context
-- Task status tracked via `passes`/`attempts`/`error` on each task
+- AI agent 审查代码，生成 `review.md`
+- 合并就绪检查（worktree 快进合并）
+- 用户审批后进入 Integrate
 
-#### Check Stage
+### Integrate 阶段
 
-1. **Auto tests**: Runs `npm test` and `npm run lint`
-2. **Human acceptance**: Review implementation
-3. **Archival**: Change moved to `openspec/changes/archive/`
+- 增量规格同步到主规格
+- Change 归档到 `openspec/changes/archive/`
+- 压缩合并到目标分支
+- 集成后健康门控（`npm run build && npm test`）
 
-## Example Workflow
+## 示例工作流
 
-### 1. Start Server
+### 1. 启动服务
 
 ```bash
 mo server start
 ```
 
-### 2. Create Change
+### 2. 创建 Change
 
 ```bash
 mo propose 42
 ```
 
-Agent explores the issue and generates artifacts.
+Agent 探索 Issue 并生成产物。
 
-### 3. Review Artifacts
+### 3. 审查产物
 
 ```bash
-# Check generated artifacts
+# 检查生成的产物
 cat openspec/changes/42-my-issue/proposal.md
 cat openspec/changes/42-my-issue/tasks.json
 
-# If satisfied, approve
+# 满意后审批
 mo issue approve 42
 ```
 
-### 4. Build Executes
+### 4. Build 自动执行
 
-Agent runs Ralph loop, executing each task in `tasks.json`.
+Agent 运行 Ralph loop，执行 `tasks.json` 中的每个任务。
 
-### 5. Check and Accept
+### 5. Check 审查
 
 ```bash
-# Tests run automatically
-# Review results
+# 自动测试运行
+# 查看变更
+mo issue diff 42
+
+# 查看详情
 mo issue show 42
 
-# If implementation is correct, approve
+# 实现正确则审批
 mo issue approve 42
 ```
 
-Change is archived automatically.
+### 6. Integrate 自动完成
 
-## Session Memories
+规格同步、归档、合并自动完成。
 
-Learnings from task execution are stored in:
+## 任务状态
 
-```
-openspec/changes/{change}/session-memories/{task-id}.json
-```
-
-Each file contains:
-
-```json
-{
-  "task_id": "T-001",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "insights": ["Constraint discovered: API rate limit"],
-  "adjustments": ["Task T-002 should handle retries"],
-  "success": true,
-  "execution_summary": "Implemented auth endpoint"
-}
-```
-
-These insights are passed to subsequent tasks.
-
-## Task Status
-
-Track execution state in `tasks.json` — each task has `passes`, `attempts`, and `error` fields:
+在 `tasks.json` 中追踪执行状态——每个任务有 `passes`、`attempts`、`error` 字段：
 
 ```bash
 cat openspec/changes/42-my-issue/tasks.json
@@ -200,48 +184,51 @@ cat openspec/changes/42-my-issue/tasks.json
 }
 ```
 
-## Recovery Scenarios
+## Session Memories
 
-### Build Fails on Task T-003
-
-1. Agent retries with failure context (up to 2 more times)
-2. If still fails, pauses with `ask_user`
-3. User fixes issues manually
-4. User runs `mo issue resume 42 --skip-to-review`
-5. Build resumes from T-003
-
-### Plan Self-Review Fails
-
-1. After 3 iterations without passing, plan stage fails
-2. User manually edits artifacts
-3. User runs `mo issue resume 42 --skip-to-review` to proceed
-
-## Configuration
-
-`.mohist/config.yaml`:
-
-```yaml
-specs:
-  location: "project"      # "project" or ".mohist"
-  project_path: "openspec"
-  git_track: true
-```
-
-## File Locations
-
-| Path | Purpose |
-|------|---------|
-| `openspec/changes/` | Active changes |
-| `openspec/changes/archive/` | Completed changes |
-| `.mohist/mohist.db` | SQLite database |
-| `.mohist/logs/` | Server logs |
-
-## Backward Compatibility
-
-Issues without `tasks.json` use traditional workflow:
+任务执行的学习记录存放在：
 
 ```
-draft → plan → build → check → done
+openspec/changes/{change}/session-memories/{task-id}.json
 ```
 
-OpenSpec workflow is opt-in via file existence (`tasks.json`).
+每个文件包含：
+
+```json
+{
+  "task_id": "T-001",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "insights": ["Constraint discovered: API rate limit"],
+  "adjustments": ["Task T-002 should handle retries"],
+  "success": true,
+  "execution_summary": "Implemented auth endpoint"
+}
+```
+
+这些学习记录会传递给后续任务。
+
+## 恢复场景
+
+### Build 任务 T-003 失败
+
+1. Agent 带失败上下文重试（最多 2 次）
+2. 仍失败则暂停
+3. 用户手动修复问题
+4. 用户运行 `mo issue resume 42 --skip-to-review`
+5. Build 从 T-003 恢复
+
+### Plan 自审失败
+
+1. 3 次迭代后仍未通过，Plan 阶段失败
+2. 用户手动编辑产物
+3. 用户运行 `mo issue resume 42 --skip-to-review` 继续
+
+## 文件位置
+
+| 路径 | 说明 |
+|------|------|
+| `openspec/changes/` | 活跃的 changes |
+| `openspec/changes/archive/` | 已完成的 changes |
+| `~/.mohist/mohist.db` | SQLite 数据库 |
+| `~/.mohist/logs/` | 服务日志 |
+| `~/.mohist/config.jsonc` | 配置文件 |
