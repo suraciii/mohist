@@ -335,11 +335,11 @@ describe('SessionTranscriptView', () => {
 
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
-      await waitFor(() => {
-        expect(screen.getByText('UnknownTool')).toBeInTheDocument()
+await waitFor(() => {
+        expect(screen.getByText(/Called UnknownTool/)).toBeInTheDocument()
       })
 
-      const toolCard = screen.getByText('UnknownTool').closest('[class*="rounded"]')
+      const toolCard = screen.getByText(/Called UnknownTool/).closest('[class*="rounded"]')
       expect(toolCard).toBeInTheDocument()
     })
 
@@ -363,10 +363,10 @@ describe('SessionTranscriptView', () => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText('CustomTool')).toBeInTheDocument()
+        expect(screen.getByText(/Called CustomTool/)).toBeInTheDocument()
       })
 
-      const toolElement = screen.getByText('CustomTool')
+      const toolElement = screen.getByText(/Called CustomTool/)
       const button = toolElement.closest('button') ?? toolElement.closest('[class*="rounded-md"]')?.querySelector('button')
       if (button) {
         fireEvent.click(button)
@@ -1717,7 +1717,7 @@ describe('Live/historical parity', () => {
     renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
     await waitFor(() => {
-      expect(screen.getByText('UnknownTool')).toBeInTheDocument()
+      expect(screen.getByText(/Called UnknownTool/)).toBeInTheDocument()
     })
   })
 })

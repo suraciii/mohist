@@ -1206,11 +1206,11 @@ describe('SessionTranscriptAssembler', () => {
       expect(toolPart.normalizedName).toBe('Write');
     });
 
-    it('should mark tool as unknown with warning when inference fails', () => {
+    it('should preserve original tool name when tool has no recognizable identity clues', () => {
       const session = makeSession();
       const events: SessionStreamLogEntry[] = [
         makePromptEvent('Do something', 'task', '2024-01-01T10:00:00.000Z'),
-        makeToolCallStart('tc-unknown', 'completely-unrecognized-tool', undefined, '{}', '2024-01-01T10:00:01.000Z'),
+        makeToolCallStart('tc-unknown', 'unknown', undefined, '{}', '2024-01-01T10:00:01.000Z'),
       ];
 
       const transcript = assembleSessionTranscript(session, events);
@@ -1549,11 +1549,11 @@ describe('SessionTranscriptAssembler', () => {
       expect(transcript.session.turnCount).toBe(2);
     });
 
-    it('should include warnings in transcript when tools could not be normalized', () => {
+    it('should include warnings in transcript when tool name is literally "unknown"', () => {
       const session = makeSession();
       const events = [
         makePromptEvent('Hello', 'task', '2024-01-01T10:00:00.000Z'),
-        makeToolCallStart('tc-unknown', 'some-random-tool', undefined, '{}', '2024-01-01T10:00:01.000Z'),
+        makeToolCallStart('tc-unknown', 'unknown', undefined, '{}', '2024-01-01T10:00:01.000Z'),
       ];
 
       const transcript = assembleSessionTranscript(session, events);

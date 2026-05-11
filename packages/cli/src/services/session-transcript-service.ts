@@ -228,47 +228,58 @@ function syntheticToolCallId(data: Record<string, unknown>, fallbackCreatedAt: s
   return `${sessionId}-${toolName}-${sequence}`;
 }
 
-function inferNormalizedToolName(d: Record<string, unknown>): string {
-  if (typeof d.toolName === 'string' && d.toolName && d.toolName !== 'unknown' && isKnownToolName(d.toolName)) return d.toolName;
-  if (typeof d.name === 'string' && d.name && isKnownToolName(d.name)) return d.name;
-  if (typeof d.title === 'string' && d.title) {
-    const titleLower = d.title.toLowerCase();
-    if (['apply_patch', 'edit', 'write', 'read', 'glob', 'grep', 'bash', 'list', 'search'].some(t => titleLower.includes(t))) {
-      return d.title;
+function inferNormalizedToolName(d: Record<string, unknown>): { name: string; wasInferred: boolean } {
+  const toolName = typeof d.toolName === 'string' ? d.toolName : undefined;
+  const name = typeof d.name === 'string' ? d.name : undefined;
+
+  if (toolName && toolName !== 'unknown') return { name: toolName, wasInferred: false };
+  if (name && name !== 'unknown') return { name, wasInferred: false };
+
+  if (typeof d.metadata === 'object' && d.metadata !== null) {
+    const meta = d.metadata as Record<string, unknown>;
+    if (typeof meta.toolName === 'string' && meta.toolName && meta.toolName !== 'unknown') return { name: meta.toolName, wasInferred: true };
+    if (typeof meta.name === 'string' && meta.name && meta.name !== 'unknown') return { name: meta.name, wasInferred: true };
+    if (typeof meta.title === 'string' && meta.title) {
+      const titleLower = meta.title.toLowerCase();
+      if (['apply_patch', 'edit', 'write', 'read', 'glob', 'grep', 'bash', 'list', 'search'].some(t => titleLower.includes(t))) {
+        return { name: meta.title, wasInferred: true };
+      }
     }
   }
+
   const rawInput = d.rawInput ?? d.input;
   if (rawInput) {
     if (typeof rawInput === 'object' && rawInput !== null) {
       const inputObj = rawInput as Record<string, unknown>;
-      if (inputObj.patchText !== undefined) return 'apply_patch';
-      if (inputObj.command !== undefined || inputObj.script !== undefined) return 'bash';
+      if (inputObj.patchText !== undefined) return { name: 'apply_patch', wasInferred: true };
+      if (inputObj.command !== undefined || inputObj.script !== undefined) return { name: 'bash', wasInferred: true };
       if (inputObj.pattern !== undefined || inputObj.query !== undefined || inputObj.search !== undefined) {
-        if (inputObj.file_path !== undefined) return 'grep';
-        return 'search';
+        if (inputObj.file_path !== undefined) return { name: 'grep', wasInferred: true };
+        return { name: 'search', wasInferred: true };
       }
-      if (inputObj.file_path !== undefined || inputObj.path !== undefined) return 'read';
-      if (inputObj.pattern !== undefined) return 'glob';
-      if (inputObj.todos !== undefined) return 'todowrite';
+      if (inputObj.file_path !== undefined || inputObj.path !== undefined) return { name: 'read', wasInferred: true };
+      if (inputObj.pattern !== undefined) return { name: 'glob', wasInferred: true };
+      if (inputObj.todos !== undefined) return { name: 'todowrite', wasInferred: true };
     } else if (typeof rawInput === 'string') {
       try {
         const parsed = JSON.parse(rawInput);
         if (parsed && typeof parsed === 'object' && parsed !== null) {
           const inputObj = parsed as Record<string, unknown>;
-          if (inputObj.patchText !== undefined) return 'apply_patch';
-          if (inputObj.command !== undefined || inputObj.script !== undefined) return 'bash';
+          if (inputObj.patchText !== undefined) return { name: 'apply_patch', wasInferred: true };
+          if (inputObj.command !== undefined || inputObj.script !== undefined) return { name: 'bash', wasInferred: true };
           if (inputObj.pattern !== undefined || inputObj.query !== undefined || inputObj.search !== undefined) {
-            if (inputObj.file_path !== undefined) return 'grep';
-            return 'search';
+            if (inputObj.file_path !== undefined) return { name: 'grep', wasInferred: true };
+            return { name: 'search', wasInferred: true };
           }
-          if (inputObj.file_path !== undefined || inputObj.path !== undefined) return 'read';
-          if (inputObj.pattern !== undefined) return 'glob';
-          if (inputObj.todos !== undefined) return 'todowrite';
+          if (inputObj.file_path !== undefined || inputObj.path !== undefined) return { name: 'read', wasInferred: true };
+          if (inputObj.pattern !== undefined) return { name: 'glob', wasInferred: true };
+          if (inputObj.todos !== undefined) return { name: 'todowrite', wasInferred: true };
         }
       } catch {
       }
     }
   }
+
   const rawOutput = d.rawOutput ?? d.output;
   if (rawOutput) {
     if (typeof rawOutput === 'string') {
@@ -278,9 +289,14 @@ function inferNormalizedToolName(d: Record<string, unknown>): string {
           const outputObj = parsed as Record<string, unknown>;
           if (outputObj.metadata && typeof outputObj.metadata === 'object') {
             const meta = (outputObj.metadata as Record<string, unknown>);
-            if (typeof meta.toolName === 'string') return meta.toolName;
-            if (typeof meta.name === 'string') return meta.name;
-            if (typeof meta.title === 'string') return meta.title;
+            if (typeof meta.toolName === 'string' && meta.toolName && meta.toolName !== 'unknown') return { name: meta.toolName, wasInferred: true };
+            if (typeof meta.name === 'string' && meta.name && meta.name !== 'unknown') return { name: meta.name, wasInferred: true };
+            if (typeof meta.title === 'string' && meta.title) {
+              const titleLower = meta.title.toLowerCase();
+              if (['apply_patch', 'edit', 'write', 'read', 'glob', 'grep', 'bash', 'list', 'search'].some(t => titleLower.includes(t))) {
+                return { name: meta.title, wasInferred: true };
+              }
+            }
           }
         }
       } catch {
@@ -289,29 +305,27 @@ function inferNormalizedToolName(d: Record<string, unknown>): string {
       const outputObj = rawOutput as Record<string, unknown>;
       if (outputObj.metadata && typeof outputObj.metadata === 'object') {
         const meta = (outputObj.metadata as Record<string, unknown>);
-        if (typeof meta.toolName === 'string') return meta.toolName;
-        if (typeof meta.name === 'string') return meta.name;
-        if (typeof meta.title === 'string') return meta.title;
+        if (typeof meta.toolName === 'string' && meta.toolName && meta.toolName !== 'unknown') return { name: meta.toolName, wasInferred: true };
+        if (typeof meta.name === 'string' && meta.name && meta.name !== 'unknown') return { name: meta.name, wasInferred: true };
+        if (typeof meta.title === 'string' && meta.title) {
+          const titleLower = meta.title.toLowerCase();
+          if (['apply_patch', 'edit', 'write', 'read', 'glob', 'grep', 'bash', 'list', 'search'].some(t => titleLower.includes(t))) {
+            return { name: meta.title, wasInferred: true };
+          }
+        }
       }
     }
   }
-  if (typeof d.metadata === 'object' && d.metadata !== null) {
-    const meta = d.metadata as Record<string, unknown>;
-    if (typeof meta.toolName === 'string') return meta.toolName;
-    if (typeof meta.name === 'string') return meta.name;
-    if (typeof meta.title === 'string') return meta.title;
-  }
-  return 'unknown';
-}
 
-function isKnownToolName(toolName: string): boolean {
-  const lower = toolName.toLowerCase();
-  return [
-    'apply_patch', 'edit', 'write', 'write_file',
-    'read', 'read_file', 'glob', 'grep', 'bash', 'shell',
-    'list', 'search', 'membrowse', 'memread', 'memsearch',
-    'todowrite', 'todo',
-  ].includes(lower);
+  if (typeof d.title === 'string' && d.title) {
+    const titleLower = d.title.toLowerCase();
+    if (['apply_patch', 'edit', 'write', 'read', 'glob', 'grep', 'bash', 'list', 'search'].some(t => titleLower.includes(t))) {
+      return { name: d.title, wasInferred: true };
+    }
+  }
+
+  const fallbackName = toolName ?? name ?? 'unknown';
+  return { name: fallbackName, wasInferred: false };
 }
 
 function parseToolCallStart(data: Record<string, unknown>, fallbackCreatedAt: string): ToolCallStartData | null {
@@ -818,7 +832,7 @@ export class SessionTranscriptAssembler {
     if (hasId) return;
     const toolName = typeof d.toolName === 'string' ? d.toolName : (typeof d.name === 'string' ? d.name : 'unknown');
     const title = typeof d.title === 'string' ? d.title : undefined;
-    const normalizedName = inferNormalizedToolName(d);
+    const { name: normalizedName } = inferNormalizedToolName(d);
     const nameKey = normalizedName.toLowerCase();
     const rawInput = d.rawInput ?? d.input;
     const input = stringifyPayload(rawInput);
@@ -903,10 +917,11 @@ export class SessionTranscriptAssembler {
   }
 
   private computeToolNormalization(d: Record<string, unknown>): { normalizedName: string; displayTitle?: string; displaySubtitle?: string; category?: string } {
-    let normalizedName = inferNormalizedToolName(d);
+    const { name, wasInferred } = inferNormalizedToolName(d);
     const displayTitle = inferDisplayTitle(d);
-    const category = getToolCategory(normalizedName);
-    return { normalizedName, displayTitle, displaySubtitle: undefined, category };
+    const category = getToolCategory(name);
+    const shouldMarkUnknown = !wasInferred && name === 'unknown';
+    return { normalizedName: shouldMarkUnknown ? 'unknown' : name, displayTitle, displaySubtitle: undefined, category };
   }
 
   private recordUnknownTool(sourceName: string | undefined, displayTitle: string | undefined, target: string | undefined): void {

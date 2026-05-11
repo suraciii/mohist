@@ -55,11 +55,8 @@ function stringifyPayload(payload: unknown): string | undefined {
   return typeof payload === 'string' ? payload : JSON.stringify(payload)
 }
 
-function inferToolName(toolName: string | undefined, title?: string, rawInput?: unknown, rawOutput?: unknown): string {
-  const explicit = toolName && toolName !== 'unknown' ? toolName : undefined
-  const titleName = title && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(title) ? title : undefined
-  if (explicit) return explicit
-  if (titleName) return titleName
+function inferToolName(toolName: string | undefined, _title?: string, rawInput?: unknown, rawOutput?: unknown): string {
+  if (toolName && toolName !== 'unknown') return toolName
 
   const input = typeof rawInput === 'string' ? rawInput : rawInput && typeof rawInput === 'object' ? rawInput as Record<string, unknown> : null
   if (input && typeof input === 'object') {
@@ -87,7 +84,7 @@ function inferToolName(toolName: string | undefined, title?: string, rawInput?: 
   if (typeof metadata?.toolName === 'string') return metadata.toolName
   if (typeof metadata?.name === 'string') return metadata.name
 
-  return 'unknown'
+  return toolName ?? 'unknown'
 }
 
 function normalizeToolName(toolName: string | undefined, title?: string, rawInput?: unknown, rawOutput?: unknown): string {
