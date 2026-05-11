@@ -187,13 +187,73 @@ You: [追踪问题]
 
 ---
 
-## Ending Discovery
+## Recording Explorations
+
+探索讨论中结晶出的**有价值内容**应抽取出来记录到 `.mohist/explores/`，供后续回顾。
+
+**不要原样记录对话。** 抽取的是洞察、决策、发现——不是聊天记录。
+
+### 记录时机
+
+以下情况应主动记录：
+- 讨论结晶出明确的产品洞察或设计决策
+- 发现了值得记录的架构理解或技术约束
+- 用户明确说"记下来"或"帮我总结一下"
+- 一次探索结束时，有值得保留的产出
+
+以下情况**不需要**记录：
+- 日常闲聊、零散提问
+- 探索过程本身（搜索命令、阅读路径）——只记录结论
+- 无明确结论的泛泛讨论
+- 可以在 issue 描述中概括的小发现
+
+### 记录格式
+
+文件名：`YYYY-MM-DD-<topic>.md`
+
+```markdown
+# <主题简述>
+
+## 探索背景
+- 为什么探索这个？
+- 触发讨论的上下文
+
+## 关键发现
+- 从用户/产品视角的洞察
+- 被验证或推翻的假设
+
+## 可视化
+[有意义的 ASCII 图保留下来]
+
+## 决策与结论
+- 达成共识的设计方向
+- 确认的下一步
+
+## 开放问题
+- 未解决的疑问
+- 需要后续验证的点
+```
+
+### 操作步骤
+
+```bash
+mkdir -p .mohist/explores
+```
+
+讨论告一段落时，主动提议：
+
+> "这次探索有几个有价值的发现，要记录到 `.mohist/explores/2026-05-11-<topic>.md` 吗？"
+
+用户确认后，写入文件。如果用户说"记下来"，直接记录。
+
+---
 
 There's no required ending. Discovery might:
 
 - **Flow into an issue**: "This feels like a real pain point. Want me to create an issue?"
 - **Result in multiple findings**: Surface a list of issues to create
 - **Just provide clarity**: User has what they need, moves on
+- **Record the session**: "这次探索有值得保留的发现。要记录到 `.mohist/explores/` 吗？"
 - **Continue later**: "We can pick this up anytime"
 
 When things crystallize, you might summarize:
@@ -221,7 +281,8 @@ But this summary is optional. Sometimes the thinking IS the value.
 - **Don't fake understanding** — If something is unclear, dig deeper
 - **Don't rush** — Discovery is thinking time, not task time
 - **Don't force structure** — Let patterns emerge naturally
-- **Don't auto-capture** — Offer to create issues, don't just do it
+- **Don't auto-capture** — Offer to create issues, don't just do it. Same for recording: offer to record to `.mohist/explores/` unless explicitly told to "记下来".
+- **Don't over-record** — 只抽取有价值的洞察和结论，不要记录对话流水账。几句聊天不值得一个文件。
 - **Do visualize** — A good diagram is worth many paragraphs
 - **Do explore the codebase** — Ground discussions in reality
 - **Do think like a user** — Always come back to: what does the user experience?
