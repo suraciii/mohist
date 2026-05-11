@@ -8,6 +8,7 @@ import type {
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import { AcpProcess } from './acp-process';
+import { createQuietThresholdMonitor, type QuietThresholdMonitor } from './quiet-threshold-monitor';
 import type { SessionObserver, SessionContext, SessionState, ToolCallEvent, MohistPromptEvent } from './session-observer';
 import { SessionStateMachine } from './session-state';
 import { Log } from '../util/log';
@@ -71,13 +72,6 @@ export function truncateAgentText(text: string): string {
 
 function createTimeout(ms: number): Promise<'timeout'> {
   return new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), ms));
-}
-
-interface QuietThresholdMonitor {
-  start(): void;
-  restart(): void;
-  clear(): void;
-  promise(): Promise<'quiet_threshold'>;
 }
 
 class ToolCallIdGenerator {
@@ -238,39 +232,7 @@ export class AgentSession {
   }
 
   private createQuietThresholdMonitor(): QuietThresholdMonitor {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let currentPromise: Promise<'quiet_threshold'> | null = null;
-
-    const start = () => {
-      if (timer) return;
-      currentPromise = new Promise<'quiet_threshold'>((resolve) => {
-        timer = setTimeout(() => {
-          timer = null;
-          resolve('quiet_threshold');
-        }, this._livenessQuietThresholdMs);
-      });
-    };
-
-    const restart = () => {
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      currentPromise = null;
-      start();
-    };
-
-    const clear = () => {
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      currentPromise = null;
-    };
-
-    const promise = () => currentPromise ?? new Promise<'quiet_threshold'>(() => {});
-
-    return { start, restart, clear, promise };
+    return createQuietThresholdMonitor(this._livenessQuietThresholdMs);
   }
 
   private createPromptResult(roundStartIndex: number, overrides: Omit<Partial<AcpSessionResult>, 'text'> = {}): AcpSessionResult {
