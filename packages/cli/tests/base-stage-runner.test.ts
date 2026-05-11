@@ -197,7 +197,7 @@ describe('BaseStageRunner', () => {
       expect(result.checkResults[0].status).toBe('fail');
     });
 
-    it('skips remaining checks after first failure', async () => {
+    it('collects remaining checks after first failure', async () => {
       const failCheck = new FailCheck('first');
       const secondCheck = new PassCheck('second');
       const secondRunSpy = vi.spyOn(secondCheck, 'run');
@@ -210,7 +210,8 @@ describe('BaseStageRunner', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(secondRunSpy).not.toHaveBeenCalled();
+      expect(secondRunSpy).toHaveBeenCalledTimes(1);
+      expect(result.checkResults.map(r => r.name)).toEqual(['first', 'second']);
     });
 
     it('does not re-execute tasks when check fails', async () => {
