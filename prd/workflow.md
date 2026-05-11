@@ -37,7 +37,9 @@ mohist 加速产出，审查永远是人类的事。每一步都有可审查的�
 | proposal.md | Explore | 产品/用户 | Intent + Scope + Approach + User Stories + Out of Scope + Open Questions |
 | specs/ | Plan | 规格 | Delta specs (ADDED/MODIFIED/REMOVED), GIVEN/WHEN/THEN |
 | design.md | Plan | 技术 | Technical Approach + Architecture Decisions + Module Design + Data Flow |
-| tasks.json | Plan | 执行 | 有序 task 列表, type/mode(AFK|HITL)/output/dependsOn |
+| tasks.json | Plan | 执行 | 有序 task 列表, type/mode(AFK\|HITL)/output/dependsOn |
+| self-review.md | Plan | 自审 | Agent 自我审查 plan 产物（最多 3 次迭代） |
+| review.md | Check | 审查 | AI 对实现代码的审查报告 |
 
 产物存放在代码库 `openspec/changes/{slug}/` 下，纳入版本控制。
 
@@ -49,32 +51,49 @@ AI 通过结构化面试从产品/用户视角梳理需求。可以随时发起�
 - 从自由对话创建 Issue + 产出 proposal.md
 - 在已有 Issue 下补充面试、更新 proposal.md
 
-Stage 状态机：draft → plan → build → check → done（Explore 不在其中）
+Stage 状态机：Draft → Plan → Build → Check → Integrate → Done（Explore 不在其中）
 
-### Pipeline Mode（PLAN → BUILD → CHECK 循环）
+### Pipeline Mode（PLAN → BUILD → CHECK → INTEGRATE 流程）
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                                                                  │
-│   ┌──────┐      ┌──────┐      ┌──────┐      ┌──────┐           │
-│   │ Plan │ ───▶ │ Build│ ───▶ │ Check│ ──▶ │ Done │           │
-│   └──────┘      └──────┘      └──────┘      └──────┘           │
-│       ▲                          │                                │
-│       └────── 有问题 ─────────────┘                                │
-│                                                                  │
-│     ⏸ 你确认               (自动推进)        ⏸ 你确认            │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                                                                          │
+│   ┌──────┐      ┌──────┐      ┌──────┐      ┌──────────┐      ┌─────┐  │
+│   │ Plan │ ───▶ │ Build│ ───▶ │ Check│ ──▶ │Integrate │ ──▶ │Done │  │
+│   └──────┘      └──────┘      └──────┘      └──────────┘      └─────┘  │
+│       ▲                          │                │                      │
+│       │                          ▼                ▼                      │
+│       │                       Build            Build                    │
+│       │                    (驳回/审查失败)   (集成失败)                  │
+│       │                                                                  │
+│       └───────── 健康门控失败回到 Plan（后备策略） ──────────────────     │
+│                                                                          │
+│     ⏸ plan gate            (自动推进)        ⏸ check gate              │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 四个 Stage
+## 五个 Stage
 
 | Stage | 职责 | 产出 | Gate |
 |-------|------|------|------|
 | Explore | 从产品/用户视角结构化面试，梳理需求 | proposal.md | — (Pipeline 外) |
-| Plan | 基于提案做技术设计、拆分任务 | specs/ + design.md + tasks.json | human（你确认方案和任务拆分） |
-| Build | 逐个执行任务，写代码，内循环 write→test→fix | 代码变更 | none（自动进入 CHECK） |
-| Check | 6-pass 代码审查 + 跨切面审计 | 审查报告 | human（你确认结果） |
+| Plan | 基于提案做技术设计、拆分任务 | specs/ + design.md + tasks.json + self-review.md | 用户审批 + 健康门控 (typecheck) |
+| Build | 逐个执行任务，写代码，内循环 write→test→fix | 代码变更 | 健康门控 (build) + 全任务完成 |
+| Check | AI 代码审查 + merge-ready 检查 | review.md | 用户审批 + merge-ready |
+| Integrate | 规格同步 + 归档 + 合并 + 集成后健康检查 | 合并到主干的代码 | 集成后门控 (build+test) |
+
+## 健康门控
+
+每个阶段完成后，自动运行健康检查命令，失败时触发 AI 自动修复：
+
+| 阶段 | 默认命令 | 自动修复策略 |
+|------|---------|-------------|
+| Plan | `npm run typecheck` | 1 次 AI 修复尝试，失败后回退到 Plan |
+| Build | `npm run build` | 默认 2 次 AI 修复重试，失败后回退到 Plan |
+| Integrate | `npm run build && npm test` | 不自动修复——这是最后防线 |
+
+此外，Plan 阶段产物缺失和 Check 阶段审查发现问题也会触发 AI 自动修复。
 
 ## 你需要做什么
 
@@ -85,11 +104,13 @@ Stage 状态机：draft → plan → build → check → done（Explore 不在�
        ↓
 3. Plan gate：确认技术方案和任务拆分
        ↓
-4. AI 自动 Build + Check（你可以去做别的事）
+4. AI 自动 Build（你可以去做别的事）
        ↓
-5. Check gate：审查结果
+5. Check gate：审查代码和合并状态
        ↓
-6. 如果 Check 有问题 → 自动回到 Plan（循环）
+6. AI 自动 Integrate：同步规格 + 归档 + 合并
+       ↓
+7. 完成
 ```
 
 ## AFK vs HITL
@@ -101,35 +122,47 @@ Stage 状态机：draft → plan → build → check → done（Explore 不在�
 
 HITL task 在决策点暂停等人类，AFK task 自动流转。
 
+## 断点续传
+
+通过 `CheckpointManager` 支持 Pipeline 中断后恢复：
+
+- 每个 Stage 的 tasks → checks → auto-fix 进度被持久化
+- 服务重启后，Issue 从最后一个检查点恢复执行
+- Plan 和 Build 阶段各自维护独立的检查点
+
 ## Issue 的角色
 
 Issue 是追踪载体，不承载设计内容：
 
 ```
 Issue #42: "Add logs page"
-  ├── Stage: plan
+  ├── Stage: build
   ├── Status: active
   ├── Change dir: openspec/changes/42-add-logs-page/
-  │     ├── proposal.md    ← Explore 产出
-  │     ├── specs/         ← Plan 产出
-  │     ├── design.md      ← Plan 产出
-  │     └── tasks.json     ← Plan 产出
+  │     ├── proposal.md      ← Explore 产出
+  │     ├── specs/           ← Plan 产出
+  │     ├── design.md        ← Plan 产出
+  │     ├── tasks.json       ← Plan 产出
+  │     ├── self-review.md   ← Plan 产出（自审）
+  │     ├── review.md        ← Check 产出
+  │     └── (archive)        ← Integrate 后移入 archive/
   └── Comments: [...]
 ```
 
 ## Stage Gate
 
-Gate 是 Stage 的属性（`gate_after: none | human`），不是独立 Stage：
+Gate 是 Stage 的属性，不是独立 Stage：
 
-- **Plan gate**: 确认技术方案和任务拆分后，AI 开始写代码
-- **Build gate**: 无，完成后自动进入 Check
-- **Check gate**: 审查通过后完成，有问题回到 Plan
+- **Plan gate**: 用户确认技术方案和任务拆分后，AI 开始写代码
+- **Build gate**: 健康门控（build 通过）后自动进入 Check
+- **Check gate**: 用户确认审查结果后，AI 自动集成
+- **Integrate gate**: 集成后健康门控（build+test 通过），完成后标记 Done
 
 ## 随时可以介入
 
 你不是旁观者。在任何阶段：
 
-- 查看进度
+- 查看进度（CLI / Web UI）
 - 追加指令
 - 要求暂停
 - 要求回退

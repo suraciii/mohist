@@ -1,180 +1,257 @@
 # Troubleshooting Guide
 
-Common issues and solutions for Mohist's OpenSpec workflow.
+Mohist 常见问题和解决方案。
 
-## Plan Stage Issues
+## Plan 阶段
 
-### Issue: Plan stage fails with "Self-review did not pass"
+### Plan 产物缺失
 
-**Symptoms**: Plan stage completes but marks as failed after 3 iterations.
+**现象**: Plan 阶段报错缺少 proposal.md / specs / design.md / tasks.json
 
-**Cause**: Agent's self-review found issues that couldn't be resolved.
+**原因**: Agent 未成功生成产物
 
-**Solution**:
-1. Check artifacts in `openspec/changes/{change}/`
-2. Manually fix issues in proposal.md, design.md, or specs/
-3. Run `mo issue resume <id> --skip-to-review` to proceed
+**解决**:
+1. 检查 `openspec/changes/{slug}/` 目录
+2. 查看 issue 日志: `mo issue logs <number>`
+3. Web UI 中查看 Issue 详情页 Pipeline 视图
+4. 重新启动: agent 会尝试自动修复（1 次）
 
-### Issue: tasks.json not generated
+### Self-review 未通过
 
-**Symptoms**: Plan stage seems to complete but no tasks.json in change directory.
+**现象**: Plan 完成后 self-review 标记失败
 
-**Cause**: Self-review may have failed silently.
+**原因**: Agent 自审发现 plan 产物存在问题，且自动修复未能解决
 
-**Solution**:
-1. Verify specs are complete in `specs/` directory
-2. Check each spec has proper acceptance criteria
-3. Ensure all REQ-XXX references are valid
-4. Manually create tasks.json if needed (see examples/)
+**解决**:
+1. 检查 `self-review.md` 中的问题列表
+2. 手动修复 proposal.md / design.md / specs/ 中的问题
+3. 使用 `mo issue resume <number> --skip-to-review` 跳过审核直接进入 Build
 
-## Build Stage Issues
+### tasks.json 未生成
 
-### Issue: Task fails with "AC not satisfied"
+**现象**: Plan 完成但 `tasks.json` 不存在
 
-**Symptoms**: Task executes but fails acceptance criteria check.
+**原因**: 自审可能静默失败
 
-**Solution**:
-1. Agent retries automatically (up to 2 times)
-2. Each retry includes failure context
-3. If persistent failure, check:
-   - Acceptance criteria in tasks.json
-   - Spec requirements in specs/{capability}/spec.md
-4. Manually verify implementation
-5. If criteria are wrong, update them and resume
+**解决**:
+1. 确认 `specs/` 目录有内容
+2. 检查每个 spec 有完整的 GIVEN/WHEN/THEN
+3. 确认 REQ-XXX 引用有效
+4. 手动创建 tasks.json 或重新启动 issue
 
-### Issue: Build hangs on a task
+## Build 阶段
 
-**Symptoms**: Task appears stuck, no progress for long time.
+### 任务失败
 
-**Cause**: Likely timeout or agent waiting for input.
+**现象**: 某个 task 执行失败
 
-**Solution**:
-1. Check agent logs in `.mohist/logs/`
-2. If timeout, task may need to be split
-3. User intervention: `mo issue pause <id>`
-4. Investigate and resolve
-5. Resume with `mo issue resume <id>`
+**原因**: 代码实现无法满足验收标准，或环境问题
 
-### Issue: Wrong task executing
+**解决**:
+1. Agent 自动重试（默认 2 次）
+2. 每次重试包含失败上下文
+3. 如持续失败，检查:
+   - `tasks.json` 中的验收标准
+   - `specs/{capability}/spec.md` 中的规格要求
+4. 手动验证实现是否正确
+5. 如验收标准有问题，更新后重新运行
 
-**Symptoms**: Build seems to skip or repeat tasks incorrectly.
+### 健康门控失败
 
-**Cause**: tasks.json may be out of sync.
+**现象**: Build 阶段完成后 `npm run build` 失败
 
-**Solution**:
-1. Check `tasks.json` in change directory
-2. Verify task `passes`/`attempts`/`error` fields match expected state
-3. Manually edit tasks.json if needed
-4. Ensure previous task artifacts are correct
+**原因**: 生成的代码有编译错误
 
-## Session Memory Issues
+**解决**:
+1. Agent 自动修复（默认 2 次重试）
+2. 如果自动修复无效，进入 Plan 被驳回流程
+3. 查看 issue 日志定位具体错误
+4. 在 Web UI 中查看 Changes 面板的 diff 定位问题代码
 
-### Issue: Learnings not being loaded
+### Build 卡住
 
-**Symptoms**: Agent doesn't seem to remember previous task failures.
+**现象**: 任务长时间无进展
 
-**Solution**:
-1. Check `session-memories/` directory exists
-2. Verify JSON files are valid
-3. Ensure files are named `{task-id}.json`
-4. Check file permissions
+**原因**: 可能是 timeout 或 agent 等待输入
 
-### Issue: Too many session memory files
+**解决**:
+1. 查看 agent 日志: `mo server logs`
+2. 查看 Web UI `/activity` 页面
+3. 如果 timeout，task 可能需要拆分
+4. 强制停止: `mo issue close <number>` 或 Web UI 中 Force Stop
+5. 调查原因后重新打开: `mo issue reopen <number>`
 
-**Symptoms**: Context becomes too long, performance issues.
+### 零工作保护触发
 
-**Solution**:
-1. This is expected - all learnings are preserved
-2. Consider archiving completed changes
-3. Future version may support filtering
+**现象**: Build 阶段报错 "total tasks > 0 but completed = 0"
 
-## Artifact Issues
+**原因**: `tasks.json` 中有任务但全部未执行
 
-### Issue: Change directory naming conflict
+**解决**:
+1. 检查 `tasks.json` 任务列表是否正确
+2. 确认前置步骤是否完成
+3. 重新启动 issue
 
-**Symptoms**: Error "Change already exists" or version confusion.
+## Check 阶段
 
-**Solution**:
-- New proposals auto-create `-v2`, `-v3` etc.
-- Use `--force` to overwrite existing
-- Archive old versions: move to `openspec/changes/archive/`
+### 审查未通过
 
-### Issue: Specs not visible in PR
+**现象**: `review-passed` 检查失败
 
-**Symptoms**: Reviewers can't see specs during code review.
+**原因**: AI 审查发现代码问题
 
-**Solution**:
-1. Verify `openspec/` is not in .gitignore
-2. Ensure specs were committed with code
-3. Check `.mohist/config.yaml` has `git_track: true`
+**解决**:
+1. Agent 自动修复（默认 3 次重试）
+2. 查看 Web UI 中的 `FullReportModal` 了解具体问题
+3. 每次重试前删除过期的 `review.md` 并重新审查
+4. 手动修复后重新运行
 
-## Server Issues
+### 合并冲突
 
-### Issue: Server won't start
+**现象**: `merge-ready` 检查失败
 
-**Symptoms**: `mo server start` fails.
+**原因**: 目标分支有新提交，worktree 无法快进合并
 
-**Solution**:
-1. Check port not in use: `lsof -i :3456`
-2. Check database permissions: `~/.mohist/`
-3. View logs: `mo server logs`
-4. Try restart: `mo server stop && mo server start`
+**解决**:
+1. Agent 自动 rebase（默认 2 次重试）
+2. 查看 Web UI 中的 `MergeStatePanel` 了解冲突详情
+3. Rebase 冲突实时追踪通过 SSE 推送
+4. 手动 rebase 或重试合并: Web UI 中 "Retry Merge"
 
-### Issue: Agent not spawning
+## Integrate 阶段
 
-**Symptoms**: Build stage shows "spawning agent" but nothing happens.
+### Spec sync 失败
 
-**Solution**:
-1. Verify opencode is installed: `opencode --version`
-2. Check `opencode agent --local` works manually
-3. Verify network/proxy settings
-4. Check server logs for errors
+**现象**: 增量规格无法同步到主规格
 
-## Configuration Issues
+**原因**: `specs/` 文件格式问题或主规格冲突
 
-### Issue: OpenSpec workflow not detected
+**解决**:
+1. 检查 `openspec/changes/{slug}/specs/` 目录
+2. 确认 spec 文件格式正确
+3. 手动运行规格同步命令
 
-**Symptoms**: Issue goes to traditional workflow instead of Ralph loop.
+### Merge 失败
 
-**Cause**: tasks.json not in expected location.
+**现象**: 压缩合并到目标分支失败
 
-**Solution**:
-1. Verify `openspec/changes/{change}/tasks.json` exists
-2. Check workflow-loader detects file
-3. Ensure change name matches expected format
+**原因**: 可能是权限、分支保护或冲突
 
-### Issue: Changes not archived
+**解决**:
+1. 查看 `mo issue show <number>` 中的 merge 状态
+2. Web UI 中查看 `MergeStatePanel`
+3. `mo issue retry-merge <number>` 重试
+4. 手动处理合并冲突后继续
 
-**Symptoms**: Completed changes stay in `changes/` instead of `archive/`.
+### 集成后健康门控失败
 
-**Solution**:
-1. Verify check stage completed successfully
-2. Manual archive: `mv changes/{name} archive/`
-3. Check disk space and permissions
+**现象**: `npm run build && npm test` 失败
 
-## Recovery Commands
+**原因**: 合并后的代码有问题
+
+**解决**:
+1. Integrate 阶段不自动修复此失败——这是最后防线
+2. 检查合并后的代码状态
+3. 手动修复后重新触发集成
+
+## Web UI 问题
+
+### 页面白屏
+
+**现象**: 打开 Web UI 后页面空白
+
+**解决**:
+1. 确认 server 运行: `mo server status`
+2. 检查浏览器 console（F12）
+3. 确认端口 3456 未被占用
+4. 重建 Web UI: `npm run build:web`
+
+### 数据不刷新
+
+**现象**: 页面显示旧数据
+
+**原因**: SSE 连接可能断开
+
+**解决**:
+1. 刷新页面重新建立 SSE 连接
+2. 检查浏览器是否支持 EventSource
+3. 检查网络连接（SSE 每 30 秒有心跳）
+
+### Project 列表为空
+
+**现象**: Web UI 中没有项目可切换
+
+**解决**:
+1. 确认已初始化项目: `mo init`
+2. 确认 project 已创建: `mo project list`
+3. 检查 server 是否正常: `mo server status`
+
+## Provider 问题
+
+### AI 模型连接失败
+
+**现象**: Agent 启动报错 "provider not configured"
+
+**解决**:
+1. 检查 provider 配置: `mo providers list`
+2. 登录 provider: `mo providers login <provider>`
+3. Web UI 中 Settings → AI 查看和配置 provider
+4. 测试连接: Web UI 中 Connect → Test
+
+### Explore 无法使用
+
+**现象**: 探索页面无法发送消息
+
+**原因**: Mohist Model (explore 专用) 未配置
+
+**解决**:
+1. Web UI 中 Settings → AI → Mohist Model 选择模型
+2. 或 `mo config model anthropic/claude-sonnet-4-20250514`
+
+## 配置问题
+
+### 配置不生效
+
+**现象**: 修改配置后未看到效果
+
+**解决**:
+1. 确认配置路径: `~/.mohist/config.jsonc`
+2. 使用 `mo config --list` 验证当前值
+3. 部分配置需要重启 server 生效
+4. Agent 运行时配置可在 Web UI Settings 中实时修改
+
+## 命令参考 (常用恢复操作)
 
 ```bash
-# Resume from build failure
-mo issue resume <id>
+# 查看 Issue 状态
+mo issue show <number>
 
-# Skip plan after manual fixes
-mo issue resume <id> --skip-to-review
+# 重新启动 pipeline
+mo issue reopen <number>
 
-# Force restart plan
-mo propose <id> --force
+# 跳过 Plan review 进入 Build
+mo issue resume <number> --skip-to-review
 
-# View issue status
-mo issue show <id>
+# 强制重新创建 Change
+mo propose <number> --force
 
-# View change artifacts
-ls -la openspec/changes/<change>/
+# 重试合并
+mo issue retry-merge <number>
+
+# 查看代码差异
+mo issue diff <number>
+
+# 实时日志
+mo issue logs <number> -f
+
+# 查看全局事件
+mo attach -f
 ```
 
-## Getting Help
+## 获取帮助
 
-1. Check logs: `mo server logs`
-2. Verify OpenSpec artifacts: `openspec/changes/`
-3. Run typecheck: `npm run typecheck`
-4. Run tests: `npm test`
-5. Open an issue at https://github.com/owner/mohist/issues
+1. 查看日志: `mo server logs` 或 Web UI `/logs`
+2. 查看 OpenSpec 产物: `openspec/changes/{slug}/`
+3. 运行类型检查: `npm run typecheck`
+4. 运行测试: `npm test`
+5. 提交 Issue: https://github.com/owner/mohist/issues

@@ -1,112 +1,133 @@
-# Contributing to crawlph
+# Contributing to mohist
 
-Thank you for your interest in contributing to crawlph!
+感谢你对 mohist 的关注！
 
-## Development Setup
+## 开发环境
 
-### Prerequisites
+### 前置条件
 
 - Node.js >= 18.0.0
 - npm >= 9.0.0
-- GitHub account with repository access
-- opencode CLI installed
+- opencode CLI
 
-### Installation
+### 安装
 
 ```bash
-# Clone the repository
-git clone https://github.com/owner/crawlph.git
-cd crawlph
+# 克隆仓库
+git clone https://github.com/owner/mohist.git
+cd mohist
 
-# Install dependencies
+# 工作目录
+cd packages/cli
+
+# 安装依赖
 npm install
 
-# Build the project
+# 构建（含 backend + web UI）
 npm run build
 ```
 
-### Development Workflow
+### 开发流程
 
-1. **Create a feature branch**
+1. **创建分支**
    ```bash
    git checkout -b feature/your-feature-name
    ```
 
-2. **Make your changes**
-   - Follow the existing code style
-   - Add tests for new functionality
-   - Update documentation as needed
+2. **修改代码**
+   - 遵循已有代码风格
+   - 为新功能编写测试
+   - 必要时更新文档
 
-3. **Run tests**
+3. **运行测试**
    ```bash
    npm test
+   npm run test:web      # Web UI 测试
    ```
 
-4. **Run linter**
+4. **代码检查**
    ```bash
    npm run lint
    ```
 
-5. **Type check**
+5. **类型检查**
    ```bash
    npm run typecheck
    ```
 
-6. **Commit your changes**
+6. **提交**
    ```bash
    git add .
    git commit -m "feat: add your feature"
    ```
 
-7. **Push and create PR**
+7. **推送并创建 PR**
    ```bash
    git push origin feature/your-feature-name
    ```
 
-## Project Structure
+## 项目结构
 
 ```
-crawlph-cli/
-├── bin/                    # CLI entry points
-│   ├── crawlph            # Main CLI
-│   └── crawlph-server     # Server entry point
+packages/cli/
+├── bin/                        # CLI 入口
+│   ├── mo                      # 主 CLI
+│   └── mo-server               # 服务入口
 ├── src/
-│   ├── agent/             # Agent runner and prompts
-│   ├── api/               # HTTP API routes
-│   ├── cli/               # CLI commands
-│   ├── github/            # GitHub API client
-│   ├── poller/            # Status poller
-│   ├── project/           # Project management
-│   ├── server/            # HTTP server
-│   ├── types/             # TypeScript types
-│   └── workflow/          # Issue workflow logic
-├── tests/                 # Test files
+│   ├── agent-runtime/          # Agent 运行时管理
+│   ├── agent-skills/           # Skill 调度
+│   ├── agents/                 # Agent 提示词和配置
+│   │   └── prompts/            # 阶段 prompt (plan/build/check/explore 等)
+│   │       └── artifacts/      # 产物模板
+│   ├── api/                    # HTTP API 路由
+│   ├── artifacts/              # 产物读写
+│   ├── cli/                    # CLI 命令实现
+│   ├── config/                 # 配置管理
+│   ├── db/                     # SQLite 数据层
+│   ├── git/                    # Git 操作 (worktree/diff/merge)
+│   ├── openspec/               # OpenSpec 集成
+│   ├── project/                # 项目管理
+│   ├── server/                 # HTTP Server + 状态管理
+│   ├── services/               # 业务逻辑层
+│   ├── tools/                  # 工具函数
+│   ├── types/                  # TypeScript 类型定义
+│   ├── util/                   # 通用工具
+│   ├── utils/                  # 工具函数
+│   └── workflow/               # 工作流引擎 (Plan/Build/Check/Integrate runners)
+├── web/                        # Web UI (React + Vite + Tailwind)
+│   ├── src/
+│   │   ├── components/         # 页面组件
+│   │   ├── hooks/              # React hooks (含 useSSE)
+│   │   ├── lib/                # API 客户端、类型、工具
+│   │   └── context/            # React context (ProjectContext 等)
+│   └── package.json
+├── tests/                      # 后端测试
 ├── package.json
 ├── tsconfig.json
 └── vitest.config.ts
 ```
 
-## Code Style
+## 代码风格
 
 ### TypeScript
 
-- Use strict mode
-- Prefer interfaces over types for object shapes
-- Use enums for fixed sets of values
-- Add JSDoc comments for public APIs
+- 使用 strict mode
+- 优先使用 interface 描述对象形状
+- 使用 enum 描述固定值集合
+- 公共 API 添加 JSDoc 注释
 
-### General
+### 通用
 
-- Use meaningful variable names
-- Keep functions small and focused
-- Prefer composition over inheritance
-- Write self-documenting code
+- 使用有意义的变量名
+- 保持函数小而专注
+- 优先组合而非继承
+- 编写自文档化代码
 
-## Testing
+## 测试
 
-### Unit Tests
+### 单元测试
 
-Place unit tests next to the source files or in the `tests/` directory:
+测试文件放在 `tests/` 目录或源文件旁：
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -118,96 +139,70 @@ describe('MyComponent', () => {
 });
 ```
 
-### Integration Tests
-
-Integration tests should be in `tests/` with the suffix `.integration.test.ts`:
+### Web UI 测试
 
 ```bash
-# Run integration tests
-npm run test:integration
+npm run test:web
 ```
 
-### E2E Tests
+### 阶段状态专项测试
 
-Follow the guide in `tests/E2E-TEST-GUIDE.md` for manual E2E testing.
+```bash
+npm run test:stage-state
+```
 
-## Commit Messages
+## Commit 规范
 
-Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+遵循 [Conventional Commits](https://www.conventionalcommits.org/)：
 
-- `feat:` New features
-- `fix:` Bug fixes
-- `docs:` Documentation changes
-- `style:` Code style changes (formatting, etc.)
-- `refactor:` Code refactoring
-- `test:` Test additions/changes
-- `chore:` Build process or auxiliary tool changes
+- `feat:` 新功能
+- `fix:` Bug 修复
+- `docs:` 文档变更
+- `style:` 代码风格（格式化等）
+- `refactor:` 代码重构
+- `test:` 测试相关
+- `chore:` 构建或工具链变更
 
-Example:
+示例：
 ```
 feat: add pause/resume functionality for issues
 
 - Implement pause command
-- Implement resume command
 - Add tests for pause/resume
-- Update README with examples
+- Update documentation
 ```
 
-## Pull Request Guidelines
+## PR 规范
 
-1. **Title**: Use conventional commit format
-2. **Description**: Explain what and why, not how
-3. **Tests**: Include tests for new functionality
-4. **Documentation**: Update relevant documentation
-5. **Breaking Changes**: Clearly mark any breaking changes
+1. **标题**: 使用 conventional commit 格式
+2. **描述**: 解释做了什么、为什么，而非怎么做
+3. **测试**: 包含新功能的测试
+4. **文档**: 更新相关文档
+5. **Breaking Changes**: 标注破坏性变更
 
-## Architecture Decisions
+## Debug
 
-When making significant architectural changes:
-
-1. **Document the decision** in `docs/architecture/`
-2. **Explain the rationale** (why, not just what)
-3. **Consider alternatives** and why they were rejected
-4. **Think about trade-offs** and future implications
-
-## Debugging
-
-### Server Logs
+### 服务器日志
 
 ```bash
-# View server logs
-crawlph server logs
+# CLI 查看
+mo server logs -n 100
 
-# View last 100 lines
-crawlph server logs -n 100
+# Web UI 实时查看
+# 打开 /logs 页面，支持级别过滤和文本搜索
 ```
 
-### Agent Logs
+### Agent 日志
 
-Agent output is captured in the server logs.
+Agent 输出捕获在服务端日志中。
 
-### Debug Mode
-
-Set the `DEBUG` environment variable:
+### Debug 模式
 
 ```bash
-DEBUG=crawlph:* crawlph server start
+# 设置日志级别
+mo config logLevel DEBUG
 ```
-
-## Release Process
-
-1. Update version in `package.json`
-2. Update `CHANGELOG.md`
-3. Create git tag: `git tag v1.0.0`
-4. Push tag: `git push origin v1.0.0`
-5. CI/CD will handle publishing
-
-## Getting Help
-
-- **Issues**: Open an issue on GitHub
-- **Discussions**: Use GitHub Discussions
-- **Documentation**: Check the README and inline docs
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+贡献的代码将采用 MIT License。
