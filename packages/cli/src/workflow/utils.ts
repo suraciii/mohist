@@ -76,6 +76,25 @@ export function readReportFile(changeDir: string, filename: string): string | nu
   }
 }
 
+export interface ReviewArtifactValidation {
+  valid: boolean;
+  content: string | null;
+  verdict: 'PASS' | 'FAIL' | null;
+  error?: 'missing' | 'unparsable';
+}
+
+export function validateReviewArtifact(changeDir: string, filename: string = 'review.md'): ReviewArtifactValidation {
+  const content = readReportFile(changeDir, filename);
+  if (content === null) {
+    return { valid: false, content: null, verdict: null, error: 'missing' };
+  }
+  const verdict = parseVerdict(content);
+  if (verdict === null) {
+    return { valid: false, content, verdict: null, error: 'unparsable' };
+  }
+  return { valid: true, content, verdict };
+}
+
 export function cleanChangeDir(changeDir: string): void {
   if (!fs.existsSync(changeDir)) {
     return;

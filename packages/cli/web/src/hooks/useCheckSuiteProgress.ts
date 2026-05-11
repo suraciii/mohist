@@ -6,15 +6,15 @@ import type { Issue, CheckSuite, CheckSuiteChecks, CheckState, CheckStateStatus 
 const PENDING_STATE: CheckState = { status: 'pending' }
 
 const DEFAULT_CHECKS: CheckSuiteChecks = {
-  'build-test': { ...PENDING_STATE },
-  'ai-review': { ...PENDING_STATE },
+  'review-passed': { ...PENDING_STATE },
+  'merge-ready': { ...PENDING_STATE },
   'user-approval': { ...PENDING_STATE },
 }
 
 function resetChecksToPending(_checks: CheckSuiteChecks): CheckSuiteChecks {
   return {
-    'build-test': { ...PENDING_STATE },
-    'ai-review': { ...PENDING_STATE },
+    'review-passed': { ...PENDING_STATE },
+    'merge-ready': { ...PENDING_STATE },
     'user-approval': { ...PENDING_STATE },
   }
 }

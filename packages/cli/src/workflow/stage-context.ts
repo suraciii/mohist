@@ -164,9 +164,9 @@ export function getLatestCheckResult(results: CheckResult[], name: string): Chec
 }
 
 export function replaceCurrentAiReviewTruth(results: CheckResult[]): CheckResult[] {
-  const latest = getLatestCheckResult(results, 'ai-review');
+  const latest = getLatestCheckResult(results, 'review-passed');
   if (!latest) return results;
-  const filtered = results.filter(r => r.name !== 'ai-review');
+  const filtered = results.filter(r => r.name !== 'review-passed');
   filtered.push(latest);
   return filtered;
 }
@@ -175,7 +175,7 @@ export function buildAuthoritativeAiReviewResult(
   checkResult: CheckResult,
   options?: AuthoritativeAiReviewOptions,
 ): AuthoritativeAiReviewResult | null {
-  if (checkResult.name !== 'ai-review') return null;
+  if (checkResult.name !== 'review-passed') return null;
   const output = checkResult.output as Record<string, unknown> | undefined;
   if (!output) return null;
 

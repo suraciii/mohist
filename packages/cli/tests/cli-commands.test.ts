@@ -91,8 +91,8 @@ describe('CLI Commands', () => {
             {
               stage: 'check',
               checkResults: [
-                { name: 'ai-review', status: 'fail', message: 'old fail' },
-                { name: 'ai-review', status: 'pass', message: 'new pass' },
+                { name: 'review-passed', status: 'fail', message: 'old fail' },
+                { name: 'review-passed', status: 'pass', message: 'new pass' },
                 { name: 'user-approval', status: 'pending', message: 'awaiting' },
               ],
             },
@@ -107,8 +107,8 @@ describe('CLI Commands', () => {
       await program.parseAsync(['node', 'test', 'issue', 'show', '1']);
 
       const output = logSpy.mock.calls.map(call => call.join(' ')).join('\n');
-      expect(output.match(/ai-review/g)?.length ?? 0).toBe(1);
-      expect(output).toContain('ai-review');
+      expect(output.match(/review-passed/g)?.length ?? 0).toBe(1);
+      expect(output).toContain('review-passed');
       expect(output).toContain('user-approval');
       expect(errorSpy).not.toHaveBeenCalled();
     });

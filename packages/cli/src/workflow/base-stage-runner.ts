@@ -7,7 +7,6 @@ import type { StageExecutionStatus } from '../db/stage-execution-repo';
 import { normalizeCheckStatus, normalizeTaskStatus, type StageStateStatus } from '../services/stage-state-service';
 import { Log } from '../util/log';
 import { parseVerdict, parseDimensions, readReportFile } from './utils';
-import * as path from 'path';
 
 const log = Log.create({ service: 'base-stage-runner' });
 
@@ -139,14 +138,6 @@ export abstract class BaseStageRunner implements StageRunner {
       const result = await check.run(checkCtx);
       results.push(result);
 
-      if (check.name === 'ai-review') {
-        const authoritativeResults = await this.persistCurrentAiReviewTruth(ctx, results);
-        if (authoritativeResults !== results) {
-          results.length = 0;
-          results.push(...authoritativeResults);
-        }
-      }
-
       if (result.status !== 'pass') {
         this.persistCheckResults(ctx, results);
         return this.handleCheckFailure(ctx, check, result, results, taskOutput, isPreTask, checks);
@@ -230,12 +221,9 @@ export abstract class BaseStageRunner implements StageRunner {
     const recheckResult = await check.run(checkCtx);
 
     const nextResults = [...allResults, recheckResult];
-    const authoritativeResults = check.name === 'ai-review'
-      ? await this.persistCurrentAiReviewTruth(ctx, nextResults)
-      : nextResults;
 
     if (recheckResult.status === 'pass') {
-      const continuedResults = [...authoritativeResults];
+      const continuedResults = [...nextResults];
       this.persistCheckResults(ctx, continuedResults);
 
       if (isPreTask) {
@@ -267,43 +255,10 @@ export abstract class BaseStageRunner implements StageRunner {
       };
     }
 
-    const updatedResults = [...authoritativeResults];
+    const updatedResults = [...nextResults];
     this.persistCheckResults(ctx, updatedResults);
 
     return this.runFixAndRecheck(ctx, check, recheckResult, updatedResults, taskOutput, isPreTask, activeChecks, policy, attempt + 1);
-  }
-
-  private async persistCurrentAiReviewTruth(ctx: StageContext, checkResults: CheckResult[]): Promise<CheckResult[]> {
-    const latest = getLatestCheckResult(checkResults, 'ai-review');
-    if (!latest) return checkResults;
-
-    const project = this.findProjectSafe(ctx);
-    const worktreePath = project
-      ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
-      : null;
-    const snapshotSha = worktreePath ? await this.getHeadShaSafe(ctx, worktreePath) : undefined;
-    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-
-    return this.persistAuthoritativeAiReview(ctx, checkResults, {
-      snapshotSha,
-      reviewArtifactPath: changeDir ? path.join(changeDir, 'review.md') : undefined,
-      selfCheckArtifactPath: changeDir ? path.join(changeDir, 'review-self-check.md') : undefined,
-    });
-  }
-
-  private async getHeadShaSafe(ctx: StageContext, worktreePath: string): Promise<string | undefined> {
-    if (typeof ctx.worktreeManager.getHeadSha !== 'function') {
-      return undefined;
-    }
-
-    try {
-      return await ctx.worktreeManager.getHeadSha(worktreePath);
-    } catch (e) {
-      log.warn('getHeadSha failed for authoritative ai-review persistence', {
-        error: e instanceof Error ? e.message : String(e),
-      });
-      return undefined;
-    }
   }
 
   private findProjectSafe(ctx: StageContext) {
@@ -340,23 +295,35 @@ export abstract class BaseStageRunner implements StageRunner {
         }
       }
     } else if (ctx.issue.stage === Stage.Check) {
-      const aiReviewResult = getLatestCheckResult(allResults, 'ai-review');
-      if (!aiReviewResult?.output) {
+      const reviewPassedResult = getLatestCheckResult(allResults, 'review-passed');
+      if (!reviewPassedResult?.output) {
         return {
           success: false,
           output: taskOutput,
           checkResults: allResults,
-          message: 'Cannot request check approval: no AI review result found',
+          message: 'Cannot request check approval: no review result found',
         };
       }
 
-      const aiReviewOutput = aiReviewResult.output as { verdict?: string; reviewReport?: string };
-      if (aiReviewOutput.verdict !== 'PASS') {
+      const reviewOutput = reviewPassedResult.output as { verdict?: string; reviewReport?: string };
+      if (reviewOutput.verdict !== 'PASS') {
         return {
           success: false,
           output: taskOutput,
           checkResults: allResults,
-          message: `Cannot request check approval: latest AI review verdict is ${aiReviewOutput.verdict ?? 'unknown'}, expected PASS`,
+          message: `Cannot request check approval: latest review verdict is ${reviewOutput.verdict ?? 'unknown'}, expected PASS`,
+        };
+      }
+
+      const mergeReadyResult = getLatestCheckResult(allResults, 'merge-ready');
+      if (!mergeReadyResult || mergeReadyResult.status !== 'pass') {
+        return {
+          success: false,
+          output: taskOutput,
+          checkResults: allResults,
+          message: mergeReadyResult
+            ? `Cannot request check approval: merge-ready is ${mergeReadyResult.status}`
+            : 'Cannot request check approval: merge-ready check has not run',
         };
       }
 
@@ -379,12 +346,12 @@ export abstract class BaseStageRunner implements StageRunner {
         effectiveResults = this.convergeSnapshot(ctx, allResults, convergence.headSha);
       }
 
-      const dimensions = aiReviewOutput.reviewReport ? parseDimensions(aiReviewOutput.reviewReport) : undefined;
-      const latestAiReview = getLatestCheckResult(effectiveResults, 'ai-review');
-      const snapshotSha = (latestAiReview?.output as { snapshotSha?: string } | undefined)?.snapshotSha;
+      const dimensions = reviewOutput.reviewReport ? parseDimensions(reviewOutput.reviewReport) : undefined;
+      const latestReviewPassed = getLatestCheckResult(effectiveResults, 'review-passed');
+      const snapshotSha = (latestReviewPassed?.output as { snapshotSha?: string } | undefined)?.snapshotSha;
       approvalOutput = {
-        result: aiReviewOutput.verdict,
-        reviewReport: aiReviewOutput.reviewReport,
+        result: reviewOutput.verdict,
+        reviewReport: reviewOutput.reviewReport,
         dimensions,
         snapshotSha,
       };
@@ -439,12 +406,12 @@ export abstract class BaseStageRunner implements StageRunner {
     }
   }
 
-  protected persistAuthoritativeAiReview(
+  protected persistAuthoritativeReview(
     ctx: StageContext,
     checkResults: CheckResult[],
     options?: AuthoritativeAiReviewOptions,
   ): CheckResult[] {
-    const latest = getLatestCheckResult(checkResults, 'ai-review');
+    const latest = getLatestCheckResult(checkResults, 'review-passed');
     if (!latest) return checkResults;
 
     const authoritative = buildAuthoritativeAiReviewResult(latest, options);
@@ -462,23 +429,23 @@ export abstract class BaseStageRunner implements StageRunner {
       output: updatedOutput,
     };
 
-    const updatedResults = checkResults.filter(r => r.name !== 'ai-review');
+    const updatedResults = checkResults.filter(r => r.name !== 'review-passed');
     updatedResults.push(updatedResult);
 
     this.persistCheckResults(ctx, updatedResults);
-    this.updateCheckSuiteAiReview(ctx, authoritative);
+    this.updateCheckSuiteReviewPassed(ctx, authoritative);
 
     return updatedResults;
   }
 
-  private updateCheckSuiteAiReview(ctx: StageContext, result: AuthoritativeAiReviewResult): void {
+  private updateCheckSuiteReviewPassed(ctx: StageContext, result: AuthoritativeAiReviewResult): void {
     if (!ctx.checkSuiteRepo) return;
     try {
       const suite = ctx.checkSuiteRepo.findActiveByIssueId(ctx.issue.id);
       if (!suite) return;
 
       const status = result.verdict === 'PASS' ? 'passed' : 'failed';
-      ctx.checkSuiteRepo.updateChecks(suite.id, 'ai-review', {
+      ctx.checkSuiteRepo.updateChecks(suite.id, 'review-passed', {
         status,
         output: result,
         ranAt: result.convergedAt,
@@ -488,7 +455,7 @@ export abstract class BaseStageRunner implements StageRunner {
         ctx.checkSuiteRepo.updateSnapshotSha(suite.id, result.snapshotSha);
       }
     } catch (e) {
-      log.warn('updateCheckSuiteAiReview failed', { error: e instanceof Error ? e.message : String(e) });
+      log.warn('updateCheckSuiteReviewPassed failed', { error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -496,7 +463,7 @@ export abstract class BaseStageRunner implements StageRunner {
     const updated = [...checkResults];
     let latestIdx = -1;
     for (let i = updated.length - 1; i >= 0; i--) {
-      if (updated[i].name === 'ai-review') {
+      if (updated[i].name === 'review-passed') {
         latestIdx = i;
         break;
       }
@@ -523,14 +490,14 @@ export abstract class BaseStageRunner implements StageRunner {
     return updated;
   }
 
-  private convergeCheckSuite(ctx: StageContext, snapshotSha: string, aiReviewResult: CheckResult): void {
+  private convergeCheckSuite(ctx: StageContext, snapshotSha: string, reviewPassedResult: CheckResult): void {
     if (!ctx.checkSuiteRepo) return;
     try {
       const suite = ctx.checkSuiteRepo.findActiveByIssueId(ctx.issue.id);
       if (!suite) return;
 
-      const output = (aiReviewResult.output as Record<string, unknown>) ?? {};
-      ctx.checkSuiteRepo.updateChecks(suite.id, 'ai-review', {
+      const output = (reviewPassedResult.output as Record<string, unknown>) ?? {};
+      ctx.checkSuiteRepo.updateChecks(suite.id, 'review-passed', {
         status: 'passed',
         output,
         ranAt: (output.convergedAt as string) ?? new Date().toISOString(),
