@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { JSX } from 'react'
 import type { ToolCallEntry, FileChangeSummary } from '../lib/types'
 
 export interface EditInput {
@@ -10,6 +11,138 @@ export interface EditInput {
 
 export interface BashInput {
   command: string
+}
+
+function parseJsonSafely(input: string | undefined): Record<string, unknown> | null {
+  if (!input) return null
+  try {
+    const parsed = JSON.parse(input)
+    if (typeof parsed !== 'object' || parsed === null) return null
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+export function getToolLabel(toolName: string, rawInput: string | undefined): string | undefined {
+  const parsed = parseJsonSafely(rawInput)
+  if (!parsed) return undefined
+
+  switch (toolName) {
+    case 'webfetch': {
+      const url = parsed.url ?? parsed.url ?? parsed.uri
+      if (typeof url === 'string') return url
+      const target = parsed.target ?? parsed.site
+      if (typeof target === 'string') return target
+      break
+    }
+    case 'task': {
+      const desc = parsed.description ?? parsed.task ?? parsed.summary
+      if (typeof desc === 'string') return desc
+      break
+    }
+    case 'skill': {
+      const name = parsed.name ?? parsed.skill ?? parsed.id
+      if (typeof name === 'string') return name
+      break
+    }
+    case 'search':
+    case 'grep': {
+      const query = parsed.query ?? parsed.pattern ?? parsed.search
+      if (typeof query === 'string') return query
+      break
+    }
+    case 'memread':
+    case 'membrowse':
+    case 'memsearch': {
+      const uri = parsed.uri ?? parsed.path ?? parsed.resource
+      if (typeof uri === 'string') return uri
+      break
+    }
+    case 'read':
+    case 'glob': {
+      const fp = parsed.filePath ?? parsed.file_path ?? parsed.path
+      if (typeof fp === 'string') return fp
+      break
+    }
+    case 'todowrite': {
+      const todos = parsed.todos
+      if (Array.isArray(todos)) return `${todos.length} items`
+      break
+    }
+    case 'bash': {
+      const cmd = parsed.command ?? parsed.script ?? parsed.cmd
+      if (typeof cmd === 'string') return cmd
+      break
+    }
+    case 'edit':
+    case 'write': {
+      const fp = parsed.filePath ?? parsed.file_path ?? parsed.path
+      if (typeof fp === 'string') return fp.split('/').pop() ?? fp
+      break
+    }
+    case 'question': {
+      const q = parsed.question ?? parsed.query ?? parsed.text
+      if (typeof q === 'string') return q.length > 60 ? q.slice(0, 60) + '...' : q
+      break
+    }
+    default: {
+      const url = parsed.url
+      if (typeof url === 'string') return url
+      const desc = parsed.description ?? parsed.name
+      if (typeof desc === 'string') return desc
+      const query = parsed.query
+      if (typeof query === 'string') return query
+    }
+  }
+  return undefined
+}
+
+export function getToolArgs(toolName: string, rawInput: string | undefined): string[] {
+  const parsed = parseJsonSafely(rawInput)
+  if (!parsed) return []
+
+  const args: string[] = []
+
+  switch (toolName) {
+    case 'webfetch':
+      if (typeof parsed.method === 'string') args.push(parsed.method)
+      if (typeof parsed.format === 'string') args.push(parsed.format)
+      break
+    case 'search':
+    case 'grep':
+      if (typeof parsed.type === 'string') args.push(parsed.type)
+      if (typeof parsed.scope === 'string') args.push(parsed.scope)
+      break
+    case 'read':
+    case 'glob':
+      if (parsed.recursive) args.push('recursive')
+      if (typeof parsed.include === 'string') args.push(parsed.include)
+      break
+    case 'bash':
+      if (parsed.timeout) args.push(`timeout:${parsed.timeout}`)
+      if (typeof parsed.cwd === 'string') args.push(parsed.cwd.split('/').pop() ?? '')
+      break
+    case 'edit':
+    case 'write':
+      if (parsed.oldString || parsed.old_string) args.push('edit')
+      break
+    case 'task':
+      if (parsed.priority) args.push(String(parsed.priority))
+      break
+    case 'memsearch':
+      if (parsed.limit) args.push(`limit:${parsed.limit}`)
+      if (parsed.score_threshold) args.push('threshold')
+      break
+    default: {
+      if (parsed.format) args.push(String(parsed.format))
+      if (parsed.language) args.push(String(parsed.language))
+      if (parsed.mode) args.push(String(parsed.mode))
+      if (parsed.level) args.push(String(parsed.level))
+    }
+  }
+
+  return args
 }
 
 export type ToolDisplayType = 'diff' | 'terminal' | 'summary' | 'generic'
@@ -590,28 +723,26 @@ function SummaryToolCard({ entry }: { entry: ToolCallEntry }) {
   const displayInput = entry.rawInput ?? entry.args
   const displayOutput = entry.rawOutput ?? entry.result
 
+  const label = getToolLabel(entry.toolName, displayInput)
+  const args = getToolArgs(entry.toolName, displayInput)
+
   let summary = entry.toolName
-  if (displayInput) {
-    try {
-      const parsed = JSON.parse(typeof displayInput === 'string' ? displayInput : JSON.stringify(displayInput))
-      if (parsed.filePath || parsed.file_path || parsed.path) {
-        summary = `${entry.toolName} ${(parsed.filePath ?? parsed.file_path ?? parsed.path).split('/').pop()}`
-      } else if (parsed.pattern || parsed.query) {
-        summary = `${entry.toolName} ${parsed.pattern ?? parsed.query}`
-      } else if (parsed.todos) {
-        summary = `${entry.toolName} (${parsed.todos.length} items)`
-      }
-    } catch {
-      summary = entry.toolName
-    }
+  if (label) {
+    summary = label
+  } else if (args.length > 0) {
+    summary = `${entry.toolName} (${args.join(', ')})`
   }
 
   if (entry.state === 'started') {
     return (
       <div className="flex items-center gap-2 px-2 py-1 text-xs">
         <StatusIcon state="started" />
-        <span className="font-mono text-gray-600">{summary}</span>
-        <span className="text-blue-500">running...</span>
+        <span className="font-mono text-gray-600">{entry.toolName}</span>
+        {label ? (
+          <span className="text-blue-500 truncate max-w-[200px]">{label}</span>
+        ) : (
+          <span className="text-blue-500">running...</span>
+        )}
       </div>
     )
   }
@@ -624,6 +755,15 @@ function SummaryToolCard({ entry }: { entry: ToolCallEntry }) {
       >
         <StatusIcon state={entry.state} />
         <span className="font-mono text-xs text-gray-600">{summary}</span>
+        {args.length > 0 && !label && (
+          <span className="flex gap-1 shrink-0">
+            {args.slice(0, 2).map((arg, i) => (
+              <span key={i} className="inline-flex items-center px-1 py-0.5 rounded bg-gray-100 text-xs text-gray-500 font-mono">
+                {arg}
+              </span>
+            ))}
+          </span>
+        )}
         {entry.duration != null && (
           <span className="text-xs text-gray-400">{formatDuration(entry.duration)}</span>
         )}
@@ -656,37 +796,140 @@ function SummaryToolCard({ entry }: { entry: ToolCallEntry }) {
   )
 }
 
+function ToolIcon({ toolName, className }: { toolName: string; className?: string }) {
+  const iconMap: Record<string, JSX.Element> = {
+    webfetch: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    ),
+    task: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M9 12h6M12 9v6" />
+      </svg>
+    ),
+    skill: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+      </svg>
+    ),
+    search: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="8" />
+        <path d="m21 21-4.35-4.35" />
+      </svg>
+    ),
+    read: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+        <polyline points="10 9 9 9 8 9" />
+      </svg>
+    ),
+    write: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+      </svg>
+    ),
+    edit: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+      </svg>
+    ),
+    bash: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="4 17 10 11 4 5" />
+        <line x1="12" y1="19" x2="20" y2="19" />
+      </svg>
+    ),
+    glob: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        <path d="M2 10h20" />
+      </svg>
+    ),
+    grep: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="8" />
+        <path d="m21 21-4.35-4.35" />
+        <path d="M8 8h6" />
+      </svg>
+    ),
+  }
+
+  const defaultIcon = (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M12 8v8M8 12h8" />
+    </svg>
+  )
+
+  return iconMap[toolName] ?? defaultIcon
+}
+
 function GenericToolCard({ entry }: { entry: ToolCallEntry }) {
   const [expanded, setExpanded] = useState(false)
   const displayInput = entry.rawInput ?? entry.args
   const displayOutput = entry.rawOutput ?? entry.result
+  const label = getToolLabel(entry.toolName, displayInput)
+  const args = getToolArgs(entry.toolName, displayInput)
 
   if (entry.state === 'started') {
     return (
       <div className="flex items-center gap-2 px-2 py-1 text-xs">
         <StatusIcon state="started" />
-        <span className="font-mono text-gray-600">{entry.toolName}</span>
-        <span className="text-blue-500">running...</span>
+        <ToolIcon toolName={entry.toolName} className="h-3.5 w-3.5 text-gray-400" />
+        <span className="font-mono text-gray-600">Called {entry.toolName}</span>
+        {label ? (
+          <span className="text-blue-500 truncate max-w-[200px]">{label}</span>
+        ) : (
+          <span className="text-blue-500">running...</span>
+        )}
       </div>
     )
   }
 
+  const isFailed = entry.state === 'failed'
+
   return (
-    <div className="rounded-md border border-gray-200 overflow-hidden">
+    <div className={`rounded-md border overflow-hidden ${isFailed ? 'border-red-200' : 'border-gray-200'}`}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
       >
         <StatusIcon state={entry.state} />
-        <span className="font-mono text-xs text-gray-600">{entry.toolName}</span>
-        {entry.duration != null && (
-          <span className="text-xs text-gray-400">{formatDuration(entry.duration)}</span>
+        <ToolIcon toolName={entry.toolName} className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+        <span className="text-xs font-medium text-gray-700">Called {entry.toolName}</span>
+        {label && (
+          <span className="text-xs text-gray-500 truncate max-w-[200px]">{label}</span>
         )}
-        {entry.state === 'failed' && entry.error && (
-          <span className="text-xs text-red-500 truncate">{entry.error}</span>
+        {args.length > 0 && (
+          <span className="flex gap-1 shrink-0">
+            {args.slice(0, 3).map((arg, i) => (
+              <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-xs text-gray-500 font-mono">
+                {arg}
+              </span>
+            ))}
+          </span>
+        )}
+        {entry.duration != null && (
+          <span className="text-xs text-gray-400 ml-auto shrink-0">{formatDuration(entry.duration)}</span>
         )}
         <ChevronIcon expanded={expanded} />
       </button>
+
+      {isFailed && entry.error && (
+        <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50 border-t border-red-100">
+          {entry.error}
+        </div>
+      )}
+
       {expanded && (
         <div className="px-3 pb-2 space-y-1.5 text-xs border-t border-gray-100">
           {displayInput && (
@@ -711,8 +954,20 @@ function GenericToolCard({ entry }: { entry: ToolCallEntry }) {
   )
 }
 
-export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
+export function ToolCallCard({ entry, compact = false }: { entry: ToolCallEntry; compact?: boolean }) {
   const displayType = getDisplayType(entry.toolName)
+
+  if (compact) {
+    return (
+      <div className={`flex items-center gap-2 px-2 py-1 text-xs rounded border border-gray-100 bg-gray-50/50 ${entry.state === 'failed' ? 'border-red-200' : ''}`}>
+        <StatusIcon state={entry.state} />
+        <span className="font-mono text-gray-600">{entry.toolName}</span>
+        {entry.duration != null && (
+          <span className="text-xs text-gray-400">{formatDuration(entry.duration)}</span>
+        )}
+      </div>
+    )
+  }
 
   switch (displayType) {
     case 'diff':

@@ -287,7 +287,6 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
   const [expanded, setExpanded] = useState(false)
 
   const counts: Record<string, number> = {}
-  const targets: string[] = []
   let failedCount = 0
 
   for (const tool of tools) {
@@ -295,28 +294,15 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
     if (!counts[name]) counts[name] = 0
     counts[name]++
     if (tool.tool.status === 'failed') failedCount++
-
-      if (tool.tool.input) {
-      try {
-        const parsed = JSON.parse(tool.tool.input)
-        const filePath = parsed.file_path ?? parsed.filePath ?? parsed.path
-        const pattern = parsed.pattern ?? parsed.query
-        if (filePath) targets.push(filePath)
-        else if (pattern) targets.push(pattern)
-      } catch {}
-    }
   }
 
-  const uniqueTargets = [...new Set(targets)]
   const labelParts: string[] = []
   for (const [name, count] of Object.entries(counts)) {
     labelParts.push(count === 1 ? name : `${name} ${count}`)
   }
 
   const failedLabel = failedCount > 0 ? ` · ${failedCount} failed` : ''
-  const summary = uniqueTargets.length > 0
-    ? `Context gathered · ${labelParts.join(' · ')}${failedLabel}`
-    : `Context gathered · ${labelParts.join(' · ')}${failedLabel}`
+  const summary = `Gathering context · ${labelParts.join(' · ')}${failedLabel}`
 
   return (
     <div className="rounded-md border border-gray-200 overflow-hidden">
@@ -336,44 +322,28 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
         </svg>
       </button>
       {expanded && (
-        <div className="px-3 pb-2 space-y-1.5 border-t border-gray-100">
-          {tools.map((tool) => {
-            const name = getToolIdentity(tool)
-            return (
-              <div key={tool.id} className="rounded-md border border-gray-200 overflow-hidden">
-                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-gray-50">
-                  <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-xs font-mono text-gray-600">{name}</span>
-                  {tool.tool.status === 'failed' && (
-                    <span className="text-xs text-red-500">failed</span>
-                  )}
-                </div>
-                {tool.tool.input && (
-                  <div className="px-3 py-2">
-                    <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
-                    <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
-                      {tool.tool.input}
-                    </pre>
-                  </div>
-                )}
-                {tool.tool.output && (
-                  <div className="px-3 py-2 border-t border-gray-100">
-                    <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
-                    <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
-                      {tool.tool.output}
-                    </pre>
-                  </div>
-                )}
-                {tool.tool.error && (
-                  <div className="px-3 py-2 text-xs text-red-600 bg-red-50 border-t border-red-100">
-                    {tool.tool.error}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+        <div className="px-3 pb-2 border-t border-gray-100 space-y-1.5">
+          {tools.map((tool) => (
+            <ToolCallCard
+              key={tool.id}
+              entry={{
+                executionId: '',
+                toolName: getToolIdentity(tool),
+                state: tool.tool.status,
+                timestamp: tool.tool.startedAt ? new Date(tool.tool.startedAt).getTime() : Date.now(),
+                toolCallId: tool.tool.toolCallId,
+                title: tool.tool.displayTitle ?? tool.tool.title ?? tool.tool.target,
+                rawInput: tool.tool.input,
+                rawOutput: tool.tool.output,
+                error: tool.tool.error,
+                duration: tool.tool.completedAt && tool.tool.startedAt
+                  ? new Date(tool.tool.completedAt).getTime() - new Date(tool.tool.startedAt).getTime()
+                  : undefined,
+                changedFiles: tool.tool.changedFiles,
+              }}
+              compact={true}
+            />
+          ))}
         </div>
       )}
     </div>

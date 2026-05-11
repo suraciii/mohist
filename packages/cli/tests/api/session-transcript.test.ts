@@ -427,7 +427,7 @@ describe('Session Transcript API', () => {
 
         insertStreamEvent(session.acpSessionId, issue.id, 'tool_call', {
           toolCallId: 'tc-unknown',
-          toolName: 'UnknownCustomTool',
+          toolName: 'unknown',
           status: 'completed',
           output: '{}',
         }, '2024-01-01T10:00:02.000Z');
