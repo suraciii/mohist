@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extract and enhance ModelSelect as a shared component",
+      "description": "Move the embedded ModelSelect from AiSettingsSection.tsx into a new components/ModelSelect.tsx file. Add a size prop ('default' | 'compact') and support both Model[] and string[] for the models prop. When models is string[], auto-convert each entry to {id, name: id.split('/').pop()}. Keep all existing behavior (search, keyboard navigation, provider grouping, clear button) intact.",
+      "acceptanceCriteria": [
+        "ModelSelect.tsx exists and exports the ModelSelect component",
+        "Component accepts size='default' | 'compact' and models as Model[] | string[]",
+        "Settings page still compiles and typechecks after removal of the embedded component",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/ModelSelect.tsx",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        190622
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Update AiSettingsSection to import the shared ModelSelect",
+      "description": "Remove the embedded ModelSelect function and its internal icon components from AiSettingsSection.tsx. Import the shared ModelSelect component instead. Ensure all existing call sites (Mohist Model, Coder Model, and per-stage overrides in Settings) continue to work with the same props.",
+      "acceptanceCriteria": [
+        "AiSettingsSection.tsx no longer contains an embedded ModelSelect definition",
+        "Settings page model selectors render and function correctly",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/AiSettingsSection.tsx",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1908468,
+        142973
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Refactor IssueModelSelector per-stage overrides to use ModelSelect",
+      "description": "Replace the per-stage Popover + Transition implementation in IssueModelSelector.tsx with the shared ModelSelect component using size='compact'. Preserve the existing handleSetStageModel and handleClearStageModel logic. Keep the main Coder Model selector unchanged.",
+      "acceptanceCriteria": [
+        "Per-stage dropdowns open and display correctly when clicked",
+        "Search, keyboard navigation (arrow keys + Enter), and provider grouping work in per-stage dropdowns",
+        "Selecting a model updates stageModels via PATCH /api/issues/:number",
+        "Clearing a model removes the stage override",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueModelSelector.tsx",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        174912
+      ]
+    }
+  ]
+}
