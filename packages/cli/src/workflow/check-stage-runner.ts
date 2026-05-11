@@ -292,7 +292,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       type: 'ai-review',
       label: 'ai-review',
       outputPath: changeDir + '/' + reviewOutputPath,
-      verifyArtifact: () => validateReviewArtifact(changeDir, reviewOutputPath),
+      verifyArtifact: () => validateReviewArtifact(changeDir, reviewOutputPath).valid,
       buildPrompt: (issue: import('../types').Issue, dir: string) => buildReviewerPrompt(issue, dir),
     };
 

@@ -8,6 +8,13 @@ import type { Check } from '../src/workflow/checks';
 import { EventBus } from '../src/services/event-bus';
 import { BaseStageRunner } from '../src/workflow/base-stage-runner';
 import { CheckStageRunner } from '../src/workflow/check-stage-runner';
+import { AgentSession } from '../src/agent-runtime/agent-session';
+
+vi.mock('../src/agent-runtime/agent-session', () => ({
+  AgentSession: {
+    create: vi.fn(),
+  },
+}));
 
 function makeCheck(name: string, runFn: () => Promise<CheckResult>): Check {
   return { name, run: runFn };
@@ -187,6 +194,59 @@ describe('CheckStageRunner ordering', () => {
 
       const preChecks = runner.getPreTaskChecks();
       expect(preChecks.map(check => check.name)).toEqual([]);
+    });
+
+    it('default CheckStageRunner executes ai-review when review.md is missing', async () => {
+      const worktreePath = path.join(tmpDir, 'worktree');
+      fs.mkdirSync(worktreePath, { recursive: true });
+      const changeDir = path.join(tmpDir, 'openspec', 'changes', '42-test');
+      const reviewPath = path.join(changeDir, 'review.md');
+      const execute = vi.fn().mockImplementation(async () => {
+        fs.writeFileSync(reviewPath, '# Review\n<promise>PASS</promise>\n\nLGTM');
+        return { success: true, text: 'review written' };
+      });
+      const close = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(AgentSession.create).mockResolvedValue({
+        execute,
+        close,
+      } as any);
+
+      const ctx = createMockContext(tmpDir, 42, {
+        acpOptions: { cwd: worktreePath, issueNumber: 42 } as any,
+        checkpointManager: {
+          save: vi.fn(),
+          load: vi.fn(),
+          deleteAll: vi.fn(),
+          getResumeSteps: vi.fn().mockReturnValue([]),
+          markStepComplete: vi.fn(),
+        } as any,
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({
+            id: 'test-project',
+            name: 'test-project',
+            path: tmpDir,
+            baseBranch: 'master',
+          }),
+        } as any,
+        worktreeManager: {
+          canFastForward: vi.fn().mockResolvedValue(true),
+          getWorktreeStatus: vi.fn().mockResolvedValue({
+            canFastForward: true,
+            conflictingFiles: [],
+            isRebaseInProgress: false,
+          }),
+          getPath: vi.fn().mockReturnValue(worktreePath),
+          createCheckConvergenceCommit: vi.fn().mockResolvedValue({ success: true, headSha: 'sha-1' }),
+        } as any,
+      });
+      const runner = new CheckStageRunner({ worktreePath });
+
+      const result = await runner.run(ctx);
+
+      expect(AgentSession.create).toHaveBeenCalledTimes(1);
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(artifactExists(tmpDir, 42, 'review.md')).toBe(true);
+      expect(result.checkResults?.find(r => r.name === 'review-passed')?.status).toBe('pass');
     });
   });
 
