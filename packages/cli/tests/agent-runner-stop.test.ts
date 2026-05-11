@@ -70,7 +70,7 @@ describe('AbortSignal propagation through WorkflowEngine', () => {
     const abortController = new AbortController();
 
     const mockIssueRepo = {
-      findById: vi.fn().mockReturnValue({ id: 'issue-1', number: 1, stage: Stage.Draft, projectId: 'proj-1' }),
+      findById: vi.fn().mockReturnValue({ id: 'issue-1', number: 1, stage: Stage.Backlog, projectId: 'proj-1' }),
       findAll: vi.fn().mockReturnValue([]),
       updateStage: vi.fn(),
       updateStatus: vi.fn(),
@@ -117,7 +117,7 @@ describe('AbortSignal propagation through WorkflowEngine', () => {
       number: 1,
       title: 'Test',
       projectId: 'proj-1',
-      stage: Stage.Draft,
+      stage: Stage.Backlog,
       status: IssueStatus.Active,
     } as any;
 

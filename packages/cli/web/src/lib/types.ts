@@ -1,7 +1,5 @@
 export enum Stage {
-  Draft = 'draft',
   Backlog = 'backlog',
-  Explore = 'explore',
   Plan = 'plan',
   Build = 'build',
   Check = 'check',
@@ -10,8 +8,7 @@ export enum Stage {
 }
 
 export const STAGE_ORDER: Stage[] = [
-  Stage.Draft,
-  Stage.Explore,
+  Stage.Backlog,
   Stage.Plan,
   Stage.Build,
   Stage.Check,

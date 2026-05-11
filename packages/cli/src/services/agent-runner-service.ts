@@ -212,7 +212,7 @@ export class AgentRunnerService {
     if (!this.issueRepo) return [];
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active });
     return activeIssues
-      .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog)
+      .filter(issue => issue.stage !== Stage.Backlog)
       .map(issue => {
         const deliveryStatus = classifyMergeDelivery(issue);
         const falseDone = deliveryStatus === 'done-not-merged';
@@ -298,7 +298,7 @@ export class AgentRunnerService {
       ...this.issueRepo.findAll({ status: IssueStatus.Active }),
       ...this.issueRepo.findAll({ status: IssueStatus.Blocked }).filter(isAwaitingApprovalForReachableStage),
     ]
-      .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog);
+      .filter(issue => issue.stage !== Stage.Backlog);
 
     if (orphans.length === 0) return;
 
@@ -313,7 +313,7 @@ export class AgentRunnerService {
     if (!this.issueRepo || !this.coderSessionRepo) return;
 
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active })
-      .filter(issue => issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog);
+      .filter(issue => issue.stage !== Stage.Backlog);
 
     const runningSessionIssueIds = new Set<string>();
     try {
@@ -360,7 +360,7 @@ export class AgentRunnerService {
     if (!this.issueRepo) return;
     const issue = this.issueRepo.findById(issueId);
     if (!issue) return;
-    if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) return;
+    if (issue.stage === Stage.Backlog) return;
     if (issue.status !== IssueStatus.Active && !isAwaitingApprovalForReachableStage(issue)) return;
     this.recoverSingleIssue(issue);
   }
@@ -1021,8 +1021,8 @@ export class AgentRunnerService {
       return;
     }
 
-    if (issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog) {
-      log.info('Skipping start-pipeline: issue not in draft/backlog', { issueNumber: issue.number, stage: issue.stage });
+    if (issue.stage !== Stage.Backlog) {
+      log.info('Skipping start-pipeline: issue not in backlog', { issueNumber: issue.number, stage: issue.stage });
       this.completeTask(task.id, 'completed', 'skipped');
       return;
     }

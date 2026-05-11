@@ -26,7 +26,7 @@ function classifyMergeDelivery(issue: { stage: string; status: string; mergeStat
   }
 
   if (mergeState === null || mergeState === undefined) {
-    if (stage === 'draft' || stage === 'plan' || stage === 'build' || stage === 'check') {
+    if (stage === 'plan' || stage === 'build' || stage === 'check') {
       return 'not-ready'
     }
     return 'unknown'
@@ -56,11 +56,6 @@ function classifyMergeDelivery(issue: { stage: string; status: string; mergeStat
 
 describe('classifyMergeDelivery', () => {
   describe('null mergeState handling', () => {
-    it('returns not-ready for draft stage with null mergeState', () => {
-      const issue = { stage: Stage.Draft, status: IssueStatus.Active, mergeState: null }
-      expect(classifyMergeDelivery(issue)).toBe('not-ready')
-    })
-
     it('returns not-ready for plan stage with null mergeState', () => {
       const issue = { stage: Stage.Plan, status: IssueStatus.Active, mergeState: null }
       expect(classifyMergeDelivery(issue)).toBe('not-ready')

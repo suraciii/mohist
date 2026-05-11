@@ -361,18 +361,21 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
   });
 
   describe('AC-5: mergeState null state matrix — classifyMergeDelivery', () => {
-    it('null mergeState in draft/plan/build/check returns not-ready', () => {
-      for (const stage of [Stage.Draft, Stage.Plan, Stage.Build, Stage.Check] as Stage[]) {
+    it('null mergeState in backlog/plan/build/check returns not-ready', () => {
+      for (const stage of [Stage.Backlog, Stage.Plan, Stage.Build, Stage.Check] as Stage[]) {
         const issue = makeIssue({ stage, mergeState: null });
         expect(classifyMergeDelivery(issue)).toBe('not-ready');
       }
     });
 
-    it('null mergeState in explore/backlog returns unknown', () => {
-      for (const stage of [Stage.Explore, Stage.Backlog] as Stage[]) {
-        const issue = makeIssue({ stage, mergeState: null });
-        expect(classifyMergeDelivery(issue)).toBe('unknown');
-      }
+    it('null mergeState in integrate returns integrating', () => {
+      const issue = makeIssue({ stage: Stage.Integrate, mergeState: null });
+      expect(classifyMergeDelivery(issue)).toBe('integrating');
+    });
+
+    it('null mergeState in backlog returns not-ready', () => {
+      const issue = makeIssue({ stage: Stage.Backlog, mergeState: null });
+      expect(classifyMergeDelivery(issue)).toBe('not-ready');
     });
 
     it('done/completed + null mergeState returns done-not-merged', () => {

@@ -6,7 +6,7 @@ import { PipelineStatusTimeline } from '../src/components/SessionTimeline'
 describe('Integrate stage rendering', () => {
   describe('PipelineStatusTimeline', () => {
     it('should include Integrate between Check and Done in stage order', () => {
-      const stageOrder = ['backlog', 'explore', 'plan', 'build', 'check', 'integrate', 'done']
+      const stageOrder = ['backlog', 'plan', 'build', 'check', 'integrate', 'done']
 
       expect(stageOrder).toContain('integrate')
       const checkIdx = stageOrder.indexOf('check')
@@ -39,8 +39,7 @@ describe('Integrate stage rendering', () => {
   describe('Stage enum and order', () => {
     it('should have Integrate between Check and Done', () => {
       const stageOrder = [
-        Stage.Draft,
-        Stage.Explore,
+        Stage.Backlog,
         Stage.Plan,
         Stage.Build,
         Stage.Check,
@@ -58,6 +57,10 @@ describe('Integrate stage rendering', () => {
 
     it('should have Stage.Integrate with value integrate', () => {
       expect(Stage.Integrate).toBe('integrate')
+    })
+
+    it('should have Backlog as initial stage', () => {
+      expect(Stage.Backlog).toBe('backlog')
     })
   })
 })

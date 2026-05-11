@@ -81,7 +81,7 @@ type CommitDiffResponse = ChangesAvailability & {
 };
 
 function unavailableChangesData(issue: Issue, message: string) {
-  const reason = issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+  const reason = issue.stage === Stage.Backlog
     ? 'not_started' as const
     : 'worktree_removed' as const;
 
@@ -739,10 +739,10 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (issue.stage !== Stage.Draft && issue.stage !== Stage.Backlog) {
+      if (issue.stage !== Stage.Backlog) {
         const response: ApiResponse = {
           success: false,
-          error: `Issue #${number} is not in a startable stage (current: ${issue.stage}). Only draft/backlog issues can be started.`
+          error: `Issue #${number} is not in a startable stage (current: ${issue.stage}). Only backlog issues can be started.`
         };
         return c.json(response, 400);
       }
@@ -1547,7 +1547,7 @@ export function createIssueRoutes(
       const branchName = `mo/issue-${number}`;
 
       if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
-        if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
+        if (issue.stage === Stage.Backlog) {
           const response: ApiResponse = {
             success: true,
             data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet. Start the issue to see changes.' }
@@ -1778,7 +1778,7 @@ export function createIssueRoutes(
         const response: ApiResponse = {
           success: true,
           data: {
-            ...unavailableChangesData(issue, issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+            ...unavailableChangesData(issue, issue.stage === Stage.Backlog
               ? 'Issue has not started yet. Start the issue to see commits.'
               : 'Workspace has been removed. Commits are only available while the issue worktree is retained.'),
             commits: [],
@@ -1791,7 +1791,7 @@ export function createIssueRoutes(
         const response: ApiResponse = {
           success: true,
           data: {
-            ...unavailableChangesData(issue, issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+            ...unavailableChangesData(issue, issue.stage === Stage.Backlog
               ? 'Issue has not started yet. Start the issue to see commits.'
               : 'Workspace has been removed. Commits are only available while the issue worktree is retained.'),
             commits: [],
@@ -1989,7 +1989,7 @@ export function createIssueRoutes(
       if (!worktreeManager) {
         const response: ApiResponse = {
           success: true,
-          data: unavailableChangesData(issue, issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+          data: unavailableChangesData(issue, issue.stage === Stage.Backlog
             ? 'Issue has not started yet.'
             : 'Workspace has been removed.')
         };
@@ -1999,7 +1999,7 @@ export function createIssueRoutes(
       if (!worktreeManager.exists(project.name, issue.number)) {
         const response: ApiResponse = {
           success: true,
-          data: unavailableChangesData(issue, issue.stage === Stage.Draft || issue.stage === Stage.Backlog
+          data: unavailableChangesData(issue, issue.stage === Stage.Backlog
             ? 'Issue has not started yet.'
             : 'Workspace has been removed.')
         };
@@ -2944,7 +2944,7 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
       }
 
-      if (issue.stage === Stage.Draft || issue.stage === Stage.Backlog) {
+      if (issue.stage === Stage.Backlog) {
         return c.json({ success: false, error: `Issue #${number} is in ${issue.stage} stage. Use start instead of rerun.` } satisfies ApiResponse, 400);
       }
 

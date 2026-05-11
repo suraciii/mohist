@@ -1,6 +1,7 @@
-## ADDED Requirements
+# OpenSpec Capability: workflow-config
 
 ### Requirement: workflow.yaml 定义工作流阶段和 prompt 模板
+
 系统 SHALL 支持项目根目录或 `.mohist/` 目录下的 `workflow.yaml` 文件，声明式定义工作流阶段及每个阶段的 prompt 模板。
 
 #### Scenario: 读取默认 workflow
@@ -16,6 +17,7 @@
 - **THEN** 返回错误信息，建议使用默认 workflow
 
 ### Requirement: workflow.yaml 项目级配置
+
 系统 SHALL 只实现项目级 workflow.yaml（项目根目录或 `.mohist/workflow.yaml`），不实现全局配置（`~/.mohist/workflow.yaml` 留作 M2+）。
 
 #### Scenario: 优先级读取
@@ -23,6 +25,7 @@
 - **THEN** 优先读取 `./workflow.yaml`
 
 ### Requirement: read_workflow tool 提供配置给 Main Agent
+
 系统 SHALL 提供 `read_workflow` tool，返回 workflow.yaml 内容（不包含变量替换）给 Main Agent 的 LLM 理解和执行。
 
 #### Scenario: Main Agent 读取 workflow
@@ -30,6 +33,7 @@
 - **THEN** 返回 workflow.yaml 的原始内容（或默认 workflow），包含每个 stage 的 name、prompt、approval、timeout 配置
 
 ### Requirement: workflow prompt 变量替换由 spawn_coder 处理
+
 系统 SHALL 由 `spawn_coder` tool 接收 prompt 模板和变量，内部完成替换后再发送给 opencode acp。
 
 #### Scenario: spawn_coder 接收 template 和 variables
@@ -43,3 +47,18 @@
 #### Scenario: 变量缺失
 - **WHEN** prompt 引用了 `{build.output}` 但 build 阶段尚未执行（变量未提供）
 - **THEN** 替换为 `"(尚未执行)"`
+
+### Requirement: workflow validation distinguishes lifecycle state from runnable stages (REQ-001)
+
+Workflow configuration SHALL validate runnable stages independently from the issue lifecycle start state.
+
+#### Scenario: Backlog remains lifecycle start state
+- **WHEN** an issue is created under the default workflow
+- **THEN** the issue still starts in `backlog`
+- **AND** `backlog` is not required to appear in the runnable workflow stage list
+
+#### Scenario: Deprecated workflow stage values are rejected or ignored by validation rules
+- **WHEN** workflow loading or validation evaluates stage names
+- **THEN** it does not require `draft` or `explore` for a valid workflow
+- **AND** no built-in workflow configuration advertises `explore` as runnable
+

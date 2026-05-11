@@ -132,8 +132,8 @@ describe('classifyMergeDelivery', () => {
   });
 
   describe('null mergeState across stages', () => {
-    it('returns not-ready for draft + null', () => {
-      const issue = makeIssue({ stage: Stage.Draft, mergeState: null });
+    it('returns not-ready for backlog + null', () => {
+      const issue = makeIssue({ stage: Stage.Backlog, mergeState: null });
       expect(classifyMergeDelivery(issue)).toBe('not-ready');
     });
 
@@ -180,14 +180,14 @@ describe('classifyMergeDelivery', () => {
   });
 
   describe('unknown state', () => {
-    it('returns unknown for explore stage + null', () => {
-      const issue = makeIssue({ stage: Stage.Explore, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('unknown');
+    it('returns done-not-merged for done + null mergeState', () => {
+      const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Active, mergeState: null });
+      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
     });
 
-    it('returns unknown for backlog stage + null', () => {
+    it('returns not-ready for backlog stage + null', () => {
       const issue = makeIssue({ stage: Stage.Backlog, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('unknown');
+      expect(classifyMergeDelivery(issue)).toBe('not-ready');
     });
   });
 });

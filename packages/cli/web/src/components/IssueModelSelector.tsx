@@ -8,7 +8,7 @@ import { ModelSelect } from './ModelSelect'
 
 const RECENT_KEY = 'mohist:recent-issue-models'
 const MAX_RECENT = 5
-const ISSUE_STAGES = ['explore', 'plan', 'build', 'check', 'integrate'] as const
+const ISSUE_STAGES = ['plan', 'build', 'check', 'integrate'] as const
 
 interface Props {
   issueNumber: number

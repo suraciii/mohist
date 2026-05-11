@@ -65,8 +65,8 @@ describe('CLI merge display formatting', () => {
       expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
     });
 
-    it('returns not-ready for draft + null mergeState', () => {
-      const issue = makeIssue({ stage: Stage.Draft, mergeState: null });
+    it('returns not-ready for backlog + null mergeState', () => {
+      const issue = makeIssue({ stage: Stage.Backlog, mergeState: null });
       expect(classifyMergeDelivery(issue)).toBe('not-ready');
     });
 
@@ -90,9 +90,9 @@ describe('CLI merge display formatting', () => {
       expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
     });
 
-    it('returns unknown for explore + null mergeState', () => {
-      const issue = makeIssue({ stage: Stage.Explore, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('unknown');
+    it('returns integrating for integrate + null mergeState', () => {
+      const issue = makeIssue({ stage: Stage.Integrate, mergeState: null });
+      expect(classifyMergeDelivery(issue)).toBe('integrating');
     });
 
     it('returns done-not-merged for completed status + null mergeState', () => {

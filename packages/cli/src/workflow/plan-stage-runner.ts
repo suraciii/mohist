@@ -59,7 +59,7 @@ export class PlanStageRunner extends BaseStageRunner {
   }
 
   canHandle(stage: Stage): boolean {
-    return stage === Stage.Plan || stage === Stage.Draft || stage === Stage.Backlog;
+    return stage === Stage.Plan || stage === Stage.Backlog;
   }
 
   protected isApprovalCheck(checkName: string): boolean {

@@ -100,7 +100,7 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
 
   const { data: stageStateData, isLoading: stageStateLoading } = useIssueStageState(issueNumber)
 
-  const isBacklog = currentStage === StageEnum.Backlog || currentStage === StageEnum.Draft
+  const isBacklog = currentStage === StageEnum.Backlog
 
   if (isBacklog) return null
 

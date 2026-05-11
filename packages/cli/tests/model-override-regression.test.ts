@@ -127,10 +127,15 @@ describe('model-override-regression: resolveStageModel precedence', () => {
     expect(resolveStageModel('build', config, undefined)).toBe('global-model');
   });
 
-  it('EXECUTABLE_MODEL_STAGES includes integrate and excludes fix', () => {
+  it('EXECUTABLE_MODEL_STAGES includes backlog, plan, build, check, integrate, done', () => {
+    expect(EXECUTABLE_MODEL_STAGES).toContain('backlog');
+    expect(EXECUTABLE_MODEL_STAGES).toContain('plan');
+    expect(EXECUTABLE_MODEL_STAGES).toContain('build');
+    expect(EXECUTABLE_MODEL_STAGES).toContain('check');
     expect(EXECUTABLE_MODEL_STAGES).toContain('integrate');
-    expect(EXECUTABLE_MODEL_STAGES).not.toContain('fix');
-    expect(EXECUTABLE_MODEL_STAGES).toEqual(['explore', 'plan', 'build', 'check', 'integrate']);
+    expect(EXECUTABLE_MODEL_STAGES).toContain('done');
+    expect(EXECUTABLE_MODEL_STAGES).not.toContain('explore');
+    expect(EXECUTABLE_MODEL_STAGES).not.toContain('draft');
   });
 });
 

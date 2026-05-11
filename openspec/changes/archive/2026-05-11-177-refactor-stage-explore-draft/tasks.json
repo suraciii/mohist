@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Refactor the canonical pipeline stage model in shared and backend logic",
+      "spec": "specs/pipeline-model/spec.md#REQ-001",
+      "description": "Update the shared Stage enum, canonical stage order, and backend transition legality rules so only the real pipeline stages remain. This task should also migrate start, approval, resume, recovery, and related backend stage checks away from `Draft` and `Explore` while preserving the current backlog-to-plan and check-to-integrate behavior.",
+      "acceptanceCriteria": [
+        "Backend Stage definitions only allow `backlog`, `plan`, `build`, `check`, `integrate`, and `done`",
+        "Issue creation still starts in `backlog` and issue start still advances from `backlog` to `plan`",
+        "Check approval still advances to `integrate`, and any preserved recovery loop no longer depends on `draft` or `explore`",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types/index.ts and backend workflow/stage service logic updated to the backlog-first pipeline model",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "If persisted issue data can still contain `draft`, handle it at a narrow read boundary instead of restoring deprecated enum members. Confirm whether `integrate -> build` is still required by current recovery semantics before removing it.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        242586,
+        1286342
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Align default workflow definition with runnable stages",
+      "spec": "specs/workflow-definition/spec.md#REQ-001",
+      "description": "Update the built-in default workflow and any related loader or validation rules so `explore` is no longer declared as a runnable stage. The workflow configuration should describe the executed pipeline stages while remaining compatible with issues that still begin life in `backlog` outside the runnable task list.",
+      "acceptanceCriteria": [
+        "Default workflow stage configuration no longer includes `explore`",
+        "Default workflow stages align with the executed pipeline: `plan -> build -> check -> integrate -> done` unless `backlog` is intentionally made explicit",
+        "Workflow loading or validation does not require deprecated `draft` or `explore` stage values",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "packages/cli/src/workflow/workflow-loader.ts and related workflow defaults/validation updated to exclude explore",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Keep the distinction from the design doc: `backlog` is lifecycle state, while workflow config represents runnable stages unless the implementation already requires a fully explicit list.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        179334
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Align workflow validation with lifecycle and runnable stage boundaries",
+      "spec": "specs/workflow-config/spec.md#REQ-001",
+      "description": "Update workflow loading and validation semantics so issue lifecycle state and runnable workflow stages are no longer conflated. This task should preserve `backlog` as the issue start state without requiring it in runnable stage lists, and ensure deprecated `draft` or `explore` values are no longer part of valid built-in workflow semantics.",
+      "acceptanceCriteria": [
+        "Issue creation still starts in `backlog` even when the runnable default workflow begins at `plan`",
+        "Workflow loading or validation does not require `backlog` to appear in runnable stage lists unless explicitly configured",
+        "Deprecated `draft` and `explore` values are no longer required or advertised by built-in workflow validation behavior",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow loader and validation behavior updated to separate lifecycle state from runnable workflow stage configuration",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "This task is intentionally separate from the default workflow definition change so validation semantics remain explicit and independently testable.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        816535
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Update web UI and Explore surfaces to use the cleaned pipeline model",
+      "spec": "specs/web-ui/spec.md#REQ-001",
+      "description": "Refactor frontend stage enums, ordering helpers, and pipeline presentation so the UI shows the same backlog-first pipeline as the backend. Remove `draft` and `explore` from pipeline displays and stage-derived UI logic while keeping dedicated Explore pages, APIs, and session views working through Explore-specific state rather than the pipeline Stage enum.",
+      "acceptanceCriteria": [
+        "Frontend stage enum and visible stage order match the backend pipeline: `backlog -> plan -> build -> check -> integrate -> done`",
+        "Pipeline views, issue cards, and related UI helpers no longer render `draft` or `explore` as pipeline stages",
+        "Explore pages, sessions, and API-driven UI flows still work without using `Stage.Explore` as pipeline state",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Frontend stage helpers and pipeline UI updated to the backlog-first model while preserving Explore-specific screens",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Classify each `draft` or `explore` frontend reference before changing it: pipeline references should be removed, Explore-domain references should move to dedicated Explore concepts.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        241137
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Refresh regression coverage for the cleaned stage model",
+      "spec": "specs/pipeline-model/spec.md#REQ-002",
+      "description": "Update backend and frontend tests, fixtures, and assertions so they validate the backlog-first pipeline and no longer treat `draft` or `explore` as legal pipeline stages. Add or adjust regression coverage for issue creation/start, check approval into integrate, workflow default loading, and Explore surfaces remaining functional outside the pipeline model.",
+      "acceptanceCriteria": [
+        "Automated tests no longer require `draft` or `explore` to be legal pipeline stages",
+        "Regression coverage verifies issue creation starts in `backlog` and pipeline start advances to `plan`",
+        "Regression coverage verifies check approval advances to `integrate` and then to `done` according to current behavior",
+        "Regression coverage verifies Explore-related UI/API behavior still works without being represented as a pipeline stage",
+        "Relevant test suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Backend and frontend tests/fixtures updated for the cleaned stage model and Explore preservation",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Audit any persisted-data fixtures separately from runtime enums; use normalization only if old stored values are still required for compatibility testing.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        618528,
+        707272
+      ]
+    }
+  ]
+}

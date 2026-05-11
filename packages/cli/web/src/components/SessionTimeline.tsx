@@ -139,7 +139,7 @@ const PIPELINE_STAGES = [
 ]
 
 export function PipelineStatusTimeline({ currentStage }: { currentStage: string }) {
-  const stageOrder = ['backlog', 'explore', 'plan', 'build', 'check', 'integrate', 'done']
+  const stageOrder = ['backlog', 'plan', 'build', 'check', 'integrate', 'done']
   const currentIndex = stageOrder.indexOf(currentStage)
 
   return (
