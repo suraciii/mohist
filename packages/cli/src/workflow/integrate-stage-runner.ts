@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { Stage } from '../types';
+import { Stage, MergeState } from '../types';
 import type { StageContext } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
 import { Log } from '../util/log';
@@ -488,6 +488,10 @@ export class IntegrateStageRunner extends BaseStageRunner {
         landedSha: mergeTruth.landedSha,
         rebased: mergeTruth.rebased,
       });
+
+      if (ctx.issueRepo.setMergeState) {
+        ctx.issueRepo.setMergeState(ctx.issue.id, MergeState.Merged);
+      }
 
     } catch (err) {
       const completedAt = new Date().toISOString();

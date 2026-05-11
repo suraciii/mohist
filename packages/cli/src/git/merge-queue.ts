@@ -343,6 +343,7 @@ export class MergeQueue {
     }
 
     entry.mergeState = MergeState.Merged;
+    this.deps.issueRepo.setMergeState(entry.issueId, MergeState.Merged);
 
     this.queue.delete(entry.issueNumber);
 
