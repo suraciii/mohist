@@ -366,7 +366,52 @@ export class IntegrateStageRunner extends BaseStageRunner {
     }
     const baseBranch = project.baseBranch;
 
-    try {
+    if (ctx.issue.mergeState === MergeState.Merged) {
+      const duration = Date.now() - new Date(mergeStartedAt).getTime();
+      mergeResult = {
+        step: 'integrate:merge',
+        status: 'completed',
+        output: {
+          step: 'integrate:merge' as const,
+          targetBranch: baseBranch,
+          skipped: true,
+          reason: 'already-merged',
+        },
+        startedAt: mergeStartedAt,
+        completedAt: new Date().toISOString(),
+        duration,
+      };
+      steps.push(mergeResult);
+      this.appendTaskResult(ctx, {
+        taskId: 'integrate:merge',
+        title: 'Merge approved candidate to target branch',
+        status: 'completed',
+        artifacts: [],
+        attempts: 1,
+        duration,
+        output: {
+          kind: 'integrate-merge',
+          targetBranch: baseBranch,
+          skipped: true,
+          reason: 'already-merged',
+        },
+      });
+
+      ctx.eventBus.emit('integration_step_updated', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        step: 'integrate:merge',
+        status: 'completed',
+        summary: 'Merge already completed; continuing to final health gate',
+        output: mergeResult.output,
+      });
+
+      log.info('Integration merge already completed; continuing to final health', {
+        issueNumber: ctx.issue.number,
+        targetBranch: baseBranch,
+      });
+    } else try {
       log.info('Running integration merge', {
         issueNumber: ctx.issue.number,
         projectId: ctx.issue.projectId,
