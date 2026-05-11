@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { Stage, IssueStatus } from '../../src/types';
+import { Stage, IssueStatus, MergeState } from '../../src/types';
 import type { StageContext } from '../../src/workflow/stage-context';
 import { IntegrateStageRunner } from '../../src/workflow/integrate-stage-runner';
 import { EventBus } from '../../src/services/event-bus';
@@ -408,6 +408,52 @@ ArcFail added scenario content.`);
         findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch, path: tmpDir }),
       };
     }
+
+    it('skips merge and reruns final health when issue is already marked merged', async () => {
+      const issueNumber = 64;
+      const archivedChangeDir = path.join(
+        tmpDir,
+        'openspec',
+        'changes',
+        'archive',
+        `2026-05-09-${issueNumber}-test-change`,
+      );
+      fs.mkdirSync(path.join(archivedChangeDir, 'specs'), { recursive: true });
+
+      const mergeApprovedCandidateMock = vi.fn();
+      const baseCtx = createMockContext(tmpDir, issueNumber);
+      const ctx = createMockContext(tmpDir, issueNumber, {
+        issue: {
+          ...baseCtx.issue,
+          mergeState: MergeState.Merged,
+        },
+        artifactManager: {
+          ...baseCtx.artifactManager,
+          getChangeDir: vi.fn().mockReturnValue(null),
+          archiveChange: vi.fn(),
+        },
+        worktreeManager: {
+          mergeApprovedCandidate: mergeApprovedCandidateMock,
+        } as any,
+      });
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(true);
+      expect(mergeApprovedCandidateMock).not.toHaveBeenCalled();
+
+      const output = result.output as { steps?: Array<{ step: string; status: string; output: any }> };
+      const mergeStep = output.steps?.find(s => s.step === 'integrate:merge');
+      const healthStep = output.steps?.find(s => s.step === 'final-health');
+      expect(mergeStep).toMatchObject({
+        status: 'completed',
+        output: {
+          skipped: true,
+          reason: 'already-merged',
+        },
+      });
+      expect(healthStep).toMatchObject({ status: 'completed' });
+    });
 
     it('fast-forward merge succeeds when candidate can fast-forward into target branch', async () => {
       const issueNumber = 50;
