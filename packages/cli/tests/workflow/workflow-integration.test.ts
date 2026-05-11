@@ -616,13 +616,14 @@ describe('Workflow Integration Tests', () => {
         checks: [
           new PassCheck('build-test-passed'),
           {
-            name: 'ai-review',
+            name: 'review-passed',
             run: async () => ({
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'pass' as const,
               output: { verdict: 'PASS', reviewReport: 'Mock review report' },
             }),
           },
+          new PassCheck('merge-ready'),
           new PendingCheck(),
         ],
         nextStage: Stage.Integrate,

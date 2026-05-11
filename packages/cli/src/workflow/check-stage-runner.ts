@@ -1,33 +1,19 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { Stage } from '../types';
-import type { CheckFailurePolicy, CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
+import type { CheckFailurePolicy, StageContext, StageRunResult } from './stage-context';
 import { emitStageTaskUpdate } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
 import type { Check } from './checks';
-import { AiReviewCheck } from './checks/ai-review-check';
+import { ReviewPassedCheck } from './checks/review-passed-check';
+import { MergeReadyCheck } from './checks/merge-ready-check';
 import { UserApprovalCheck } from './checks/user-approval-check';
-import { buildReviewerPrompt, buildReviewSelfCheckPrompt } from '../agents/artifact-prompt';
+import { buildReviewerPrompt } from '../agents/artifact-prompt';
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
-import { readReportFile } from './utils';
+import { validateReviewArtifact } from './utils';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
-import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
-import { HealthGateCheck } from './checks/health-gate-check';
-import { MergeReadinessCheck } from './checks/merge-readiness-check';
-import { IntegrationHealthGatePreviewCheck } from './checks/integration-health-gate-preview-check';
-import { runHealthFixTask } from './health-fix-task';
 import { runReviewFixTask } from './review-fix-task';
 
 const log = Log.create({ service: 'check-stage-runner' });
-
-interface TaskConfig {
-  type: string;
-  label: string;
-  outputPath: string;
-  verifyArtifact: () => boolean;
-  buildPrompt: (issue: import('../types').Issue, changeDir: string) => string;
-}
 
 export interface StageRunner {
   canHandle(stage: Stage): boolean;
@@ -40,27 +26,15 @@ export interface CheckStageRunnerOptions {
 }
 
 export class CheckStageRunner extends BaseStageRunner implements StageRunner {
-  private worktreePath: string;
-  private preTaskChecks: Check[];
   private postTaskChecks: Check[];
   private usesDefaultChecks: boolean;
-  private checkHealthGatePolicy: import('./workflow-loader').HealthGatePolicy;
 
   constructor(options: CheckStageRunnerOptions) {
     super();
-    this.worktreePath = options.worktreePath;
     this.usesDefaultChecks = !options.checks;
-    const wf = loadWorkflow(this.worktreePath);
-    this.checkHealthGatePolicy = typeof wf === 'string'
-      ? { enabled: true, command: 'npm run build && npm test', timeout: 300000, autoFix: true, maxFixAttempts: 2, fallbackReaction: { type: 'escalate', escalateTarget: Stage.Check } }
-      : loadHealthGatePolicies(wf).check;
-    this.preTaskChecks = options.checks ? [] : [
-      new HealthGateCheck({ worktreePath: this.worktreePath, policy: this.checkHealthGatePolicy, stage: 'check' }),
-      new MergeReadinessCheck(),
-      new IntegrationHealthGatePreviewCheck(),
-    ];
     this.postTaskChecks = options.checks ?? [
-      new AiReviewCheck(),
+      new ReviewPassedCheck(),
+      new MergeReadyCheck(),
       new UserApprovalCheck(Stage.Check),
     ];
   }
@@ -70,90 +44,236 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected getPreTaskChecks(): Check[] {
-    return this.preTaskChecks;
+    return [];
   }
 
   protected getCheckFailurePolicies(): CheckFailurePolicy[] {
-    const policies: CheckFailurePolicy[] = [];
-
-    if (this.checkHealthGatePolicy.enabled && this.checkHealthGatePolicy.autoFix) {
-      policies.push({
-        checkName: 'health:check',
-        fixTaskId: 'fix-check-health',
-        maxAttempts: this.checkHealthGatePolicy.maxFixAttempts,
-      });
-    }
-
-    policies.push({
-      checkName: 'ai-review',
-      fixTaskId: 'fix-review-findings',
-      maxAttempts: 1,
-    });
-
-    return policies;
+    return [
+      {
+        checkName: 'review-passed',
+        fixTaskId: 'repair-review-findings',
+        maxAttempts: 3,
+      },
+      {
+        checkName: 'merge-ready',
+        fixTaskId: 'repair-merge',
+        maxAttempts: 2,
+      },
+    ];
   }
 
   protected async runFixTask(
     ctx: StageContext,
-    taskId: string,
-    failedCheck: CheckResult,
+    _taskId: string,
+    failedCheck: import('./stage-context').CheckResult,
     attempt: number,
-  ): Promise<StageTaskResult | null> {
-    if (taskId === 'fix-check-health') {
-      return runHealthFixTask(ctx, {
-        taskId: 'fix-check-health',
-        title: 'Fix check health',
-        stage: 'check',
-        worktreePath: this.worktreePath,
-        healthCommand: this.checkHealthGatePolicy.command,
-        failedCheck,
-        attempt,
-      });
+  ): Promise<import('./stage-context').StageTaskResult | null> {
+    if (failedCheck.name === 'review-passed' && (failedCheck.output as { verdict?: string })?.verdict === 'FAIL') {
+      const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+      const worktreePath = project
+        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+        : null;
+      if (!worktreePath) {
+        log.warn('runFixTask: no worktree path found', { issueNumber: ctx.issue.number });
+        return null;
+      }
+      return runReviewFixTask(ctx, { worktreePath, failedCheck, attempt });
     }
 
-    if (taskId === 'fix-review-findings') {
-      return runReviewFixTask(ctx, {
-        worktreePath: this.worktreePath,
-        failedCheck,
-        attempt,
-      });
+    if (failedCheck.name === 'merge-ready') {
+      return this.runMergeRepairTask(ctx, failedCheck, attempt);
     }
 
     return null;
   }
 
-  protected isApprovalCheck(checkName: string): boolean {
-    return checkName === 'user-approval';
+  private async runMergeRepairTask(
+    ctx: StageContext,
+    failedCheck: import('./stage-context').CheckResult,
+    attempt: number,
+  ): Promise<import('./stage-context').StageTaskResult> {
+    const startedAt = Date.now();
+    const taskId = 'repair-merge';
+    const title = 'Repair merge readiness';
+    const stage = 'check';
+
+    const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+    if (!project) {
+      return {
+        taskId,
+        title,
+        status: 'failed',
+        artifacts: [],
+        attempts: attempt,
+        duration: Date.now() - startedAt,
+        output: { kind: 'merge-repair', success: false, error: 'Project not found' },
+      };
+    }
+
+    const worktreePath = ctx.worktreeManager.getPath(project.name, ctx.issue.number);
+    if (!worktreePath) {
+      return {
+        taskId,
+        title,
+        status: 'failed',
+        artifacts: [],
+        attempts: attempt,
+        duration: Date.now() - startedAt,
+        output: { kind: 'merge-repair', success: false, error: 'Worktree not found' },
+      };
+    }
+
+    emitStageTaskUpdate(
+      ctx.eventBus,
+      ctx.issue.id,
+      ctx.issue.projectId,
+      stage,
+      taskId,
+      title,
+      'started',
+      attempt,
+      [],
+    );
+
+    try {
+      const headBefore = await ctx.worktreeManager.getHeadSha(worktreePath);
+
+      const output = failedCheck.output as { targetBranch?: string; conflictFiles?: string[] };
+      const targetBranch = output?.targetBranch ?? project.baseBranch;
+      const conflictFiles = output?.conflictFiles ?? [];
+
+      log.info('Running merge repair', {
+        issueNumber: ctx.issue.number,
+        worktreePath,
+        targetBranch,
+        conflictFiles,
+        attempt,
+      });
+
+      const result = await ctx.worktreeManager.rebaseOntoMaster(
+        project.path,
+        project.name,
+        ctx.issue.number,
+        targetBranch,
+        { abortOnConflict: false },
+      );
+
+      const headAfter = await ctx.worktreeManager.getHeadSha(worktreePath);
+      const headChanged = headBefore !== headAfter;
+
+      log.info('Merge repair completed', {
+        issueNumber: ctx.issue.number,
+        success: result.success,
+        conflicts: result.conflicts,
+        headChanged,
+        headBefore,
+        headAfter,
+      });
+
+      emitStageTaskUpdate(
+        ctx.eventBus,
+        ctx.issue.id,
+        ctx.issue.projectId,
+        stage,
+        taskId,
+        title,
+        result.success ? 'completed' : 'failed',
+        attempt,
+        [],
+      );
+
+      return {
+        taskId,
+        title,
+        status: result.success ? 'completed' : 'failed',
+        artifacts: [],
+        attempts: attempt,
+        duration: Date.now() - startedAt,
+        output: {
+          kind: 'merge-repair',
+          targetBranch,
+          attempt,
+          success: result.success,
+          conflicts: result.conflicts,
+          headChanged,
+          headBefore,
+          headAfter,
+        },
+      };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      log.warn('Merge repair failed', { issueNumber: ctx.issue.number, taskId, error });
+
+      emitStageTaskUpdate(
+        ctx.eventBus,
+        ctx.issue.id,
+        ctx.issue.projectId,
+        stage,
+        taskId,
+        title,
+        'failed',
+        attempt,
+        [],
+      );
+
+      return {
+        taskId,
+        title,
+        status: 'failed',
+        artifacts: [],
+        attempts: attempt,
+        duration: Date.now() - startedAt,
+        output: { kind: 'merge-repair', success: false, error },
+      };
+    }
   }
 
-  protected async beforeRecheckAfterFix(ctx: StageContext, checkName: string, fixTaskId: string): Promise<void> {
-    if (checkName !== 'ai-review' || fixTaskId !== 'fix-review-findings') return;
-
+  protected async beforeRecheckAfterFix(
+    ctx: StageContext,
+    checkName: string,
+    _fixTaskId: string,
+  ): Promise<void> {
     const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-    if (!changeDir) return;
 
-    if (ctx.checkpointManager) {
-      const steps = ctx.checkpointManager.getResumeSteps(ctx.issue.number, 'check');
-      const filtered = steps.filter((s: string) => s !== 'review' && s !== 'review-self-check');
-      ctx.checkpointManager.upsert(ctx.issue.number, 'check', filtered, null);
-    }
-
-    for (const filename of ['review.md', 'review-self-check.md']) {
-      const filePath = path.join(changeDir, filename);
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+    if (checkName === 'review-passed') {
+      if (changeDir) {
+        const reviewArtifactPath = changeDir + '/review.md';
+        try {
+          if (require('fs').existsSync(reviewArtifactPath)) {
+            require('fs').unlinkSync(reviewArtifactPath);
+            log.info('Invalidated stale review.md', { changeDir });
+          }
+        } catch {
+          log.warn('Failed to delete stale review.md', { changeDir });
         }
-      } catch {
-        // ignore
       }
+      ctx.checkpointManager?.deleteStep(ctx.issue.number, 'check', 'ai-review');
+      log.info('Invalidated ai-review checkpoint for re-review', {
+        issueNumber: ctx.issue.number,
+      });
     }
 
-    log.info('Regenerating review artifacts after fix-review-findings', {
-      issueNumber: ctx.issue.number,
-    });
+    if (checkName === 'merge-ready') {
+      if (changeDir) {
+        const reviewArtifactPath = changeDir + '/review.md';
+        try {
+          if (require('fs').existsSync(reviewArtifactPath)) {
+            require('fs').unlinkSync(reviewArtifactPath);
+            log.info('Invalidated stale review.md after merge repair', { changeDir });
+          }
+        } catch {
+          log.warn('Failed to delete stale review.md after merge repair', { changeDir });
+        }
+      }
+      ctx.checkpointManager?.deleteStep(ctx.issue.number, 'check', 'ai-review');
+      log.info('Invalidated ai-review checkpoint after merge repair, HEAD changed', {
+        issueNumber: ctx.issue.number,
+      });
+    }
+  }
 
-    await this.executeTasks(ctx);
+  protected isApprovalCheck(checkName: string): boolean {
+    return checkName === 'user-approval';
   }
 
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
@@ -167,24 +287,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     }
 
     const reviewOutputPath = 'review.md';
-    const selfCheckOutputPath = 'review-self-check.md';
 
-    const tasks: TaskConfig[] = [
-      {
-        type: 'review',
-        label: 'review.md',
-        outputPath: changeDir + '/' + reviewOutputPath,
-        verifyArtifact: () => readReportFile(changeDir, reviewOutputPath) !== null,
-        buildPrompt: (issue, dir) => buildReviewerPrompt(issue, dir),
-      },
-      {
-        type: 'review-self-check',
-        label: 'review-self-check.md',
-        outputPath: changeDir + '/' + selfCheckOutputPath,
-        verifyArtifact: () => readReportFile(changeDir, selfCheckOutputPath) !== null,
-        buildPrompt: (issue, dir) => buildReviewSelfCheckPrompt(issue, dir),
-      },
-    ];
+    const task = {
+      type: 'ai-review',
+      label: 'ai-review',
+      outputPath: changeDir + '/' + reviewOutputPath,
+      verifyArtifact: () => validateReviewArtifact(changeDir, reviewOutputPath),
+      buildPrompt: (issue: import('../types').Issue, dir: string) => buildReviewerPrompt(issue, dir),
+    };
 
     const resumeSteps = ctx.checkpointManager
       ? ctx.checkpointManager.getResumeSteps(ctx.issue.number, 'check')
@@ -238,58 +348,55 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     try {
       session = await AgentSession.create(connectionOptions);
 
-      for (const [index, task] of tasks.entries()) {
-        roundState.type = task.type;
-        roundState.index = index;
+      roundState.type = task.type;
+      roundState.index = 0;
 
-        if (completedSteps.includes(task.type)) {
-          if (task.verifyArtifact()) {
-            log.info('Review task skipped (checkpoint + artifact exists)', {
-              artifact: task.type,
-              issueNumber: ctx.issue.number,
-            });
-            this.appendTaskResult(ctx, {
-              taskId: task.type,
-              title: task.label,
-              status: 'skipped',
-              artifacts: [],
-              attempts: 0,
-              duration: 0,
-            });
-            continue;
-          }
+      if (completedSteps.includes(task.type)) {
+        if (task.verifyArtifact()) {
+          log.info('Review task skipped (checkpoint + artifact exists)', {
+            artifact: task.type,
+            issueNumber: ctx.issue.number,
+          });
+          this.appendTaskResult(ctx, {
+            taskId: task.type,
+            title: task.label,
+            status: 'skipped',
+            artifacts: [],
+            attempts: 0,
+            duration: 0,
+          });
+        } else {
           log.info('Review task in checkpoint but artifact missing, re-running', {
             artifact: task.type,
             issueNumber: ctx.issue.number,
           });
           const idx = completedSteps.indexOf(task.type);
           completedSteps.splice(idx);
-        } else if (task.verifyArtifact()) {
-          log.info('Review artifact exists but not in checkpoint, marking complete', {
-            artifact: task.type,
-            issueNumber: ctx.issue.number,
-          });
-          completedSteps.push(task.type);
-          ctx.checkpointManager?.markStepComplete(
-            ctx.issue.number,
-            'check',
-            task.type,
-            tasks[index + 1]?.type ?? null,
-          );
-          this.appendTaskResult(ctx, {
-            taskId: task.type,
-            title: task.label,
-            status: 'skipped',
-            artifacts: [task.label],
-            attempts: 0,
-            duration: 0,
-          });
-          continue;
         }
-
+      } else if (task.verifyArtifact()) {
+        log.info('Review artifact exists but not in checkpoint, marking complete', {
+          artifact: task.type,
+          issueNumber: ctx.issue.number,
+        });
+        completedSteps.push(task.type);
+        ctx.checkpointManager?.markStepComplete(
+          ctx.issue.number,
+          'check',
+          task.type,
+          null,
+        );
+        this.appendTaskResult(ctx, {
+          taskId: task.type,
+          title: task.label,
+          status: 'skipped',
+          artifacts: [task.label],
+          attempts: 0,
+          duration: 0,
+        });
+      } else {
         log.info('Review task', { artifact: task.type, issueNumber: ctx.issue.number });
 
-        emitReviewRoundStart(ctx.eventBus, task.type, index, ctx.acpOptions, ctx.issue.projectId ?? '');
+        emitReviewRoundStart(ctx.eventBus, task.type, 0, ctx.acpOptions, ctx.issue.projectId ?? '');
         emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'started', 1, []);
 
         const taskStartTime = Date.now();
@@ -316,7 +423,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         if (!task.verifyArtifact()) {
           log.warn('Review artifact not found after task, sending retry', {
             artifact: task.label,
-            taskIndex: index,
+            taskIndex: 0,
           });
 
           const retryPrompt = [
@@ -328,7 +435,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
             'This is a retry. The pipeline cannot continue without this file.',
           ].join('\n');
 
-          log.info('Review retry prompt sent', { artifact: task.type, taskIndex: index });
+          log.info('Review retry prompt sent', { artifact: task.type, taskIndex: 0 });
           attempts++;
           emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'retrying', attempts, []);
 
@@ -367,6 +474,25 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
           log.info('Review retry succeeded', { artifact: task.label });
         }
 
+        const artifactValidation = validateReviewArtifact(changeDir, reviewOutputPath);
+        if (!artifactValidation.valid) {
+          log.error('Review artifact invalid after task', {
+            artifact: task.label,
+            error: artifactValidation.error,
+          });
+          emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'failed', attempts, []);
+          this.appendTaskResult(ctx, {
+            taskId: task.type,
+            title: task.label,
+            status: 'failed',
+            artifacts: [],
+            attempts,
+            duration: Date.now() - taskStartTime,
+          });
+          await session.close();
+          throw new Error(`Artifact "${task.label}" is ${artifactValidation.error ?? 'invalid'}`);
+        }
+
         const taskDuration = Date.now() - taskStartTime;
         const taskArtifacts = task.verifyArtifact() ? [task.label] : [];
         emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'completed', attempts, taskArtifacts);
@@ -384,7 +510,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
           ctx.issue.number,
           'check',
           task.type,
-          tasks[index + 1]?.type ?? null,
+          null,
         );
       }
 

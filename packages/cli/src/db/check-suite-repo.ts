@@ -26,8 +26,8 @@ function rowToCheckSuite(row: CheckSuiteRow): CheckSuite {
 
 function makeInitialChecks(): CheckSuiteChecks {
   return {
-    'build-test': { status: 'pending' },
-    'ai-review': { status: 'pending' },
+    'review-passed': { status: 'pending' },
+    'merge-ready': { status: 'pending' },
     'user-approval': { status: 'pending' },
   };
 }

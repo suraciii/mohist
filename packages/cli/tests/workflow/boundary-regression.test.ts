@@ -418,13 +418,13 @@ describe('Task/Check/Artifact boundary regression', () => {
       });
 
       const reviewCheck = new FailCheck(
-        'ai-review',
+        'review-passed',
         async () => {
           reviewRunCount++;
           if (reviewRunCount <= 1) {
-            return { name: 'ai-review', status: 'fail', message: 'FAIL verdict', output: { verdict: 'FAIL', reviewReport: 'fail' } };
+            return { name: 'review-passed', status: 'fail', message: 'FAIL verdict', output: { verdict: 'FAIL', reviewReport: 'fail' } };
           }
-          return { name: 'ai-review', status: 'pass', output: { verdict: 'PASS', reviewReport: 'pass' } };
+          return { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', reviewReport: 'pass' } };
         },
       );
 
@@ -432,7 +432,7 @@ describe('Task/Check/Artifact boundary regression', () => {
         checks: [reviewCheck],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
           taskId: 'fix-review-findings',
           title: 'Fix review findings',
@@ -449,12 +449,14 @@ describe('Task/Check/Artifact boundary regression', () => {
       expect(reviewRunCount).toBe(2);
       expect(runner.fixTaskCalls).toHaveLength(1);
       expect(runner.fixTaskCalls[0].taskId).toBe('fix-review-findings');
-      expect(result.checkResults.filter(r => r.name === 'ai-review')).toEqual([
-        expect.objectContaining({ name: 'ai-review', status: 'pass' }),
+      expect(result.checkResults.filter(r => r.name === 'review-passed')).toEqual([
+        expect.objectContaining({ name: 'review-passed', status: 'fail' }),
+        expect.objectContaining({ name: 'review-passed', status: 'pass' }),
       ]);
       expect(persistedCheckResults.length).toBeGreaterThanOrEqual(2);
       expect(persistedCheckResults[persistedCheckResults.length - 1]).toEqual([
-        expect.objectContaining({ name: 'ai-review', status: 'pass' }),
+        expect.objectContaining({ name: 'review-passed', status: 'fail' }),
+        expect.objectContaining({ name: 'review-passed', status: 'pass' }),
       ]);
     });
   });

@@ -144,8 +144,8 @@ export interface CheckState {
 }
 
 export interface CheckSuiteChecks {
-  'build-test': CheckState;
-  'ai-review': CheckState;
+  'review-passed': CheckState;
+  'merge-ready': CheckState;
   'user-approval': CheckState;
 }
 

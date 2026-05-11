@@ -159,17 +159,17 @@ describe('Check-stage re-review convergence regressions', () => {
   });
 
   describe('AC-1: FAIL -> auto-fix -> regenerated re-review PASS -> persisted PASS -> approval requested', () => {
-    it('full convergence flow: ai-review FAIL, fix, re-review PASS, persisted PASS, approval requested', async () => {
+    it('full convergence flow: review-passed FAIL, fix, re-review PASS, persisted PASS, approval requested', async () => {
       let reviewRunCount = 0;
-      const aiReviewCheck: Check = {
-        name: 'ai-review',
+      const reviewPassedCheck: Check = {
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
-              message: 'AI review failed',
+              message: 'Review failed',
               output: {
                 verdict: 'FAIL',
                 reviewReport: FAIL_REVIEW_REPORT,
@@ -178,15 +178,20 @@ describe('Check-stage re-review convergence regressions', () => {
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'pass' as const,
-            message: 'AI review passed',
+            message: 'Review passed',
             output: {
               verdict: 'PASS',
               reviewReport: PASS_REVIEW_REPORT,
             },
           };
         },
+      };
+
+      const mergeReadyCheck: Check = {
+        name: 'merge-ready',
+        run: async () => ({ name: 'merge-ready', status: 'pass' }),
       };
 
       const userApprovalCheck = new PendingCheck();
@@ -214,13 +219,13 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, userApprovalCheck],
+        checks: [reviewPassedCheck, mergeReadyCheck, userApprovalCheck],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'repair-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
-          taskId: 'fix-review-findings',
-          title: 'Fix review findings',
+          taskId: 'repair-review-findings',
+          title: 'Repair review findings',
           status: 'completed' as const,
           artifacts: [],
           attempts: 1,
@@ -234,17 +239,15 @@ describe('Check-stage re-review convergence regressions', () => {
       expect(result.success).toBe(false);
       expect(reviewRunCount).toBe(2);
       expect(runner.fixTaskCalls).toHaveLength(1);
-      expect(runner.fixTaskCalls[0].taskId).toBe('fix-review-findings');
+      expect(runner.fixTaskCalls[0].taskId).toBe('repair-review-findings');
 
-      const latestAiReview = getLatestCheckResult(result.checkResults, 'ai-review');
-      expect(latestAiReview).toBeDefined();
-      expect(latestAiReview!.status).toBe('pass');
-      expect((latestAiReview!.output as any).verdict).toBe('PASS');
-      expect((latestAiReview!.output as any).reviewReport).toBe(PASS_REVIEW_REPORT);
-      expect(result.checkResults.filter(r => r.name === 'ai-review')).toHaveLength(1);
-      expect((latestAiReview!.output as any).snapshotSha).toBeDefined();
-      expect((latestAiReview!.output as any).reviewArtifactPath).toBe('/tmp/change/review.md');
-      expect((latestAiReview!.output as any).selfCheckArtifactPath).toBe('/tmp/change/review-self-check.md');
+      const latestReviewPassed = getLatestCheckResult(result.checkResults, 'review-passed');
+      expect(latestReviewPassed).toBeDefined();
+      expect(latestReviewPassed!.status).toBe('pass');
+      expect((latestReviewPassed!.output as any).verdict).toBe('PASS');
+      expect((latestReviewPassed!.output as any).reviewReport).toBe(PASS_REVIEW_REPORT);
+      expect(result.checkResults.filter(r => r.name === 'review-passed')).toHaveLength(2);
+      expect((latestReviewPassed!.output as any).snapshotSha).toBeDefined();
 
       expect(approvalCalls).toHaveLength(1);
       const approvalState = approvalCalls[0] as { stage: Stage; status: string; output: any };
@@ -257,41 +260,46 @@ describe('Check-stage re-review convergence regressions', () => {
     });
   });
 
-  describe('AC-2: fix-review-findings changes code and old review.md is not reused', () => {
-    it('beforeRecheckAfterFix is called for ai-review after fix-review-findings', async () => {
+  describe('AC-2: repair-review-findings changes code and old review.md is not reused', () => {
+    it('beforeRecheckAfterFix is called for review-passed after repair-review-findings', async () => {
       let reviewRunCount = 0;
       let beforeRecheckCalled = false;
       let beforeRecheckArgs: { checkName: string; fixTaskId: string } | null = null;
 
-      const aiReviewCheck: Check = {
-        name: 'ai-review',
+      const reviewPassedCheck: Check = {
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
-              message: 'AI review failed',
+              message: 'Review failed',
               output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'pass' as const,
-            message: 'AI review passed',
+            message: 'Review passed',
             output: { verdict: 'PASS', reviewReport: PASS_REVIEW_REPORT },
           };
         },
       };
 
+      const mergeReadyCheck: Check = {
+        name: 'merge-ready',
+        run: async () => ({ name: 'merge-ready', status: 'pass' }),
+      };
+
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, new PendingCheck()],
+        checks: [reviewPassedCheck, mergeReadyCheck, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'repair-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
-          taskId: 'fix-review-findings',
-          title: 'Fix review findings',
+          taskId: 'repair-review-findings',
+          title: 'Repair review findings',
           status: 'completed' as const,
           artifacts: [],
           attempts: 1,
@@ -308,8 +316,8 @@ describe('Check-stage re-review convergence regressions', () => {
 
       expect(beforeRecheckCalled).toBe(true);
       expect(beforeRecheckArgs).toEqual({
-        checkName: 'ai-review',
-        fixTaskId: 'fix-review-findings',
+        checkName: 'review-passed',
+        fixTaskId: 'repair-review-findings',
       });
     });
 
@@ -317,35 +325,40 @@ describe('Check-stage re-review convergence regressions', () => {
       let reviewRunCount = 0;
       const reviewReports: string[] = [];
 
-      const aiReviewCheck: Check = {
-        name: 'ai-review',
+      const reviewPassedCheck: Check = {
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
-              message: 'AI review failed',
+              message: 'Review failed',
               output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'pass' as const,
-            message: 'AI review passed',
+            message: 'Review passed',
             output: { verdict: 'PASS', reviewReport: PASS_REVIEW_REPORT },
           };
         },
       };
 
+      const mergeReadyCheck: Check = {
+        name: 'merge-ready',
+        run: async () => ({ name: 'merge-ready', status: 'pass' }),
+      };
+
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, new PendingCheck()],
+        checks: [reviewPassedCheck, mergeReadyCheck, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'repair-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
-          taskId: 'fix-review-findings',
-          title: 'Fix review findings',
+          taskId: 'repair-review-findings',
+          title: 'Repair review findings',
           status: 'completed' as const,
           artifacts: [],
           attempts: 1,
@@ -356,12 +369,12 @@ describe('Check-stage re-review convergence regressions', () => {
 
       const result = await runner.run(ctx);
 
-      const aiReviewResults = result.checkResults.filter(r => r.name === 'ai-review');
-      for (const r of aiReviewResults) {
+      const reviewPassedResults = result.checkResults.filter(r => r.name === 'review-passed');
+      for (const r of reviewPassedResults) {
         reviewReports.push((r.output as any).reviewReport);
       }
 
-      expect(reviewReports).toEqual([PASS_REVIEW_REPORT]);
+      expect(reviewReports).toEqual([FAIL_REVIEW_REPORT, PASS_REVIEW_REPORT]);
     });
   });
 
@@ -371,19 +384,19 @@ describe('Check-stage re-review convergence regressions', () => {
       let reviewRunCount = 0;
 
       const aiReviewCheck: Check = {
-        name: 'ai-review',
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
               message: 'AI review failed',
               output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'pass' as const,
             message: 'AI review passed',
             output: { verdict: 'PASS', reviewReport: latestReport },
@@ -405,10 +418,10 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, new PendingCheck()],
+        checks: [aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
           taskId: 'fix-review-findings',
           title: 'Fix review findings',
@@ -433,19 +446,19 @@ describe('Check-stage re-review convergence regressions', () => {
       let reviewRunCount = 0;
 
       const aiReviewCheck: Check = {
-        name: 'ai-review',
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
               message: 'AI review failed',
               output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'pass' as const,
             message: 'AI review passed',
             output: { verdict: 'PASS', reviewReport: PASS_REVIEW_REPORT },
@@ -454,10 +467,10 @@ describe('Check-stage re-review convergence regressions', () => {
       };
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, new PendingCheck()],
+        checks: [aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
           taskId: 'fix-review-findings',
           title: 'Fix review findings',
@@ -471,7 +484,7 @@ describe('Check-stage re-review convergence regressions', () => {
 
       const result = await runner.run(ctx);
 
-      const latest = getLatestCheckResult(result.checkResults, 'ai-review');
+      const latest = getLatestCheckResult(result.checkResults, 'review-passed');
       expect(latest).toBeDefined();
       expect((latest!.output as any).snapshotSha).toBe('sha-converged-001');
     });
@@ -482,19 +495,19 @@ describe('Check-stage re-review convergence regressions', () => {
       let reviewRunCount = 0;
 
       const aiReviewCheck: Check = {
-        name: 'ai-review',
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
               message: 'AI review failed',
               output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'pass' as const,
             message: 'AI review passed',
             output: { verdict: 'PASS', reviewReport: PASS_REVIEW_REPORT },
@@ -524,10 +537,10 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, new PendingCheck()],
+        checks: [aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
           taskId: 'fix-review-findings',
           title: 'Fix review findings',
@@ -550,19 +563,19 @@ describe('Check-stage re-review convergence regressions', () => {
       let reviewRunCount = 0;
 
       const aiReviewCheck: Check = {
-        name: 'ai-review',
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
               message: 'AI review failed',
               output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'pass' as const,
             message: 'AI review passed',
             output: { verdict: 'PASS', reviewReport: PASS_REVIEW_REPORT },
@@ -582,10 +595,10 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, new PendingCheck()],
+        checks: [aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
           taskId: 'fix-review-findings',
           title: 'Fix review findings',
@@ -609,19 +622,19 @@ describe('Check-stage re-review convergence regressions', () => {
       let reviewRunCount = 0;
 
       const aiReviewCheck: Check = {
-        name: 'ai-review',
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
               message: 'AI review failed',
               output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'fail' as const,
             message: 'AI review still failed',
             output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT_V2 },
@@ -646,7 +659,7 @@ describe('Check-stage re-review convergence regressions', () => {
         checks: [aiReviewCheck],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
           taskId: 'fix-review-findings',
           title: 'Fix review findings',
@@ -663,31 +676,31 @@ describe('Check-stage re-review convergence regressions', () => {
       expect(reviewRunCount).toBe(2);
       expect(approvalCalls).toHaveLength(0);
 
-      const latest = getLatestCheckResult(result.checkResults, 'ai-review');
+      const latest = getLatestCheckResult(result.checkResults, 'review-passed');
       expect(latest).toBeDefined();
       expect(latest!.status).toBe('fail');
       expect((latest!.output as any).verdict).toBe('FAIL');
       expect((latest!.output as any).reviewReport).toBe(FAIL_REVIEW_REPORT_V2);
-      expect(result.checkResults.filter(r => r.name === 'ai-review')).toHaveLength(1);
+      expect(result.checkResults.filter(r => r.name === 'review-passed')).toHaveLength(2);
     });
 
     it('latest FAIL report is the re-reviewed one, not the initial one', async () => {
       let reviewRunCount = 0;
 
       const aiReviewCheck: Check = {
-        name: 'ai-review',
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           if (reviewRunCount === 1) {
             return {
-              name: 'ai-review',
+              name: 'review-passed',
               status: 'fail' as const,
               message: 'Initial FAIL',
               output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
             };
           }
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'fail' as const,
             message: 'Re-review FAIL',
             output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT_V2 },
@@ -699,7 +712,7 @@ describe('Check-stage re-review convergence regressions', () => {
         checks: [aiReviewCheck],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
           taskId: 'fix-review-findings',
           title: 'Fix review findings',
@@ -712,7 +725,7 @@ describe('Check-stage re-review convergence regressions', () => {
 
       const result = await runner.run(ctx);
 
-      const latest = getLatestCheckResult(result.checkResults, 'ai-review');
+      const latest = getLatestCheckResult(result.checkResults, 'review-passed');
       expect((latest!.output as any).reviewReport).toBe(FAIL_REVIEW_REPORT_V2);
       expect((latest!.output as any).reviewReport).not.toBe(FAIL_REVIEW_REPORT);
     });
@@ -722,11 +735,11 @@ describe('Check-stage re-review convergence regressions', () => {
       let approvalCheckReached = false;
 
       const aiReviewCheck: Check = {
-        name: 'ai-review',
+        name: 'review-passed',
         run: async () => {
           reviewRunCount++;
           return {
-            name: 'ai-review',
+            name: 'review-passed',
             status: 'fail' as const,
             message: reviewRunCount === 1 ? 'Initial FAIL' : 'Re-review FAIL',
             output: { verdict: 'FAIL', reviewReport: reviewRunCount === 1 ? FAIL_REVIEW_REPORT : FAIL_REVIEW_REPORT_V2 },
@@ -742,13 +755,13 @@ describe('Check-stage re-review convergence regressions', () => {
         },
       };
 
-      const runner = new TestStageRunner({
-        checks: [aiReviewCheck, userApprovalCheck],
+const runner = new TestStageRunner({
+        checks: [aiReviewCheck, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
-        failurePolicies: [{ checkName: 'ai-review', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
+        failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'repair-review-findings', maxAttempts: 1 }],
         fixTaskFn: async () => ({
-          taskId: 'fix-review-findings',
+          taskId: 'repair-review-findings',
           title: 'Fix review findings',
           status: 'completed' as const,
           artifacts: [],
@@ -766,36 +779,36 @@ describe('Check-stage re-review convergence regressions', () => {
   });
 
   describe('Helper functions: getLatestCheckResult and replaceCurrentAiReviewTruth', () => {
-    it('getLatestCheckResult picks the last ai-review entry, not the first', () => {
+    it('getLatestCheckResult picks the last review-passed entry, not the first', () => {
       const results: CheckResult[] = [
-        { name: 'ai-review', status: 'fail', output: { verdict: 'FAIL' } },
+        { name: 'review-passed', status: 'fail', output: { verdict: 'FAIL' } },
         { name: 'some-other', status: 'pass' },
-        { name: 'ai-review', status: 'pass', output: { verdict: 'PASS' } },
+        { name: 'review-passed', status: 'pass', output: { verdict: 'PASS' } },
       ];
 
-      const latest = getLatestCheckResult(results, 'ai-review');
+      const latest = getLatestCheckResult(results, 'review-passed');
       expect(latest).toBeDefined();
       expect(latest!.status).toBe('pass');
       expect((latest!.output as any).verdict).toBe('PASS');
     });
 
-    it('replaceCurrentAiReviewTruth deduplicates to the latest ai-review only', () => {
+    it('replaceCurrentAiReviewTruth deduplicates to the latest review-passed only', () => {
       const results: CheckResult[] = [
-        { name: 'ai-review', status: 'fail', output: { verdict: 'FAIL' } },
+        { name: 'review-passed', status: 'fail', output: { verdict: 'FAIL' } },
         { name: 'some-other', status: 'pass' },
-        { name: 'ai-review', status: 'pass', output: { verdict: 'PASS' } },
+        { name: 'review-passed', status: 'pass', output: { verdict: 'PASS' } },
       ];
 
       const deduped = replaceCurrentAiReviewTruth([...results]);
 
-      const aiReviewEntries = deduped.filter(r => r.name === 'ai-review');
-      expect(aiReviewEntries).toHaveLength(1);
-      expect(aiReviewEntries[0].status).toBe('pass');
+      const reviewPassedEntries = deduped.filter(r => r.name === 'review-passed');
+      expect(reviewPassedEntries).toHaveLength(1);
+      expect(reviewPassedEntries[0].status).toBe('pass');
     });
 
     it('buildAuthoritativeAiReviewResult builds a result with snapshot metadata', () => {
       const checkResult: CheckResult = {
-        name: 'ai-review',
+        name: 'review-passed',
         status: 'pass',
         output: {
           verdict: 'PASS',
@@ -820,11 +833,11 @@ describe('Check-stage re-review convergence regressions', () => {
   });
 
   describe('Approval guard: non-PASS verdict blocks approval even at user-approval check', () => {
-    it('approval is not requested when latest ai-review is FAIL', async () => {
-      const aiReviewCheck: Check = {
-        name: 'ai-review',
+    it('approval is not requested when latest review-passed is FAIL', async () => {
+      const reviewPassedCheck: Check = {
+        name: 'review-passed',
         run: async () => ({
-          name: 'ai-review',
+          name: 'review-passed',
           status: 'pass' as const,
           message: 'Parsed stale artifact',
           output: { verdict: 'FAIL', reviewReport: FAIL_REVIEW_REPORT },
@@ -847,7 +860,7 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, userApprovalCheck],
+        checks: [reviewPassedCheck, userApprovalCheck],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         approvalCheckNames: ['user-approval'],
@@ -856,7 +869,7 @@ describe('Check-stage re-review convergence regressions', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain('latest AI review verdict is FAIL');
+      expect(result.message).toContain('latest review verdict is FAIL');
       expect(approvalCalls).toHaveLength(0);
     });
   });

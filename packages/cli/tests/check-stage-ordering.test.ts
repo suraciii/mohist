@@ -140,15 +140,11 @@ describe('CheckStageRunner ordering', () => {
       expect(runner.executeTasksCalls).toBe(0);
     });
 
-    it('default CheckStageRunner runs health:check and readiness checks as pre-task checks', () => {
+    it('default CheckStageRunner has no pre-task checks in simplified model', () => {
       const runner = new CheckStageRunner({ worktreePath: '/tmp/worktree' });
       const preChecks = runner.getPreTaskChecks();
 
-      expect(preChecks.map(check => check.name)).toEqual([
-        'health:check',
-        'merge-readiness',
-        'integration-health-gate-preview',
-      ]);
+      expect(preChecks.map(check => check.name)).toEqual([]);
     });
 
     it('default CheckStageRunner does not include openspec-sync-dry-run in pre-task checks', () => {
@@ -159,16 +155,16 @@ describe('CheckStageRunner ordering', () => {
       expect(checkNames).not.toContain('openspec-sync-dry-run');
     });
 
-    it('default CheckStageRunner runs AI review and user approval after tasks', () => {
+    it('default CheckStageRunner runs review-passed, merge-ready, and user-approval after tasks', () => {
       const worktreePath = path.join(tmpDir, 'worktree');
       fs.mkdirSync(worktreePath, { recursive: true });
       const runner = new CheckStageRunner({ worktreePath });
       const checks = runner.getChecks();
 
-      expect(checks.map(check => check.name)).toEqual(['ai-review', 'user-approval']);
+      expect(checks.map(check => check.name)).toEqual(['review-passed', 'merge-ready', 'user-approval']);
     });
 
-    it('default CheckStageRunner.run blocks review artifact generation when health:check fails', async () => {
+    it('default CheckStageRunner.run does not run pre-task health checks in simplified model', async () => {
       const worktreePath = path.join(tmpDir, 'worktree');
       fs.mkdirSync(worktreePath, { recursive: true });
       fs.writeFileSync(path.join(worktreePath, 'workflow.yaml'), [
@@ -189,12 +185,8 @@ describe('CheckStageRunner ordering', () => {
         acpOptions: { cwd: worktreePath, issueNumber: 42 } as any,
       });
 
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(false);
-      expect(result.checkResults?.map(check => check.name)).toEqual(['health:check']);
-      expect(artifactExists(tmpDir, 42, 'review.md')).toBe(false);
-      expect(artifactExists(tmpDir, 42, 'review-self-check.md')).toBe(false);
+      const preChecks = runner.getPreTaskChecks();
+      expect(preChecks.map(check => check.name)).toEqual([]);
     });
   });
 
@@ -322,10 +314,14 @@ describe('CheckStageRunner ordering', () => {
       const runner = new TestStageRunner();
       runner.preTaskChecks = [makePassCheck('build-test')];
       runner.postTaskChecks = [
-        makeCheck('ai-review', async () => ({
-          name: 'ai-review',
+        makeCheck('review-passed', async () => ({
+          name: 'review-passed',
           status: 'pass' as const,
           output: { verdict: 'PASS', reviewReport: 'Mock review report' },
+        })),
+        makeCheck('merge-ready', async () => ({
+          name: 'merge-ready',
+          status: 'pass' as const,
         })),
         makeCheck('user-approval', async () => ({
           name: 'user-approval', status: 'pending', message: 'Waiting for approval',
@@ -349,11 +345,11 @@ describe('CheckStageRunner ordering', () => {
       expect(approvalCalls).toHaveLength(1);
     });
 
-    it('approval_requested not emitted when AI review fails', async () => {
+    it('approval_requested not emitted when review-passed fails', async () => {
       const runner = new TestStageRunner();
       runner.preTaskChecks = [makePassCheck('build-test')];
       runner.postTaskChecks = [
-        makeFailCheck('ai-review', 'AI review failed'),
+        makeFailCheck('review-passed', 'Review failed'),
         makeCheck('user-approval', async () => ({
           name: 'user-approval', status: 'pending', message: 'Waiting for approval',
         })),
@@ -367,20 +363,20 @@ describe('CheckStageRunner ordering', () => {
       expect(approvalCalls).toHaveLength(0);
     });
 
-    it('ai-review check not run when build-test fails', async () => {
+    it('review-passed check not run when build-test fails', async () => {
       const alwaysFail = makeFailCheck('build-test', 'Build failed');
 
-      const aiReviewCheck = makePassCheck('ai-review');
-      const aiReviewRun = vi.spyOn(aiReviewCheck, 'run');
+      const reviewPassedCheck = makePassCheck('review-passed');
+      const reviewPassedRun = vi.spyOn(reviewPassedCheck, 'run');
 
       const runner = new TestStageRunner();
       runner.preTaskChecks = [alwaysFail];
-      runner.postTaskChecks = [aiReviewCheck];
+      runner.postTaskChecks = [reviewPassedCheck];
 
       const ctx = createMockContext(tmpDir);
       await runner.run(ctx);
 
-      expect(aiReviewRun).not.toHaveBeenCalled();
+      expect(reviewPassedRun).not.toHaveBeenCalled();
     });
   });
 

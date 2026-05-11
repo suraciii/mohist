@@ -166,18 +166,19 @@ describe('Check-stage approval requires health:check pass', () => {
 
     it('health:check pass followed by all checks pass results in pending approval', async () => {
       const healthGatePassCheck = new PassCheck('health:check');
-      const aiReviewCheck: Check = {
-        name: 'ai-review',
+      const reviewPassedCheck: Check = {
+        name: 'review-passed',
         run: async () => ({
-          name: 'ai-review',
+          name: 'review-passed',
           status: 'pass' as const,
           output: { verdict: 'PASS', reviewReport: 'Mock review report' },
         }),
       };
+      const mergeReadyCheck = new PassCheck('merge-ready');
       const userApprovalCheck = new UserApprovalCheck(Stage.Check);
 
       const runner = new HealthGateCheckRunner({
-        checks: [healthGatePassCheck, aiReviewCheck, userApprovalCheck],
+        checks: [healthGatePassCheck, reviewPassedCheck, mergeReadyCheck, userApprovalCheck],
         nextStage: Stage.Done,
         stage: Stage.Check,
       });
@@ -195,8 +196,8 @@ describe('Check-stage approval requires health:check pass', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.checkResults).toHaveLength(3);
-      expect(result.checkResults[2].status).toBe('pending');
+      expect(result.checkResults).toHaveLength(4);
+      expect(result.checkResults[3].status).toBe('pending');
       expect(ctx.issueRepo.setApprovalState).toHaveBeenCalled();
     });
 

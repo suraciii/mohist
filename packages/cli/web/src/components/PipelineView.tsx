@@ -874,8 +874,8 @@ function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
 
   const checkOutput = checkExecution?.checkResults
     ?.find(c => c.name === 'openspec-sync-dry-run')?.output as OpenSpecSyncOutput | undefined
-  const mergeReadinessOutput = checkExecution?.checkResults
-    ?.find(c => c.name === 'merge-readiness')?.output as MergeReadinessOutput | undefined
+  const mergeReadinessOutput = (checkExecution?.checkResults
+    ?.find(c => c.name === 'merge-ready' || c.name === 'merge-readiness')?.output as MergeReadinessOutput | undefined)
   const healthGatePolicyOutput = checkExecution?.checkResults
     ?.find(c => c.name === 'integration-health-gate-preview')?.output as IntegrationHealthGatePolicy | undefined
 

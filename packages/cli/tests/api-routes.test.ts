@@ -381,7 +381,7 @@ describe('API Routes', () => {
 
         expect(response.status).toBe(409);
         expect(response.body.success).toBe(false);
-        expect(response.body.error).toContain("latest ai-review verdict");
+        expect(response.body.error).toContain("latest review verdict");
         expect(enqueueSpy).not.toHaveBeenCalled();
       });
 

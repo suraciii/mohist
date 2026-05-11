@@ -384,7 +384,7 @@ Content.`, 'utf-8');
     expect(conflicts[0].type).toBe('missing_source');
   });
 
-  it('CheckStageRunner default preTaskChecks does not include openspec-sync-dry-run', async () => {
+  it('CheckStageRunner default postTaskChecks are review-passed, merge-ready, user-approval', async () => {
     const worktreePath = tmpDir;
     fs.mkdirSync(worktreePath, { recursive: true });
     fs.writeFileSync(path.join(worktreePath, 'workflow.yaml'), 'stages:\n  - stage: check\n', 'utf-8');
@@ -392,10 +392,13 @@ Content.`, 'utf-8');
     const { CheckStageRunner } = await import('../../src/workflow/check-stage-runner');
     const runner = new CheckStageRunner({ worktreePath });
     const preChecks = runner.getPreTaskChecks();
-    const checkNames = preChecks.map((c: any) => c.name);
+    const postChecks = runner.getChecks();
 
-    expect(checkNames).not.toContain('openspec-sync-dry-run');
-    expect(checkNames).toContain('health:check');
-    expect(checkNames).toContain('merge-readiness');
+    expect(preChecks).toHaveLength(0);
+    const postCheckNames = postChecks.map((c: any) => c.name);
+    expect(postCheckNames).not.toContain('openspec-sync-dry-run');
+    expect(postCheckNames).toContain('review-passed');
+    expect(postCheckNames).toContain('merge-ready');
+    expect(postCheckNames).toContain('user-approval');
   });
 });

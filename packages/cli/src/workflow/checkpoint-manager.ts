@@ -31,6 +31,15 @@ export class CheckpointManager {
     this.repo.delete(issueNumber, stage);
   }
 
+  deleteStep(issueNumber: number, stage: string, step: string): void {
+    const current = this.getResumeSteps(issueNumber, stage);
+    const idx = current.indexOf(step);
+    if (idx >= 0) {
+      current.splice(idx, 1);
+      this.repo.upsert(issueNumber, stage, current, null);
+    }
+  }
+
   deleteAll(issueNumber: number): void {
     this.repo.deleteAll(issueNumber);
   }
