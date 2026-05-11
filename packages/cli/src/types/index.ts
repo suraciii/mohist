@@ -1,17 +1,14 @@
 export enum Stage {
-  Draft = 'draft',
-  Explore = 'explore',
+  Backlog = 'backlog',
   Plan = 'plan',
   Build = 'build',
   Check = 'check',
   Integrate = 'integrate',
   Done = 'done',
-  Backlog = 'backlog'
 }
 
 export const STAGE_ORDER: Stage[] = [
-  Stage.Draft,
-  Stage.Explore,
+  Stage.Backlog,
   Stage.Plan,
   Stage.Build,
   Stage.Check,
@@ -20,14 +17,12 @@ export const STAGE_ORDER: Stage[] = [
 ];
 
 export const STAGE_TRANSITIONS: Record<Stage, Stage[]> = {
-  [Stage.Draft]: [Stage.Explore, Stage.Plan],
-  [Stage.Explore]: [Stage.Plan],
+  [Stage.Backlog]: [Stage.Plan],
   [Stage.Plan]: [Stage.Build],
   [Stage.Build]: [Stage.Check],
   [Stage.Check]: [Stage.Integrate, Stage.Build],
   [Stage.Integrate]: [Stage.Done, Stage.Build],
   [Stage.Done]: [],
-  [Stage.Backlog]: [Stage.Plan]
 };
 
 export function isValidTransition(from: Stage, to: Stage): boolean {

@@ -68,7 +68,7 @@ describe('connectSSE', () => {
 
     dataCallback(
       Buffer.from(
-        'event: agent_started\ndata: {"issueId":"1"}\n\nevent: stage_changed\ndata: {"from":"draft","to":"designing"}\n\n'
+        'event: agent_started\ndata: {"issueId":"1"}\n\nevent: stage_changed\ndata: {"from":"backlog","to":"plan"}\n\n'
       )
     );
 
@@ -77,7 +77,7 @@ describe('connectSSE', () => {
     expect(onEvent).toHaveBeenNthCalledWith(
       2,
       'stage_changed',
-      '{"from":"draft","to":"designing"}'
+      '{"from":"backlog","to":"plan"}'
     );
   });
 

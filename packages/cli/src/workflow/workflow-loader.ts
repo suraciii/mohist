@@ -36,15 +36,9 @@ export interface WorkflowConfigWithDetection extends WorkflowConfig {
 const DEFAULT_WORKFLOW: WorkflowConfig = {
   stages: [
     {
-      stage: 'explore',
-      prompt:
-        '探索 issue #{issue.number}: {issue.title}，分析问题背景和 codebase',
-      approval: false,
-    },
-    {
       stage: 'plan',
       prompt:
-        '基于探索结果，为 issue #{issue.number}: {issue.title} 制定实现计划',
+        '为 issue #{issue.number}: {issue.title} 制定实现计划',
       approval: true,
     },
     {
@@ -55,6 +49,11 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
     {
       stage: 'check',
       prompt: '审查实现成果，检查功能正确性和代码质量',
+      approval: true,
+    },
+    {
+      stage: 'integrate',
+      prompt: '将实现成果合并到主分支，验证完整性',
       approval: true,
     },
     {

@@ -6,11 +6,12 @@ export type IssueModelOverride = {
 };
 
 export const EXECUTABLE_MODEL_STAGES = [
-  'explore',
+  'backlog',
   'plan',
   'build',
   'check',
   'integrate',
+  'done',
 ] as const;
 
 export type ExecutableModelStage = (typeof EXECUTABLE_MODEL_STAGES)[number];

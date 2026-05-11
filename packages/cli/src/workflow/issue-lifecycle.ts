@@ -46,10 +46,10 @@ export function classifyMergeDelivery(issue: Issue): MergeDeliveryStatus {
   }
 
   if (mergeState === null || mergeState === undefined) {
-    if (stage === Stage.Draft || stage === Stage.Plan || stage === Stage.Build) {
+    if (stage === Stage.Plan || stage === Stage.Build) {
       return 'not-ready';
     }
-    if (stage === Stage.Check) {
+    if (stage === Stage.Check || stage === Stage.Backlog) {
       return 'not-ready';
     }
     return 'unknown';

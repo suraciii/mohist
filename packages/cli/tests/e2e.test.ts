@@ -126,7 +126,7 @@ describe('E2E: Single Issue Complete Flow', () => {
       expect(startResponse.body.data.message).toContain('enqueued');
       expect(startResponse.body.data.taskId).toBeDefined();
 
-      // Issue remains in Draft until pipeline actually runs
+      // Issue remains in Backlog until pipeline actually runs
       const showResponse1 = await request(baseUrl).get('/api/issues/1');
       expect(showResponse1.status).toBe(200);
       expect(showResponse1.body.data.stage).toBe(Stage.Backlog);
@@ -136,7 +136,7 @@ describe('E2E: Single Issue Complete Flow', () => {
       expect(statusResponse.body.data.issues).toBe(1);
     });
 
-    it('should prevent starting a non-draft issue', async () => {
+    it('should prevent starting a non-backlog issue', async () => {
       const baseUrl = getAppUrl();
 
       await request(baseUrl)
@@ -166,7 +166,7 @@ describe('E2E: Single Issue Complete Flow', () => {
       const startResponse = await request(baseUrl).post('/api/issues/2/start');
       expect(startResponse.status).toBe(202);
 
-      // All issues remain in Draft since pipeline runs async and mock has no deps
+      // All issues remain in Backlog since pipeline runs async and mock has no deps
       const response = await request(baseUrl).get('/api/issues');
       const issues = response.body.data;
 
@@ -179,8 +179,8 @@ describe('E2E: Single Issue Complete Flow', () => {
       expect(issue3.stage).toBe(Stage.Backlog);
 
       // Just verify we can query by stage without errors
-      const draftResponse = await request(baseUrl).get('/api/issues?stage=draft');
-      expect(draftResponse.status).toBe(200);
+      const backlogResponse = await request(baseUrl).get('/api/issues?stage=backlog');
+      expect(backlogResponse.status).toBe(200);
 
       const planResponse = await request(baseUrl).get('/api/issues?stage=plan');
       expect(planResponse.status).toBe(200);

@@ -816,7 +816,7 @@ function SpecialStatePanel({
 
   if (readOnly) return null
 
-  if (issue.stage === Stage.Backlog || issue.stage === Stage.Draft) {
+  if (issue.stage === Stage.Backlog) {
     return (
       <div className="flex justify-center py-4">
         <button
@@ -1121,7 +1121,7 @@ export function PipelineView({ issue }: { issue: Issue }) {
 
   const isClosed = issue.status === IssueStatus.Closed
   const isCompleted = issue.status === IssueStatus.Completed
-  const isBacklog = issue.stage === Stage.Backlog || issue.stage === Stage.Draft
+  const isBacklog = issue.stage === Stage.Backlog
   const readOnly = isClosed
 
   const getDefaultStage = useCallback((): PipelineStage => {

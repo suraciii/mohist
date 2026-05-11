@@ -104,15 +104,6 @@ describe('POST /api/issues/:number/rebase', () => {
       expect(res.body.error).toContain('Rebase not available');
       expect(res.body.error).toContain('backlog');
     });
-
-    it('should return 400 for explore stage', async () => {
-      const issue = issueService.create({ projectId, title: 'Explore Issue' });
-      issueService.transitionToStage(issue.id, Stage.Explore);
-      const { server } = makeServer();
-      const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Rebase not available');
-    });
   });
 
   describe('done stage', () => {

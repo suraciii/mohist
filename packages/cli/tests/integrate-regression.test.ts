@@ -135,7 +135,6 @@ function createDisabledHealthGateWorkflow(tmpDir: string) {
   const workflowYaml = path.join(tmpDir, 'workflow.yaml');
   fs.writeFileSync(workflowYaml, `
 stages:
-  - stage: explore
   - stage: plan
   - stage: build
   - stage: check
@@ -157,7 +156,6 @@ function createEnabledHealthGateWorkflow(tmpDir: string) {
   const workflowYaml = path.join(tmpDir, 'workflow.yaml');
   fs.writeFileSync(workflowYaml, `
 stages:
-  - stage: explore
   - stage: plan
   - stage: build
   - stage: check
