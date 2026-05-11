@@ -797,6 +797,106 @@ describe('Timeout path cleanup and cancellation', () => {
   });
 });
 
+describe('QuietThresholdMonitor: restart preserves promise for Promise.race', () => {
+  it('should resolve after threshold when no restart occurs', async () => {
+    const { createQuietThresholdMonitorForTest } = await import('../src/agent-runtime/quiet-threshold-monitor');
+    vi.useFakeTimers();
+    const monitor = createQuietThresholdMonitorForTest(100);
+    monitor.start();
+    const p = monitor.promise();
+    vi.advanceTimersByTime(99);
+    let resolved = false;
+    p.then(() => { resolved = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+    vi.advanceTimersByTime(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('should keep same promise reference after restart', async () => {
+    const { createQuietThresholdMonitorForTest } = await import('../src/agent-runtime/quiet-threshold-monitor');
+    vi.useFakeTimers();
+    const monitor = createQuietThresholdMonitorForTest(100);
+    monitor.start();
+    const p1 = monitor.promise();
+    monitor.restart();
+    const p2 = monitor.promise();
+    expect(p1).toBe(p2);
+    vi.advanceTimersByTime(99);
+    let resolved = false;
+    p1.then(() => { resolved = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+    vi.advanceTimersByTime(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('should delay resolution when restart resets timer after notifications', async () => {
+    const { createQuietThresholdMonitorForTest } = await import('../src/agent-runtime/quiet-threshold-monitor');
+    vi.useFakeTimers();
+    const monitor = createQuietThresholdMonitorForTest(100);
+    monitor.start();
+    const p = monitor.promise();
+
+    vi.advanceTimersByTime(50);
+    monitor.restart();
+
+    vi.advanceTimersByTime(99);
+    let resolved = false;
+    p.then(() => { resolved = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+
+    vi.advanceTimersByTime(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('should not resolve after clear', async () => {
+    const { createQuietThresholdMonitorForTest } = await import('../src/agent-runtime/quiet-threshold-monitor');
+    vi.useFakeTimers();
+    const monitor = createQuietThresholdMonitorForTest(100);
+    monitor.start();
+    const p = monitor.promise();
+    monitor.clear();
+    vi.advanceTimersByTime(200);
+    let resolved = false;
+    p.then(() => { resolved = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it('should handle multiple restarts and still resolve correctly', async () => {
+    const { createQuietThresholdMonitorForTest } = await import('../src/agent-runtime/quiet-threshold-monitor');
+    vi.useFakeTimers();
+    const monitor = createQuietThresholdMonitorForTest(100);
+    monitor.start();
+    const p = monitor.promise();
+
+    for (let i = 0; i < 10; i++) {
+      vi.advanceTimersByTime(30);
+      monitor.restart();
+    }
+
+    vi.advanceTimersByTime(99);
+    let resolved = false;
+    p.then(() => { resolved = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+
+    vi.advanceTimersByTime(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(true);
+    vi.useRealTimers();
+  });
+});
+
 describe('Model override behavior', () => {
   beforeEach(() => {
     mockPromptFn.mockReset();
