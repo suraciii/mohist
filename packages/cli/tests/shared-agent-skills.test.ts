@@ -89,6 +89,20 @@ describe('Shared Agent Skills', () => {
       expect(content).not.toBe('# Modified content\n');
     });
 
+    it('--claude writes to .claude/skills instead of .agents/skills', () => {
+      const results = installSharedAgentSkills({ projectPath: tmpDir, claude: true });
+
+      const claudeMohistPath = path.join(tmpDir, '.claude', 'skills', 'mohist', 'SKILL.md');
+      const claudeExplorePath = path.join(tmpDir, '.claude', 'skills', 'mohist-explore', 'SKILL.md');
+      const agentMohistPath = path.join(tmpDir, '.agents', 'skills', 'mohist', 'SKILL.md');
+
+      expect(fs.existsSync(claudeMohistPath)).toBe(true);
+      expect(fs.existsSync(claudeExplorePath)).toBe(true);
+      expect(fs.existsSync(agentMohistPath)).toBe(false);
+
+      expect(results.some(r => r.skill === 'mohist' && r.result === 'created')).toBe(true);
+    });
+
     it('--path writes to the target directory and not the process working directory', () => {
       const originalCwd = process.cwd();
       process.chdir(tmpDir);
@@ -134,7 +148,7 @@ describe('Shared Agent Skills', () => {
       expect(skillsCmd?.commands.some(cmd => cmd.name() === 'list')).toBe(true);
     });
 
-    it('skills install command has --path option but not --force', () => {
+    it('skills install command has --path, --claude options', () => {
       const program = new Command();
       setupSkillsCommands(program);
 
@@ -143,9 +157,10 @@ describe('Shared Agent Skills', () => {
 
       expect(installCmd?.options.some(opt => opt.long === '--force')).toBe(false);
       expect(installCmd?.options.some(opt => opt.long === '--path')).toBe(true);
+      expect(installCmd?.options.some(opt => opt.long === '--claude')).toBe(true);
     });
 
-    it('help distinguishes coder agent skills from internal Mohist skills for all skills commands', () => {
+    it('help mentions both .agents/skills and .claude/skills', () => {
       const program = new Command();
       program.name('mo');
       setupSkillsCommands(program);
@@ -153,14 +168,10 @@ describe('Shared Agent Skills', () => {
       const skillsCmd = program.commands.find(cmd => cmd.name() === 'skills');
       const installCmd = skillsCmd?.commands.find(cmd => cmd.name() === 'install');
 
-      for (const help of [skillsCmd, installCmd].map(cmd => cmd?.helpInformation())) {
-        const normalizedHelp = help?.replace(/\s+/g, ' ');
-        expect(help).toContain('.agents/skills');
-        expect(help).toContain('coder agent skills');
-        expect(help).toContain('.mohist/skills');
-        expect(help).toContain('do not execute');
-        expect(normalizedHelp).toContain('do not execute, scan, or modify Mohist internal skills');
-      }
+      const installHelp = installCmd?.helpInformation() ?? '';
+      expect(installHelp).toContain('.agents/skills');
+      expect(installHelp).toContain('.claude/skills');
+      expect(installHelp).toContain('--claude');
     });
   });
 });

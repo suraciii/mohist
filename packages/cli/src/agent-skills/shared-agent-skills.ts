@@ -23,11 +23,16 @@ function ensureDir(dirPath: string): void {
 
 export interface InstallOptions {
   projectPath?: string;
+  claude?: boolean;
+}
+
+function skillsDirName(claude: boolean): string {
+  return claude ? '.claude' : '.agents';
 }
 
 export function installSharedAgentSkills(options: InstallOptions = {}): SkillOperationResult[] {
   const basePath = options.projectPath || process.cwd();
-  const skillsDir = path.join(basePath, '.agents', 'skills');
+  const skillsDir = path.join(basePath, skillsDirName(options.claude ?? false), 'skills');
   const results: SkillOperationResult[] = [];
 
   for (const name of getSharedSkillNames()) {
