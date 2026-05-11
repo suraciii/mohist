@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Publish recovery verb spec deltas for API, CLI, and Web UI",
+      "spec": "specs/reopen-resume/spec.md#recovery-verbs-contract",
+      "description": "Create the change-local spec deltas for `reopen-resume`, `http-api`, `cli-interface`, and `web-ui` so this change has explicit SHALL requirements before code implementation. The deltas should capture that `reopen` is closed-only, `resume` handles paused/interrupted recovery, `restart` is removed or deprecated, and blocked user-facing labels become failure-oriented guidance.",
+      "acceptanceCriteria": [
+        "The change directory contains spec delta files for reopen-resume, http-api, cli-interface, and web-ui",
+        "The spec deltas define reopen as closed-only and resume as the recovery action for paused/interrupted issues",
+        "The spec deltas define restart as unavailable or deprecated with guidance to retry/rerun/rewind",
+        "The spec deltas define Web/CLI user-facing labels and actions consistent with the proposal and design"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "openspec/changes/178-refactor-workflow-restart/specs/",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "This change currently has no spec delta files; publish them first so implementation tasks have stable acceptance anchors.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        215255
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Implement backend recovery semantics and split reopen from resume",
+      "spec": "specs/http-api/spec.md#resume-retry-rerun-reopen-contract",
+      "description": "Add a shared recovery-semantics decision path in the backend and use it to enforce distinct meanings for `reopen`, `resume`, `retry`, `rerun`, and deprecated `restart`. This task should narrow `IssueService.reopen()` to closed issues, add `POST /api/issues/:number/resume` for paused/interrupted recovery, update retry/rerun gating to stop depending directly on `status === blocked`, and convert `/restart` into a clear migration error instead of a working reset path.",
+      "acceptanceCriteria": [
+        "POST /api/issues/:number/reopen succeeds only for closed issues and no longer auto-enqueues resume-pipeline for blocked, paused, or interrupted issues",
+        "POST /api/issues/:number/resume resumes paused or interrupted issues without changing stage or clearing checkpoints",
+        "POST /api/issues/:number/retry no longer resets issues to backlog when no checkpoint exists and no longer requires a raw status===blocked check as its sole eligibility rule",
+        "POST /api/issues/:number/restart returns a clear deprecation error instructing callers to use retry, rerun, or rewind instead",
+        "Backend error messages no longer recommend restart in blocked or failed recovery paths",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Implement the shared recovery classification in the service/domain layer even if the first consumer is the issues API. Avoid introducing implicit reset-to-backlog fallback.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        506093
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Align CLI recovery commands and guidance with the new verb model",
+      "spec": "specs/cli-interface/spec.md#issue-recovery-verbs-are-user-intent-based",
+      "description": "Update CLI issue commands and output so `reopen` means reopening closed issues only, while `resume` is the explicit action for paused or interrupted work. Remove any restart-oriented help or error guidance and make blocked/failed paths point to `retry`, `rerun`, or future `rewind` commands instead.",
+      "acceptanceCriteria": [
+        "`mo issue reopen <number>` only targets closed issues and no longer acts as a generic resume path",
+        "`mo issue resume <number>` calls the dedicated resume API and is described as resuming paused or interrupted work",
+        "CLI help and command output do not mention Restart as an issue recovery action",
+        "Blocked or failed CLI guidance points to retry, rerun, or rewind rather than restart",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "This task consumes the new backend routes and messages from T-002, so it must not guess old reopen behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        476977
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Update Web issue status surfaces to show intent-based recovery actions",
+      "spec": "specs/web-ui/spec.md#issue-recovery-actions-match-user-intent",
+      "description": "Refactor Web issue cards, detail panels, status helpers, and API client calls so user-facing recovery actions match the new verb model. Closed issues should show Reopen, paused/interrupted issues should show Resume, failed or needs-action issues should show Retry and Rerun Stage, and Blocked should be replaced with failure-oriented labels such as Needs action or Failed while keeping diagnostic evidence visible.",
+      "acceptanceCriteria": [
+        "Web UI does not show any Restart action for issue recovery",
+        "Closed issues show Reopen and do not reuse the interrupted resume flow",
+        "Paused and interrupted issues show Resume using the dedicated resume API",
+        "Blocked user-facing labels are replaced by Needs action or Failed while blockedReason remains visible as diagnostic evidence",
+        "Failed or needs-action issue surfaces offer Retry and Rerun Stage actions consistent with backend eligibility",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueCard.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Prefer consuming shared API semantics over re-encoding blocked/interrupted decisions independently in the UI.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        476413
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Add backend regression coverage for recovery routing and restart deprecation",
+      "spec": "specs/http-api/spec.md#resume-retry-rerun-reopen-contract",
+      "description": "Add or update backend tests that lock in the new recovery model across service and API boundaries. The regression suite should prove reopen is closed-only, resume handles paused/interrupted, retry no longer falls back to backlog reset, and restart returns migration guidance instead of performing work.",
+      "acceptanceCriteria": [
+        "Tests cover IssueService.reopen() rejecting blocked, paused, and interrupted issues",
+        "Tests cover POST /api/issues/:number/resume succeeding for paused or interrupted issues and preserving stage",
+        "Tests cover POST /api/issues/:number/reopen only reopening closed issues",
+        "Tests cover POST /api/issues/:number/restart returning a deprecation error without mutating stage or status",
+        "Tests cover retry rejecting no-checkpoint recovery instead of resetting to backlog",
+        "Relevant backend tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Mirror the contract in tests so future rewind work can build on a stable verb boundary.",
+      "attempts": 4,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        539407,
+        1918096,
+        1939872,
+        920268,
+        271222,
+        419478
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Verify CLI and Web recovery behavior end to end",
+      "spec": "specs/web-ui/spec.md#issue-recovery-actions-match-user-intent",
+      "description": "Add focused UI and CLI-facing regression coverage and run the final verification commands for this change. This task should prove the visible labels, buttons, and command guidance are consistent with the backend recovery model and that Restart has disappeared from user-facing recovery flows.",
+      "acceptanceCriteria": [
+        "Frontend or integration tests cover closed -> Reopen, paused/interrupted -> Resume, and failed/needs-action -> Retry/Rerun visibility",
+        "CLI-facing tests or snapshots cover resume vs reopen guidance and absence of restart wording",
+        "No user-facing recovery surface still renders the label Restart",
+        "npm test passes",
+        "npm run build passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Verified CLI/Web recovery behavior and passing repository checks",
+      "dependsOn": [
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "Final validation task tying together backend semantics, CLI wording, and Web presentation.",
+      "attempts": 4,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        746030,
+        1925350,
+        1317809
+      ]
+    }
+  ]
+}

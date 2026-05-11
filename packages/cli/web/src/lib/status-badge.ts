@@ -14,3 +14,22 @@ export function statusBadge(status: IssueStatus): string {
       return 'text-gray-700 bg-gray-50'
   }
 }
+
+export function statusLabel(status: IssueStatus): string {
+  switch (status) {
+    case IssueStatus.Active:
+      return 'Active'
+    case IssueStatus.Paused:
+      return 'Paused'
+    case IssueStatus.Blocked:
+      return 'Needs Action'
+    case IssueStatus.Interrupted:
+      return 'Interrupted'
+    case IssueStatus.Closed:
+      return 'Closed'
+    case IssueStatus.Completed:
+      return 'Completed'
+    default:
+      return status
+  }
+}

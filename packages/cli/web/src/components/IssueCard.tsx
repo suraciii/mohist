@@ -106,8 +106,8 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const isClosed = issue.status === IssueStatus.Closed
   const isInterrupted = issue.status === IssueStatus.Interrupted
 
-  const reopenMutation = useMutation({
-    mutationFn: () => api.reopenIssue(issue.number),
+  const resumeMutation = useMutation({
+    mutationFn: () => api.resumeIssue(issue.number),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -156,7 +156,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
 
       {isBlocked && (
         <div className="absolute inset-0 bg-red-100/40 z-10 flex items-center justify-center">
-          <span className="text-sm font-semibold text-red-700">Blocked</span>
+          <span className="text-sm font-semibold text-red-700">Needs Action</span>
         </div>
       )}
 
@@ -243,12 +243,12 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                reopenMutation.mutate()
+                resumeMutation.mutate()
               }}
-              disabled={reopenMutation.isPending}
+              disabled={resumeMutation.isPending}
               className="rounded bg-orange-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
             >
-              {reopenMutation.isPending ? 'Resuming...' : 'Resume'}
+              {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
             </button>
           </div>
         )}
