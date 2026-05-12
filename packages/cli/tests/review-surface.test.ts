@@ -632,4 +632,277 @@ describe('Issue Review Surface Regression Tests', () => {
       server.close();
     });
   });
+
+  describe('Merge-forward issue diff regression', () => {
+    it('excludes base-branch changes from issue diff when issue branch has merged base forward', async () => {
+      const project = await projectService.create({ name: 'MergeForwardDiff', path: repoDir });
+      projectService.setCurrent(project);
+
+      const git = promisify(execFile);
+
+      fs.writeFileSync(path.join(repoDir, 'base.txt'), 'base content');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'base commit on main'], { cwd: repoDir });
+
+      const issue = issueService.create({ projectId: project.id, title: 'Merge Forward Issue' });
+      const branchName = `mo/issue-${issue.number}`;
+
+      await git('git', ['checkout', '-b', branchName], { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'issue-only.txt'), 'issue only');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'issue-only commit'], { cwd: repoDir });
+
+      fs.writeFileSync(path.join(repoDir, 'issue-only-2.txt'), 'issue only 2');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'second issue-only'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+      await git('git', ['merge', branchName, '-m', 'merge issue branch into main'], { cwd: repoDir });
+
+      await git('git', ['checkout', branchName], { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'issue-only.txt'), 'issue modified after merge');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'update issue-only after merge'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'main-only.txt'), 'main only file');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'main-only commit after merge'], { cwd: repoDir });
+
+      await git('git', ['checkout', branchName], { cwd: repoDir });
+      await git('git', ['merge', 'main', '-m', 'merge main into issue branch'], { cwd: repoDir });
+
+      fs.writeFileSync(path.join(repoDir, 'another-issue.txt'), 'another issue file');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'issue-only change after merge'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+
+      const worktreeDir = path.join(os.homedir(), '.mohist', 'projects', 'mergeforwarddiff', 'worktrees', `issue-${issue.number}`);
+      fs.mkdirSync(worktreeDir, { recursive: true });
+
+      const { WorktreeManager } = await import('../src/git/worktree-manager');
+      const wm = new WorktreeManager();
+
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, wm, undefined, agentRunner));
+      const server = createTestServer(app);
+
+      const diffResponse = await request(server).get(`/api/issues/${issue.number}/diff`);
+
+      expect(diffResponse.status).toBe(200);
+      expect(diffResponse.body.success).toBe(true);
+      expect(diffResponse.body.data.available).toBe(true);
+
+      const filePaths = diffResponse.body.data.files.map((f: any) => f.file);
+      expect(filePaths).toContain('another-issue.txt');
+      expect(filePaths).toContain('issue-only.txt');
+      expect(filePaths).not.toContain('base.txt');
+      expect(filePaths).not.toContain('issue-only-2.txt');
+
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+      server.close();
+    });
+
+    it('keeps diff summary and per-file patch consistent after merge-forward range change', async () => {
+      const project = await projectService.create({ name: 'MergeConsistentDiff', path: repoDir });
+      projectService.setCurrent(project);
+
+      const git = promisify(execFile);
+
+      fs.writeFileSync(path.join(repoDir, 'shared.txt'), 'shared content v1');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'initial shared file'], { cwd: repoDir });
+
+      const issue = issueService.create({ projectId: project.id, title: 'Consistent Diff Issue' });
+      const branchName = `mo/issue-${issue.number}`;
+
+      await git('git', ['checkout', '-b', branchName], { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'shared.txt'), 'shared content v2');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'update shared on issue branch'], { cwd: repoDir });
+
+      fs.writeFileSync(path.join(repoDir, 'only-issue.txt'), 'only on issue branch');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'add only-issue file'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+      await git('git', ['merge', branchName, '-m', 'merge issue into main'], { cwd: repoDir });
+
+      await git('git', ['checkout', branchName], { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'shared.txt'), 'shared content v3');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'update shared after merge'], { cwd: repoDir });
+      await git('git', ['merge', 'main', '-m', 'merge main back'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+
+      const worktreeDir = path.join(os.homedir(), '.mohist', 'projects', 'mergeconsistentdiff', 'worktrees', `issue-${issue.number}`);
+      fs.mkdirSync(worktreeDir, { recursive: true });
+
+      const { WorktreeManager } = await import('../src/git/worktree-manager');
+      const wm = new WorktreeManager();
+
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, wm, undefined, agentRunner));
+      const server = createTestServer(app);
+
+      const diffResponse = await request(server).get(`/api/issues/${issue.number}/diff`);
+
+      expect(diffResponse.status).toBe(200);
+      expect(diffResponse.body.data.available).toBe(true);
+
+      const files = diffResponse.body.data.files;
+      const summary = diffResponse.body.data.summary;
+
+      expect(files.length).toBe(summary.filesChanged);
+
+      const reportedFiles = new Set(files.map((f: any) => f.file));
+      if (summary.filesChanged > 0) {
+        for (const file of files) {
+          if (!file.isBinary && file.diff) {
+            expect(file.diff).toContain('diff --git');
+          }
+        }
+      }
+
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+      server.close();
+    });
+
+    it('does not broaden commit diff behavior after two-dot fix', async () => {
+      const project = await projectService.create({ name: 'CommitDiffUnchanged', path: repoDir });
+      projectService.setCurrent(project);
+
+      const git = promisify(execFile);
+
+      fs.writeFileSync(path.join(repoDir, 'base-file.txt'), 'base content');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'base commit on main'], { cwd: repoDir });
+
+      const issue = issueService.create({ projectId: project.id, title: 'Commit Diff Issue' });
+      const branchName = `mo/issue-${issue.number}`;
+
+      await git('git', ['checkout', '-b', branchName], { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'issue-file.txt'), 'issue file content');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'issue commit 1'], { cwd: repoDir });
+
+      fs.writeFileSync(path.join(repoDir, 'another.txt'), 'another');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'issue commit 2'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+      await git('git', ['merge', branchName, '-m', 'merge'], { cwd: repoDir });
+
+      await git('git', ['checkout', branchName], { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'issue-file.txt'), 'updated issue file');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'update on issue branch'], { cwd: repoDir });
+      await git('git', ['merge', 'main', '-m', 'merge main'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+
+      const worktreeDir = path.join(os.homedir(), '.mohist', 'projects', 'commitdiffunchanged', 'worktrees', `issue-${issue.number}`);
+      fs.mkdirSync(worktreeDir, { recursive: true });
+
+      const { WorktreeManager } = await import('../src/git/worktree-manager');
+      const wm = new WorktreeManager();
+
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, wm, undefined, agentRunner));
+      const server = createTestServer(app);
+
+      const diffResponse = await request(server).get(`/api/issues/${issue.number}/diff`);
+      expect(diffResponse.status).toBe(200);
+      expect(diffResponse.body.data.available).toBe(true);
+      const issueDiffFiles = diffResponse.body.data.files.map((f: any) => f.file);
+
+      const commitsResponse = await request(server).get(`/api/issues/${issue.number}/commits`);
+      expect(commitsResponse.status).toBe(200);
+      expect(commitsResponse.body.data.available).toBe(true);
+      expect(Array.isArray(commitsResponse.body.data.commits)).toBe(true);
+      expect(commitsResponse.body.data.commits.length).toBeGreaterThan(0);
+
+      for (const commit of commitsResponse.body.data.commits) {
+        expect(commit.hash).toBeDefined();
+        expect(commit.message).toBeDefined();
+        expect(Array.isArray(commit.files)).toBe(true);
+      }
+
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+      server.close();
+    });
+
+    it('issue diff uses two-argument base-vs-head comparison not three-dot merge-base', async () => {
+      const project = await projectService.create({ name: 'TwoDotVsThreeDot', path: repoDir });
+      projectService.setCurrent(project);
+
+      const git = promisify(execFile);
+
+      fs.writeFileSync(path.join(repoDir, 'base-file.txt'), 'base content');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'initial base'], { cwd: repoDir });
+
+      const issue = issueService.create({ projectId: project.id, title: 'Two Dot Test Issue' });
+      const branchName = `mo/issue-${issue.number}`;
+
+      await git('git', ['checkout', '-b', branchName], { cwd: repoDir });
+      fs.writeFileSync(path.join(repoDir, 'issue-only.txt'), 'issue only');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'issue-only commit'], { cwd: repoDir });
+
+      fs.writeFileSync(path.join(repoDir, 'issue-only-2.txt'), 'another issue file');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'second issue-only'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+      await git('git', ['merge', branchName, '-m', 'merge'], { cwd: repoDir });
+
+      await git('git', ['checkout', branchName], { cwd: repoDir });
+      await git('git', ['merge', 'main', '-m', 'merge main'], { cwd: repoDir });
+
+      fs.writeFileSync(path.join(repoDir, 'issue-only-3.txt'), 'third issue file');
+      await git('git', ['add', '-A'], { cwd: repoDir });
+      await git('git', ['commit', '-m', 'third issue-only'], { cwd: repoDir });
+
+      await git('git', ['checkout', 'main'], { cwd: repoDir });
+
+      const worktreeDir = path.join(os.homedir(), '.mohist', 'projects', 'twodotvsthreedot', 'worktrees', `issue-${issue.number}`);
+      fs.mkdirSync(worktreeDir, { recursive: true });
+
+      const { WorktreeManager } = await import('../src/git/worktree-manager');
+      const wm = new WorktreeManager();
+
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+
+      const app = new Hono();
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, wm, undefined, agentRunner));
+      const server = createTestServer(app);
+
+      const diffResponse = await request(server).get(`/api/issues/${issue.number}/diff`);
+
+      expect(diffResponse.status).toBe(200);
+      expect(diffResponse.body.data.available).toBe(true);
+      expect(diffResponse.body.data.base).toBe('main');
+      expect(diffResponse.body.data.head).toBe(branchName);
+
+      const filePaths = diffResponse.body.data.files.map((f: any) => f.file);
+      expect(filePaths).toContain('issue-only-3.txt');
+      expect(filePaths).not.toContain('base-file.txt');
+
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+      server.close();
+    });
+  });
 });

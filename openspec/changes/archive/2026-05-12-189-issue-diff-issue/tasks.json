@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Switch issue diff API to base-vs-head worktree comparison",
+      "spec": "specs/http-api/spec.md#review-apis-expose-availability-and-complete-review-data",
+      "description": "Update `GET /api/issues/:number/diff` to build its git diff range with two-argument base/head comparison instead of three-dot merge-base comparison. Keep the existing response shape, availability handling, `--numstat` summary generation, and per-file diff parsing, but ensure both summary and patch output come from the same corrected diff range.",
+      "acceptanceCriteria": [
+        "`GET /api/issues/:number/diff` returns `available: true`, `base`, `head`, summary counts, and per-file unified diff content using `git diff <baseBranch> <branchName>` semantics",
+        "For a branch that has merged the base branch forward, the diff response excludes files that are already present on both base and head",
+        "`--numstat` additions, deletions, and filesChanged counts stay aligned with the returned file diff list",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Do not change commit-list or commit-diff endpoints in this task.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        99171
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Align `mo issue diff` with the API diff semantics",
+      "spec": "specs/issue-review-surface/spec.md#files-changed-is-the-primary-review-view",
+      "description": "Update the `mo issue diff <number>` command to use the same two-argument base/head diff semantics as the API. This keeps terminal review output consistent with the primary Files changed review surface without changing the command's existing error handling or data-loading flow.",
+      "acceptanceCriteria": [
+        "`mo issue diff <number>` runs `git diff <baseBranch> <branchName>` instead of three-dot syntax",
+        "For the same issue branch, CLI diff output matches the cleaned file set shown by the API-backed review surface",
+        "Existing unknown-revision and missing-worktree error behavior remains unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Keep this task scoped to issue-level file diff behavior only.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        156527
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Add regression coverage for merge-forward issue diff review",
+      "spec": "specs/http-api/spec.md#review-apis-expose-availability-and-complete-review-data",
+      "description": "Add or update focused tests covering an issue branch that merges the base branch before adding issue-specific changes, so the corrected two-dot diff behavior is locked in. Verify both the API diff payload and the CLI-facing behavior that depends on the same comparison semantics, while leaving commit endpoints untouched.",
+      "acceptanceCriteria": [
+        "Automated tests cover a merge-forward branch history where base changes are present on both branches and are excluded from issue-level file diff results",
+        "Automated tests verify the diff summary and per-file patch set stay consistent after the range change",
+        "Automated tests confirm commit diff behavior is unchanged or not broadened by this fix",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/review-surface.test.ts and related CLI diff regression coverage",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Prefer extending existing review-surface and CLI command tests rather than creating a new end-to-end harness.",
+      "attempts": 7,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        168547,
+        1887081,
+        1226737,
+        1862080,
+        714149,
+        591528,
+        765184,
+        226109
+      ]
+    }
+  ]
+}
