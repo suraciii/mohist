@@ -245,11 +245,11 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   protected async beforeRecheckAfterFix(
     ctx: StageContext,
     checkName: string,
-    _fixTaskId: string,
+    fixTaskId: string,
   ): Promise<void> {
     const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
 
-    if (checkName === 'review-passed') {
+    if (checkName === 'review-passed' && fixTaskId === 'repair-review-findings') {
       if (changeDir) {
         const reviewArtifactPath = changeDir + '/review.md';
         try {
