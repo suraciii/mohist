@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Seed Integrate workflow tasks and checks",
+      "spec": "specs/workflow-run/spec.md#REQ-WR-005",
+      "description": "Add backend-owned Integrate task and check definitions so the active WorkflowRun and fallback stage-state model both know Integrate has three ordered tasks and one final health check before execution begins. This task should seed `integrate:spec-sync`, `integrate:archive-change`, `integrate:merge`, and `health:integrate` in the same way Plan currently seeds its initial runtime entities.",
+      "acceptanceCriteria": [
+        "Starting or loading a WorkflowRun exposes pending Integrate tasks `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge` in order on the Integrate StageRun",
+        "Starting or loading a WorkflowRun exposes a pending Integrate check `health:integrate` on the Integrate StageRun",
+        "Stage-state fallback data for Integrate uses the same static task identifiers as WorkflowRun seeding rather than leaving Integrate empty",
+        "Relevant backend tests cover Integrate seeding behavior",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/workflow-run-service.ts; packages/cli/src/services/stage-state-service.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Prefer one shared source of Integrate task/check definitions so WorkflowRun and stage-state seeding cannot drift.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        690477,
+        371516
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Refactor Integrate runner onto BaseStageRunner lifecycle",
+      "spec": "specs/workflow-definition/spec.md#REQ-WD-002",
+      "description": "Move Integrate from runner-local step orchestration to the standard `executeTasks() -> getChecks() -> runChecksPhase()` flow. Keep spec sync, archive, and merge as sequential task work, move final verification to `HealthGateCheck`, and wire `health:integrate` to `fix-integrate-health` through `CheckFailurePolicy` only when `postMerge.autoFix` is enabled.",
+      "acceptanceCriteria": [
+        "`IntegrateStageRunner` performs spec sync, archive, and merge inside task execution and no longer runs final health verification directly inside `executeTasks()`",
+        "`getChecks()` returns the standard Integrate health check backed by `healthGates.postMerge` configuration and records results as `health:integrate`",
+        "Completed or failed Integrate tasks are mirrored into `workflow_tasks`, and final health results are mirrored into `workflow_checks` through existing BaseStageRunner write paths",
+        "When `postMerge.autoFix` is enabled, a failed `health:integrate` check triggers `fix-integrate-health` and then re-runs the check through shared BaseStageRunner logic",
+        "Spec sync, archive, and merge failure ordering does not regress: later Integrate work does not run after an earlier task failure",
+        "Relevant backend tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/integrate-stage-runner.ts; packages/cli/src/workflow/checks/health-gate-check.ts; packages/cli/src/workflow/health-fix-task.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Keep compatibility `integration_*` events for now, but make WorkflowRun and stage-state persistence the primary progress contract.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        60469,
+        1112211
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Render Integrate progress from WorkflowRun-backed task and check state",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-005",
+      "description": "Update the issue detail progress surfaces so Integrate renders the seeded task/check contract and live status from WorkflowRun or stage-state data instead of appearing as an opaque running stage. The UI should show ordered Integrate tasks, final health status, and durations using the same data path already used for other stages.",
+      "acceptanceCriteria": [
+        "PipelineView shows `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge` as discrete Integrate tasks when the workflow run includes them",
+        "Issue detail progress surfaces show the Integrate health check separately from Integrate tasks rather than treating it as a fourth task",
+        "Running or completed Integrate task durations are visible from the same WorkflowRun or stage-state data model used by other stages",
+        "The UI no longer presents Integrate as an empty or opaque stage when seeded WorkflowRun task/check data exists",
+        "Frontend tests or component tests cover Integrate progress rendering",
+        "Frontend typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/PipelineView.tsx; packages/cli/web/src/components/TaskProgressPanel.tsx; packages/cli/web/src/lib/workflow-run-utils.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Keep execution history as evidence/debug data, but current Integrate progress should come from WorkflowRun or stage-state rows.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1372235
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Add Integrate standardization regression coverage",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-007",
+      "description": "Add backend and frontend regression coverage for the new Integrate contract so future changes cannot silently return Integrate to a progress black hole. Tests should cover seeding, persisted task/check visibility, local health-check repair flow, compatibility events, and unchanged task ordering on failure paths.",
+      "acceptanceCriteria": [
+        "A backend test proves Integrate tasks and `health:integrate` are seeded into WorkflowRun for a newly started run",
+        "A backend test proves Integrate writes task results to `workflow_tasks` and final health results to `workflow_checks` during execution",
+        "A backend test proves failed spec sync or merge stops later Integrate work, while failed `health:integrate` stays local to Integrate and can use shared recheck semantics when auto-fix is enabled",
+        "A frontend test proves Integrate task/check progress renders from WorkflowRun-backed data instead of an empty placeholder",
+        "Relevant backend and frontend test suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/workflow/integrate-stage-runner.test.ts; packages/cli/tests/integrate-regression.test.ts; packages/cli/web/src/components/*.test.tsx",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Preserve existing compatibility-event assertions while adding WorkflowRun/task-check persistence assertions as the new primary contract.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        640960,
+        1647070
+      ]
+    }
+  ]
+}

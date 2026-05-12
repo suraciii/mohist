@@ -7,9 +7,9 @@ import { Log } from '../util/log';
 const log = Log.create({ service: 'health-fix-task' });
 
 export interface HealthFixTaskOptions {
-  taskId: 'fix-plan-health' | 'fix-build-health' | 'fix-check-health';
+  taskId: 'fix-plan-health' | 'fix-build-health' | 'fix-check-health' | 'fix-integrate-health';
   title: string;
-  stage: 'plan' | 'build' | 'check';
+  stage: 'plan' | 'build' | 'check' | 'integrate';
   worktreePath: string;
   healthCommand: string;
   failedCheck: CheckResult;

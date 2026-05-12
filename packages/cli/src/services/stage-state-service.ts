@@ -315,7 +315,7 @@ const REAL_TASK_IDS: Record<Stage, Set<string>> = {
   [Stage.Plan]: new Set(['proposal', 'specs', 'design', 'tasks', 'self-review', 'repair-plan-artifacts', 'fix-plan-health']),
   [Stage.Build]: new Set(['fix-build-health', 'repair-build']),
   [Stage.Check]: new Set(['ai-review', 'fix-review-findings', 'repair-merge', 'fix-check-health']),
-  [Stage.Integrate]: new Set(['merge-branch', 'verify-merge', 'repair-merge', 'rebase-branch']),
+  [Stage.Integrate]: new Set(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge', 'merge-branch', 'verify-merge', 'repair-merge', 'rebase-branch', 'fix-integrate-health']),
   [Stage.Done]: new Set([]),
   [Stage.Backlog]: new Set([]),
 };
@@ -390,7 +390,11 @@ const PLAN_TASK_DEFS: StaticTaskDef[] = [];
 
 const CHECK_TASK_DEFS: StaticTaskDef[] = [];
 
-const INTEGRATE_TASK_DEFS: StaticTaskDef[] = [];
+const INTEGRATE_TASK_DEFS: StaticTaskDef[] = [
+  { taskId: 'integrate:spec-sync', title: 'Sync specs', order: 0 },
+  { taskId: 'integrate:archive-change', title: 'Archive change', order: 1 },
+  { taskId: 'integrate:merge', title: 'Merge branch', order: 2 },
+];
 
 const STATIC_TASK_DEFS: Partial<Record<Stage, StaticTaskDef[]>> = {
   [Stage.Plan]: PLAN_TASK_DEFS,

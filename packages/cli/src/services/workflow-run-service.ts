@@ -46,6 +46,10 @@ export class WorkflowRunService {
       this.seedPlanTasks(run.id, planStageRun.id);
       this.seedPlanChecks(run.id, planStageRun.id);
 
+      const integrateStageRun = stageRuns.find(sr => sr.stage === Stage.Integrate)!;
+      this.seedIntegrateTasks(run.id, integrateStageRun.id);
+      this.seedIntegrateChecks(run.id, integrateStageRun.id);
+
       return this.repo.getActiveRunWithRelations(issueId)!;
     });
   }
@@ -88,6 +92,33 @@ export class WorkflowRunService {
         title: check.title,
       });
     }
+  }
+
+  private seedIntegrateTasks(runId: string, integrateStageRunId: string): void {
+    const integrateTasks = [
+      { taskId: 'integrate:spec-sync', title: 'Sync specs', order: 0 },
+      { taskId: 'integrate:archive-change', title: 'Archive change', order: 1 },
+      { taskId: 'integrate:merge', title: 'Merge branch', order: 2 },
+    ];
+
+    for (const task of integrateTasks) {
+      this.repo.createTask({
+        workflowRunId: runId,
+        stageRunId: integrateStageRunId,
+        taskId: task.taskId,
+        title: task.title,
+        taskOrder: task.order,
+      });
+    }
+  }
+
+  private seedIntegrateChecks(runId: string, integrateStageRunId: string): void {
+    this.repo.createCheck({
+      workflowRunId: runId,
+      stageRunId: integrateStageRunId,
+      checkName: 'health:integrate',
+      title: 'Post-merge health check',
+    });
   }
 
   getActiveRunForIssue(issueId: string): WorkflowRunWithStageRuns | null {

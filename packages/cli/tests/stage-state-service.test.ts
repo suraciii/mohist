@@ -59,7 +59,8 @@ describe('StageStateService', () => {
       service.ensureStage(issueId, Stage.Integrate);
 
       const state = service.getStageState(issueId, Stage.Integrate);
-      expect(state!.tasks.length).toBe(0);
+      expect(state!.tasks.length).toBe(3);
+      expect(state!.tasks.map(t => t.taskId)).toEqual(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge']);
     });
 
     it('should not seed tasks for build stage (dynamic tasks)', () => {

@@ -85,6 +85,50 @@ describe('WorkflowRun persistence', () => {
       }
     });
 
+    it('seeds Integrate StageRun with integrate:spec-sync, integrate:archive-change, integrate:merge tasks', () => {
+      const run = workflowRunService.startRun(issueId, issueNumber);
+      const integrateStageRun = run.stageRuns.find(sr => sr.stage === Stage.Integrate)!;
+
+      const taskIds = integrateStageRun.tasks.map(t => t.taskId);
+      expect(taskIds).toContain('integrate:spec-sync');
+      expect(taskIds).toContain('integrate:archive-change');
+      expect(taskIds).toContain('integrate:merge');
+
+      const specSyncTask = integrateStageRun.tasks.find(t => t.taskId === 'integrate:spec-sync')!;
+      expect(specSyncTask.taskOrder).toBe(0);
+      expect(specSyncTask.status).toBe('pending');
+
+      const archiveTask = integrateStageRun.tasks.find(t => t.taskId === 'integrate:archive-change')!;
+      expect(archiveTask.taskOrder).toBe(1);
+      expect(archiveTask.status).toBe('pending');
+
+      const mergeTask = integrateStageRun.tasks.find(t => t.taskId === 'integrate:merge')!;
+      expect(mergeTask.taskOrder).toBe(2);
+      expect(mergeTask.status).toBe('pending');
+    });
+
+    it('seeds Integrate StageRun with health:integrate check', () => {
+      const run = workflowRunService.startRun(issueId, issueNumber);
+      const integrateStageRun = run.stageRuns.find(sr => sr.stage === Stage.Integrate)!;
+
+      const checkNames = integrateStageRun.checks.map(c => c.checkName);
+      expect(checkNames).toContain('health:integrate');
+
+      const healthCheck = integrateStageRun.checks.find(c => c.checkName === 'health:integrate')!;
+      expect(healthCheck.status).toBe('pending');
+    });
+
+    it('startRun twice returns same active run with Integrate tasks and checks intact', () => {
+      const run1 = workflowRunService.startRun(issueId, issueNumber);
+      const run2 = workflowRunService.startRun(issueId, issueNumber);
+
+      expect(run1.id).toBe(run2.id);
+
+      const integrateStageRun = run2.stageRuns.find(sr => sr.stage === Stage.Integrate)!;
+      expect(integrateStageRun.tasks.map(t => t.taskId)).toEqual(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge']);
+      expect(integrateStageRun.checks.map(c => c.checkName)).toContain('health:integrate');
+    });
+
     it('seeds Plan StageRun with proposal-complete, specs-complete, design-complete, tasks-valid, self-review-passed, user-approval checks', () => {
       const run = workflowRunService.startRun(issueId, issueNumber);
       const planStageRun = run.stageRuns.find(sr => sr.stage === Stage.Plan)!;

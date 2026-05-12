@@ -409,7 +409,7 @@ ArcFail added scenario content.`);
       };
     }
 
-    it('skips merge and reruns final health when issue is already marked merged', async () => {
+    it('skips merge and passes health:integrate check when issue is already marked merged', async () => {
       const issueNumber = 64;
       const archivedChangeDir = path.join(
         tmpDir,
@@ -436,7 +436,27 @@ ArcFail added scenario content.`);
           mergeApprovedCandidate: mergeApprovedCandidateMock,
         } as any,
       });
+      fs.writeFileSync(path.join(tmpDir, 'workflow.yaml'), `
+stages:
+  - stage: explore
+  - stage: plan
+  - stage: build
+  - stage: check
+  - stage: integrate
+  - stage: done
+healthGates:
+  postMerge:
+    enabled: false
+    command: npm run build
+    timeout: 300000
+    autoFix: false
+    maxFixAttempts: 0
+    fallbackReaction:
+      type: ask-user
+`);
 
+      const { IntegrateStageRunner } = await import('../../src/workflow/integrate-stage-runner');
+      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
@@ -444,7 +464,6 @@ ArcFail added scenario content.`);
 
       const output = result.output as { steps?: Array<{ step: string; status: string; output: any }> };
       const mergeStep = output.steps?.find(s => s.step === 'integrate:merge');
-      const healthStep = output.steps?.find(s => s.step === 'final-health');
       expect(mergeStep).toMatchObject({
         status: 'completed',
         output: {
@@ -452,7 +471,11 @@ ArcFail added scenario content.`);
           reason: 'already-merged',
         },
       });
-      expect(healthStep).toMatchObject({ status: 'completed' });
+
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('pass');
     });
 
     it('fast-forward merge succeeds when candidate can fast-forward into target branch', async () => {
@@ -770,7 +793,7 @@ ML added scenario content.`);
       return execFileMock;
     }
 
-    it('runs final health gate after merge and records health:integrate result', async () => {
+    it('runs health:integrate check after merge and records passing result', async () => {
       const issueNumber = 60;
       const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
       fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
@@ -807,18 +830,17 @@ FH added scenario content.`);
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
-      expect(output.steps).toBeDefined();
-      const healthStep = output.steps?.find(s => s.step === 'final-health');
-      expect(healthStep).toBeDefined();
-      expect(healthStep!.status).toBe('completed');
-      const healthOutput = healthStep!.output as { kind?: string; stage?: string; command?: string; passed?: boolean };
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('pass');
+      const healthOutput = healthCheck!.output as { kind?: string; stage?: string; command?: string; enabled?: boolean };
       expect(healthOutput.kind).toBe('health-gate');
       expect(healthOutput.stage).toBe('integrate');
-      expect(healthOutput.passed).toBe(true);
+      expect(healthOutput.enabled).toBe(true);
     });
 
-    it('final health gate failure leaves issue not Done and records failing step final-health', async () => {
+    it('health:integrate check failure leaves issue not Done and records failing check', async () => {
       const issueNumber = 61;
       const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
       fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
@@ -855,11 +877,15 @@ FHF added scenario content.`);
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain('Final health gate failed');
+      expect(result.message).toContain('npm run build');
       expect(result.nextStage).toBeUndefined();
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('fail');
     });
 
-    it('disabled final health policy records a disabled pass result and allows Done transition', async () => {
+it('disabled health policy records a disabled pass check result and allows Done transition', async () => {
       const issueNumber = 62;
       const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
       fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
@@ -923,13 +949,12 @@ healthGates:
 
       expect(result.success).toBe(true);
       expect(execFileMock).not.toHaveBeenCalled();
-      const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
-      const healthStep = output.steps?.find(s => s.step === 'final-health');
-      expect(healthStep).toBeDefined();
-      expect(healthStep!.status).toBe('completed');
-      const healthOutput = healthStep!.output as { enabled?: boolean; passed?: boolean };
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('pass');
+      const healthOutput = healthCheck!.output as { enabled?: boolean };
       expect(healthOutput.enabled).toBe(false);
-      expect(healthOutput.passed).toBe(true);
     });
 
     it('postMerge config is used as default Integrate final health policy', async () => {

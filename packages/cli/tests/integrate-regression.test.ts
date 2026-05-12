@@ -461,7 +461,7 @@ New scenario content.`);
       expect(mergeOutput.landedSha).toBe('ghi789');
     });
 
-    it('successful Integrate records final health result (disabled health gate passes)', async () => {
+    it('successful Integrate records health:integrate check result (disabled health gate passes)', async () => {
       const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
 
       const issueNumber = 104;
@@ -486,16 +486,15 @@ New scenario content.`);
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
-      const healthStep = output.steps?.find(s => s.step === 'final-health');
-      expect(healthStep).toBeDefined();
-      expect(healthStep!.status).toBe('completed');
-      const healthOutput = healthStep!.output as { passed?: boolean; enabled?: boolean };
-      expect(healthOutput.passed).toBe(true);
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('pass');
+      const healthOutput = healthCheck!.output as { enabled?: boolean };
       expect(healthOutput.enabled).toBe(false);
     });
 
-    it('Done issue evidence includes spec sync summary, archive path, merge truth, and final health result', async () => {
+    it('Done issue evidence includes spec sync summary, archive path, merge truth, and health:integrate check', async () => {
       const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
 
       const issueNumber = 105;
@@ -540,13 +539,14 @@ New scenario content.`);
       expect(mergeOutput.targetBranch).toBe('main');
       expect(mergeOutput.landedSha).toBe('ghi789');
 
-      const healthStep = output.steps?.find(s => s.step === 'final-health');
-      expect(healthStep).toBeDefined();
-      expect(healthStep!.status).toBe('completed');
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('pass');
     });
   });
 
-  describe('AC-3: spec-sync, archive, merge, final-health failures each block Done with correct failing step', () => {
+  describe('AC-3: spec-sync, archive, merge failures each block Done with correct failing step', () => {
     it('spec sync failure blocks Done at integrate:spec-sync', async () => {
       const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
 
@@ -673,7 +673,7 @@ New scenario content.`);
       );
     });
 
-    it('final health failure blocks Done at final-health', async () => {
+    it('health:integrate check failure blocks Done', async () => {
       const execFileMock = vi.fn().mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
         const err = new Error('Build failed');
         (err as any).code = 1;
@@ -719,12 +719,12 @@ New scenario content.`);
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain('Final health gate failed');
       expect(result.nextStage).toBeUndefined();
 
-      expect(appendedTaskResults(ctx)).toContainEqual(
-        expect.objectContaining({ taskId: 'final-health', status: 'failed' }),
-      );
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('fail');
     });
   });
 
@@ -999,7 +999,7 @@ Duplicate scenario content.`);
       expect(eventOutput?.conflicts![0]?.type).toBe('duplicate_target');
     });
 
-    it('failed spec sync does not trigger archive, merge, or final-health', async () => {
+    it('failed spec sync does not trigger archive, merge, or health check', async () => {
       const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
 
       const issueNumber = 152;
@@ -1030,7 +1030,7 @@ Duplicate scenario content.`);
 
       const archiveTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:archive-change');
       const mergeTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:merge');
-      const healthTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'final-health');
+      const healthTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'health:integrate');
 
       expect(archiveTask).toBeUndefined();
       expect(mergeTask).toBeUndefined();
@@ -1125,7 +1125,7 @@ Duplicate scenario content.`);
     });
   });
 
-  describe('AC-8: existing integrate archive, merge, final-health success/failure tests still pass', () => {
+  describe('AC-8: existing integrate archive, merge, health check success/failure tests still pass', () => {
     it('archive success still works after spec sync passes', async () => {
       const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
 
@@ -1208,7 +1208,7 @@ New scenario content.`);
       expect(mergeTask.status).toBe('failed');
     });
 
-    it('final-health failure still blocks at final-health', async () => {
+    it('health:integrate check failure still blocks Done', async () => {
       const execFileMock = vi.fn().mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
         const err = new Error('Build failed');
         (err as any).code = 1;
@@ -1254,21 +1254,16 @@ New scenario content.`);
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain('Final health gate failed');
+      expect(result.message).toContain('npm run build');
 
-      const emitCalls = (ctx.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls;
-      const failedEvent = emitCalls.find(([name]) => name === 'integration_failed');
-      expect(failedEvent?.[1]).toMatchObject({
-        failingStep: 'final-health',
-      });
-
-      const healthTask = appendedTaskResults(ctx).find((t: any) => t.taskId === 'final-health');
-      expect(healthTask).toBeDefined();
-      expect(healthTask.status).toBe('failed');
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('fail');
     });
   });
 
-  describe('AC-6: Done issue evidence includes spec sync summary, archive path, merge truth, and final health result', () => {
+  describe('AC-6: Done issue evidence includes spec sync summary, archive path, merge truth, and health check result', () => {
     it('stage execution for Done issue contains all integration evidence steps', async () => {
       const { IntegrateStageRunner } = await import('../src/workflow/integrate-stage-runner');
 
@@ -1297,13 +1292,12 @@ New scenario content.`);
 
       const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
       expect(output.steps).toBeDefined();
-      expect(output.steps!.length).toBeGreaterThanOrEqual(4);
+      expect(output.steps!.length).toBe(3);
 
       const stepIds = output.steps!.map(s => s.step);
       expect(stepIds).toContain('integrate:spec-sync');
       expect(stepIds).toContain('integrate:archive-change');
       expect(stepIds).toContain('integrate:merge');
-      expect(stepIds).toContain('final-health');
 
       const specSyncStep = output.steps!.find(s => s.step === 'integrate:spec-sync');
       expect(specSyncStep!.status).toBe('completed');
@@ -1314,8 +1308,10 @@ New scenario content.`);
       const mergeStep = output.steps!.find(s => s.step === 'integrate:merge');
       expect(mergeStep!.status).toBe('completed');
 
-      const healthStep = output.steps!.find(s => s.step === 'final-health');
-      expect(healthStep!.status).toBe('completed');
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('pass');
     });
 
     it('stage execution repo records all task results for Done issue', async () => {
@@ -1340,7 +1336,7 @@ New scenario content.`);
 
       const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
       const ctx = createMockContext(tmpDir, issueNumber);
-      await runner.run(ctx);
+      const result = await runner.run(ctx);
 
       const taskResultCalls = appendedTaskResults(ctx);
 
@@ -1348,7 +1344,6 @@ New scenario content.`);
       expect(taskIds).toContain('integrate:spec-sync');
       expect(taskIds).toContain('integrate:archive-change');
       expect(taskIds).toContain('integrate:merge');
-      expect(taskIds).toContain('final-health');
 
       const specSyncCall = taskResultCalls.find(result => result.taskId === 'integrate:spec-sync');
       expect(specSyncCall?.status).toBe('completed');
@@ -1359,8 +1354,10 @@ New scenario content.`);
       const mergeCall = taskResultCalls.find(result => result.taskId === 'integrate:merge');
       expect(mergeCall?.status).toBe('completed');
 
-      const healthCall = taskResultCalls.find(result => result.taskId === 'final-health');
-      expect(healthCall?.status).toBe('completed');
+      expect(result.checkResults).toBeDefined();
+      const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
+      expect(healthCheck).toBeDefined();
+      expect(healthCheck!.status).toBe('pass');
     });
 
     it('integration_completed event carries all step evidence', async () => {
@@ -1395,13 +1392,12 @@ New scenario content.`);
       expect(completedEvent).toBeDefined();
       expect(completedEvent![1].steps).toBeDefined();
       expect(Array.isArray(completedEvent![1].steps)).toBe(true);
-      expect(completedEvent![1].steps.length).toBeGreaterThanOrEqual(4);
+      expect(completedEvent![1].steps.length).toBe(3);
 
       const stepIds = completedEvent![1].steps.map((s: any) => s.step);
       expect(stepIds).toContain('integrate:spec-sync');
       expect(stepIds).toContain('integrate:archive-change');
       expect(stepIds).toContain('integrate:merge');
-      expect(stepIds).toContain('final-health');
     });
   });
 });
