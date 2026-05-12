@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { Stage, type Issue, IssueStatus } from '../../src/types';
 import type {
   StageContext,
@@ -16,6 +19,7 @@ import type {
 import type { Check, CheckContext } from '../../src/workflow/checks';
 import { EventBus } from '../../src/services/event-bus';
 import { BaseStageRunner } from '../../src/workflow/base-stage-runner';
+import { CheckStageRunner } from '../../src/workflow/check-stage-runner';
 import {
   getLatestCheckResult,
   replaceCurrentAiReviewTruth,
@@ -156,6 +160,64 @@ describe('Check-stage re-review convergence regressions', () => {
 
   beforeEach(() => {
     ctx = makeContext();
+  });
+
+  describe('review artifact invalidation boundaries', () => {
+    it('does not delete review.md for fix-review-findings follow-up tasks', async () => {
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-'));
+      const changeDir = path.join(tmpRoot, 'change');
+      fs.mkdirSync(changeDir, { recursive: true });
+      const reviewPath = path.join(changeDir, 'review.md');
+      fs.writeFileSync(reviewPath, '# review\n<promise>FAIL</promise>\n');
+
+      const checkpointDeletes: Array<{ stage: string; step: string }> = [];
+      const runner = new CheckStageRunner({ worktreePath: tmpRoot });
+      const localCtx = makeContext({
+        artifactManager: {
+          ...ctx.artifactManager,
+          getChangeDir: vi.fn().mockReturnValue(changeDir),
+        } as unknown as ChangeArtifactsManager,
+        checkpointManager: {
+          ...ctx.checkpointManager,
+          deleteStep: vi.fn().mockImplementation((_issueNumber: number, stage: string, step: string) => {
+            checkpointDeletes.push({ stage, step });
+          }),
+        } as unknown as CheckpointManager,
+      });
+
+      await (runner as any).beforeRecheckAfterFix(localCtx, 'review-passed', 'fix-review-findings');
+
+      expect(fs.existsSync(reviewPath)).toBe(true);
+      expect(checkpointDeletes).toEqual([]);
+    });
+
+    it('deletes review.md and ai-review checkpoint for repair-review-findings re-review', async () => {
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-'));
+      const changeDir = path.join(tmpRoot, 'change');
+      fs.mkdirSync(changeDir, { recursive: true });
+      const reviewPath = path.join(changeDir, 'review.md');
+      fs.writeFileSync(reviewPath, '# review\n<promise>FAIL</promise>\n');
+
+      const checkpointDeletes: Array<{ stage: string; step: string }> = [];
+      const runner = new CheckStageRunner({ worktreePath: tmpRoot });
+      const localCtx = makeContext({
+        artifactManager: {
+          ...ctx.artifactManager,
+          getChangeDir: vi.fn().mockReturnValue(changeDir),
+        } as unknown as ChangeArtifactsManager,
+        checkpointManager: {
+          ...ctx.checkpointManager,
+          deleteStep: vi.fn().mockImplementation((_issueNumber: number, stage: string, step: string) => {
+            checkpointDeletes.push({ stage, step });
+          }),
+        } as unknown as CheckpointManager,
+      });
+
+      await (runner as any).beforeRecheckAfterFix(localCtx, 'review-passed', 'repair-review-findings');
+
+      expect(fs.existsSync(reviewPath)).toBe(false);
+      expect(checkpointDeletes).toEqual([{ stage: 'check', step: 'ai-review' }]);
+    });
   });
 
   describe('AC-1: FAIL -> auto-fix -> regenerated re-review PASS -> persisted PASS -> approval requested', () => {
