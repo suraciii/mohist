@@ -71,6 +71,28 @@ function makeBuildStageState(tasksOverrides: TaskOverride[]): StageStateRead {
   }
 }
 
+function makePlanStageState(tasksOverrides: TaskOverride[], checksOverrides: TaskOverride[] = []): StageStateRead {
+  return {
+    stage: Stage.Plan,
+    status: 'running',
+    tasks: makeTasks(tasksOverrides),
+    checks: checksOverrides.map((c) => ({
+      checkName: c.taskId,
+      status: (c.status.replace('ed', '') as 'passed' | 'failed') || 'passed',
+      message: null,
+      output: null,
+      runCount: 1,
+      lastRunAt: null,
+      updatedAt: '2026-01-01T00:00:00Z',
+    })),
+    approval: null,
+    attempts: 0,
+    startedAt: '2026-01-01T00:00:00Z',
+    completedAt: null,
+    updatedAt: '2026-01-01T00:00:00Z',
+  }
+}
+
 function makeIssue(overrides?: Partial<Issue>): Issue {
   return {
     id: 'issue-1',
@@ -210,5 +232,136 @@ describe('PipelineView and TaskProgressPanel stage-state consistency', () => {
     )
 
     expect(useIssueStageState).toHaveBeenCalledWith(1)
+  })
+
+  it('PipelineView does not show placeholder Plan tasks when real artifact tasks are present', () => {
+    const planState = makeStageStateResponse([
+      makePlanStageState(
+        [
+          { taskId: 'proposal', title: 'Write proposal', status: 'completed' },
+          { taskId: 'specs', title: 'Write specs', status: 'completed' },
+          { taskId: 'self-review', title: 'Self-review plan', status: 'pending' },
+        ],
+        [],
+      ),
+    ])
+
+    setupMocks(planState)
+
+    const issue = makeIssue({ stage: Stage.Plan })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+        <TaskProgressPanel issueNumber={issue.number} currentStage={Stage.Plan} isAgentRunning={false} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.queryByText('Read context files')).toBeNull()
+    expect(screen.queryByText('Design solution')).toBeNull()
+    expect(screen.getAllByText('Write proposal').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Write specs').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Self-review plan').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('PipelineView shows reason label on a runtime-added repair task', () => {
+    const planStateWithRepair = makeStageStateResponse([
+      makePlanStageState(
+        [
+          { taskId: 'proposal', title: 'Write proposal', status: 'completed' },
+          { taskId: 'repair-plan-artifacts', title: 'Repair plan artifacts', status: 'completed' },
+        ],
+        [],
+      ),
+    ])
+
+    setupMocks(planStateWithRepair)
+
+    const issue = makeIssue({ stage: Stage.Plan })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getAllByText('Repair plan artifacts').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('checks do not appear in the task list rendered by PipelineView StepList', () => {
+    const checkState = makeStageStateResponse([
+      {
+        stage: Stage.Check,
+        status: 'running',
+        tasks: [
+          {
+            taskId: 'fix-review-findings',
+            title: 'Fix review findings',
+            status: 'completed',
+            source: 'dynamic',
+            order: 100,
+            attempts: 1,
+            duration: 15000,
+            artifacts: [],
+            output: null,
+            startedAt: null,
+            completedAt: null,
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+        checks: [
+          {
+            checkName: 'ai-review',
+            status: 'passed',
+            message: 'LGTM',
+            output: null,
+            runCount: 1,
+            lastRunAt: null,
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+          {
+            checkName: 'build-test',
+            status: 'passed',
+            message: 'All tests passed',
+            output: null,
+            runCount: 1,
+            lastRunAt: null,
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+        approval: null,
+        attempts: 0,
+        startedAt: '2026-01-01T00:00:00Z',
+        completedAt: null,
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+
+    setupMocks(checkState)
+
+    const issue = makeIssue({ stage: Stage.Check })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getAllByText('Fix review findings').length).toBeGreaterThanOrEqual(1)
+
+    const tasksHeading = screen.getByRole('heading', { name: /tasks/i })
+    const checksHeading = screen.getByRole('heading', { name: /checks/i })
+
+    const tasksDiv = tasksHeading.closest('div')
+    const checksDiv = checksHeading.closest('div')
+
+    const checkNameSpansInTasks = tasksDiv ? Array.from(tasksDiv.querySelectorAll('span')).filter(el => el.textContent === 'ai-review' || el.textContent === 'build-test') : []
+    expect(checkNameSpansInTasks).toHaveLength(0)
+
+    const checkNameSpansInChecks = checksDiv ? Array.from(checksDiv.querySelectorAll('span')).filter(el => el.textContent === 'ai-review' || el.textContent === 'build-test') : []
+    expect(checkNameSpansInChecks.length).toBeGreaterThan(0)
   })
 })

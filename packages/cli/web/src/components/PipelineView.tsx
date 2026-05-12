@@ -269,6 +269,8 @@ function TaskItem({
       ? task.duration
       : liveElapsed
 
+  const hasReason = task.reason != null
+
   return (
     <div
       className={`rounded-md border border-gray-200 overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-red-200' : ''}`}
@@ -280,6 +282,9 @@ function TaskItem({
       >
         {icon}
         <span className="text-sm text-gray-900 flex-1 truncate">{task.title}</span>
+        {hasReason && (
+          <span className="text-xs text-amber-500 flex-shrink-0" title={task.reason}>reason</span>
+        )}
         {duration != null && duration > 0 && (
           <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(duration)}</span>
         )}
@@ -303,6 +308,11 @@ function TaskItem({
       {expanded && canExpand && (
         <div className="px-3 pb-2 border-t border-gray-100 bg-gray-50">
           <div className="mt-2 space-y-1">
+            {hasReason && (
+              <div className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
+                {task.reason}
+              </div>
+            )}
             {task.artifacts.map((a) => (
               <div key={a} className="flex items-center gap-1.5 text-xs text-gray-500">
                 <svg className="h-3 w-3 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
