@@ -49,6 +49,10 @@ coverage/
 
 # Mohist data (runtime)
 .mohist/
+.claude/
+
+# OpenCode generated
+.opencode/package-lock.json
 
 # Temporary files
 tmp/
