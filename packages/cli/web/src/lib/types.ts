@@ -819,6 +819,7 @@ export interface StageTaskState {
 
 export interface StageCheckState {
   checkName: string
+  title?: string
   status: StageCheckStatus
   message: string | null
   output: unknown

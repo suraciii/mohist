@@ -215,17 +215,41 @@ describe('WorkflowRun-backed task and check data consistency', () => {
 
     expect(screen.getAllByText('Fix review findings').length).toBeGreaterThanOrEqual(1)
 
-    const tasksHeading = screen.getByRole('heading', { name: /tasks/i })
-    const checksHeading = screen.getByRole('heading', { name: /checks/i })
+    expect(screen.getAllByText('AI review').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Build test').length).toBeGreaterThanOrEqual(1)
+  })
 
-    const tasksDiv = tasksHeading.closest('div')
-    const checksDiv = checksHeading.closest('div')
+  it('health gate checks preserve WorkflowRun titles in PipelineView', () => {
+    const workflowRun = makeWorkflowRun([
+      makeWorkflowStageRun(
+        Stage.Integrate,
+        makeWorkflowTasks([{ taskId: 'integrate:merge', title: 'Merge branch', status: 'completed' }]),
+        [
+          {
+            checkName: 'health:integrate',
+            title: 'Post-merge health check',
+            status: 'failed',
+            message: 'build failed',
+            output: { kind: 'health-gate' },
+            runCount: 1,
+            lastRunAt: null,
+          },
+        ],
+      ),
+    ])
+    setupWorkflowRunMocks(workflowRun)
 
-    const checkNameSpansInTasks = tasksDiv ? Array.from(tasksDiv.querySelectorAll('span')).filter(el => el.textContent === 'ai-review' || el.textContent === 'build-test') : []
-    expect(checkNameSpansInTasks).toHaveLength(0)
+    const issue = makeIssue({ stage: Stage.Integrate, status: IssueStatus.Blocked })
+    const queryClient = new QueryClient()
 
-    const checkNameSpansInChecks = checksDiv ? Array.from(checksDiv.querySelectorAll('span')).filter(el => el.textContent === 'ai-review' || el.textContent === 'build-test') : []
-    expect(checkNameSpansInChecks.length).toBeGreaterThan(0)
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText('Health Gate: integrate')).toBeNull()
   })
 
   it('approval is not rendered as a top-level task row', () => {
