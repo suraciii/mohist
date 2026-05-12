@@ -96,6 +96,7 @@ export interface ReasoningPart {
 export interface ToolPart {
   id: string;
   type: 'tool';
+  hidden?: boolean;
   tool: {
     toolCallId: string;
     normalizedName?: string;
@@ -132,6 +133,12 @@ interface RawEvent {
   eventType: string;
   data: Record<string, unknown>;
   createdAt: string;
+}
+
+const INTERNAL_TOOL_NAMES = new Set(['todowrite', 'todo']);
+
+function isSuppressedInternalTool(normalizedName: string): boolean {
+  return INTERNAL_TOOL_NAMES.has(normalizedName);
 }
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -502,12 +509,16 @@ function parseEditWriteChanges(toolName: string, input: string | undefined): Fil
     const filePath = parsed.file_path ?? parsed.path;
     if (typeof filePath !== 'string') return [];
 
-    let operation: 'created' | 'modified' = 'modified';
+    let operation: 'created' | 'modified' | 'moved' = 'modified';
     if (lower === 'write' || lower === 'write_file') {
       const content = parsed.content;
       if (content === '' || content === null || content === undefined) {
         operation = 'created';
       }
+    }
+
+    if (parsed.old_path || parsed.oldPath) {
+      operation = 'moved';
     }
 
     let additions = 0;
@@ -530,6 +541,7 @@ function parseEditWriteChanges(toolName: string, input: string | undefined): Fil
       operation,
       additions: additions || undefined,
       deletions: deletions || undefined,
+      oldPath: (parsed.old_path ?? parsed.oldPath)?.split('/').pop() ?? (parsed.old_path ?? parsed.oldPath),
     }];
   } catch {
     return [];
@@ -976,9 +988,11 @@ export class SessionTranscriptAssembler {
       this.recordUnknownTool(start.toolName, displayTitle ?? start.title, target);
     }
 
+    const suppressed = isSuppressedInternalTool(normalizedName);
     const toolPart: ToolPart = {
       id: this.nextId('tool'),
       type: 'tool',
+      hidden: suppressed || undefined,
       tool: {
         toolCallId: start.toolCallId,
         normalizedName,
@@ -1004,7 +1018,9 @@ export class SessionTranscriptAssembler {
     }
 
     this.toolPartsById.set(start.toolCallId, toolPart);
-    this.currentTurn!.assistant.push(toolPart);
+    if (!suppressed) {
+      this.currentTurn!.assistant.push(toolPart);
+    }
   }
 
   private extractChangedFiles(toolName: string, input: string | undefined, rawInput: string | undefined): FileChangeSummary[] {
@@ -1067,10 +1083,13 @@ export class SessionTranscriptAssembler {
         existing.tool.metadata = { ...existing.tool.metadata, ...update.metadata };
       }
 
-      const changedFiles = this.extractChangedFiles(existing.tool.normalizedName ?? existing.tool.toolName, update.input, update.rawInput);
-      if (changedFiles.length > 0) {
-        existing.tool.changedFiles = [...(existing.tool.changedFiles ?? []), ...changedFiles];
-        this.allChangedFiles.push(...changedFiles);
+      if (existing.tool.changedFiles && existing.tool.changedFiles.length > 0) {
+      } else {
+        const changedFiles = this.extractChangedFiles(existing.tool.normalizedName ?? existing.tool.toolName, update.input, update.rawInput);
+        if (changedFiles.length > 0) {
+          existing.tool.changedFiles = [...(existing.tool.changedFiles ?? []), ...changedFiles];
+          this.allChangedFiles.push(...changedFiles);
+        }
       }
     } else {
       if (!this.currentTurn) {
@@ -1108,9 +1127,11 @@ export class SessionTranscriptAssembler {
         this.recordUnknownTool(update.toolName, displayTitle ?? update.title, target);
       }
 
+      const suppressed = isSuppressedInternalTool(normalizedName);
       const toolPart: ToolPart = {
         id: this.nextId('tool'),
         type: 'tool',
+        hidden: suppressed || undefined,
         tool: {
           toolCallId: update.toolCallId,
           normalizedName,
@@ -1143,7 +1164,9 @@ export class SessionTranscriptAssembler {
       }
 
       this.toolPartsById.set(update.toolCallId, toolPart);
-      this.currentTurn!.assistant.push(toolPart);
+      if (!suppressed) {
+        this.currentTurn!.assistant.push(toolPart);
+      }
     }
   }
 

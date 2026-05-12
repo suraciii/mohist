@@ -1348,6 +1348,50 @@ describe('SessionTranscriptAssembler', () => {
     });
   });
 
+  describe('internal tool suppression', () => {
+    it('should suppress todowrite tool from primary transcript', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Plan the implementation', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-todo', 'todowrite', 'Update todos', JSON.stringify({ todos: [{ content: 'Do task', status: 'in_progress' }] }), '2024-01-01T10:00:01.000Z'),
+        makeToolCallUpdate('tc-todo', 'completed', JSON.stringify({ success: true }), undefined, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(0);
+      const hiddenTools = transcript.turns[0].assistant.filter(p => p.type === 'tool' && (p as any).hidden === true);
+      expect(hiddenTools).toHaveLength(0);
+    });
+
+    it('should still record todowrite in session toolCount and metadata', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Plan the implementation', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-todo', 'todowrite', 'Update todos', JSON.stringify({ todos: [{ content: 'Do task', status: 'in_progress' }] }), '2024-01-01T10:00:01.000Z'),
+        makeToolCallUpdate('tc-todo', 'completed', JSON.stringify({ success: true }), undefined, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.session.toolCount).toBe(1);
+    });
+
+    it('should suppress todo tool from primary transcript', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Plan the implementation', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-todo', 'todo', 'Update todos', JSON.stringify({ todos: [] }), '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(0);
+    });
+  });
+
   describe('apply_patch summaries', () => {
     it('should parse apply_patch Add File operations', () => {
       const session = makeSession();
@@ -1436,7 +1480,7 @@ describe('SessionTranscriptAssembler', () => {
       expect(toolPart.changedFiles![0].operation).toBe('deleted');
     });
 
-    it('should parse apply_patch Move to operations', () => {
+it('should parse apply_patch Move to operations', () => {
       const session = makeSession();
       const patchText = `Move to: src/renamed.ts
 + new content here`;
@@ -1451,6 +1495,27 @@ describe('SessionTranscriptAssembler', () => {
       const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
       expect(toolPart.changedFiles).toBeDefined();
       expect(toolPart.changedFiles![0].operation).toBe('moved');
+    });
+
+    it('should parse apply_patch with oldPath from OldPath header', () => {
+      const session = makeSession();
+      const patchText = `*** Begin Patch
+*** OldPath: src/old-name.ts
+*** Move to: src/new-name.ts
++ new content
+*** End Patch`;
+      const events = [
+        makePromptEvent('Move file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-patch', 'apply_patch', 'src/new-name.ts', JSON.stringify({ patchText }), '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.changedFiles).toBeDefined();
+      expect(toolPart.changedFiles![0].operation).toBe('moved');
+      expect(toolPart.changedFiles![0].oldPath).toBe('src/old-name.ts');
     });
 
     it('should handle apply_patch with title-only tool identity', () => {
@@ -1492,6 +1557,81 @@ describe('SessionTranscriptAssembler', () => {
       expect(transcript.session.changedFiles).toHaveLength(2);
       expect(transcript.session.changedFiles!.some((f: FileChangeSummary) => f.path === 'src/a.ts')).toBe(true);
       expect(transcript.session.changedFiles!.some((f: FileChangeSummary) => f.path === 'src/b.ts')).toBe(true);
+    });
+  });
+
+  describe('edit/write moved file detection', () => {
+    it('should detect moved operation from old_path field', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Rename file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolCallId: 'tc-edit',
+            toolName: 'edit',
+            title: 'src/renamed.ts',
+            input: { file_path: 'src/renamed.ts', old_path: 'src/original.ts', new_string: 'content' },
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.changedFiles).toBeDefined();
+      expect(toolPart.changedFiles![0].operation).toBe('moved');
+      expect(toolPart.changedFiles![0].oldPath).toBe('original.ts');
+    });
+
+    it('should detect moved operation from oldPath field (camelCase)', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Rename file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolCallId: 'tc-edit',
+            toolName: 'edit',
+            title: 'src/renamed.ts',
+            input: { file_path: 'src/renamed.ts', oldPath: 'src/original.ts', new_string: 'content' },
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(1);
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.changedFiles).toBeDefined();
+      expect(toolPart.changedFiles![0].operation).toBe('moved');
+      expect(toolPart.changedFiles![0].oldPath).toBe('original.ts');
+    });
+
+    it('should include changedFiles summary in session metadata from edit tool', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Edit file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolCallId: 'tc-edit',
+            toolName: 'edit',
+            title: 'src/index.ts',
+            input: { file_path: 'src/index.ts', old_string: 'old', new_string: 'new' },
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      expect(transcript.session.changedFiles).toBeDefined();
+      expect(transcript.session.changedFiles!).toHaveLength(1);
+      expect(transcript.session.changedFiles![0].path).toBe('index.ts');
     });
   });
 
