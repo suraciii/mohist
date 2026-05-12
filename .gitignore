@@ -49,6 +49,7 @@ coverage/
 
 # Mohist data (runtime)
 .mohist/
+!.mohist/explores/
 .claude/
 
 # OpenCode generated
