@@ -746,7 +746,7 @@ export function setupIssueCommands(program: Command): void {
         const baseBranch = issue.baseBranch || 'main';
 
         try {
-          execSync(`git diff ${baseBranch}...${branchName}`, {
+          execSync(`git diff ${baseBranch} ${branchName}`, {
             cwd: projectPath,
             stdio: 'inherit'
           });

@@ -1708,7 +1708,7 @@ export function createIssueRoutes(
         return c.json(response);
       }
 
-      const diffArgs = ['diff', `${project.baseBranch}...${branchName}`];
+      const diffArgs = ['diff', project.baseBranch, branchName];
 
       let numstatOutput: { stdout: string };
       let fullDiffOutput: { stdout: string };
