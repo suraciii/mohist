@@ -48,7 +48,7 @@ coverage/
 *.db-shm
 
 # Mohist data (runtime)
-.mohist/
+.mohist/*
 !.mohist/explores/
 .claude/
 
