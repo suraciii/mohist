@@ -8,6 +8,7 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
+import type { WorkflowRunService } from '../services/workflow-run-service';
 import type { ConfigInfo } from '../config/config-schema';
 import type { StageStateService } from '../services/stage-state-service';
 import { resolveStageModel } from '../config/model-resolution';
@@ -34,6 +35,7 @@ export interface WorkflowEngineOptions {
   coderSessionRepo?: CoderSessionRepo;
   stageExecutionRepo?: StageExecutionRepo;
   stageStateService?: StageStateService;
+  workflowRunService?: WorkflowRunService;
   config?: ConfigInfo;
 }
 
@@ -51,6 +53,7 @@ export class WorkflowEngine {
   private coderSessionRepo?: CoderSessionRepo;
   private stageExecutionRepo?: StageExecutionRepo;
   private stageStateService?: StageStateService;
+  private workflowRunService?: WorkflowRunService;
   private config?: ConfigInfo;
 
   constructor(options: WorkflowEngineOptions) {
@@ -67,6 +70,7 @@ export class WorkflowEngine {
     this.coderSessionRepo = options.coderSessionRepo;
     this.stageExecutionRepo = options.stageExecutionRepo;
     this.stageStateService = options.stageStateService;
+    this.workflowRunService = options.workflowRunService;
     this.config = options.config;
   }
 
@@ -97,6 +101,8 @@ export class WorkflowEngine {
       coderSessionRepo: this.coderSessionRepo,
       stageExecutionRepo: this.stageExecutionRepo,
       stageStateService: this.stageStateService,
+      workflowRunService: this.workflowRunService,
+      workflowRun: this.workflowRunService ? this.workflowRunService.getActiveRunForIssue(issue.id) ?? undefined : undefined,
       signal: this.signal,
     };
   }
@@ -154,6 +160,13 @@ export class WorkflowEngine {
         }
       } else {
         return { completed: false, stage: currentIssue.stage, message: result.message };
+      }
+    }
+
+    if (this.workflowRunService) {
+      const run = this.workflowRunService.getActiveRunForIssue(currentIssue.id);
+      if (run) {
+        this.workflowRunService.setRunStatus(run.id, 'passed', Stage.Done);
       }
     }
 

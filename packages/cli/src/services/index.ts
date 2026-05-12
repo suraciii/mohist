@@ -14,3 +14,4 @@ export { SchedulerService, type SkillRunner } from './scheduler-service';
 export { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
 export { PostMergeFinalizer, type FinalizationResult, type HealthGateResult } from './post-merge-finalizer';
 export { StageStateService, normalizeCheckStatus, normalizeTaskStatus, type StageTaskStatus, type StageCheckStatus, type StageStateStatus, type StageTaskState, type StageCheckState, type StageApprovalState, type StageStateRead, type UpsertTaskInput, type UpsertCheckInput, type SetApprovalInput } from './stage-state-service';
+export { WorkflowRunService } from './workflow-run-service';

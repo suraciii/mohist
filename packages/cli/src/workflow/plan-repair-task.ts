@@ -204,6 +204,12 @@ export async function runPlanRepairTask(
       artifacts: updatedArtifacts,
       attempts: attempt,
       duration,
+      reason: `${title} triggered by failed check: ${options.failedCheck.name}`,
+      causedBy: {
+        type: 'check-failure',
+        checkName: options.failedCheck.name,
+        message: options.failedCheck.message,
+      },
       output: {
         kind: 'plan-repair-task',
         checkName: options.failedCheck.name,
@@ -243,6 +249,12 @@ export async function runPlanRepairTask(
       artifacts: [],
       attempts: attempt,
       duration,
+      reason: `${title} triggered by failed check: ${options.failedCheck.name}`,
+      causedBy: {
+        type: 'check-failure',
+        checkName: options.failedCheck.name,
+        message: error,
+      },
       output: {
         kind: 'plan-repair-task',
         checkName: options.failedCheck.name,

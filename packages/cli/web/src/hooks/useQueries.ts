@@ -582,3 +582,12 @@ export function useIssueStageState(number: number) {
     refetchInterval: 5000,
   })
 }
+
+export function useWorkflowRun(number: number) {
+  return useQuery<import('../lib/types').WorkflowRun>({
+    queryKey: ['issues', number, 'workflow-run'],
+    queryFn: () => api.getWorkflowRun(number),
+    enabled: number > 0,
+    refetchInterval: 5000,
+  })
+}

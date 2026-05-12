@@ -1,11 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { DatabaseManager } from '../db/database';
+import { DatabaseManager } from '../db/database';
 import { findChangeDir } from '../openspec/detector';
 import { Stage } from '../types';
 import type { CheckState, CheckSuiteChecks } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { CheckResult, StageTaskResult } from '../workflow/stage-context';
+import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
@@ -608,6 +609,65 @@ export class StageStateService {
         filteredTasks,
         checkRows.map(rowToStageCheck),
       );
+    });
+  }
+
+  getIssueStageStateFromWorkflowRun(run: WorkflowRunWithStageRuns): StageStateRead[] {
+    return run.stageRuns.map(stageRun => {
+      const tasks: StageTaskState[] = stageRun.tasks.map(task => ({
+        taskId: task.taskId,
+        title: task.title,
+        status: task.status as StageTaskStatus,
+        source: 'static' as const,
+        order: task.taskOrder,
+        attempts: task.attempts,
+        duration: task.duration,
+        artifacts: task.artifacts,
+        output: task.output,
+        startedAt: task.startedAt,
+        completedAt: task.completedAt,
+        updatedAt: task.updatedAt,
+        reason: task.reason ?? undefined,
+        causedBy: task.causedByType ? {
+          type: task.causedByType as StageTaskCause['type'],
+          checkName: task.causedByCheckName ?? undefined,
+          taskId: task.causedByTaskId ?? undefined,
+        } : undefined,
+      }));
+
+      const checks: StageCheckState[] = stageRun.checks.map(check => ({
+        checkName: check.checkName,
+        status: check.status as StageCheckStatus,
+        message: check.message,
+        output: check.output,
+        runCount: check.runCount,
+        lastRunAt: check.lastRunAt,
+        updatedAt: check.updatedAt,
+      }));
+
+      let approval: StageApprovalState | null = null;
+      if (stageRun.approvalStatus) {
+        approval = {
+          status: stageRun.approvalStatus,
+          output: stageRun.approvalOutput,
+          requestedAt: stageRun.approvalRequestedAt,
+          respondedAt: stageRun.approvalRespondedAt,
+        };
+      }
+
+      const status = stageRun.status as StageStateStatus;
+
+      return {
+        stage: stageRun.stage,
+        status,
+        tasks,
+        checks,
+        approval,
+        attempts: 0,
+        startedAt: stageRun.startedAt,
+        completedAt: stageRun.completedAt,
+        updatedAt: stageRun.updatedAt,
+      };
     });
   }
 

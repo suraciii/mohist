@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useIssueStageState } from '../hooks/useQueries'
+import { useWorkflowRun, useIssueStageState } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
+import { convertCause } from '../lib/workflow-run-utils'
 import type { StageTaskState, Stage } from '../lib/types'
 import { Stage as StageEnum } from '../lib/types'
 
@@ -101,16 +102,39 @@ function ProgressBar({ completed, failed, total }: { completed: number; failed: 
 export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }: TaskProgressPanelProps) {
   useTaskProgress(issueNumber)
 
+  const { data: workflowRun } = useWorkflowRun(issueNumber)
   const { data: stageStateData, isLoading: stageStateLoading } = useIssueStageState(issueNumber)
 
   const isBacklog = currentStage === StageEnum.Backlog
 
   if (isBacklog) return null
 
-  const currentStageState = stageStateData?.stages?.find(s => s.stage === currentStage)
-  const tasks: StageTaskState[] = currentStageState?.tasks ?? []
+  const stageState = workflowRun?.stageRuns?.find(sr => sr.stage === currentStage)
+  let tasks: StageTaskState[]
 
-  if (stageStateLoading) {
+  if (stageState) {
+    tasks = stageState.tasks.map((t) => ({
+      taskId: t.taskId,
+      title: t.title,
+      status: t.status,
+      source: (t.reason || t.causedBy) ? 'dynamic' as const : 'static' as const,
+      order: t.taskOrder ?? 0,
+      attempts: t.attempts,
+      duration: t.duration,
+      artifacts: t.artifacts,
+      output: t.output,
+      startedAt: t.startedAt,
+      completedAt: t.completedAt,
+      updatedAt: new Date().toISOString(),
+      reason: t.reason ?? undefined,
+      causedBy: convertCause(t.causedBy),
+    }))
+  } else {
+    const currentStageState = stageStateData?.stages?.find(s => s.stage === currentStage)
+    tasks = currentStageState?.tasks ?? []
+  }
+
+  if (stageStateLoading && !workflowRun) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-gray-700 mb-3">Task Progress</h2>

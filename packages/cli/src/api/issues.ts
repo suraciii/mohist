@@ -27,6 +27,7 @@ import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
 import { isValidModelId } from '../config/model-resolution';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
 import type { StageStateService } from '../services/stage-state-service';
+import type { WorkflowRunService } from '../services/workflow-run-service';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 
@@ -127,6 +128,7 @@ export function createIssueRoutes(
   stageExecutionRepo?: StageExecutionRepo,
   _postMergeFinalizer?: PostMergeFinalizer,
   stageStateService?: StageStateService,
+  workflowRunService?: WorkflowRunService,
 ): Hono {
   const app = new Hono();
 
@@ -414,6 +416,45 @@ export function createIssueRoutes(
     }
   });
 
+  app.get('/:number/workflow-run', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (!workflowRunService) {
+        return c.json({ success: false, error: 'WorkflowRunService not configured' } satisfies ApiResponse, 500);
+      }
+
+      const run = workflowRunService.getActiveRunForIssue(issue.id);
+      if (!run) {
+        return c.json({ success: false, error: `No active workflow run for issue #${number}` } satisfies ApiResponse, 404);
+      }
+
+      return c.json({
+        success: true,
+        data: {
+          issueId: run.issueId,
+          issueNumber: run.issueNumber,
+          id: run.id,
+          status: run.status,
+          currentStage: run.currentStage,
+          stageRuns: run.stageRuns,
+        },
+      } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
   app.get('/:number/stage-state', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
@@ -430,6 +471,21 @@ export function createIssueRoutes(
 
       if (!stageStateService) {
         return c.json({ success: false, error: 'StageStateService not configured' } satisfies ApiResponse, 500);
+      }
+
+      if (workflowRunService) {
+        const run = workflowRunService.getActiveRunForIssue(issue.id);
+        if (run) {
+          const stages = stageStateService.getIssueStageStateFromWorkflowRun(run);
+          return c.json({
+            success: true,
+            data: {
+              issueId: issue.id,
+              issueNumber: issue.number,
+              stages,
+            },
+          } satisfies ApiResponse);
+        }
       }
 
       const stages = stageStateService.getIssueStageState(issue.id);
@@ -1260,6 +1316,18 @@ export function createIssueRoutes(
             requestedAt: issue.approvalState.requestedAt,
             respondedAt,
           });
+          if (workflowRunService) {
+            const run = workflowRunService.getActiveRunForIssue(issue.id);
+            if (run) {
+              const approvalStage = issue.approvalState.stage as Stage;
+              workflowRunService.setApproval(run.id, approvalStage, {
+                status: 'approved',
+                output: issue.approvalState.output ?? null,
+                requestedAt: issue.approvalState.requestedAt ?? null,
+                respondedAt,
+              });
+            }
+          }
         }
 
         issueRepo.updateStage(issue.id, Stage.Integrate);
@@ -1294,6 +1362,18 @@ export function createIssueRoutes(
             requestedAt: issue.approvalState.requestedAt,
             respondedAt,
           });
+          if (workflowRunService) {
+            const run = workflowRunService.getActiveRunForIssue(issue.id);
+            if (run) {
+              const approvalStage = issue.approvalState.stage as Stage;
+              workflowRunService.setApproval(run.id, approvalStage, {
+                status: 'approved',
+                output: issue.approvalState.output ?? null,
+                requestedAt: issue.approvalState.requestedAt ?? null,
+                respondedAt,
+              });
+            }
+          }
         }
       }
 
@@ -1397,6 +1477,17 @@ export function createIssueRoutes(
         requestedAt: issue.approvalState!.requestedAt,
         respondedAt,
       });
+      if (workflowRunService) {
+        const run = workflowRunService.getActiveRunForIssue(issue.id);
+        if (run) {
+          workflowRunService.setApproval(run.id, rejectedStage as Stage, {
+            status: 'rejected',
+            output: issue.approvalState!.output ?? null,
+            requestedAt: issue.approvalState!.requestedAt ?? null,
+            respondedAt,
+          });
+        }
+      }
 
       if (rejectedStage === Stage.Check) {
         issueRepo.updateStage(issue.id, Stage.Build);

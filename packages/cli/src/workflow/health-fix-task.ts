@@ -125,6 +125,12 @@ export async function runHealthFixTask(
       artifacts: [],
       attempts: options.attempt,
       duration,
+      reason: `${options.title} triggered by failed check: ${options.failedCheck.name}`,
+      causedBy: {
+        type: 'check-failure',
+        checkName: options.failedCheck.name,
+        message: options.failedCheck.message,
+      },
       output: {
         kind: 'health-fix-task',
         stage: options.stage,
@@ -165,6 +171,12 @@ export async function runHealthFixTask(
       artifacts: [],
       attempts: options.attempt,
       duration,
+      reason: `${options.title} triggered by failed check: ${options.failedCheck.name}`,
+      causedBy: {
+        type: 'check-failure',
+        checkName: options.failedCheck.name,
+        message: error,
+      },
       output: {
         kind: 'health-fix-task',
         stage: options.stage,
