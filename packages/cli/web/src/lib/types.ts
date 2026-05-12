@@ -435,6 +435,7 @@ export interface ReasoningPart {
 export interface ToolPart {
   id: string
   type: 'tool'
+  hidden?: boolean
   tool: {
     toolCallId: string
     normalizedName?: string

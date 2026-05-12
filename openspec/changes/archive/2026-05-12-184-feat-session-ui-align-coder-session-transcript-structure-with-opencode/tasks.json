@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Normalize backend transcript assembly for opencode-style turns",
+      "spec": "specs/http-api/spec.md#Requirement: Coder session detail exposes normalized transcript metadata",
+      "description": "Make the session transcript service the canonical source for stable turn ordering, merged tool lifecycle records, normalized tool status, and richer patch/edit/write metadata. This task should eliminate duplicate started/completed tool parts in replay and ensure the API payload contains enough information for low-noise transcript rendering.",
+      "acceptanceCriteria": [
+        "Replay transcript merges tool lifecycle events by toolCallId or equivalent inferred correlation so one logical tool produces one logical tool part",
+        "Unknown running placeholders with no meaningful input or output are suppressed from the primary payload when they cannot become user-visible tools",
+        "Patch, edit, and write tool parts expose file-level metadata including path, operation, and additions/deletions when recoverable",
+        "Transcript metadata includes stable counts and changed-file summaries needed by the session page",
+        "Backend transcript tests cover ordering, unknown-tool suppression, tool merge behavior, and patch metadata extraction",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/session-transcript-service.ts, packages/cli/tests/session-transcript-service.test.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Keep the API shape additive where possible; prefer stronger normalization over schema redesign.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1046468
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Add a display adapter for transcript-first session turns",
+      "spec": "specs/agent-session-ui/spec.md#Requirement: Session page reads as a Mohist-to-Coder transcript",
+      "description": "Introduce a frontend display adapter that converts current session detail turns into prompt-led display turns with ordered assistant parts, grouped context tools, filtered internal noise, and turn-ending changed files. This task should give the UI a single render contract shared by replayed transcript data and later live updates.",
+      "acceptanceCriteria": [
+        "The adapter outputs prompt-led display turns with assistant parts for text, reasoning, tool, context-group, error, and divider states",
+        "Contiguous read/search/glob/list-style tools are grouped into a context-gathering part without losing failure visibility",
+        "todowrite is excluded from the default transcript projection and inferable tools do not fall back to unknown display rows unnecessarily",
+        "Patch/edit/write parts surface changed-file summaries into the display turn contract",
+        "Frontend tests cover prompt projection, context grouping, unknown filtering, and changed-file extraction from representative transcript fixtures",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/session-transcript-display.ts, packages/cli/web/tests/session-transcript-display.test.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Keep the adapter pure so replay and live paths can share the same projection logic.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        792820
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Rebuild the session page around centered transcript turns",
+      "spec": "specs/session-timeline-ui/spec.md#Requirement: Session timeline uses opencode-like reading layout and live affordances",
+      "description": "Replace the current dashboard-like transcript composition with a centered turn timeline that uses a sticky in-flow session title, user-message-like prompt blocks, ordered assistant parts, and readable empty/error states. This task should make the session page structurally resemble opencode before tool-specific polish is added.",
+      "acceptanceCriteria": [
+        "The session page renders a centered transcript column with a sticky in-timeline header and a log-style turn list",
+        "Mohist prompts render as right-aligned low-saturation prompt blocks with collapsed raw prompt content and secondary actions for expand/copy",
+        "Assistant text and reasoning render as ordered parts instead of a separate coder label plus tool-card stack",
+        "Long transcript turns use a containment strategy such as content-visibility without breaking transcript reading",
+        "Frontend tests cover prompt rendering, sticky title presence, and transcript-first empty/error state behavior",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/SessionPage.tsx, packages/cli/web/src/components/session-transcript/*, packages/cli/web/tests/SessionPage.test.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Focus this task on transcript layout and turn composition, not final tool/diff detail behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1636781
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Implement compact tool rows, context groups, and turn diffs",
+      "spec": "specs/coder-session-tracking/spec.md#Requirement: Transcript assembly preserves stable tool identity and turn semantics",
+      "description": "Replace heavy event-log tool cards with compact BasicTool-like rows, grouped context gathering, expandable tool details, and turn-ending diff sections for patch/edit/write activity. This task should make tool evidence feel like assistant content instead of a workflow log.",
+      "acceptanceCriteria": [
+        "read, glob, grep/search, bash, apply_patch, edit/write, webfetch, and generic fallback tools render as compact transcript-native rows",
+        "Running and pending tools use subtle loading treatment and are not expanded by default, while completed and error tools expose expandable details",
+        "The primary transcript never shows Called unknown or duplicate running/completed rows for the same logical tool call",
+        "Patch/edit/write tools display file-aware summaries and each turn ends with a changed-files or diff section that supports expandable per-file details",
+        "Frontend tests cover compact tool rendering, grouped context rows, hidden todowrite noise, and per-file diff summaries",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/session-transcript/*, packages/cli/web/tests/SessionPage.test.tsx",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Tool details may still expose raw input/output as fallback, but only behind expandable views.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1046385
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Align live updates, thinking states, and auto-follow behavior",
+      "spec": "specs/pipeline-session-events/spec.md#Requirement: Live session events converge with replayed transcript display",
+      "description": "Refactor live session handling so SSE updates feed the same normalized display transcript used for replay, with subtle transcript status, thinking shimmer, paced live updates, and bottom-lock-aware scroll behavior. This task should make running sessions feel alive without relying on noisy tool-card churn.",
+      "acceptanceCriteria": [
+        "Live tool start/update events update existing logical display parts instead of creating duplicate or orphan tool rows",
+        "Running sessions show subtle live status, inline spinner or progress treatment, and a thinking placeholder when no visible assistant content exists yet",
+        "Auto-follow pauses when the user scrolls away or selects text, ignores nested data-scrollable regions, and restores bottom lock correctly on resize when appropriate",
+        "Jump-to-bottom appears only when the user is meaningfully away from the bottom and new transcript content is available",
+        "Frontend tests cover live update convergence, thinking state behavior, and scroll follow or new-content interaction",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/hooks/useSessionTranscript.ts, packages/cli/web/src/components/SessionPage.tsx, packages/cli/web/tests/SessionPage.test.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Use a transcript-specific scroll state machine rather than a single near-bottom boolean.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1830288
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Add regression fixtures and final transcript verification",
+      "spec": "specs/agent-session-ui/spec.md#Requirement: Session page reads as a Mohist-to-Coder transcript",
+      "description": "Add representative backend, API, and UI regression fixtures that model real coder sessions across prompt-heavy turns, grouped context gathering, patch tools, replay ordering, and live/refetch convergence. This task proves the completed transcript experience matches the change goals end to end and stays stable across refreshes.",
+      "acceptanceCriteria": [
+        "Regression fixtures cover a large Mohist prompt, multi-turn transcript flow, grouped context tools, inferable patch tools, nested or missing tool-call ids, and interrupted or recovery states",
+        "Regression tests prove replay ordering is stable, inferable tools do not surface as unknown rows, and changed-file summaries remain attached to the correct turn",
+        "Regression tests prove live append followed by transcript refetch preserves equivalent visible grouping and ordering",
+        "Regression tests prove error, recovery, and auto-follow or jump-to-bottom behavior continue to work with the final transcript components",
+        "Tests pass",
+        "Build passes",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/session-transcript-service.test.ts, packages/cli/tests/api/session-transcript.test.ts, packages/cli/web/tests/SessionPage.test.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "Use regression fixtures to prove the proposal and all capability specs stay aligned across backend, API, live updates, and transcript UI.",
+      "attempts": 2,
+      "order": 999999,
+      "error": "Auto-skipped (no onAskUser): Session liveness probe timed out",
+      "durations": [
+        931537,
+        443076
+      ]
+    }
+  ]
+}

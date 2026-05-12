@@ -36,6 +36,7 @@ export interface UseSessionTranscriptResult {
   newContentAvailable: boolean
   acknowledgeNewContent: () => void
   isFinalizing: boolean
+  isThinking: boolean
 }
 
 function generateId(): string {
@@ -356,11 +357,12 @@ export function useSessionTranscript({
   isRunning,
 }: UseSessionTranscriptOptions): UseSessionTranscriptResult {
   const queryClient = useQueryClient()
-  const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
+const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
   const [transcriptVersion, setTranscriptVersion] = useState(0)
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [newContentAvailable, setNewContentAvailable] = useState(false)
   const [isFinalizing, setIsFinalizing] = useState(false)
+  const [isThinking, setIsThinking] = useState(false)
 
   const turnsRef = useRef(turns)
   turnsRef.current = turns
@@ -404,8 +406,22 @@ export function useSessionTranscript({
     liveToolCallMapRef.current.clear()
     pendingCorrelationRef.current.clear()
     setIsFinalizing(false)
+    setIsThinking(false)
     setTranscriptVersion((version) => version + 1)
   }, [initialTurns])
+
+  useEffect(() => {
+    if (!isRunning) {
+      setIsThinking(false)
+      return
+    }
+    const hasVisibleContent = turns.some(t =>
+      t.assistant.some(p => p.type === 'text' || p.type === 'reasoning' || p.type === 'tool')
+    )
+    if (!hasVisibleContent) {
+      setIsThinking(true)
+    }
+  }, [isRunning, turns])
 
   useEffect(() => {
     if (!isRunning) return
@@ -424,6 +440,7 @@ export function useSessionTranscript({
           next[next.length - 1] = appendTextToTurn(lastTurn, detail.text)
           return next
         })
+        setIsThinking(false)
         markNewContentRef.current()
       }),
     )
@@ -473,6 +490,7 @@ export function useSessionTranscript({
             }, correlationKey)
             return next
           })
+          setIsThinking(false)
           markNewContentRef.current()
         } else if (isTerminalState(detail.state)) {
           const existing = liveToolCallMapRef.current.get(toolCallId)
@@ -655,5 +673,6 @@ export function useSessionTranscript({
     newContentAvailable,
     acknowledgeNewContent,
     isFinalizing,
+    isThinking,
   }
 }

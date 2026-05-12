@@ -5,9 +5,10 @@ import { useIssue } from '../hooks/useQueries'
 import { useCoderSessions } from '../hooks/useCoderSessions'
 import { api } from '../lib/api'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
-import { SessionTranscriptView } from './SessionTranscriptView'
 import { useSessionTranscript } from '../hooks/useSessionTranscript'
+import { projectSessionToDisplayTurns } from '../lib/session-transcript-display'
 import type { CoderSessionDetail, SessionStatusKind } from '../lib/types'
+import { SessionTranscriptLayout } from './session-transcript/SessionTranscriptLayout'
 
 type StatusKind = SessionStatusKind
 
@@ -312,7 +313,6 @@ export function SessionPage() {
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
-  const scrollToBottomPendingRef = useRef(false)
 
   const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
   const apiStatusKind = detail?.metadata?.statusKind
@@ -330,6 +330,7 @@ export function SessionPage() {
     newContentAvailable,
     setIsNearBottom,
     isFinalizing,
+    isThinking,
   } = useSessionTranscript({
     issueNumber,
     sessionId: sessionId ?? '',
@@ -341,12 +342,31 @@ export function SessionPage() {
   const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
   const displayTurnCount = detail?.metadata?.turnCount ?? turns.length
 
-  const handleScroll = useCallback(() => {
+  const displayTurns = detail ? projectSessionToDisplayTurns(detail) : []
+
+  const isUserScrollingRef = useRef(false)
+  const isSelectingTextRef = useRef(false)
+
+  const handleScroll = useCallback((evt?: Event) => {
     const container = scrollContainerRef.current
     if (!container) return
-    const threshold = 200
+
+    const target = evt?.target as HTMLElement | null
+    if (target && (target as HTMLElement).closest('[data-scrollable]')) {
+      return
+    }
+
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    const threshold = 200
+    const wasNearBottom = isNearBottomRef.current
     isNearBottomRef.current = distanceFromBottom < threshold
+
+    if (!wasNearBottom && isNearBottomRef.current) {
+      isUserScrollingRef.current = false
+    } else if (wasNearBottom && !isNearBottomRef.current) {
+      isUserScrollingRef.current = true
+    }
+
     setIsNearBottom(isNearBottomRef.current)
   }, [setIsNearBottom])
 
@@ -358,35 +378,80 @@ export function SessionPage() {
       behavior: 'smooth',
     })
     scrollToBottom()
+    isUserScrollingRef.current = false
   }, [scrollToBottom])
 
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
 
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
+    let animationFrame: number | null = null
+
+    const onScroll = (evt: Event) => {
+      if (animationFrame !== null) {
+        cancelAnimationFrame(animationFrame)
+      }
+      animationFrame = requestAnimationFrame(() => {
+        handleScroll(evt)
+      })
+    }
+
+    container.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      container.removeEventListener('scroll', onScroll)
+      if (animationFrame !== null) {
+        cancelAnimationFrame(animationFrame)
+      }
+    }
   }, [handleScroll])
 
   useEffect(() => {
-    if (!isNearBottomRef.current) return
-    if (!isRunning) return
     const container = scrollContainerRef.current
     if (!container) return
 
-    container.scrollTop = container.scrollHeight
-    if (scrollToBottomPendingRef.current) {
-      scrollToBottomPendingRef.current = false
+    const onSelectionChange = () => {
+      const selection = window.getSelection()
+      isSelectingTextRef.current = selection !== null && selection.toString().length > 0
     }
-  }, [transcriptVersion, isRunning])
+
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [])
 
   useEffect(() => {
     if (!isRunning) return
     const container = scrollContainerRef.current
     if (!container) return
 
+    if (isUserScrollingRef.current || isSelectingTextRef.current) return
+
+    container.scrollTop = container.scrollHeight
+  }, [isRunning, transcriptVersion])
+
+  useEffect(() => {
+    if (!isRunning) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    if (isUserScrollingRef.current || isSelectingTextRef.current) return
+
     container.scrollTop = container.scrollHeight
   }, [isRunning, detail?.metadata?.status])
+
+  useEffect(() => {
+    if (!isRunning) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const handleResize = () => {
+      if (isNearBottomRef.current && !isUserScrollingRef.current && !isSelectingTextRef.current) {
+        container.scrollTop = container.scrollHeight
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isRunning])
 
   if (!sessionId || isNaN(issueNumber) || issueNumber <= 0) {
     return <SessionNotFound issueNumber={issueNumber || 0} />
@@ -451,19 +516,18 @@ export function SessionPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative">
-      <SessionHeader
-        issueNumber={issueNumber}
-        issueTitle={issue?.title}
-        meta={detail.metadata}
-        statusKind={displayStatusKind}
-        turnCount={displayTurnCount}
-      />
-
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-4 py-6"
+        className="flex-1 overflow-y-auto"
       >
-        <SessionTranscriptView turns={turns} isRunning={isRunning} />
+        <SessionTranscriptLayout
+          title={detail.metadata.title ?? 'Session'}
+          turnCount={displayTurnCount}
+          turns={displayTurns}
+          statusKind={displayStatusKind}
+          isRunning={isRunning}
+          isThinking={isThinking}
+        />
       </div>
 
       {newContentAvailable && (

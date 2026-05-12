@@ -2384,3 +2384,309 @@ describe('Correlation-based tool merging', () => {
     })
   })
 })
+
+describe('Thinking state for live sessions', () => {
+  it('sets isThinking true when session is running with no visible assistant content', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    await waitFor(() => {
+      expect(result.current.isThinking).toBe(true)
+    })
+  })
+
+  it('sets isThinking false when text chunk arrives', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    await waitFor(() => {
+      expect(result.current.isThinking).toBe(true)
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        text: 'Hello world',
+        coderSessionId: 'session-123',
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.isThinking).toBe(false)
+    })
+  })
+
+  it('sets isThinking false when tool call starts', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    await waitFor(() => {
+      expect(result.current.isThinking).toBe(true)
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-thinking',
+        toolName: 'read',
+        state: 'started',
+        rawInput: { file_path: 'src/index.ts' },
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.isThinking).toBe(false)
+    })
+  })
+
+  it('resets isThinking when initialTurns change', async () => {
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns: [makeTurn()],
+      isRunning: false,
+    }))
+
+    expect(result.current.isThinking).toBe(false)
+  })
+})
+
+describe('Scroll follow behavior', () => {
+  it('does not auto-scroll when user is not near bottom', async () => {
+    const scrollToMock = vi.fn()
+    Element.prototype.scrollTo = scrollToMock
+
+    const initialTurns = [makeTurn()]
+
+    renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    await waitFor(() => {
+      expect(scrollToMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('newContentAvailable is set when not near bottom and new content arrives', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    result.current.setIsNearBottom(false)
+
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        text: 'New content',
+        coderSessionId: 'session-123',
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.newContentAvailable).toBe(true)
+    })
+  })
+
+  it('acknowledgeNewContent clears newContentAvailable', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    result.current.setIsNearBottom(false)
+
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        text: 'New content',
+        coderSessionId: 'session-123',
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.newContentAvailable).toBe(true)
+    })
+
+    act(() => {
+      result.current.acknowledgeNewContent()
+    })
+
+    expect(result.current.newContentAvailable).toBe(false)
+  })
+})
+
+describe('Live update convergence', () => {
+  it('tool start and completion update same tool part without duplication', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-converge',
+        toolName: 'read',
+        state: 'started',
+        rawInput: { file_path: 'src/index.ts' },
+      })
+    })
+
+    await waitFor(() => {
+      const toolParts = result.current.turns.at(-1)?.assistant.filter(
+        (part): part is ToolPart => part.type === 'tool',
+      )
+      expect(toolParts).toHaveLength(1)
+      expect(toolParts?.[0].tool.status).toBe('running')
+    })
+
+    const firstToolId = result.current.turns.at(-1)?.assistant.find(
+      (part): part is ToolPart => part.type === 'tool',
+    )?.id
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-converge',
+        toolName: 'read',
+        state: 'completed',
+        rawOutput: 'file content',
+      })
+    })
+
+    await waitFor(() => {
+      const toolParts = result.current.turns.at(-1)?.assistant.filter(
+        (part): part is ToolPart => part.type === 'tool',
+      )
+      expect(toolParts).toHaveLength(1)
+      expect(toolParts?.[0].id).toBe(firstToolId)
+      expect(toolParts?.[0].tool.status).toBe('completed')
+      expect(toolParts?.[0].tool.output).toBe('file content')
+    })
+  })
+
+  it('preserves turn order after multiple live events', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        text: 'First text',
+        coderSessionId: 'session-123',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-order-1',
+        toolName: 'read',
+        state: 'started',
+        rawInput: { file_path: 'src/index.ts' },
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        text: 'Second text',
+        coderSessionId: 'session-123',
+      })
+    })
+
+    await waitFor(() => {
+      const textParts = result.current.turns.at(-1)?.assistant.filter(
+        (p): p is TextPart => p.type === 'text',
+      )
+      expect(textParts).toHaveLength(1)
+      expect(textParts?.[0].text).toBe('First textSecond text')
+    })
+
+    const toolParts = result.current.turns.at(-1)?.assistant.filter(
+      (part): part is ToolPart => part.type === 'tool',
+    )
+    expect(toolParts).toHaveLength(1)
+    expect(toolParts?.[0].tool.toolCallId).toBe('tc-order-1')
+  })
+})
