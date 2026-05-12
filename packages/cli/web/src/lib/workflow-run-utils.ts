@@ -46,6 +46,7 @@ export function workflowRunToStageStateMap(workflowRun: WorkflowRun): Map<string
     }))
     const checks: StageCheckState[] = sr.checks.map((c) => ({
       checkName: c.checkName,
+      title: c.title,
       status: c.status,
       message: c.message,
       output: c.output,

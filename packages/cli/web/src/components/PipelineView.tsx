@@ -356,7 +356,8 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
     icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
   }
 
-  const baseName = isHealthGate ? `Health Gate: ${check.checkName.replace('health:', '')}` : check.checkName
+  const fallbackName = isHealthGate ? `Health Gate: ${check.checkName.replace('health:', '')}` : check.checkName
+  const baseName = check.title?.trim() || fallbackName
   const displayName = attemptLabel ? `${baseName} (${attemptLabel})` : baseName
 
   return (
