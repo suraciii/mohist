@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PipelineView } from './PipelineView'
 import { TaskProgressPanel } from './TaskProgressPanel'
@@ -101,6 +101,22 @@ function setupWorkflowRunMocks(workflowRunData: WorkflowRun) {
     data: [],
     isLoading: false,
   } as unknown as ReturnType<typeof useIssueExecutions>)
+}
+
+function makeWorkflowChecks(overrides: { checkName: string; title: string; status: string }[]): any[] {
+  return overrides.map((c) => ({
+    checkName: c.checkName,
+    title: c.title,
+    status: c.status,
+    message: null,
+    output: c.checkName.startsWith('health:') ? { kind: 'health-gate' } : null,
+    runCount: 1,
+    lastRunAt: null,
+  }))
+}
+
+function makeIntegrateTasks(overrides: { taskId: string; title: string; status: string }[]): any[] {
+  return makeWorkflowTasks(overrides)
 }
 
 describe('WorkflowRun-backed task and check data consistency', () => {
@@ -344,5 +360,119 @@ describe('WorkflowRun-backed task and check data consistency', () => {
 
     expect(screen.getAllByText('WorkflowRun task').length).toBeGreaterThanOrEqual(2)
     expect(screen.queryByText('StageState task')).toBeNull()
+  })
+
+  it('PipelineView shows Integrate tasks as discrete ordered items', () => {
+    const workflowRun = makeWorkflowRun([
+      makeWorkflowStageRun(
+        Stage.Integrate,
+        makeIntegrateTasks([
+          { taskId: 'integrate:spec-sync', title: 'Sync specs', status: 'completed' },
+          { taskId: 'integrate:archive-change', title: 'Archive change', status: 'running' },
+          { taskId: 'integrate:merge', title: 'Merge branch', status: 'pending' },
+        ]),
+        [],
+      ),
+    ])
+    setupWorkflowRunMocks(workflowRun)
+
+    const issue = makeIssue({ stage: Stage.Integrate, status: IssueStatus.Active })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getAllByText('Sync specs').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Archive change').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Merge branch').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('Integrate health check appears in checks section, not task list', () => {
+    const workflowRun = makeWorkflowRun([
+      makeWorkflowStageRun(
+        Stage.Integrate,
+        makeIntegrateTasks([
+          { taskId: 'integrate:spec-sync', title: 'Sync specs', status: 'completed' },
+          { taskId: 'integrate:archive-change', title: 'Archive change', status: 'completed' },
+          { taskId: 'integrate:merge', title: 'Merge branch', status: 'completed' },
+        ]),
+        makeWorkflowChecks([
+          { checkName: 'health:integrate', title: 'Post-merge health check', status: 'passed' },
+        ]),
+      ),
+    ])
+    setupWorkflowRunMocks(workflowRun)
+
+    const issue = makeIssue({ stage: Stage.Integrate, status: IssueStatus.Active })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getAllByText('Sync specs').length).toBeGreaterThanOrEqual(1)
+    fireEvent.click(screen.getByRole('button', { name: /integrate/i }))
+    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryAllByText('Health Gate: integrate')).toHaveLength(0)
+  })
+
+  it('TaskProgressPanel renders Integrate tasks from WorkflowRun', () => {
+    const workflowRun = makeWorkflowRun([
+      makeWorkflowStageRun(
+        Stage.Integrate,
+        makeIntegrateTasks([
+          { taskId: 'integrate:spec-sync', title: 'Sync specs', status: 'completed' },
+          { taskId: 'integrate:archive-change', title: 'Archive change', status: 'pending' },
+        ]),
+        [],
+      ),
+    ])
+    setupWorkflowRunMocks(workflowRun)
+
+    const issue = makeIssue({ stage: Stage.Integrate, status: IssueStatus.Active })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TaskProgressPanel issueNumber={issue.number} currentStage={Stage.Integrate} isAgentRunning={true} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getAllByText('Sync specs').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Archive change').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('Integrate stage shows health:integrate check separately from tasks', () => {
+    const workflowRun = makeWorkflowRun([
+      makeWorkflowStageRun(
+        Stage.Integrate,
+        makeIntegrateTasks([
+          { taskId: 'integrate:spec-sync', title: 'Sync specs', status: 'completed' },
+          { taskId: 'integrate:merge', title: 'Merge branch', status: 'completed' },
+        ]),
+        makeWorkflowChecks([
+          { checkName: 'health:integrate', title: 'Post-merge health check', status: 'failed' },
+        ]),
+      ),
+    ])
+    setupWorkflowRunMocks(workflowRun)
+
+    const issue = makeIssue({ stage: Stage.Integrate, status: IssueStatus.Blocked })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+      </QueryClientProvider>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /integrate/i }))
+    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryAllByText('Health Gate: integrate')).toHaveLength(0)
   })
 })
