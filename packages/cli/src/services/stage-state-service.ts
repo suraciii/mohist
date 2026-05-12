@@ -11,6 +11,13 @@ export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | '
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
 export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped';
 
+export interface StageTaskCause {
+  type: 'check-failure' | 'health-gate-failure' | 'retry' | 'rebase' | 'merge-conflict' | 'unknown';
+  checkName?: string;
+  taskId?: string;
+  message?: string;
+}
+
 export interface StageTaskState {
   taskId: string;
   title: string;
@@ -24,6 +31,8 @@ export interface StageTaskState {
   startedAt: string | null;
   completedAt: string | null;
   updatedAt: string;
+  reason?: string;
+  causedBy?: StageTaskCause;
 }
 
 export interface StageCheckState {
@@ -145,7 +154,7 @@ interface ProjectedStageSeed {
 }
 
 function rowToStageTask(row: StageTaskRow): StageTaskState {
-  return {
+  const base = {
     taskId: row.task_id,
     title: row.title,
     status: row.status as StageTaskStatus,
@@ -159,6 +168,21 @@ function rowToStageTask(row: StageTaskRow): StageTaskState {
     completedAt: row.completed_at,
     updatedAt: row.updated_at,
   };
+
+  const explanation = RUNTIME_TASK_EXPLANATIONS[row.task_id];
+  if (explanation) {
+    return {
+      ...base,
+      title: explanation.title || base.title,
+      reason: explanation.reason,
+      causedBy: {
+        type: explanation.causedByType,
+        checkName: explanation.causedByCheckName,
+      },
+    };
+  }
+
+  return base;
 }
 
 function rowToStageCheck(row: StageCheckRow): StageCheckState {
@@ -286,24 +310,86 @@ interface StaticTaskDef {
   order: number;
 }
 
-const PLAN_TASK_DEFS: StaticTaskDef[] = [
-  { taskId: 'read-context', title: 'Read context files', order: 1 },
-  { taskId: 'design-solution', title: 'Design solution', order: 2 },
-  { taskId: 'write-design', title: 'Write design document', order: 3 },
-  { taskId: 'write-specs', title: 'Write specifications', order: 4 },
-  { taskId: 'write-tasks', title: 'Write task breakdown', order: 5 },
-];
+const REAL_TASK_IDS: Record<Stage, Set<string>> = {
+  [Stage.Plan]: new Set(['proposal', 'specs', 'design', 'tasks', 'self-review', 'repair-plan-artifacts', 'fix-plan-health']),
+  [Stage.Build]: new Set(['fix-build-health', 'repair-build']),
+  [Stage.Check]: new Set(['ai-review', 'fix-review-findings', 'repair-merge', 'fix-check-health']),
+  [Stage.Integrate]: new Set(['merge-branch', 'verify-merge', 'repair-merge', 'rebase-branch']),
+  [Stage.Done]: new Set([]),
+  [Stage.Backlog]: new Set([]),
+};
 
-const CHECK_TASK_DEFS: StaticTaskDef[] = [
-  { taskId: 'build-test', title: 'Build & test', order: 1 },
-  { taskId: 'ai-review', title: 'AI review', order: 2 },
-  { taskId: 'user-approval', title: 'User approval', order: 3 },
-];
+function isRealTask(stage: Stage, taskId: string): boolean {
+  const allowed = REAL_TASK_IDS[stage];
+  if (!allowed) {
+    return taskId.startsWith('repair-') || taskId.startsWith('fix-');
+  }
+  if (allowed.has(taskId)) {
+    return true;
+  }
+  if (stage === Stage.Build && /^T-\d+$/.test(taskId)) {
+    return true;
+  }
+  return false;
+}
 
-const INTEGRATE_TASK_DEFS: StaticTaskDef[] = [
-  { taskId: 'merge-branch', title: 'Merge branch', order: 1 },
-  { taskId: 'verify-merge', title: 'Verify merge', order: 2 },
-];
+interface TaskExplanationDef {
+  title: string;
+  reason?: string;
+  causedByType: StageTaskCause['type'];
+  causedByCheckName?: string;
+}
+
+const RUNTIME_TASK_EXPLANATIONS: Record<string, TaskExplanationDef> = {
+  'repair-plan-artifacts': {
+    title: 'Repair plan artifacts',
+    reason: 'Added after plan artifact check failed',
+    causedByType: 'check-failure',
+    causedByCheckName: 'plan-artifact-check',
+  },
+  'fix-plan-health': {
+    title: 'Fix plan health',
+    reason: 'Added after plan health gate failed',
+    causedByType: 'health-gate-failure',
+  },
+  'fix-build-health': {
+    title: 'Fix build health',
+    reason: 'Added after build health gate failed',
+    causedByType: 'health-gate-failure',
+  },
+  'repair-build': {
+    title: 'Repair build',
+    reason: 'Added after build failed',
+    causedByType: 'check-failure',
+  },
+  'fix-review-findings': {
+    title: 'Fix review findings',
+    reason: 'Added after review passed failed',
+    causedByType: 'check-failure',
+    causedByCheckName: 'ai-review',
+  },
+  'repair-merge': {
+    title: 'Repair merge',
+    reason: 'Added after merge check failed',
+    causedByType: 'check-failure',
+  },
+  'fix-check-health': {
+    title: 'Fix check health',
+    reason: 'Added after check health gate failed',
+    causedByType: 'health-gate-failure',
+  },
+  'rebase-branch': {
+    title: 'Rebase branch',
+    reason: 'Added because target branch moved',
+    causedByType: 'rebase',
+  },
+};
+
+const PLAN_TASK_DEFS: StaticTaskDef[] = [];
+
+const CHECK_TASK_DEFS: StaticTaskDef[] = [];
+
+const INTEGRATE_TASK_DEFS: StaticTaskDef[] = [];
 
 const STATIC_TASK_DEFS: Partial<Record<Stage, StaticTaskDef[]>> = {
   [Stage.Plan]: PLAN_TASK_DEFS,
@@ -489,9 +575,11 @@ export class StageStateService {
       [issueId, stage],
     );
 
+    const allTasks = taskRows.map(rowToStageTask);
+    const filteredTasks = allTasks.filter(t => isRealTask(stage, t.taskId));
     return rowToStageStateRead(
       stateRow,
-      taskRows.map(rowToStageTask),
+      filteredTasks,
       checkRows.map(rowToStageCheck),
     );
   }
@@ -513,9 +601,11 @@ export class StageStateService {
         'SELECT * FROM stage_checks WHERE issue_id = ? AND stage = ? ORDER BY check_name ASC',
         [issueId, row.stage],
       );
+      const allTasks = taskRows.map(rowToStageTask);
+      const filteredTasks = allTasks.filter(t => isRealTask(row.stage as Stage, t.taskId));
       return rowToStageStateRead(
         row,
-        taskRows.map(rowToStageTask),
+        filteredTasks,
         checkRows.map(rowToStageCheck),
       );
     });

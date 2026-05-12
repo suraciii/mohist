@@ -45,26 +45,21 @@ describe('StageStateService', () => {
       service.ensureStage(issueId, Stage.Plan);
 
       const state = service.getStageState(issueId, Stage.Plan);
-      expect(state!.tasks.length).toBe(5);
-      expect(state!.tasks[0].taskId).toBe('read-context');
-      expect(state!.tasks[0].status).toBe('pending');
-      expect(state!.tasks[0].source).toBe('static');
+      expect(state!.tasks.length).toBe(0);
     });
 
     it('should seed static tasks for check stage', () => {
       service.ensureStage(issueId, Stage.Check);
 
       const state = service.getStageState(issueId, Stage.Check);
-      expect(state!.tasks.length).toBe(3);
-      expect(state!.tasks[0].taskId).toBe('build-test');
+      expect(state!.tasks.length).toBe(0);
     });
 
     it('should seed static tasks for integrate stage', () => {
       service.ensureStage(issueId, Stage.Integrate);
 
       const state = service.getStageState(issueId, Stage.Integrate);
-      expect(state!.tasks.length).toBe(2);
-      expect(state!.tasks[0].taskId).toBe('merge-branch');
+      expect(state!.tasks.length).toBe(0);
     });
 
     it('should not seed tasks for build stage (dynamic tasks)', () => {
@@ -88,7 +83,7 @@ describe('StageStateService', () => {
       service.ensureStage(issueId, Stage.Plan);
 
       const state = service.getStageState(issueId, Stage.Plan);
-      expect(state!.tasks.length).toBe(5);
+      expect(state!.tasks.length).toBe(0);
     });
   });
 
@@ -96,7 +91,7 @@ describe('StageStateService', () => {
     it('should insert a new task', () => {
       service.ensureStage(issueId, Stage.Build);
       service.upsertTask(issueId, Stage.Build, {
-        taskId: 'compile',
+        taskId: 'T-001',
         title: 'Compile code',
         status: 'completed',
         source: 'dynamic',
@@ -104,34 +99,35 @@ describe('StageStateService', () => {
       });
 
       const state = service.getStageState(issueId, Stage.Build);
-      expect(state!.tasks.length).toBe(1);
-      expect(state!.tasks[0].taskId).toBe('compile');
-      expect(state!.tasks[0].status).toBe('completed');
-      expect(state!.tasks[0].source).toBe('dynamic');
+      const task = state!.tasks.find(t => t.taskId === 'T-001');
+      expect(task).toBeDefined();
+      expect(task!.taskId).toBe('T-001');
+      expect(task!.status).toBe('completed');
+      expect(task!.source).toBe('dynamic');
     });
 
     it('should update existing task in place', () => {
       service.ensureStage(issueId, Stage.Plan);
 
       service.upsertTask(issueId, Stage.Plan, {
-        taskId: 'read-context',
-        title: 'Read context files',
+        taskId: 'proposal',
+        title: 'Write proposal',
         status: 'running',
       });
 
       const state1 = service.getStageState(issueId, Stage.Plan);
-      expect(state1!.tasks.find(t => t.taskId === 'read-context')!.status).toBe('running');
+      expect(state1!.tasks.find(t => t.taskId === 'proposal')!.status).toBe('running');
 
       service.upsertTask(issueId, Stage.Plan, {
-        taskId: 'read-context',
-        title: 'Read context files',
+        taskId: 'proposal',
+        title: 'Write proposal',
         status: 'completed',
         attempts: 1,
         duration: 5000,
       });
 
       const state2 = service.getStageState(issueId, Stage.Plan);
-      const task = state2!.tasks.find(t => t.taskId === 'read-context');
+      const task = state2!.tasks.find(t => t.taskId === 'proposal');
       expect(task!.status).toBe('completed');
       expect(task!.attempts).toBe(1);
       expect(task!.duration).toBe(5000);
@@ -140,7 +136,7 @@ describe('StageStateService', () => {
     it('should store artifacts and output', () => {
       service.ensureStage(issueId, Stage.Build);
       service.upsertTask(issueId, Stage.Build, {
-        taskId: 'compile',
+        taskId: 'T-001',
         title: 'Compile',
         status: 'completed',
         artifacts: ['dist/main.js', 'dist/vendor.js'],
@@ -148,21 +144,22 @@ describe('StageStateService', () => {
       });
 
       const state = service.getStageState(issueId, Stage.Build);
-      const task = state!.tasks.find(t => t.taskId === 'compile');
+      const task = state!.tasks.find(t => t.taskId === 'T-001');
       expect(task!.artifacts).toEqual(['dist/main.js', 'dist/vendor.js']);
       expect(task!.output).toEqual({ lines: 42 });
     });
 
     it('should create stage row automatically if missing', () => {
       service.upsertTask(issueId, Stage.Build, {
-        taskId: 'compile',
+        taskId: 'T-001',
         title: 'Compile',
         status: 'running',
       });
 
       const state = service.getStageState(issueId, Stage.Build);
       expect(state).not.toBeNull();
-      expect(state!.tasks.length).toBe(1);
+      const task = state!.tasks.find(t => t.taskId === 'T-001');
+      expect(task).toBeDefined();
     });
 
     it('should support dynamic fix tasks', () => {
@@ -303,7 +300,7 @@ describe('StageStateService', () => {
       const states = service.getIssueStageState(issueId);
       const checkState = states.find(s => s.stage === Stage.Check);
       expect(checkState).toBeDefined();
-      expect(checkState!.tasks.length).toBe(3);
+      expect(checkState!.tasks.length).toBe(0);
       expect(checkState!.checks.length).toBe(1);
     });
   });
@@ -359,33 +356,182 @@ describe('StageStateService', () => {
     });
   });
 
+  describe('placeholder filtering', () => {
+    it('filters out obsolete Plan placeholder tasks when real task evidence also exists', () => {
+      service.ensureStage(issueId, Stage.Plan);
+
+      const now = new Date().toISOString();
+      service.db.run(
+        `INSERT INTO stage_tasks
+         (issue_id, stage, task_id, title, status, source, task_order, attempts, duration, artifacts, output, started_at, completed_at, updated_at)
+         VALUES (?, ?, ?, ?, 'pending', 'static', ?, 0, 0, '[]', NULL, NULL, NULL, ?)`,
+        [issueId, Stage.Plan, 'read-context', 'Read context files', 1, now],
+      );
+      service.db.run(
+        `INSERT INTO stage_tasks
+         (issue_id, stage, task_id, title, status, source, task_order, attempts, duration, artifacts, output, started_at, completed_at, updated_at)
+         VALUES (?, ?, ?, ?, 'pending', 'static', ?, 0, 0, '[]', NULL, NULL, NULL, ?)`,
+        [issueId, Stage.Plan, 'design-solution', 'Design solution', 2, now],
+      );
+
+      service.upsertTask(issueId, Stage.Plan, {
+        taskId: 'proposal',
+        title: 'Write proposal',
+        status: 'completed',
+        source: 'dynamic',
+        order: 10,
+        attempts: 1,
+        duration: 5000,
+      });
+      service.upsertTask(issueId, Stage.Plan, {
+        taskId: 'specs',
+        title: 'Write specs',
+        status: 'completed',
+        source: 'dynamic',
+        order: 11,
+        attempts: 1,
+        duration: 8000,
+      });
+      service.upsertTask(issueId, Stage.Plan, {
+        taskId: 'self-review',
+        title: 'Self-review plan',
+        status: 'pending',
+        source: 'dynamic',
+        order: 12,
+      });
+
+      const state = service.getStageState(issueId, Stage.Plan);
+      const taskIds = state!.tasks.map(t => t.taskId);
+
+      expect(taskIds).not.toContain('read-context');
+      expect(taskIds).not.toContain('design-solution');
+      expect(taskIds).toContain('proposal');
+      expect(taskIds).toContain('specs');
+      expect(taskIds).toContain('self-review');
+      expect(taskIds).toHaveLength(3);
+    });
+
+    it('adds reason and causedBy metadata to a runtime-added repair task', () => {
+      service.ensureStage(issueId, Stage.Check);
+      service.upsertTask(issueId, Stage.Check, {
+        taskId: 'fix-review-findings',
+        title: 'Fix review findings',
+        status: 'completed',
+        source: 'dynamic',
+        order: 100,
+        attempts: 1,
+        duration: 15000,
+      });
+
+      const state = service.getStageState(issueId, Stage.Check);
+      const fixTask = state!.tasks.find(t => t.taskId === 'fix-review-findings');
+
+      expect(fixTask).toBeDefined();
+      expect(fixTask!.status).toBe('completed');
+      expect(fixTask!.reason).toBe('Added after review passed failed');
+      expect(fixTask!.causedBy).toEqual({
+        type: 'check-failure',
+        checkName: 'ai-review',
+        taskId: undefined,
+        message: undefined,
+      });
+    });
+
+    it('adds reason metadata to a rebase-branch task', () => {
+      service.ensureStage(issueId, Stage.Integrate);
+      service.upsertTask(issueId, Stage.Integrate, {
+        taskId: 'rebase-branch',
+        title: 'Rebase branch',
+        status: 'completed',
+        source: 'dynamic',
+        order: 50,
+        attempts: 1,
+        duration: 30000,
+      });
+
+      const state = service.getStageState(issueId, Stage.Integrate);
+      const rebaseTask = state!.tasks.find(t => t.taskId === 'rebase-branch');
+
+      expect(rebaseTask).toBeDefined();
+      expect(rebaseTask!.reason).toBe('Added because target branch moved');
+      expect(rebaseTask!.causedBy).toEqual({
+        type: 'rebase',
+        checkName: undefined,
+        taskId: undefined,
+        message: undefined,
+      });
+    });
+
+    it('returns Build stage tasks from tasks.json pattern (T-N IDs) plus repair tasks', () => {
+      service.ensureStage(issueId, Stage.Build);
+      service.upsertTask(issueId, Stage.Build, {
+        taskId: 'T-001',
+        title: 'Add persistence',
+        status: 'completed',
+        source: 'dynamic',
+        order: 1,
+        attempts: 1,
+        duration: 5000,
+      });
+      service.upsertTask(issueId, Stage.Build, {
+        taskId: 'T-002',
+        title: 'Expose API',
+        status: 'failed',
+        source: 'dynamic',
+        order: 2,
+        attempts: 2,
+        duration: 3000,
+        output: { error: 'TypeScript build failed' },
+      });
+      service.upsertTask(issueId, Stage.Build, {
+        taskId: 'fix-build-health',
+        title: 'Fix build health',
+        status: 'pending',
+        source: 'dynamic',
+        order: 100,
+      });
+
+      const state = service.getStageState(issueId, Stage.Build);
+      const taskIds = state!.tasks.map(t => t.taskId);
+
+      expect(taskIds).toContain('T-001');
+      expect(taskIds).toContain('T-002');
+      expect(taskIds).toContain('fix-build-health');
+      expect(taskIds).toHaveLength(3);
+    });
+  });
+
   describe('stage retry scenario', () => {
     it('should update current task state across retries', () => {
       service.ensureStage(issueId, Stage.Build);
 
       service.upsertTask(issueId, Stage.Build, {
-        taskId: 'compile',
+        taskId: 'T-999',
         title: 'Compile',
         status: 'failed',
         attempts: 1,
       });
 
       const state1 = service.getStageState(issueId, Stage.Build);
-      expect(state1!.tasks[0].status).toBe('failed');
-      expect(state1!.tasks[0].attempts).toBe(1);
+      const compileTask = state1!.tasks.find(t => t.taskId === 'T-999');
+      expect(compileTask).toBeDefined();
+      expect(compileTask!.status).toBe('failed');
+      expect(compileTask!.attempts).toBe(1);
 
       service.ensureStage(issueId, Stage.Build);
 
       service.upsertTask(issueId, Stage.Build, {
-        taskId: 'compile',
+        taskId: 'T-999',
         title: 'Compile',
         status: 'completed',
         attempts: 2,
       });
 
       const state2 = service.getStageState(issueId, Stage.Build);
-      expect(state2!.tasks[0].status).toBe('completed');
-      expect(state2!.tasks[0].attempts).toBe(2);
+      const compileTask2 = state2!.tasks.find(t => t.taskId === 'T-999');
+      expect(compileTask2).toBeDefined();
+      expect(compileTask2!.status).toBe('completed');
+      expect(compileTask2!.attempts).toBe(2);
       expect(state2!.attempts).toBe(1);
     });
 

@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Project canonical stage task lists from real workflow evidence",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-001",
+      "description": "Refactor the stage-state read model so each stage returns one user-visible task list containing only real workflow tasks and one separate check list. Filter obsolete placeholder rows such as Plan's seeded abstract tasks, map real Plan/Build/Check/Integrate task identities to stable user-facing titles, and stop seeding non-executable placeholder tasks for new stage runs where possible.",
+      "acceptanceCriteria": [
+        "StageStateService no longer returns `read-context`, `design-solution`, `write-design`, `write-specs`, or `write-tasks` as visible Plan tasks when no matching real workflow task evidence exists",
+        "Plan stage visible tasks resolve to the real artifact task set (`proposal`, `specs`, `design`, `tasks`, `self-review`) plus real runtime repair/health tasks when present",
+        "Build stage visible tasks resolve from `tasks.json` plus real runtime repair tasks such as `fix-build-health` without introducing a separate planned/dynamic user model",
+        "Checks remain in a separate list from tasks for all projected stages",
+        "New stage runs do not persist obsolete placeholder tasks as the source of truth for user-visible stage progress",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/stage-state-service.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Keep the first pass schema-light: fix semantics in projection before considering any deeper storage cleanup.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        912656,
+        832322
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Expose reason-aware stage-state API contract",
+      "spec": "specs/http-api/spec.md#REQ-HTTP-001",
+      "description": "Update the stage-state API and shared backend/frontend types so the response is explicitly the canonical user-visible workflow view rather than raw `stage_tasks` rows. Add optional task explanation metadata such as `reason` and `causedBy`, preserve existing task/check evidence fields, and populate explanation metadata for runtime-added repair/rebase/retry tasks wherever the current workflow can derive it reliably.",
+      "acceptanceCriteria": [
+        "`GET /api/issues/:number/stage-state` returns the projected stage task/check view produced by StageStateService rather than exposing placeholder rows verbatim",
+        "Shared task types support optional `reason` and `causedBy` metadata without removing task evidence fields such as attempts, artifacts, output, and timestamps",
+        "At least one runtime-added task path such as `repair-plan-artifacts`, `fix-build-health`, `fix-review-findings`, `repair-merge`, or rebase-backed integrate work can surface a human-readable explanation in stage-state output",
+        "All in-repo stage-state consumers compile against the updated contract without ad hoc frontend status remapping",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts; packages/cli/web/src/lib/types.ts; packages/cli/web/src/lib/api.ts; packages/cli/web/src/hooks/useQueries.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Prefer backward-compatible field additions over a full response rename so existing in-repo callers can migrate in one change.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1153615
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Render Issue Detail from the real stage task/check model",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-004",
+      "description": "Update `PipelineView` and `TaskProgressPanel` so both render the same canonical stage task list and check list from `useIssueStageState()`. Show task explanation metadata inline or in details, keep checks distinct from tasks, and ensure Plan/Build/Check/Integrate all display real workflow tasks instead of placeholder rows or mixed internal concepts.",
+      "acceptanceCriteria": [
+        "PipelineView no longer shows obsolete Plan placeholder tasks when stage-state also contains the real Plan artifact tasks",
+        "TaskProgressPanel and PipelineView render the same task list for the same issue stage and can both show runtime-added tasks such as `fix-build-health` when present in stage-state data",
+        "Checks remain visibly separate from tasks in the Issue Detail UI and approval continues to render as decision state rather than as a synthetic task",
+        "Task details can show available evidence such as attempts, artifacts, output, or explanation metadata without promoting logs/checks/session activity into top-level tasks",
+        "Frontend typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/PipelineView.tsx; packages/cli/web/src/components/TaskProgressPanel.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Do not reintroduce frontend-owned task classification logic; the backend projection remains the single source of truth.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        237231
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Add regression coverage for placeholder filtering and runtime-added tasks",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-001",
+      "description": "Add backend and frontend regression coverage for the contradictory task-list cases behind #180. Verify placeholder filtering, real Plan artifact task rendering, runtime repair-task visibility with reason metadata, and consistency between `PipelineView` and `TaskProgressPanel` when both consume the same stage-state response.",
+      "acceptanceCriteria": [
+        "A backend test proves Plan placeholder rows mixed with real Plan task evidence are projected as only the real task list",
+        "A backend or route-level test proves a runtime-added repair or retry task can appear in stage-state output with `reason` or `causedBy` metadata when that metadata is available",
+        "A frontend test proves PipelineView and TaskProgressPanel both render the same stage task list from shared stage-state data",
+        "A frontend test proves checks do not render as top-level tasks in the task list",
+        "Relevant test suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests; packages/cli/web/src/components/stage-state-consistency.test.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Favor narrow fixtures that model the exact mixed-placeholder and runtime-repair states described in the issue.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        673406
+      ]
+    }
+  ]
+}

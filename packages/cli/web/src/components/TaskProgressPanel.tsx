@@ -62,7 +62,10 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
       </button>
       {expanded && isFailed && (
         <div className="px-2.5 pb-2 border-t border-red-100 bg-red-50/50">
-          <p className="text-xs text-red-600 mt-1.5 whitespace-pre-wrap">
+          {task.reason && (
+            <p className="text-xs text-amber-600 mb-1.5">{task.reason}</p>
+          )}
+          <p className="text-xs text-red-600 whitespace-pre-wrap">
             {typeof task.output === 'string' ? task.output : task.output != null ? JSON.stringify(task.output) : 'Task failed'}
           </p>
         </div>

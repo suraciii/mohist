@@ -162,10 +162,10 @@ describe('GET /api/issues/:number/stage-state', () => {
 
     stageStateService.ensureStage(issue.id, Stage.Plan);
     stageStateService.upsertTask(issue.id, Stage.Plan, {
-      taskId: 'read-context',
-      title: 'Read context files',
+      taskId: 'proposal',
+      title: 'Write proposal',
       status: 'completed',
-      source: 'static',
+      source: 'dynamic',
       order: 1,
       attempts: 1,
       duration: 5000,
@@ -191,14 +191,14 @@ describe('GET /api/issues/:number/stage-state', () => {
     expect(Array.isArray(planStage.checks)).toBe(true);
     expect(planStage.approval).toBeNull();
 
-    const readContextTask = planStage.tasks.find((t: any) => t.taskId === 'read-context');
-    expect(readContextTask).toBeDefined();
-    expect(readContextTask.status).toBe('completed');
-    expect(readContextTask.source).toBe('static');
-    expect(readContextTask.order).toBe(1);
-    expect(readContextTask.attempts).toBe(1);
-    expect(readContextTask.duration).toBe(5000);
-    expect(readContextTask.updatedAt).toBeTruthy();
+    const proposalTask = planStage.tasks.find((t: any) => t.taskId === 'proposal');
+    expect(proposalTask).toBeDefined();
+    expect(proposalTask.status).toBe('completed');
+    expect(proposalTask.source).toBe('dynamic');
+    expect(proposalTask.order).toBe(1);
+    expect(proposalTask.attempts).toBe(1);
+    expect(proposalTask.duration).toBe(5000);
+    expect(proposalTask.updatedAt).toBeTruthy();
   });
 
   it('returns normalized check statuses without exposing pass/fail variants', async () => {

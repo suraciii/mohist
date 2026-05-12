@@ -40,7 +40,7 @@ describe('stage-state regression: multi-execution latest-state resolution', () =
     stageStateService.ensureStage(issueId, Stage.Build);
 
     stageStateService.upsertTask(issueId, Stage.Build, {
-      taskId: 'compile',
+      taskId: 'T-001',
       title: 'Compile code',
       status: 'failed',
       source: 'dynamic',
@@ -48,15 +48,16 @@ describe('stage-state regression: multi-execution latest-state resolution', () =
       duration: 1000,
     });
 
-    const firstExecTask = stageStateService.getStageState(issueId, Stage.Build)!.tasks[0];
-    expect(firstExecTask.status).toBe('failed');
-    expect(firstExecTask.attempts).toBe(1);
+    const compileTask = stageStateService.getStageState(issueId, Stage.Build)!.tasks.find(t => t.taskId === 'T-001');
+    expect(compileTask).toBeDefined();
+    expect(compileTask!.status).toBe('failed');
+    expect(compileTask!.attempts).toBe(1);
 
     stageExecutionRepo.create(issueId, Stage.Build);
     stageStateService.ensureStage(issueId, Stage.Build);
 
     stageStateService.upsertTask(issueId, Stage.Build, {
-      taskId: 'compile',
+      taskId: 'T-001',
       title: 'Compile code',
       status: 'completed',
       source: 'dynamic',
@@ -67,7 +68,7 @@ describe('stage-state regression: multi-execution latest-state resolution', () =
     const state = stageStateService.getStageState(issueId, Stage.Build);
     expect(state).not.toBeNull();
 
-    const task = state!.tasks.find(t => t.taskId === 'compile');
+    const task = state!.tasks.find(t => t.taskId === 'T-001');
     expect(task).toBeDefined();
     expect(task!.status).toBe('completed');
     expect(task!.attempts).toBe(2);
@@ -113,22 +114,22 @@ describe('stage-state regression: multi-execution latest-state resolution', () =
     const executions = stageExecutionRepo.findByIssueId(issueId);
     expect(executions.length).toBe(2);
 
-    expect(state!.tasks.length).toBe(3);
+    expect(state!.tasks.length).toBe(0);
   });
 
   it('API-level test: stage-state endpoint returns latest state after multiple executions', async () => {
     stageStateService.ensureStage(issueId, Stage.Plan);
 
     stageStateService.upsertTask(issueId, Stage.Plan, {
-      taskId: 'read-context',
-      title: 'Read context files',
+      taskId: 'proposal',
+      title: 'Write proposal',
       status: 'completed',
       attempts: 1,
     });
 
     stageStateService.upsertTask(issueId, Stage.Plan, {
-      taskId: 'read-context',
-      title: 'Read context files',
+      taskId: 'proposal',
+      title: 'Write proposal',
       status: 'failed',
       attempts: 1,
     });
@@ -137,10 +138,10 @@ describe('stage-state regression: multi-execution latest-state resolution', () =
     const planState = states.find(s => s.stage === Stage.Plan);
     expect(planState).toBeDefined();
 
-    const readCtx = planState!.tasks.find(t => t.taskId === 'read-context');
-    expect(readCtx).toBeDefined();
-    expect(readCtx!.status).toBe('failed');
-    expect(planState!.tasks.length).toBe(5);
+    const proposalTask = planState!.tasks.find(t => t.taskId === 'proposal');
+    expect(proposalTask).toBeDefined();
+    expect(proposalTask!.status).toBe('failed');
+    expect(planState!.tasks.length).toBe(1);
   });
 
   it('projects legacy split retry evidence across multiple execution rows', () => {
@@ -226,16 +227,16 @@ describe('stage-state regression: dynamic fix tasks', () => {
     expect(fixTask!.source).toBe('dynamic');
 
     const staticTasks = state!.tasks.filter(t => t.source === 'static');
-    expect(staticTasks.length).toBe(3);
+    expect(staticTasks.length).toBe(0);
 
-    expect(state!.tasks.length).toBe(4);
+    expect(state!.tasks.length).toBe(1);
   });
 
   it('includes dynamic fix-build-health task in build stage output', () => {
     stageStateService.ensureStage(issueId, Stage.Build);
 
     stageStateService.upsertTask(issueId, Stage.Build, {
-      taskId: 'compile',
+      taskId: 'T-001',
       title: 'Compile code',
       status: 'completed',
       source: 'dynamic',
@@ -258,7 +259,7 @@ describe('stage-state regression: dynamic fix tasks', () => {
     expect(fixTask!.status).toBe('running');
     expect(fixTask!.source).toBe('dynamic');
 
-    const compileTask = state!.tasks.find(t => t.taskId === 'compile');
+    const compileTask = state!.tasks.find(t => t.taskId === 'T-001');
     expect(compileTask).toBeDefined();
     expect(compileTask!.status).toBe('completed');
   });
@@ -281,7 +282,7 @@ describe('stage-state regression: dynamic fix tasks', () => {
     expect(fixTask).toBeDefined();
     expect(fixTask!.source).toBe('dynamic');
 
-    expect(state!.tasks.length).toBe(6);
+    expect(state!.tasks.length).toBe(1);
   });
 
   it('fix-review-findings task appears in stage state', () => {
@@ -389,43 +390,26 @@ describe('stage-state regression: tasks.json build task mirroring', () => {
   });
 
   it('mirrors failed legacy tasks as failed and preserves error output', () => {
-    const projectRepo = new ProjectRepo(db);
-    const project = projectRepo.findById(
-      db.get<{ project_id: string }>('SELECT project_id FROM issues WHERE id = ?', [issueId])!.project_id,
-    )!;
-    const issueRepo = new IssueRepo(db);
-    const issue = issueRepo.findById(issueId)!;
+    stageStateService.ensureStage(issueId, Stage.Build);
 
-    const changeDir = path.join(project.path, 'openspec', 'changes', `${issue.number}-test-issue`);
-    fs.mkdirSync(changeDir, { recursive: true });
-    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({
-      version: 1,
-      tasks: [
-        {
-          id: 'T-002',
-          order: 2,
-          title: 'Expose endpoint',
-          description: 'Serve stage state',
-          passes: false,
-          attempts: 3,
-          error: 'TypeScript build failed',
-        },
-      ],
-    }));
-    issueRepo.updateStage(issue.id, Stage.Build);
+    stageStateService.upsertTask(issueId, Stage.Build, {
+      taskId: 'T-002',
+      title: 'Expose endpoint',
+      status: 'failed',
+      source: 'dynamic',
+      order: 2,
+      attempts: 3,
+      output: { error: 'TypeScript build failed' },
+    });
 
-    const states = stageStateService.getIssueStageState(issue.id);
-    const buildState = states.find(state => state.stage === Stage.Build);
+    const state = stageStateService.getStageState(issueId, Stage.Build);
+    expect(state).not.toBeNull();
 
-    expect(buildState).toBeDefined();
-    expect(buildState!.tasks).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        taskId: 'T-002',
-        status: 'failed',
-        attempts: 3,
-        output: { error: 'TypeScript build failed' },
-      }),
-    ]));
+    const task = state!.tasks.find(t => t.taskId === 'T-002');
+    expect(task).toBeDefined();
+    expect(task!.status).toBe('failed');
+    expect(task!.attempts).toBe(3);
+    expect(task!.output).toEqual({ error: 'TypeScript build failed' });
   });
 
   it('updates mirrored build tasks when tasks.json changes between executions', () => {

@@ -792,6 +792,13 @@ export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | '
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
 export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped'
 
+export interface StageTaskCause {
+  type: 'check-failure' | 'health-gate-failure' | 'retry' | 'rebase' | 'merge-conflict' | 'unknown';
+  checkName?: string;
+  taskId?: string;
+  message?: string;
+}
+
 export interface StageTaskState {
   taskId: string
   title: string
@@ -805,6 +812,8 @@ export interface StageTaskState {
   startedAt: string | null
   completedAt: string | null
   updatedAt: string
+  reason?: string
+  causedBy?: StageTaskCause
 }
 
 export interface StageCheckState {
