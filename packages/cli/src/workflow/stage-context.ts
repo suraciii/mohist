@@ -7,6 +7,8 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { WorkflowSessionObserverDeps } from '../services/session-observers';
+import type { WorkflowRunService } from '../services/workflow-run-service';
+import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { StageStateService } from '../services/stage-state-service';
 
 type StageType = Stage;
@@ -55,6 +57,8 @@ export interface StageContext {
   stageExecutionRepo?: StageExecutionRepo;
   checkSuiteRepo?: CheckSuiteRepo;
   stageStateService?: StageStateService;
+  workflowRunService?: WorkflowRunService;
+  workflowRun?: WorkflowRunWithStageRuns;
   signal?: AbortSignal;
 }
 
@@ -123,6 +127,13 @@ export interface StageTask {
   completedAt?: string;
 }
 
+export interface StageTaskCause {
+  type: 'check-failure' | 'task-failure' | 'branch-changed' | 'conflict' | 'retry' | 'user-action' | 'system-policy';
+  checkName?: string;
+  taskId?: string;
+  message?: string;
+}
+
 export interface StageTaskResult {
   taskId: string;
   title: string;
@@ -131,6 +142,8 @@ export interface StageTaskResult {
   output?: unknown;
   attempts: number;
   duration: number;
+  reason?: string;
+  causedBy?: StageTaskCause;
 }
 
 export interface CheckFailurePolicy {

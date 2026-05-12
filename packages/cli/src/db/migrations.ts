@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 26;
+const SCHEMA_VERSION = 27;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -209,6 +209,9 @@ export function initializeDatabase(db: DatabaseManager): void {
   }
   if (currentVersion < 26) {
     migrateToVersion26(db);
+  }
+  if (currentVersion < 27) {
+    migrateToVersion27(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -1086,5 +1089,102 @@ function migrateToVersion26(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 26);
+  });
+}
+
+const CREATE_WORKFLOW_RUNS_TABLE = `
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id            TEXT PRIMARY KEY,
+  issue_id      TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  issue_number  INTEGER NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'running',
+  current_stage TEXT NOT NULL DEFAULT 'plan',
+  started_by    TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+`;
+
+const CREATE_WORKFLOW_STAGE_RUNS_TABLE = `
+CREATE TABLE IF NOT EXISTS workflow_stage_runs (
+  id                  TEXT PRIMARY KEY,
+  workflow_run_id     TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  stage               TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'pending',
+  stage_order         INTEGER NOT NULL,
+  approval_status     TEXT,
+  approval_output     TEXT,
+  approval_requested_at TEXT,
+  approval_responded_at TEXT,
+  started_at          TEXT,
+  completed_at        TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+`;
+
+const CREATE_WORKFLOW_TASKS_TABLE = `
+CREATE TABLE IF NOT EXISTS workflow_tasks (
+  id            TEXT PRIMARY KEY,
+  workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  stage_run_id  TEXT NOT NULL REFERENCES workflow_stage_runs(id) ON DELETE CASCADE,
+  task_id       TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'pending',
+  task_order    INTEGER NOT NULL DEFAULT 0,
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  duration      INTEGER NOT NULL DEFAULT 0,
+  artifacts     TEXT NOT NULL DEFAULT '[]',
+  output        TEXT,
+  reason        TEXT,
+  caused_by_type TEXT,
+  caused_by_check_name TEXT,
+  caused_by_task_id TEXT,
+  started_at    TEXT,
+  completed_at  TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+`;
+
+const CREATE_WORKFLOW_CHECKS_TABLE = `
+CREATE TABLE IF NOT EXISTS workflow_checks (
+  id                  TEXT PRIMARY KEY,
+  workflow_run_id     TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  stage_run_id        TEXT NOT NULL REFERENCES workflow_stage_runs(id) ON DELETE CASCADE,
+  check_name          TEXT NOT NULL,
+  title               TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'pending',
+  message             TEXT,
+  output              TEXT,
+  run_count           INTEGER NOT NULL DEFAULT 0,
+  last_run_at         TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+`;
+
+const CREATE_WORKFLOW_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_workflow_runs_issue_id ON workflow_runs(issue_id);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_runs_issue_status ON workflow_runs(issue_id, status);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_stage_runs_run_id ON workflow_stage_runs(workflow_run_id);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_stage_runs_stage ON workflow_stage_runs(workflow_run_id, stage);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_tasks_run_id ON workflow_tasks(workflow_run_id);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_tasks_stage_run_id ON workflow_tasks(stage_run_id);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_tasks_task_id ON workflow_tasks(workflow_run_id, task_id);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_checks_run_id ON workflow_checks(workflow_run_id);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_checks_stage_run_id ON workflow_checks(stage_run_id);',
+];
+
+function migrateToVersion27(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_WORKFLOW_RUNS_TABLE);
+    db.exec(CREATE_WORKFLOW_STAGE_RUNS_TABLE);
+    db.exec(CREATE_WORKFLOW_TASKS_TABLE);
+    db.exec(CREATE_WORKFLOW_CHECKS_TABLE);
+    for (const indexSql of CREATE_WORKFLOW_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 27);
   });
 }

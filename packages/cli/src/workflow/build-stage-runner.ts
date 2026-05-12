@@ -168,6 +168,8 @@ export class BuildStageRunner extends BaseStageRunner {
         if (!ctx.stageStateService) return;
         ctx.artifactManager.syncTasksToStageState(issue.number, issue.id, Stage.Build, ctx.stageStateService);
       },
+      workflowRunService: ctx.workflowRunService,
+      workflowRun: ctx.workflowRun,
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];

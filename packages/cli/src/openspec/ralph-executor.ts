@@ -32,6 +32,9 @@ import type { StageTaskResult } from '../workflow/stage-context';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { SessionObserver } from '../agent-runtime/session-observer';
 import { createWorkflowSessionObservers } from '../agent-runtime';
+import type { WorkflowRunService } from '../services/workflow-run-service';
+import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
+import { Stage } from '../types';
 
 export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip' | 'hang_unrecoverable' | 'session_failed';
 
@@ -149,6 +152,9 @@ export interface RalphExecutorContext {
   coderSessionRepo?: import('../db/coder-session-repo').CoderSessionRepo;
   observers?: SessionObserver[];
   syncTasksToStageState?: () => void;
+  syncTasksToWorkflowRun?: () => void;
+  workflowRunService?: WorkflowRunService;
+  workflowRun?: WorkflowRunWithStageRuns;
 }
 
 export interface RalphLoopResult {
@@ -223,6 +229,21 @@ function writeTasksFile(tasksPath: string, tasks: Task[]): void {
 function persistTasks(context: RalphExecutorContext, tasksPath: string, tasks: Task[]): void {
   writeTasksFile(tasksPath, tasks);
   context.syncTasksToStageState?.();
+  syncTasksToWorkflowRun(context, tasks);
+}
+
+function syncTasksToWorkflowRun(context: RalphExecutorContext, tasks: Task[]): void {
+  if (!context.workflowRunService || !context.workflowRun) return;
+  for (const t of tasks) {
+    const status = t.passes ? 'completed' : t.error ? 'failed' : 'pending';
+    context.workflowRunService.upsertTask(context.workflowRun.id, Stage.Build, {
+      taskId: t.id,
+      title: t.title,
+      status,
+      attempts: t.attempts,
+      output: t.error ? { error: t.error } : null,
+    });
+  }
 }
 
 async function commitTasksFile(

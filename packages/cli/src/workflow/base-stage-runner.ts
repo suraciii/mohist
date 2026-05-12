@@ -63,6 +63,14 @@ export abstract class BaseStageRunner implements StageRunner {
   async run(ctx: StageContext): Promise<StageRunResult> {
     this.stageExecutionId = undefined;
 
+    if (ctx.workflowRunService && ctx.workflowRun) {
+      try {
+        ctx.workflowRunService.setStageStarted(ctx.workflowRun.id, ctx.issue.stage);
+      } catch (e) {
+        log.warn('setStageStarted failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
     if (ctx.stageExecutionRepo) {
       try {
         const execution = ctx.stageExecutionRepo.create(ctx.issue.id, ctx.issue.stage);
@@ -429,6 +437,19 @@ export abstract class BaseStageRunner implements StageRunner {
       stage: ctx.issue.stage,
     });
 
+    if (ctx.workflowRunService && ctx.workflowRun) {
+      try {
+        ctx.workflowRunService.setApproval(ctx.workflowRun.id, ctx.issue.stage, {
+          status: 'awaiting',
+          output: approvalOutput,
+          requestedAt: new Date().toISOString(),
+          respondedAt: null,
+        });
+      } catch (e) {
+        log.warn('workflowRun setApproval failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
     return {
       success: false,
       output: taskOutput,
@@ -449,6 +470,21 @@ export abstract class BaseStageRunner implements StageRunner {
         ctx.stageStateService.setStageStatus(ctx.issue.id, ctx.issue.stage, status as StageStateStatus);
       } catch (e) {
         log.warn('setStageStatus failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (ctx.workflowRunService && ctx.workflowRun) {
+      try {
+        if (status === 'running') {
+          ctx.workflowRunService.setStageStarted(ctx.workflowRun.id, ctx.issue.stage);
+        } else if (status === 'passed') {
+          ctx.workflowRunService.setStagePassed(ctx.workflowRun.id, ctx.issue.stage);
+        } else if (status === 'failed') {
+          ctx.workflowRunService.setStageFailed(ctx.workflowRun.id, ctx.issue.stage);
+        } else if (status === 'awaiting-approval') {
+          ctx.workflowRunService.setStageAwaitingApproval(ctx.workflowRun.id, ctx.issue.stage);
+        }
+      } catch (e) {
+        log.warn('workflowRun stage status update failed', { error: e instanceof Error ? e.message : String(e) });
       }
     }
   }
@@ -598,6 +634,25 @@ export abstract class BaseStageRunner implements StageRunner {
     } catch (e) {
       log.warn('mirrorTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
     }
+    if (ctx.workflowRunService && ctx.workflowRun) {
+      try {
+        ctx.workflowRunService.upsertTask(ctx.workflowRun.id, ctx.issue.stage, {
+          taskId: result.taskId,
+          title: result.title,
+          status: result.status === 'completed' ? 'completed' : result.status === 'failed' ? 'failed' : 'skipped',
+          attempts: result.attempts,
+          duration: result.duration,
+          artifacts: result.artifacts,
+          output: result.output,
+          reason: result.reason ?? null,
+          causedByType: result.causedBy?.type ?? null,
+          causedByCheckName: result.causedBy?.checkName ?? null,
+          causedByTaskId: result.causedBy?.taskId ?? null,
+        });
+      } catch (e) {
+        log.warn('workflowRun upsertTask failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
   }
 
   private mirrorCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {
@@ -616,6 +671,21 @@ export abstract class BaseStageRunner implements StageRunner {
         });
       } catch (e) {
         log.warn('mirrorCheckResult failed', { checkName: cr.name, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (ctx.workflowRunService && ctx.workflowRun) {
+      try {
+        for (const [, cr] of seen) {
+          ctx.workflowRunService.upsertCheck(ctx.workflowRun.id, ctx.issue.stage, {
+            checkName: cr.name,
+            title: cr.name,
+            status: cr.status === 'pass' ? 'passed' : cr.status === 'fail' ? 'failed' : cr.status === 'error' ? 'error' : 'pending',
+            message: cr.message ?? null,
+            output: cr.output,
+          });
+        }
+      } catch (e) {
+        log.warn('workflowRun upsertCheck failed', { error: e instanceof Error ? e.message : String(e) });
       }
     }
   }

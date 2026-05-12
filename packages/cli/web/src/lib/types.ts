@@ -850,3 +850,64 @@ export interface IssueStageStateResponse {
   issueNumber: number
   stages: StageStateRead[]
 }
+
+export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled'
+export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+export type WorkflowCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
+export type WorkflowStageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped'
+
+export interface WorkflowTaskCause {
+  type: 'check-failure' | 'task-failure' | 'branch-changed' | 'conflict' | 'retry' | 'user-action' | 'system-policy'
+  checkName?: string
+  taskId?: string
+  message?: string
+}
+
+export interface WorkflowTask {
+  id: string
+  taskId: string
+  title: string
+  status: WorkflowTaskStatus
+  taskOrder: number
+  attempts: number
+  duration: number
+  artifacts: string[]
+  output: unknown
+  reason: string | null
+  causedBy: WorkflowTaskCause | null
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface WorkflowCheck {
+  checkName: string
+  title: string
+  status: WorkflowCheckStatus
+  message: string | null
+  output: unknown
+  runCount: number
+  lastRunAt: string | null
+}
+
+export interface WorkflowStageRun {
+  stage: Stage
+  status: WorkflowStageRunStatus
+  tasks: WorkflowTask[]
+  checks: WorkflowCheck[]
+  approvalStatus: string | null
+  approvalOutput: unknown | null
+  approvalRequestedAt: string | null
+  approvalRespondedAt: string | null
+  attempts: number
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface WorkflowRun {
+  id: string
+  issueId: string
+  issueNumber: number
+  status: WorkflowRunStatus
+  currentStage: Stage
+  stageRuns: WorkflowStageRun[]
+}

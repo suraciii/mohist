@@ -18,6 +18,7 @@ import { Log } from '../util/log';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { StageStateService } from './stage-state-service';
+import type { WorkflowRunService } from './workflow-run-service';
 import { findChangeDir } from '../openspec/detector';
 import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
@@ -125,6 +126,7 @@ export class AgentRunnerService {
     private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
     private readonly stageExecutionRepo?: StageExecutionRepo,
     private readonly stageStateService?: StageStateService,
+    private readonly workflowRunService?: WorkflowRunService,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -1039,6 +1041,15 @@ export class AgentRunnerService {
       return;
     }
 
+    if (this.workflowRunService) {
+      try {
+        this.workflowRunService.startRun(issue.id, issue.number, 'start-pipeline');
+        log.info('WorkflowRun started for issue', { issueNumber: issue.number });
+      } catch (err) {
+        log.warn('Failed to start WorkflowRun', { issueNumber: issue.number, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     const acpOptions: AgentSessionOptions = { cwd: worktreePath };
     await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
   }
@@ -1065,6 +1076,15 @@ export class AgentRunnerService {
       log.info('Skipping resume-pipeline: issue already done', { issueNumber: issue.number });
       this.completeTask(task.id, 'completed', 'skipped');
       return;
+    }
+
+    if (this.workflowRunService) {
+      try {
+        this.workflowRunService.startRun(issue.id, issue.number, 'resume-pipeline');
+        log.info('WorkflowRun ensured for issue resume', { issueNumber: issue.number });
+      } catch (err) {
+        log.warn('Failed to ensure WorkflowRun', { issueNumber: issue.number, error: err instanceof Error ? err.message : String(err) });
+      }
     }
 
     if (issue.stage === Stage.Integrate || (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged)) {

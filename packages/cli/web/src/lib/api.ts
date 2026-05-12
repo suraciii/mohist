@@ -351,6 +351,9 @@ export const api = {
   getIssueStageState: (number: number) =>
     request<import('./types').IssueStageStateResponse>(`/issues/${number}/stage-state`),
 
+  getWorkflowRun: (number: number) =>
+    request<import('./types').WorkflowRun>(`/issues/${number}/workflow-run`),
+
   rebuildSystem: () =>
     request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
 

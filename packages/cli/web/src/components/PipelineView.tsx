@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { useIssueExecutions, useIssueStageState } from '../hooks/useQueries'
+import { useIssueStageState, useWorkflowRun, useIssueExecutions } from '../hooks/useQueries'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
 import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy } from '../lib/types'
+import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
@@ -415,6 +416,7 @@ function InlineApproval({
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
     },
   })
 
@@ -425,6 +427,7 @@ function InlineApproval({
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
       setFeedback('')
     },
   })
@@ -1116,10 +1119,14 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
 }
 
 export function PipelineView({ issue }: { issue: Issue }) {
+  const { data: workflowRun } = useWorkflowRun(issue.number)
   const { data: stageStateData } = useIssueStageState(issue.number)
   const { data: executions = [] } = useIssueExecutions(issue.number)
 
   const stageStateMap = useMemo(() => {
+    if (workflowRun?.stageRuns) {
+      return workflowRunToStageStateMap(workflowRun)
+    }
     const map = new Map<string, StageStateRead>()
     if (stageStateData?.stages) {
       for (const ss of stageStateData.stages) {
@@ -1127,7 +1134,7 @@ export function PipelineView({ issue }: { issue: Issue }) {
       }
     }
     return map
-  }, [stageStateData])
+  }, [workflowRun, stageStateData])
 
   const isClosed = issue.status === IssueStatus.Closed
   const isCompleted = issue.status === IssueStatus.Completed

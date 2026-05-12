@@ -418,6 +418,15 @@ export class PlanStageRunner extends BaseStageRunner {
     if (result.success) {
       const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
       const selfReviewReport = changeDir ? readReportFile(changeDir, 'self-review.md') : null;
+      if (ctx.workflowRunService && ctx.workflowRun) {
+        const tasksFile = ctx.artifactManager.readTasks(ctx.issue.number);
+        if (tasksFile?.tasks) {
+          ctx.workflowRunService.materializeBuildTasks(
+            ctx.workflowRun.id,
+            tasksFile.tasks.map(t => ({ id: t.id, title: t.title, order: t.order })),
+          );
+        }
+      }
       return {
         ...result,
         output: {

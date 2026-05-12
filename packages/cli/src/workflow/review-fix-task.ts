@@ -114,6 +114,14 @@ export async function runReviewFixTask(
       artifacts: [],
       attempts: attempt,
       duration,
+      reason: `${title} triggered by failed check: ${options.failedCheck.name}`,
+      causedBy: {
+        type: 'check-failure',
+        checkName: options.failedCheck.name,
+        message: (options.failedCheck.output as { verdict?: string })?.verdict === 'FAIL'
+          ? `AI review returned FAIL verdict`
+          : undefined,
+      },
       output: {
         kind: 'review-fix-task',
         checkName: options.failedCheck.name,
@@ -152,6 +160,12 @@ export async function runReviewFixTask(
       artifacts: [],
       attempts: attempt,
       duration,
+      reason: `${title} triggered by failed check: ${options.failedCheck.name}`,
+      causedBy: {
+        type: 'check-failure',
+        checkName: options.failedCheck.name,
+        message: error,
+      },
       output: {
         kind: 'review-fix-task',
         checkName: options.failedCheck.name,

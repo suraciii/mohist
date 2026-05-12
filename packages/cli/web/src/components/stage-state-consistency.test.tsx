@@ -8,11 +8,16 @@ import { Stage, IssueStatus } from '../lib/types'
 import type { Issue, IssueStageStateResponse, StageStateRead, StageTaskState } from '../lib/types'
 import { useIssueStageState, useIssueExecutions } from '../hooks/useQueries'
 
-vi.mock('../hooks/useQueries', () => ({
-  useIssueStageState: vi.fn(),
-  useIssueExecutions: vi.fn(),
-  useWorktreeStatus: vi.fn(),
-}))
+vi.mock('../hooks/useQueries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../hooks/useQueries')>()
+  return {
+    ...actual,
+    useIssueStageState: vi.fn(),
+    useIssueExecutions: vi.fn(),
+    useWorktreeStatus: vi.fn(),
+    useWorkflowRun: vi.fn().mockReturnValue({ data: undefined, isLoading: false }),
+  }
+})
 
 vi.mock('../hooks/useSSE', () => ({
   useLiveTask: () => ({}),

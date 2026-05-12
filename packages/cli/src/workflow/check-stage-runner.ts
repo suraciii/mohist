@@ -189,6 +189,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         artifacts: [],
         attempts: attempt,
         duration: Date.now() - startedAt,
+        reason: result.success
+          ? `${title} completed after ${attempt} attempt(s)`
+          : `merge conflict prevented successful merge repair`,
+        causedBy: {
+          type: 'conflict',
+          checkName: failedCheck.name,
+          message: result.conflicts.length > 0 ? `Conflict files: ${result.conflicts.join(', ')}` : undefined,
+        },
         output: {
           kind: 'merge-repair',
           targetBranch,
@@ -223,6 +231,12 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         artifacts: [],
         attempts: attempt,
         duration: Date.now() - startedAt,
+        reason: `${title} failed: ${error}`,
+        causedBy: {
+          type: 'conflict',
+          checkName: failedCheck.name,
+          message: error,
+        },
         output: { kind: 'merge-repair', success: false, error },
       };
     }
