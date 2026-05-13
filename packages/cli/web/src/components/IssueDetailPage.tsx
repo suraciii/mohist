@@ -17,7 +17,7 @@ import { SessionList } from './SessionList'
 import { TaskProgressPanel } from './TaskProgressPanel'
 import { formatTime } from '../lib/format-time'
 import { statusBadge, statusLabel } from '../lib/status-badge'
-import { ChangesPanel } from './ChangesPanel'
+
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 function MarkdownContent({ content }: { content: string }) {
@@ -67,9 +67,7 @@ export function IssueDetailPage() {
   const [commentText, setCommentText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
-  const [diffTab, setDiffTab] = useState<'files' | 'commits'>('files')
-  const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set())
-  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+
   const [descriptionExpanded, setDescriptionExpanded] = useState(false)
   const descriptionBodyRef = useRef<HTMLDivElement>(null)
   const [isOverflowing, setIsOverflowing] = useState(false)
@@ -348,19 +346,28 @@ export function IssueDetailPage() {
                   </div>
               )}
 
-              <div id="changes-panel">
-              <ChangesPanel
-                diffData={diffData}
-                commitsData={commitsData}
-                diffTab={diffTab}
-                setDiffTab={setDiffTab}
-                expandedFiles={expandedFiles}
-                setExpandedFiles={setExpandedFiles}
-                expandedCommits={expandedCommits}
-                setExpandedCommits={setExpandedCommits}
-                issueNumber={issueNumber}
-              />
-            </div>
+              {diffData?.available === true && (
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 text-sm text-gray-500">
+                      <span className="font-medium text-gray-700">{diffData.base}</span>
+                      {' → '}
+                      <span className="font-medium text-gray-700">{diffData.head}</span>
+                      <span className="text-gray-300">·</span>
+                      <span>{diffData.summary.filesChanged} files changed</span>
+                      <span className="text-gray-300">·</span>
+                      <span className="text-green-600">+{diffData.summary.additions}</span>
+                      <span className="text-red-500">-{diffData.summary.deletions}</span>
+                    </div>
+                    <button
+                      onClick={() => navigate(`/issue/${issueNumber}/files`)}
+                      className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-md transition-colors"
+                    >
+                      View files
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">

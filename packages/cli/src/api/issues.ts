@@ -1840,6 +1840,7 @@ export function createIssueRoutes(
           const firstLine = block.split('\n')[0];
           const match = firstLine.match(/^diff --git a\/(.+?) b\/(.+)$/);
           if (match) {
+            diffByFile.set(match[1], block);
             diffByFile.set(match[2], block);
           }
         }
@@ -1945,6 +1946,80 @@ export function createIssueRoutes(
         error: error instanceof Error ? error.message : 'Unknown error'
       };
       return c.json(response, 500);
+    }
+  });
+
+  app.get('/:number/file-content', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const filePath = c.req.query('path');
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      if (!filePath) {
+        return c.json({ success: false, error: 'path query parameter is required' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      const project = projectService.getById(projectId);
+      if (!project) {
+        return c.json({ success: false, error: 'Project not found' } satisfies ApiResponse, 404);
+      }
+
+      const branchName = `mo/issue-${number}`;
+
+      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+        return c.json({ success: false, error: 'Workspace has been removed' } satisfies ApiResponse, 400);
+      }
+
+      const worktreePath = worktreeManager.getPath(project.name, issue.number);
+      if (!worktreePath) {
+        return c.json({ success: false, error: 'Worktree path not found' } satisfies ApiResponse, 400);
+      }
+
+      let baseExists = false;
+      try {
+        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${project.baseBranch}`], { cwd: project.path });
+        baseExists = revOutput.stdout.trim().length > 0;
+      } catch {
+        baseExists = false;
+      }
+
+      if (!baseExists) {
+        return c.json({ success: false, error: `Base branch ${project.baseBranch} not found` } satisfies ApiResponse, 400);
+      }
+
+      const readContent = async (ref: string) => {
+        try {
+          const result = await execFileAsync('git', ['show', `${ref}:${filePath}`], { cwd: project.path });
+          return result.stdout;
+        } catch {
+          return '';
+        }
+      };
+
+      const [baseContent, headContent] = await Promise.all([
+        readContent(project.baseBranch),
+        readContent(branchName),
+      ]);
+
+      if (!baseContent && !headContent) {
+        return c.json({ success: false, error: 'Failed to read file content from git' } satisfies ApiResponse, 500);
+      }
+
+      return c.json({
+        success: true,
+        data: { base: baseContent, head: headContent },
+      });
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
   });
 

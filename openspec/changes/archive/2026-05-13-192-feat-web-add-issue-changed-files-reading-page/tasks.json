@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extract a shared file-diff model and keep inline diff compatibility",
+      "spec": "specs/issue-changed-files-reader/spec.md#Unified-diff-reader-supports-sticky-file-context-and-expand-controls",
+      "description": "Refactor the current diff parsing logic out of `DiffViewer` into a reusable utility or model layer that normalizes file blocks, hunks, line metadata, and derived counts such as changed-line totals. Keep the existing inline diff experiences working through a compatibility wrapper so later reader work can build on one parser instead of forking diff behavior.",
+      "acceptanceCriteria": [
+        "A shared diff-model utility can parse the current issue diff and commit diff patch formats into reusable file/hunk/line structures",
+        "Existing inline diff rendering in the issue detail Changes panel still works after the refactor",
+        "The shared model exposes enough metadata to support large-diff suppression and hunk navigation without re-parsing raw patch text in the page layer",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/DiffViewer.tsx",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Expected touched files may include a new diff utility under packages/cli/web/src/lib or components plus a thinner DiffViewer wrapper. This task produces the shared parser/model consumed by every later reader task.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        497955,
+        78577
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Add the changed-files page route and reader shell",
+      "spec": "specs/issue-changed-files-reader/spec.md#Dedicated-changed-files-page-provides-the-primary-reading-surface",
+      "description": "Create the new `/issue/:number/files` route and page component with issue-aware loading, not-found, and unavailable states. The page should render the top reading context for issue number/title, base/head, files changed, additions/deletions, and current stage/status while staying free of approval, review, and merge-action UI.",
+      "acceptanceCriteria": [
+        "Navigating to `/issue/:number/files` renders a dedicated changed-files page inside the existing Web UI router",
+        "The page shows issue number, title, base, head, files changed, additions, deletions, stage, and status when diff data is available",
+        "Not-started, worktree-removed, branch-missing, and other unavailable states render as reading-specific page states instead of crashing or showing issue-detail controls",
+        "The page does not show approve/reject actions, review reports, line comments, or merge decision UI",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueChangedFilesPage.tsx",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Expected touched files include packages/cli/web/src/App.tsx and any small page-level helpers. Consume the shared diff model from T-001 instead of embedding new parsing logic in the page.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        99422
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Implement the P0 file tree and unified diff reader",
+      "spec": "specs/issue-review-surface/spec.md#Files-changed-is-the-primary-review-view",
+      "description": "Add the main P0 reading experience inside the new page: a left-side changed-files tree grouped by directory, file-path filtering, and a right-side unified diff pane driven by the shared diff model. Include sticky file headers, expand all/collapse all controls, and large-diff suppression with a per-file `Render anyway` override so the page is optimized for reading rather than raw patch dumping.",
+      "acceptanceCriteria": [
+        "The left pane groups changed files by directory instead of rendering a flat button list",
+        "Filtering by file path narrows the visible file tree and corresponding file selection behavior",
+        "The right pane renders unified diffs with line numbers and sticky file headers showing path, status, additions, and deletions",
+        "Expand all and collapse all controls work across the page reader state",
+        "Large diffs are hidden by default behind a placeholder with changed-line count and a Render anyway action",
+        "No file changes yet renders a clear empty state when an issue worktree exists but has no diff entries",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/issue-changed-files/",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "This is the core P0 reader capability. Prefer a dedicated component subtree for the page rather than growing ChangesPanel into the full reader.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        418766
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Reduce Issue Detail to summary plus View files entry",
+      "spec": "specs/web-ui/spec.md#Issue-Detail-changes-summary-links-to-the-dedicated-reader",
+      "description": "Update `IssueDetailPage` so its Changes area becomes a lightweight entry point into the dedicated reader instead of the primary code-reading surface. Keep the existing summary context readable, add a `View files` navigation affordance, and preserve lightweight inline evidence only where it still supports issue management without competing with the new page.",
+      "acceptanceCriteria": [
+        "Issue Detail shows a lightweight changes summary with base/head and diffstat context when available",
+        "Issue Detail provides a View files action that navigates to `/issue/:number/files`",
+        "The main code-reading workflow now lives on the dedicated page rather than requiring users to stay inside issue description/comments context",
+        "Issue Detail remains free of broken state after the routing change",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "This task consumes the dedicated page from T-002/T-003 and updates Issue Detail to coordinate navigation instead of owning the primary reader experience.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        93803
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Add P1 reader controls for split diff, hunk navigation, scroll restore, and commit mode",
+      "spec": "specs/web-ui/spec.md#Changed-files-page-preserves-reading-context-across-navigation",
+      "description": "Extend the reader shell so users can switch between unified and split diff, jump between hunks, resume their reading position after navigating away, and inspect file changes for a selected commit without leaving the dedicated reading surface. Reuse the existing issue commits and commit-diff APIs where possible, and keep the page focused on browsing evidence rather than introducing review decisions.",
+      "acceptanceCriteria": [
+        "The reader supports unified and split diff modes without breaking the default unified reading flow",
+        "Prev hunk and next hunk controls navigate within the visible diff content",
+        "Leaving and returning to `/issue/:number/files` restores the last reading position for the same issue",
+        "Users can switch into a commit-scoped reading mode that uses existing commit data and still stays within the same reader shell",
+        "Commit mode does not introduce approval, review report, or merge decision UI",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueChangedFilesPage.tsx",
+      "dependsOn": [
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Use sessionStorage or equivalent reader-local persistence keyed by issue number. Reuse `/api/issues/:number/commits` and `/api/issues/:number/commits/:hash/diff` instead of designing a second commit reader API.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        291304
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Add P2 raw, full-file, and in-diff search modes",
+      "spec": "specs/issue-changed-files-reader/spec.md#Advanced-reading-modes-support-deeper-diff-inspection",
+      "description": "Complete the advanced reading modes by adding raw patch view, full-file view with changed-line highlighting, and search within diff content. If full-file mode requires extra backend support to fetch file contents for base/head versions, add only the minimal API needed to serve the reader while keeping the route shape and page shell unchanged.",
+      "acceptanceCriteria": [
+        "Each file supports a raw patch view suitable for copy/paste and format inspection",
+        "Each file supports a full-file view that highlights changed lines rather than showing only patch hunks",
+        "Users can search within the visible diff content and move through matches",
+        "Any backend support added for full-file mode is scoped to the changed-files reader and does not replace existing diff endpoints",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/issue-changed-files/",
+      "dependsOn": [
+        "T-003",
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "Prefer additive API work only if full-file mode truly needs blob content from the backend. Keep the single reader shell from earlier tasks.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        388904
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Add end-to-end regression coverage for the changed-files reader",
+      "spec": "specs/issue-changed-files-reader/spec.md#Advanced-reading-modes-support-deeper-diff-inspection",
+      "description": "Add focused automated coverage for the new changed-files reader so future UI or API refactors cannot silently regress the primary reading flow. Cover parser compatibility, route rendering, file tree/filter behavior, unified/split rendering, large-diff suppression, navigation from Issue Detail, and any advanced modes introduced by later tasks.",
+      "acceptanceCriteria": [
+        "Tests cover the dedicated route rendering and the View files navigation path from Issue Detail",
+        "Tests cover directory-grouped file tree behavior, file filtering, and large-diff Render anyway behavior",
+        "Tests cover unified diff rendering and any split/hunk/scroll-restore behavior added by the reader",
+        "If full-file or raw modes are implemented, tests cover at least one representative file-mode switch and visible output assertion",
+        "Existing relevant frontend and backend test suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests and packages/cli/web/src/components/*.test.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "Prefer the closest existing frontend test patterns in the repo. This task depends on the delivered user-facing reader behaviors rather than only implementation details.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1804794,
+        1073598
+      ]
+    }
+  ]
+}

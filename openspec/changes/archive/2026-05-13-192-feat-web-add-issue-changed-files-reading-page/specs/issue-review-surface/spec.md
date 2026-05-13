@@ -1,4 +1,4 @@
-# OpenSpec Capability: issue-review-surface
+## MODIFIED Requirements
 
 ### Requirement: Files changed is the primary review view
 
@@ -32,4 +32,3 @@ The changed-files experience SHALL stay focused on reading final file changes an
 - **WHEN** a user reads code on the changed-files page
 - **THEN** the surface provides file browsing and diff reading controls
 - **AND** it does not provide review comments, approval/reject actions, merge actions, or AI review report panes
-

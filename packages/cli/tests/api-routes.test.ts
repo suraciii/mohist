@@ -1528,5 +1528,34 @@ it('allows merge when issue is in Integrate stage and enqueues resume-pipeline',
         expect(response.body.data.reason).toBe('not_started');
       });
     });
+
+    describe('GET /api/issues/:number/file-content', () => {
+      it('returns available side when reading added or deleted files', async () => {
+        await issueService.create({ projectId, title: 'Test Issue' });
+
+        const git = promisify(execFile);
+        await git('git', ['checkout', '-b', 'mo/issue-1'], { cwd: repoDir });
+        fs.writeFileSync(path.join(repoDir, 'added.txt'), 'added content\n');
+        fs.unlinkSync(path.join(repoDir, 'README.md'));
+        await git('git', ['add', '-A'], { cwd: repoDir });
+        await git('git', ['commit', '-m', 'change files'], { cwd: repoDir });
+        await git('git', ['checkout', 'main'], { cwd: repoDir });
+
+        const worktreeDir = path.join(os.homedir(), '.mohist', 'projects', 'test-project', 'worktrees', 'issue-1');
+        fs.mkdirSync(worktreeDir, { recursive: true });
+
+        const addedResponse = await request(server).get('/api/issues/1/file-content?path=added.txt');
+        expect(addedResponse.status).toBe(200);
+        expect(addedResponse.body.data.base).toBe('');
+        expect(addedResponse.body.data.head).toBe('added content\n');
+
+        const deletedResponse = await request(server).get('/api/issues/1/file-content?path=README.md');
+        expect(deletedResponse.status).toBe(200);
+        expect(deletedResponse.body.data.base).toBe('init');
+        expect(deletedResponse.body.data.head).toBe('');
+
+        fs.rmSync(worktreeDir, { recursive: true, force: true });
+      });
+    });
   });
 });
