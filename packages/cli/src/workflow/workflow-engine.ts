@@ -129,6 +129,7 @@ export class WorkflowEngine {
       title: task.title,
       status: task.status,
       order: task.taskOrder,
+      dependsOn: [],
       attempts: task.attempts,
       duration: task.duration,
       artifacts: task.artifacts,

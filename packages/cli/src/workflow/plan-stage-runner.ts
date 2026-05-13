@@ -154,12 +154,12 @@ export class PlanStageRunner extends BaseStageRunner {
 
     if (completedSteps.includes(task.type) && task.verifyArtifact()) {
       if (isLastTask) await this.closeAggregateTaskSession(ctx);
-      return { taskId: task.type, title: task.label, status: 'skipped', artifacts: [], attempts: 0, duration: 0 };
+      return { taskId: task.type, title: task.label, status: 'completed', artifacts: [], attempts: 0, duration: 0 };
     }
     if (task.verifyArtifact()) {
       checkpointManager.markStepComplete(issue.number, 'plan', task.type, tasks[taskIndex + 1]?.type ?? null);
       if (isLastTask) await this.closeAggregateTaskSession(ctx);
-      return { taskId: task.type, title: task.label, status: 'skipped', artifacts: [task.label], attempts: 0, duration: 0 };
+      return { taskId: task.type, title: task.label, status: 'completed', artifacts: [task.label], attempts: 0, duration: 0 };
     }
 
     const session = await this.getAggregateTaskSession(ctx);
@@ -347,14 +347,14 @@ export class PlanStageRunner extends BaseStageRunner {
       for (const [index, task] of tasks.entries()) {
         if (completedSteps.includes(task.type)) {
           if (task.verifyArtifact()) {
-            log.info('Plan task skipped (checkpoint + artifact exists)', {
+            log.info('Plan task restored from checkpoint', {
               artifact: task.type,
               issueNumber: issue.number,
             });
             this.appendTaskResult(ctx, {
               taskId: task.type,
               title: task.label,
-              status: 'skipped',
+              status: 'completed',
               artifacts: [],
               attempts: 0,
               duration: 0,
@@ -382,7 +382,7 @@ export class PlanStageRunner extends BaseStageRunner {
           this.appendTaskResult(ctx, {
             taskId: task.type,
             title: task.label,
-            status: 'skipped',
+            status: 'completed',
             artifacts: [task.label],
             attempts: 0,
             duration: 0,

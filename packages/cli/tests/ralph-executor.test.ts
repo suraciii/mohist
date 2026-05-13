@@ -217,7 +217,7 @@ describe('runRalphLoop', () => {
     expect(onTaskStart).not.toHaveBeenCalled();
     expect(result.completed).toBe(2);
     expect(result.success).toBe(true);
-    expect(result.skipped).toBe(2);
+    expect(result.skipped).toBe(0);
 
     const updated = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
     expect(updated.tasks.every((t: any) => t.passes === true)).toBe(true);
@@ -320,7 +320,7 @@ describe('runRalphLoop', () => {
       expect(onTaskStart).not.toHaveBeenCalled();
       expect(result.completed).toBe(2);
       expect(result.success).toBe(true);
-      expect(result.skipped).toBe(2);
+      expect(result.skipped).toBe(0);
     });
 
     it('partial skipTaskIds still enters main loop for remaining tasks', async () => {
@@ -770,7 +770,7 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
     };
   }
 
-  it('auto-skipped task increments failed and skipped counters', async () => {
+  it('failure without onAskUser fails the task and does not skip forward', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({
       success: false,
       error: 'Timed out after 1800000ms',
@@ -785,10 +785,10 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
     const result = await runRalphLoop(change, context, { maxRetries: 0 });
 
     expect(result.failed).toBe(1);
-    expect(result.skipped).toBe(1);
+    expect(result.skipped).toBe(0);
     expect(result.success).toBe(false);
     expect(result.taskResults).toHaveLength(1);
-    expect(result.taskResults[0].status).toBe('skipped');
+    expect(result.taskResults[0].status).toBe('failed');
   });
 
   it('retry success replaces failed taskResult with completed', async () => {
@@ -848,7 +848,7 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
     expect(context.syncTasksToStageState).toHaveBeenCalledTimes(3);
     expect(snapshots).toEqual([
       [{ passes: false, attempts: 1, error: 'Timed out' }],
-      [{ passes: false, attempts: 1, error: 'Skipped: task was not executed (attemptsUsed=1, no attempts made)' }],
+      [{ passes: false, attempts: 1, error: 'Task was not executed (attemptsUsed=1, no attempts made)' }],
       [{ passes: true, attempts: 2, error: null }],
     ]);
   });
@@ -877,12 +877,12 @@ describe('v4 bug fix: failed counter and auto-skip', () => {
     const result = await runRalphLoop(change, context, { maxRetries: 0 });
 
     expect(result.success).toBe(false);
-    expect(result.taskResults[0].status).toBe('skipped');
+    expect(result.taskResults[0].status).toBe('failed');
     expect(context.syncTasksToStageState).toHaveBeenCalledTimes(3);
     expect(snapshots).toEqual([
       [{ passes: false, attempts: 1, error: 'Timed out after 1800000ms' }],
-      [{ passes: false, attempts: 1, error: 'Skipped: task was not executed (attemptsUsed=1, no attempts made)' }],
-      [{ passes: false, attempts: 1, error: 'Auto-skipped (no onAskUser): Timed out after 1800000ms' }],
+      [{ passes: false, attempts: 1, error: 'Task was not executed (attemptsUsed=1, no attempts made)' }],
+      [{ passes: false, attempts: 1, error: 'Timed out after 1800000ms' }],
     ]);
   });
 

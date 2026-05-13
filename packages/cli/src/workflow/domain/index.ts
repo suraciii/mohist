@@ -25,6 +25,7 @@ export interface FailureDetails {
 export interface TaskDefinition {
   id: string;
   title: string;
+  dependsOn?: string[];
 }
 
 export interface CheckDefinition {
@@ -87,6 +88,7 @@ export interface MaterializedTaskInput {
   id: string;
   title: string;
   order?: number;
+  dependsOn?: string[];
 }
 
 export type WorkflowEvent =
@@ -125,6 +127,7 @@ export interface TaskRunSnapshot {
   title: string;
   status: TaskRunStatus;
   order: number;
+  dependsOn: string[];
   attempts: number;
   duration: number;
   artifacts: string[];
@@ -175,6 +178,7 @@ export class WorkflowDomainError extends Error {}
 
 export class TaskRun {
   status: TaskRunStatus = 'pending';
+  dependsOn: string[] = [];
   attempts = 0;
   duration = 0;
   artifacts: string[] = [];
@@ -192,12 +196,17 @@ export class TaskRun {
     return this.status === 'completed' || this.status === 'failed' || this.status === 'skipped';
   }
 
+  get succeeded(): boolean {
+    return this.status === 'completed';
+  }
+
   snapshot(): TaskRunSnapshot {
     return {
       id: this.id,
       title: this.title,
       status: this.status,
       order: this.order,
+      dependsOn: [...this.dependsOn],
       attempts: this.attempts,
       duration: this.duration,
       artifacts: [...this.artifacts],
@@ -243,7 +252,11 @@ export class StageRun {
     readonly definition: StageDefinition,
     readonly order: number,
   ) {
-    this.tasks = definition.tasks.map((task, index) => new TaskRun(task.id, task.title, index));
+    this.tasks = definition.tasks.map((task, index) => {
+      const taskRun = new TaskRun(task.id, task.title, index);
+      taskRun.dependsOn = [...(task.dependsOn ?? [])];
+      return taskRun;
+    });
     this.checks = definition.checks.map(check => new CheckState(check.name, check.title));
   }
 
@@ -263,14 +276,23 @@ export class StageRun {
       throw new WorkflowDomainError('Only the build stage can materialize tasks');
     }
     for (const task of [...tasks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
-      if (this.tasks.some(existing => existing.id === task.id)) continue;
-      this.tasks.push(new TaskRun(task.id, task.title, task.order ?? this.tasks.length));
+      const existing = this.tasks.find(candidate => candidate.id === task.id);
+      if (existing) {
+        existing.dependsOn = [...(task.dependsOn ?? existing.dependsOn)];
+        continue;
+      }
+      const taskRun = new TaskRun(task.id, task.title, task.order ?? this.tasks.length);
+      taskRun.dependsOn = [...(task.dependsOn ?? [])];
+      this.tasks.push(taskRun);
     }
     this.tasks.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   }
 
   nextTask(): TaskRun | null {
-    return this.tasks.find(task => !task.terminal) ?? null;
+    return this.tasks.find(task => {
+      if (task.terminal) return false;
+      return task.dependsOn.every(depId => this.tasks.find(dep => dep.id === depId)?.succeeded);
+    }) ?? null;
   }
 
   nextCheck(): CheckState | null {
@@ -283,7 +305,7 @@ export class StageRun {
   }
 
   allRequiredTasksSucceeded(): boolean {
-    return this.tasks.every(task => task.status === 'completed' || task.status === 'skipped');
+    return this.tasks.every(task => task.status === 'completed');
   }
 
   allChecksPassed(): boolean {
@@ -536,7 +558,7 @@ export class WorkflowRun {
       };
     }
 
-    if (result.status === 'failed') {
+    if (result.status === 'failed' || result.status === 'skipped') {
       const failure: FailureDetails = {
         reason: 'task-failed',
         stage,
@@ -695,8 +717,9 @@ export class WorkflowRun {
     stageRun.failure = null;
     stageRun.approval = null;
 
-    for (const task of stageRun.tasks) {
-      if (task.status === 'completed' || task.status === 'skipped') continue;
+    const firstIncompleteTaskIndex = stageRun.tasks.findIndex(task => task.status !== 'completed');
+    for (const [index, task] of stageRun.tasks.entries()) {
+      if (task.status === 'completed' && (firstIncompleteTaskIndex === -1 || index < firstIncompleteTaskIndex)) continue;
       task.status = 'pending';
       task.duration = 0;
       task.artifacts = [];
@@ -730,10 +753,51 @@ export class WorkflowRun {
     return this.decision([{ type: 'stage-retried', stage }]);
   }
 
+  rerunStage(stage: Stage): WorkflowDecision {
+    if (this.status !== 'running') {
+      throw new WorkflowDomainError(`WorkflowRun is ${this.status}`);
+    }
+    const stageRun = this.assertCurrentStage(stage);
+    if (stageRun.status !== 'running') {
+      throw new WorkflowDomainError(`Stage ${stage} is not running`);
+    }
+
+    const firstIncompleteTaskIndex = stageRun.tasks.findIndex(task => task.status !== 'completed');
+    const resetFromIndex = firstIncompleteTaskIndex === -1 ? 0 : firstIncompleteTaskIndex;
+    for (const [index, task] of stageRun.tasks.entries()) {
+      if (index < resetFromIndex) continue;
+      task.status = 'pending';
+      task.duration = 0;
+      task.artifacts = [];
+      task.output = null;
+      task.reason = null;
+      task.causedBy = null;
+    }
+    for (const check of stageRun.checks) {
+      check.status = 'pending';
+      check.message = null;
+      check.output = null;
+    }
+
+    return this.decision([{ type: 'stage-retried', stage }]);
+  }
+
   nextWork(): WorkflowWork {
     if (this.status === 'passed') return { kind: 'complete' };
     if (this.status === 'failed') return { kind: 'failed', reason: this.failure! };
     const stageRun = this.currentStageRun();
+    const failedTask = stageRun.tasks.find(task => task.status === 'failed' || task.status === 'skipped');
+    if (failedTask) {
+      const failure: FailureDetails = {
+        reason: 'task-failed',
+        stage: stageRun.stage,
+        taskId: failedTask.id,
+        message: failedTask.reason ?? undefined,
+        causedBy: failedTask.causedBy ?? undefined,
+      };
+      this.fail(stageRun, failure, []);
+      return { kind: 'failed', reason: failure };
+    }
     if (stageRun.status === 'awaiting-approval') return { kind: 'await-approval', stage: stageRun.stage };
     const task = stageRun.nextTask();
     if (task) return { kind: 'task', stage: stageRun.stage, taskId: task.id };

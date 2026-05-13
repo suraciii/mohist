@@ -112,6 +112,43 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
   });
 
+  it('does not advance to dependent build tasks after an incomplete task', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [
+      { id: 'T-001', title: 'First build task', order: 1 },
+      { id: 'T-002', title: 'Second build task', order: 2, dependsOn: ['T-001'] },
+    ]);
+
+    const decision = run.completeTask(Stage.Build, 'T-001', { status: 'skipped', reason: 'process exited' });
+
+    expect(run.status).toBe('failed');
+    expect(run.failure).toMatchObject({ reason: 'task-failed', stage: Stage.Build, taskId: 'T-001' });
+    expect(run.stageRun(Stage.Build).findTask('T-002').status).toBe('pending');
+    expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
+  });
+
+  it('reruns an active stage from the first incomplete task and clears later completed tasks', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [
+      { id: 'T-001', title: 'First build task', order: 1 },
+      { id: 'T-002', title: 'Second build task', order: 2, dependsOn: ['T-001'] },
+    ]);
+    const buildStage = run.stageRun(Stage.Build);
+    buildStage.findTask('T-001').attempts = 2;
+    buildStage.findTask('T-002').status = 'completed';
+    buildStage.findTask('T-002').attempts = 1;
+    buildStage.findTask('T-002').output = { text: 'stale' };
+
+    const decision = run.rerunStage(Stage.Build);
+
+    expect(run.status).toBe('running');
+    expect(buildStage.findTask('T-001')).toMatchObject({ status: 'pending', attempts: 2, output: null });
+    expect(buildStage.findTask('T-002')).toMatchObject({ status: 'pending', attempts: 1, output: null });
+    expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
+  });
+
   it('records pass, fail, error, and pending check results', () => {
     const definitions: StageDefinition[] = [
       {

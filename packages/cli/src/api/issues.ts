@@ -3264,6 +3264,24 @@ export function createIssueRoutes(
       issueRepo.updateRetryCount(issue.id, 0);
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
 
+      const workflowApplicationService = createWorkflowApplicationService();
+      if (workflowApplicationService) {
+        const worktreePath = worktreeManager?.getPath(project.name, issue.number);
+        const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
+        const workflowOptions = {
+          issueId: issue.id,
+          stage: issue.stage,
+          tasksPath: changeDir ? path.join(changeDir, 'tasks.json') : undefined,
+          startedBy: 'rerun',
+        };
+        const decision = workflowApplicationService.resumeDecision(issue.id, workflowOptions);
+        if (decision.nextWork.kind === 'failed') {
+          workflowApplicationService.retryStage(workflowOptions);
+        } else {
+          workflowApplicationService.rerunStage(workflowOptions);
+        }
+      }
+
       const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
 
       return c.json({

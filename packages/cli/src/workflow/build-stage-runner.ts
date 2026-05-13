@@ -105,7 +105,12 @@ export class BuildStageRunner extends BaseStageRunner {
       ctx.workflowApplicationService.materializeTasks({
         issueId: issue.id,
         stage: Stage.Build,
-        tasks: buildTasks.map(task => ({ id: task.id, title: task.title, order: task.order })),
+        tasks: buildTasks.map(task => ({
+          id: task.id,
+          title: task.title,
+          order: task.order,
+          dependsOn: task.dependsOn ?? [],
+        })),
         tasksPath: change.tasksPath,
       });
     } else {
@@ -326,6 +331,7 @@ export class BuildStageRunner extends BaseStageRunner {
           title: ctx.requestedWork.taskId,
           status: 'pending',
           order: 0,
+          dependsOn: [],
           attempts: 0,
           duration: 0,
           artifacts: [],

@@ -561,7 +561,7 @@ export async function runRalphLoop(
     const alreadyPassedResult: RalphLoopResult = {
       completed: tasks.length,
       failed: 0,
-      skipped: tasks.length,
+      skipped: 0,
       total: tasks.length,
       taskResults: [],
       success: true,
@@ -575,18 +575,18 @@ export async function runRalphLoop(
       task.passes = true;
       task.error = null;
       reportTaskToAggregate(context, task, {
-        status: 'skipped',
-        attempts: task.attempts,
+        status: 'completed',
+        attempts: task.attempts || 1,
         duration: 0,
-        reason: 'Skipped during checkpoint resume',
+        reason: 'Recovered from checkpoint',
       });
     }
   }
   if (skipTaskIds.size > 0) {
     writeTasksFile(change.tasksPath, tasks);
-    log.info('Marked tasks as passed from skipTaskIds', {
+    log.info('Restored completed tasks from checkpoint', {
       issueId: context.issueId || '',
-      skippedIds: [...skipTaskIds],
+      completedIds: [...skipTaskIds],
     });
   }
 
@@ -977,7 +977,7 @@ export async function runRalphLoop(
 
     if (!taskSuccess) {
       if (attemptsUsed === nextTask.attempts) {
-        updateTaskInList(tasks, nextTask.id, { passes: false, attempts: nextTask.attempts, error: `Skipped: task was not executed (attemptsUsed=${attemptsUsed}, no attempts made)` });
+        updateTaskInList(tasks, nextTask.id, { passes: false, attempts: nextTask.attempts, error: `Task was not executed (attemptsUsed=${attemptsUsed}, no attempts made)` });
         persistTasks(context, change.tasksPath, tasks);
       }
       taskResults.push({
@@ -991,20 +991,32 @@ export async function runRalphLoop(
       context.onTaskComplete?.(nextTask, false, lastError ?? 'Max retries exceeded');
 
       if (shouldPause && context.onAskUser) {
-        const question = `Task ${nextTask.id} failed and requires user intervention.\n\nReason: ${pauseReason}\n\nOptions:\n1. Retry this task\n2. Skip this task and continue\n3. Abort the build\n\nWhat would you like to do?`;
+        const question = `Task ${nextTask.id} failed and requires user intervention.\n\nReason: ${pauseReason}\n\nOptions:\n1. Retry this task\n2. Abort the build\n\nWhat would you like to do?`;
         const answer = await context.onAskUser(question, nextTask.id);
 
         if (answer.toLowerCase().includes('skip')) {
-          updateTaskInList(tasks, nextTask.id, { passes: true, error: `Skipped: ${lastError}` });
-          persistTasks(context, change.tasksPath, tasks);
-          taskResults[taskResults.length - 1].status = 'skipped';
+          failed++;
+          pauseReason = `Task ${nextTask.id} was not completed: ${lastError}`;
           reportTaskToAggregate(context, nextTask, {
-            status: 'skipped',
+            status: 'failed',
             attempts: attemptsUsed,
             duration: Date.now() - taskStartTime,
-            output: { error: lastError },
-            reason: `Skipped: ${lastError}`,
+            output: { error: lastError, requestedAction: 'skip' },
+            reason: pauseReason,
           });
+          const result: RalphLoopResult = {
+            completed,
+            failed,
+            skipped,
+            total: sortedTasks.length,
+            taskResults,
+            success: false,
+            paused: true,
+            pausedTaskId: nextTask.id,
+            pauseReason,
+          };
+          context.onLoopComplete?.(result);
+          return result;
         } else if (answer.toLowerCase().includes('retry')) {
           taskResults.pop();
           continue;
@@ -1032,18 +1044,16 @@ export async function runRalphLoop(
           return result;
         }
       } else if (shouldPause && !context.onAskUser) {
-        updateTaskInList(tasks, nextTask.id, { passes: false, error: `Auto-skipped (no onAskUser): ${lastError}` });
+        updateTaskInList(tasks, nextTask.id, { passes: false, error: lastError });
         persistTasks(context, change.tasksPath, tasks);
-        taskResults[taskResults.length - 1].status = 'skipped';
         reportTaskToAggregate(context, nextTask, {
-          status: 'skipped',
+          status: 'failed',
           attempts: attemptsUsed,
           duration: Date.now() - taskStartTime,
           output: { error: lastError },
-          reason: `Auto-skipped (no onAskUser): ${lastError}`,
+          reason: lastError,
         });
         failed++;
-        skipped++;
         processedTaskIds.add(nextTask.id);
       } else {
         reportTaskToAggregate(context, nextTask, {
