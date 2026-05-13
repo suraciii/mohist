@@ -38,6 +38,8 @@ interface TaskConfig {
 export class PlanStageRunner extends BaseStageRunner {
   private worktreePath: string;
   private planHealthGatePolicy: import('./workflow-loader').HealthGatePolicy;
+  private readonly aggregateTaskSessions = new Map<string, AgentSession>();
+  private readonly aggregateTaskAbortListeners = new Map<string, () => void>();
 
   constructor(worktreePath: string = '') {
     super();
@@ -148,33 +150,19 @@ export class PlanStageRunner extends BaseStageRunner {
     const { issue, acpOptions, eventBus, checkpointManager } = ctx;
     const task = tasks[taskIndex];
     const completedSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
+    const isLastTask = taskIndex === tasks.length - 1;
 
     if (completedSteps.includes(task.type) && task.verifyArtifact()) {
+      if (isLastTask) await this.closeAggregateTaskSession(ctx);
       return { taskId: task.type, title: task.label, status: 'skipped', artifacts: [], attempts: 0, duration: 0 };
     }
     if (task.verifyArtifact()) {
       checkpointManager.markStepComplete(issue.number, 'plan', task.type, tasks[taskIndex + 1]?.type ?? null);
+      if (isLastTask) await this.closeAggregateTaskSession(ctx);
       return { taskId: task.type, title: task.label, status: 'skipped', artifacts: [task.label], attempts: 0, duration: 0 };
     }
 
-    const wfObservers = createWorkflowSessionObservers({
-      eventBus: ctx.eventBus,
-      workflowLogRepo: ctx.workflowLogRepo,
-      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
-      coderSessionRepo: ctx.coderSessionRepo,
-      stage: 'plan',
-      title: 'Plan stage',
-    });
-    const session = await AgentSession.create({
-      ...acpOptions,
-      issueId: issue.id,
-      projectId: issue.projectId,
-      issueNumber: issue.number,
-      executionId: `plan-${issue.number}`,
-      stage: 'plan',
-      title: 'Plan stage',
-      observers: wfObservers,
-    });
+    const session = await this.getAggregateTaskSession(ctx);
 
     const startedAt = Date.now();
     let attempts = 1;
@@ -184,6 +172,7 @@ export class PlanStageRunner extends BaseStageRunner {
       const result = await session.execute(task.buildPrompt(issue, changeDir), { kind: 'task', title: task.label });
       if (!result.success) {
         emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'failed', attempts, []);
+        await this.closeAggregateTaskSession(ctx);
         return { taskId: task.type, title: task.label, status: 'failed', artifacts: [], attempts, duration: Date.now() - startedAt, reason: `Task "${task.label}" failed: ${result.error ?? 'unknown error'}` };
       }
       if (!task.verifyArtifact()) {
@@ -200,6 +189,7 @@ export class PlanStageRunner extends BaseStageRunner {
         const retryResult = await session.execute(retryPrompt, { kind: 'retry', title: task.label });
         if (!retryResult.success || !task.verifyArtifact()) {
           emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'failed', attempts, []);
+          await this.closeAggregateTaskSession(ctx);
           return {
             taskId: task.type,
             title: task.label,
@@ -214,10 +204,99 @@ export class PlanStageRunner extends BaseStageRunner {
       const artifacts = task.verifyArtifact() ? [task.label] : [];
       checkpointManager.markStepComplete(issue.number, 'plan', task.type, tasks[taskIndex + 1]?.type ?? null);
       emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'completed', attempts, artifacts);
+      if (isLastTask) await this.closeAggregateTaskSession(ctx);
       return { taskId: task.type, title: task.label, status: 'completed', artifacts, attempts, duration: Date.now() - startedAt };
-    } finally {
-      await session.close();
+    } catch (err) {
+      await this.closeAggregateTaskSession(ctx);
+      throw err;
     }
+  }
+
+  private aggregateTaskSessionKey(ctx: StageContext): string {
+    return `${ctx.issue.id}:plan:${ctx.acpOptions.cwd ?? ''}`;
+  }
+
+  private async getAggregateTaskSession(ctx: StageContext): Promise<AgentSession> {
+    const key = this.aggregateTaskSessionKey(ctx);
+    const existing = this.aggregateTaskSessions.get(key);
+    if (existing && existing.canClose()) return existing;
+    if (existing) await this.closeAggregateTaskSession(ctx);
+
+    const wfObservers = createWorkflowSessionObservers({
+      eventBus: ctx.eventBus,
+      workflowLogRepo: ctx.workflowLogRepo,
+      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+      coderSessionRepo: ctx.coderSessionRepo,
+      stage: 'plan',
+      title: 'Plan stage',
+    }, [this.createPlanBridgeObserver(ctx)]);
+
+    const session = await AgentSession.create({
+      ...ctx.acpOptions,
+      issueId: ctx.issue.id,
+      projectId: ctx.issue.projectId,
+      issueNumber: ctx.issue.number,
+      executionId: `plan-${ctx.issue.number}`,
+      stage: 'plan',
+      title: 'Plan stage',
+      observers: wfObservers,
+    });
+    this.aggregateTaskSessions.set(key, session);
+    this.registerAggregateTaskAbortListener(ctx, key);
+    return session;
+  }
+
+  private registerAggregateTaskAbortListener(ctx: StageContext, key: string): void {
+    const signal = ctx.acpOptions.signal ?? ctx.signal;
+    if (!signal || this.aggregateTaskAbortListeners.has(key)) return;
+    const onAbort = () => {
+      void this.closeAggregateTaskSession(ctx);
+    };
+    this.aggregateTaskAbortListeners.set(key, onAbort);
+    signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  private async closeAggregateTaskSession(ctx: StageContext): Promise<void> {
+    const key = this.aggregateTaskSessionKey(ctx);
+    const signal = ctx.acpOptions.signal ?? ctx.signal;
+    const abortListener = this.aggregateTaskAbortListeners.get(key);
+    if (signal && abortListener) {
+      signal.removeEventListener('abort', abortListener);
+      this.aggregateTaskAbortListeners.delete(key);
+    }
+    const session = this.aggregateTaskSessions.get(key);
+    if (!session) return;
+    this.aggregateTaskSessions.delete(key);
+    try {
+      await session.close();
+    } catch (err) {
+      log.warn('Failed to close aggregate plan task session', {
+        issueNumber: ctx.issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private createPlanBridgeObserver(ctx: StageContext) {
+    return {
+      onRawNotification(_sessionCtx: import('../agent-runtime/session-observer').SessionContext, notification: import('@agentclientprotocol/sdk').SessionNotification) {
+        if (!ctx.eventBus) return;
+        try {
+          ctx.eventBus.emit('plan_session_update', {
+            issueId: String(ctx.acpOptions.issueNumber ?? ctx.acpOptions.issueId ?? ''),
+            projectId: ctx.issue.projectId,
+            roundType: '',
+            roundIndex: 0,
+            sessionUpdate: notification.update.sessionUpdate,
+            data: notification.update as unknown,
+          });
+        } catch (e) {
+          log.warn('eventBus.emit failed for plan_session_update', {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      },
+    };
   }
 
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
@@ -240,26 +319,6 @@ export class PlanStageRunner extends BaseStageRunner {
 
     const completedSteps = [...resumeSteps];
 
-    const planBridgeObserver = {
-      onRawNotification(_ctx: import('../agent-runtime/session-observer').SessionContext, notification: import('@agentclientprotocol/sdk').SessionNotification) {
-        if (!ctx.eventBus) return;
-        try {
-          ctx.eventBus.emit('plan_session_update', {
-            issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-            projectId: issue.projectId,
-            roundType: '',
-            roundIndex: 0,
-            sessionUpdate: notification.update.sessionUpdate,
-            data: notification.update as unknown,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_session_update', {
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      },
-    };
-
     const wfObservers = createWorkflowSessionObservers({
       eventBus: ctx.eventBus,
       workflowLogRepo: ctx.workflowLogRepo,
@@ -267,7 +326,7 @@ export class PlanStageRunner extends BaseStageRunner {
       coderSessionRepo: ctx.coderSessionRepo,
       stage: 'plan',
       title: 'Plan stage',
-    }, [planBridgeObserver]);
+    }, [this.createPlanBridgeObserver(ctx)]);
 
     const connectionOptions: AgentSessionOptions = {
       ...acpOptions,
