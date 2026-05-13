@@ -53,7 +53,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
-    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed']) {
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
       run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
     }
     run.approveStage(Stage.Plan, { output: { approved: true } });
@@ -68,7 +68,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(snapshot.currentStage).toBe(Stage.Build);
     expect(plan.stage).toBe(Stage.Plan);
     expect(plan.tasks.map(task => task.id)).toEqual(['proposal', 'specs', 'design', 'tasks', 'self-review']);
-    expect(plan.checks.map(check => check.name)).toEqual(['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed']);
+    expect(plan.checks.map(check => check.name)).toEqual(['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']);
     expect(plan.approval).toMatchObject({ status: 'approved', output: { approved: true } });
     expect(snapshot.stageRuns.find(stage => stage.stage === Stage.Build)?.tasks).toHaveLength(1);
   });
@@ -78,7 +78,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
-    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed']) {
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
       run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
     }
     run.approveStage(Stage.Plan, { output: { approved: true } });

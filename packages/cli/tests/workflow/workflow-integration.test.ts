@@ -420,7 +420,7 @@ describe('Workflow Integration Tests', () => {
 
       const secondResult = await resumeRunner.run(approvalCtx);
       expect(secondResult.success).toBe(true);
-      expect(secondResult.nextStage).toBe(Stage.Build);
+      expect(secondResult).not.toHaveProperty('nextStage');
     });
 
     it('emits approval_requested event when pipeline pauses', async () => {
@@ -479,7 +479,7 @@ describe('Workflow Integration Tests', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Check);
+      expect(result).not.toHaveProperty('nextStage');
       expect(runCount).toBe(2);
     });
 
@@ -552,7 +552,7 @@ describe('Workflow Integration Tests', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Build);
+      expect(result).not.toHaveProperty('nextStage');
     });
 
     it('continues when fix task returns null and check passes on re-run', async () => {
@@ -580,7 +580,7 @@ describe('Workflow Integration Tests', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Check);
+      expect(result).not.toHaveProperty('nextStage');
     });
   });
 

@@ -239,16 +239,31 @@ export abstract class BaseStageRunner implements StageRunner {
     if (firstBlockingResult) {
       if (firstBlockingResult.status === 'pending' && this.isApprovalCheck(firstBlockingResult.name)) {
         if (!ctx.workflowApplicationService) {
-          const approval = await this.prepareApproval(ctx, results);
-          if (!approval.ok) {
+          const approvalResults = await this.convergeReviewForApproval(ctx, results);
+          if (!approvalResults.ok) {
             return {
               success: false,
               output: taskOutput,
               checkResults: results,
+              message: approvalResults.message,
+            };
+          }
+          const approval = await this.prepareApproval(ctx, approvalResults.results);
+          if (!approval.ok) {
+            return {
+              success: false,
+              output: taskOutput,
+              checkResults: approvalResults.results,
               message: approval.message,
             };
           }
           this.requestApproval(ctx, approval.output);
+          return {
+            success: false,
+            output: taskOutput,
+            checkResults: approvalResults.results,
+            message: firstBlockingResult.message ?? `Check "${firstBlockingResult.name}" ${firstBlockingResult.status}`,
+          };
         }
       }
 

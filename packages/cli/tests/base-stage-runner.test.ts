@@ -138,7 +138,7 @@ describe('BaseStageRunner', () => {
   });
 
   describe('all-pass scenario', () => {
-    it('returns success with nextStage when all checks pass', async () => {
+    it('returns success without deciding the next stage when all checks pass', async () => {
       const runner = new TestStageRunner({
         checks: [
           new PassCheck('check-a'),
@@ -150,7 +150,7 @@ describe('BaseStageRunner', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Build);
+      expect(result).not.toHaveProperty('nextStage');
       expect(result.checkResults).toHaveLength(2);
       expect(result.checkResults[0].status).toBe('pass');
       expect(result.checkResults[1].status).toBe('pass');
@@ -257,7 +257,7 @@ describe('BaseStageRunner', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Build);
+      expect(result).not.toHaveProperty('nextStage');
       expect(fixCalled).toBe(true);
       expect(runCount).toBe(2);
     });

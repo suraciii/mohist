@@ -246,7 +246,7 @@ describe('Build-stage completion requires health:build pass', () => {
     expect(result.checkResults[1].status).toBe('fail');
   });
 
-  it('Build stage produces success with nextStage=Check when health:build passes', async () => {
+  it('Build stage succeeds without deciding the next stage when health:build passes', async () => {
     const allTasksCompleteCheck = new PassCheck('all-tasks-complete');
     const healthGatePassCheck = new PassCheck('health:build');
 
@@ -261,7 +261,7 @@ describe('Build-stage completion requires health:build pass', () => {
 
     expect(result.success).toBe(true);
     expect(result.checkResults).toHaveLength(2);
-    expect(result.nextStage).toBe(Stage.Check);
+    expect(result).not.toHaveProperty('nextStage');
   });
 
   it('health:build failure fails stage without escalation', async () => {
@@ -725,7 +725,7 @@ describe('Disabled gates are recorded as disabled policy results and do not bloc
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(true);
-    expect(result.nextStage).toBe(Stage.Check);
+    expect(result).not.toHaveProperty('nextStage');
   });
 });
 
