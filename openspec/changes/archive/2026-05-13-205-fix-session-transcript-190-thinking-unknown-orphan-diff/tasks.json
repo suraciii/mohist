@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Preserve interleaved reasoning and text order in persisted transcripts",
+      "spec": "specs/coder-session-tracking/spec.md#Requirement: Transcript assembly preserves emitted reasoning and text ordering",
+      "description": "Update the session transcript assembler so reasoning and assistant text stay in the emitted order instead of being merged into giant same-type parts. Close the currently open opposite stream part when text, reasoning, tool, error, or terminal content arrives so replayed transcripts keep stable inline thinking boundaries.",
+      "acceptanceCriteria": [
+        "Historical transcript assembly preserves alternating reasoning and text parts in emission order instead of collapsing thinking to the top of a turn",
+        "Tool, error, and terminal insertions close any open streaming text or reasoning part before the next part is appended",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/session-transcript-service.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep one open part per active stream; do not create one part per chunk.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        234448
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Stream live thinking with the same transcript semantics as replay",
+      "spec": "specs/pipeline-session-events/spec.md#Requirement: Realtime session events include dedicated thinking chunks",
+      "description": "Add the `coder_thought_chunk` event through the runtime, SSE registry, frontend event typing, and live transcript reducer. The live reducer must mirror the assembler boundary rules so running sessions show inline thinking that converges with the persisted transcript after refresh.",
+      "acceptanceCriteria": [
+        "The backend emits `coder_thought_chunk` events for live sessions and the event is registered in the API and frontend event maps",
+        "The live transcript hook appends reasoning chunks inline and closes any active text part before opening a reasoning part",
+        "Refreshing after a run does not materially change the relative ordering of live reasoning and text parts",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/session-observers.ts; packages/cli/src/services/event-bus.ts; packages/cli/src/api/events.ts; packages/cli/web/src/lib/types.ts; packages/cli/web/src/lib/agent-events.ts; packages/cli/web/src/hooks/useSessionTranscript.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Match the replay shape instead of creating a live-only reasoning list.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        638592
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Merge synthetic and provider tool ids into one logical tool call",
+      "spec": "specs/coder-session-tracking/spec.md#Requirement: Tool lifecycle correlation preserves one logical tool call",
+      "description": "Fix tool lifecycle correlation so start and update events resolve to the same transcript tool part even when they use different ids. Keep a stable transcript-local tool identity, add alias mapping for provider ids, and use correlation metadata as a fallback matcher for historical or mixed payloads.",
+      "acceptanceCriteria": [
+        "Tool start and update events with synthetic and provider ids merge into one transcript tool part instead of producing `unknown` orphan rows",
+        "Subsequent tool updates resolve through persisted alias mapping or deterministic fallback correlation without changing the visible tool part identity mid-stream",
+        "Changed-file summaries for file-changing tools remain attached to the merged logical tool call",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/session-transcript-service.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Prefer assembler-side aliasing even if some start events can expose real ids earlier.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        457828
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Normalize file-changing tools into canonical diff metadata",
+      "spec": "specs/coder-session-tracking/spec.md#Requirement: File-changing tools expose normalized diff metadata",
+      "description": "Enrich `apply_patch`, `edit`, and `write` transcript tool metadata with normalized changed-file summaries and a canonical unified diff string. Perform this normalization in the backend transcript layer so replay and live consumers share one diff contract instead of parsing tool-specific raw payloads in the UI.",
+      "acceptanceCriteria": [
+        "`apply_patch`, `edit`, and `write` transcript tool parts include `metadata.changedFiles` entries with normalized paths and operations",
+        "File-changing tools expose `metadata.diff` as a unified diff string suitable for shared frontend diff rendering",
+        "Raw tool payloads remain available for audit or fallback views without being the only source of file-change semantics",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/session-transcript-service.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Reuse patch text directly for `apply_patch`; synthesize unified diffs for `edit` and `write`.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        9934,
+        356696
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Render file-changing transcript tools as diff-first semantic content",
+      "spec": "specs/agent-session-ui/spec.md#Requirement: File-changing transcript tools render diff-first semantic content",
+      "description": "Update the session transcript UI so `edit`, `write`, and `apply_patch` render a diff-first semantic view instead of raw JSON. Reuse the repo's existing diff parsing and rendering utilities where possible, show changed files prominently, and keep raw payloads in secondary disclosures only.",
+      "acceptanceCriteria": [
+        "`renderSemanticContent()` routes diff display types to a dedicated diff view instead of falling back to raw JSON",
+        "File-changing transcript tools display changed-file summaries and readable diff content as the primary transcript body",
+        "The implementation reuses shared diff helpers already present in the repo unless a narrow adapter is required",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/session-transcript/AssistantParts.tsx",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "A unified-only first pass is acceptable if it satisfies the semantic diff requirement cleanly.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        496538
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Fix transcript display summaries, grouping, and fallback subtitle regressions",
+      "spec": "specs/agent-session-ui/spec.md#Requirement: Transcript display summaries stay accurate for grouped and truncated content",
+      "description": "Correct the known presentation regressions left by the previous session transcript work. This includes the search-results ellipsis condition, changed-file collection from nested context groups, reuse of the shared fallback subtitle helper, and flattening single-tool context groups so display summaries reflect the actual transcript structure.",
+      "acceptanceCriteria": [
+        "Search transcript content shows an ellipsis only when the result list is truncated rather than when fewer than five results are present",
+        "Turn-level changed-file summaries include file changes from tools nested inside context groups",
+        "Single context tools render as normal tool parts instead of unnecessary one-item groups, and fallback subtitles come from the shared helper",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/session-transcript/AssistantParts.tsx; packages/cli/web/src/lib/session-transcript-display.ts",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "Keep these fixes in the presentation layer; they do not require new transcript schema fields.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        497499
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Add regression coverage for transcript ordering, live thinking, tool merging, and diff display",
+      "spec": "specs/pipeline-session-events/spec.md#Requirement: Live transcript updates converge with replayed transcript structure",
+      "description": "Add or update focused tests that cover the repaired transcript behaviors end to end at the model and UI boundaries. The suite should verify interleaved reasoning/text replay, live thinking visibility, synthetic-to-real tool id merging, diff-first rendering for file-changing tools, search ellipsis behavior, and changed-file collection from grouped tools, then confirm the existing package build and tests still pass.",
+      "acceptanceCriteria": [
+        "Automated tests cover interleaved reasoning/text assembly, live `coder_thought_chunk` handling, orphan-tool merge behavior, diff-first tool rendering, search ellipsis logic, and grouped changed-file collection",
+        "`cd packages/cli && npm test` passes",
+        "`cd packages/cli && npm run build` passes",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/ and/or packages/cli/web/src/**/*.test.* updates covering the transcript regression surface",
+      "dependsOn": [
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "Keep coverage close to the assembler, live transcript reducer, and transcript rendering helpers/components that own the repaired behavior.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        460769
+      ]
+    }
+  ]
+}

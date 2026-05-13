@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../lib/agent-events'
-import type { SessionTurn, TextPart, ToolPart, ErrorPart } from '../lib/types'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../lib/types'
 import { parseEditInput, parsePatchOperations } from '../lib/transcript-tool-utils'
 import {
   normalizeToolName,
@@ -52,6 +52,10 @@ function generateId(): string {
 
 function createTextPart(text: string, startedAt: string): TextPart {
   return { id: generateId(), type: 'text', text, startedAt, completedAt: null }
+}
+
+function createReasoningPart(text: string, startedAt: string): ReasoningPart {
+  return { id: generateId(), type: 'reasoning', text, startedAt, completedAt: null }
 }
 
 function createErrorPart(message: string, kind: ErrorPart['kind'], at: string): ErrorPart {
@@ -146,6 +150,40 @@ function appendTextToTurn(turn: SessionTurn, text: string): SessionTurn {
   return {
     ...turn,
     assistant: [...turn.assistant, createTextPart(text, now)],
+  }
+}
+
+function closeActiveTextPart(turn: SessionTurn, completedAt: string): SessionTurn {
+  const textIndex = turn.assistant.findIndex((p): p is TextPart => p.type === 'text' && p.completedAt === null)
+  if (textIndex >= 0) {
+    return {
+      ...turn,
+      assistant: turn.assistant.map((p, i) =>
+        i === textIndex ? { ...(p as TextPart), completedAt } : p,
+      ),
+    }
+  }
+  return turn
+}
+
+function appendReasoningToTurn(turn: SessionTurn, text: string): SessionTurn {
+  const now = new Date().toISOString()
+  const existingReasoningIndex = turn.assistant.findIndex(
+    (p): p is ReasoningPart => p.type === 'reasoning' && p.completedAt === null,
+  )
+
+  if (existingReasoningIndex >= 0) {
+    const existing = turn.assistant[existingReasoningIndex] as ReasoningPart
+    const updated: ReasoningPart = { ...existing, text: existing.text + text }
+    return {
+      ...turn,
+      assistant: turn.assistant.map((p, i) => (i === existingReasoningIndex ? updated : p)),
+    }
+  }
+
+  return {
+    ...turn,
+    assistant: [...turn.assistant, createReasoningPart(text, now)],
   }
 }
 
@@ -394,6 +432,25 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
           return next
         })
         setIsThinking(false)
+        markNewContentRef.current()
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('coder_thought_chunk', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (detail.acpSessionId !== acpSessionId) return
+
+        setIsStreaming(true)
+        setTurns((prev) => {
+          const now = new Date().toISOString()
+          const next = ensureLiveTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          const withClosedText = closeActiveTextPart(lastTurn, now)
+          next[next.length - 1] = appendReasoningToTurn(withClosedText, detail.text)
+          return next
+        })
+        setIsThinking(true)
         markNewContentRef.current()
       }),
     )

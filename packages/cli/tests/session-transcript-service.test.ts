@@ -2008,4 +2008,234 @@ it('should parse apply_patch Move to operations', () => {
       expect((textParts[0] as any).text).toBe('Starting work...Work complete.');
     });
   });
+
+  describe('interleaved reasoning/text ordering', () => {
+    it('closes reasoning part when text chunk arrives and preserves alternating order', () => {
+      const events = [
+        makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeThoughtChunk('Thinking...', '2024-01-01T10:00:01.000Z'),
+        makeTextChunk('Here is my answer.', '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession(), events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(2);
+      expect(transcript.turns[0].assistant[0].type).toBe('reasoning');
+      expect(transcript.turns[0].assistant[1].type).toBe('text');
+      expect((transcript.turns[0].assistant[0] as any).text).toBe('Thinking...');
+      expect((transcript.turns[0].assistant[1] as any).text).toBe('Here is my answer.');
+      expect((transcript.turns[0].assistant[0] as any).completedAt).toBe('2024-01-01T10:00:02.000Z');
+    });
+
+    it('closes text part when reasoning chunk arrives and preserves alternating order', () => {
+      const events = [
+        makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeTextChunk('First text.', '2024-01-01T10:00:01.000Z'),
+        makeThoughtChunk('Then thinking.', '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession(), events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(2);
+      expect(transcript.turns[0].assistant[0].type).toBe('text');
+      expect(transcript.turns[0].assistant[1].type).toBe('reasoning');
+      expect((transcript.turns[0].assistant[0] as any).text).toBe('First text.');
+      expect((transcript.turns[0].assistant[1] as any).text).toBe('Then thinking.');
+      expect((transcript.turns[0].assistant[0] as any).completedAt).toBe('2024-01-01T10:00:02.000Z');
+    });
+
+    it('alternates text and reasoning multiple times in emission order', () => {
+      const events = [
+        makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeTextChunk('Text 1.', '2024-01-01T10:00:01.000Z'),
+        makeThoughtChunk('Reasoning 1.', '2024-01-01T10:00:02.000Z'),
+        makeTextChunk('Text 2.', '2024-01-01T10:00:03.000Z'),
+        makeThoughtChunk('Reasoning 2.', '2024-01-01T10:00:04.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession(), events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(4);
+      expect(transcript.turns[0].assistant[0].type).toBe('text');
+      expect(transcript.turns[0].assistant[1].type).toBe('reasoning');
+      expect(transcript.turns[0].assistant[2].type).toBe('text');
+      expect(transcript.turns[0].assistant[3].type).toBe('reasoning');
+      expect((transcript.turns[0].assistant[0] as any).text).toBe('Text 1.');
+      expect((transcript.turns[0].assistant[1] as any).text).toBe('Reasoning 1.');
+      expect((transcript.turns[0].assistant[2] as any).text).toBe('Text 2.');
+      expect((transcript.turns[0].assistant[3] as any).text).toBe('Reasoning 2.');
+    });
+
+    it('closes streaming text before tool insertion', () => {
+      const events = [
+        makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeTextChunk('Starting response.', '2024-01-01T10:00:01.000Z'),
+        makeToolCallStart('tc-1', 'Read', 'src/index.ts', '{"file_path":"src/index.ts"}', '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession(), events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(2);
+      expect(transcript.turns[0].assistant[0].type).toBe('text');
+      expect((transcript.turns[0].assistant[0] as any).completedAt).toBe('2024-01-01T10:00:02.000Z');
+      expect(transcript.turns[0].assistant[1].type).toBe('tool');
+    });
+
+    it('closes streaming reasoning before tool insertion', () => {
+      const events = [
+        makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeThoughtChunk('Thinking before tool.', '2024-01-01T10:00:01.000Z'),
+        makeToolCallStart('tc-1', 'Read', 'src/index.ts', '{"file_path":"src/index.ts"}', '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession(), events);
+
+      expect(transcript.turns[0].assistant).toHaveLength(2);
+      expect(transcript.turns[0].assistant[0].type).toBe('reasoning');
+      expect((transcript.turns[0].assistant[0] as any).completedAt).toBe('2024-01-01T10:00:02.000Z');
+      expect(transcript.turns[0].assistant[1].type).toBe('tool');
+    });
+  });
+
+  describe('orphan-tool merge behavior', () => {
+    it('does not create orphan unknown rows for update-only events matching a pending no-id tool', () => {
+      const events = [
+        makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'src/config.ts',
+            input: { file_path: 'src/config.ts' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call_update', {
+          toolCall: {
+            toolName: 'Read',
+            title: 'src/config.ts',
+            output: { content: 'database url = postgres://...' },
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession(), events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      const unknownParts = toolParts.filter(p => p.tool.normalizedName === 'unknown');
+      expect(unknownParts).toHaveLength(0);
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.status).toBe('completed');
+    });
+
+    it('merges no-id start and update events into one tool part by name and title', () => {
+      const events = [
+        makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'Bash',
+            title: 'npm test',
+            input: { command: 'npm test' },
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call_update', {
+          toolCall: {
+            toolName: 'Bash',
+            title: 'npm test',
+            output: 'tests passed',
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession(), events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.status).toBe('completed');
+      expect(toolParts[0].tool.output).toBe('tests passed');
+    });
+  });
+
+  describe('diff-first rendering and changed-files metadata', () => {
+    it('provides changed-files metadata for apply_patch tools', () => {
+      const events = [
+        makePromptEvent('Patch files', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-patch', 'apply_patch', 'src/new.ts', JSON.stringify({ patchText: 'Add File: src/new.ts\n+ export const foo = 1;\n\nUpdate File: src/existing.ts\n- old\n+ new' }), '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession({ status: 'completed', completedAt: '2024-01-01T10:00:10.000Z' }), events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.changedFiles).toBeDefined();
+      expect(toolParts[0].tool.changedFiles).toHaveLength(2);
+      expect(toolParts[0].tool.changedFiles[0].path).toBe('src/new.ts');
+      expect(toolParts[0].tool.changedFiles[0].operation).toBe('created');
+      expect(toolParts[0].tool.changedFiles[1].path).toBe('src/existing.ts');
+      expect(toolParts[0].tool.changedFiles[1].operation).toBe('modified');
+    });
+
+    it('provides changed-files metadata for edit tools', () => {
+      const events = [
+        makePromptEvent('Edit file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-edit', 'edit', 'src/index.ts', JSON.stringify({ file_path: 'src/index.ts', old_string: 'old', new_string: 'new' }), '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession({ status: 'completed', completedAt: '2024-01-01T10:00:10.000Z' }), events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.changedFiles).toBeDefined();
+      expect(toolParts[0].tool.changedFiles).toHaveLength(1);
+      expect(toolParts[0].tool.changedFiles[0].path).toBe('index.ts');
+    });
+
+    it('provides changed-files metadata for write tools', () => {
+      const events = [
+        makePromptEvent('Write file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-write', 'write', 'src/new.ts', JSON.stringify({ file_path: 'src/new.ts', content: 'export const foo = 1;' }), '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession({ status: 'completed', completedAt: '2024-01-01T10:00:10.000Z' }), events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].tool.changedFiles).toBeDefined();
+      expect(toolParts[0].tool.changedFiles).toHaveLength(1);
+      expect(toolParts[0].tool.changedFiles[0].path).toBe('new.ts');
+    });
+
+    it('preserves raw payloads alongside changed-files metadata', () => {
+      const rawInput = JSON.stringify({ file_path: 'src/index.ts', old_string: 'old', new_string: 'new' });
+      const events = [
+        makePromptEvent('Edit file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-edit', 'edit', 'src/index.ts', rawInput, '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession({ status: 'completed', completedAt: '2024-01-01T10:00:10.000Z' }), events);
+
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      expect(toolParts[0].tool.input).toBe(rawInput);
+      expect(toolParts[0].tool.rawInput).toBe(rawInput);
+    });
+
+    it('accumulates changed files in session metadata across multiple file-changing tools', () => {
+      const events = [
+        makePromptEvent('Edit files', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-edit1', 'edit', 'src/a.ts', JSON.stringify({ file_path: 'src/a.ts', old_string: 'a', new_string: 'b' }), '2024-01-01T10:00:01.000Z'),
+        makeToolCallStart('tc-edit2', 'write', 'src/new.ts', JSON.stringify({ file_path: 'src/new.ts', content: 'new' }), '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(makeSession({ status: 'completed', completedAt: '2024-01-01T10:00:10.000Z' }), events);
+
+      expect(transcript.session.changedFiles).toBeDefined();
+      expect(transcript.session.changedFiles!.length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });

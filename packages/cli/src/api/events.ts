@@ -18,6 +18,7 @@ const ALL_EVENT_TYPES: EventName[] = [
   'agent_text_chunk',
   'main_tool_call',
   'coder_text_chunk',
+  'coder_thought_chunk',
   'coder_tool_call',
   'ralph_task_update',
   'ralph_loop_progress',

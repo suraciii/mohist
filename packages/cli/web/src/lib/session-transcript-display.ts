@@ -203,13 +203,18 @@ function buildDisplayErrorPart(part: ErrorPart): DisplayErrorPart {
   }
 }
 
-function collectChangedFilesFromTools(tools: DisplayToolPart[]): DisplayChangedFile[] {
+function collectChangedFilesFromTools(parts: DisplayAssistantPart[]): DisplayChangedFile[] {
   const files: DisplayChangedFile[] = []
-  for (const tool of tools) {
-    if (tool.changedFiles) {
-      for (const cf of tool.changedFiles) {
-        files.push({ ...cf })
+  for (const part of parts) {
+    if (part.partType === 'tool') {
+      if (part.changedFiles) {
+        for (const cf of part.changedFiles) {
+          files.push({ ...cf })
+        }
       }
+    } else if (part.partType === 'context-group') {
+      const nestedFiles = collectChangedFilesFromTools(part.tools as DisplayAssistantPart[])
+      files.push(...nestedFiles)
     }
   }
   return files
@@ -281,6 +286,10 @@ export function projectTurn(turn: SessionTurn): DisplayTurn {
   const flushContextGroup = () => {
     if (toolStack.length === 0) return
     const groupTools = toolStack.splice(0)
+    if (groupTools.length === 1) {
+      displayParts.push(groupTools[0])
+      return
+    }
     const hasError = groupTools.some(t => t.hasError)
     const contextToolCount = groupTools.filter(t => t.isContextTool).length
     let title: string
@@ -293,8 +302,6 @@ export function projectTurn(turn: SessionTurn): DisplayTurn {
       if (searches > 0) parts.push(`${searches} search${searches > 1 ? 'es' : ''}`)
       if (globs > 0) parts.push(`${globs} glob${globs > 1 ? 's' : ''}`)
       title = `Gathering context · ${parts.join(' · ')}`
-    } else if (groupTools.length === 1) {
-      title = groupTools[0].displayTitle ?? groupTools[0].normalizedName
     } else {
       title = 'Gathering context'
     }
@@ -389,9 +396,7 @@ export function projectTurn(turn: SessionTurn): DisplayTurn {
       ? 'finalizing'
       : 'streaming'
 
-  const changedFiles = collectChangedFilesFromTools(
-    displayParts.filter((p): p is DisplayToolPart => p.partType === 'tool'),
-  )
+  const changedFiles = collectChangedFilesFromTools(displayParts)
 
   return {
     id: turn.id,
