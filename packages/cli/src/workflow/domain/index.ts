@@ -92,6 +92,7 @@ export interface MaterializedTaskInput {
 export type WorkflowEvent =
   | { type: 'workflow-started'; stage: Stage }
   | { type: 'stage-started'; stage: Stage }
+  | { type: 'stage-retried'; stage: Stage }
   | { type: 'task-completed'; stage: Stage; taskId: string }
   | { type: 'task-failed'; stage: Stage; taskId: string; reason: FailureDetails }
   | { type: 'check-recorded'; stage: Stage; checkName: string; status: CheckRunStatus }
@@ -632,6 +633,55 @@ export class WorkflowRun {
       message: typeof input.output === 'string' ? input.output : undefined,
     };
     return this.fail(stageRun, failure, [{ type: 'approval-rejected', stage, reason: failure }]);
+  }
+
+  retryStage(stage: Stage): WorkflowDecision {
+    if (this.status !== 'failed') {
+      throw new WorkflowDomainError(`WorkflowRun is ${this.status}`);
+    }
+    const stageRun = this.stageRun(stage);
+    if (this.currentStage !== stage) {
+      throw new WorkflowDomainError(`Stage ${stage} is not current stage ${this.currentStage}`);
+    }
+    if (stageRun.status !== 'failed') {
+      throw new WorkflowDomainError(`Stage ${stage} is not failed`);
+    }
+
+    this.status = 'running';
+    this.failure = null;
+
+    for (const priorStageRun of this.stageRuns) {
+      if (priorStageRun.order >= stageRun.order) break;
+      if (priorStageRun.status !== 'passed') continue;
+      for (const task of priorStageRun.tasks) {
+        if (task.status === 'completed') continue;
+        task.status = 'completed';
+        if (task.attempts === 0) task.attempts = 1;
+        task.reason = null;
+        task.causedBy = null;
+      }
+    }
+
+    stageRun.status = 'running';
+    stageRun.failure = null;
+    stageRun.approval = null;
+
+    for (const task of stageRun.tasks) {
+      if (task.status === 'completed' || task.status === 'skipped') continue;
+      task.status = 'pending';
+      task.duration = 0;
+      task.artifacts = [];
+      task.output = null;
+      task.reason = null;
+      task.causedBy = null;
+    }
+    for (const check of stageRun.checks) {
+      check.status = 'pending';
+      check.message = null;
+      check.output = null;
+    }
+
+    return this.decision([{ type: 'stage-retried', stage }]);
   }
 
   nextWork(): WorkflowWork {

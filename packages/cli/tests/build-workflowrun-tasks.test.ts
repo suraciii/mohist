@@ -62,6 +62,8 @@ function makeService(run: ReturnType<typeof startBuildRun>): WorkflowApplication
     materializeTasks: vi.fn(({ stage, tasks }) => ({ run, decision: run.materializeTasks(stage, tasks) })),
     completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
     recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
+    approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
+    retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
   };
 }
 

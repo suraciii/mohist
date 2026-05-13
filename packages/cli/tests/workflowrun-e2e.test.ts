@@ -145,6 +145,45 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Plan, status: IssueStatus.Blocked });
   });
 
+  it('retries the failed current stage without creating a new Plan WorkflowRun', () => {
+    startWorkflow();
+    advanceToBuild();
+    completeBuild();
+    workflowApplicationService.completeTask({
+      issueId,
+      stage: Stage.Check,
+      taskId: 'ai-review',
+      result: { status: 'failed', reason: 'review session cancelled' },
+    });
+
+    const failedRun = workflowRunService.getLatestRunForIssue(issueId)!;
+    expect(failedRun.status).toBe('failed');
+    expect(failedRun.currentStage).toBe(Stage.Check);
+    expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Check, status: IssueStatus.Blocked });
+
+    const retry = workflowApplicationService.retryStage({ issueId, stage: Stage.Check });
+    expect(retry.decision.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+
+    const retriedRun = workflowRunService.getActiveRunForIssue(issueId)!;
+    expect(retriedRun.id).toBe(failedRun.id);
+    expect(retriedRun.status).toBe('running');
+    expect(retriedRun.currentStage).toBe(Stage.Check);
+    expect(retriedRun.stageRuns.find(stageRun => stageRun.stage === Stage.Plan)?.status).toBe('passed');
+    expect(retriedRun.stageRuns.find(stageRun => stageRun.stage === Stage.Build)?.status).toBe('passed');
+    expect(retriedRun.stageRuns.find(stageRun => stageRun.stage === Stage.Plan)?.tasks.every(task => task.status === 'completed')).toBe(true);
+    expect(retriedRun.stageRuns.find(stageRun => stageRun.stage === Stage.Build)?.tasks.every(task => task.status === 'completed')).toBe(true);
+    expect(retriedRun.stageRuns.find(stageRun => stageRun.stage === Stage.Check)).toMatchObject({
+      status: 'running',
+      approvalStatus: null,
+    });
+    expect(retriedRun.stageRuns.find(stageRun => stageRun.stage === Stage.Check)?.tasks.find(task => task.taskId === 'ai-review')).toMatchObject({
+      status: 'pending',
+      reason: null,
+    });
+    expect(workflowRunRepo.findByIssueId(issueId)).toHaveLength(1);
+    expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Check, status: IssueStatus.Active });
+  });
+
   it('records repair task causedBy metadata and reruns checks by aggregate decision', () => {
     startWorkflow();
     advanceToBuild();

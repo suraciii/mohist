@@ -120,6 +120,7 @@ describe('WorkflowEngine aggregate progression', () => {
       recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
       materializeTasks: vi.fn(({ stage, tasks }) => ({ run, decision: run.materializeTasks(stage, tasks) })),
       approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
+      retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
     };
     const runner = new AggregatePlanRunner(service, issue.id);
 
@@ -158,6 +159,7 @@ describe('WorkflowEngine aggregate progression', () => {
       recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
       materializeTasks: vi.fn(({ stage, tasks }) => ({ run, decision: run.materializeTasks(stage, tasks) })),
       approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
+      retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
     };
 
     const runner: StageRunner = {
@@ -210,6 +212,7 @@ describe('WorkflowEngine aggregate progression', () => {
       recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
       materializeTasks: vi.fn(({ stage, tasks }) => ({ run, decision: run.materializeTasks(stage, tasks) })),
       approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
+      retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
     };
 
     const runner: StageRunner = {

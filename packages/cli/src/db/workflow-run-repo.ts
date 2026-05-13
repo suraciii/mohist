@@ -352,6 +352,15 @@ export class WorkflowRunRepo {
     return this.loadAggregateByRow(row, options);
   }
 
+  loadLatestAggregate(issueId: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
+    const row = this.db.get<WorkflowRunRow>(
+      `SELECT * FROM workflow_runs WHERE issue_id = ? AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1`,
+      [issueId],
+    );
+    if (!row) return null;
+    return this.loadAggregateByRow(row, options);
+  }
+
   loadAggregateById(id: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
     const row = this.db.get<WorkflowRunRow>('SELECT * FROM workflow_runs WHERE id = ?', [id]);
     if (!row) return null;
@@ -440,9 +449,9 @@ export class WorkflowRunRepo {
       const stageRunId = `${snapshot.id}/${stageRun.stage}`;
       const existingStage = this.db.get<WorkflowStageRunRow>('SELECT * FROM workflow_stage_runs WHERE id = ?', [stageRunId]);
       const startedAt = stageRun.status === 'running' && !existingStage?.started_at ? now : existingStage?.started_at ?? null;
-      const completedAt = (stageRun.status === 'passed' || stageRun.status === 'failed') && !existingStage?.completed_at
-        ? now
-        : existingStage?.completed_at ?? null;
+      const completedAt = stageRun.status === 'passed' || stageRun.status === 'failed'
+        ? existingStage?.completed_at ?? now
+        : null;
       const approval = stageRun.approval;
 
       if (existingStage) {
@@ -612,9 +621,10 @@ export class WorkflowRunRepo {
     };
   }
 
-  getLatestRunWithRelations(issueId: string): WorkflowRunWithStageRuns | null {
+  getLatestRunWithRelations(issueId: string, options: { includeCancelled?: boolean } = {}): WorkflowRunWithStageRuns | null {
+    const statusClause = options.includeCancelled ? '' : ` AND status != 'cancelled'`;
     const runRow = this.db.get<WorkflowRunRow>(
-      `SELECT * FROM workflow_runs WHERE issue_id = ? ORDER BY created_at DESC LIMIT 1`,
+      `SELECT * FROM workflow_runs WHERE issue_id = ?${statusClause} ORDER BY created_at DESC LIMIT 1`,
       [issueId],
     );
     if (!runRow) return null;
@@ -815,12 +825,17 @@ export class WorkflowRunRepo {
     const artifacts = data.artifacts ? JSON.stringify(data.artifacts) : (existing?.artifacts ?? '[]');
 
     if (existing) {
-      const completedAt = (status === 'completed' || status === 'failed') && !existing.completed_at ? now : (existing.completed_at ?? null);
+      const completedAt = status === 'completed' || status === 'failed'
+        ? existing.completed_at ?? now
+        : null;
+      const startedAt = status === 'pending'
+        ? null
+        : data.startedAt ?? existing.started_at ?? now;
       this.db.run(
         `UPDATE workflow_tasks
          SET status = ?, attempts = ?, duration = ?, artifacts = ?, output = ?, reason = ?,
              caused_by_type = ?, caused_by_check_name = ?, caused_by_task_id = ?,
-             started_at = COALESCE(started_at, ?), completed_at = ?, updated_at = ?
+             started_at = ?, completed_at = ?, updated_at = ?
          WHERE id = ?`,
         [
           status,
@@ -828,11 +843,11 @@ export class WorkflowRunRepo {
           duration,
           artifacts,
           data.output !== undefined ? JSON.stringify(data.output) : existing.output,
-          data.reason ?? existing.reason,
-          data.causedByType ?? existing.caused_by_type,
-          data.causedByCheckName ?? existing.caused_by_check_name,
-          data.causedByTaskId ?? existing.caused_by_task_id,
-          data.startedAt ?? existing.started_at,
+          data.reason !== undefined ? data.reason : existing.reason,
+          data.causedByType !== undefined ? data.causedByType : existing.caused_by_type,
+          data.causedByCheckName !== undefined ? data.causedByCheckName : existing.caused_by_check_name,
+          data.causedByTaskId !== undefined ? data.causedByTaskId : existing.caused_by_task_id,
+          startedAt,
           completedAt,
           now,
           existing.id,
@@ -885,10 +900,10 @@ export class WorkflowRunRepo {
          WHERE id = ?`,
         [
           status,
-          data.message ?? existing.message,
+          data.message !== undefined ? data.message : existing.message,
           data.output !== undefined ? JSON.stringify(data.output) : existing.output,
           runCount,
-          data.lastRunAt ?? now,
+          data.lastRunAt ?? (status === 'pending' ? existing.last_run_at : now),
           now,
           existing.id,
         ],
