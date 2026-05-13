@@ -178,9 +178,16 @@ export class WorkflowEngine {
 
     let currentIssue = issue;
     const tasksPath = this.getTasksPath(issue);
-    const initial = issue.stage === Stage.Backlog
-      ? service.startWorkflow({ issueId: issue.id, issueNumber: issue.number, tasksPath })
-      : service.resumeDecision(issue.id, { tasksPath });
+    let initial: ReturnType<WorkflowApplicationRuntime['startWorkflow']> | ReturnType<WorkflowApplicationRuntime['resumeDecision']>;
+    if (issue.stage === Stage.Backlog) {
+      initial = service.startWorkflow({ issueId: issue.id, issueNumber: issue.number, tasksPath });
+    } else {
+      const latestRun = this.workflowRunService?.getLatestRunForIssue(issue.id);
+      const retryableFailedStage = latestRun?.status === 'failed' && latestRun.currentStage === issue.stage;
+      initial = retryableFailedStage
+        ? service.retryStage({ issueId: issue.id, stage: issue.stage, tasksPath, startedBy: 'retry' })
+        : service.resumeDecision(issue.id, { tasksPath });
+    }
     let run = initial.run;
     let work = 'decision' in initial ? initial.decision.nextWork : initial.nextWork;
 

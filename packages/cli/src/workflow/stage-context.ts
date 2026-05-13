@@ -44,7 +44,7 @@ export interface StageRunResult {
 }
 
 export type WorkflowApplicationRuntime = Pick<WorkflowApplicationService,
-  'startWorkflow' | 'resumeDecision' | 'completeTask' | 'recordCheckResult' | 'materializeTasks' | 'approveStage'
+  'startWorkflow' | 'resumeDecision' | 'completeTask' | 'recordCheckResult' | 'materializeTasks' | 'approveStage' | 'retryStage'
 >;
 
 export interface StageContext {

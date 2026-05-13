@@ -105,6 +105,8 @@ function makeSequencedWorkflowService(issue: Issue, work: WorkflowWork[]): Workf
     completeTask: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
     recordCheckResult: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
     materializeTasks: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
+    approveStage: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
+    retryStage: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
   };
 }
 

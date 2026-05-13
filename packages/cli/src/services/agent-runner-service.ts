@@ -1096,15 +1096,6 @@ export class AgentRunnerService {
       return;
     }
 
-    if (this.workflowRunService) {
-      try {
-        this.workflowRunService.startRun(issue.id, issue.number, 'resume-pipeline');
-        log.info('WorkflowRun ensured for issue resume', { issueNumber: issue.number });
-      } catch (err) {
-        log.warn('Failed to ensure WorkflowRun', { issueNumber: issue.number, error: err instanceof Error ? err.message : String(err) });
-      }
-    }
-
     if (issue.stage === Stage.Integrate || (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged)) {
       const project = this.projectRepo.findById(issue.projectId);
       if (!project) {

@@ -158,6 +158,8 @@ export class WorkflowRunProjection {
     for (const event of events) {
       if (event.type === 'stage-started') {
         this.bus.emit('stage_changed', { issueId: snapshot.issueId, projectId: issue.project_id, from: issue.stage, to: event.stage });
+      } else if (event.type === 'stage-retried') {
+        this.bus.emit('stage_changed', { issueId: snapshot.issueId, projectId: issue.project_id, from: issue.stage, to: event.stage });
       } else if (event.type === 'approval-requested') {
         this.bus.emit('approval_requested', { issueId: snapshot.issueId, projectId: issue.project_id, stage: event.stage });
       } else if (event.type === 'task-completed' || event.type === 'task-failed') {

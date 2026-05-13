@@ -565,4 +565,49 @@ describe('GET /api/issues/:number/stage-state backed by WorkflowRun', () => {
     expect(rebaseTask).toBeDefined();
     expect(rebaseTask.causedBy?.type).toBe('branch-changed');
   });
+
+  it('stage-state ignores newer cancelled WorkflowRun and uses the latest live run', async () => {
+    const project = await projectService.create({ name: 'Test', path: '/tmp/test' });
+    projectService.setCurrent(project);
+    const issue = await issueService.create({ projectId: project.id, title: 'Test Issue' });
+
+    const activeRun = workflowRunService.startRun(issue.id, issue.number);
+    const now = new Date().toISOString();
+    db.run(
+      `UPDATE workflow_runs SET status = 'running', current_stage = ?, updated_at = ? WHERE id = ?`,
+      [Stage.Check, now, activeRun.id],
+    );
+    db.run(
+      `UPDATE workflow_stage_runs SET status = 'passed', completed_at = ?, updated_at = ?
+       WHERE workflow_run_id = ? AND stage = ?`,
+      [now, now, activeRun.id, Stage.Plan],
+    );
+    db.run(
+      `UPDATE workflow_stage_runs SET status = 'running', started_at = ?, completed_at = NULL, updated_at = ?
+       WHERE workflow_run_id = ? AND stage = ?`,
+      [now, now, activeRun.id, Stage.Check],
+    );
+
+    const cancelledRunId = 'wr_cancelled_newer';
+    db.run(
+      `INSERT INTO workflow_runs (id, issue_id, issue_number, status, current_stage, started_by, created_at, updated_at)
+       VALUES (?, ?, ?, 'cancelled', ?, 'test', ?, ?)`,
+      [cancelledRunId, issue.id, issue.number, Stage.Plan, '2999-01-01T00:00:00.000Z', now],
+    );
+    db.run(
+      `INSERT INTO workflow_stage_runs (id, workflow_run_id, stage, status, stage_order, approval_status, approval_requested_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'awaiting-approval', 0, 'awaiting', ?, ?, ?)`,
+      [`${cancelledRunId}/${Stage.Plan}`, cancelledRunId, Stage.Plan, now, now, now],
+    );
+
+    server = createApp();
+
+    const response = await request(server).get(`/api/issues/${issue.number}/stage-state`);
+
+    expect(response.status).toBe(200);
+    const planStage = response.body.data.stages.find((s: any) => s.stage === Stage.Plan);
+    const checkStage = response.body.data.stages.find((s: any) => s.stage === Stage.Check);
+    expect(planStage.status).toBe('passed');
+    expect(checkStage.status).toBe('running');
+  });
 });

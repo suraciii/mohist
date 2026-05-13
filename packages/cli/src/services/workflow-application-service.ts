@@ -16,6 +16,7 @@ export interface WorkflowRunRepositoryPort {
   createOrLoadActiveAggregate(data: { issueId: string; issueNumber: number; startedBy?: string | null; tasksPath?: string }): WorkflowRun;
   loadActiveAggregate(issueId: string, options?: { tasksPath?: string }): WorkflowRun | null;
   loadRunningAggregate?(issueId: string, options?: { tasksPath?: string }): WorkflowRun | null;
+  loadLatestAggregate?(issueId: string, options?: { tasksPath?: string }): WorkflowRun | null;
   saveAggregate(run: WorkflowRun, startedBy?: string | null): void;
 }
 
@@ -71,6 +72,17 @@ export class WorkflowApplicationService {
 
   rejectStage(input: { issueId: string; stage: Stage; approval?: ApprovalInput } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
     return this.updateActiveRun(input.issueId, input, run => run.rejectStage(input.stage, input.approval));
+  }
+
+  retryStage(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    const run = this.repo.loadLatestAggregate
+      ? this.repo.loadLatestAggregate(input.issueId, { tasksPath: input.tasksPath })
+      : this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
+    if (!run) throw new Error(`No WorkflowRun for issue ${input.issueId}`);
+    const decision = run.retryStage(input.stage);
+    this.repo.saveAggregate(run, input.startedBy ?? null);
+    this.projection.apply({ run, decision, sessionId: input.sessionId });
+    return { run, decision };
   }
 
   resumeDecision(issueId: string, options: WorkflowCommandOptions = {}): { run: WorkflowRun; nextWork: WorkflowWork } {
