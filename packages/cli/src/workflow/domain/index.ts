@@ -95,6 +95,8 @@ export type WorkflowEvent =
   | { type: 'stage-retried'; stage: Stage }
   | { type: 'task-completed'; stage: Stage; taskId: string }
   | { type: 'task-failed'; stage: Stage; taskId: string; reason: FailureDetails }
+  | { type: 'task-invalidated'; stage: Stage; taskId: string; reason: string }
+  | { type: 'check-invalidated'; stage: Stage; checkName: string; reason: string }
   | { type: 'check-recorded'; stage: Stage; checkName: string; status: CheckRunStatus }
   | { type: 'fix-task-scheduled'; stage: Stage; taskId: string; causedBy: CausedByMetadata }
   | { type: 'approval-requested'; stage: Stage }
@@ -298,6 +300,24 @@ export class StageRun {
     const check = this.checks.find(candidate => candidate.name === checkName);
     if (!check) throw new WorkflowDomainError(`Check ${checkName} does not exist in stage ${this.stage}`);
     return check;
+  }
+
+  resetTask(taskId: string): void {
+    const task = this.findTask(taskId);
+    task.status = 'pending';
+    task.attempts = 0;
+    task.duration = 0;
+    task.artifacts = [];
+    task.output = null;
+    task.reason = null;
+    task.causedBy = null;
+  }
+
+  resetCheck(checkName: string): void {
+    const check = this.findCheck(checkName);
+    check.status = 'pending';
+    check.message = null;
+    check.output = null;
   }
 
   scheduledFixCount(checkName: string): number {
@@ -530,6 +550,15 @@ export class WorkflowRun {
     }
 
     const events: WorkflowEvent[] = [{ type: 'task-completed', stage, taskId }];
+    if (stage === Stage.Check && taskId.startsWith('fix-review-findings')) {
+      const reason = 'Review findings changed code; re-run AI review before rechecking';
+      stageRun.resetTask('ai-review');
+      events.push({ type: 'task-invalidated', stage, taskId: 'ai-review', reason });
+      for (const checkName of ['review-passed', 'merge-ready']) {
+        stageRun.resetCheck(checkName);
+        events.push({ type: 'check-invalidated', stage, checkName, reason });
+      }
+    }
     if (stageRun.freezePoint) events.push({ type: 'integrate-frozen', stage, freezePoint: stageRun.freezePoint });
     return this.maybeCompleteStage(stageRun, events);
   }
@@ -679,6 +708,23 @@ export class WorkflowRun {
       check.status = 'pending';
       check.message = null;
       check.output = null;
+    }
+
+    if (
+      stage === Stage.Check &&
+      stageRun.tasks.some(task => task.id.startsWith('fix-review-findings') && task.status === 'completed')
+    ) {
+      const reason = 'Retrying Check after review findings were fixed; re-run AI review before rechecking';
+      stageRun.resetTask('ai-review');
+      for (const checkName of ['review-passed', 'merge-ready']) {
+        stageRun.resetCheck(checkName);
+      }
+      return this.decision([
+        { type: 'stage-retried', stage },
+        { type: 'task-invalidated', stage, taskId: 'ai-review', reason },
+        { type: 'check-invalidated', stage, checkName: 'review-passed', reason },
+        { type: 'check-invalidated', stage, checkName: 'merge-ready', reason },
+      ]);
     }
 
     return this.decision([{ type: 'stage-retried', stage }]);

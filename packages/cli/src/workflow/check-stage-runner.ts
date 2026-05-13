@@ -12,6 +12,7 @@ import { validateReviewArtifact } from './utils';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { runReviewFixTask } from './review-fix-task';
+import * as fs from 'node:fs';
 
 const log = Log.create({ service: 'check-stage-runner' });
 
@@ -247,8 +248,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     checkName: string,
     fixTaskId: string,
   ): Promise<void> {
-    if (ctx.workflowApplicationService) return;
-    if (checkName !== 'review-passed' || fixTaskId !== 'repair-review-findings') {
+    if (checkName !== 'review-passed' || (fixTaskId !== 'repair-review-findings' && fixTaskId !== 'fix-review-findings')) {
       log.info('Legacy check repair completed without artifact invalidation', {
         issueNumber: ctx.issue.number,
         checkName,
@@ -256,14 +256,18 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       });
       return;
     }
+    this.invalidateReviewArtifactForRereview(ctx);
+  }
+
+  private invalidateReviewArtifactForRereview(ctx: StageContext): void {
     const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
     if (!changeDir) return;
     const reviewPath = `${changeDir}/review.md`;
     try {
-      const fs = await import('node:fs');
       if (fs.existsSync(reviewPath)) {
-        fs.rmSync(reviewPath, { force: true });
-        log.info('Invalidated stale review.md before re-review', { issueNumber: ctx.issue.number });
+        const staleReviewPath = `${changeDir}/review.stale-${Date.now()}.md`;
+        fs.renameSync(reviewPath, staleReviewPath);
+        log.info('Renamed stale review.md before re-review', { issueNumber: ctx.issue.number, staleReviewPath });
       }
       ctx.checkpointManager?.deleteStep?.(ctx.issue.number, 'check', 'ai-review');
       log.info('Invalidated ai-review checkpoint for re-review', { issueNumber: ctx.issue.number });
@@ -290,6 +294,12 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     }
 
     const reviewOutputPath = 'review.md';
+    const requestedTask = ctx.workflowRun
+      ?.stageRuns.find(stageRun => stageRun.stage === Stage.Check)
+      ?.tasks.find(candidate => candidate.taskId === 'ai-review');
+    if (ctx.requestedWork?.kind === 'task' && ctx.requestedWork.taskId === 'ai-review' && requestedTask?.status === 'pending') {
+      this.invalidateReviewArtifactForRereview(ctx);
+    }
 
     const task = {
       type: 'ai-review',
@@ -565,7 +575,9 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         log.warn('executeReportedTask: no worktree path found', { issueNumber: ctx.issue.number });
         return null;
       }
-      return runReviewFixTask(ctx, { worktreePath, failedCheck, attempt });
+      const result = await runReviewFixTask(ctx, { worktreePath, failedCheck, attempt });
+      if (result.status === 'completed') this.invalidateReviewArtifactForRereview(ctx);
+      return result;
     }
 
     if (taskId === 'fix-merge-readiness' && failedCheck?.name === 'merge-ready') {
