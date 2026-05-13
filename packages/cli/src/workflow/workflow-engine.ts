@@ -88,6 +88,21 @@ export class WorkflowEngine {
       sessionStreamLogRepo: this.sessionStreamLogRepo,
       coderSessionRepo: this.coderSessionRepo,
     });
+    const emit: StageContext['emit'] = (event, data) => {
+      try {
+        this.eventBus.emit(event as keyof import('../services/event-bus').EventMap, data as never);
+      } catch (e) {
+        // fire-and-forget
+      }
+    };
+    const log: StageContext['log'] = (eventType, data) => {
+      if (!this.workflowLogRepo) return;
+      try {
+        this.workflowLogRepo.insert(issue.id, null, eventType, data);
+      } catch (e) {
+        // fire-and-forget
+      }
+    };
     return {
       issue: { ...issue, stage },
       acpOptions: {
@@ -113,6 +128,8 @@ export class WorkflowEngine {
       requestedWork: work,
       requestedTask: this.findRequestedTask(workflowRun, work),
       signal: this.signal,
+      emit,
+      log,
     };
   }
 

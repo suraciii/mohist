@@ -7,9 +7,9 @@ import { Log } from '../util/log';
 import { OpenSpecIntegrator } from '../openspec/open-spec-integrator';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import { HealthGateCheck } from './checks/health-gate-check';
-import { runHealthFixTask } from './health-fix-task';
 import type { CheckResult, StageTaskResult } from './stage-context';
 import type { Check } from './checks';
+import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
 
 const log = Log.create({ service: 'integrate-stage-runner' });
 
@@ -104,7 +104,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
       return { integrate: false, steps };
     }
 
-    ctx.eventBus.emit('integration_completed', {
+    ctx.emit('integration_completed', {
       issueId: ctx.issue.id,
       projectId: ctx.issue.projectId,
       issueNumber: ctx.issue.number,
@@ -118,7 +118,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
   }
 
   private emitIntegrationStarted(ctx: StageContext): void {
-    ctx.eventBus.emit('integration_started', {
+    ctx.emit('integration_started', {
       issueId: ctx.issue.id,
       projectId: ctx.issue.projectId,
       issueNumber: ctx.issue.number,
@@ -246,7 +246,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
 
       steps.push(result);
 
-      ctx.eventBus.emit('integration_step_updated', {
+      ctx.emit('integration_step_updated', {
         issueId: ctx.issue.id,
         projectId: ctx.issue.projectId,
         issueNumber: ctx.issue.number,
@@ -287,7 +287,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
 
       if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
-      ctx.eventBus.emit('integration_failed', {
+      ctx.emit('integration_failed', {
         issueId: ctx.issue.id,
         projectId: ctx.issue.projectId,
         issueNumber: ctx.issue.number,
@@ -359,7 +359,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
 
       steps.push(result);
 
-      ctx.eventBus.emit('integration_step_updated', {
+      ctx.emit('integration_step_updated', {
         issueId: ctx.issue.id,
         projectId: ctx.issue.projectId,
         issueNumber: ctx.issue.number,
@@ -389,7 +389,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
 
       if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
-      ctx.eventBus.emit('integration_failed', {
+      ctx.emit('integration_failed', {
         issueId: ctx.issue.id,
         projectId: ctx.issue.projectId,
         issueNumber: ctx.issue.number,
@@ -437,7 +437,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
       steps.push(result);
       if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
-      ctx.eventBus.emit('integration_step_updated', {
+      ctx.emit('integration_step_updated', {
         issueId: ctx.issue.id,
         projectId: ctx.issue.projectId,
         issueNumber: ctx.issue.number,
@@ -493,7 +493,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         steps.push(result);
         if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
-        ctx.eventBus.emit('integration_failed', {
+        ctx.emit('integration_failed', {
           issueId: ctx.issue.id,
           projectId: ctx.issue.projectId,
           issueNumber: ctx.issue.number,
@@ -536,7 +536,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
       steps.push(result);
       if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
-      ctx.eventBus.emit('integration_step_updated', {
+      ctx.emit('integration_step_updated', {
         issueId: ctx.issue.id,
         projectId: ctx.issue.projectId,
         issueNumber: ctx.issue.number,
@@ -579,7 +579,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
 
       if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
-      ctx.eventBus.emit('integration_failed', {
+      ctx.emit('integration_failed', {
         issueId: ctx.issue.id,
         projectId: ctx.issue.projectId,
         issueNumber: ctx.issue.number,
@@ -638,7 +638,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
 
       const result = await this.runMergeStep(ctx, steps, false);
       if (result?.status === 'completed') {
-        ctx.eventBus.emit('integration_completed', {
+        ctx.emit('integration_completed', {
           issueId: ctx.issue.id,
           projectId: ctx.issue.projectId,
           issueNumber: ctx.issue.number,
@@ -649,13 +649,10 @@ export class IntegrateStageRunner extends BaseStageRunner {
     }
 
     if (taskId !== 'fix-integrate-health') return null;
-    return runHealthFixTask(ctx, {
-      taskId: 'fix-integrate-health',
-      title: 'Fix integrate health',
-      stage: 'integrate',
+    const adapter = createRepairFixAdapter();
+    return adapter.dispatch('fix-integrate-health', ctx, {
       worktreePath: this.worktreePath,
-      healthCommand: this.integrateHealthGatePolicy.command,
-      failedCheck: failedCheck ?? { name: 'health:integrate', status: 'fail' },
+      failedCheck: failedCheck ?? { name: 'health:integrate', status: 'fail' as const },
       attempt,
     });
   }

@@ -130,7 +130,7 @@ class SimpleRunner extends BaseStageRunner {
 }
 
 function makeContext(overrides?: Partial<StageContext>): StageContext {
-  return {
+  const result = {
     issue: {
       id: 'issue-1',
       number: 1,
@@ -169,8 +169,23 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
       clearApprovalState: vi.fn(),
       updateStatus: vi.fn(),
     } as unknown as IssueRepo,
+    workflowLogRepo: {
+      insert: vi.fn(),
+    } as any,
+    emit: (event: string, data: unknown) => {
+      try {
+        (result.eventBus as any)?.emit?.(event, data);
+      } catch {
+        // fire-and-forget
+      }
+    },
+    log: (_eventType: string, _data: object) => {
+      // fire-and-forget
+    },
     ...overrides,
   } as StageContext;
+
+  return result;
 }
 
 function makeIssue(
