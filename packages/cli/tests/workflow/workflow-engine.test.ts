@@ -6,11 +6,13 @@ import type {
   IssueRepo,
   ChangeArtifactsManager,
   CheckpointManager,
+  WorkflowApplicationRuntime,
 } from '../../src/workflow/stage-context';
 import type { StageRunner } from '../../src/workflow/check-stage-runner';
 import { EventBus } from '../../src/services/event-bus';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import type { ConfigInfo } from '../../src/config/config-schema';
+import { WorkflowRun, type WorkflowWork } from '../../src/workflow/domain';
 
 class CapturingRunner implements StageRunner {
   capturedContexts: StageContext[] = [];
@@ -59,6 +61,7 @@ function makeMockIssueRepo(): IssueRepo {
     setApprovalState: vi.fn(),
     clearApprovalState: vi.fn(),
     updateStatus: vi.fn().mockReturnValue(makeIssue(Stage.Done)),
+    findById: vi.fn().mockReturnValue(null),
   } as unknown as IssueRepo;
 }
 
@@ -66,6 +69,7 @@ function makeEngine(options: {
   runners: StageRunner[];
   config?: ConfigInfo;
   issueRepo?: IssueRepo;
+  workflowApplicationService?: WorkflowApplicationRuntime;
 }) {
   return new WorkflowEngine({
     runners: options.runners,
@@ -87,7 +91,21 @@ function makeEngine(options: {
       archiveChange: vi.fn(),
     } as unknown as ChangeArtifactsManager,
     config: options.config,
+    workflowApplicationService: options.workflowApplicationService,
   });
+}
+
+function makeSequencedWorkflowService(issue: Issue, work: WorkflowWork[]): WorkflowApplicationRuntime {
+  const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number });
+  let index = 0;
+  const next = () => work[index++] ?? { kind: 'complete' as const };
+  return {
+    startWorkflow: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
+    resumeDecision: vi.fn(() => ({ run, nextWork: next() })),
+    completeTask: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
+    recordCheckResult: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
+    materializeTasks: vi.fn(() => ({ run, decision: { events: [], nextWork: next() } })),
+  };
 }
 
 describe('WorkflowEngine.buildContext model injection', () => {
@@ -107,12 +125,19 @@ describe('WorkflowEngine.buildContext model injection', () => {
       },
     };
 
+    const issue = makeIssue(Stage.Plan);
     const engine = makeEngine({
       runners: [planRunner, buildRunner, checkRunner],
       config,
+      workflowApplicationService: makeSequencedWorkflowService(issue, [
+        { kind: 'task', stage: Stage.Plan, taskId: 'proposal' },
+        { kind: 'task', stage: Stage.Build, taskId: 'build-task' },
+        { kind: 'task', stage: Stage.Check, taskId: 'ai-review' },
+        { kind: 'complete' },
+      ]),
     });
 
-    await engine.run(makeIssue(Stage.Plan), { cwd: '/tmp' });
+    await engine.run(issue, { cwd: '/tmp' });
 
     expect(planRunner.capturedContexts).toHaveLength(1);
     expect(planRunner.capturedContexts[0].acpOptions.model).toBe('plan-model');
@@ -137,12 +162,18 @@ describe('WorkflowEngine.buildContext model injection', () => {
       },
     };
 
+    const issue = makeIssue(Stage.Plan);
     const engine = makeEngine({
       runners: [planRunner, buildRunner],
       config,
+      workflowApplicationService: makeSequencedWorkflowService(issue, [
+        { kind: 'task', stage: Stage.Plan, taskId: 'proposal' },
+        { kind: 'task', stage: Stage.Build, taskId: 'build-task' },
+        { kind: 'complete' },
+      ]),
     });
 
-    await engine.run(makeIssue(Stage.Plan), { cwd: '/tmp' });
+    await engine.run(issue, { cwd: '/tmp' });
 
     expect(planRunner.capturedContexts[0].acpOptions.model).toBe('plan-model');
     expect(buildRunner.capturedContexts[0].acpOptions.model).toBe('global-model');
@@ -151,11 +182,16 @@ describe('WorkflowEngine.buildContext model injection', () => {
   it('leaves acpOptions.model unchanged when config is absent', async () => {
     const planRunner = new CapturingRunner(Stage.Plan, Stage.Build);
 
+    const issue = makeIssue(Stage.Plan);
     const engine = makeEngine({
       runners: [planRunner],
+      workflowApplicationService: makeSequencedWorkflowService(issue, [
+        { kind: 'task', stage: Stage.Plan, taskId: 'proposal' },
+        { kind: 'complete' },
+      ]),
     });
 
-    await engine.run(makeIssue(Stage.Plan), { cwd: '/tmp', model: 'pre-existing-model' });
+    await engine.run(issue, { cwd: '/tmp', model: 'pre-existing-model' });
 
     expect(planRunner.capturedContexts[0].acpOptions.model).toBe('pre-existing-model');
   });
@@ -167,12 +203,17 @@ describe('WorkflowEngine.buildContext model injection', () => {
       opencode: {},
     };
 
+    const issue = makeIssue(Stage.Plan);
     const engine = makeEngine({
       runners: [planRunner],
       config,
+      workflowApplicationService: makeSequencedWorkflowService(issue, [
+        { kind: 'task', stage: Stage.Plan, taskId: 'proposal' },
+        { kind: 'complete' },
+      ]),
     });
 
-    await engine.run(makeIssue(Stage.Plan), { cwd: '/tmp' });
+    await engine.run(issue, { cwd: '/tmp' });
 
     expect(planRunner.capturedContexts[0].acpOptions.model).toBeUndefined();
   });
@@ -184,12 +225,17 @@ describe('WorkflowEngine.buildContext model injection', () => {
       opencode: { model: 'injected-model' },
     };
 
+    const issue = makeIssue(Stage.Plan);
     const engine = makeEngine({
       runners: [planRunner],
       config,
+      workflowApplicationService: makeSequencedWorkflowService(issue, [
+        { kind: 'task', stage: Stage.Plan, taskId: 'proposal' },
+        { kind: 'complete' },
+      ]),
     });
 
-    await engine.run(makeIssue(Stage.Plan), { cwd: '/tmp', taskId: 'task-123' });
+    await engine.run(issue, { cwd: '/tmp', taskId: 'task-123' });
 
     expect(planRunner.capturedContexts[0].acpOptions.cwd).toBe('/tmp');
     expect(planRunner.capturedContexts[0].acpOptions.taskId).toBe('task-123');
@@ -234,6 +280,11 @@ describe('WorkflowEngine merge-gated completion', () => {
 
     const issue = makeIssue(Stage.Check);
     const mockRepo = makeMockIssueRepoWithIssue(issue);
+    const workflowApplicationService = makeSequencedWorkflowService(issue, [
+      { kind: 'task', stage: Stage.Check, taskId: 'ai-review' },
+      { kind: 'task', stage: Stage.Integrate, taskId: 'integrate:merge' },
+      { kind: 'complete' },
+    ]);
 
     const engine = new WorkflowEngine({
       runners: [checkRunner, integrateRunner],
@@ -241,6 +292,7 @@ describe('WorkflowEngine merge-gated completion', () => {
       eventBus: new EventBus(),
       checkpointManager: { save: vi.fn(), load: vi.fn(), deleteAll: vi.fn(), markStepComplete: vi.fn(), getResumeSteps: vi.fn() } as unknown as CheckpointManager,
       artifactManager: { getChangeDir: vi.fn().mockReturnValue('/tmp/change'), createChangeDir: vi.fn(), readArtifact: vi.fn(), writeArtifact: vi.fn(), exists: vi.fn(), readTasks: vi.fn(), updateTaskPasses: vi.fn(), archiveChange: vi.fn() } as unknown as ChangeArtifactsManager,
+      workflowApplicationService,
     });
 
     const result = await engine.run(issue, { cwd: '/tmp' });
@@ -267,6 +319,10 @@ describe('WorkflowEngine merge-gated completion', () => {
     const issue = makeIssue(Stage.Build);
     const mockRepo = makeMockIssueRepoWithIssue({ ...issue, mergeState: MergeState.Merged });
     const updateStatusSpy = vi.spyOn(mockRepo, 'updateStatus');
+    const workflowApplicationService = makeSequencedWorkflowService(issue, [
+      { kind: 'task', stage: Stage.Build, taskId: 'build-task' },
+      { kind: 'await-approval', stage: Stage.Check },
+    ]);
 
     const engine = new WorkflowEngine({
       runners: [buildRunner, checkRunner],
@@ -274,6 +330,7 @@ describe('WorkflowEngine merge-gated completion', () => {
       eventBus: new EventBus(),
       checkpointManager: { save: vi.fn(), load: vi.fn(), deleteAll: vi.fn(), markStepComplete: vi.fn(), getResumeSteps: vi.fn() } as unknown as CheckpointManager,
       artifactManager: { getChangeDir: vi.fn().mockReturnValue('/tmp/change'), createChangeDir: vi.fn(), readArtifact: vi.fn(), writeArtifact: vi.fn(), exists: vi.fn(), readTasks: vi.fn(), updateTaskPasses: vi.fn(), archiveChange: vi.fn() } as unknown as ChangeArtifactsManager,
+      workflowApplicationService,
     });
 
     await engine.run(issue, { cwd: '/tmp' });

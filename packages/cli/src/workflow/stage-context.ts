@@ -10,6 +10,8 @@ import type { WorkflowSessionObserverDeps } from '../services/session-observers'
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { StageStateService } from '../services/stage-state-service';
+import type { WorkflowApplicationService } from '../services/workflow-application-service';
+import type { TaskRunSnapshot, WorkflowWork } from './domain';
 
 type StageType = Stage;
 
@@ -39,8 +41,11 @@ export interface StageRunResult {
   output: unknown;
   checkResults: CheckResult[];
   message?: string;
-  nextStage?: Stage;
 }
+
+export type WorkflowApplicationRuntime = Pick<WorkflowApplicationService,
+  'startWorkflow' | 'resumeDecision' | 'completeTask' | 'recordCheckResult' | 'materializeTasks' | 'approveStage'
+>;
 
 export interface StageContext {
   issue: Issue;
@@ -58,7 +63,10 @@ export interface StageContext {
   checkSuiteRepo?: CheckSuiteRepo;
   stageStateService?: StageStateService;
   workflowRunService?: WorkflowRunService;
+  workflowApplicationService?: WorkflowApplicationRuntime;
   workflowRun?: WorkflowRunWithStageRuns;
+  requestedWork?: WorkflowWork;
+  requestedTask?: TaskRunSnapshot;
   signal?: AbortSignal;
 }
 

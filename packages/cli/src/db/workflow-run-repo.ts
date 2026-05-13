@@ -1,5 +1,18 @@
 import { DatabaseManager } from './database';
 import { Stage } from '../types';
+import {
+  DEFAULT_STAGE_DEFINITIONS,
+  type CausedByMetadata,
+  type StageRunSnapshot,
+  type WorkflowRunSnapshot,
+  WorkflowRun as DomainWorkflowRun,
+} from '../workflow/domain';
+import {
+  freezePointFromStageSnapshot,
+  hydrateWorkflowRun,
+  repairWorkflowRunSnapshot,
+} from '../workflow/domain/persistence';
+import fs from 'fs';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -215,8 +228,299 @@ function rowToWorkflowCheck(row: WorkflowCheckRow): WorkflowCheck {
   };
 }
 
+function safeParseJson(value: string | null): unknown | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function causedByFromTask(row: WorkflowTaskRow): CausedByMetadata | null {
+  if (!row.caused_by_type) return null;
+  return {
+    type: row.caused_by_type as CausedByMetadata['type'],
+    checkName: row.caused_by_check_name ?? undefined,
+    taskId: row.caused_by_task_id ?? undefined,
+    message: row.reason ?? undefined,
+  };
+}
+
+function taskRowToSnapshot(row: WorkflowTaskRow): StageRunSnapshot['tasks'][number] {
+  return {
+    id: row.task_id,
+    title: row.title,
+    status: row.status as WorkflowTaskStatus,
+    order: row.task_order,
+    attempts: row.attempts,
+    duration: row.duration,
+    artifacts: JSON.parse(row.artifacts || '[]'),
+    output: safeParseJson(row.output),
+    reason: row.reason,
+    causedBy: causedByFromTask(row),
+  };
+}
+
+function checkRowToSnapshot(row: WorkflowCheckRow): StageRunSnapshot['checks'][number] {
+  return {
+    name: row.check_name,
+    title: row.title,
+    status: row.status as WorkflowCheckStatus,
+    message: row.message,
+    output: safeParseJson(row.output),
+    runCount: row.run_count,
+  };
+}
+
+function approvalFromStageRow(row: WorkflowStageRunRow): StageRunSnapshot['approval'] {
+  if (!row.approval_status || !row.approval_requested_at) return null;
+  return {
+    status: row.approval_status as 'awaiting' | 'approved' | 'rejected',
+    output: safeParseJson(row.approval_output),
+    requestedAt: row.approval_requested_at,
+    respondedAt: row.approval_responded_at,
+  };
+}
+
+function readBuildTasks(tasksPath?: string): Array<{ id: string; title: string; order?: number }> {
+  if (!tasksPath || !fs.existsSync(tasksPath)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(tasksPath, 'utf-8')) as {
+      tasks?: Array<{ id?: unknown; title?: unknown; order?: unknown }>;
+    };
+    if (!Array.isArray(parsed.tasks)) return [];
+    return parsed.tasks.flatMap((task, index) => {
+      if (typeof task.id !== 'string') return [];
+      return [{
+        id: task.id,
+        title: typeof task.title === 'string' ? task.title : task.id,
+        order: typeof task.order === 'number' ? task.order : index,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function orderCheckSnapshots(stage: Stage, checks: StageRunSnapshot['checks']): StageRunSnapshot['checks'] {
+  const definition = DEFAULT_STAGE_DEFINITIONS.find(candidate => candidate.stage === stage);
+  if (!definition) return checks;
+  const order = new Map(definition.checks.map((check, index) => [check.name, index]));
+  return [...checks].sort((a, b) => (order.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.name) ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name));
+}
+
 export class WorkflowRunRepo {
   constructor(private db: DatabaseManager) {}
+
+  createOrLoadActiveAggregate(data: {
+    issueId: string;
+    issueNumber: number;
+    startedBy?: string | null;
+    tasksPath?: string;
+  }): DomainWorkflowRun {
+    return this.db.transaction(() => {
+      const existing = this.loadRunningAggregate(data.issueId, { tasksPath: data.tasksPath });
+      if (existing) return existing;
+
+      const id = `wr_${data.issueNumber}_${Date.now()}`;
+      const { run } = DomainWorkflowRun.startWorkflow({
+        id,
+        issueId: data.issueId,
+        issueNumber: data.issueNumber,
+      });
+      this.saveAggregate(run, data.startedBy ?? null);
+      return this.loadRunningAggregate(data.issueId, { tasksPath: data.tasksPath }) ?? run;
+    });
+  }
+
+  loadActiveAggregate(issueId: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
+    const row = this.db.get<WorkflowRunRow>(
+      `SELECT * FROM workflow_runs WHERE issue_id = ? AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1`,
+      [issueId],
+    );
+    if (!row) return null;
+    return this.loadAggregateByRow(row, options);
+  }
+
+  loadRunningAggregate(issueId: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
+    const row = this.db.get<WorkflowRunRow>(
+      `SELECT * FROM workflow_runs WHERE issue_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1`,
+      [issueId],
+    );
+    if (!row) return null;
+    return this.loadAggregateByRow(row, options);
+  }
+
+  loadAggregateById(id: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
+    const row = this.db.get<WorkflowRunRow>('SELECT * FROM workflow_runs WHERE id = ?', [id]);
+    if (!row) return null;
+    return this.loadAggregateByRow(row, options);
+  }
+
+  saveAggregate(run: DomainWorkflowRun, startedBy?: string | null): void {
+    const snapshot = run.snapshot();
+    this.db.transaction(() => {
+      this.saveAggregateSnapshot(snapshot, startedBy);
+    });
+  }
+
+  private loadAggregateByRow(row: WorkflowRunRow, options: { tasksPath?: string }): DomainWorkflowRun {
+    return this.db.transaction(() => {
+      const repaired = repairWorkflowRunSnapshot(
+        this.snapshotFromRows(row),
+        readBuildTasks(options.tasksPath),
+      );
+      this.saveAggregateSnapshot(repaired, row.started_by);
+      const freshRow = this.db.get<WorkflowRunRow>('SELECT * FROM workflow_runs WHERE id = ?', [row.id]) ?? row;
+      return hydrateWorkflowRun(this.snapshotFromRows(freshRow));
+    });
+  }
+
+  private snapshotFromRows(row: WorkflowRunRow): WorkflowRunSnapshot {
+    const stageRows = this.db.all<WorkflowStageRunRow>(
+      'SELECT * FROM workflow_stage_runs WHERE workflow_run_id = ? ORDER BY stage_order ASC',
+      [row.id],
+    );
+
+    const stageRuns = stageRows.map((stageRow): StageRunSnapshot => {
+      const taskRows = this.db.all<WorkflowTaskRow>(
+        'SELECT * FROM workflow_tasks WHERE stage_run_id = ? ORDER BY task_order ASC, task_id ASC',
+        [stageRow.id],
+      );
+      const checkRows = this.db.all<WorkflowCheckRow>(
+        'SELECT * FROM workflow_checks WHERE stage_run_id = ? ORDER BY check_name ASC',
+        [stageRow.id],
+      );
+      const stageSnapshot: StageRunSnapshot = {
+        stage: stageRow.stage as Stage,
+        status: stageRow.status as WorkflowStageRunStatus,
+        order: stageRow.stage_order,
+        tasks: taskRows.map(taskRowToSnapshot),
+        checks: orderCheckSnapshots(stageRow.stage as Stage, checkRows.map(checkRowToSnapshot)),
+        approval: approvalFromStageRow(stageRow),
+        failure: null,
+        freezePoint: null,
+      };
+      stageSnapshot.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot);
+      return stageSnapshot;
+    });
+
+    const failureStage = stageRuns.find(stage => stage.status === 'failed');
+    const snapshot: WorkflowRunSnapshot = {
+      id: row.id,
+      issueId: row.issue_id,
+      issueNumber: row.issue_number,
+      status: row.status as WorkflowRunStatus,
+      currentStage: row.current_stage as Stage,
+      stageOrder: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage),
+      stageRuns,
+      failure: failureStage?.failure ?? null,
+    };
+    return snapshot;
+  }
+
+  private saveAggregateSnapshot(snapshot: WorkflowRunSnapshot, startedBy?: string | null): void {
+    const now = new Date().toISOString();
+    const existingRun = this.db.get<WorkflowRunRow>('SELECT * FROM workflow_runs WHERE id = ?', [snapshot.id]);
+    if (existingRun) {
+      this.db.run(
+        `UPDATE workflow_runs SET issue_id = ?, issue_number = ?, status = ?, current_stage = ?, started_by = ?, updated_at = ? WHERE id = ?`,
+        [snapshot.issueId, snapshot.issueNumber, snapshot.status, snapshot.currentStage, startedBy ?? existingRun.started_by, now, snapshot.id],
+      );
+    } else {
+      this.db.run(
+        `INSERT INTO workflow_runs (id, issue_id, issue_number, status, current_stage, started_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [snapshot.id, snapshot.issueId, snapshot.issueNumber, snapshot.status, snapshot.currentStage, startedBy ?? null, now, now],
+      );
+    }
+
+    for (const stageRun of snapshot.stageRuns) {
+      const stageRunId = `${snapshot.id}/${stageRun.stage}`;
+      const existingStage = this.db.get<WorkflowStageRunRow>('SELECT * FROM workflow_stage_runs WHERE id = ?', [stageRunId]);
+      const startedAt = stageRun.status === 'running' && !existingStage?.started_at ? now : existingStage?.started_at ?? null;
+      const completedAt = (stageRun.status === 'passed' || stageRun.status === 'failed') && !existingStage?.completed_at
+        ? now
+        : existingStage?.completed_at ?? null;
+      const approval = stageRun.approval;
+
+      if (existingStage) {
+        this.db.run(
+          `UPDATE workflow_stage_runs
+           SET status = ?, stage_order = ?, approval_status = ?, approval_output = ?, approval_requested_at = ?,
+               approval_responded_at = ?, started_at = ?, completed_at = ?, updated_at = ?
+           WHERE id = ?`,
+          [
+            stageRun.status,
+            stageRun.order,
+            approval?.status ?? null,
+            approval ? JSON.stringify(approval.output) : null,
+            approval?.requestedAt ?? null,
+            approval?.respondedAt ?? null,
+            startedAt,
+            completedAt,
+            now,
+            stageRunId,
+          ],
+        );
+      } else {
+        this.db.run(
+          `INSERT INTO workflow_stage_runs
+           (id, workflow_run_id, stage, status, stage_order, approval_status, approval_output,
+            approval_requested_at, approval_responded_at, started_at, completed_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            stageRunId,
+            snapshot.id,
+            stageRun.stage,
+            stageRun.status,
+            stageRun.order,
+            approval?.status ?? null,
+            approval ? JSON.stringify(approval.output) : null,
+            approval?.requestedAt ?? null,
+            approval?.respondedAt ?? null,
+            startedAt,
+            completedAt,
+            now,
+            now,
+          ],
+        );
+      }
+
+      for (const task of stageRun.tasks) {
+        this.upsertTaskInternal({
+          workflowRunId: snapshot.id,
+          stageRunId,
+          taskId: task.id,
+          title: task.title,
+          status: task.status,
+          taskOrder: task.order,
+          attempts: task.attempts,
+          duration: task.duration,
+          artifacts: task.artifacts,
+          output: task.output,
+          reason: task.reason,
+          causedByType: task.causedBy?.type ?? null,
+          causedByCheckName: task.causedBy?.checkName ?? null,
+          causedByTaskId: task.causedBy?.taskId ?? null,
+        });
+      }
+
+      for (const check of stageRun.checks) {
+        this.upsertCheckInternal({
+          workflowRunId: snapshot.id,
+          stageRunId,
+          checkName: check.name,
+          title: check.title,
+          status: check.status,
+          message: check.message,
+          output: check.output,
+          runCount: check.runCount,
+        });
+      }
+    }
+  }
 
   create(data: {
     issueId: string;
@@ -270,7 +574,7 @@ export class WorkflowRunRepo {
 
   getActiveRunWithRelations(issueId: string): WorkflowRunWithStageRuns | null {
     const runRow = this.db.get<WorkflowRunRow>(
-      `SELECT * FROM workflow_runs WHERE issue_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1`,
+      `SELECT * FROM workflow_runs WHERE issue_id = ? AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1`,
       [issueId],
     );
     if (!runRow) return null;
@@ -306,6 +610,40 @@ export class WorkflowRunRepo {
       ...run,
       stageRuns,
     };
+  }
+
+  getLatestRunWithRelations(issueId: string): WorkflowRunWithStageRuns | null {
+    const runRow = this.db.get<WorkflowRunRow>(
+      `SELECT * FROM workflow_runs WHERE issue_id = ? ORDER BY created_at DESC LIMIT 1`,
+      [issueId],
+    );
+    if (!runRow) return null;
+
+    const run = rowToWorkflowRun(runRow);
+
+    const stageRunRows = this.db.all<WorkflowStageRunRow>(
+      'SELECT * FROM workflow_stage_runs WHERE workflow_run_id = ? ORDER BY stage_order ASC',
+      [run.id],
+    );
+
+    const stageRuns: WorkflowStageRunWithTasksAndChecks[] = stageRunRows.map(srRow => {
+      const stageRun = rowToWorkflowStageRun(srRow);
+      const taskRows = this.db.all<WorkflowTaskRow>(
+        'SELECT * FROM workflow_tasks WHERE stage_run_id = ? ORDER BY task_order ASC, task_id ASC',
+        [stageRun.id],
+      );
+      const checkRows = this.db.all<WorkflowCheckRow>(
+        'SELECT * FROM workflow_checks WHERE stage_run_id = ? ORDER BY check_name ASC',
+        [stageRun.id],
+      );
+      return {
+        ...stageRun,
+        tasks: taskRows.map(rowToWorkflowTask),
+        checks: checkRows.map(rowToWorkflowCheck),
+      };
+    });
+
+    return { ...run, stageRuns };
   }
 
   createStageRun(data: {
@@ -445,57 +783,7 @@ export class WorkflowRunRepo {
     return row ? rowToWorkflowStageRun(row) : null;
   }
 
-  updateStageRunStatus(stageRunId: string, status: WorkflowStageRunStatus): void {
-    const now = new Date().toISOString();
-    if (status === 'running') {
-      this.db.run(
-        'UPDATE workflow_stage_runs SET status = ?, started_at = ?, updated_at = ? WHERE id = ?',
-        [status, now, now, stageRunId],
-      );
-    } else if (status === 'passed' || status === 'failed' || status === 'awaiting-approval') {
-      this.db.run(
-        'UPDATE workflow_stage_runs SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?',
-        [status, now, now, stageRunId],
-      );
-    } else {
-      this.db.run(
-        'UPDATE workflow_stage_runs SET status = ?, updated_at = ? WHERE id = ?',
-        [status, now, stageRunId],
-      );
-    }
-  }
-
-  updateWorkflowRunStatus(runId: string, status: WorkflowRunStatus, currentStage: Stage): void {
-    const now = new Date().toISOString();
-    this.db.run(
-      'UPDATE workflow_runs SET status = ?, current_stage = ?, updated_at = ? WHERE id = ?',
-      [status, currentStage, now, runId],
-    );
-  }
-
-  setApproval(stageRunId: string, approval: {
-    status: string;
-    output: unknown | null;
-    requestedAt: string | null;
-    respondedAt: string | null;
-  }): void {
-    const now = new Date().toISOString();
-    this.db.run(
-      `UPDATE workflow_stage_runs
-       SET approval_status = ?, approval_output = ?, approval_requested_at = ?, approval_responded_at = ?, updated_at = ?
-       WHERE id = ?`,
-      [
-        approval.status,
-        approval.output !== null ? JSON.stringify(approval.output) : null,
-        approval.requestedAt,
-        approval.respondedAt,
-        now,
-        stageRunId,
-      ],
-    );
-  }
-
-  upsertTask(data: {
+  private upsertTaskInternal(data: {
     stageRunId: string;
     workflowRunId: string;
     taskId: string;
@@ -569,7 +857,7 @@ export class WorkflowRunRepo {
     }
   }
 
-  upsertCheck(data: {
+  private upsertCheckInternal(data: {
     stageRunId: string;
     workflowRunId: string;
     checkName: string;
@@ -609,9 +897,22 @@ export class WorkflowRunRepo {
     } else {
       this.db.run(
         `INSERT INTO workflow_checks
-         (id, workflow_run_id, stage_run_id, check_name, title, status, run_count, last_run_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, data.workflowRunId, data.stageRunId, data.checkName, data.title, status, runCount, data.lastRunAt ?? now, now, now],
+         (id, workflow_run_id, stage_run_id, check_name, title, status, message, output, run_count, last_run_at, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          data.workflowRunId,
+          data.stageRunId,
+          data.checkName,
+          data.title,
+          status,
+          data.message ?? null,
+          data.output !== undefined ? JSON.stringify(data.output) : null,
+          runCount,
+          data.lastRunAt ?? now,
+          now,
+          now,
+        ],
       );
       return this.findCheckById(id)!;
     }

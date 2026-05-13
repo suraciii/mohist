@@ -53,6 +53,31 @@ export interface StageApprovalState {
   respondedAt: string | null;
 }
 
+export interface StageFailureDetails {
+  reason: string;
+  stage: Stage;
+  taskId?: string;
+  checkName?: string;
+  message?: string | null;
+  causedBy?: StageTaskCause | null;
+}
+
+export interface StageDeliveryMetadata {
+  specSync: { status: StageTaskStatus; output: unknown } | null;
+  archive: { status: StageTaskStatus; output: unknown } | null;
+  merge: {
+    status: StageTaskStatus;
+    output: unknown;
+    targetBranch: string | null;
+    baseSha: string | null;
+    candidateHeadSha: string | null;
+    landedSha: string | null;
+    rebased: boolean | null;
+  } | null;
+  health: { status: StageCheckStatus; message: string | null; output: unknown } | null;
+  frozen: boolean;
+}
+
 export interface StageStateRead {
   stage: Stage;
   status: StageStateStatus;
@@ -63,6 +88,8 @@ export interface StageStateRead {
   startedAt: string | null;
   completedAt: string | null;
   updatedAt: string;
+  failure?: StageFailureDetails | null;
+  deliveryMetadata?: StageDeliveryMetadata | null;
 }
 
 interface StageTaskRow {
@@ -636,6 +663,7 @@ export class StageStateService {
           type: task.causedByType as StageTaskCause['type'],
           checkName: task.causedByCheckName ?? undefined,
           taskId: task.causedByTaskId ?? undefined,
+          message: task.reason ?? undefined,
         } : undefined,
       }));
 
@@ -671,8 +699,72 @@ export class StageStateService {
         startedAt: stageRun.startedAt,
         completedAt: stageRun.completedAt,
         updatedAt: stageRun.updatedAt,
+        failure: this.workflowRunFailureDetails(stageRun, tasks, checks),
+        deliveryMetadata: this.workflowRunDeliveryMetadata(stageRun, tasks, checks),
       };
     });
+  }
+
+  private workflowRunDeliveryMetadata(
+    stageRun: WorkflowRunWithStageRuns['stageRuns'][number],
+    tasks: StageTaskState[],
+    checks: StageCheckState[],
+  ): StageDeliveryMetadata | null {
+    if (stageRun.stage !== Stage.Integrate) return null;
+    const specSync = tasks.find(task => task.taskId === 'integrate:spec-sync');
+    const archive = tasks.find(task => task.taskId === 'integrate:archive-change');
+    const merge = tasks.find(task => task.taskId === 'integrate:merge');
+    const health = checks.find(check => check.checkName === 'health:integrate');
+    const mergeOutput = merge?.output && typeof merge.output === 'object' ? merge.output as Record<string, unknown> : {};
+
+    if (!specSync && !archive && !merge && !health) return null;
+    return {
+      specSync: specSync ? { status: specSync.status, output: specSync.output } : null,
+      archive: archive ? { status: archive.status, output: archive.output } : null,
+      merge: merge ? {
+        status: merge.status,
+        output: merge.output,
+        targetBranch: typeof mergeOutput.targetBranch === 'string' ? mergeOutput.targetBranch : null,
+        baseSha: typeof mergeOutput.baseSha === 'string' ? mergeOutput.baseSha : null,
+        candidateHeadSha: typeof mergeOutput.candidateHeadSha === 'string' ? mergeOutput.candidateHeadSha : null,
+        landedSha: typeof mergeOutput.landedSha === 'string' ? mergeOutput.landedSha : null,
+        rebased: typeof mergeOutput.rebased === 'boolean' ? mergeOutput.rebased : null,
+      } : null,
+      health: health ? { status: health.status, message: health.message, output: health.output } : null,
+      frozen: merge?.status === 'completed',
+    };
+  }
+
+  private workflowRunFailureDetails(
+    stageRun: WorkflowRunWithStageRuns['stageRuns'][number],
+    tasks: StageTaskState[],
+    checks: StageCheckState[],
+  ): StageFailureDetails | null {
+    if (stageRun.status !== 'failed') return null;
+    const failedTask = tasks.find(task => task.status === 'failed');
+    if (failedTask) {
+      return {
+        reason: 'task-failed',
+        stage: stageRun.stage,
+        taskId: failedTask.taskId,
+        message: failedTask.reason ?? null,
+        causedBy: failedTask.causedBy ?? null,
+      };
+    }
+    const failedCheck = checks.find(check => check.status === 'failed' || check.status === 'error');
+    if (failedCheck) {
+      const merged = stageRun.stage === Stage.Integrate && tasks.some(task => task.taskId === 'integrate:merge' && task.status === 'completed');
+      return {
+        reason: merged && failedCheck.checkName === 'health:integrate' ? 'post-merge-health-failed' : 'check-unrepaired',
+        stage: stageRun.stage,
+        checkName: failedCheck.checkName,
+        message: failedCheck.message,
+      };
+    }
+    if (stageRun.approvalStatus === 'rejected') {
+      return { reason: 'approval-rejected', stage: stageRun.stage, message: null };
+    }
+    return null;
   }
 
   private ensureStageRowExists(issueId: string, stage: Stage): void {

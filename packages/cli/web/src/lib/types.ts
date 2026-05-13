@@ -804,7 +804,7 @@ export interface StageTaskState {
   taskId: string
   title: string
   status: StageTaskStatus
-  source: 'static' | 'dynamic'
+  source?: 'static' | 'dynamic'
   order: number
   attempts: number
   duration: number
@@ -845,6 +845,8 @@ export interface StageStateRead {
   startedAt: string | null
   completedAt: string | null
   updatedAt: string
+  failure?: WorkflowFailureDetails | null
+  deliveryMetadata?: WorkflowDeliveryMetadata | null
 }
 
 export interface IssueStageStateResponse {
@@ -863,6 +865,31 @@ export interface WorkflowTaskCause {
   checkName?: string
   taskId?: string
   message?: string
+}
+
+export interface WorkflowFailureDetails {
+  reason: string
+  stage: Stage
+  taskId?: string
+  checkName?: string
+  message?: string | null
+  causedBy?: WorkflowTaskCause | null
+}
+
+export interface WorkflowDeliveryMetadata {
+  specSync: { status: WorkflowTaskStatus; output: unknown } | null
+  archive: { status: WorkflowTaskStatus; output: unknown } | null
+  merge: {
+    status: WorkflowTaskStatus
+    output: unknown
+    targetBranch: string | null
+    baseSha: string | null
+    candidateHeadSha: string | null
+    landedSha: string | null
+    rebased: boolean | null
+  } | null
+  health: { status: WorkflowCheckStatus; message: string | null; output: unknown } | null
+  frozen: boolean
 }
 
 export interface WorkflowTask {
@@ -900,9 +927,13 @@ export interface WorkflowStageRun {
   approvalOutput: unknown | null
   approvalRequestedAt: string | null
   approvalRespondedAt: string | null
+  approval?: StageApprovalState | null
+  failure?: WorkflowFailureDetails | null
+  deliveryMetadata?: WorkflowDeliveryMetadata | null
   attempts: number
   startedAt: string | null
   completedAt: string | null
+  updatedAt?: string
 }
 
 export interface WorkflowRun {
@@ -912,4 +943,5 @@ export interface WorkflowRun {
   status: WorkflowRunStatus
   currentStage: Stage
   stageRuns: WorkflowStageRun[]
+  failure?: WorkflowFailureDetails | null
 }

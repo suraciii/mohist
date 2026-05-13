@@ -316,30 +316,30 @@ Pipeline stages SHALL present one canonical user-visible task list and one separ
 
 ### Requirement: REQ-PM-WORKFLOW-RUN-001 Pipeline current state is rooted in WorkflowRun
 
-Pipeline current state SHALL be represented by a WorkflowRun containing StageRuns, Tasks, Checks, and approval snapshots. Issue stage/status remain coarse issue fields, `stage_executions` and logs remain evidence, and checkpoints remain resume cursors.
+Pipeline current state SHALL be represented and decided by a WorkflowRun aggregate containing ordered StageRuns, Tasks, Checks, approval snapshots, failure reasons, and delivery metadata. Issue stage/status remain coarse projections, `stage_executions` and logs remain evidence, and checkpoints remain resume cursors.
 
 #### Scenario: Current state has one runtime root
 
-- **WHEN** a user or API consumer asks where an issue run currently is
-- **THEN** the system SHALL answer from WorkflowRun status, currentStage, StageRuns, tasks, checks, and approval snapshots
-- **AND** it SHALL NOT require consumers to combine issue stage, `tasks.json`, stage-state rows, execution logs, session logs, and checkpoints to understand current progress
+- **WHEN** a user, API consumer, runner, or recovery path asks where an issue run currently is
+- **THEN** the system SHALL answer from WorkflowRun status, currentStage, StageRuns, tasks, checks, approval snapshots, and failure reason
+- **AND** it SHALL NOT require consumers to combine issue stage, `tasks.json`, `stage_states`, execution logs, session logs, check suites, and checkpoints to understand current progress
+
+#### Scenario: Stage transition cannot bypass aggregate
+
+- **WHEN** any workflow path wants to start a stage, complete a stage, fail a stage, or advance to the next stage
+- **THEN** it SHALL invoke a WorkflowRun or StageRun domain method
+- **AND** it SHALL NOT update issue stage/status or WorkflowRun stage status as the business decision source
 
 #### Scenario: Stage organizes tasks and checks
 
 - **WHEN** a stage contains task progress, check results, and approval state
-- **THEN** tasks SHALL remain tasks
-- **AND** checks SHALL remain checks
-- **AND** the stage SHALL only organize those runtime records
-
-#### Scenario: Evidence and resume cursor keep narrow roles
-
-- **WHEN** audit, debug, or resume behavior needs supporting data
-- **THEN** `stage_executions`, `workflow_log`, session logs, and checkpoints MAY be used for their existing roles
-- **AND** they SHALL NOT define the primary current-state model
+- **THEN** tasks SHALL remain executable work units
+- **AND** checks SHALL remain read-only validators
+- **AND** approval SHALL remain user decision state rather than executable check side effect
 
 ### Requirement: REQ-PM-007 Integrate failures stay local with visible task/check evidence
 
-Integrate SHALL have the same visible runtime lifecycle as other runnable stages, with task failures stopping the stage locally and check failures remaining in Integrate with visible evidence. The workflow SHALL NOT treat Integrate as an opaque "running" step once task/check state is available.
+Integrate SHALL have the same visible runtime lifecycle as other runnable stages, with task failures stopping the stage locally and post-task check failures remaining visible in Integrate. A post-merge health failure SHALL be distinguished from ordinary repairable check failures because merge delivery has already occurred.
 
 #### Scenario: Task failure stops later Integrate work
 
@@ -347,9 +347,9 @@ Integrate SHALL have the same visible runtime lifecycle as other runnable stages
 - **THEN** later Integrate tasks and checks SHALL NOT run
 - **AND** the issue SHALL remain in Integrate failure state with the failing task visible
 
-#### Scenario: Final health failure remains an Integrate check failure
+#### Scenario: Final health failure after merge requires manual intervention
 
 - **WHEN** `health:integrate` fails after merge succeeds
-- **THEN** the issue SHALL remain in Integrate with visible failed check evidence
-- **AND** any configured auto-fix or recheck behavior SHALL occur inside Integrate rather than bypassing the shared stage framework
+- **THEN** the issue SHALL show that merge already happened
+- **AND** WorkflowRun SHALL fail with post-merge delivery failure evidence rather than scheduling an automatic fix task
 

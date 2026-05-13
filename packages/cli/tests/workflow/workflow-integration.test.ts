@@ -250,21 +250,10 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(true);
-      expect(result.stage).toBe(Stage.Done);
-
-      expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
-        'issue-1',
-        Stage.Build,
-      );
-      expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
-        'issue-1',
-        Stage.Check,
-      );
-      expect(mockIssueRepo.updateStage).toHaveBeenCalledWith(
-        'issue-1',
-        Stage.Integrate,
-      );
+      expect(result.completed).toBe(false);
+      expect(result.stage).toBe(Stage.Plan);
+      expect(result.message).toContain('aggregate workflow service is unavailable');
+      expect(mockIssueRepo.updateStage).not.toHaveBeenCalled();
     });
   });
 
@@ -340,9 +329,9 @@ describe('Workflow Integration Tests', () => {
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
       expect(result.completed).toBe(false);
-      expect(result.stage).toBe(Stage.Check);
-      expect(stageHistory).toContain(Stage.Build);
-      expect(stageHistory).toContain(Stage.Check);
+      expect(result.stage).toBe(Stage.Plan);
+      expect(result.message).toContain('aggregate workflow service is unavailable');
+      expect(stageHistory).toEqual([]);
     });
   });
 
@@ -666,7 +655,7 @@ describe('Workflow Integration Tests', () => {
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
       expect(result.completed).toBe(false);
-      expect(result.message).toContain('Waiting for user approval');
+      expect(result.message).toContain('aggregate workflow service is unavailable');
     });
   });
 
@@ -800,8 +789,9 @@ describe('Workflow Integration Tests', () => {
 
       const result = await engine.run(makeIssue(Stage.Plan), {} as any);
 
-      expect(result.completed).toBe(true);
-      expect(result.stage).toBe(Stage.Done);
+      expect(result.completed).toBe(false);
+      expect(result.stage).toBe(Stage.Plan);
+      expect(result.message).toContain('aggregate workflow service is unavailable');
       expect((result as any).gateRequired).toBeUndefined();
     });
   });

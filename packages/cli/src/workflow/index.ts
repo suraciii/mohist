@@ -115,4 +115,3 @@ export {
   type OpenSpecDetection,
   type WorkflowConfigWithDetection,
 } from './workflow-loader';
-

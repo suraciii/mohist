@@ -1,6 +1,6 @@
 import { Stage } from '../types';
-import type { CheckFailurePolicy, StageContext, StageRunResult } from './stage-context';
-import { emitStageTaskUpdate } from './stage-context';
+import type { CheckFailurePolicy, StageContext, StageRunResult, StageTaskResult } from './stage-context';
+import { buildAuthoritativeAiReviewResult, emitStageTaskUpdate } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
 import type { Check } from './checks';
 import { ReviewPassedCheck } from './checks/review-passed-check';
@@ -91,9 +91,9 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     ctx: StageContext,
     failedCheck: import('./stage-context').CheckResult,
     attempt: number,
+    taskId = 'repair-merge',
   ): Promise<import('./stage-context').StageTaskResult> {
     const startedAt = Date.now();
-    const taskId = 'repair-merge';
     const title = 'Repair merge readiness';
     const stage = 'check';
 
@@ -247,41 +247,30 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     checkName: string,
     fixTaskId: string,
   ): Promise<void> {
-    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-
-    if (checkName === 'review-passed' && fixTaskId === 'repair-review-findings') {
-      if (changeDir) {
-        const reviewArtifactPath = changeDir + '/review.md';
-        try {
-          if (require('fs').existsSync(reviewArtifactPath)) {
-            require('fs').unlinkSync(reviewArtifactPath);
-            log.info('Invalidated stale review.md', { changeDir });
-          }
-        } catch {
-          log.warn('Failed to delete stale review.md', { changeDir });
-        }
-      }
-      ctx.checkpointManager?.deleteStep(ctx.issue.number, 'check', 'ai-review');
-      log.info('Invalidated ai-review checkpoint for re-review', {
+    if (ctx.workflowApplicationService) return;
+    if (checkName !== 'review-passed' || fixTaskId !== 'repair-review-findings') {
+      log.info('Legacy check repair completed without artifact invalidation', {
         issueNumber: ctx.issue.number,
+        checkName,
+        fixTaskId,
       });
+      return;
     }
-
-    if (checkName === 'merge-ready') {
-      if (changeDir) {
-        const reviewArtifactPath = changeDir + '/review.md';
-        try {
-          if (require('fs').existsSync(reviewArtifactPath)) {
-            require('fs').unlinkSync(reviewArtifactPath);
-            log.info('Invalidated stale review.md after merge repair', { changeDir });
-          }
-        } catch {
-          log.warn('Failed to delete stale review.md after merge repair', { changeDir });
-        }
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+    if (!changeDir) return;
+    const reviewPath = `${changeDir}/review.md`;
+    try {
+      const fs = await import('node:fs');
+      if (fs.existsSync(reviewPath)) {
+        fs.rmSync(reviewPath, { force: true });
+        log.info('Invalidated stale review.md before re-review', { issueNumber: ctx.issue.number });
       }
-      ctx.checkpointManager?.deleteStep(ctx.issue.number, 'check', 'ai-review');
-      log.info('Invalidated ai-review checkpoint after merge repair, HEAD changed', {
+      ctx.checkpointManager?.deleteStep?.(ctx.issue.number, 'check', 'ai-review');
+      log.info('Invalidated ai-review checkpoint for re-review', { issueNumber: ctx.issue.number });
+    } catch (err) {
+      log.warn('Failed to invalidate review artifact before re-review', {
         issueNumber: ctx.issue.number,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
   }
@@ -541,6 +530,90 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     }
 
     return { success: true };
+  }
+
+  protected async executeReportedTask(
+    ctx: StageContext,
+    taskId: string,
+    failedCheck: import('./stage-context').CheckResult | undefined,
+    attempt: number,
+  ): Promise<StageTaskResult | null> {
+    if (taskId === 'ai-review') {
+      const output = await this.executeTasks(ctx);
+      return {
+        taskId: 'ai-review',
+        title: 'ai-review',
+        status: 'completed',
+        artifacts: ['ai-review'],
+        attempts: 1,
+        duration: 0,
+        output,
+      };
+    }
+
+    if (taskId === 'check:converge-review-snapshot') {
+      return this.runConvergeReviewSnapshotTask(ctx);
+    }
+
+    if (taskId === 'fix-review-findings' && failedCheck?.name === 'review-passed') {
+      const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+      const worktreePath = project
+        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+        : null;
+      if (!worktreePath) {
+        log.warn('executeReportedTask: no worktree path found', { issueNumber: ctx.issue.number });
+        return null;
+      }
+      return runReviewFixTask(ctx, { worktreePath, failedCheck, attempt });
+    }
+
+    if (taskId === 'fix-merge-readiness' && failedCheck?.name === 'merge-ready') {
+      return this.runMergeRepairTask(ctx, failedCheck, attempt, taskId);
+    }
+
+    if (failedCheck) return this.runFixTask(ctx, taskId, failedCheck, attempt);
+    return null;
+  }
+
+  private async runConvergeReviewSnapshotTask(ctx: StageContext): Promise<StageTaskResult> {
+    const startedAt = Date.now();
+    const taskId = 'check:converge-review-snapshot';
+    const title = 'Converge review snapshot';
+    try {
+      const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+      const worktreePath = project ? ctx.worktreeManager.getPath(project.name, ctx.issue.number) : null;
+      if (!worktreePath) throw new Error('Worktree not found');
+
+      const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
+      if (!convergence.success) throw new Error(convergence.error ?? 'Convergence commit failed');
+
+      const output = {
+        converged: true,
+        snapshotSha: convergence.headSha,
+      };
+      const latestReview = this.latestReviewPassedFromAggregate(ctx);
+      if (latestReview) {
+        const authoritative = buildAuthoritativeAiReviewResult({ ...latestReview, output: { ...((latestReview.output as Record<string, unknown>) ?? {}), snapshotSha: convergence.headSha } });
+        if (authoritative && ctx.checkSuiteRepo) {
+          const suite = ctx.checkSuiteRepo.findActiveByIssueId(ctx.issue.id);
+          if (suite) {
+            ctx.checkSuiteRepo.updateChecks(suite.id, 'review-passed', { status: 'passed', output: authoritative, ranAt: authoritative.convergedAt });
+            ctx.checkSuiteRepo.updateSnapshotSha(suite.id, convergence.headSha);
+          }
+        }
+      }
+      return { taskId, title, status: 'completed', artifacts: [], attempts: 1, duration: Date.now() - startedAt, output };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { taskId, title, status: 'failed', artifacts: [], attempts: 1, duration: Date.now() - startedAt, reason: message, output: { error: message } };
+    }
+  }
+
+  private latestReviewPassedFromAggregate(ctx: StageContext): import('./stage-context').CheckResult | undefined {
+    const checkStage = ctx.workflowRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check);
+    const review = checkStage?.checks.find(check => check.checkName === 'review-passed');
+    if (!review?.output) return undefined;
+    return { name: 'review-passed', status: review.status === 'passed' ? 'pass' : 'fail', output: review.output };
   }
 
   protected getChecks(): Check[] {

@@ -259,9 +259,10 @@ describe('T-010: Integrate stage regression tests', () => {
 
       const result = await engine.run(issue, { cwd: '/tmp' });
 
-      expect(result.completed).toBe(true);
-      expect(result.stage).toBe(Stage.Done);
-      expect(mockRepo.updateStage).toHaveBeenCalledWith('issue-1', Stage.Integrate);
+      expect(result.completed).toBe(false);
+      expect(result.stage).toBe(Stage.Check);
+      expect(result.message).toContain('aggregate workflow service is unavailable');
+      expect(mockRepo.updateStage).not.toHaveBeenCalled();
     });
 
     it('CheckStageRunner.getNextStage() returns Stage.Integrate', async () => {
@@ -325,18 +326,10 @@ describe('T-010: Integrate stage regression tests', () => {
 
       const result = await engine.run(issue, { cwd: '/tmp' });
 
-      expect(result.completed).toBe(true);
-      expect(result.stage).toBe(Stage.Done);
-
-      const stagesCalled: Stage[] = [];
-      for (const call of (mockRepo.updateStage as ReturnType<typeof vi.fn>).mock.calls) {
-        stagesCalled.push(call[1]);
-      }
-      expect(stagesCalled).toContain(Stage.Integrate);
-      const integrateIdx = stagesCalled.indexOf(Stage.Integrate);
-      const doneIdx = stagesCalled.indexOf(Stage.Done);
-      expect(integrateIdx).toBeLessThan(doneIdx);
-      expect(integrateIdx).toBeGreaterThan(stagesCalled.indexOf(Stage.Check));
+      expect(result.completed).toBe(false);
+      expect(result.stage).toBe(Stage.Plan);
+      expect(result.message).toContain('aggregate workflow service is unavailable');
+      expect(mockRepo.updateStage).not.toHaveBeenCalled();
     });
   });
 

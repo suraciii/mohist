@@ -32,8 +32,7 @@ import type { StageTaskResult } from '../workflow/stage-context';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { SessionObserver } from '../agent-runtime/session-observer';
 import { createWorkflowSessionObservers } from '../agent-runtime';
-import type { WorkflowRunService } from '../services/workflow-run-service';
-import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
+import type { WorkflowApplicationRuntime } from '../workflow/stage-context';
 import { Stage } from '../types';
 
 export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip' | 'hang_unrecoverable' | 'session_failed';
@@ -153,8 +152,7 @@ export interface RalphExecutorContext {
   observers?: SessionObserver[];
   syncTasksToStageState?: () => void;
   syncTasksToWorkflowRun?: () => void;
-  workflowRunService?: WorkflowRunService;
-  workflowRun?: WorkflowRunWithStageRuns;
+  workflowApplicationService?: Pick<WorkflowApplicationRuntime, 'completeTask'>;
 }
 
 export interface RalphLoopResult {
@@ -229,21 +227,33 @@ function writeTasksFile(tasksPath: string, tasks: Task[]): void {
 function persistTasks(context: RalphExecutorContext, tasksPath: string, tasks: Task[]): void {
   writeTasksFile(tasksPath, tasks);
   context.syncTasksToStageState?.();
-  syncTasksToWorkflowRun(context, tasks);
 }
 
-function syncTasksToWorkflowRun(context: RalphExecutorContext, tasks: Task[]): void {
-  if (!context.workflowRunService || !context.workflowRun) return;
-  for (const t of tasks) {
-    const status = t.passes ? 'completed' : t.error ? 'failed' : 'pending';
-    context.workflowRunService.upsertTask(context.workflowRun.id, Stage.Build, {
-      taskId: t.id,
-      title: t.title,
-      status,
-      attempts: t.attempts,
-      output: t.error ? { error: t.error } : null,
-    });
-  }
+function reportTaskToAggregate(
+  context: RalphExecutorContext,
+  task: Task,
+  result: {
+    status: 'completed' | 'failed' | 'skipped';
+    attempts: number;
+    duration: number;
+    output?: unknown;
+    reason?: string;
+  },
+): void {
+  if (!context.workflowApplicationService || !context.issueId) return;
+  context.workflowApplicationService.completeTask({
+    issueId: context.issueId,
+    stage: Stage.Build,
+    taskId: task.id,
+    result: {
+      status: result.status,
+      attempts: result.attempts,
+      duration: result.duration,
+      artifacts: [],
+      output: result.output,
+      reason: result.reason,
+    },
+  });
 }
 
 async function commitTasksFile(
@@ -263,10 +273,42 @@ async function commitTasksFile(
   }
 }
 
+async function commitAggregateTaskChanges(
+  worktreePath: string,
+  taskId: string,
+  issueNumber?: number,
+): Promise<string | undefined> {
+  try {
+    const { stdout: statusOut } = await execFileAsync(
+      'git',
+      ['status', '--porcelain', '--ignore-submodules'],
+      { cwd: worktreePath },
+    );
+    const changedLines = statusOut
+      .split('\n')
+      .filter(line => line.trim() !== '')
+      .filter(line => !line.includes('openspec/changes/') && !line.includes('.opencode/'));
+    if (changedLines.length === 0) return undefined;
+
+    await execFileAsync('git', ['add', '--', ':!openspec/changes/', ':!.opencode/'], { cwd: worktreePath });
+    const issuePrefix = issueNumber ? `issue-${issueNumber}` : 'aggregate';
+    await execFileAsync('git', ['commit', '-m', `build(${issuePrefix}): complete ${taskId}`], { cwd: worktreePath });
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+    const commitSha = stdout.trim();
+    log.info('Committed aggregate task changes', { taskId, commitSha });
+    return commitSha;
+  } catch (e) {
+    log.warn('commitAggregateTaskChanges failed', { taskId, error: e instanceof Error ? e.message : String(e) });
+    return undefined;
+  }
+}
+
 export interface RalphExecutorOptions extends RalphTaskOptions {
   resumeFromTaskIndex?: number;
   skipTaskIds?: string[];
   onTaskCompleted?: (taskId: string) => void;
+  ignoreTaskFileProgress?: boolean;
+  onlyTaskId?: string;
 }
 
 async function storeFailureLearning(
@@ -455,6 +497,13 @@ export async function runRalphLoop(
     };
   }
 
+  if (options.ignoreTaskFileProgress) {
+    for (const task of tasks) {
+      task.passes = false;
+      task.error = null;
+    }
+  }
+
   const validation = validateTaskDependencies(tasks);
   if (!validation.valid) {
     for (const err of validation.errors) {
@@ -469,17 +518,40 @@ export async function runRalphLoop(
       success: false,
       pauseReason: `Task dependency validation failed: ${validation.errors.join('; ')}`,
     };
+    const duration = 0;
+    const firstTask = sortTasksByOrder(tasks)[0];
+    if (firstTask) {
+      reportTaskToAggregate(context, firstTask, {
+        status: 'failed',
+        attempts: firstTask.attempts,
+        duration,
+        output: { validationErrors: validation.errors },
+        reason: result.pauseReason,
+      });
+    }
     context.onLoopComplete?.(result);
     return result;
   }
 
   const sortedTasks = sortTasksByOrder(tasks);
+  const requestedTask = options.onlyTaskId ? sortedTasks.find(task => task.id === options.onlyTaskId) : undefined;
+  if (options.onlyTaskId && !requestedTask) {
+    return {
+      completed: 0,
+      failed: 1,
+      skipped: 0,
+      total: 1,
+      taskResults: [{ taskId: options.onlyTaskId, status: 'failed', attempts: 0, error: `Task ${options.onlyTaskId} not found` }],
+      success: false,
+      pauseReason: `Task ${options.onlyTaskId} not found`,
+    };
+  }
   const timeoutConfig = getAgentTimeoutConfig(loadConfig());
   const perTaskTimeout = timeoutConfig.taskTimeout * 1000;
 
   const skipTaskIds = new Set(options.skipTaskIds ?? []);
 
-  if (tasks.length > 0 && tasks.every(t => t.passes)) {
+  if (!options.onlyTaskId && tasks.length > 0 && tasks.every(t => t.passes)) {
     log.info('All tasks already passed, returning success', {
       issueId: context.issueId || '',
       total: tasks.length,
@@ -496,10 +568,16 @@ export async function runRalphLoop(
     return alreadyPassedResult;
   }
 
-  for (const task of tasks) {
+  for (const task of sortTasksByOrder(tasks)) {
     if (skipTaskIds.has(task.id) && !task.passes) {
       task.passes = true;
       task.error = null;
+      reportTaskToAggregate(context, task, {
+        status: 'skipped',
+        attempts: task.attempts,
+        duration: 0,
+        reason: 'Skipped during checkpoint resume',
+      });
     }
   }
   if (skipTaskIds.size > 0) {
@@ -630,7 +708,9 @@ export async function runRalphLoop(
   const processedTaskIds = new Set<string>();
 
   while (true) {
-    const nextTask = findNextPendingTask(tasks);
+    const nextTask = options.onlyTaskId
+      ? tasks.find(task => task.id === options.onlyTaskId && !processedTaskIds.has(task.id))
+      : findNextPendingTask(tasks);
     if (!nextTask || processedTaskIds.has(nextTask.id)) {
       if (!nextTask) {
         const remainingPending = tasks.filter(t => !t.passes);
@@ -765,6 +845,9 @@ export async function runRalphLoop(
       attemptsUsed = attempt;
       if (result.success) {
         taskSuccess = true;
+        const implementationCommitSha = options.onlyTaskId && context.workflowApplicationService
+          ? await commitAggregateTaskChanges(context.worktreePath, nextTask.id, context.issueNumber)
+          : undefined;
         updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null, durations: [attemptDuration] });
         persistTasks(context, change.tasksPath, tasks);
         await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
@@ -788,6 +871,12 @@ export async function runRalphLoop(
         options.onTaskCompleted?.(nextTask.id);
 
         appendStageTaskResult(nextTask.id, nextTask.title, 'completed', attempt, Date.now() - taskStartTime);
+        reportTaskToAggregate(context, nextTask, {
+          status: 'completed',
+          attempts: attempt,
+          duration: Date.now() - taskStartTime,
+          output: result.text || implementationCommitSha ? { text: result.text, implementationCommitSha } : undefined,
+        });
 
         break;
       } else {
@@ -901,11 +990,25 @@ export async function runRalphLoop(
           updateTaskInList(tasks, nextTask.id, { passes: true, error: `Skipped: ${lastError}` });
           persistTasks(context, change.tasksPath, tasks);
           taskResults[taskResults.length - 1].status = 'skipped';
+          reportTaskToAggregate(context, nextTask, {
+            status: 'skipped',
+            attempts: attemptsUsed,
+            duration: Date.now() - taskStartTime,
+            output: { error: lastError },
+            reason: `Skipped: ${lastError}`,
+          });
         } else if (answer.toLowerCase().includes('retry')) {
           taskResults.pop();
           continue;
         } else {
           failed++;
+          reportTaskToAggregate(context, nextTask, {
+            status: 'failed',
+            attempts: attemptsUsed,
+            duration: Date.now() - taskStartTime,
+            output: { error: lastError, pauseReason },
+            reason: pauseReason ?? lastError,
+          });
           const result: RalphLoopResult = {
             completed,
             failed,
@@ -924,10 +1027,24 @@ export async function runRalphLoop(
         updateTaskInList(tasks, nextTask.id, { passes: false, error: `Auto-skipped (no onAskUser): ${lastError}` });
         persistTasks(context, change.tasksPath, tasks);
         taskResults[taskResults.length - 1].status = 'skipped';
+        reportTaskToAggregate(context, nextTask, {
+          status: 'skipped',
+          attempts: attemptsUsed,
+          duration: Date.now() - taskStartTime,
+          output: { error: lastError },
+          reason: `Auto-skipped (no onAskUser): ${lastError}`,
+        });
         failed++;
         skipped++;
         processedTaskIds.add(nextTask.id);
       } else {
+        reportTaskToAggregate(context, nextTask, {
+          status: 'failed',
+          attempts: attemptsUsed,
+          duration: Date.now() - taskStartTime,
+          output: { error: lastError },
+          reason: lastError,
+        });
         failed++;
         processedTaskIds.add(nextTask.id);
       }
@@ -940,13 +1057,14 @@ export async function runRalphLoop(
     }
 
     learnings = loadLearningsFromDir(change.sessionMemoriesPath);
+    if (options.onlyTaskId) break;
   }
 
   const result: RalphLoopResult = {
     completed,
     failed,
     skipped,
-    total: sortedTasks.length,
+    total: options.onlyTaskId ? 1 : sortedTasks.length,
     taskResults,
     success: failed === 0,
   };
