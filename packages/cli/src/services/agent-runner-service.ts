@@ -31,7 +31,7 @@ import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue
 
 const execFileAsync = promisify(execFile);
 
-const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Done];
+const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done];
 
 export type TaskType = QueueTaskType;
 

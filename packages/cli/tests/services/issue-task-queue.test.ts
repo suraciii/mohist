@@ -8,8 +8,16 @@ import { AgentRunnerService } from '../../src/services/agent-runner-service';
 import { EventBus } from '../../src/services/event-bus';
 import { IssueService } from '../../src/services/issue-service';
 import { Stage, IssueStatus } from '../../src/types';
+import * as fs from 'fs';
+import * as path from 'path';
 
 let projectCounter = 0;
+
+function touchFetchCache(projectPath: string) {
+  const gitDir = path.join(projectPath, '.git');
+  fs.mkdirSync(gitDir, { recursive: true });
+  fs.writeFileSync(path.join(gitDir, 'mohist-last-fetch'), Date.now().toString(), 'utf-8');
+}
 
 function createHangingWorktreeManager() {
   return {
@@ -487,6 +495,35 @@ describe('IssueTaskQueue', () => {
       const dbRecord = taskQueueRepo.findById(result.taskId);
       expect(dbRecord!.status).toBe('completed');
       expect(dbRecord!.result).toBe('skipped');
+    });
+
+    it('should execute rebase for integrate-stage issues', async () => {
+      const project = setupProject();
+      touchFetchCache(project.path);
+      const issue = setupIssue(project.id);
+      issueRepo.updateStage(issue.id, Stage.Integrate);
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+      const wtManager = createHangingWorktreeManager();
+      wtManager.exists.mockReturnValue(true);
+      wtManager.canFastForward.mockResolvedValue(false);
+      wtManager.rebaseOntoMaster.mockResolvedValue({ success: true, conflicts: [] });
+
+      const service = createService(1, wtManager);
+      const result = service.enqueue(issue.id, 'rebase');
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const dbRecord = taskQueueRepo.findById(result.taskId);
+      expect(dbRecord!.status).toBe('completed');
+      expect(dbRecord!.result).toBe('success');
+      expect(wtManager.rebaseOntoMaster).toHaveBeenCalledWith(
+        project.path,
+        project.name,
+        issue.number,
+        project.baseBranch,
+        { abortOnConflict: false },
+      );
     });
   });
 
