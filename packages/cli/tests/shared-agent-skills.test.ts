@@ -174,4 +174,149 @@ describe('Shared Agent Skills', () => {
       expect(installHelp).toContain('--claude');
     });
   });
+
+  describe('issue-templates.md bundle installation', () => {
+    it('installs issue-templates.md alongside SKILL.md for mohist', () => {
+      installSharedAgentSkills({ projectPath: tmpDir });
+
+      const mohistDir = path.join(tmpDir, '.agents', 'skills', 'mohist');
+      const skillMdPath = path.join(mohistDir, 'SKILL.md');
+      const issueTemplatesPath = path.join(mohistDir, 'issue-templates.md');
+
+      expect(fs.existsSync(skillMdPath)).toBe(true);
+      expect(fs.existsSync(issueTemplatesPath)).toBe(true);
+
+      const content = fs.readFileSync(issueTemplatesPath, 'utf-8');
+      expect(content).toContain('## Template: refactor');
+      expect(content).toContain('## Template: user-story');
+      expect(content).toContain('## Template: ui');
+    });
+
+    it('does not install issue-templates.md for mohist-explore', () => {
+      installSharedAgentSkills({ projectPath: tmpDir });
+
+      const exploreDir = path.join(tmpDir, '.agents', 'skills', 'mohist-explore');
+      const skillMdPath = path.join(exploreDir, 'SKILL.md');
+      const issueTemplatesPath = path.join(exploreDir, 'issue-templates.md');
+
+      expect(fs.existsSync(skillMdPath)).toBe(true);
+      expect(fs.existsSync(issueTemplatesPath)).toBe(false);
+    });
+
+    it('installed issue-templates.md contains UI template with ASCII prototype section', () => {
+      installSharedAgentSkills({ projectPath: tmpDir });
+
+      const issueTemplatesPath = path.join(tmpDir, '.agents', 'skills', 'mohist', 'issue-templates.md');
+      const content = fs.readFileSync(issueTemplatesPath, 'utf-8');
+
+      expect(content).toContain('## Template: ui');
+      expect(content).toContain('ASCII 原型图');
+      expect(content).toContain('+------------------------------------------+');
+    });
+
+    it('getSharedSkillNames returns only skill names, not companion files', () => {
+      const names = getSharedSkillNames();
+      expect(names).toContain('mohist');
+      expect(names).toContain('mohist-explore');
+      expect(names).not.toContain('issue-templates.md');
+    });
+  });
+});
+
+describe('Issue Template Instructions', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-instructions-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  describe('mo instructions command setup', () => {
+    it('setupInstructionsCommand registers instructions command', async () => {
+      vi.mock('../src/cli/api-client', () => ({ apiClient: vi.fn() }));
+      vi.mock('../src/cli/server-check', () => ({ requireServer: vi.fn().mockResolvedValue(undefined) }));
+
+      const { setupInstructionsCommand } = await import('../src/cli/commands/instructions');
+      const program = new Command();
+      setupInstructionsCommand(program);
+
+      const instructionsCmd = program.commands.find(cmd => cmd.name() === 'instructions');
+      expect(instructionsCmd).toBeDefined();
+      expect(instructionsCmd?.commands.some(cmd => cmd.name() === 'list')).toBe(true);
+    });
+  });
+
+  describe('getAvailableTemplates', () => {
+    it('returns all template groups with their labels', async () => {
+      const { getAvailableTemplates } = await import('../src/agent-skills/issue-template-lookup');
+      const templates = getAvailableTemplates();
+
+      const userStory = templates.find(t => t.template === 'user-story');
+      const refactor = templates.find(t => t.template === 'refactor');
+      const ui = templates.find(t => t.template === 'ui');
+
+      expect(userStory).toBeDefined();
+      expect(userStory?.labels).toContain('bug');
+      expect(userStory?.labels).toContain('feature');
+      expect(userStory?.labels).toContain('improvement');
+
+      expect(refactor).toBeDefined();
+      expect(refactor?.labels).toContain('refactor');
+
+      expect(ui).toBeDefined();
+      expect(ui?.labels).toContain('ui-feature');
+      expect(ui?.labels).toContain('ui-improvement');
+    });
+  });
+
+  describe('getTemplateContent', () => {
+    it('returns refactor template for refactor label', async () => {
+      const { getTemplateContent } = await import('../src/agent-skills/issue-template-lookup');
+      const result = getTemplateContent('refactor');
+
+      expect(result).not.toBeNull();
+      expect(result?.template).toBe('refactor');
+      expect(result?.content).toContain('## 重构目标');
+      expect(result?.content).toContain('## 当前状态');
+      expect(result?.content).toContain('## 验收标准');
+    });
+
+    it('returns UI template for ui-feature label', async () => {
+      const { getTemplateContent } = await import('../src/agent-skills/issue-template-lookup');
+      const result = getTemplateContent('ui-feature');
+
+      expect(result).not.toBeNull();
+      expect(result?.template).toBe('ui');
+      expect(result?.content).toContain('## ASCII 原型图');
+      expect(result?.content).toContain('+------------------------------------------+');
+      expect(result?.content).toContain('### 盒子布局示例');
+    });
+
+    it('returns UI template for ui-improvement label', async () => {
+      const { getTemplateContent } = await import('../src/agent-skills/issue-template-lookup');
+      const result = getTemplateContent('ui-improvement');
+
+      expect(result).not.toBeNull();
+      expect(result?.template).toBe('ui');
+      expect(result?.content).toContain('## ASCII 原型图');
+    });
+
+    it('returns null for unknown label', async () => {
+      const { getTemplateContent } = await import('../src/agent-skills/issue-template-lookup');
+      const result = getTemplateContent('unknown-label');
+
+      expect(result).toBeNull();
+    });
+
+    it('normalizes label by lowercasing and trimming', async () => {
+      const { getTemplateContent } = await import('../src/agent-skills/issue-template-lookup');
+      const result = getTemplateContent('  REFACTOR  ');
+
+      expect(result).not.toBeNull();
+      expect(result?.template).toBe('refactor');
+    });
+  });
 });
