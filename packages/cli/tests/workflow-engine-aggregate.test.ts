@@ -46,7 +46,12 @@ function makeIssueRepo(issue: Issue): IssueRepo {
   } as unknown as IssueRepo;
 }
 
-function makeEngine(issue: Issue, service: WorkflowApplicationRuntime, runners: StageRunner[]) {
+function makeEngine(
+  issue: Issue,
+  service: WorkflowApplicationRuntime,
+  runners: StageRunner[],
+  workflowRunService?: { getActiveRunForIssue: (issueId: string) => unknown; getLatestRunForIssue: (issueId: string) => unknown },
+) {
   return new WorkflowEngine({
     runners,
     issueRepo: makeIssueRepo(issue),
@@ -67,6 +72,7 @@ function makeEngine(issue: Issue, service: WorkflowApplicationRuntime, runners: 
       archiveChange: vi.fn(),
     } as unknown as ChangeArtifactsManager,
     workflowApplicationService: service,
+    workflowRunService: workflowRunService as never,
   });
 }
 
@@ -169,7 +175,11 @@ describe('WorkflowEngine aggregate progression', () => {
       },
     };
 
-    const engine = makeEngine(issue, service, [runner]);
+    const workflowRunService = {
+      getActiveRunForIssue: vi.fn(() => run.snapshot()),
+      getLatestRunForIssue: vi.fn(() => run.snapshot()),
+    };
+    const engine = makeEngine(issue, service, [runner], workflowRunService);
 
     const result = await engine.run(issue, { cwd: '/tmp' });
 
@@ -179,5 +189,62 @@ describe('WorkflowEngine aggregate progression', () => {
     expect(run.currentStage).toBe(Stage.Plan);
     expect(run.stageRun(Stage.Plan).status).toBe('failed');
     expect(run.failure).toMatchObject({ reason: 'task-failed', stage: Stage.Plan, taskId: 'proposal' });
+  });
+
+  it('returns completed when runner finishes the aggregate without another resumeDecision', async () => {
+    const issue = makeIssue(Stage.Backlog);
+    const definitions = [
+      {
+        ...DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Plan)!,
+        tasks: [{ id: 'proposal', title: 'Generate proposal' }],
+        checks: [{ name: 'health:plan', title: 'Plan health gate' }],
+        requiresApproval: false,
+      },
+    ];
+    const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions });
+
+    const service: WorkflowApplicationRuntime = {
+      startWorkflow: vi.fn(() => ({ run, decision: { events: [], nextWork: run.nextWork() } })),
+      resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
+      completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
+      recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
+      materializeTasks: vi.fn(({ stage, tasks }) => ({ run, decision: run.materializeTasks(stage, tasks) })),
+      approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
+    };
+
+    const runner: StageRunner = {
+      canHandle: stage => stage === Stage.Plan,
+      run: async ctx => {
+        if (ctx.requestedWork?.kind === 'task') {
+          service.completeTask({
+            issueId: issue.id,
+            stage: ctx.requestedWork.stage,
+            taskId: ctx.requestedWork.taskId,
+            result: { status: 'completed' },
+          });
+        }
+        if (ctx.requestedWork?.kind === 'check') {
+          service.recordCheckResult({
+            issueId: issue.id,
+            stage: ctx.requestedWork.stage,
+            result: { name: ctx.requestedWork.checkName, status: 'pass' },
+          });
+        }
+        return { success: true, output: null, checkResults: [] };
+      },
+    };
+
+    const workflowRunService = {
+      getActiveRunForIssue: vi.fn(() => run.snapshot()),
+      getLatestRunForIssue: vi.fn(() => run.snapshot()),
+    };
+    const engine = makeEngine(issue, service, [runner], workflowRunService);
+
+    const result = await engine.run(issue, { cwd: '/tmp' });
+
+    expect(result).toEqual({ completed: true, stage: Stage.Done, message: 'Pipeline completed' });
+    expect(run.status).toBe('passed');
+    expect(workflowRunService.getLatestRunForIssue).toHaveBeenCalled();
+    expect(service.resumeDecision).toHaveBeenCalledTimes(1);
   });
 });

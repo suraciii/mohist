@@ -213,6 +213,22 @@ export class WorkflowEngine {
       const beforeSnapshot = JSON.stringify(run.snapshot());
       const result = await runner.run(ctx);
 
+      const latestRun = this.workflowRunService?.getLatestRunForIssue(issue.id);
+      if (latestRun?.status === 'passed') {
+        this.checkpointManager.deleteAll(currentIssue.number);
+        return { completed: true, stage: Stage.Done, message: 'Pipeline completed' };
+      }
+      if (latestRun?.status === 'failed') {
+        const failedStage = latestRun.stageRuns.find(stageRun => stageRun.status === 'failed');
+        const failedTask = failedStage?.tasks.find(task => task.status === 'failed');
+        const failedCheck = failedStage?.checks.find(check => check.status === 'failed' || check.status === 'error');
+        return {
+          completed: false,
+          stage: failedStage?.stage ?? ctx.issue.stage,
+          message: failedTask?.reason ?? failedCheck?.message ?? failedTask?.taskId ?? failedCheck?.checkName ?? result.message,
+        };
+      }
+
       const decision = service.resumeDecision(issue.id, { tasksPath });
       run = decision.run;
       work = decision.nextWork;
