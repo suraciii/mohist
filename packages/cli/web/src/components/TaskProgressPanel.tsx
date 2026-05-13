@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useWorkflowRun, useIssueStageState } from '../hooks/useQueries'
 import { useTaskProgress } from '../hooks/useTaskProgress'
-import { convertCause } from '../lib/workflow-run-utils'
+import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
 import type { StageTaskState, Stage } from '../lib/types'
 import { Stage as StageEnum } from '../lib/types'
 
@@ -109,30 +109,9 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
 
   if (isBacklog) return null
 
-  const stageState = workflowRun?.stageRuns?.find(sr => sr.stage === currentStage)
-  let tasks: StageTaskState[]
-
-  if (stageState) {
-    tasks = stageState.tasks.map((t) => ({
-      taskId: t.taskId,
-      title: t.title,
-      status: t.status,
-      source: (t.reason || t.causedBy) ? 'dynamic' as const : 'static' as const,
-      order: t.taskOrder ?? 0,
-      attempts: t.attempts,
-      duration: t.duration,
-      artifacts: t.artifacts,
-      output: t.output,
-      startedAt: t.startedAt,
-      completedAt: t.completedAt,
-      updatedAt: new Date().toISOString(),
-      reason: t.reason ?? undefined,
-      causedBy: convertCause(t.causedBy),
-    }))
-  } else {
-    const currentStageState = stageStateData?.stages?.find(s => s.stage === currentStage)
-    tasks = currentStageState?.tasks ?? []
-  }
+  const workflowStageState = workflowRun ? workflowRunToStageStateMap(workflowRun).get(currentStage) : undefined
+  const fallbackStageState = stageStateData?.stages?.find(s => s.stage === currentStage)
+  const tasks: StageTaskState[] = workflowStageState?.tasks ?? fallbackStageState?.tasks ?? []
 
   if (stageStateLoading && !workflowRun) {
     return (

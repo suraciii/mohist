@@ -2,16 +2,15 @@
 
 ### Requirement: REQ-WR-001 Starting an issue creates a WorkflowRun
 
-Starting an issue SHALL create one active WorkflowRun runtime record bound to the issue id and issue number. The WorkflowRun SHALL expose stable identity, status, current stage, timestamps, starter metadata, ordered StageRuns for `plan`, `build`, `check`, and `integrate`, and initial Plan task/check instances.
+Starting an issue SHALL create or reuse one active WorkflowRun aggregate bound to the issue id and issue number. The aggregate SHALL derive its first stage from its ordered stage definition, create ordered StageRuns for `plan`, `build`, `check`, and `integrate`, seed static Plan and Integrate task/check state, and start the first StageRun without using `Issue.stage` as the state-machine decision source.
 
-#### Scenario: Start creates seeded run
+#### Scenario: Start creates aggregate-rooted run
 
 - **WHEN** an issue is started
 - **THEN** the system SHALL create or reuse one active WorkflowRun for that issue
-- **AND** the WorkflowRun SHALL have `status = running` and `currentStage = plan`
-- **AND** it SHALL contain ordered StageRuns for `plan`, `build`, `check`, and `integrate`
-- **AND** the Plan StageRun SHALL contain tasks `proposal`, `specs`, `design`, `tasks`, and `self-review`
-- **AND** the Plan StageRun SHALL contain checks `proposal-complete`, `specs-complete`, `design-complete`, `tasks-valid`, `self-review-passed`, and `user-approval`
+- **AND** the WorkflowRun SHALL have `status = running` and `currentStage` equal to the first configured runnable stage
+- **AND** the first StageRun SHALL be running
+- **AND** issue stage/status updates SHALL be projections of the WorkflowRun decision
 
 #### Scenario: Start is idempotent for active run
 
@@ -21,7 +20,7 @@ Starting an issue SHALL create one active WorkflowRun runtime record bound to th
 
 ### Requirement: REQ-WR-002 Build tasks materialize into the WorkflowRun
 
-After Plan produces and validates `tasks.json`, Build tasks SHALL be materialized as Task instances under the same WorkflowRun's Build StageRun. Build execution MAY continue using `tasks.json` as executor input, but user-facing Build task state SHALL be stored in WorkflowRun tasks.
+After Plan produces and validates `tasks.json`, Build tasks SHALL be materialized as TaskRun instances under the same WorkflowRun's Build StageRun. `tasks.json` MAY remain the design artifact and Build input, but runtime task progress, skipped/completed/failed state, attempts, artifacts, output, and failure evidence SHALL be stored in WorkflowRun tasks.
 
 #### Scenario: Tasks file becomes Build task instances
 
@@ -33,53 +32,59 @@ After Plan produces and validates `tasks.json`, Build tasks SHALL be materialize
 
 - **WHEN** Ralph executes, skips, completes, or fails a Build task
 - **THEN** the corresponding WorkflowRun task SHALL reflect the latest status, attempts, artifacts, and output
-- **AND** the primary user-facing Build task list SHALL NOT be reconstructed from logs, checkpoints, or session events
+- **AND** the primary user-facing Build task list SHALL NOT be reconstructed from `tasks.json`, logs, checkpoints, or session events
 
 ### Requirement: REQ-WR-003 Runtime-added work is represented as normal tasks
 
-Runtime-added repair, rebase, retry, rerun, and conflict-resolution work SHALL be appended to the current StageRun as ordinary WorkflowRun tasks. Such tasks MAY include `reason` and `causedBy` metadata, but SHALL NOT create a user-visible planned/dynamic/static task category.
+Runtime-added repair, rebase, retry, rerun, and conflict-resolution work SHALL be appended to the current StageRun as ordinary WorkflowRun tasks. Such tasks SHALL include `reason` and `causedBy` metadata when they are scheduled by a task or check failure policy.
 
-#### Scenario: Runtime task includes explanation metadata
+#### Scenario: Fix task records origin
 
-- **WHEN** a check failure, task failure, branch change, conflict, retry, user action, or system policy creates additional executable work
-- **THEN** the work SHALL appear in the same StageRun task list as other tasks
-- **AND** it SHOULD include `reason` and `causedBy` metadata identifying why it was added
+- **WHEN** a failed check schedules a repair task
+- **THEN** the repair SHALL appear in the same StageRun task list as other tasks
+- **AND** it SHALL record causedBy metadata identifying the originating check or task
 
 #### Scenario: Origin metadata is not a user-facing category
 
 - **WHEN** WorkflowRun tasks are returned through API or rendered in UI
 - **THEN** users SHALL see one task list for the stage
-- **AND** users SHALL NOT need to interpret planned, dynamic, or static task categories
+- **AND** users SHALL NOT need to interpret planned, dynamic, static, or fix task categories
 
 ### Requirement: REQ-WR-004 Evidence and checkpoints remain separate from WorkflowRun state
 
-WorkflowRun SHALL be the current runtime state root. `stage_executions`, `workflow_log`, session logs, and checkpoints SHALL retain their existing evidence, audit, or resume-cursor roles and SHALL NOT be used as the primary source for current tasks and checks.
+WorkflowRun SHALL be the current runtime state root and consistency boundary. `stage_executions`, `workflow_log`, session logs, check suites, `stage_states`, and checkpoints SHALL retain evidence, audit, compatibility projection, or resume-cursor roles and SHALL NOT be used as the primary source for current stage, task, check, approval, or failure decisions.
 
-#### Scenario: Logs are evidence only
+#### Scenario: Logs and projections are evidence only
 
-- **WHEN** the UI or API needs current stage, task, check, or approval state
-- **THEN** it SHALL read WorkflowRun state
-- **AND** it SHALL NOT reconstruct that current state from `workflow_log`, session logs, or `stage_executions`
+- **WHEN** the UI, API, or recovery logic needs current stage, task, check, approval, or failure state
+- **THEN** it SHALL read WorkflowRun state when a WorkflowRun exists
+- **AND** it SHALL NOT reconstruct that current state from logs, `stage_executions`, check suites, `stage_states`, or checkpoints
 
 #### Scenario: Checkpoint is resume cursor only
 
 - **WHEN** the workflow resumes after interruption
-- **THEN** checkpoint data MAY determine the safe resume point
+- **THEN** checkpoint data MAY determine the safe external resume point
 - **AND** checkpoint data SHALL NOT replace WorkflowRun current stage, task, or check state
 
 ### Requirement: REQ-WR-005 Integrate runtime work is first-class WorkflowRun state
 
-Integrate stage progress SHALL be represented in `WorkflowRun` using standard task and check entities rather than runner-local step state only. The Integrate `StageRun` SHALL expose the ordered tasks `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge`, plus the final verification check `health:integrate`.
+Integrate stage progress SHALL be represented in WorkflowRun using standard task and check entities. The Integrate StageRun SHALL expose ordered tasks `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge`, plus check `health:integrate`; merge delivery metadata and post-merge freeze state SHALL be persisted as WorkflowRun facts.
 
 #### Scenario: Integrate stage is seeded with visible work
 
-- **WHEN** an issue starts or resumes with an active `WorkflowRun`
-- **THEN** the Integrate `StageRun` SHALL contain pending tasks `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge` in execution order
+- **WHEN** an issue starts or resumes with an active WorkflowRun
+- **THEN** the Integrate StageRun SHALL contain pending tasks `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge` in execution order
 - **AND** it SHALL contain a pending check `health:integrate`
 
-#### Scenario: Integrate execution updates WorkflowRun tasks and checks
+#### Scenario: Integrate merge records delivery facts
 
-- **WHEN** Integrate executes or fails any of its ordered tasks
-- **THEN** the corresponding `workflow_tasks` row SHALL reflect the latest status, attempts, duration, and output
-- **AND** final verification SHALL update `workflow_checks` using check identity `health:integrate`
+- **WHEN** `integrate:merge` completes successfully
+- **THEN** the task result SHALL record `targetBranch`, `baseSha`, `candidateHeadSha`, `landedSha`, and `rebased` when available
+- **AND** the Integrate StageRun SHALL record a freeze point that prevents later automatic code-modifying tasks
+
+#### Scenario: Post-merge health failure is non-repairable
+
+- **WHEN** `health:integrate` fails after `integrate:merge` has completed
+- **THEN** WorkflowRun SHALL fail with reason `post-merge-health-failed`
+- **AND** it SHALL NOT schedule `fix-integrate-health` regardless of check failure policy configuration
 

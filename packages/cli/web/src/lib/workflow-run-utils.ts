@@ -32,7 +32,6 @@ export function workflowRunToStageStateMap(workflowRun: WorkflowRun): Map<string
       taskId: t.taskId,
       title: t.title,
       status: t.status,
-      source: (t.reason || t.causedBy) ? 'dynamic' as const : 'static' as const,
       order: t.taskOrder ?? 0,
       attempts: t.attempts,
       duration: t.duration,
@@ -73,7 +72,9 @@ export function workflowRunToStageStateMap(workflowRun: WorkflowRun): Map<string
       attempts: sr.attempts ?? 0,
       startedAt: sr.startedAt,
       completedAt: sr.completedAt,
-      updatedAt: new Date().toISOString(),
+      updatedAt: sr.updatedAt ?? new Date().toISOString(),
+      failure: sr.failure ?? null,
+      deliveryMetadata: sr.deliveryMetadata ?? null,
     })
   }
   return map

@@ -28,6 +28,8 @@ import { isValidModelId } from '../config/model-resolution';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
 import type { StageStateService } from '../services/stage-state-service';
 import type { WorkflowRunService } from '../services/workflow-run-service';
+import type { WorkflowRunWithStageRuns, WorkflowStageRunWithTasksAndChecks } from '../db/workflow-run-repo';
+import { WorkflowApplicationService } from '../services/workflow-application-service';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 
@@ -110,6 +112,139 @@ function getLatestCheckStageReviewPassed(issueId: string, stageExecutionRepo?: S
     getLatestCheckResult(latestCheckExecution.checkResults as CheckResult[], 'ai-review');
 }
 
+function taskCause(task: { causedByType: string | null; causedByCheckName: string | null; causedByTaskId: string | null; reason: string | null }) {
+  if (!task.causedByType) return null;
+  return {
+    type: task.causedByType,
+    checkName: task.causedByCheckName ?? undefined,
+    taskId: task.causedByTaskId ?? undefined,
+    message: task.reason ?? undefined,
+  };
+}
+
+function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks) {
+  if (stageRun.stage !== Stage.Integrate) return null;
+  const specSync = stageRun.tasks.find(task => task.taskId === 'integrate:spec-sync');
+  const archive = stageRun.tasks.find(task => task.taskId === 'integrate:archive-change');
+  const merge = stageRun.tasks.find(task => task.taskId === 'integrate:merge');
+  const health = stageRun.checks.find(check => check.checkName === 'health:integrate');
+  const mergeOutput = merge?.output && typeof merge.output === 'object' ? merge.output as Record<string, unknown> : {};
+
+  if (!specSync && !archive && !merge && !health) return null;
+  return {
+    specSync: specSync ? { status: specSync.status, output: specSync.output } : null,
+    archive: archive ? { status: archive.status, output: archive.output } : null,
+    merge: merge ? {
+      status: merge.status,
+      output: merge.output,
+      targetBranch: typeof mergeOutput.targetBranch === 'string' ? mergeOutput.targetBranch : null,
+      baseSha: typeof mergeOutput.baseSha === 'string' ? mergeOutput.baseSha : null,
+      candidateHeadSha: typeof mergeOutput.candidateHeadSha === 'string' ? mergeOutput.candidateHeadSha : null,
+      landedSha: typeof mergeOutput.landedSha === 'string' ? mergeOutput.landedSha : null,
+      rebased: typeof mergeOutput.rebased === 'boolean' ? mergeOutput.rebased : null,
+    } : null,
+    health: health ? { status: health.status, message: health.message, output: health.output } : null,
+    frozen: merge?.status === 'completed',
+  };
+}
+
+function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks) {
+  if (stageRun.status !== 'failed') return null;
+  const failedTask = stageRun.tasks.find(task => task.status === 'failed');
+  if (failedTask) {
+    return {
+      reason: 'task-failed',
+      stage: stageRun.stage,
+      taskId: failedTask.taskId,
+      message: failedTask.reason,
+      causedBy: taskCause(failedTask),
+    };
+  }
+
+  const failedCheck = stageRun.checks.find(check => check.status === 'failed' || check.status === 'error');
+  if (failedCheck) {
+    const merged = stageRun.stage === Stage.Integrate && stageRun.tasks.some(task => task.taskId === 'integrate:merge' && task.status === 'completed');
+    return {
+      reason: merged && failedCheck.checkName === 'health:integrate' ? 'post-merge-health-failed' : 'check-unrepaired',
+      stage: stageRun.stage,
+      checkName: failedCheck.checkName,
+      message: failedCheck.message,
+    };
+  }
+
+  if (stageRun.approvalStatus === 'rejected') {
+    return { reason: 'approval-rejected', stage: stageRun.stage, message: null };
+  }
+  return null;
+}
+
+function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
+  const stageRuns = run.stageRuns.map(stageRun => {
+    const failure = failureDetails(stageRun);
+    const delivery = deliveryMetadata(stageRun);
+    return {
+      id: stageRun.id,
+      workflowRunId: stageRun.workflowRunId,
+      stage: stageRun.stage,
+      status: stageRun.status,
+      stageOrder: stageRun.stageOrder,
+      tasks: stageRun.tasks.map(task => ({
+        id: task.id,
+        taskId: task.taskId,
+        title: task.title,
+        status: task.status,
+        taskOrder: task.taskOrder,
+        attempts: task.attempts,
+        duration: task.duration,
+        artifacts: task.artifacts,
+        output: task.output,
+        reason: task.reason,
+        causedBy: taskCause(task),
+        startedAt: task.startedAt,
+        completedAt: task.completedAt,
+        updatedAt: task.updatedAt,
+      })),
+      checks: stageRun.checks.map(check => ({
+        id: check.id,
+        checkName: check.checkName,
+        title: check.title,
+        status: check.status,
+        message: check.message,
+        output: check.output,
+        runCount: check.runCount,
+        lastRunAt: check.lastRunAt,
+        updatedAt: check.updatedAt,
+      })),
+      approval: stageRun.approvalStatus ? {
+        status: stageRun.approvalStatus,
+        output: stageRun.approvalOutput,
+        requestedAt: stageRun.approvalRequestedAt,
+        respondedAt: stageRun.approvalRespondedAt,
+      } : null,
+      approvalStatus: stageRun.approvalStatus,
+      approvalOutput: stageRun.approvalOutput,
+      approvalRequestedAt: stageRun.approvalRequestedAt,
+      approvalRespondedAt: stageRun.approvalRespondedAt,
+      failure,
+      deliveryMetadata: delivery,
+      attempts: 0,
+      startedAt: stageRun.startedAt,
+      completedAt: stageRun.completedAt,
+      updatedAt: stageRun.updatedAt,
+    };
+  });
+
+  return {
+    issueId: run.issueId,
+    issueNumber: run.issueNumber,
+    id: run.id,
+    status: run.status,
+    currentStage: run.currentStage,
+    stageRuns,
+    failure: stageRuns.find(stageRun => stageRun.failure)?.failure ?? null,
+  };
+}
+
 export function createIssueRoutes(
   issueService: IssueService,
   projectService: ProjectService,
@@ -138,6 +273,33 @@ export function createIssueRoutes(
     if (stageStateService && stage) {
       stageStateService.clearApproval(issueId, stage);
     }
+  };
+
+  const createWorkflowApplicationService = (): WorkflowApplicationService | null => {
+    if (!workflowRunService) return null;
+    return new WorkflowApplicationService(workflowRunService.getDatabaseManager());
+  };
+
+  const activeWorkflowRunExists = (issueId: string): boolean => Boolean(workflowRunService?.getActiveRunForIssue(issueId));
+
+  const approveThroughWorkflowRun = (issue: Issue): boolean => {
+    if (!issue.approvalState || !activeWorkflowRunExists(issue.id)) return false;
+    createWorkflowApplicationService()?.approveStage({
+      issueId: issue.id,
+      stage: issue.approvalState.stage as Stage,
+      approval: { output: issue.approvalState.output },
+    });
+    return true;
+  };
+
+  const rejectThroughWorkflowRun = (issue: Issue, output: unknown): boolean => {
+    if (!issue.approvalState || !activeWorkflowRunExists(issue.id)) return false;
+    createWorkflowApplicationService()?.rejectStage({
+      issueId: issue.id,
+      stage: issue.approvalState.stage as Stage,
+      approval: { output },
+    });
+    return true;
   };
 
   const getCurrentProjectId = (): string | null => {
@@ -434,21 +596,14 @@ export function createIssueRoutes(
         return c.json({ success: false, error: 'WorkflowRunService not configured' } satisfies ApiResponse, 500);
       }
 
-      const run = workflowRunService.getActiveRunForIssue(issue.id);
+      const run = workflowRunService.getLatestRunForIssue(issue.id);
       if (!run) {
         return c.json({ success: false, error: `No active workflow run for issue #${number}` } satisfies ApiResponse, 404);
       }
 
       return c.json({
         success: true,
-        data: {
-          issueId: run.issueId,
-          issueNumber: run.issueNumber,
-          id: run.id,
-          status: run.status,
-          currentStage: run.currentStage,
-          stageRuns: run.stageRuns,
-        },
+        data: projectWorkflowRun(run),
       } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
@@ -474,7 +629,7 @@ export function createIssueRoutes(
       }
 
       if (workflowRunService) {
-        const run = workflowRunService.getActiveRunForIssue(issue.id);
+        const run = workflowRunService.getLatestRunForIssue(issue.id);
         if (run) {
           const stages = stageStateService.getIssueStageStateFromWorkflowRun(run);
           return c.json({
@@ -1203,11 +1358,6 @@ export function createIssueRoutes(
         }
       }
 
-      if (issue.status === IssueStatus.Blocked) {
-        issueRepo.updateStatus(issue.id, IssueStatus.Active);
-        issueRepo.updateBlockedReason(issue.id, null);
-      }
-
       const approvalStage = issue.approvalState?.stage;
 
       if (approvalStage === Stage.Check) {
@@ -1304,33 +1454,13 @@ export function createIssueRoutes(
         }
 
         if (issue.approvalState) {
-          const respondedAt = new Date().toISOString();
-          issueRepo.setApprovalState(issue.id, {
-            ...issue.approvalState,
-            status: 'approved',
-            respondedAt,
-          });
-          stageStateService?.setApproval(issue.id, issue.approvalState.stage, {
-            status: 'approved',
-            output: issue.approvalState.output,
-            requestedAt: issue.approvalState.requestedAt,
-            respondedAt,
-          });
-          if (workflowRunService) {
-            const run = workflowRunService.getActiveRunForIssue(issue.id);
-            if (run) {
-              const approvalStage = issue.approvalState.stage as Stage;
-              workflowRunService.setApproval(run.id, approvalStage, {
-                status: 'approved',
-                output: issue.approvalState.output ?? null,
-                requestedAt: issue.approvalState.requestedAt ?? null,
-                respondedAt,
-              });
-            }
+          if (!approveThroughWorkflowRun(issue)) {
+            return c.json({
+              success: false,
+              error: `Cannot approve: issue #${number} has no active WorkflowRun. Re-run the pipeline so approval can be recorded through the workflow aggregate.`
+            } satisfies ApiResponse, 409);
           }
         }
-
-        issueRepo.updateStage(issue.id, Stage.Integrate);
 
         const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
 
@@ -1350,29 +1480,11 @@ export function createIssueRoutes(
       // Plan stage: just set approval state and resume pipeline; runner will auto-advance
       if (approvalStage === Stage.Plan) {
         if (issue.approvalState) {
-          const respondedAt = new Date().toISOString();
-          issueRepo.setApprovalState(issue.id, {
-            ...issue.approvalState,
-            status: 'approved',
-            respondedAt,
-          });
-          stageStateService?.setApproval(issue.id, issue.approvalState.stage, {
-            status: 'approved',
-            output: issue.approvalState.output,
-            requestedAt: issue.approvalState.requestedAt,
-            respondedAt,
-          });
-          if (workflowRunService) {
-            const run = workflowRunService.getActiveRunForIssue(issue.id);
-            if (run) {
-              const approvalStage = issue.approvalState.stage as Stage;
-              workflowRunService.setApproval(run.id, approvalStage, {
-                status: 'approved',
-                output: issue.approvalState.output ?? null,
-                requestedAt: issue.approvalState.requestedAt ?? null,
-                respondedAt,
-              });
-            }
+          if (!approveThroughWorkflowRun(issue)) {
+            return c.json({
+              success: false,
+              error: `Cannot approve: issue #${number} has no active WorkflowRun. Re-run the pipeline so approval can be recorded through the workflow aggregate.`
+            } satisfies ApiResponse, 409);
           }
         }
       }
@@ -1462,36 +1574,16 @@ export function createIssueRoutes(
       }
 
       const rejectedStage = issue.approvalState!.stage;
-      const respondedAt = new Date().toISOString();
+      const rejectedThroughWorkflowRun = rejectThroughWorkflowRun(issue, issue.approvalState!.output ?? message ?? null);
 
-      issueRepo.setApprovalState(issue.id, {
-        stage: rejectedStage,
-        status: 'rejected',
-        output: issue.approvalState!.output,
-        requestedAt: issue.approvalState!.requestedAt,
-        respondedAt,
-      });
-      stageStateService?.setApproval(issue.id, rejectedStage, {
-        status: 'rejected',
-        output: issue.approvalState!.output,
-        requestedAt: issue.approvalState!.requestedAt,
-        respondedAt,
-      });
-      if (workflowRunService) {
-        const run = workflowRunService.getActiveRunForIssue(issue.id);
-        if (run) {
-          workflowRunService.setApproval(run.id, rejectedStage as Stage, {
-            status: 'rejected',
-            output: issue.approvalState!.output ?? null,
-            requestedAt: issue.approvalState!.requestedAt ?? null,
-            respondedAt,
-          });
-        }
+      if (!rejectedThroughWorkflowRun) {
+        return c.json({
+          success: false,
+          error: `Cannot reject: issue #${number} has no active WorkflowRun. Re-run the pipeline so rejection can be recorded through the workflow aggregate.`
+        } satisfies ApiResponse, 409);
       }
 
       if (rejectedStage === Stage.Check) {
-        issueRepo.updateStage(issue.id, Stage.Build);
-
         if (checkpointRepo) {
           checkpointRepo.delete(issue.number, Stage.Check);
         }

@@ -2,13 +2,12 @@ import * as fs from 'fs';
 import { Stage } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import { detectOpenSpecChange } from '../openspec/detector';
-import { RalphExecutor, type RalphLoopResult } from '../openspec/ralph-executor';
+import { RalphExecutor, readTasks, type RalphLoopResult } from '../openspec/ralph-executor';
 import { loadWorkflow, loadHealthGatePolicies } from './workflow-loader';
 import { GitCommitter } from './git-committer';
 import { BaseStageRunner } from './base-stage-runner';
-import type { CheckFailurePolicy, CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
+import type { CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
 import type { Check } from './checks';
-import { AllTasksCompleteCheck } from './checks/all-tasks-complete-check';
 import { HealthGateCheck } from './checks/health-gate-check';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
@@ -46,18 +45,6 @@ export class BuildStageRunner extends BaseStageRunner {
     const completedTaskIds = checkpointManager.getResumeSteps(issue.number, 'build');
 
     const change = detectOpenSpecChange(this.worktreePath, issue);
-
-    if (change) {
-      try {
-        const tasksContent = fs.readFileSync(change.tasksPath, 'utf-8');
-        const tasksFile = JSON.parse(tasksContent) as TasksFile;
-        for (const t of tasksFile.tasks) {
-          if (t.passes && !completedTaskIds.includes(t.id)) {
-            completedTaskIds.push(t.id);
-          }
-        }
-      } catch {}
-    }
 
     if (completedTaskIds.length > 0) {
       log.info('Build stage resuming', {
@@ -97,19 +84,36 @@ export class BuildStageRunner extends BaseStageRunner {
     let total = 0;
     let pending = 0;
     let passed = 0;
+    let taskSnapshot: TasksFile['tasks'] = [];
 
     try {
       const tasksContent = fs.readFileSync(change.tasksPath, 'utf-8');
       const tasksFile = JSON.parse(tasksContent) as TasksFile;
-      const tasks = tasksFile.tasks;
-      total = tasks.length;
-      pending = tasks.filter(t => !t.passes).length;
-      passed = tasks.filter(t => t.passes).length;
+      taskSnapshot = tasksFile.tasks;
+      total = taskSnapshot.length;
+      pending = taskSnapshot.filter(t => !t.passes).length;
+      passed = taskSnapshot.filter(t => t.passes).length;
     } catch {
       log.warn('Failed to read tasks snapshot for build stage logging', {
         tasksPath: change.tasksPath,
         issueNumber: issue.number,
       });
+    }
+
+    if (ctx.workflowApplicationService) {
+      const buildTasks = readTasks(change.tasksPath) ?? [];
+      ctx.workflowApplicationService.materializeTasks({
+        issueId: issue.id,
+        stage: Stage.Build,
+        tasks: buildTasks.map(task => ({ id: task.id, title: task.title, order: task.order })),
+        tasksPath: change.tasksPath,
+      });
+    } else {
+      for (const t of taskSnapshot) {
+        if (t.passes && !completedTaskIds.includes(t.id)) {
+          completedTaskIds.push(t.id);
+        }
+      }
     }
 
     log.info('Build stage tasks snapshot', {
@@ -164,18 +168,21 @@ export class BuildStageRunner extends BaseStageRunner {
       model: acpOptions.model,
       stage: 'build',
       observers: executorObservers,
+      workflowApplicationService: ctx.workflowApplicationService,
       syncTasksToStageState: () => {
         if (!ctx.stageStateService) return;
         ctx.artifactManager.syncTasksToStageState(issue.number, issue.id, Stage.Build, ctx.stageStateService);
       },
-      workflowRunService: ctx.workflowRunService,
-      workflowRun: ctx.workflowRun,
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
 
     const result: RalphLoopResult = await executor.execute(change, {
       skipTaskIds: completedTaskIds.length > 0 ? completedTaskIds : undefined,
+      ignoreTaskFileProgress: Boolean(ctx.workflowApplicationService),
+      onlyTaskId: ctx.workflowApplicationService && ctx.requestedWork?.kind === 'task'
+        ? ctx.requestedWork.taskId
+        : undefined,
       onTaskCompleted: (taskId: string) => {
         activeCompletedTaskIds.push(taskId);
         checkpointManager.markStepComplete(issue.number, 'build', taskId);
@@ -218,7 +225,9 @@ export class BuildStageRunner extends BaseStageRunner {
 
     if (result.success) {
       await this.gitCommitter.commitBuildChanges(issue);
-      checkpointManager.delete(issue.number, 'build');
+      if (!ctx.requestedWork) {
+        checkpointManager.delete(issue.number, 'build');
+      }
 
       this.emitSafe(eventBus, 'build_stage_completed', {
         issueId,
@@ -260,7 +269,6 @@ export class BuildStageRunner extends BaseStageRunner {
 
   protected getChecks(): Check[] {
     return [
-      new AllTasksCompleteCheck(),
       new HealthGateCheck({
         worktreePath: this.worktreePath,
         policy: this.buildHealthGatePolicy,
@@ -269,24 +277,25 @@ export class BuildStageRunner extends BaseStageRunner {
     ];
   }
 
-  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
-    if (!this.buildHealthGatePolicy.enabled || !this.buildHealthGatePolicy.autoFix) {
-      return [];
-    }
-    return [{
-      checkName: 'health:build',
-      fixTaskId: 'fix-build-health',
-      maxAttempts: this.buildHealthGatePolicy.maxFixAttempts,
-    }];
-  }
-
-  protected async runFixTask(
+  protected async executeReportedTask(
     ctx: StageContext,
     taskId: string,
-    failedCheck: CheckResult,
+    failedCheck: CheckResult | undefined,
     attempt: number,
   ): Promise<StageTaskResult | null> {
     if (taskId !== 'fix-build-health') return null;
+    if (!failedCheck) {
+      return {
+        taskId: 'fix-build-health',
+        title: 'Fix build health',
+        status: 'failed',
+        artifacts: [],
+        attempts: attempt,
+        duration: 0,
+        reason: 'Missing failed check context for fix-build-health',
+        output: { error: 'Missing failed check context for fix-build-health' },
+      };
+    }
     return runHealthFixTask(ctx, {
       taskId: 'fix-build-health',
       title: 'Fix build health',
@@ -303,6 +312,42 @@ export class BuildStageRunner extends BaseStageRunner {
   }
 
   async run(ctx: StageContext): Promise<StageRunResult> {
+    if (!ctx.workflowApplicationService) {
+      return super.run(ctx);
+    }
+
+    if (ctx.requestedWork?.kind === 'task' && ctx.requestedWork.stage === Stage.Build && ctx.requestedWork.taskId !== 'fix-build-health') {
+      try {
+        ctx.requestedTask ??= {
+          id: ctx.requestedWork.taskId,
+          title: ctx.requestedWork.taskId,
+          status: 'pending',
+          order: 0,
+          attempts: 0,
+          duration: 0,
+          artifacts: [],
+          output: null,
+          reason: null,
+          causedBy: null,
+        };
+        const output = await this.executeTasks(ctx);
+        const taskOutput = output as { completedTasks?: number; failedTasks?: number; totalTasks?: number } | null;
+        return {
+          success: Boolean(taskOutput && taskOutput.failedTasks === 0 && taskOutput.completedTasks === 1),
+          output,
+          checkResults: [],
+          message: taskOutput?.failedTasks ? `Task ${ctx.requestedWork.taskId} failed` : undefined,
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          output: null,
+          checkResults: [],
+          message: `Task execution failed: ${err.message}`,
+        };
+      }
+    }
+
     const result = await super.run(ctx);
 
     return {

@@ -134,17 +134,23 @@ The built-in default workflow definition SHALL only declare stages that the runn
 
 ### Requirement: REQ-WD-002 Integrate uses the standard task/check stage contract
 
-The Integrate stage SHALL execute deterministic integration work as standard stage tasks and SHALL run final verification as a post-task check through the shared `BaseStageRunner` lifecycle. Integrate SHALL use the same task execution, check classification, and check-failure handling contract as other runnable stages.
+The Integrate stage SHALL execute deterministic integration work as standard WorkflowRun tasks and SHALL run final verification as a read-only WorkflowRun check. Integrate ordering, task failure handling, merge delivery metadata, freeze behavior, and post-merge health failure handling SHALL be decided by StageRun rather than by runner-local step state.
 
 #### Scenario: Integrate runs tasks before checks
 
 - **WHEN** an issue enters Integrate
-- **THEN** the stage SHALL execute `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge` as ordered stage tasks
+- **THEN** the stage SHALL execute `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge` as ordered StageRun tasks
 - **AND** it SHALL run `health:integrate` only after those tasks succeed
 
-#### Scenario: Integrate health failure uses standard check handling
+#### Scenario: Integrate failure stays local
 
-- **WHEN** `health:integrate` fails
-- **THEN** the failure SHALL be recorded as a standard check result
-- **AND** the stage SHALL apply configured `CheckFailurePolicy` behavior for that check instead of runner-local failure handling
+- **WHEN** `integrate:spec-sync`, `integrate:archive-change`, or `integrate:merge` fails
+- **THEN** later Integrate tasks and checks SHALL NOT run
+- **AND** the issue SHALL remain associated with Integrate failure evidence
+
+#### Scenario: Post-merge health cannot auto-fix
+
+- **WHEN** `health:integrate` fails after merge has completed
+- **THEN** the failure SHALL be recorded as a post-merge delivery failure
+- **AND** the stage SHALL NOT apply any check failure policy that would modify code after the merge freeze point
 

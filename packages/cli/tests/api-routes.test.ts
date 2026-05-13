@@ -25,6 +25,8 @@ import { createStatusRoutes } from '../src/api/status';
 import { createConfigRoutes } from '../src/api/config';
 import { StageExecutionRepo } from '../src/db/stage-execution-repo';
 import { StageStateService } from '../src/services/stage-state-service';
+import { WorkflowRunService } from '../src/services/workflow-run-service';
+import { WorkflowApplicationService } from '../src/services/workflow-application-service';
 
 function createTestServer(app: Hono): http.Server {
   return http.createServer(async (req, res) => {
@@ -52,6 +54,29 @@ function createTestServer(app: Hono): http.Server {
     }
     res.end();
   });
+}
+
+function completePlanToApproval(workflowApplicationService: WorkflowApplicationService, issueId: string): void {
+  for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+    workflowApplicationService.completeTask({ issueId, stage: Stage.Plan, taskId, result: { status: 'completed' } });
+  }
+  for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed']) {
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Plan, result: { name: checkName, status: 'pass' } });
+  }
+}
+
+function completeCheckToApproval(workflowApplicationService: WorkflowApplicationService, issueId: string, snapshotSha: string): void {
+  workflowApplicationService.approveStage({ issueId, stage: Stage.Plan, approval: { output: { approved: true } } });
+  workflowApplicationService.materializeTasks({ issueId, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+  workflowApplicationService.completeTask({ issueId, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
+  workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
+  workflowApplicationService.completeTask({ issueId, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+  workflowApplicationService.recordCheckResult({
+    issueId,
+    stage: Stage.Check,
+    result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha } },
+  });
+  workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass' } });
 }
 
 describe('API Routes', () => {
@@ -297,6 +322,121 @@ describe('API Routes', () => {
       });
     });
 
+    describe('WorkflowRun-backed progress endpoints', () => {
+      function createWorkflowRunProgressServer(stageStateService: StageStateService, workflowRunService: WorkflowRunService) {
+        const app = new Hono();
+        app.route('/api/issues', createIssueRoutes(
+          issueService,
+          projectService,
+          stateManager,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          stageStateService,
+          workflowRunService,
+        ));
+        return createTestServer(app);
+      }
+
+      it('returns aggregate-backed WorkflowRun with approval, failure, and Integrate delivery metadata', async () => {
+        const issue = issueService.create({ projectId, title: 'WorkflowRun API Issue' });
+        const stageStateService = new StageStateService(db);
+        const workflowRunService = new WorkflowRunService(db);
+        const run = workflowRunService.startRun(issue.id, issue.number);
+
+        const now = new Date().toISOString();
+        db.run(
+          `UPDATE workflow_stage_runs
+           SET status = 'awaiting-approval', approval_status = 'awaiting', approval_output = ?, approval_requested_at = ?, updated_at = ?
+           WHERE workflow_run_id = ? AND stage = ?`,
+          [JSON.stringify({ snapshotSha: 'abc123' }), '2026-01-01T00:00:00Z', now, run.id, Stage.Plan],
+        );
+        db.run(`UPDATE workflow_stage_runs SET status = 'failed', completed_at = ?, updated_at = ? WHERE workflow_run_id = ? AND stage = ?`, [now, now, run.id, Stage.Integrate]);
+        db.run(
+          `UPDATE workflow_tasks SET status = 'completed', output = ?, completed_at = ?, updated_at = ? WHERE workflow_run_id = ? AND task_id = ?`,
+          [JSON.stringify({ targetBranch: 'main', baseSha: 'base-sha', candidateHeadSha: 'head-sha', landedSha: 'landed-sha', rebased: false }), now, now, run.id, 'integrate:merge'],
+        );
+        db.run(
+          `UPDATE workflow_checks SET status = 'failed', message = ?, run_count = ?, last_run_at = ?, updated_at = ? WHERE workflow_run_id = ? AND check_name = ?`,
+          ['typecheck failed', 1, now, now, run.id, 'health:integrate'],
+        );
+
+        const apiServer = createWorkflowRunProgressServer(stageStateService, workflowRunService);
+        const response = await request(apiServer).get(`/api/issues/${issue.number}/workflow-run`);
+
+        expect(response.status).toBe(200);
+        const plan = response.body.data.stageRuns.find((s: any) => s.stage === 'plan');
+        expect(plan.approval).toMatchObject({ status: 'awaiting', output: { snapshotSha: 'abc123' } });
+        const integrate = response.body.data.stageRuns.find((s: any) => s.stage === 'integrate');
+        expect(integrate.deliveryMetadata.merge).toMatchObject({ targetBranch: 'main', candidateHeadSha: 'head-sha', landedSha: 'landed-sha' });
+        expect(integrate.deliveryMetadata.health).toMatchObject({ status: 'failed', message: 'typecheck failed' });
+        expect(integrate.failure).toMatchObject({ reason: 'post-merge-health-failed', checkName: 'health:integrate' });
+      });
+
+      it('stage-state projects from WorkflowRun and ignores legacy evidence when a run exists', async () => {
+        const issue = issueService.create({ projectId, title: 'Stage State WorkflowRun Issue' });
+        const stageStateService = new StageStateService(db);
+        const workflowRunService = new WorkflowRunService(db);
+        const run = workflowRunService.startRun(issue.id, issue.number);
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT INTO workflow_tasks
+           (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, attempts, duration, artifacts, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [`${run.id}/build/T-001`, run.id, `${run.id}/build`, 'T-001', 'WorkflowRun task', 'pending', 1, 0, 0, '[]', now, now],
+        );
+        db.run(
+          `INSERT INTO workflow_tasks
+           (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, attempts, duration, artifacts, reason, caused_by_type, caused_by_check_name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [`${run.id}/build/fix-build-health`, run.id, `${run.id}/build`, 'fix-build-health', 'Fix build health', 'running', 0, 0, 0, '[]', 'Added after build health failed', 'check-failure', 'health:build', now, now],
+        );
+        stageExecutionRepo.create(issue.id, Stage.Build);
+        db.run(
+          `INSERT INTO workflow_log (id, issue_id, session_id, event_type, data, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          ['log-evidence', issue.id, null, 'task_completed', JSON.stringify({ taskId: 'T-LOG', title: 'Log task' }), now],
+        );
+
+        const apiServer = createWorkflowRunProgressServer(stageStateService, workflowRunService);
+        const response = await request(apiServer).get(`/api/issues/${issue.number}/stage-state`);
+
+        expect(response.status).toBe(200);
+        const build = response.body.data.stages.find((s: any) => s.stage === 'build');
+        expect(build.tasks.map((t: any) => t.taskId)).toEqual(['fix-build-health', 'T-001']);
+        expect(build.tasks.find((t: any) => t.taskId === 'fix-build-health').causedBy).toMatchObject({ checkName: 'health:build' });
+        expect(JSON.stringify(build)).not.toContain('T-LOG');
+      });
+
+      it('stage-state keeps legacy fallback available when no WorkflowRun exists', async () => {
+        const issue = issueService.create({ projectId, title: 'Legacy Fallback Issue' });
+        const stageStateService = new StageStateService(db);
+        stageStateService.ensureStage(issue.id, Stage.Build);
+        stageStateService.upsertTask(issue.id, Stage.Build, {
+          taskId: 'T-001',
+          title: 'Legacy task',
+          status: 'completed',
+        });
+
+        const apiServer = createWorkflowRunProgressServer(stageStateService, new WorkflowRunService(db));
+        const response = await request(apiServer).get(`/api/issues/${issue.number}/stage-state`);
+
+        expect(response.status).toBe(200);
+        const build = response.body.data.stages.find((s: any) => s.stage === 'build');
+        expect(build.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: 'T-001', title: 'Legacy task' })]));
+      });
+    });
+
     describe('POST /api/issues/:number/start', () => {
       it('should enqueue start-pipeline for an issue', async () => {
         await issueService.create({ projectId, title: 'Test Issue' });
@@ -320,32 +460,20 @@ describe('API Routes', () => {
         expect(response.body.error).toMatch(/No pending approval/);
       });
 
-      it('should fall back to DB when hasPendingGate returns false but DB has awaiting state', async () => {
+      it('approves Plan through WorkflowRun when hasPendingGate returns false but DB has awaiting projection', async () => {
         const issue = issueService.create({ projectId, title: 'Awaiting Issue' });
-        issueService.transitionToStage(issue.id, Stage.Plan);
-        issueService.setStatus(issue.id, IssueStatus.Active);
-
-        const issueRepo = stateManager.getIssueRepo();
         const stageStateService = new StageStateService(db);
-        issueRepo.setApprovalState(issue.id, {
-          stage: Stage.Plan,
-          status: 'awaiting',
-          output: { test: true },
-          requestedAt: new Date().toISOString(),
-        });
-        stageStateService.ensureStage(issue.id, Stage.Plan);
-        stageStateService.setApproval(issue.id, Stage.Plan, {
-          status: 'awaiting',
-          output: { test: true },
-          requestedAt: issueRepo.findById(issue.id)!.approvalState!.requestedAt,
-        });
+        const workflowRunService = new WorkflowRunService(db);
+        const workflowApplicationService = new WorkflowApplicationService(db);
+        workflowRunService.startRun(issue.id, issue.number);
+        completePlanToApproval(workflowApplicationService, issue.id);
 
         const refreshedIssue = issueService.getByNumber(projectId, 1);
         expect(refreshedIssue?.approvalState?.status).toBe('awaiting');
 
         const approveApp = new Hono();
         const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
-        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService));
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
         const approveServer = createTestServer(approveApp);
 
         const response = await request(approveServer).post('/api/issues/1/approve');
@@ -355,6 +483,7 @@ describe('API Routes', () => {
         const updatedStageState = stageStateService.getStageState(issue.id, Stage.Plan);
         expect(updatedStageState?.approval?.status).toBe('approved');
         expect(updatedStageState?.approval?.respondedAt).toBeTruthy();
+        expect(workflowRunService.getActiveRunForIssue(issue.id)?.stageRuns.find(stage => stage.stage === Stage.Build)?.status).toBe('running');
       });
 
       it('Check approval should reject when authoritative PASS review is missing', async () => {
@@ -387,22 +516,17 @@ describe('API Routes', () => {
 
       it('Check approval should transition to Integrate and enqueue resume-pipeline when authoritative PASS matches snapshot', async () => {
         const issue = issueService.create({ projectId, title: 'Check Approval Ready Issue' });
-        issueService.transitionToStage(issue.id, Stage.Check);
-        issueService.setStatus(issue.id, IssueStatus.Active);
-
-        const issueRepo = stateManager.getIssueRepo();
         const stageStateService = new StageStateService(db);
-        issueRepo.setApprovalState(issue.id, {
+        const workflowRunService = new WorkflowRunService(db);
+        const workflowApplicationService = new WorkflowApplicationService(db);
+        workflowRunService.startRun(issue.id, issue.number);
+        completePlanToApproval(workflowApplicationService, issue.id);
+        completeCheckToApproval(workflowApplicationService, issue.id, 'sha-pass-001');
+        stateManager.getIssueRepo().setApprovalState(issue.id, {
           stage: Stage.Check,
           status: 'awaiting',
           output: { snapshotSha: 'sha-pass-001', result: 'PASS' },
           requestedAt: new Date().toISOString(),
-        });
-        stageStateService.ensureStage(issue.id, Stage.Check);
-        stageStateService.setApproval(issue.id, Stage.Check, {
-          status: 'awaiting',
-          output: { snapshotSha: 'sha-pass-001', result: 'PASS' },
-          requestedAt: issueRepo.findById(issue.id)!.approvalState!.requestedAt,
         });
 
         const execution = stageExecutionRepo.create(issue.id, Stage.Check);
@@ -431,7 +555,7 @@ describe('API Routes', () => {
         const approveEventBus = new EventBus();
         const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
         const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService));
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
         const approveServer = createTestServer(approveApp);
 
         const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
@@ -443,6 +567,7 @@ describe('API Routes', () => {
         const updatedStageState = stageStateService.getStageState(issue.id, Stage.Check);
         expect(updatedStageState?.approval?.status).toBe('approved');
         expect(updatedStageState?.approval?.respondedAt).toBeTruthy();
+        expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Integrate);
       });
 
       it('Direct merge for non-Integrate issue should return bypass error', async () => {
@@ -552,14 +677,16 @@ describe('API Routes', () => {
           projectService.setCurrent(project);
 
           const issue = issueService.create({ projectId: project.id, title: 'Reject Check Issue' });
-          issueService.transitionToStage(issue.id, Stage.Check);
-          issueService.setStatus(issue.id, IssueStatus.Active);
-
           const issueRepo = stateManager.getIssueRepo();
+          const workflowRunService = new WorkflowRunService(db);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          workflowRunService.startRun(issue.id, issue.number);
+          completePlanToApproval(workflowApplicationService, issue.id);
+          completeCheckToApproval(workflowApplicationService, issue.id, 'reject-sha-001');
           issueRepo.setApprovalState(issue.id, {
             stage: Stage.Check,
             status: 'awaiting',
-            output: null,
+            output: { snapshotSha: 'reject-sha-001', result: 'PASS' },
             requestedAt: new Date().toISOString(),
           });
 
@@ -580,7 +707,7 @@ describe('API Routes', () => {
           const rejectEventBus = new EventBus();
           const rejectAgentRunner = new AgentRunnerService(rejectEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo());
           const enqueueSpy = vi.spyOn(rejectAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-          rejectApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, rejectAgentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
+          rejectApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, rejectAgentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(), undefined, undefined, stageExecutionRepo, undefined, undefined, workflowRunService));
           const rejectServer = createTestServer(rejectApp);
 
           const response = await request(rejectServer)
@@ -590,7 +717,8 @@ describe('API Routes', () => {
           expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
           expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
-          expect(issueRepo.findById(issue.id)?.stage).toBe(Stage.Build);
+          expect(issueRepo.findById(issue.id)?.status).toBe(IssueStatus.Blocked);
+          expect(workflowRunService.getActiveRunForIssue(issue.id)).toBeNull();
           expect(checkpointRepo.get(issue.number, 'check')).toBeNull();
           expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
           expect(fs.existsSync(path.join(changeDir, 'review-self-check.md'))).toBe(false);

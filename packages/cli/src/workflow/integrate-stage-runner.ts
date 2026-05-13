@@ -8,7 +8,7 @@ import { OpenSpecIntegrator } from '../openspec/open-spec-integrator';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import { HealthGateCheck } from './checks/health-gate-check';
 import { runHealthFixTask } from './health-fix-task';
-import type { CheckResult, CheckFailurePolicy, StageTaskResult } from './stage-context';
+import type { CheckResult, StageTaskResult } from './stage-context';
 import type { Check } from './checks';
 
 const log = Log.create({ service: 'integrate-stage-runner' });
@@ -33,13 +33,22 @@ export interface IntegrateStageRunnerOptions {
   worktreePath: string;
 }
 
+type IntegrateTaskId = 'integrate:spec-sync' | 'integrate:archive-change' | 'integrate:merge';
+
 interface IntegrateStepResult {
-  step: 'integrate:spec-sync' | 'integrate:archive-change' | 'integrate:merge';
+  step: IntegrateTaskId;
   status: 'completed' | 'failed';
   output: unknown;
   startedAt: string;
   completedAt: string;
   duration: number;
+}
+
+interface IntegrationContext {
+  effectiveChangeDir: string;
+  isAlreadyArchived: boolean;
+  expectedArchivePath: string;
+  projectPath: string;
 }
 
 export class IntegrateStageRunner extends BaseStageRunner {
@@ -68,43 +77,23 @@ export class IntegrateStageRunner extends BaseStageRunner {
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
     const steps: IntegrateStepResult[] = [];
 
-    ctx.eventBus.emit('integration_started', {
-      issueId: ctx.issue.id,
-      projectId: ctx.issue.projectId,
-      issueNumber: ctx.issue.number,
-    });
-
-    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-    const archivedChangeDir = changeDir ? null : findArchivedChangePath(this.worktreePath, ctx.issue.number);
-    const isAlreadyArchived = !changeDir && Boolean(archivedChangeDir);
-    const effectiveChangeDir = changeDir ?? archivedChangeDir;
-    if (!effectiveChangeDir) {
-      throw new Error(`Change directory not found for issue #${ctx.issue.number}`);
-    }
-
-    const changeName = isAlreadyArchived
-      ? path.basename(effectiveChangeDir).replace(/^\d{4}-\d{2}-\d{2}-/, '')
-      : path.basename(effectiveChangeDir);
-    const now = new Date();
-    const datePrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const expectedArchiveName = `${datePrefix}-${changeName}`;
-    const expectedArchivePath = `openspec/changes/archive/${expectedArchiveName}`;
-    const projectPath = this.worktreePath;
+    this.emitIntegrationStarted(ctx);
+    const integration = this.resolveIntegrationContext(ctx);
 
     const specSyncResult = await this.runSpecSyncStep(ctx, steps, {
-      effectiveChangeDir,
-      isAlreadyArchived,
-      projectPath,
+      effectiveChangeDir: integration.effectiveChangeDir,
+      isAlreadyArchived: integration.isAlreadyArchived,
+      projectPath: integration.projectPath,
     });
     if (specSyncResult?.status === 'failed') {
       return { integrate: false, steps };
     }
 
     const archiveResult = await this.runArchiveStep(ctx, steps, {
-      effectiveChangeDir,
-      isAlreadyArchived,
-      expectedArchivePath,
-      projectPath,
+      effectiveChangeDir: integration.effectiveChangeDir,
+      isAlreadyArchived: integration.isAlreadyArchived,
+      expectedArchivePath: integration.expectedArchivePath,
+      projectPath: integration.projectPath,
     });
     if (archiveResult?.status === 'failed') {
       return { integrate: false, steps };
@@ -128,10 +117,74 @@ export class IntegrateStageRunner extends BaseStageRunner {
     };
   }
 
+  private emitIntegrationStarted(ctx: StageContext): void {
+    ctx.eventBus.emit('integration_started', {
+      issueId: ctx.issue.id,
+      projectId: ctx.issue.projectId,
+      issueNumber: ctx.issue.number,
+    });
+  }
+
+  private resolveIntegrationContext(ctx: StageContext): IntegrationContext {
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+    const archivedChangeDir = changeDir ? null : findArchivedChangePath(this.worktreePath, ctx.issue.number);
+    const isAlreadyArchived = !changeDir && Boolean(archivedChangeDir);
+    const effectiveChangeDir = changeDir ?? archivedChangeDir;
+    if (!effectiveChangeDir) {
+      throw new Error(`Change directory not found for issue #${ctx.issue.number}`);
+    }
+
+    const changeName = isAlreadyArchived
+      ? path.basename(effectiveChangeDir).replace(/^\d{4}-\d{2}-\d{2}-/, '')
+      : path.basename(effectiveChangeDir);
+    const now = new Date();
+    const datePrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const expectedArchiveName = `${datePrefix}-${changeName}`;
+
+    return {
+      effectiveChangeDir,
+      isAlreadyArchived,
+      expectedArchivePath: `openspec/changes/archive/${expectedArchiveName}`,
+      projectPath: this.worktreePath,
+    };
+  }
+
+  private stepToTaskResult(step: IntegrateStepResult): StageTaskResult {
+    return {
+      taskId: step.step,
+      title: this.taskTitle(step.step),
+      status: step.status,
+      artifacts: this.taskArtifacts(step),
+      output: step.output,
+      attempts: 1,
+      duration: step.duration,
+      reason: step.status === 'failed' ? this.failureReason(step.output) : undefined,
+    };
+  }
+
+  private taskTitle(taskId: IntegrateTaskId): string {
+    if (taskId === 'integrate:spec-sync') return 'Sync OpenSpec delta specs to main specs';
+    if (taskId === 'integrate:archive-change') return 'Archive OpenSpec change';
+    return 'Merge approved candidate to target branch';
+  }
+
+  private taskArtifacts(step: IntegrateStepResult): string[] {
+    if (step.step !== 'integrate:archive-change') return [];
+    const output = step.output as { archivePath?: unknown } | undefined;
+    return typeof output?.archivePath === 'string' ? [output.archivePath] : [];
+  }
+
+  private failureReason(output: unknown): string | undefined {
+    if (!output || typeof output !== 'object') return undefined;
+    const error = (output as { error?: unknown }).error;
+    return typeof error === 'string' ? error : undefined;
+  }
+
   private async runSpecSyncStep(
     ctx: StageContext,
     steps: IntegrateStepResult[],
     opts: { effectiveChangeDir: string; isAlreadyArchived: boolean; projectPath: string },
+    reportTask = true,
   ): Promise<IntegrateStepResult | undefined> {
     const startedAt = new Date().toISOString();
 
@@ -151,14 +204,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         duration,
       };
       steps.push(result);
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:spec-sync',
-        title: 'Sync OpenSpec delta specs to main specs',
-        status: 'completed',
-        artifacts: [path.relative(opts.projectPath, opts.effectiveChangeDir)],
-        attempts: 1,
-        duration,
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
       log.info('Spec sync already applied; continuing integration', {
         issueNumber: ctx.issue.number,
         archivedChangeDir: opts.effectiveChangeDir,
@@ -212,14 +258,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         output: stepOutput,
       });
 
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:spec-sync',
-        title: 'Sync OpenSpec delta specs to main specs',
-        status: summary.valid ? 'completed' : 'failed',
-        artifacts: [],
-        attempts: 1,
-        duration,
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       if (!summary.valid) {
         const errMsg = `Spec sync failed: ${summary.errors.join('; ')}`;
@@ -246,14 +285,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         steps.push(result);
       }
 
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:spec-sync',
-        title: 'Sync OpenSpec delta specs to main specs',
-        status: 'failed',
-        artifacts: [],
-        attempts: 1,
-        duration,
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       ctx.eventBus.emit('integration_failed', {
         issueId: ctx.issue.id,
@@ -276,6 +308,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
     ctx: StageContext,
     steps: IntegrateStepResult[],
     opts: { effectiveChangeDir: string; isAlreadyArchived: boolean; expectedArchivePath: string; projectPath: string },
+    reportTask = true,
   ): Promise<IntegrateStepResult | undefined> {
     const startedAt = new Date().toISOString();
 
@@ -297,14 +330,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         duration,
       };
       steps.push(result);
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:archive-change',
-        title: 'Archive OpenSpec change',
-        status: 'completed',
-        artifacts: [archivePath],
-        attempts: 1,
-        duration,
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
       log.info('Archive already applied; continuing integration', {
         issueNumber: ctx.issue.number,
         archivePath,
@@ -343,14 +369,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         output: result.output,
       });
 
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:archive-change',
-        title: 'Archive OpenSpec change',
-        status: 'completed',
-        artifacts: [opts.expectedArchivePath],
-        attempts: 1,
-        duration,
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       log.info('Archive succeeded', { issueNumber: ctx.issue.number });
       return result;
@@ -368,14 +387,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
       };
       steps.push(result);
 
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:archive-change',
-        title: 'Archive OpenSpec change',
-        status: 'failed',
-        artifacts: [],
-        attempts: 1,
-        duration,
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       ctx.eventBus.emit('integration_failed', {
         issueId: ctx.issue.id,
@@ -397,6 +409,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
   private async runMergeStep(
     ctx: StageContext,
     steps: IntegrateStepResult[],
+    reportTask = true,
   ): Promise<IntegrateStepResult | undefined> {
     const startedAt = new Date().toISOString();
 
@@ -422,20 +435,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         duration,
       };
       steps.push(result);
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:merge',
-        title: 'Merge approved candidate to target branch',
-        status: 'completed',
-        artifacts: [],
-        attempts: 1,
-        duration,
-        output: {
-          kind: 'integrate-merge',
-          targetBranch: baseBranch,
-          skipped: true,
-          reason: 'already-merged',
-        },
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       ctx.eventBus.emit('integration_step_updated', {
         issueId: ctx.issue.id,
@@ -491,14 +491,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
           duration,
         };
         steps.push(result);
-        this.appendTaskResult(ctx, {
-          taskId: 'integrate:merge',
-          title: 'Merge approved candidate to target branch',
-          status: 'failed',
-          artifacts: [],
-          attempts: 1,
-          duration,
-        });
+        if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
         ctx.eventBus.emit('integration_failed', {
           issueId: ctx.issue.id,
@@ -541,22 +534,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         duration,
       };
       steps.push(result);
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:merge',
-        title: 'Merge approved candidate to target branch',
-        status: 'completed',
-        artifacts: [],
-        attempts: 1,
-        duration,
-        output: {
-          kind: 'integrate-merge',
-          targetBranch: mergeTruth.targetBranch,
-          baseSha: mergeTruth.baseSha,
-          candidateHeadSha: mergeTruth.candidateHeadSha,
-          landedSha: mergeTruth.landedSha,
-          rebased: mergeTruth.rebased,
-        },
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       ctx.eventBus.emit('integration_step_updated', {
         issueId: ctx.issue.id,
@@ -599,14 +577,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         steps.push(result);
       }
 
-      this.appendTaskResult(ctx, {
-        taskId: 'integrate:merge',
-        title: 'Merge approved candidate to target branch',
-        status: 'failed',
-        artifacts: [],
-        attempts: 1,
-        duration,
-      });
+      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       ctx.eventBus.emit('integration_failed', {
         issueId: ctx.issue.id,
@@ -635,23 +606,48 @@ export class IntegrateStageRunner extends BaseStageRunner {
     ];
   }
 
-  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
-    if (!this.integrateHealthGatePolicy.enabled || !this.integrateHealthGatePolicy.autoFix) {
-      return [];
-    }
-    return [{
-      checkName: 'health:integrate',
-      fixTaskId: 'fix-integrate-health',
-      maxAttempts: this.integrateHealthGatePolicy.maxFixAttempts,
-    }];
-  }
-
-  protected async runFixTask(
+  protected async executeReportedTask(
     ctx: StageContext,
     taskId: string,
-    failedCheck: CheckResult,
+    failedCheck: CheckResult | undefined,
     attempt: number,
   ): Promise<StageTaskResult | null> {
+    if (taskId === 'integrate:spec-sync' || taskId === 'integrate:archive-change' || taskId === 'integrate:merge') {
+      const steps: IntegrateStepResult[] = [];
+      this.emitIntegrationStarted(ctx);
+      const integration = this.resolveIntegrationContext(ctx);
+
+      if (taskId === 'integrate:spec-sync') {
+        const result = await this.runSpecSyncStep(ctx, steps, {
+          effectiveChangeDir: integration.effectiveChangeDir,
+          isAlreadyArchived: integration.isAlreadyArchived,
+          projectPath: integration.projectPath,
+        }, false);
+        return result ? this.stepToTaskResult(result) : null;
+      }
+
+      if (taskId === 'integrate:archive-change') {
+        const result = await this.runArchiveStep(ctx, steps, {
+          effectiveChangeDir: integration.effectiveChangeDir,
+          isAlreadyArchived: integration.isAlreadyArchived,
+          expectedArchivePath: integration.expectedArchivePath,
+          projectPath: integration.projectPath,
+        }, false);
+        return result ? this.stepToTaskResult(result) : null;
+      }
+
+      const result = await this.runMergeStep(ctx, steps, false);
+      if (result?.status === 'completed') {
+        ctx.eventBus.emit('integration_completed', {
+          issueId: ctx.issue.id,
+          projectId: ctx.issue.projectId,
+          issueNumber: ctx.issue.number,
+          steps: steps.map(s => ({ step: s.step, status: s.status, output: s.output })),
+        });
+      }
+      return result ? this.stepToTaskResult(result) : null;
+    }
+
     if (taskId !== 'fix-integrate-health') return null;
     return runHealthFixTask(ctx, {
       taskId: 'fix-integrate-health',
@@ -659,7 +655,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
       stage: 'integrate',
       worktreePath: this.worktreePath,
       healthCommand: this.integrateHealthGatePolicy.command,
-      failedCheck,
+      failedCheck: failedCheck ?? { name: 'health:integrate', status: 'fail' },
       attempt,
     });
   }

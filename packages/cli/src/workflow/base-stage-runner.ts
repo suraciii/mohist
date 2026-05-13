@@ -26,9 +26,75 @@ export abstract class BaseStageRunner implements StageRunner {
   }
 
   protected async runFixTask(
+    ctx: StageContext,
+    taskId: string,
+    failedCheck: CheckResult,
+    attempt: number,
+  ): Promise<StageTaskResult | null> {
+    return this.executeReportedTask(ctx, taskId, failedCheck, attempt);
+  }
+
+  protected async beforeRecheckAfterFix(
+    _ctx: StageContext,
+    _checkName: string,
+    _fixTaskId: string,
+  ): Promise<void> {
+    // Optional legacy hook for runners that must invalidate stale artifacts before rechecking.
+  }
+
+  async executeTaskWork(ctx: StageContext, taskId: string, options: { failedCheck?: CheckResult; attempt?: number } = {}): Promise<StageTaskResult | null> {
+    const result = await this.executeReportedTask(ctx, taskId, options.failedCheck, options.attempt ?? 1);
+    if (result) this.appendTaskResult(ctx, result);
+    return result;
+  }
+
+  async executeCheckWork(ctx: StageContext, checkName: string): Promise<CheckResult> {
+    if (ctx.workflowApplicationService && this.isApprovalCheck(checkName)) {
+      const output = this.buildApprovalOutput(ctx, []);
+      if (output && typeof output === 'object' && 'error' in output) {
+        return { name: checkName, status: 'fail', message: String((output as { error: unknown }).error) };
+      }
+      ctx.workflowApplicationService.approveStage({
+        issueId: ctx.issue.id,
+        stage: ctx.issue.stage,
+        approval: { output },
+      });
+      return { name: checkName, status: 'pass', output };
+    }
+
+    const check = [...this.getPreTaskChecks(), ...this.getChecks()].find(candidate => candidate.name === checkName);
+    if (!check) throw new Error(`Check ${checkName} is not registered for stage ${ctx.issue.stage}`);
+
+    const result = await check.run(this.buildCheckContext(ctx));
+    this.persistCheckResults(ctx, [result]);
+    return result;
+  }
+
+  protected failedCheckForRequestedTask(ctx: StageContext): CheckResult | undefined {
+    const checkName = ctx.requestedTask?.causedBy?.checkName;
+    if (!checkName) return undefined;
+    const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
+    const check = stageRun?.checks.find(candidate => candidate.checkName === checkName);
+    if (!check) return undefined;
+    const status = check.status === 'passed'
+      ? 'pass'
+      : check.status === 'pending' || check.status === 'running'
+        ? 'pending'
+        : check.status === 'error'
+          ? 'error'
+          : 'fail';
+    return {
+      name: check.checkName,
+      status,
+      message: check.message ?? ctx.requestedTask?.reason ?? ctx.requestedTask?.causedBy?.message,
+      output: check.output ?? undefined,
+    };
+  }
+
+  protected async executeReportedTask(
     _ctx: StageContext,
     _taskId: string,
-    _failedCheck: CheckResult,
+    _failedCheck: CheckResult | undefined,
     _attempt: number,
   ): Promise<StageTaskResult | null> {
     return null;
@@ -38,12 +104,6 @@ export abstract class BaseStageRunner implements StageRunner {
     return false;
   }
 
-  protected async beforeRecheckAfterFix(
-    _ctx: StageContext,
-    _checkName: string,
-    _fixTaskId: string,
-  ): Promise<void> {}
-
   private stageExecutionId?: string;
 
   protected getStageExecutionId(): string | undefined {
@@ -51,25 +111,53 @@ export abstract class BaseStageRunner implements StageRunner {
   }
 
   protected appendTaskResult(ctx: StageContext, result: StageTaskResult): void {
-    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
-    try {
-      ctx.stageExecutionRepo.appendTaskResult(this.stageExecutionId, result);
-    } catch (e) {
-      log.warn('appendTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
+    if (this.stageExecutionId && ctx.stageExecutionRepo) {
+      try {
+        ctx.stageExecutionRepo.appendTaskResult(this.stageExecutionId, result);
+      } catch (e) {
+        log.warn('appendTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
+      }
     }
     this.mirrorTaskResult(ctx, result);
+    this.reportTaskResult(ctx, result);
   }
 
   async run(ctx: StageContext): Promise<StageRunResult> {
-    this.stageExecutionId = undefined;
-
-    if (ctx.workflowRunService && ctx.workflowRun) {
-      try {
-        ctx.workflowRunService.setStageStarted(ctx.workflowRun.id, ctx.issue.stage);
-      } catch (e) {
-        log.warn('setStageStarted failed', { error: e instanceof Error ? e.message : String(e) });
+    if (ctx.requestedWork?.kind === 'task') {
+      const result = await this.executeTaskWork(ctx, ctx.requestedWork.taskId, {
+        failedCheck: this.failedCheckForRequestedTask(ctx),
+        attempt: (ctx.requestedTask?.attempts ?? 0) + 1,
+      });
+      if (!result) {
+        return {
+          success: false,
+          output: null,
+          checkResults: [],
+          message: `Task ${ctx.requestedWork.taskId} is not executable by ${this.constructor.name}`,
+        };
       }
+      return {
+        success: result?.status !== 'failed',
+        output: result?.output ?? null,
+        checkResults: [],
+        message: result?.status === 'failed' ? result.reason ?? `Task ${ctx.requestedWork.taskId} failed` : undefined,
+      };
     }
+
+    if (ctx.requestedWork?.kind === 'check') {
+      const result = await this.executeCheckWork(ctx, ctx.requestedWork.checkName);
+      return {
+        success: result.status === 'pass' || result.status === 'pending',
+        output: result.output ?? null,
+        checkResults: [result],
+        message: result.status === 'pass' || result.status === 'pending'
+          ? undefined
+          : result.message ?? `Check "${result.name}" ${result.status}`,
+      };
+    }
+
+    this.stageExecutionId = undefined;
+    this.reportedCheckResultCount = 0;
 
     if (ctx.stageExecutionRepo) {
       try {
@@ -108,8 +196,6 @@ export abstract class BaseStageRunner implements StageRunner {
     try {
       taskOutput = await this.executeTasks(ctx);
     } catch (err: any) {
-      const checkResults: CheckResult[] = [];
-      this.persistCheckResults(ctx, checkResults);
       this.updateStageExecutionStatus(ctx, 'failed');
       return {
         success: false,
@@ -149,189 +235,221 @@ export abstract class BaseStageRunner implements StageRunner {
 
     this.persistCheckResults(ctx, results);
 
-    const classification = this.classifyPhaseResults(results);
-
-    if (classification.unrepairedFailures.length > 0) {
-      const first = classification.unrepairedFailures[0];
-      const failedCheck = checks.find(c => c.name === first.name);
-      if (failedCheck) {
-        return this.handleCheckFailure(ctx, failedCheck, first, results, taskOutput, isPreTask, checks);
+    const firstBlockingResult = results.find(r => r.status !== 'pass');
+    if (firstBlockingResult) {
+      if (firstBlockingResult.status === 'pending' && this.isApprovalCheck(firstBlockingResult.name)) {
+        if (!ctx.workflowApplicationService) {
+          const approval = await this.prepareApproval(ctx, results);
+          if (!approval.ok) {
+            return {
+              success: false,
+              output: taskOutput,
+              checkResults: results,
+              message: approval.message,
+            };
+          }
+          this.requestApproval(ctx, approval.output);
+        }
       }
-    }
 
-    if (classification.repairableFailures.length > 0) {
-      const first = classification.repairableFailures[0];
-      const failedCheck = checks.find(c => c.name === first.name);
-      if (failedCheck) {
-        return this.handleCheckFailure(ctx, failedCheck, first, results, taskOutput, isPreTask, checks);
+      if (!ctx.workflowApplicationService && firstBlockingResult.status !== 'pending') {
+        const repaired = await this.tryLegacyRepair(ctx, priorResults, checks, taskOutput, firstBlockingResult);
+        if (repaired) return repaired;
       }
-    }
 
-    if (classification.pendingApproval) {
-      return this.handleApprovalCheck(ctx, checks.find(c => c.name === 'user-approval')!, classification.pendingApproval, results, taskOutput);
+      return {
+        success: false,
+        output: taskOutput,
+        checkResults: results,
+        message: firstBlockingResult.message ?? `Check "${firstBlockingResult.name}" ${firstBlockingResult.status}`,
+      };
     }
 
     return {
       success: true,
-      nextStage: isPreTask ? undefined : this.getNextStage(),
       output: isPreTask ? undefined : taskOutput,
       checkResults: results,
     };
   }
 
-  private classifyPhaseResults(results: CheckResult[]): {
-    repairableFailures: CheckResult[];
-    unrepairedFailures: CheckResult[];
-    pendingApproval: CheckResult | undefined;
-  } {
-    const policies = this.getCheckFailurePolicies();
-    const repairableFailures: CheckResult[] = [];
-    const unrepairedFailures: CheckResult[] = [];
-    let pendingApproval: CheckResult | undefined;
-
-    for (const r of results) {
-      if (r.status === 'pass') continue;
-      if (r.status === 'pending' && this.isApprovalCheck(r.name)) {
-        pendingApproval = r;
-        continue;
-      }
-      if (r.status === 'pending') continue;
-
-      const hasPolicy = policies.some(p => p.checkName === r.name);
-      if (hasPolicy) {
-        repairableFailures.push(r);
-      } else {
-        unrepairedFailures.push(r);
-      }
-    }
-
-    return { repairableFailures, unrepairedFailures, pendingApproval };
-  }
-
-  private async handleCheckFailure(
+  private async tryLegacyRepair(
     ctx: StageContext,
-    check: Check,
-    result: CheckResult,
-    allResults: CheckResult[],
+    priorResults: CheckResult[],
+    checks: Check[],
     taskOutput: unknown,
-    isPreTask: boolean,
-    activeChecks: Check[],
-  ): Promise<StageRunResult> {
-    if (this.isApprovalCheck(check.name)) {
-      return this.handleApprovalCheck(ctx, check, result, allResults, taskOutput);
-    }
+    failedCheck: CheckResult,
+  ): Promise<StageRunResult | null> {
+    const policy = this.getCheckFailurePolicies().find(candidate => candidate.checkName === failedCheck.name);
+    if (!policy) return null;
 
-    const policies = this.getCheckFailurePolicies();
-    const policy = policies.find(p => p.checkName === check.name);
-
-    if (!policy) {
-      return {
-        success: false,
-        output: taskOutput,
-        checkResults: allResults,
-        message: result.message ?? `Check "${check.name}" failed`,
-      };
-    }
-
-    return this.runFixAndRecheck(ctx, check, result, allResults, taskOutput, isPreTask, activeChecks, policy, 0);
-  }
-
-  private async runFixAndRecheck(
-    ctx: StageContext,
-    check: Check,
-    failedResult: CheckResult,
-    allResults: CheckResult[],
-    taskOutput: unknown,
-    isPreTask: boolean,
-    activeChecks: Check[],
-    policy: CheckFailurePolicy,
-    attempt: number,
-  ): Promise<StageRunResult> {
-    if (attempt >= policy.maxAttempts) {
-      return {
-        success: false,
-        output: taskOutput,
-        checkResults: allResults,
-        message: failedResult.message ?? `Check "${check.name}" failed after ${policy.maxAttempts} fix attempt(s)`,
-      };
-    }
-
-    const fixResult = await this.runFixTask(ctx, policy.fixTaskId, failedResult, attempt + 1);
-
-    if (fixResult) {
-      this.appendTaskResult(ctx, fixResult);
-      if (fixResult.status !== 'completed') {
+    const accumulatedResults = [...priorResults, failedCheck];
+    let lastResults: CheckResult[] = [];
+    for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
+      const fixResult = await this.runFixTask(ctx, policy.fixTaskId, failedCheck, attempt);
+      if (fixResult) this.appendTaskResult(ctx, fixResult);
+      if (fixResult?.status === 'failed') {
         return {
           success: false,
           output: taskOutput,
-          checkResults: allResults,
-          message: `${fixResult.title} failed`,
+          checkResults: accumulatedResults,
+          message: fixResult?.reason ?? `${fixResult?.title ?? policy.fixTaskId} failed`,
+        };
+      }
+
+      await this.beforeRecheckAfterFix(ctx, failedCheck.name, policy.fixTaskId);
+
+      lastResults = [...priorResults];
+      for (const check of checks) {
+        lastResults.push(await check.run(this.buildCheckContext(ctx)));
+      }
+      accumulatedResults.push(...lastResults.slice(priorResults.length));
+      this.persistCheckResults(ctx, accumulatedResults);
+
+      const nextBlocking = lastResults.find(r => r.status !== 'pass');
+      if (!nextBlocking) {
+        return {
+          success: true,
+          output: taskOutput,
+          checkResults: accumulatedResults,
+        };
+      }
+      if (nextBlocking.name !== failedCheck.name || nextBlocking.status === 'pending') {
+        if (nextBlocking.status === 'pending' && this.isApprovalCheck(nextBlocking.name)) {
+          const approvalResults = await this.convergeReviewForApproval(ctx, accumulatedResults);
+          if (!approvalResults.ok) {
+            return {
+              success: false,
+              output: taskOutput,
+              checkResults: accumulatedResults,
+              message: approvalResults.message,
+            };
+          }
+          const approval = await this.prepareApproval(ctx, approvalResults.results);
+          if (!approval.ok) {
+            return {
+              success: false,
+              output: taskOutput,
+              checkResults: approvalResults.results,
+              message: approval.message,
+            };
+          }
+          this.requestApproval(ctx, approval.output);
+          return {
+            success: false,
+            output: taskOutput,
+            checkResults: approvalResults.results,
+            message: nextBlocking.message ?? `Check "${nextBlocking.name}" ${nextBlocking.status}`,
+          };
+        }
+        return {
+          success: false,
+          output: taskOutput,
+          checkResults: accumulatedResults,
+          message: nextBlocking.message ?? `Check "${nextBlocking.name}" ${nextBlocking.status}`,
         };
       }
     }
 
-    await this.beforeRecheckAfterFix(ctx, check.name, policy.fixTaskId);
+    const finalBlocking = lastResults.find(r => r.status !== 'pass') ?? failedCheck;
+    return {
+      success: false,
+      output: taskOutput,
+      checkResults: accumulatedResults,
+      message: finalBlocking.message ?? `Check "${finalBlocking.name}" ${finalBlocking.status}`,
+    };
+  }
 
-    const checkCtx = this.buildCheckContext(ctx);
-    const recheckResult = await check.run(checkCtx);
+  private async convergeReviewForApproval(
+    ctx: StageContext,
+    checkResults: CheckResult[],
+  ): Promise<{ ok: true; results: CheckResult[] } | { ok: false; message: string }> {
+    if (ctx.issue.stage !== Stage.Check) return { ok: true, results: checkResults };
 
-    const nextResults = [...allResults, recheckResult];
+    const latestReviewPassed = getLatestCheckResult(checkResults, 'review-passed');
+    const reviewOutput = latestReviewPassed?.output as { verdict?: string; snapshotSha?: string } | undefined;
+    if (reviewOutput?.verdict !== 'PASS' || reviewOutput.snapshotSha) {
+      return { ok: true, results: checkResults };
+    }
 
-    if (recheckResult.status === 'pass') {
-      const continuedResults = [...nextResults];
-      this.persistCheckResults(ctx, continuedResults);
-
-      if (isPreTask) {
-        return {
-          success: true,
-          nextStage: undefined,
-          output: undefined,
-          checkResults: continuedResults,
-        };
+    try {
+      const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+      const worktreePath = project
+        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+        : null;
+      if (!worktreePath) {
+        return { ok: false, message: 'Cannot request check approval: worktree not found for review convergence' };
       }
 
-      const currentIndex = activeChecks.findIndex(c => c.name === check.name);
-      const remaining = activeChecks.slice(currentIndex + 1);
-
-      for (const nextCheck of remaining) {
-        const nextResult = await nextCheck.run(checkCtx);
-        continuedResults.push(nextResult);
-        if (nextResult.status !== 'pass') {
-          this.persistCheckResults(ctx, continuedResults);
-          return this.handleCheckFailure(ctx, nextCheck, nextResult, continuedResults, taskOutput, isPreTask, activeChecks);
-        }
+      const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
+      if (!convergence.success) {
+        return { ok: false, message: convergence.error ?? 'Convergence commit failed' };
       }
 
       return {
-        success: true,
-        nextStage: this.getNextStage(),
-        output: taskOutput,
-        checkResults: continuedResults,
+        ok: true,
+        results: this.persistAuthoritativeReview(ctx, checkResults, { snapshotSha: convergence.headSha }),
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
       };
     }
-
-    const updatedResults = [...nextResults];
-    this.persistCheckResults(ctx, updatedResults);
-
-    return this.runFixAndRecheck(ctx, check, recheckResult, updatedResults, taskOutput, isPreTask, activeChecks, policy, attempt + 1);
   }
 
-  private findProjectSafe(ctx: StageContext) {
-    const projectRepo = ctx.projectRepo;
-    return projectRepo && typeof projectRepo.findById === 'function'
-      ? projectRepo.findById(ctx.issue.projectId)
-      : null;
+  private async prepareApproval(ctx: StageContext, allResults: CheckResult[]): Promise<{ ok: true; output: unknown } | { ok: false; message: string }> {
+    if (ctx.issue.stage === Stage.Check) {
+      const latestReviewPassed = getLatestCheckResult(allResults, 'review-passed');
+      if (!latestReviewPassed) return { ok: false, message: 'Cannot request check approval: no review result found' };
+      const reviewOutput = latestReviewPassed.output as { verdict?: string; snapshotSha?: string } | undefined;
+      if (reviewOutput?.verdict === 'PASS' && !reviewOutput.snapshotSha) {
+        return { ok: false, message: 'Cannot request check approval: review snapshot has not been converged' };
+      }
+    }
+
+    const output = this.buildApprovalOutput(ctx, allResults);
+    if (output && typeof output === 'object' && 'error' in output) {
+      return { ok: false, message: String((output as { error: unknown }).error) };
+    }
+    return { ok: true, output };
   }
 
-  private async handleApprovalCheck(
-    ctx: StageContext,
-    _check: Check,
-    result: CheckResult,
-    allResults: CheckResult[],
-    taskOutput: unknown,
-  ): Promise<StageRunResult> {
+  private requestApproval(ctx: StageContext, output: unknown): void {
+    const requestedAt = new Date().toISOString();
+    try {
+      ctx.issueRepo.setApprovalState(ctx.issue.id, {
+        stage: ctx.issue.stage,
+        status: 'awaiting',
+        output,
+        requestedAt,
+      });
+    } catch (e) {
+      log.warn('setApprovalState failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+    if (ctx.stageStateService) {
+      try {
+        ctx.stageStateService.setApproval(ctx.issue.id, ctx.issue.stage, {
+          status: 'awaiting',
+          output,
+          requestedAt,
+        });
+      } catch (e) {
+        log.warn('stageStateService.setApproval failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    try {
+      ctx.eventBus.emit('approval_requested', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        stage: ctx.issue.stage,
+      });
+    } catch (e) {
+      log.warn('approval_requested emit failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  protected buildApprovalOutput(ctx: StageContext, allResults: CheckResult[]): unknown {
     let approvalOutput: unknown = null;
-    let effectiveResults = allResults;
 
     if (ctx.issue.stage === Stage.Plan) {
       const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
@@ -352,57 +470,25 @@ export abstract class BaseStageRunner implements StageRunner {
     } else if (ctx.issue.stage === Stage.Check) {
       const reviewPassedResult = getLatestCheckResult(allResults, 'review-passed');
       if (!reviewPassedResult?.output) {
-        return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: 'Cannot request check approval: no review result found',
-        };
+        return { error: 'Cannot request check approval: no review result found' };
       }
 
       const reviewOutput = reviewPassedResult.output as { verdict?: string; reviewReport?: string };
       if (reviewOutput.verdict !== 'PASS') {
-        return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: `Cannot request check approval: latest review verdict is ${reviewOutput.verdict ?? 'unknown'}, expected PASS`,
-        };
+        return { error: `Cannot request check approval: latest review verdict is ${reviewOutput.verdict ?? 'unknown'}, expected PASS` };
       }
 
       const mergeReadyResult = getLatestCheckResult(allResults, 'merge-ready');
       if (!mergeReadyResult || mergeReadyResult.status !== 'pass') {
         return {
-          success: false,
-          output: taskOutput,
-          checkResults: allResults,
-          message: mergeReadyResult
+          error: mergeReadyResult
             ? `Cannot request check approval: merge-ready is ${mergeReadyResult.status}`
             : 'Cannot request check approval: merge-ready check has not run',
         };
       }
 
-      const project = this.findProjectSafe(ctx);
-      const worktreePath = project
-        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
-        : null;
-
-      if (worktreePath && typeof ctx.worktreeManager.createCheckConvergenceCommit === 'function') {
-        const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
-        if (!convergence.success) {
-          return {
-            success: false,
-            output: taskOutput,
-            checkResults: allResults,
-            message: convergence.error ?? 'Cannot request check approval: uncommitted auto-fix or review artifact changes prevented approval',
-          };
-        }
-
-        effectiveResults = this.convergeSnapshot(ctx, allResults, convergence.headSha);
-      }
-
       const dimensions = reviewOutput.reviewReport ? parseDimensions(reviewOutput.reviewReport) : undefined;
-      const latestReviewPassed = getLatestCheckResult(effectiveResults, 'review-passed');
+      const latestReviewPassed = getLatestCheckResult(allResults, 'review-passed');
       const snapshotSha = (latestReviewPassed?.output as { snapshotSha?: string } | undefined)?.snapshotSha;
       approvalOutput = {
         result: reviewOutput.verdict,
@@ -412,50 +498,7 @@ export abstract class BaseStageRunner implements StageRunner {
       };
     }
 
-    ctx.issueRepo.setApprovalState(ctx.issue.id, {
-      stage: ctx.issue.stage,
-      status: 'awaiting',
-      output: approvalOutput,
-      requestedAt: new Date().toISOString(),
-    });
-
-    if (ctx.stageStateService) {
-      try {
-        ctx.stageStateService.setApproval(ctx.issue.id, ctx.issue.stage, {
-          status: 'awaiting',
-          output: approvalOutput,
-          requestedAt: new Date().toISOString(),
-        });
-      } catch (e) {
-        log.warn('setApproval failed', { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-
-    ctx.eventBus.emit('approval_requested', {
-      issueId: ctx.issue.id,
-      projectId: ctx.issue.projectId,
-      stage: ctx.issue.stage,
-    });
-
-    if (ctx.workflowRunService && ctx.workflowRun) {
-      try {
-        ctx.workflowRunService.setApproval(ctx.workflowRun.id, ctx.issue.stage, {
-          status: 'awaiting',
-          output: approvalOutput,
-          requestedAt: new Date().toISOString(),
-          respondedAt: null,
-        });
-      } catch (e) {
-        log.warn('workflowRun setApproval failed', { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-
-    return {
-      success: false,
-      output: taskOutput,
-      checkResults: effectiveResults,
-      message: result.message ?? `User approval required`,
-    };
+    return approvalOutput;
   }
 
   private updateStageExecutionStatus(ctx: StageContext, status: StageExecutionStatus): void {
@@ -470,21 +513,6 @@ export abstract class BaseStageRunner implements StageRunner {
         ctx.stageStateService.setStageStatus(ctx.issue.id, ctx.issue.stage, status as StageStateStatus);
       } catch (e) {
         log.warn('setStageStatus failed', { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    if (ctx.workflowRunService && ctx.workflowRun) {
-      try {
-        if (status === 'running') {
-          ctx.workflowRunService.setStageStarted(ctx.workflowRun.id, ctx.issue.stage);
-        } else if (status === 'passed') {
-          ctx.workflowRunService.setStagePassed(ctx.workflowRun.id, ctx.issue.stage);
-        } else if (status === 'failed') {
-          ctx.workflowRunService.setStageFailed(ctx.workflowRun.id, ctx.issue.stage);
-        } else if (status === 'awaiting-approval') {
-          ctx.workflowRunService.setStageAwaitingApproval(ctx.workflowRun.id, ctx.issue.stage);
-        }
-      } catch (e) {
-        log.warn('workflowRun stage status update failed', { error: e instanceof Error ? e.message : String(e) });
       }
     }
   }
@@ -512,8 +540,13 @@ export abstract class BaseStageRunner implements StageRunner {
       output: updatedOutput,
     };
 
-    const updatedResults = checkResults.filter(r => r.name !== 'review-passed');
-    updatedResults.push(updatedResult);
+    const updatedResults = [...checkResults];
+    for (let i = updatedResults.length - 1; i >= 0; i--) {
+      if (updatedResults[i].name === 'review-passed') {
+        updatedResults[i] = updatedResult;
+        break;
+      }
+    }
 
     this.persistCheckResults(ctx, updatedResults);
     this.updateCheckSuiteReviewPassed(ctx, authoritative);
@@ -542,56 +575,6 @@ export abstract class BaseStageRunner implements StageRunner {
     }
   }
 
-  private convergeSnapshot(ctx: StageContext, checkResults: CheckResult[], snapshotSha: string): CheckResult[] {
-    const updated = [...checkResults];
-    let latestIdx = -1;
-    for (let i = updated.length - 1; i >= 0; i--) {
-      if (updated[i].name === 'review-passed') {
-        latestIdx = i;
-        break;
-      }
-    }
-
-    if (latestIdx >= 0) {
-      const existing = updated[latestIdx];
-      updated[latestIdx] = {
-        ...existing,
-        output: {
-          ...((existing.output as Record<string, unknown>) ?? {}),
-          snapshotSha,
-          convergedAt: new Date().toISOString(),
-        },
-      };
-    }
-
-    this.persistCheckResults(ctx, updated);
-
-    if (latestIdx >= 0) {
-      this.convergeCheckSuite(ctx, snapshotSha, updated[latestIdx]);
-    }
-
-    return updated;
-  }
-
-  private convergeCheckSuite(ctx: StageContext, snapshotSha: string, reviewPassedResult: CheckResult): void {
-    if (!ctx.checkSuiteRepo) return;
-    try {
-      const suite = ctx.checkSuiteRepo.findActiveByIssueId(ctx.issue.id);
-      if (!suite) return;
-
-      const output = (reviewPassedResult.output as Record<string, unknown>) ?? {};
-      ctx.checkSuiteRepo.updateChecks(suite.id, 'review-passed', {
-        status: 'passed',
-        output,
-        ranAt: (output.convergedAt as string) ?? new Date().toISOString(),
-      });
-
-      ctx.checkSuiteRepo.updateSnapshotShaPreservingChecks(suite.id, snapshotSha);
-    } catch (e) {
-      log.warn('convergeCheckSuite failed', { error: e instanceof Error ? e.message : String(e) });
-    }
-  }
-
   private buildCheckContext(ctx: StageContext): CheckContext {
     const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
     return {
@@ -609,16 +592,19 @@ export abstract class BaseStageRunner implements StageRunner {
   }
 
   private persistCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {
-    if (!this.stageExecutionId || !ctx.stageExecutionRepo) return;
-    try {
-      ctx.stageExecutionRepo.updateCheckResults(this.stageExecutionId, checkResults);
-    } catch (e) {
-      log.warn('persistCheckResults failed', { error: e instanceof Error ? e.message : String(e) });
+    if (this.stageExecutionId && ctx.stageExecutionRepo) {
+      try {
+        ctx.stageExecutionRepo.updateCheckResults(this.stageExecutionId, checkResults);
+      } catch (e) {
+        log.warn('persistCheckResults failed', { error: e instanceof Error ? e.message : String(e) });
+      }
     }
     this.mirrorCheckResults(ctx, checkResults);
+    this.reportNewCheckResults(ctx, checkResults);
   }
 
   private mirrorTaskResult(ctx: StageContext, result: StageTaskResult): void {
+    if (ctx.workflowApplicationService) return;
     if (!ctx.stageStateService) return;
     try {
       ctx.stageStateService.upsertTask(ctx.issue.id, ctx.issue.stage, {
@@ -634,28 +620,10 @@ export abstract class BaseStageRunner implements StageRunner {
     } catch (e) {
       log.warn('mirrorTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
     }
-    if (ctx.workflowRunService && ctx.workflowRun) {
-      try {
-        ctx.workflowRunService.upsertTask(ctx.workflowRun.id, ctx.issue.stage, {
-          taskId: result.taskId,
-          title: result.title,
-          status: result.status === 'completed' ? 'completed' : result.status === 'failed' ? 'failed' : 'skipped',
-          attempts: result.attempts,
-          duration: result.duration,
-          artifacts: result.artifacts,
-          output: result.output,
-          reason: result.reason ?? null,
-          causedByType: result.causedBy?.type ?? null,
-          causedByCheckName: result.causedBy?.checkName ?? null,
-          causedByTaskId: result.causedBy?.taskId ?? null,
-        });
-      } catch (e) {
-        log.warn('workflowRun upsertTask failed', { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
   }
 
   private mirrorCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {
+    if (ctx.workflowApplicationService) return;
     if (!ctx.stageStateService) return;
     const seen = new Map<string, CheckResult>();
     for (const cr of checkResults) {
@@ -673,20 +641,50 @@ export abstract class BaseStageRunner implements StageRunner {
         log.warn('mirrorCheckResult failed', { checkName: cr.name, error: e instanceof Error ? e.message : String(e) });
       }
     }
-    if (ctx.workflowRunService && ctx.workflowRun) {
-      try {
-        for (const [, cr] of seen) {
-          ctx.workflowRunService.upsertCheck(ctx.workflowRun.id, ctx.issue.stage, {
-            checkName: cr.name,
-            title: cr.name,
-            status: cr.status === 'pass' ? 'passed' : cr.status === 'fail' ? 'failed' : cr.status === 'error' ? 'error' : 'pending',
-            message: cr.message ?? null,
-            output: cr.output,
-          });
-        }
-      } catch (e) {
-        log.warn('workflowRun upsertCheck failed', { error: e instanceof Error ? e.message : String(e) });
-      }
+  }
+
+  private reportTaskResult(ctx: StageContext, result: StageTaskResult): void {
+    if (!ctx.workflowApplicationService) return;
+    ctx.workflowApplicationService.completeTask({
+      issueId: ctx.issue.id,
+      stage: ctx.issue.stage,
+      taskId: result.taskId,
+      result: {
+        status: result.status,
+        attempts: result.attempts,
+        duration: result.duration,
+        artifacts: result.artifacts,
+        output: result.output,
+        reason: result.reason,
+        causedBy: result.causedBy,
+      },
+    });
+  }
+
+  private reportedCheckResultCount = 0;
+
+  private reportNewCheckResults(ctx: StageContext, checkResults: CheckResult[]): void {
+    if (!ctx.workflowApplicationService) return;
+    const pending = ctx.requestedWork?.kind === 'check'
+      ? checkResults
+      : checkResults.slice(this.reportedCheckResultCount);
+    this.reportedCheckResultCount = ctx.requestedWork?.kind === 'check'
+      ? 0
+      : checkResults.length;
+    for (const result of pending) {
+      const output = this.isApprovalCheck(result.name) && result.status === 'pending'
+        ? this.buildApprovalOutput(ctx, checkResults)
+        : result.output;
+      ctx.workflowApplicationService.recordCheckResult({
+        issueId: ctx.issue.id,
+        stage: ctx.issue.stage,
+        result: {
+          name: result.name,
+          status: result.status,
+          message: result.message,
+          output,
+        },
+      });
     }
   }
 

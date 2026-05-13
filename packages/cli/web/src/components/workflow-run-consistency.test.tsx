@@ -54,7 +54,7 @@ function makeWorkflowRun(stageRuns: WorkflowStageRun[]): WorkflowRun {
   }
 }
 
-function makeWorkflowTasks(overrides: { taskId: string; title: string; status: string }[]): any[] {
+function makeWorkflowTasks(overrides: { taskId: string; title: string; status: string; reason?: string; causedBy?: unknown }[]): any[] {
   return overrides.map((t, i) => ({
     taskId: t.taskId,
     title: t.title,
@@ -64,8 +64,8 @@ function makeWorkflowTasks(overrides: { taskId: string; title: string; status: s
     duration: t.status === 'completed' ? 5000 : 0,
     artifacts: [],
     output: null,
-    reason: null,
-    causedBy: null,
+    reason: t.reason ?? null,
+    causedBy: t.causedBy ?? null,
     startedAt: null,
     completedAt: t.status === 'completed' ? '2026-01-01T00:00:00Z' : null,
   }))
@@ -188,7 +188,13 @@ describe('WorkflowRun-backed task and check data consistency', () => {
       makeWorkflowStageRun(
         Stage.Check,
         makeWorkflowTasks([
-          { taskId: 'fix-review-findings', title: 'Fix review findings', status: 'completed' },
+          {
+            taskId: 'fix-review-findings',
+            title: 'Fix review findings',
+            status: 'completed',
+            reason: 'Review passed failed',
+            causedBy: { type: 'check-failure', checkName: 'review-passed', message: 'Review passed failed' },
+          },
         ]),
         [],
       ),
@@ -205,6 +211,8 @@ describe('WorkflowRun-backed task and check data consistency', () => {
     )
 
     expect(screen.getAllByText('Fix review findings').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('reason').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByTitle('Review passed failed').length).toBeGreaterThanOrEqual(1)
   })
 
   it('checks appear in a separate check list, not in the task list', () => {
@@ -474,5 +482,116 @@ describe('WorkflowRun-backed task and check data consistency', () => {
     fireEvent.click(screen.getByRole('button', { name: /integrate/i }))
     expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryAllByText('Health Gate: integrate')).toHaveLength(0)
+  })
+
+  it('completed Issue Detail shows Integrate delivery metadata from WorkflowRun', () => {
+    const mergeOutput = {
+      targetBranch: 'main',
+      baseSha: 'base1234',
+      candidateHeadSha: 'head5678',
+      landedSha: 'landed99',
+      rebased: false,
+    }
+    const workflowRun = makeWorkflowRun([
+      {
+        ...makeWorkflowStageRun(
+          Stage.Integrate,
+          makeIntegrateTasks([
+            { taskId: 'integrate:spec-sync', title: 'Sync specs', status: 'completed' },
+            { taskId: 'integrate:archive-change', title: 'Archive change', status: 'completed' },
+            { taskId: 'integrate:merge', title: 'Merge branch', status: 'completed' },
+          ]).map((task) => task.taskId === 'integrate:merge' ? { ...task, output: mergeOutput } : task),
+          makeWorkflowChecks([
+            { checkName: 'health:integrate', title: 'Post-merge health check', status: 'passed' },
+          ]),
+        ),
+        deliveryMetadata: {
+          specSync: { status: 'completed', output: null },
+          archive: { status: 'completed', output: { archivePath: 'openspec/changes/archive/188' } },
+          merge: { status: 'completed', output: mergeOutput, ...mergeOutput },
+          health: { status: 'passed', message: null, output: null },
+          frozen: true,
+        },
+      } as WorkflowStageRun,
+    ])
+    setupWorkflowRunMocks(workflowRun)
+
+    const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getByText('Integration Evidence')).toBeTruthy()
+    expect(screen.getAllByText('Spec Sync').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Archive OpenSpec Change').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Merge to Target Branch').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/main: base123 → head567 → landed9/)).toBeTruthy()
+    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('blocked Issue Detail keeps post-merge delivery metadata visible after final health failure', () => {
+    const mergeOutput = {
+      targetBranch: 'main',
+      baseSha: 'base1234',
+      candidateHeadSha: 'head5678',
+      landedSha: 'landed99',
+      rebased: true,
+    }
+    const workflowRun = makeWorkflowRun([
+      {
+        ...makeWorkflowStageRun(
+          Stage.Integrate,
+          makeIntegrateTasks([
+            { taskId: 'integrate:spec-sync', title: 'Sync specs', status: 'completed' },
+            { taskId: 'integrate:archive-change', title: 'Archive change', status: 'completed' },
+            { taskId: 'integrate:merge', title: 'Merge branch', status: 'completed' },
+          ]).map((task) => task.taskId === 'integrate:merge' ? { ...task, output: mergeOutput } : task),
+          [
+            {
+              checkName: 'health:integrate',
+              title: 'Post-merge health check',
+              status: 'failed',
+              message: 'post-merge build failed',
+              output: { manualIntervention: true },
+              runCount: 1,
+              lastRunAt: null,
+            },
+          ],
+        ),
+        status: 'failed',
+        failure: {
+          reason: 'post-merge-health-failed',
+          stage: Stage.Integrate,
+          checkName: 'health:integrate',
+          message: 'post-merge build failed',
+        },
+        deliveryMetadata: {
+          specSync: { status: 'completed', output: null },
+          archive: { status: 'completed', output: { archivePath: 'openspec/changes/archive/188' } },
+          merge: { status: 'completed', output: mergeOutput, ...mergeOutput },
+          health: { status: 'failed', message: 'post-merge build failed', output: { manualIntervention: true } },
+          frozen: true,
+        },
+      } as WorkflowStageRun,
+    ])
+    setupWorkflowRunMocks(workflowRun)
+
+    const issue = makeIssue({ stage: Stage.Integrate, status: IssueStatus.Blocked })
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PipelineView issue={issue} />
+      </QueryClientProvider>
+    )
+
+    expect(screen.getByText('Integration Evidence')).toBeTruthy()
+    expect(screen.getByText(/main: base123 → head567 → landed9/)).toBeTruthy()
+    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('post-merge build failed').length).toBeGreaterThanOrEqual(1)
   })
 })

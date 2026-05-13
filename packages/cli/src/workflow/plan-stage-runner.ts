@@ -8,7 +8,7 @@ import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-s
 import { readReportFile } from './utils';
 import { Log } from '../util/log';
 import { BaseStageRunner } from './base-stage-runner';
-import type { CheckFailurePolicy, CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
+import type { CheckResult, StageContext, StageRunResult, StageTaskResult } from './stage-context';
 import { emitStageTaskUpdate } from './stage-context';
 import type { Check } from './checks';
 import { ProposalCompleteCheck } from './checks/proposal-complete-check';
@@ -26,16 +26,6 @@ import { runPlanRepairTask } from './plan-repair-task';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
-
-const PLAN_ARTIFACT_CHECK_NAMES = [
-  'proposal-complete',
-  'specs-complete',
-  'design-complete',
-  'tasks-valid',
-  'self-review-passed',
-];
-
-const PLAN_REPAIR_MAX_ATTEMPTS = 1;
 
 interface TaskConfig {
   type: string;
@@ -66,31 +56,16 @@ export class PlanStageRunner extends BaseStageRunner {
     return checkName === 'user-approval';
   }
 
-  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
-    const policies: CheckFailurePolicy[] = PLAN_ARTIFACT_CHECK_NAMES.map(checkName => ({
-      checkName,
-      fixTaskId: 'repair-plan-artifacts',
-      maxAttempts: PLAN_REPAIR_MAX_ATTEMPTS,
-    }));
-
-    if (this.planHealthGatePolicy.enabled && this.planHealthGatePolicy.autoFix) {
-      policies.push({
-        checkName: 'health:plan',
-        fixTaskId: 'fix-plan-health',
-        maxAttempts: this.planHealthGatePolicy.maxFixAttempts,
-      });
-    }
-
-    return policies;
-  }
-
-  protected async runFixTask(
+  protected async executeReportedTask(
     ctx: StageContext,
     taskId: string,
-    failedCheck: CheckResult,
+    failedCheck: CheckResult | undefined,
     attempt: number,
   ): Promise<StageTaskResult | null> {
     if (taskId === 'repair-plan-artifacts') {
+      if (!failedCheck) {
+        return { taskId, title: 'Repair plan artifacts', status: 'failed', artifacts: [], attempts: attempt, duration: 0, reason: 'Missing failed check context' };
+      }
       return runPlanRepairTask(ctx, {
         worktreePath: this.worktreePath || process.cwd(),
         failedCheck,
@@ -98,6 +73,9 @@ export class PlanStageRunner extends BaseStageRunner {
       });
     }
     if (taskId === 'fix-plan-health') {
+      if (!failedCheck) {
+        return { taskId, title: 'Fix plan health', status: 'failed', artifacts: [], attempts: attempt, duration: 0, reason: 'Missing failed check context' };
+      }
       return runHealthFixTask(ctx, {
         taskId: 'fix-plan-health',
         title: 'Fix plan health',
@@ -108,26 +86,21 @@ export class PlanStageRunner extends BaseStageRunner {
         attempt,
       });
     }
-    return null;
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number)
+      || ctx.artifactManager.createChangeDir(ctx.issue.number, ctx.issue.title);
+    if (!changeDir) {
+      throw new Error(`Failed to get or create change directory for issue #${ctx.issue.number}`);
+    }
+
+    const tasks = this.createTaskConfigs(changeDir);
+    const taskIndex = tasks.findIndex(task => task.type === taskId);
+    if (taskIndex === -1) return null;
+
+    return this.executeSingleArtifactTask(ctx, tasks, taskIndex, changeDir);
   }
 
-  protected async executeTasks(ctx: StageContext): Promise<unknown> {
-    const { issue, acpOptions, artifactManager, eventBus, checkpointManager } = ctx;
-
-    const changeDir = artifactManager.getChangeDir(issue.number)
-      || artifactManager.createChangeDir(issue.number, issue.title);
-    if (!changeDir) {
-      throw new Error(`Failed to get or create change directory for issue #${issue.number}`);
-    }
-
-    if (isCurrentStageApproval(issue, Stage.Plan, 'approved')) {
-      checkpointManager.delete(issue.number, 'plan');
-      return { changeDir, skipped: true };
-    }
-
-    const resumeSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
-
-    const tasks: TaskConfig[] = [
+  private createTaskConfigs(changeDir: string): TaskConfig[] {
+    return [
       {
         type: 'proposal',
         label: 'proposal.md',
@@ -164,6 +137,106 @@ export class PlanStageRunner extends BaseStageRunner {
         buildPrompt: (iss, dir) => buildSelfReviewPrompt(iss, dir),
       },
     ];
+  }
+
+  private async executeSingleArtifactTask(
+    ctx: StageContext,
+    tasks: TaskConfig[],
+    taskIndex: number,
+    changeDir: string,
+  ): Promise<StageTaskResult> {
+    const { issue, acpOptions, eventBus, checkpointManager } = ctx;
+    const task = tasks[taskIndex];
+    const completedSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
+
+    if (completedSteps.includes(task.type) && task.verifyArtifact()) {
+      return { taskId: task.type, title: task.label, status: 'skipped', artifacts: [], attempts: 0, duration: 0 };
+    }
+    if (task.verifyArtifact()) {
+      checkpointManager.markStepComplete(issue.number, 'plan', task.type, tasks[taskIndex + 1]?.type ?? null);
+      return { taskId: task.type, title: task.label, status: 'skipped', artifacts: [task.label], attempts: 0, duration: 0 };
+    }
+
+    const wfObservers = createWorkflowSessionObservers({
+      eventBus: ctx.eventBus,
+      workflowLogRepo: ctx.workflowLogRepo,
+      sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+      coderSessionRepo: ctx.coderSessionRepo,
+      stage: 'plan',
+      title: 'Plan stage',
+    });
+    const session = await AgentSession.create({
+      ...acpOptions,
+      issueId: issue.id,
+      projectId: issue.projectId,
+      issueNumber: issue.number,
+      executionId: `plan-${issue.number}`,
+      stage: 'plan',
+      title: 'Plan stage',
+      observers: wfObservers,
+    });
+
+    const startedAt = Date.now();
+    let attempts = 1;
+    try {
+      emitRoundStart(eventBus, task.type, taskIndex, acpOptions, issue.projectId ?? '');
+      emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'started', attempts, []);
+      const result = await session.execute(task.buildPrompt(issue, changeDir), { kind: 'task', title: task.label });
+      if (!result.success) {
+        emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'failed', attempts, []);
+        return { taskId: task.type, title: task.label, status: 'failed', artifacts: [], attempts, duration: Date.now() - startedAt, reason: `Task "${task.label}" failed: ${result.error ?? 'unknown error'}` };
+      }
+      if (!task.verifyArtifact()) {
+        attempts++;
+        emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'retrying', attempts, []);
+        const retryPrompt = [
+          `The artifact file ${task.outputPath} was not found. You MUST create it now.`,
+          '',
+          `Use the write_file tool to write the ${task.type} artifact to:`,
+          task.outputPath,
+          '',
+          'This is a retry. The pipeline cannot continue without this file.',
+        ].join('\n');
+        const retryResult = await session.execute(retryPrompt, { kind: 'retry', title: task.label });
+        if (!retryResult.success || !task.verifyArtifact()) {
+          emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'failed', attempts, []);
+          return {
+            taskId: task.type,
+            title: task.label,
+            status: 'failed',
+            artifacts: [],
+            attempts,
+            duration: Date.now() - startedAt,
+            reason: retryResult.success ? `Artifact "${task.label}" not found after retry` : `Task "${task.label}" retry failed: ${retryResult.error ?? 'unknown error'}`,
+          };
+        }
+      }
+      const artifacts = task.verifyArtifact() ? [task.label] : [];
+      checkpointManager.markStepComplete(issue.number, 'plan', task.type, tasks[taskIndex + 1]?.type ?? null);
+      emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'completed', attempts, artifacts);
+      return { taskId: task.type, title: task.label, status: 'completed', artifacts, attempts, duration: Date.now() - startedAt };
+    } finally {
+      await session.close();
+    }
+  }
+
+  protected async executeTasks(ctx: StageContext): Promise<unknown> {
+    const { issue, acpOptions, artifactManager, eventBus, checkpointManager } = ctx;
+
+    const changeDir = artifactManager.getChangeDir(issue.number)
+      || artifactManager.createChangeDir(issue.number, issue.title);
+    if (!changeDir) {
+      throw new Error(`Failed to get or create change directory for issue #${issue.number}`);
+    }
+
+    if (isCurrentStageApproval(issue, Stage.Plan, 'approved')) {
+      checkpointManager.delete(issue.number, 'plan');
+      return { changeDir, skipped: true };
+    }
+
+    const resumeSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
+
+    const tasks = this.createTaskConfigs(changeDir);
 
     const completedSteps = [...resumeSteps];
 
@@ -418,15 +491,6 @@ export class PlanStageRunner extends BaseStageRunner {
     if (result.success) {
       const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
       const selfReviewReport = changeDir ? readReportFile(changeDir, 'self-review.md') : null;
-      if (ctx.workflowRunService && ctx.workflowRun) {
-        const tasksFile = ctx.artifactManager.readTasks(ctx.issue.number);
-        if (tasksFile?.tasks) {
-          ctx.workflowRunService.materializeBuildTasks(
-            ctx.workflowRun.id,
-            tasksFile.tasks.map(t => ({ id: t.id, title: t.title, order: t.order })),
-          );
-        }
-      }
       return {
         ...result,
         output: {

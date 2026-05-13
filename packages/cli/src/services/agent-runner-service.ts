@@ -19,6 +19,7 @@ import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { StageStateService } from './stage-state-service';
 import type { WorkflowRunService } from './workflow-run-service';
+import { WorkflowApplicationService } from './workflow-application-service';
 import { findChangeDir } from '../openspec/detector';
 import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
@@ -370,6 +371,23 @@ export class AgentRunnerService {
   private recoverSingleIssue(issue: Issue): void {
     if (!this.issueRepo) return;
     try {
+      const activeRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
+      if (activeRun) {
+        if (issue.stage !== activeRun.currentStage) {
+          this.issueRepo.updateStage(issue.id, activeRun.currentStage);
+        }
+        if (issue.status !== IssueStatus.Active) {
+          this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
+        }
+        this.issueRepo.updateBlockedReason(issue.id, null);
+        log.info('Recovered issue from active WorkflowRun aggregate state', {
+          issueNumber: issue.number,
+          stage: activeRun.currentStage,
+          action: 'stage/status projected from WorkflowRun, task/check state preserved',
+        });
+        return;
+      }
+
       const deliveryStatus = classifyMergeDelivery(issue);
       const isFalseDone = deliveryStatus === 'done-not-merged';
 
@@ -1160,6 +1178,9 @@ export class AgentRunnerService {
         new CheckStageRunner({ worktreePath }),
         new IntegrateStageRunner({ worktreePath }),
       ];
+      const workflowApplicationService = this.workflowRunService
+        ? new WorkflowApplicationService(this.workflowRunService.getDatabaseManager())
+        : undefined;
       const pipeline = new WorkflowEngine({
         runners,
         artifactManager,
@@ -1175,6 +1196,8 @@ export class AgentRunnerService {
         sessionStreamLogRepo: this.sessionStreamLogRepo,
         stageExecutionRepo: this.stageExecutionRepo,
         stageStateService: this.stageStateService,
+        workflowRunService: this.workflowRunService,
+        workflowApplicationService,
         config: load(),
       });
 

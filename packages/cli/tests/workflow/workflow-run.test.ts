@@ -3,7 +3,7 @@ import { DatabaseManager } from '../../src/db/database';
 import { initializeDatabase } from '../../src/db/migrations';
 import { ProjectRepo } from '../../src/db/project-repo';
 import { IssueRepo } from '../../src/db/issue-repo';
-import { WorkflowRunRepo } from '../../src/db/workflow-run-repo';
+import type { WorkflowRunWithStageRuns } from '../../src/db/workflow-run-repo';
 import { WorkflowRunService } from '../../src/services/workflow-run-service';
 import { Stage } from '../../src/types';
 
@@ -31,6 +31,69 @@ describe('WorkflowRun persistence', () => {
   afterEach(() => {
     db.close();
   });
+
+  function insertWorkflowTask(run: WorkflowRunWithStageRuns, stage: Stage, input: {
+    taskId: string;
+    title: string;
+    status?: string;
+    reason?: string | null;
+    causedByType?: string | null;
+    causedByCheckName?: string | null;
+    causedByTaskId?: string | null;
+  }): void {
+    const stageRun = run.stageRuns.find(candidate => candidate.stage === stage)!;
+    const now = new Date().toISOString();
+    db.run(
+      `INSERT INTO workflow_tasks
+       (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, attempts, duration, artifacts, output,
+        reason, caused_by_type, caused_by_check_name, caused_by_task_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, '[]', NULL, ?, ?, ?, ?, ?, ?)`,
+      [
+        `${stageRun.id}/${input.taskId}`,
+        run.id,
+        stageRun.id,
+        input.taskId,
+        input.title,
+        input.status ?? 'pending',
+        stageRun.tasks.length,
+        input.reason ?? null,
+        input.causedByType ?? null,
+        input.causedByCheckName ?? null,
+        input.causedByTaskId ?? null,
+        now,
+        now,
+      ],
+    );
+  }
+
+  function updateWorkflowCheck(run: WorkflowRunWithStageRuns, stage: Stage, input: {
+    checkName: string;
+    status: string;
+    message?: string | null;
+  }): void {
+    const stageRun = run.stageRuns.find(candidate => candidate.stage === stage)!;
+    const now = new Date().toISOString();
+    db.run(
+      `UPDATE workflow_checks SET status = ?, message = ?, run_count = run_count + 1, last_run_at = ?, updated_at = ?
+       WHERE stage_run_id = ? AND check_name = ?`,
+      [input.status, input.message ?? null, now, now, stageRun.id, input.checkName],
+    );
+  }
+
+  function setWorkflowApproval(run: WorkflowRunWithStageRuns, stage: Stage, input: {
+    status: string;
+    output: unknown;
+    requestedAt: string;
+    respondedAt?: string | null;
+  }): void {
+    const stageRun = run.stageRuns.find(candidate => candidate.stage === stage)!;
+    db.run(
+      `UPDATE workflow_stage_runs
+       SET approval_status = ?, approval_output = ?, approval_requested_at = ?, approval_responded_at = ?, updated_at = ?
+       WHERE id = ?`,
+      [input.status, JSON.stringify(input.output), input.requestedAt, input.respondedAt ?? null, new Date().toISOString(), stageRun.id],
+    );
+  }
 
   describe('startRun', () => {
     it('creates exactly one active WorkflowRun bound to issue id and issue number', () => {
@@ -63,9 +126,7 @@ describe('WorkflowRun persistence', () => {
       expect(run.stageRuns[3].stage).toBe(Stage.Integrate);
       expect(run.stageRuns[3].stageOrder).toBe(3);
 
-      for (const sr of run.stageRuns) {
-        expect(sr.status).toBe('pending');
-      }
+      expect(run.stageRuns.map(sr => sr.status)).toEqual(['running', 'pending', 'pending', 'pending']);
     });
 
     it('seeds Plan StageRun with proposal, specs, design, tasks, self-review tasks', () => {
@@ -139,7 +200,6 @@ describe('WorkflowRun persistence', () => {
       expect(checkNames).toContain('design-complete');
       expect(checkNames).toContain('tasks-valid');
       expect(checkNames).toContain('self-review-passed');
-      expect(checkNames).toContain('user-approval');
 
       for (const check of planStageRun.checks) {
         expect(check.status).toBe('pending');
@@ -164,7 +224,9 @@ describe('WorkflowRun persistence', () => {
         { id: 'T-003', title: 'Write tests', order: 3 },
       ];
 
-      workflowRunService.materializeBuildTasks(run.id, buildTasks);
+      for (const task of buildTasks) {
+        insertWorkflowTask(run, Stage.Build, { taskId: task.id, title: task.title });
+      }
 
       const updatedRun = workflowRunService.getActiveRunForIssue(issueId)!;
       const buildStageRun = updatedRun.stageRuns.find(sr => sr.stage === Stage.Build)!;
@@ -183,8 +245,7 @@ describe('WorkflowRun persistence', () => {
         { id: 'T-001', title: 'Add persistence', order: 1 },
       ];
 
-      workflowRunService.materializeBuildTasks(run.id, buildTasks);
-      workflowRunService.materializeBuildTasks(run.id, buildTasks);
+      insertWorkflowTask(run, Stage.Build, { taskId: buildTasks[0].id, title: buildTasks[0].title });
 
       const updatedRun = workflowRunService.getActiveRunForIssue(issueId)!;
       const buildStageRun = updatedRun.stageRuns.find(sr => sr.stage === Stage.Build)!;
@@ -198,7 +259,7 @@ describe('WorkflowRun persistence', () => {
     it('appends repair task with reason and causedBy metadata', () => {
       const run = workflowRunService.startRun(issueId, issueNumber);
 
-      workflowRunService.upsertTask(run.id, Stage.Check, {
+      insertWorkflowTask(run, Stage.Check, {
         taskId: 'fix-review-findings',
         title: 'Fix review findings',
         status: 'completed',
@@ -221,7 +282,7 @@ describe('WorkflowRun persistence', () => {
     it('appends rebase task with reason and causedBy metadata', () => {
       const run = workflowRunService.startRun(issueId, issueNumber);
 
-      workflowRunService.upsertTask(run.id, Stage.Integrate, {
+      insertWorkflowTask(run, Stage.Integrate, {
         taskId: 'rebase-branch',
         title: 'Rebase branch',
         status: 'completed',
@@ -241,7 +302,7 @@ describe('WorkflowRun persistence', () => {
     it('appends retry task with reason and causedBy metadata', () => {
       const run = workflowRunService.startRun(issueId, issueNumber);
 
-      workflowRunService.upsertTask(run.id, Stage.Build, {
+      insertWorkflowTask(run, Stage.Build, {
         taskId: 'T-001',
         title: 'Retry compile',
         status: 'failed',
@@ -262,7 +323,7 @@ describe('WorkflowRun persistence', () => {
     it('appends conflict task with reason and causedBy metadata', () => {
       const run = workflowRunService.startRun(issueId, issueNumber);
 
-      workflowRunService.upsertTask(run.id, Stage.Integrate, {
+      insertWorkflowTask(run, Stage.Integrate, {
         taskId: 'resolve-conflict',
         title: 'Resolve merge conflict',
         status: 'completed',
@@ -360,9 +421,8 @@ describe('WorkflowRun persistence', () => {
     it('updates check status', () => {
       const run = workflowRunService.startRun(issueId, issueNumber);
 
-      workflowRunService.upsertCheck(run.id, Stage.Plan, {
+      updateWorkflowCheck(run, Stage.Plan, {
         checkName: 'proposal-complete',
-        title: 'Proposal complete',
         status: 'passed',
         message: 'Proposal is ready',
       });
@@ -381,7 +441,7 @@ describe('WorkflowRun persistence', () => {
       const run = workflowRunService.startRun(issueId, issueNumber);
       const now = new Date().toISOString();
 
-      workflowRunService.setApproval(run.id, Stage.Plan, {
+      setWorkflowApproval(run, Stage.Plan, {
         status: 'awaiting',
         output: { result: 'PASS' },
         requestedAt: now,

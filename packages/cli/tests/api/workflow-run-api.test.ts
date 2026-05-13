@@ -19,6 +19,7 @@ import { StageStateService } from '../../src/services/stage-state-service';
 import { WorkflowRunService } from '../../src/services/workflow-run-service';
 import { createIssueRoutes } from '../../src/api/issues';
 import { Stage } from '../../src/types';
+import type { WorkflowRunWithStageRuns } from '../../src/db/workflow-run-repo';
 
 function createTestServer(app: Hono): http.Server {
   return http.createServer(async (req, res) => {
@@ -131,6 +132,52 @@ describe('GET /api/issues/:number/workflow-run', () => {
     return createTestServer(app);
   }
 
+  function insertWorkflowTask(run: WorkflowRunWithStageRuns, stage: Stage, input: {
+    taskId: string;
+    title: string;
+    status?: string;
+    reason?: string | null;
+    causedByType?: string | null;
+    causedByCheckName?: string | null;
+  }): void {
+    const stageRun = run.stageRuns.find(candidate => candidate.stage === stage)!;
+    const now = new Date().toISOString();
+    db.run(
+      `INSERT INTO workflow_tasks
+       (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, attempts, duration, artifacts, output,
+        reason, caused_by_type, caused_by_check_name, caused_by_task_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, '[]', NULL, ?, ?, ?, NULL, ?, ?)`,
+      [
+        `${stageRun.id}/${input.taskId}`,
+        run.id,
+        stageRun.id,
+        input.taskId,
+        input.title,
+        input.status ?? 'pending',
+        stageRun.tasks.length,
+        input.reason ?? null,
+        input.causedByType ?? null,
+        input.causedByCheckName ?? null,
+        now,
+        now,
+      ],
+    );
+  }
+
+  function setWorkflowApproval(run: WorkflowRunWithStageRuns, stage: Stage, input: {
+    status: string;
+    output: unknown;
+    requestedAt: string;
+  }): void {
+    const stageRun = run.stageRuns.find(candidate => candidate.stage === stage)!;
+    db.run(
+      `UPDATE workflow_stage_runs
+       SET approval_status = ?, approval_output = ?, approval_requested_at = ?, updated_at = ?
+       WHERE id = ?`,
+      [input.status, JSON.stringify(input.output), input.requestedAt, new Date().toISOString(), stageRun.id],
+    );
+  }
+
   it('returns 404 when no WorkflowRun exists', async () => {
     const project = await projectService.create({ name: 'Test', path: '/tmp/test' });
     projectService.setCurrent(project);
@@ -149,8 +196,8 @@ describe('GET /api/issues/:number/workflow-run', () => {
     projectService.setCurrent(project);
     const issue = await issueService.create({ projectId: project.id, title: 'Test Issue' });
 
-    workflowRunService.startRun(issue.id, issue.number);
-    workflowRunService.setApproval(issue.id, Stage.Plan, {
+    const seededRun = workflowRunService.startRun(issue.id, issue.number);
+    setWorkflowApproval(seededRun, Stage.Plan, {
       status: 'awaiting',
       output: { result: 'PASS' },
       requestedAt: '2026-01-01T00:00:00.000Z',
@@ -174,14 +221,14 @@ describe('GET /api/issues/:number/workflow-run', () => {
 
     expect(data.stageRuns).toHaveLength(4);
     expect(data.stageRuns[0].stage).toBe('plan');
-    expect(data.stageRuns[0].status).toBe('pending');
+    expect(data.stageRuns[0].status).toBe('running');
     expect(data.stageRuns[1].stage).toBe('build');
     expect(data.stageRuns[2].stage).toBe('check');
     expect(data.stageRuns[3].stage).toBe('integrate');
 
     const planStageRun = data.stageRuns[0];
     expect(planStageRun.tasks.length).toBe(5);
-    expect(planStageRun.checks.length).toBe(6);
+    expect(planStageRun.checks.length).toBe(5);
     expect(planStageRun.approval).not.toBeNull();
     if (planStageRun.approval) {
       expect(planStageRun.approval.status).toBe('awaiting');
@@ -200,7 +247,6 @@ describe('GET /api/issues/:number/workflow-run', () => {
     expect(checkNames).toContain('design-complete');
     expect(checkNames).toContain('tasks-valid');
     expect(checkNames).toContain('self-review-passed');
-    expect(checkNames).toContain('user-approval');
   });
 
   it('Build tasks materialize from tasks.json into the same WorkflowRun', async () => {
@@ -220,10 +266,8 @@ describe('GET /api/issues/:number/workflow-run', () => {
     }));
 
     const run = workflowRunService.startRun(issue.id, issue.number);
-    workflowRunService.materializeBuildTasks(run.id, [
-      { id: 'T-001', title: 'Add persistence', order: 1 },
-      { id: 'T-002', title: 'Expose endpoint', order: 2 },
-    ]);
+    insertWorkflowTask(run, Stage.Build, { taskId: 'T-001', title: 'Add persistence' });
+    insertWorkflowTask(run, Stage.Build, { taskId: 'T-002', title: 'Expose endpoint' });
 
     server = createApp();
 
@@ -376,6 +420,38 @@ describe('GET /api/issues/:number/stage-state backed by WorkflowRun', () => {
     return createTestServer(app);
   }
 
+  function insertWorkflowTask(run: WorkflowRunWithStageRuns, stage: Stage, input: {
+    taskId: string;
+    title: string;
+    status?: string;
+    reason?: string | null;
+    causedByType?: string | null;
+    causedByCheckName?: string | null;
+  }): void {
+    const stageRun = run.stageRuns.find(candidate => candidate.stage === stage)!;
+    const now = new Date().toISOString();
+    db.run(
+      `INSERT INTO workflow_tasks
+       (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, attempts, duration, artifacts, output,
+        reason, caused_by_type, caused_by_check_name, caused_by_task_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, '[]', NULL, ?, ?, ?, NULL, ?, ?)`,
+      [
+        `${stageRun.id}/${input.taskId}`,
+        run.id,
+        stageRun.id,
+        input.taskId,
+        input.title,
+        input.status ?? 'pending',
+        stageRun.tasks.length,
+        input.reason ?? null,
+        input.causedByType ?? null,
+        input.causedByCheckName ?? null,
+        now,
+        now,
+      ],
+    );
+  }
+
   it('stage-state API returns WorkflowRun-backed data when WorkflowRun exists', async () => {
     const project = await projectService.create({ name: 'Test', path: '/tmp/test' });
     projectService.setCurrent(project);
@@ -397,7 +473,7 @@ describe('GET /api/issues/:number/stage-state backed by WorkflowRun', () => {
     const planStage = data.stages.find((s: any) => s.stage === 'plan');
     expect(planStage).toBeDefined();
     expect(planStage.tasks.length).toBe(5);
-    expect(planStage.checks.length).toBe(6);
+    expect(planStage.checks.length).toBe(5);
   });
 
   it('stage_executions, workflow_log, session logs, and checkpoints are not promoted to tasks/checks', async () => {
@@ -456,7 +532,7 @@ describe('GET /api/issues/:number/stage-state backed by WorkflowRun', () => {
     const issue = await issueService.create({ projectId: project.id, title: 'Test Issue' });
 
     const run = workflowRunService.startRun(issue.id, issue.number);
-    workflowRunService.upsertTask(run.id, Stage.Check, {
+    insertWorkflowTask(run, Stage.Check, {
       taskId: 'fix-review-findings',
       title: 'Fix review findings',
       status: 'completed',
@@ -464,7 +540,7 @@ describe('GET /api/issues/:number/stage-state backed by WorkflowRun', () => {
       causedByType: 'check-failure',
       causedByCheckName: 'ai-review',
     });
-    workflowRunService.upsertTask(run.id, Stage.Integrate, {
+    insertWorkflowTask(run, Stage.Integrate, {
       taskId: 'rebase-branch',
       title: 'Rebase branch',
       status: 'pending',
