@@ -163,12 +163,13 @@ describe('Check-stage re-review convergence regressions', () => {
   });
 
   describe('review artifact invalidation boundaries', () => {
-    it('does not delete review.md for fix-review-findings follow-up tasks', async () => {
+    it('renames review.md and ai-review checkpoint for fix-review-findings follow-up tasks', async () => {
       const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-'));
       const changeDir = path.join(tmpRoot, 'change');
       fs.mkdirSync(changeDir, { recursive: true });
       const reviewPath = path.join(changeDir, 'review.md');
-      fs.writeFileSync(reviewPath, '# review\n<promise>FAIL</promise>\n');
+      const reviewBody = '# review\n<promise>FAIL</promise>\n';
+      fs.writeFileSync(reviewPath, reviewBody);
 
       const checkpointDeletes: Array<{ stage: string; step: string }> = [];
       const runner = new CheckStageRunner({ worktreePath: tmpRoot });
@@ -187,16 +188,20 @@ describe('Check-stage re-review convergence regressions', () => {
 
       await (runner as any).beforeRecheckAfterFix(localCtx, 'review-passed', 'fix-review-findings');
 
-      expect(fs.existsSync(reviewPath)).toBe(true);
-      expect(checkpointDeletes).toEqual([]);
+      expect(fs.existsSync(reviewPath)).toBe(false);
+      const staleReviews = fs.readdirSync(changeDir).filter(name => name.startsWith('review.stale-'));
+      expect(staleReviews).toHaveLength(1);
+      expect(fs.readFileSync(path.join(changeDir, staleReviews[0]), 'utf8')).toBe(reviewBody);
+      expect(checkpointDeletes).toEqual([{ stage: 'check', step: 'ai-review' }]);
     });
 
-    it('deletes review.md and ai-review checkpoint for repair-review-findings re-review', async () => {
+    it('renames review.md and ai-review checkpoint for repair-review-findings re-review', async () => {
       const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-'));
       const changeDir = path.join(tmpRoot, 'change');
       fs.mkdirSync(changeDir, { recursive: true });
       const reviewPath = path.join(changeDir, 'review.md');
-      fs.writeFileSync(reviewPath, '# review\n<promise>FAIL</promise>\n');
+      const reviewBody = '# review\n<promise>FAIL</promise>\n';
+      fs.writeFileSync(reviewPath, reviewBody);
 
       const checkpointDeletes: Array<{ stage: string; step: string }> = [];
       const runner = new CheckStageRunner({ worktreePath: tmpRoot });
@@ -216,6 +221,9 @@ describe('Check-stage re-review convergence regressions', () => {
       await (runner as any).beforeRecheckAfterFix(localCtx, 'review-passed', 'repair-review-findings');
 
       expect(fs.existsSync(reviewPath)).toBe(false);
+      const staleReviews = fs.readdirSync(changeDir).filter(name => name.startsWith('review.stale-'));
+      expect(staleReviews).toHaveLength(1);
+      expect(fs.readFileSync(path.join(changeDir, staleReviews[0]), 'utf8')).toBe(reviewBody);
       expect(checkpointDeletes).toEqual([{ stage: 'check', step: 'ai-review' }]);
     });
   });
