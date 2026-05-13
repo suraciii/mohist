@@ -199,6 +199,20 @@ function runBuildStage(
     checkpointManager,
     issueRepo: deps.issueRepo as any,
     workflowLogRepo: deps.workflowLogRepo,
+    emit: (event: string, data: unknown) => {
+      try {
+        deps.eventBus.emit(event as never, data as never);
+      } catch {
+        // fire-and-forget
+      }
+    },
+    log: (eventType: string, data: object) => {
+      try {
+        deps.workflowLogRepo?.insert?.(issue.id, null, eventType, data);
+      } catch {
+        // fire-and-forget
+      }
+    },
   };
   return runner.run(ctx);
 }

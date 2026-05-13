@@ -158,7 +158,7 @@ describe('T-005: Workflow consumes session failure without judging liveness', ()
 
         expect(result.success).toBe(false);
         expect(result.failed).toBe(1);
-        expect(result.taskResults[0].status).toBe('skipped');
+        expect(result.taskResults[0].status).toBe('failed');
         expect(result.taskResults[0].error).toContain('Session liveness probe timed out');
 
         fs.rmSync(tempDir, { recursive: true, force: true });

@@ -56,7 +56,7 @@ function createMockContext(tmpDir: string, issueNumber = 42, overrides?: Partial
   const eventBus = new EventBus();
   vi.spyOn(eventBus, 'emit').mockImplementation(emitSpy);
 
-  return {
+  const ctx = {
     issue: {
       id: `issue-${issueNumber}`,
       number: issueNumber,
@@ -111,6 +111,17 @@ function createMockContext(tmpDir: string, issueNumber = 42, overrides?: Partial
     } as any,
     ...overrides,
   } as StageContext;
+  ctx.emit = ctx.emit ?? ((event: string, data: unknown) => {
+    try {
+      (ctx.eventBus as any)?.emit?.(event, data);
+    } catch {
+      // fire-and-forget
+    }
+  });
+  ctx.log = ctx.log ?? (() => {
+    // fire-and-forget
+  });
+  return ctx;
 }
 
 function createMainSpec(tmpDir: string, capability: string, requirements: string[]) {

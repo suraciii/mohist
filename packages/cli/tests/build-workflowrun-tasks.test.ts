@@ -175,6 +175,8 @@ describe('Build aggregate-backed task runtime', () => {
       issueRepo: { updateStage: vi.fn(), setApprovalState: vi.fn(), clearApprovalState: vi.fn(), updateStatus: vi.fn(), findById: vi.fn() },
       workflowApplicationService: service,
       requestedWork: { kind: 'task', stage: Stage.Build, taskId: 'T-001' },
+      emit: vi.fn(),
+      log: vi.fn(),
     } as never);
 
     expect(service.materializeTasks).toHaveBeenCalledWith(expect.objectContaining({
@@ -233,6 +235,8 @@ describe('Build aggregate-backed task runtime', () => {
       issueRepo: { updateStage: vi.fn(), setApprovalState: vi.fn(), clearApprovalState: vi.fn(), updateStatus: vi.fn(), findById: vi.fn() },
       workflowApplicationService: service,
       requestedWork: { kind: 'task', stage: Stage.Build, taskId: 'T-002' },
+      emit: vi.fn(),
+      log: vi.fn(),
     } as never);
 
     expect(execute).toHaveBeenCalledWith(change, expect.objectContaining({

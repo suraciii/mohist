@@ -264,6 +264,14 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
       eventBus: { emit: vi.fn() } as any,
       checkpointManager,
       issueRepo: { setApprovalState: vi.fn() } as any,
+      emit: (event: string, data: unknown) => {
+        try {
+          ctx.eventBus.emit(event as never, data as never);
+        } catch {
+          // fire-and-forget
+        }
+      },
+      log: vi.fn(),
     };
     return runner.run(ctx);
   }
@@ -287,6 +295,14 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
       issueRepo: { setApprovalState: vi.fn() } as any,
       workflowApplicationService,
       requestedWork: { kind: 'task', stage: Stage.Plan, taskId },
+      emit: (event: string, data: unknown) => {
+        try {
+          ctx.eventBus.emit(event as never, data as never);
+        } catch {
+          // fire-and-forget
+        }
+      },
+      log: vi.fn(),
     };
     return runner.run(ctx);
   }
