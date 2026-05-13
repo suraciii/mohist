@@ -2,16 +2,18 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { onAgentEvent } from '../lib/agent-events'
-import type { CoderSessionItem } from '../lib/types'
+import type { CoderSessionSummary } from '../lib/types'
 
 export function useCoderSessions(issueNumber: number) {
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['issues', issueNumber, 'coder-sessions'],
     queryFn: () => api.getCoderSessions(issueNumber),
     enabled: issueNumber > 0,
+    staleTime: 30 * 1000,
   })
 
-  const [liveSessions, setLiveSessions] = useState<CoderSessionItem[]>([])
+  const [liveSessions, setLiveSessions] = useState<CoderSessionSummary[]>([])
+
   const initializedRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mountedRef = useRef(true)
@@ -60,7 +62,7 @@ export function useCoderSessions(issueNumber: number) {
     unsubs.push(
       onAgentEvent('coder_session_started', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
-        const newSession: CoderSessionItem = {
+        const newSession: CoderSessionSummary = {
           id: detail.coderSessionId,
           acpSessionId: detail.acpSessionId,
           executionId: detail.executionId ?? null,
@@ -76,7 +78,6 @@ export function useCoderSessions(issueNumber: number) {
           probeSentAt: null,
           probeDeadlineAt: null,
           failureReason: null,
-          workflowLogs: [],
         }
         setLiveSessions((prev) => [...prev, newSession])
         startTimer()
@@ -106,7 +107,7 @@ export function useCoderSessions(issueNumber: number) {
           const idx = prev.findIndex((s) => s.id === detail.coderSessionId)
           if (idx === -1) return prev
           const existing = prev[idx]
-          const updated: CoderSessionItem = {
+          const updated: CoderSessionSummary = {
             ...existing,
             status: detail.status,
             ...(detail.lastDataAt !== undefined && { lastDataAt: detail.lastDataAt }),

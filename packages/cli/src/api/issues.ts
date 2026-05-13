@@ -2528,60 +2528,32 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      if (!coderSessionRepo || !workflowLogRepo) {
+      if (!coderSessionRepo) {
         const response: ApiResponse = {
           success: false,
-          error: 'CoderSessionRepo or WorkflowLogRepo not configured'
+          error: 'CoderSessionRepo not configured'
         };
         return c.json(response, 500);
       }
 
-      const SESSION_STREAM_EVENT_TYPES = new Set([
-        'agent_thought_chunk',
-        'agent_message_chunk',
-        'tool_call',
-        'tool_call_update',
-        'user_message_chunk',
-        'mohist_prompt',
-      ]);
-
       const sessions = coderSessionRepo.findByIssueId(issue.id);
-      const data = sessions.map(session => {
-        let logs;
-        if (sessionStreamLogRepo) {
-          const streamLogs = sessionStreamLogRepo.findBySessionId(session.acpSessionId);
-          if (streamLogs.length > 0) {
-            logs = streamLogs;
-          }
-        }
-        if (!logs) {
-          const fallbackLogs = workflowLogRepo.findBySessionId(session.acpSessionId);
-          logs = fallbackLogs.filter(l => SESSION_STREAM_EVENT_TYPES.has(l.eventType));
-        }
-        return {
-          id: session.id,
-          acpSessionId: session.acpSessionId,
-          executionId: session.executionId,
-          taskDescription: session.taskDescription,
-          status: session.status,
-          createdAt: session.createdAt,
-          completedAt: session.completedAt,
-          model: session.model,
-          coderType: session.coderType,
-          stage: session.stage,
-          title: session.title,
-          lastDataAt: session.lastDataAt,
-          probeSentAt: session.probeSentAt,
-          probeDeadlineAt: session.probeDeadlineAt,
-          failureReason: session.failureReason,
-          workflowLogs: logs.map(l => ({
-            id: l.id,
-            eventType: l.eventType,
-            data: (() => { try { return JSON.parse(l.data); } catch { return l.data; } })(),
-            createdAt: l.createdAt,
-          })),
-        };
-      });
+      const data = sessions.map(session => ({
+        id: session.id,
+        acpSessionId: session.acpSessionId,
+        executionId: session.executionId,
+        taskDescription: session.taskDescription,
+        status: session.status,
+        createdAt: session.createdAt,
+        completedAt: session.completedAt,
+        model: session.model,
+        coderType: session.coderType,
+        stage: session.stage,
+        title: session.title,
+        lastDataAt: session.lastDataAt,
+        probeSentAt: session.probeSentAt,
+        probeDeadlineAt: session.probeDeadlineAt,
+        failureReason: session.failureReason,
+      }));
 
       const response: ApiResponse = {
         success: true,

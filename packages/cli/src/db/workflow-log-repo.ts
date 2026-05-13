@@ -39,8 +39,8 @@ export class WorkflowLogRepo {
 
     this.db.run(
       `INSERT INTO workflow_log (id, issue_id, session_id, event_type, data, created_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-      [id, issueId, sessionId, eventType, dataStr]
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, issueId, sessionId, eventType, dataStr, new Date().toISOString()]
     );
 
     const row = this.db.get<WorkflowLogRow>(
@@ -58,14 +58,14 @@ export class WorkflowLogRepo {
   findByIssueId(issueId: string, eventType?: string): WorkflowLogEntry[] {
     if (eventType) {
       const rows = this.db.all<WorkflowLogRow>(
-        `SELECT * FROM workflow_log WHERE issue_id = ? AND event_type = ? ORDER BY created_at ASC`,
+        `SELECT * FROM workflow_log WHERE issue_id = ? AND event_type = ? ORDER BY created_at ASC, rowid ASC`,
         [issueId, eventType]
       );
       return rows.map(rowToEntry);
     }
 
     const rows = this.db.all<WorkflowLogRow>(
-      `SELECT * FROM workflow_log WHERE issue_id = ? ORDER BY created_at ASC`,
+      `SELECT * FROM workflow_log WHERE issue_id = ? ORDER BY created_at ASC, rowid ASC`,
       [issueId]
     );
     return rows.map(rowToEntry);
@@ -81,8 +81,18 @@ export class WorkflowLogRepo {
 
   findBySessionId(sessionId: string): WorkflowLogEntry[] {
     const rows = this.db.all<WorkflowLogRow>(
-      `SELECT * FROM workflow_log WHERE session_id = ? ORDER BY created_at ASC`,
+      `SELECT * FROM workflow_log WHERE session_id = ? ORDER BY created_at ASC, rowid ASC`,
       [sessionId]
+    );
+    return rows.map(rowToEntry);
+  }
+
+  findBySessionIds(sessionIds: string[]): WorkflowLogEntry[] {
+    if (sessionIds.length === 0) return [];
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const rows = this.db.all<WorkflowLogRow>(
+      `SELECT * FROM workflow_log WHERE session_id IN (${placeholders}) ORDER BY session_id, created_at ASC, rowid ASC`,
+      sessionIds
     );
     return rows.map(rowToEntry);
   }

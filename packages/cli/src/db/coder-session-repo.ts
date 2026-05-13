@@ -203,7 +203,7 @@ export class CoderSessionRepo {
 
   findByIssueId(issueId: string): CoderSession[] {
     const rows = this.db.all<CoderSessionRow>(
-      'SELECT * FROM coder_session WHERE issue_id = ? ORDER BY created_at ASC',
+      'SELECT * FROM coder_session WHERE issue_id = ? ORDER BY created_at DESC',
       [issueId]
     );
     return rows.map(rowToCoderSession);
