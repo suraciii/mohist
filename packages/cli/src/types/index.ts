@@ -43,6 +43,15 @@ export type Priority = 'p0' | 'p1' | 'p2' | 'p3' | 'p4';
 
 export const VALID_PRIORITIES: Priority[] = ['p0', 'p1', 'p2', 'p3', 'p4'];
 
+export function normalizePriority(value: string | undefined | null): Priority | null {
+  if (value === undefined || value === null || value === '') return null;
+  const lower = value.toLowerCase();
+  if (VALID_PRIORITIES.includes(lower as Priority)) {
+    return lower as Priority;
+  }
+  return null;
+}
+
 export type ApprovalStatus = 'pending' | 'awaiting' | 'approved' | 'rejected' | 'error';
 
 export enum MergeState {

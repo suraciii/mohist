@@ -3,11 +3,61 @@ import chalk from 'chalk';
 import { execSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ApiResponse, Issue, Priority, VALID_PRIORITIES } from '../../types';
+import { ApiResponse, Issue, Stage, VALID_PRIORITIES, normalizePriority } from '../../types';
 import { slugify } from '../../utils/slugify';
 import { apiClient } from '../api-client';
 import { requireServer } from '../server-check';
 import { classifyMergeDelivery, type MergeDeliveryStatus } from '../../workflow/issue-lifecycle';
+import * as readline from 'readline';
+
+export interface BodyIngestResult {
+  body: string | undefined;
+  error: string | null;
+}
+
+export async function ingestBody(bodyOpt: string | undefined, bodyFileOpt: string | undefined): Promise<BodyIngestResult> {
+  if (bodyOpt && bodyFileOpt) {
+    return { body: undefined, error: 'Cannot use both --body and --body-file. Use only one body source.' };
+  }
+  if (bodyOpt === '-') {
+    return ingestStdin();
+  }
+  if (bodyOpt?.startsWith('@')) {
+    const filePath = bodyOpt.slice(1);
+    return ingestFile(filePath);
+  }
+  if (bodyFileOpt) {
+    return ingestFile(bodyFileOpt);
+  }
+  return { body: bodyOpt, error: null };
+}
+
+function ingestFile(filePath: string): BodyIngestResult {
+  try {
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) {
+      return { body: undefined, error: `File not found: ${filePath}` };
+    }
+    const content = fs.readFileSync(resolved, 'utf-8');
+    return { body: content, error: null };
+  } catch (err: any) {
+    return { body: undefined, error: `Failed to read file ${filePath}: ${err.message}` };
+  }
+}
+
+function ingestStdin(): Promise<BodyIngestResult> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+    const lines: string[] = [];
+    rl.on('line', (line) => lines.push(line));
+    rl.on('close', () => resolve({ body: lines.join('\n'), error: null }));
+    rl.on('error', (err) => resolve({ body: undefined, error: `Failed to read stdin: ${err.message}` }));
+  });
+}
+
+function isStartable(issue: Issue): boolean {
+  return issue.stage === Stage.Backlog;
+}
 
 function latestCurrentTruthChecks(checkResults: any[]): any[] {
   const latestByName = new Map<string, any>();
@@ -139,30 +189,42 @@ export function setupIssueCommands(program: Command): void {
   issue
     .command('create <title>')
     .description('Create a new issue')
-    .option('-b, --body <body>', 'Issue body/description')
+    .option('-b, --body <body>', 'Issue body/description (use @file.md or - for file/stdin)')
+    .option('--body-file <path>', 'Read body from a file')
     .option('-l, --label <label>', 'Add label (can be repeated)', (val, prev: string[]) => [...prev, val], [] as string[])
     .option('-p, --priority <level>', 'Set priority (p0-p4)')
     .action(async (title, options) => {
+      const normalizedPriority = normalizePriority(options.priority);
+      if (options.priority !== undefined && normalizedPriority === null) {
+        console.error(chalk.red(`Invalid priority: ${options.priority}. Must be one of: ${VALID_PRIORITIES.join(', ')}`));
+        process.exit(1);
+      }
+      const bodyResult = await ingestBody(options.body, options.bodyFile);
+      if (bodyResult.error) {
+        console.error(chalk.red(`Error: ${bodyResult.error}`));
+        process.exit(1);
+      }
       try {
-        if (options.priority && !VALID_PRIORITIES.includes(options.priority as Priority)) {
-          console.error(chalk.red(`Invalid priority: ${options.priority}. Must be one of: ${VALID_PRIORITIES.join(', ')}`));
-          return;
-        }
         const response = await apiClient<ApiResponse<Issue>>(
           'POST',
           '/issues',
-          { title, body: options.body, labels: options.label, priority: options.priority }
+          { title, body: bodyResult.body, labels: options.label, priority: normalizedPriority }
         );
-        
+
         if (response.success && response.data) {
           const issue = response.data;
           console.log(chalk.green(`✓ Created issue #${issue.number}: ${issue.title}`));
           console.log(chalk.gray(`  Priority: ${formatPriority(issue.priority)}`));
+          if (isStartable(issue)) {
+            console.log(chalk.cyan(`  Tip: Run '${chalk.bold(`mo issue start ${issue.number}`)}' to begin processing`));
+          }
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
+          process.exit(1);
         }
       } catch (error) {
         console.error(chalk.red(`Failed to create issue: ${error}`));
+        process.exit(1);
       }
     });
 
@@ -171,10 +233,17 @@ export function setupIssueCommands(program: Command): void {
     .description('List issues')
     .option('-s, --status <stage>', 'Filter by stage')
     .option('-l, --label <label>', 'Filter by label')
-    .option('-p, --priority <level>', 'Filter by priority')
+    .option('-p, --priority <level>', 'Filter by priority (p0-p4)')
     .option('--archived', 'Show only archived issues')
     .option('--all', 'Show all issues including archived')
     .action(async (options) => {
+      if (options.priority !== undefined) {
+        const normalizedPriority = normalizePriority(options.priority);
+        if (normalizedPriority === null) {
+          console.error(chalk.red(`Invalid priority: ${options.priority}. Must be one of: ${VALID_PRIORITIES.join(', ')}`));
+          process.exit(1);
+        }
+      }
       try {
         let path = '/issues';
         const params: string[] = [];
@@ -185,7 +254,7 @@ export function setupIssueCommands(program: Command): void {
           params.push(`label=${options.label}`);
         }
         if (options.priority) {
-          params.push(`priority=${options.priority}`);
+          params.push(`priority=${normalizePriority(options.priority)}`);
         }
         if (options.archived) {
           params.push('archived=true');
@@ -424,36 +493,44 @@ export function setupIssueCommands(program: Command): void {
     .command('update <number>')
     .description('Update an issue')
     .option('--title <title>', 'New title')
-    .option('--body <body>', 'New body')
+    .option('--body <body>', 'New body (use @file.md or - for file/stdin)')
     .option('-l, --label <label>', 'Add (+label) or remove (-label) label', (val, prev: string[]) => [...prev, val], [] as string[])
     .option('-p, --priority <level>', 'Set priority (p0-p4)')
     .action(async (number, options) => {
       try {
-        if (options.priority && !VALID_PRIORITIES.includes(options.priority as Priority)) {
+        const normalizedPriority = normalizePriority(options.priority);
+        if (options.priority !== undefined && normalizedPriority === null) {
           console.error(chalk.red(`Invalid priority: ${options.priority}. Must be one of: ${VALID_PRIORITIES.join(', ')}`));
-          return;
+          process.exit(1);
+        }
+        const bodyResult = await ingestBody(options.body, undefined);
+        if (bodyResult.error) {
+          console.error(chalk.red(`Error: ${bodyResult.error}`));
+          process.exit(1);
         }
         const { add, remove } = parseLabelFlags(options.label);
-        
+
         const response = await apiClient<ApiResponse<Issue>>(
           'PATCH',
           `/issues/${number}`,
           {
             title: options.title,
-            body: options.body,
-            priority: options.priority,
+            body: bodyResult.body,
+            priority: normalizedPriority,
             addLabels: add.length > 0 ? add : undefined,
             removeLabels: remove.length > 0 ? remove : undefined,
           }
         );
-        
+
         if (response.success && response.data) {
           console.log(chalk.green(`✓ Updated issue #${response.data.number}`));
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
+          process.exit(1);
         }
       } catch (error) {
         console.error(chalk.red(`Failed to update issue: ${error}`));
+        process.exit(1);
       }
     });
 

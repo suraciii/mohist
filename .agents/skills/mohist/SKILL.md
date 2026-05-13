@@ -10,7 +10,7 @@ mohist 命令前缀为 `mo`。操作前确认 server 在运行：`mo server stat
 ## Issue 命令
 
 ```
-mo issue create <title> --body <text> --label <label> --priority <P0|P1|P2>
+mo issue create <title> [--body <text>|@file.md|-] [--body-file <path>] [--label <label>] [--priority <P0|P1|P2>]
 mo issue list [-s <stage>] [-l <label>] [-p <priority>] [--all] [--archived]
 mo issue show <number>
 mo issue start <number>
@@ -21,7 +21,7 @@ mo issue reopen <number>
 mo issue comment <number> <text>
 mo issue logs <number> [-f]
 mo issue diff <number>
-mo issue update <number> --title <text> --body <text> --label <+add|-remove>
+mo issue update <number> [--title <text>] [--body <text>|@file.md|-] [--label <+add|-remove>]
 mo issue archive <number>
 mo issue archive --all-completed
 mo issue unarchive <number>
@@ -43,6 +43,24 @@ mo server update                   重新构建并重启（源码模式）
 ```bash
 mo issue create "Fix X" --body "描述" --label bug --priority P1
 mo issue start <number>
+```
+
+长 Markdown 内容使用文件或管道：
+```bash
+mo issue create "Fix X" --body @issue-body.md
+mo issue create "Fix X" --body - < issue-body.md
+cat issue-body.md | mo issue create "Fix X" --body -
+```
+
+heredoc 作为兼容性备选：
+```bash
+mo issue create "Fix X" --body "$(cat <<'EOF'
+## 描述
+
+- code block
+- special chars: $()|'"` 都可以
+EOF
+)"
 ```
 
 监控进度：

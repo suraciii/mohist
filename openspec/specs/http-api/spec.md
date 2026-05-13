@@ -533,6 +533,40 @@ The existing issue stage-state API SHALL project current stage/task/check progre
 - **WHEN** Integrate merge has completed
 - **THEN** API responses SHALL expose delivery facts including target branch, candidate head, landed sha, and whether final health failed after merge
 
+### Requirement: Issue write endpoints accept case-insensitive priority values
+
+`POST /api/issues` and `PATCH /api/issues/:number` SHALL accept priority values case-insensitively and normalize them to the stored lowercase priority contract.
+
+#### Scenario: Create issue with uppercase priority
+- **WHEN** a client sends `POST /api/issues` with `priority: "P2"`
+- **THEN** the API accepts the request
+- **AND** treats the priority the same as `"p2"`
+
+#### Scenario: Update issue with uppercase priority
+- **WHEN** a client sends `PATCH /api/issues/42` with `priority: "P0"`
+- **THEN** the API accepts the request
+- **AND** treats the priority the same as `"p0"`
+
+#### Scenario: Reject invalid create priority
+- **WHEN** a client sends `POST /api/issues` with `priority: "urgent"`
+- **THEN** the API returns a 400-class validation error
+
+#### Scenario: Reject invalid update priority
+- **WHEN** a client sends `PATCH /api/issues/42` with `priority: "urgent"`
+- **THEN** the API returns a 400-class validation error
+
+### Requirement: Issue list endpoint accepts case-insensitive priority filters
+
+`GET /api/issues` SHALL accept uppercase or lowercase priority filter values and apply the same normalized filter semantics for both.
+
+#### Scenario: List issues with uppercase priority filter
+- **WHEN** a client requests `GET /api/issues?priority=P1`
+- **THEN** the API applies the same filter as `priority=p1`
+
+#### Scenario: Reject invalid list priority filter
+- **WHEN** a client requests `GET /api/issues?priority=urgent`
+- **THEN** the API returns a 400-class validation error
+
 ### Requirement: Issue coder session list endpoint returns summary metadata only
 
 `GET /api/issues/:number/coder-sessions` SHALL return only the session summary metadata needed by the issue detail surface and SHALL NOT load or embed per-session transcript or workflow log payloads.
@@ -557,4 +591,3 @@ The existing issue stage-state API SHALL project current stage/task/check progre
 
 - **WHEN** an issue has 50 or more coder sessions
 - **THEN** `GET /api/issues/:number/coder-sessions` completes within 1 second in the project verification environment
-
