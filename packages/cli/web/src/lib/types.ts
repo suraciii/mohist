@@ -341,7 +341,7 @@ export interface WorkflowLogItem {
   createdAt: string
 }
 
-export interface CoderSessionItem {
+export interface CoderSessionSummary {
   id: string
   acpSessionId: string
   executionId: string | null
@@ -357,7 +357,10 @@ export interface CoderSessionItem {
   probeSentAt: string | null
   probeDeadlineAt: string | null
   failureReason: string | null
-  workflowLogs: WorkflowLogItem[]
+}
+
+export type CoderSessionItem = CoderSessionSummary & {
+  workflowLogs?: WorkflowLogItem[]
 }
 
 export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' | 'legacy-missing'

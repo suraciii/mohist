@@ -206,7 +206,7 @@ export const api = {
     request<import('./types').AgentSessionMessageItem[]>(`/issues/${number}/agent-session`),
 
   getCoderSessions: (number: number) =>
-    request<import('./types').CoderSessionItem[]>(`/issues/${number}/coder-sessions`),
+    request<import('./types').CoderSessionSummary[]>(`/issues/${number}/coder-sessions`),
 
   getCoderSessionDetail: (number: number, sessionId: string) =>
     request<import('./types').CoderSessionDetail>(`/issues/${number}/coder-sessions/${sessionId}`),

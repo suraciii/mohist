@@ -358,7 +358,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
   useEffect(() => {
     if (session) {
-      const reconstructed = reconstructRoundsFromLogs(session.workflowLogs)
+      const reconstructed = reconstructRoundsFromLogs(session.workflowLogs ?? [])
       setRounds(reconstructed)
       return
     }

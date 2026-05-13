@@ -71,4 +71,14 @@ export class SessionStreamLogRepo {
     );
     return rows.map(rowToEntry);
   }
+
+  findBySessionIds(sessionIds: string[]): SessionStreamLogEntry[] {
+    if (sessionIds.length === 0) return [];
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const rows = this.db.all<SessionStreamLogRow>(
+      `SELECT * FROM session_stream_log WHERE session_id IN (${placeholders}) ORDER BY session_id, created_at ASC, rowid ASC`,
+      sessionIds
+    );
+    return rows.map(rowToEntry);
+  }
 }

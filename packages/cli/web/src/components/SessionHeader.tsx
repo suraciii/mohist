@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom'
-import type { CoderSessionItem } from '../lib/types'
+import type { CoderSessionSummary } from '../lib/types'
 
 interface SessionHeaderProps {
-  session: CoderSessionItem
+  session: CoderSessionSummary
   issueNumber: number
   showTranscriptLink?: boolean
 }
@@ -23,7 +23,7 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-export function getSessionLabel(session: CoderSessionItem): string {
+export function getSessionLabel(session: CoderSessionSummary): string {
   if (session.title) return session.title
 
   if (session.executionId) {
@@ -47,7 +47,7 @@ export function getSessionLabel(session: CoderSessionItem): string {
   return 'Session'
 }
 
-export function getSessionStatusLabel(session: CoderSessionItem): string {
+export function getSessionStatusLabel(session: CoderSessionSummary): string {
   if (session.status === 'running') return 'Running'
   if (session.status === 'probing') return 'Checking session'
   if (session.status === 'failed') return 'Session failed'
