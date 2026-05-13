@@ -275,7 +275,7 @@ describe('CheckStageRunner archive integration', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(true);
-    expect(result.nextStage).toBe(Stage.Integrate);
+    expect(result).not.toHaveProperty('nextStage');
     expect(archiveChange).not.toHaveBeenCalled();
   });
 
@@ -311,7 +311,7 @@ describe('CheckStageRunner archive integration', () => {
     const result = await runner.run(ctx);
 
     expect(result.success).toBe(true);
-    expect(result.nextStage).toBe(Stage.Integrate);
+    expect(result).not.toHaveProperty('nextStage');
     expect(archiveChange).not.toHaveBeenCalled();
   });
 });

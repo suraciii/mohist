@@ -233,7 +233,7 @@ describe('Full Pipeline: Plan -> Build -> Check -> Done', () => {
 
     expect(result).not.toHaveProperty('requiresApproval');
     expect(result.success).toBe(true);
-    expect(result.nextStage).toBe(Stage.Build);
+    expect(result).not.toHaveProperty('nextStage');
   });
 });
 
@@ -586,7 +586,7 @@ describe('StageRunResult has no gate fields', () => {
     expect(result).not.toHaveProperty('requiresApproval');
     expect(result).not.toHaveProperty('gateRequired');
     expect(result.success).toBe(true);
-    expect(result.nextStage).toBe(Stage.Build);
+    expect(result).not.toHaveProperty('nextStage');
     expect(result.checkResults).toBeDefined();
     expect(result.checkResults).toHaveLength(1);
   });
@@ -741,7 +741,7 @@ describe('Build stage has no user-approval check', () => {
     const result = await buildRunner.run(ctx);
 
     expect(result.success).toBe(true);
-    expect(result.nextStage).toBe(Stage.Check);
+    expect(result).not.toHaveProperty('nextStage');
     expect(result.checkResults.every(r => r.name !== 'user-approval')).toBe(true);
     expect(ctx.issueRepo.setApprovalState).not.toHaveBeenCalled();
   });
