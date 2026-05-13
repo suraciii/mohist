@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { Issue } from '../types';
 import type { AgentConfig } from '../workflow/workflow-loader';
 import { formatAgentPrompt } from './agent-prompt-schema';
+import { formatIssueInfo, listOpenSpecContextFiles } from './workflow-context';
 
 export type ArtifactType = 'proposal' | 'specs' | 'design' | 'tasks';
 
@@ -71,14 +72,6 @@ function loadSpecContext(changeDir: string): string {
   }
 
   return parts.join('\n\n');
-}
-
-function formatIssueInfo(issue: Issue): string {
-  let info = `Issue #${issue.number}: ${issue.title}`;
-  if (issue.body) {
-    info += `\n\n${issue.body}`;
-  }
-  return info;
 }
 
 function buildDependencyFiles(artifactType: ArtifactType, changeDir: string): Array<{ path: string; desc: string }> {
@@ -204,15 +197,7 @@ export function buildReviewerPrompt(
   const instruction = loadFile(REVIEW_PROMPT_PATH);
   const specContext = loadSpecContext(changeDir);
 
-  const contextFiles: Array<{ path: string; desc: string }> = [];
-  const proposalPath = path.join(changeDir, 'proposal.md');
-  const designPath = path.join(changeDir, 'design.md');
-  if (fs.existsSync(proposalPath)) {
-    contextFiles.push({ path: proposalPath, desc: 'Proposal — understand the scope and motivation' });
-  }
-  if (fs.existsSync(designPath)) {
-    contextFiles.push({ path: designPath, desc: 'Design — understand the intended implementation approach' });
-  }
+  const contextFiles = listOpenSpecContextFiles(changeDir, { includeReports: true });
 
   const taskContent = [
     `Change Directory: ${changeDir}`,
@@ -267,8 +252,10 @@ export function buildConflictResolutionPrompt(
   changeDir: string,
   conflictFiles: string[],
   agentConfig?: AgentConfig,
+  contextChangeDir?: string | null,
 ): string {
   const instruction = loadFile(CONFLICT_RESOLUTION_PROMPT_PATH);
+  const contextFiles = listOpenSpecContextFiles(contextChangeDir ?? changeDir, { includeReports: true, includeSessionMemories: true });
 
   const conflictFileList = conflictFiles
     .map((f) => `- ${f}`)
@@ -286,6 +273,7 @@ export function buildConflictResolutionPrompt(
   return formatAgentPrompt({
     role: 'Resolve merge conflicts',
     projectContext: agentConfig?.context,
+    contextFiles: contextFiles.length > 0 ? contextFiles : undefined,
     task: taskContent,
     contract: 'Apply ONLY the conflict resolution. Do NOT modify unrelated files.',
     instruction,
@@ -301,28 +289,7 @@ export function buildAutoFixPrompt(
 ): string {
   const instruction = loadFile(AUTO_FIX_PROMPT_PATH);
 
-  const contextFiles: Array<{ path: string; desc: string }> = [];
-  const proposalPath = path.join(changeDir, 'proposal.md');
-  const designPath = path.join(changeDir, 'design.md');
-  const specsDir = path.join(changeDir, 'specs');
-
-  if (fs.existsSync(proposalPath)) {
-    contextFiles.push({ path: proposalPath, desc: 'Proposal — understand WHY these changes were needed' });
-  }
-  if (fs.existsSync(designPath)) {
-    contextFiles.push({ path: designPath, desc: 'Design — understand HOW the implementation was approached' });
-  }
-  if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
-    const specEntries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
-    for (const entry of specEntries) {
-      if (typeof entry === 'string' && entry.endsWith('.md')) {
-        contextFiles.push({
-          path: path.join(specsDir, entry),
-          desc: `Spec: ${entry} — verify fixes satisfy these requirements`,
-        });
-      }
-    }
-  }
+  const contextFiles = listOpenSpecContextFiles(changeDir, { includeReports: true });
 
   const taskContent = [
     `Change Directory: ${changeDir}`,
@@ -415,28 +382,7 @@ export function buildReVerifyPrompt(
 ): string {
   const instruction = loadFile(RE_VERIFY_PROMPT_PATH);
 
-  const contextFiles: Array<{ path: string; desc: string }> = [];
-  const proposalPath = path.join(changeDir, 'proposal.md');
-  const designPath = path.join(changeDir, 'design.md');
-  const specsDir = path.join(changeDir, 'specs');
-
-  if (fs.existsSync(proposalPath)) {
-    contextFiles.push({ path: proposalPath, desc: 'Proposal — understand WHY these changes were needed' });
-  }
-  if (fs.existsSync(designPath)) {
-    contextFiles.push({ path: designPath, desc: 'Design — understand HOW the implementation was approached' });
-  }
-  if (fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory()) {
-    const specEntries = fs.readdirSync(specsDir, { recursive: true, encoding: 'utf-8' });
-    for (const entry of specEntries) {
-      if (typeof entry === 'string' && entry.endsWith('.md')) {
-        contextFiles.push({
-          path: path.join(specsDir, entry),
-          desc: `Spec: ${entry} — re-verify against these requirements`,
-        });
-      }
-    }
-  }
+  const contextFiles = listOpenSpecContextFiles(changeDir, { includeReports: true });
 
   const taskContent = [
     `Change Directory: ${changeDir}`,

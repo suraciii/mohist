@@ -162,6 +162,8 @@ export class BuildStageRunner extends BaseStageRunner {
       eventBus,
       executionId: `build-${issue.number}`,
       issueNumber: issue.number,
+      issueTitle: issue.title,
+      issueBody: issue.body,
       stageTimeoutMs: this.getBuildStageTimeoutMs(),
       stageExecutionId: this.getStageExecutionId(),
       stageExecutionRepo: ctx.stageExecutionRepo,

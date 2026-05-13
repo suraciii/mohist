@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { OpenSpecChange } from './detector';
 import type { SessionLearning } from '../tools/session-memory';
 import { formatAgentPrompt, type AgentPromptParts } from '../agents/agent-prompt-schema';
+import { listOpenSpecContextFiles } from '../agents/workflow-context';
 import type { AgentConfig } from '../workflow/workflow-loader';
 
 const BUILD_INSTRUCTION_PATH = path.join(__dirname, '..', 'agents', 'prompts', 'build.md');
@@ -41,6 +42,8 @@ export interface BuildContextOptions {
   wipResumeContext?: string;
   totalTasks?: number;
   issueNumber?: number;
+  issueTitle?: string;
+  issueBody?: string;
   agentConfig?: AgentConfig;
 }
 
@@ -164,6 +167,15 @@ function buildContract(task: Task): string {
 function buildTaskContent(task: Task, options: BuildContextOptions): string {
   const parts: string[] = [];
 
+  if (options.issueNumber || options.issueTitle || options.issueBody) {
+    parts.push(`Issue #${options.issueNumber ?? 'unknown'}: ${options.issueTitle ?? task.title}`);
+    if (options.issueBody) {
+      parts.push('');
+      parts.push(options.issueBody);
+    }
+    parts.push('');
+  }
+
   if (options.isRetry && options.failureReason) {
     parts.push('[Previous Attempt Failed]');
     parts.push(`Failure Reason: ${options.failureReason}`);
@@ -199,31 +211,7 @@ export function buildTaskContext(options: BuildContextOptions): AssembledContext
     spec = readFileIfExists(specPath);
   }
 
-  const contextFiles: Array<{ path: string; desc: string }> = [];
-
-  if (proposal) {
-    contextFiles.push({ path: change.proposalPath, desc: 'Proposal — understand WHY this change is needed' });
-  }
-  if (design) {
-    contextFiles.push({ path: change.designPath, desc: 'Design — understand HOW this change is implemented' });
-  }
-
-  if (fs.existsSync(change.specsPath) && fs.statSync(change.specsPath).isDirectory()) {
-    const specEntries = fs.readdirSync(change.specsPath, { recursive: true, encoding: 'utf-8' });
-    for (const entry of specEntries) {
-      if (typeof entry === 'string' && entry.endsWith('.md')) {
-        contextFiles.push({
-          path: path.join(change.specsPath, entry),
-          desc: `Spec: ${entry} — requirements and acceptance criteria`,
-        });
-      }
-    }
-  }
-
-  if (fs.existsSync(change.tasksPath)) {
-    contextFiles.push({ path: change.tasksPath, desc: 'Tasks — all tasks, their status, and dependency graph' });
-  }
-
+  const contextFiles = listOpenSpecContextFiles(change.changePath, { includeReports: true });
   const learningFiles = listLearningFiles(change.sessionMemoriesPath);
   contextFiles.push(...learningFiles);
 

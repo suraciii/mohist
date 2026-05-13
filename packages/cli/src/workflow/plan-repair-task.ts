@@ -4,6 +4,9 @@ import type { CheckResult, StageContext, StageTaskResult } from './stage-context
 import { emitStageTaskUpdate } from './stage-context';
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import { createWorkflowSessionObservers } from '../agent-runtime';
+import { formatAgentPrompt } from '../agents/agent-prompt-schema';
+import { formatIssueInfo, listOpenSpecContextFiles } from '../agents/workflow-context';
+import { loadAgentConfig } from './workflow-loader';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'plan-repair-task' });
@@ -67,20 +70,20 @@ function buildRepairPrompt(ctx: StageContext, options: PlanRepairTaskOptions, ch
   const missing = detectMissingArtifacts(changeDir);
 
   const parts = [
-    `## Plan Artifact Repair Required`,
+    `Change Directory: ${changeDir}`,
     '',
-    `Issue #${ctx.issue.number}: ${ctx.issue.title}`,
+    formatIssueInfo(ctx.issue),
+    '',
     `Failed check: ${options.failedCheck.name}`,
     '',
-    `## Failure Summary`,
-    '',
+    'Failure Summary:',
     options.failedCheck.message ?? 'Plan artifact check failed.',
     '',
   ];
 
   if (missing.length > 0) {
     parts.push(
-      `## Missing or Invalid Artifacts`,
+      `Missing or Invalid Artifacts:`,
       '',
       ...missing.map(m => `- ${m}`),
       '',
@@ -88,26 +91,26 @@ function buildRepairPrompt(ctx: StageContext, options: PlanRepairTaskOptions, ch
   }
 
   parts.push(
-    `## Change Directory`,
-    '',
-    changeDir,
-    '',
-    `## Expected Durable Artifacts`,
-    '',
+    `Expected Durable Artifacts:`,
     'The following files should exist and be non-empty in the change directory:',
     '',
     ...PLAN_ARTIFACT_FILES.map(a => `- ${a}`),
-    '',
-    `## Instructions`,
-    '',
-    `1. Identify which plan artifact(s) are missing or invalid based on the failed check.`,
-    `2. Create or update only the missing/invalid artifact(s) using the write_file tool.`,
-    `3. Each artifact must be written to the correct path under: ${changeDir}`,
-    `4. Do not modify artifacts that already pass their checks.`,
-    `5. Follow the existing artifact format and content conventions.`,
   );
 
-  return parts.join('\n');
+  return formatAgentPrompt({
+    role: 'Repair invalid Plan artifacts for this issue',
+    projectContext: loadAgentConfig(options.worktreePath).context,
+    contextFiles: listOpenSpecContextFiles(changeDir, { includeReports: true, includeSessionMemories: true }),
+    task: parts.join('\n'),
+    contract: `Create or update only the missing or invalid artifact files under ${changeDir}. Do not modify artifacts that already pass their checks.`,
+    instruction: [
+      '1. Read the issue and every @file context reference before editing.',
+      '2. Identify which plan artifact(s) are missing or invalid based on the failed check.',
+      '3. Create or update only the missing or invalid artifact(s).',
+      `4. Each artifact must be written to the correct path under: ${changeDir}`,
+      '5. Follow the existing artifact format and content conventions.',
+    ].join('\n'),
+  });
 }
 
 export async function runPlanRepairTask(

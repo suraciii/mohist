@@ -2,6 +2,9 @@ import type { CheckResult, StageContext, StageTaskResult } from './stage-context
 import { emitStageTaskUpdate } from './stage-context';
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import { createWorkflowSessionObservers } from '../agent-runtime';
+import { formatAgentPrompt } from '../agents/agent-prompt-schema';
+import { formatIssueInfo, listOpenSpecContextFiles } from '../agents/workflow-context';
+import { loadAgentConfig } from './workflow-loader';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'review-fix-task' });
@@ -12,34 +15,41 @@ export interface ReviewFixTaskOptions {
   attempt: number;
 }
 
-function buildReviewFixPrompt(ctx: StageContext, options: ReviewFixTaskOptions): string {
+function buildReviewFixPrompt(ctx: StageContext, options: ReviewFixTaskOptions, changeDir: string | null): string {
   const output = options.failedCheck.output as { verdict?: string; reviewReport?: string; fixSuggestions?: string } | undefined;
   const fixSuggestions = output?.fixSuggestions ?? '';
   const reviewReport = output?.reviewReport ?? '';
   const trimmedReport = reviewReport.length > 12000 ? reviewReport.slice(-12000) : reviewReport;
   const trimmedSuggestions = fixSuggestions.length > 8000 ? fixSuggestions.slice(-8000) : fixSuggestions;
 
-  return [
-    `## Review Fix Required`,
+  const task = [
+    `Change Directory: ${changeDir ?? options.worktreePath}`,
     '',
-    `Issue #${ctx.issue.number}: ${ctx.issue.title}`,
+    formatIssueInfo(ctx.issue),
+    '',
     `Failed check: ${options.failedCheck.name}`,
     '',
-    `## Review Report`,
-    '',
+    'Review Report:',
     trimmedReport,
     '',
-    `## Fix Suggestions`,
-    '',
+    'Fix Suggestions:',
     trimmedSuggestions || 'No structured fix suggestions found. Read the review report carefully and address all FAIL items.',
-    '',
-    `## Instructions`,
-    '',
-    `1. Read the review report and fix suggestions carefully.`,
-    `2. Apply the minimal code or artifact changes required to resolve every FAIL item.`,
-    `3. Do not make unrelated refactors.`,
-    `4. Do not modify review.md or review-self-check.md.`,
   ].join('\n');
+
+  return formatAgentPrompt({
+    role: 'Fix review findings for this issue',
+    projectContext: loadAgentConfig(options.worktreePath).context,
+    contextFiles: listOpenSpecContextFiles(changeDir, { includeReports: true, includeSessionMemories: true }),
+    task,
+    contract: 'Apply the minimal code or artifact changes required to resolve every FAIL item. Do not modify review.md or review-self-check.md.',
+    instruction: [
+      '1. Read the issue and every @file context reference before editing.',
+      '2. Read the review report and fix suggestions carefully.',
+      '3. Apply only the minimal changes required to resolve every FAIL item.',
+      '4. Do not make unrelated refactors.',
+      '5. Add or update focused tests when the fix changes behavior.',
+    ].join('\n'),
+  });
 }
 
 export async function runReviewFixTask(
@@ -51,6 +61,7 @@ export async function runReviewFixTask(
   const title = 'Fix review findings';
   const stage = 'check';
   const attempt = options.attempt;
+  const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
 
   emitStageTaskUpdate(
     ctx.eventBus,
@@ -88,7 +99,7 @@ export async function runReviewFixTask(
   let session: AgentSession | undefined;
   try {
     session = await AgentSession.create(acpOptions);
-    const result = await session.execute(buildReviewFixPrompt(ctx, options), {
+    const result = await session.execute(buildReviewFixPrompt(ctx, options, changeDir), {
       kind: 'recovery',
       title,
     });
