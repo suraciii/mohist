@@ -359,7 +359,9 @@ New scenario content.`);
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(result.nextStage).toBe(Stage.Done);
+      expect(result.checkResults).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'health:integrate', status: 'pass' }),
+      ]));
     });
 
     it('successful Integrate records spec sync summary in stage execution task results', async () => {
@@ -1055,7 +1057,9 @@ New scenario content.`);
 
       const result1 = await runner.run(ctx);
       expect(result1.success).toBe(true);
-      expect(result1.nextStage).toBe(Stage.Done);
+      expect(result1.checkResults).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'health:integrate', status: 'pass' }),
+      ]));
 
       const specSyncCall1 = appendedTaskResults(ctx).find((t: any) => t.taskId === 'integrate:spec-sync');
       expect(specSyncCall1?.status).toBe('completed');
