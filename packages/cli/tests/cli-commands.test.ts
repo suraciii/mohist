@@ -112,6 +112,42 @@ describe('CLI Commands', () => {
       expect(output).toContain('user-approval');
       expect(errorSpy).not.toHaveBeenCalled();
     });
+
+    it('issue update omits priority when --priority is not provided', async () => {
+      const mockedApiClient = vi.mocked(apiClient);
+      mockedApiClient.mockResolvedValueOnce({
+        success: true,
+        data: {
+          number: 199,
+          title: 'Updated Issue',
+          priority: 'p1',
+          stage: 'backlog',
+          status: 'active',
+          labels: [],
+        },
+      } as any);
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const program = new Command();
+      setupIssueCommands(program);
+
+      await program.parseAsync(['node', 'test', 'issue', 'update', '199', '--body', 'new body']);
+
+      expect(mockedApiClient).toHaveBeenCalledWith(
+        'PATCH',
+        '/issues/199',
+        expect.not.objectContaining({ priority: expect.anything() })
+      );
+      expect(mockedApiClient.mock.calls[0][2]).toEqual({
+        title: undefined,
+        body: 'new body',
+        addLabels: undefined,
+        removeLabels: undefined,
+      });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Updated issue #199'));
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
   });
   
   describe('Quick Commands', () => {

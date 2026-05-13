@@ -510,16 +510,26 @@ export function setupIssueCommands(program: Command): void {
         }
         const { add, remove } = parseLabelFlags(options.label);
 
+        const payload: {
+          title?: string;
+          body?: string;
+          priority?: typeof normalizedPriority;
+          addLabels?: string[];
+          removeLabels?: string[];
+        } = {
+          title: options.title,
+          body: bodyResult.body,
+          addLabels: add.length > 0 ? add : undefined,
+          removeLabels: remove.length > 0 ? remove : undefined,
+        };
+        if (options.priority !== undefined) {
+          payload.priority = normalizedPriority;
+        }
+
         const response = await apiClient<ApiResponse<Issue>>(
           'PATCH',
           `/issues/${number}`,
-          {
-            title: options.title,
-            body: bodyResult.body,
-            priority: normalizedPriority,
-            addLabels: add.length > 0 ? add : undefined,
-            removeLabels: remove.length > 0 ? remove : undefined,
-          }
+          payload
         );
 
         if (response.success && response.data) {
