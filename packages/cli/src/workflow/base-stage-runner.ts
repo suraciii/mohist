@@ -44,7 +44,7 @@ export abstract class BaseStageRunner implements StageRunner {
 
   async executeTaskWork(ctx: StageContext, taskId: string, options: { failedCheck?: CheckResult; attempt?: number } = {}): Promise<StageTaskResult | null> {
     const result = await this.executeReportedTask(ctx, taskId, options.failedCheck, options.attempt ?? 1);
-    if (result) this.appendTaskResult(ctx, result);
+    if (result && !result.alreadyReported) this.appendTaskResult(ctx, result);
     return result;
   }
 
