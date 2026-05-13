@@ -253,6 +253,7 @@ function taskRowToSnapshot(row: WorkflowTaskRow): StageRunSnapshot['tasks'][numb
     title: row.title,
     status: row.status as WorkflowTaskStatus,
     order: row.task_order,
+    dependsOn: [],
     attempts: row.attempts,
     duration: row.duration,
     artifacts: JSON.parse(row.artifacts || '[]'),
@@ -283,11 +284,11 @@ function approvalFromStageRow(row: WorkflowStageRunRow): StageRunSnapshot['appro
   };
 }
 
-function readBuildTasks(tasksPath?: string): Array<{ id: string; title: string; order?: number }> {
+function readBuildTasks(tasksPath?: string): Array<{ id: string; title: string; order?: number; dependsOn?: string[] }> {
   if (!tasksPath || !fs.existsSync(tasksPath)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(tasksPath, 'utf-8')) as {
-      tasks?: Array<{ id?: unknown; title?: unknown; order?: unknown }>;
+      tasks?: Array<{ id?: unknown; title?: unknown; order?: unknown; dependsOn?: unknown }>;
     };
     if (!Array.isArray(parsed.tasks)) return [];
     return parsed.tasks.flatMap((task, index) => {
@@ -296,6 +297,9 @@ function readBuildTasks(tasksPath?: string): Array<{ id: string; title: string; 
         id: task.id,
         title: typeof task.title === 'string' ? task.title : task.id,
         order: typeof task.order === 'number' ? task.order : index,
+        dependsOn: Array.isArray(task.dependsOn)
+          ? task.dependsOn.filter((dep): dep is string => typeof dep === 'string')
+          : [],
       }];
     });
   } catch {

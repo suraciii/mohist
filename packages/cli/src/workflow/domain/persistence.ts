@@ -100,6 +100,7 @@ export function hydrateWorkflowRun(
     for (const taskSnapshot of [...stageSnapshot.tasks].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))) {
       const task = stageRun.materializeTaskForPersistence(taskSnapshot.id, taskSnapshot.title, taskSnapshot.order);
       task.status = taskSnapshot.status;
+      task.dependsOn = [...(taskSnapshot.dependsOn ?? [])];
       task.attempts = taskSnapshot.attempts;
       task.duration = taskSnapshot.duration;
       task.artifacts = [...taskSnapshot.artifacts];
@@ -129,7 +130,7 @@ export function hydrateWorkflowRun(
 
 export function repairWorkflowRunSnapshot(
   snapshot: WorkflowRunSnapshot,
-  buildTasks: Array<{ id: string; title: string; order?: number }> = [],
+  buildTasks: Array<{ id: string; title: string; order?: number; dependsOn?: string[] }> = [],
   definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS,
 ): WorkflowRunSnapshot {
   const stageSnapshots = new Map(snapshot.stageRuns.map(stageRun => [stageRun.stage, stageRun]));
@@ -156,12 +157,17 @@ export function repairWorkflowRunSnapshot(
 
     if (shouldMaterializeBuild) {
       for (const task of buildTasks) {
-        if (stageRun.tasks.some(existing => existing.id === task.id)) continue;
+        const existing = stageRun.tasks.find(candidate => candidate.id === task.id);
+        if (existing) {
+          existing.dependsOn = [...(task.dependsOn ?? existing.dependsOn ?? [])];
+          continue;
+        }
         stageRun.tasks.push({
           id: task.id,
           title: task.title,
           status: 'pending',
           order: task.order ?? stageRun.tasks.length,
+          dependsOn: [...(task.dependsOn ?? [])],
           attempts: 0,
           duration: 0,
           artifacts: [],
@@ -178,6 +184,7 @@ export function repairWorkflowRunSnapshot(
           title: task.title,
           status: 'pending' as TaskRunStatus,
           order: taskIndex,
+          dependsOn: [...(task.dependsOn ?? [])],
           attempts: 0,
           duration: 0,
           artifacts: [],

@@ -44,7 +44,7 @@ describe('auto-skip failure handling', () => {
     };
   }
 
-  it('non-retryable failure (timeout) without onAskUser → passes=false, failed=1, skipped=1, success=false', async () => {
+  it('non-retryable failure without onAskUser fails the task and stops progression', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({
       success: false,
       error: 'Timed out after 300s',
@@ -55,17 +55,17 @@ describe('auto-skip failure handling', () => {
     const result = await runRalphLoop(change, context, { maxRetries: 0 });
 
     expect(result.failed).toBe(1);
-    expect(result.skipped).toBe(1);
+    expect(result.skipped).toBe(0);
     expect(result.success).toBe(false);
     expect(result.taskResults).toHaveLength(1);
-    expect(result.taskResults[0].status).toBe('skipped');
+    expect(result.taskResults[0].status).toBe('failed');
 
     const tasksFile = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
     expect(tasksFile.tasks[0].passes).toBe(false);
-    expect(tasksFile.tasks[0].error).toContain('Auto-skipped');
+    expect(tasksFile.tasks[0].error).toContain('Timed out');
   });
 
-  it('max retries exceeded without onAskUser → passes=false, failed=1, skipped=1, success=false', async () => {
+  it('max retries exceeded without onAskUser fails the task and stops progression', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({
       success: false,
       error: 'Build failed: npm test exited with code 1',
@@ -76,14 +76,14 @@ describe('auto-skip failure handling', () => {
     const result = await runRalphLoop(change, context, { maxRetries: 3 });
 
     expect(result.failed).toBe(1);
-    expect(result.skipped).toBe(1);
+    expect(result.skipped).toBe(0);
     expect(result.success).toBe(false);
     expect(result.taskResults).toHaveLength(1);
-    expect(result.taskResults[0].status).toBe('skipped');
+    expect(result.taskResults[0].status).toBe('failed');
 
     const tasksFile = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
     expect(tasksFile.tasks[0].passes).toBe(false);
-    expect(tasksFile.tasks[0].error).toContain('Auto-skipped');
+    expect(tasksFile.tasks[0].error).toContain('Build failed');
   });
 
   it('all tasks pass → failed=0, skipped=0, success=true', async () => {

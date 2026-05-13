@@ -366,14 +366,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
       if (completedSteps.includes(task.type)) {
         if (task.verifyArtifact()) {
-          log.info('Review task skipped (checkpoint + artifact exists)', {
+          log.info('Review task restored from checkpoint', {
             artifact: task.type,
             issueNumber: ctx.issue.number,
           });
           this.appendTaskResult(ctx, {
             taskId: task.type,
             title: task.label,
-            status: 'skipped',
+            status: 'completed',
             artifacts: [],
             attempts: 0,
             duration: 0,
@@ -401,7 +401,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         this.appendTaskResult(ctx, {
           taskId: task.type,
           title: task.label,
-          status: 'skipped',
+          status: 'completed',
           artifacts: [task.label],
           attempts: 0,
           duration: 0,

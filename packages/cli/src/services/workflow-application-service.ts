@@ -85,9 +85,22 @@ export class WorkflowApplicationService {
     return { run, decision };
   }
 
+  rerunStage(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    const run = this.loadActive(input.issueId, input.tasksPath);
+    const decision = run.rerunStage(input.stage);
+    this.repo.saveAggregate(run, input.startedBy ?? null);
+    this.projection.apply({ run, decision, sessionId: input.sessionId });
+    return { run, decision };
+  }
+
   resumeDecision(issueId: string, options: WorkflowCommandOptions = {}): { run: WorkflowRun; nextWork: WorkflowWork } {
     const run = this.loadActive(issueId, options.tasksPath);
-    return { run, nextWork: run.nextWork() };
+    const nextWork = run.nextWork();
+    if (nextWork.kind === 'failed') {
+      this.repo.saveAggregate(run, options.startedBy ?? null);
+      this.projection.apply({ run, decision: { events: [], nextWork }, sessionId: options.sessionId });
+    }
+    return { run, nextWork };
   }
 
   private updateActiveRun(

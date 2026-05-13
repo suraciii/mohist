@@ -180,7 +180,7 @@ describe('Build aggregate-backed task runtime', () => {
     expect(service.materializeTasks).toHaveBeenCalledWith(expect.objectContaining({
       issueId: issue.id,
       stage: Stage.Build,
-      tasks: [{ id: 'T-001', title: 'First', order: 1 }],
+      tasks: [{ id: 'T-001', title: 'First', order: 1, dependsOn: [] }],
       tasksPath: change.tasksPath,
     }));
     expect(execute).toHaveBeenCalledWith(change, expect.objectContaining({ ignoreTaskFileProgress: true }));
@@ -270,7 +270,7 @@ describe('Build aggregate-backed task runtime', () => {
     expect(tasksFile.tasks.find((task: any) => task.id === 'T-002')).toMatchObject({ passes: false });
   });
 
-  it('records skipped task validation through the aggregate immediately', async () => {
+  it('records failed task validation through the aggregate immediately', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({ success: false, error: 'Timed out' }));
     const issue = makeIssue();
     const change = makeChange(tempDir, [
@@ -288,12 +288,16 @@ describe('Build aggregate-backed task runtime', () => {
     }, { maxRetries: 0, ignoreTaskFileProgress: true });
 
     expect(result.success).toBe(false);
-    expect(result.taskResults[0].status).toBe('skipped');
+    expect(result.taskResults[0].status).toBe('failed');
     expect(service.completeTask).toHaveBeenCalledWith(expect.objectContaining({
       taskId: 'T-001',
-      result: expect.objectContaining({ status: 'skipped', reason: expect.stringContaining('Auto-skipped') }),
+      result: expect.objectContaining({ status: 'failed', reason: 'Timed out' }),
     }));
-    expect(run.stageRun(Stage.Build).findTask('T-001').status).toBe('skipped');
+    expect(run.stageRun(Stage.Build).findTask('T-001').status).toBe('failed');
+    expect(run.nextWork()).toEqual({
+      kind: 'failed',
+      reason: expect.objectContaining({ reason: 'task-failed', stage: Stage.Build, taskId: 'T-001' }),
+    });
   });
 
   it('stops the Build stage when Ralph reports a task failure', async () => {
@@ -346,7 +350,7 @@ describe('Build aggregate-backed task runtime', () => {
     }, { maxRetries: 0, ignoreTaskFileProgress: true, skipTaskIds: ['T-001'] });
 
     expect(result.success).toBe(true);
-    expect(run.stageRun(Stage.Build).findTask('T-001').status).toBe('skipped');
+    expect(run.stageRun(Stage.Build).findTask('T-001').status).toBe('completed');
     expect(run.stageRun(Stage.Build).findTask('T-002').status).toBe('completed');
     expect(service.completeTask).toHaveBeenNthCalledWith(1, expect.objectContaining({ taskId: 'T-001' }));
   });
