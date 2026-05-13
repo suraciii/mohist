@@ -340,4 +340,51 @@ describe('BaseStageRunner aggregate reporting', () => {
       }),
     }));
   });
+
+  it('does not double-report requested task results that were reported by task internals', async () => {
+    class InternallyReportingRunner extends ReportingRunner {
+      protected override async executeReportedTask(
+        ctx: StageContext,
+        taskId: string,
+      ): Promise<StageTaskResult> {
+        ctx.workflowApplicationService?.completeTask({
+          issueId: ctx.issue.id,
+          stage: ctx.issue.stage,
+          taskId,
+          result: { status: 'completed', attempts: 1, duration: 10, artifacts: ['ai-review'] },
+        });
+        return {
+          taskId,
+          title: 'AI review',
+          status: 'completed',
+          attempts: 1,
+          duration: 10,
+          artifacts: ['ai-review'],
+          alreadyReported: true,
+        };
+      }
+    }
+
+    const completeTask = vi.fn();
+    const runner = new InternallyReportingRunner([]);
+    const ctx = makeContext({
+      issue: makeIssue({ stage: Stage.Check }),
+      workflowApplicationService: {
+        completeTask,
+        recordCheckResult: vi.fn(),
+        materializeTasks: vi.fn(),
+      },
+      requestedWork: { kind: 'task', stage: Stage.Check, taskId: 'ai-review' },
+    });
+
+    const result = await runner.run(ctx);
+
+    expect(result.success).toBe(true);
+    expect(completeTask).toHaveBeenCalledTimes(1);
+    expect(completeTask).toHaveBeenCalledWith(expect.objectContaining({
+      issueId: 'issue-1',
+      stage: Stage.Check,
+      taskId: 'ai-review',
+    }));
+  });
 });

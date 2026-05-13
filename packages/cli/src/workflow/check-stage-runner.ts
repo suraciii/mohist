@@ -548,6 +548,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         attempts: 1,
         duration: 0,
         output,
+        alreadyReported: Boolean(ctx.workflowApplicationService),
       };
     }
 
