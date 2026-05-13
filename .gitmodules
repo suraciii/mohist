@@ -4,9 +4,9 @@
 [submodule "opensrc/opencode"]
 	path = opensrc/opencode
 	url = https://github.com/anomalyco/opencode.git
-[submodule "opensrc/nanoclaw"]
-	path = opensrc/nanoclaw
-	url = https://github.com/qwibitai/nanoclaw.git
 [submodule "opensrc/OpenSpec"]
 	path = opensrc/OpenSpec
 	url = https://github.com/Fission-AI/OpenSpec.git
+[submodule "opensrc/hermes-agent"]
+	path = opensrc/hermes-agent
+	url = https://github.com/NousResearch/hermes-agent.git
