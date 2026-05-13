@@ -81,7 +81,8 @@ class TestStageRunner extends BaseStageRunner {
 }
 
 function makeContext(overrides?: Partial<StageContext>): StageContext {
-  return {
+  const eventBus = new EventBus() as any;
+  const ctx = {
     issue: {
       id: 'issue-1',
       number: 1,
@@ -107,7 +108,7 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
     } as unknown as ChangeArtifactsManager,
     worktreeManager: {} as WorktreeManager,
     projectRepo: {} as ProjectRepo,
-    eventBus: new EventBus() as any,
+    eventBus,
     checkpointManager: {
       save: vi.fn(),
       load: vi.fn(),
@@ -128,6 +129,17 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
     } as any,
     ...overrides,
   } as StageContext;
+  ctx.emit = ctx.emit ?? ((event: string, data: unknown) => {
+    try {
+      ctx.eventBus.emit(event as never, data as never);
+    } catch {
+      // fire-and-forget
+    }
+  });
+  ctx.log = ctx.log ?? (() => {
+    // fire-and-forget
+  });
+  return ctx;
 }
 
 describe('BaseStageRunner', () => {
