@@ -452,15 +452,11 @@ export abstract class BaseStageRunner implements StageRunner {
         log.warn('stageStateService.setApproval failed', { error: e instanceof Error ? e.message : String(e) });
       }
     }
-    try {
-      ctx.eventBus.emit('approval_requested', {
-        issueId: ctx.issue.id,
-        projectId: ctx.issue.projectId,
-        stage: ctx.issue.stage,
-      });
-    } catch (e) {
-      log.warn('approval_requested emit failed', { error: e instanceof Error ? e.message : String(e) });
-    }
+    ctx.emit?.('approval_requested', {
+      issueId: ctx.issue.id,
+      projectId: ctx.issue.projectId,
+      stage: ctx.issue.stage,
+    });
   }
 
   protected buildApprovalOutput(ctx: StageContext, allResults: CheckResult[]): unknown {

@@ -56,6 +56,15 @@ function createMockContext(
       findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch: 'main', path: tmpDir }),
     } as any,
     eventBus: eventBus as any,
+    stageExecutionRepo: {
+      create: vi.fn().mockReturnValue({ id: 'exec-1', issueId: `issue-${issueNumber}`, stage: Stage.Integrate, status: 'running', taskResults: [], checkResults: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
+      appendTaskResult: vi.fn(),
+      updateStatus: vi.fn(),
+      updateCheckResults: vi.fn(),
+      findByIssueId: vi.fn().mockReturnValue([
+        { id: 'exec-1', issueId: `issue-${issueNumber}`, stage: Stage.Integrate, status: 'passed', taskResults: [], checkResults: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      ]),
+    } as any,
     checkpointManager: { save: vi.fn(), load: vi.fn(), deleteAll: vi.fn() } as any,
     issueRepo: {
       updateStage: vi.fn(),
@@ -63,16 +72,16 @@ function createMockContext(
       clearApprovalState: vi.fn(),
       updateStatus: vi.fn(),
     } as any,
-    stageExecutionRepo: {
-      create: vi.fn().mockReturnValue({ id: 'exec-1', issueId: `issue-${issueNumber}`, stage: Stage.Integrate, status: 'running', taskResults: [], checkResults: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
-      appendTaskResult: vi.fn(),
-      updateStatus: vi.fn(),
-      updateCheckResults: vi.fn(),
-      updateTaskResults: vi.fn(),
-      findByIssueId: vi.fn().mockReturnValue([
-        { id: 'exec-1', issueId: `issue-${issueNumber}`, stage: Stage.Integrate, status: 'passed', taskResults: [], checkResults: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      ]),
-    } as any,
+    emit: (event: string, data: unknown) => {
+      try {
+        eventBus.emit(event, data);
+      } catch {
+        // fire-and-forget
+      }
+    },
+    log: (_eventType: string, _data: object) => {
+      // fire-and-forget
+    },
     ...overrides,
   } as StageContext;
 }

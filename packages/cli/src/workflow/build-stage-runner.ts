@@ -37,10 +37,9 @@ export class BuildStageRunner extends BaseStageRunner {
   }
 
   protected async executeTasks(ctx: StageContext): Promise<unknown> {
-    const { issue, acpOptions, eventBus, checkpointManager } = ctx;
+    const { issue, acpOptions, checkpointManager } = ctx;
     const issueId = issue.id;
     const projectId = this.projectId ?? issue.projectId;
-    const workflowLogRepo = ctx.workflowLogRepo;
 
     const completedTaskIds = checkpointManager.getResumeSteps(issue.number, 'build');
 
@@ -59,14 +58,14 @@ export class BuildStageRunner extends BaseStageRunner {
         issueNumber: issue.number,
       });
 
-      this.emitSafe(eventBus, 'build_stage_failed', {
+      ctx.emit('build_stage_failed', {
         issueId,
         projectId,
         reason: 'no_change_found',
         details: { worktreePath: this.worktreePath },
         timestamp: new Date().toISOString(),
       });
-      this.writeLog(workflowLogRepo, issueId, 'build_failed', {
+      ctx.log('build_failed', {
         reason: 'no_change_found',
         worktreePath: this.worktreePath,
         issueNumber: issue.number,
@@ -128,7 +127,7 @@ export class BuildStageRunner extends BaseStageRunner {
       passed,
     });
 
-    this.emitSafe(eventBus, 'build_stage_started', {
+    ctx.emit('build_stage_started', {
       issueId,
       projectId,
       stage: 'build' as const,
@@ -136,14 +135,14 @@ export class BuildStageRunner extends BaseStageRunner {
       tasksCount: total,
       timestamp: new Date().toISOString(),
     });
-    this.emitSafe(eventBus, 'build_tasks_snapshot', {
+    ctx.emit('build_tasks_snapshot', {
       issueId,
       projectId,
       total,
       pending,
       passed,
     });
-    this.writeLog(workflowLogRepo, issueId, 'build_started', {
+    ctx.log('build_started', {
       changePath: change.changePath,
       tasksCount: total,
       pending,
@@ -164,7 +163,7 @@ export class BuildStageRunner extends BaseStageRunner {
       projectPath: this.worktreePath,
       issueId: issue.id,
       projectId: issue.projectId,
-      eventBus,
+      eventBus: ctx.eventBus,
       executionId: `build-${issue.number}`,
       issueNumber: issue.number,
       issueTitle: issue.title,
@@ -213,14 +212,14 @@ export class BuildStageRunner extends BaseStageRunner {
         issueNumber: issue.number,
       });
 
-      this.emitSafe(eventBus, 'build_stage_failed', {
+      ctx.emit('build_stage_failed', {
         issueId,
         projectId,
         reason: 'zero_work',
         details: { completed: result.completed, total: result.total },
         timestamp: new Date().toISOString(),
       });
-      this.writeLog(workflowLogRepo, issueId, 'build_failed', {
+      ctx.log('build_failed', {
         reason: 'zero_work',
         completed: result.completed,
         total: result.total,
@@ -237,7 +236,7 @@ export class BuildStageRunner extends BaseStageRunner {
         checkpointManager.delete(issue.number, 'build');
       }
 
-      this.emitSafe(eventBus, 'build_stage_completed', {
+      ctx.emit('build_stage_completed', {
         issueId,
         projectId,
         completed: result.completed,
@@ -245,20 +244,20 @@ export class BuildStageRunner extends BaseStageRunner {
         total: result.total,
         timestamp: new Date().toISOString(),
       });
-      this.writeLog(workflowLogRepo, issueId, 'build_completed', {
+      ctx.log('build_completed', {
         completed: result.completed,
         failed: result.failed,
         total: result.total,
       });
     } else {
-      this.emitSafe(eventBus, 'build_stage_failed', {
+      ctx.emit('build_stage_failed', {
         issueId,
         projectId,
         reason: 'tasks_failed',
         details: { completed: result.completed, failed: result.failed, total: result.total },
         timestamp: new Date().toISOString(),
       });
-      this.writeLog(workflowLogRepo, issueId, 'build_failed', {
+      ctx.log('build_failed', {
         reason: 'tasks_failed',
         completed: result.completed,
         failed: result.failed,
@@ -374,32 +373,5 @@ export class BuildStageRunner extends BaseStageRunner {
     const buildStage = config.stages.find(s => s.stage === 'build');
     if (!buildStage?.timeout) return undefined;
     return buildStage.timeout * 1000;
-  }
-
-  private emitSafe(
-    eventBus: import('../services/event-bus').EventBus,
-    event: string,
-    data: unknown,
-  ): void {
-    if (!eventBus) return;
-    try {
-      eventBus.emit(event as keyof import('../services/event-bus').EventMap, data as never);
-    } catch (e) {
-      log.warn('eventBus.emit failed', { event: String(event), error: e instanceof Error ? e.message : String(e) });
-    }
-  }
-
-  private writeLog(
-    workflowLogRepo: import('../db/workflow-log-repo').WorkflowLogRepo | undefined,
-    issueId: string,
-    eventType: string,
-    data: object,
-  ): void {
-    if (!workflowLogRepo) return;
-    try {
-      workflowLogRepo.insert(issueId, null, eventType, data);
-    } catch (e) {
-      log.warn('workflowLogRepo.insert failed', { eventType, issueId, error: e instanceof Error ? e.message : String(e) });
-    }
   }
 }

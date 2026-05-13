@@ -13,6 +13,9 @@ import type { StageStateService } from '../services/stage-state-service';
 import type { WorkflowApplicationService } from '../services/workflow-application-service';
 import type { TaskRunSnapshot, WorkflowWork } from './domain';
 
+
+
+
 type StageType = Stage;
 
 export interface ChangeArtifactsManager {
@@ -68,6 +71,8 @@ export interface StageContext {
   requestedWork?: WorkflowWork;
   requestedTask?: TaskRunSnapshot;
   signal?: AbortSignal;
+  emit: (event: string, data: unknown) => void;
+  log: (eventType: string, data: object) => void;
 }
 
 export interface CheckResult {

@@ -11,7 +11,7 @@ import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-s
 import { validateReviewArtifact } from './utils';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
-import { runReviewFixTask } from './review-fix-task';
+import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
 import * as fs from 'node:fs';
 
 const log = Log.create({ service: 'check-stage-runner' });
@@ -69,178 +69,41 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     failedCheck: import('./stage-context').CheckResult,
     attempt: number,
   ): Promise<import('./stage-context').StageTaskResult | null> {
-    if (failedCheck.name === 'review-passed' && (failedCheck.output as { verdict?: string })?.verdict === 'FAIL') {
-      const project = ctx.projectRepo?.findById(ctx.issue.projectId);
-      const worktreePath = project
-        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
-        : null;
+    const adapter = createRepairFixAdapter();
+    const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+    const worktreePath = project
+      ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+      : null;
+
+    if (failedCheck.name === 'review-passed') {
       if (!worktreePath) {
         log.warn('runFixTask: no worktree path found', { issueNumber: ctx.issue.number });
         return null;
       }
-      return runReviewFixTask(ctx, { worktreePath, failedCheck, attempt });
+      const result = await adapter.dispatch('fix-review-findings', ctx, {
+        worktreePath,
+        failedCheck,
+        attempt,
+      });
+      if (result.status === 'completed') {
+        this.invalidateReviewArtifactForRereview(ctx);
+      }
+      return result;
     }
 
     if (failedCheck.name === 'merge-ready') {
-      return this.runMergeRepairTask(ctx, failedCheck, attempt);
+      if (!worktreePath) {
+        log.warn('runFixTask: no worktree path found', { issueNumber: ctx.issue.number });
+        return null;
+      }
+      return adapter.dispatch('repair-merge', ctx, {
+        worktreePath,
+        failedCheck,
+        attempt,
+      });
     }
 
     return null;
-  }
-
-  private async runMergeRepairTask(
-    ctx: StageContext,
-    failedCheck: import('./stage-context').CheckResult,
-    attempt: number,
-    taskId = 'repair-merge',
-  ): Promise<import('./stage-context').StageTaskResult> {
-    const startedAt = Date.now();
-    const title = 'Repair merge readiness';
-    const stage = 'check';
-
-    const project = ctx.projectRepo?.findById(ctx.issue.projectId);
-    if (!project) {
-      return {
-        taskId,
-        title,
-        status: 'failed',
-        artifacts: [],
-        attempts: attempt,
-        duration: Date.now() - startedAt,
-        output: { kind: 'merge-repair', success: false, error: 'Project not found' },
-      };
-    }
-
-    const worktreePath = ctx.worktreeManager.getPath(project.name, ctx.issue.number);
-    if (!worktreePath) {
-      return {
-        taskId,
-        title,
-        status: 'failed',
-        artifacts: [],
-        attempts: attempt,
-        duration: Date.now() - startedAt,
-        output: { kind: 'merge-repair', success: false, error: 'Worktree not found' },
-      };
-    }
-
-    emitStageTaskUpdate(
-      ctx.eventBus,
-      ctx.issue.id,
-      ctx.issue.projectId,
-      stage,
-      taskId,
-      title,
-      'started',
-      attempt,
-      [],
-    );
-
-    try {
-      const headBefore = await ctx.worktreeManager.getHeadSha(worktreePath);
-
-      const output = failedCheck.output as { targetBranch?: string; conflictFiles?: string[] };
-      const targetBranch = output?.targetBranch ?? project.baseBranch;
-      const conflictFiles = output?.conflictFiles ?? [];
-
-      log.info('Running merge repair', {
-        issueNumber: ctx.issue.number,
-        worktreePath,
-        targetBranch,
-        conflictFiles,
-        attempt,
-      });
-
-      const result = await ctx.worktreeManager.rebaseOntoMaster(
-        project.path,
-        project.name,
-        ctx.issue.number,
-        targetBranch,
-        { abortOnConflict: false },
-      );
-
-      const headAfter = await ctx.worktreeManager.getHeadSha(worktreePath);
-      const headChanged = headBefore !== headAfter;
-
-      log.info('Merge repair completed', {
-        issueNumber: ctx.issue.number,
-        success: result.success,
-        conflicts: result.conflicts,
-        headChanged,
-        headBefore,
-        headAfter,
-      });
-
-      emitStageTaskUpdate(
-        ctx.eventBus,
-        ctx.issue.id,
-        ctx.issue.projectId,
-        stage,
-        taskId,
-        title,
-        result.success ? 'completed' : 'failed',
-        attempt,
-        [],
-      );
-
-      return {
-        taskId,
-        title,
-        status: result.success ? 'completed' : 'failed',
-        artifacts: [],
-        attempts: attempt,
-        duration: Date.now() - startedAt,
-        reason: result.success
-          ? `${title} completed after ${attempt} attempt(s)`
-          : `merge conflict prevented successful merge repair`,
-        causedBy: {
-          type: 'conflict',
-          checkName: failedCheck.name,
-          message: result.conflicts.length > 0 ? `Conflict files: ${result.conflicts.join(', ')}` : undefined,
-        },
-        output: {
-          kind: 'merge-repair',
-          targetBranch,
-          attempt,
-          success: result.success,
-          conflicts: result.conflicts,
-          headChanged,
-          headBefore,
-          headAfter,
-        },
-      };
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      log.warn('Merge repair failed', { issueNumber: ctx.issue.number, taskId, error });
-
-      emitStageTaskUpdate(
-        ctx.eventBus,
-        ctx.issue.id,
-        ctx.issue.projectId,
-        stage,
-        taskId,
-        title,
-        'failed',
-        attempt,
-        [],
-      );
-
-      return {
-        taskId,
-        title,
-        status: 'failed',
-        artifacts: [],
-        attempts: attempt,
-        duration: Date.now() - startedAt,
-        reason: `${title} failed: ${error}`,
-        causedBy: {
-          type: 'conflict',
-          checkName: failedCheck.name,
-          message: error,
-        },
-        output: { kind: 'merge-repair', success: false, error },
-      };
-    }
   }
 
   protected async beforeRecheckAfterFix(
@@ -318,21 +181,14 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
     const checkBridgeObserver = {
       onRawNotification(_ctx: import('../agent-runtime/session-observer').SessionContext, notification: import('@agentclientprotocol/sdk').SessionNotification) {
-        if (!ctx.eventBus) return;
-        try {
-          ctx.eventBus.emit('plan_session_update', {
-            issueId: String(ctx.acpOptions.issueNumber ?? ctx.acpOptions.issueId ?? ''),
-            projectId: ctx.issue.projectId,
-            roundType: roundState.type,
-            roundIndex: roundState.index,
-            sessionUpdate: notification.update.sessionUpdate,
-            data: notification.update as unknown,
-          });
-        } catch (e) {
-          log.warn('eventBus.emit failed for plan_session_update', {
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
+        ctx.emit('plan_session_update', {
+          issueId: String(ctx.acpOptions.issueNumber ?? ctx.acpOptions.issueId ?? ''),
+          projectId: ctx.issue.projectId,
+          roundType: roundState.type,
+          roundIndex: roundState.index,
+          sessionUpdate: notification.update.sessionUpdate,
+          data: notification.update as unknown,
+        });
       },
     };
 
@@ -409,7 +265,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       } else {
         log.info('Review task', { artifact: task.type, issueNumber: ctx.issue.number });
 
-        emitReviewRoundStart(ctx.eventBus, task.type, 0, ctx.acpOptions, ctx.issue.projectId ?? '');
+        emitReviewRoundStart(ctx, task.type, 0, ctx.acpOptions, ctx.issue.projectId ?? '');
         emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId ?? '', 'check', task.type, task.label, 'started', 1, []);
 
         const taskStartTime = Date.now();
@@ -566,7 +422,8 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       return this.runConvergeReviewSnapshotTask(ctx);
     }
 
-    if (taskId === 'fix-review-findings' && failedCheck?.name === 'review-passed') {
+    if (taskId === 'fix-review-findings' || taskId === 'repair-review-findings') {
+      const adapter = createRepairFixAdapter();
       const project = ctx.projectRepo?.findById(ctx.issue.projectId);
       const worktreePath = project
         ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
@@ -575,13 +432,30 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         log.warn('executeReportedTask: no worktree path found', { issueNumber: ctx.issue.number });
         return null;
       }
-      const result = await runReviewFixTask(ctx, { worktreePath, failedCheck, attempt });
+      const result = await adapter.dispatch('fix-review-findings', ctx, {
+        worktreePath,
+        failedCheck: failedCheck ?? { name: 'review-passed', status: 'fail' as const, output: { verdict: 'FAIL' } },
+        attempt,
+      });
       if (result.status === 'completed') this.invalidateReviewArtifactForRereview(ctx);
       return result;
     }
 
-    if (taskId === 'fix-merge-readiness' && failedCheck?.name === 'merge-ready') {
-      return this.runMergeRepairTask(ctx, failedCheck, attempt, taskId);
+    if (taskId === 'fix-merge-readiness' || taskId === 'repair-merge') {
+      const adapter = createRepairFixAdapter();
+      const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+      const worktreePath = project
+        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+        : null;
+      if (!worktreePath) {
+        log.warn('executeReportedTask: no worktree path found', { issueNumber: ctx.issue.number });
+        return null;
+      }
+      return adapter.dispatch('repair-merge', ctx, {
+        worktreePath,
+        failedCheck: failedCheck ?? { name: 'merge-ready', status: 'fail' as const },
+        attempt,
+      });
     }
 
     if (failedCheck) return this.runFixTask(ctx, taskId, failedCheck, attempt);
@@ -639,25 +513,17 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 }
 
 function emitReviewRoundStart(
-  eventBus: import('../services/event-bus').EventBus | undefined,
+  ctx: StageContext,
   roundType: string,
   roundIndex: number,
   acpOptions: AgentSessionOptions,
   projectId: string,
 ): void {
-  if (!eventBus) return;
-  try {
-    eventBus.emit('plan_round_start', {
-      issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-      projectId,
-      roundType,
-      roundLabel: roundType,
-      roundIndex,
-    });
-  } catch (e) {
-    log.warn('eventBus.emit failed for plan_round_start', {
-      roundType,
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
+  ctx.emit('plan_round_start', {
+    issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+    projectId,
+    roundType,
+    roundLabel: roundType,
+    roundIndex,
+  });
 }

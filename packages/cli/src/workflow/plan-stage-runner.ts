@@ -21,8 +21,7 @@ import { isCurrentStageApproval } from './issue-lifecycle';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { HealthGateCheck } from './checks/health-gate-check';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
-import { runHealthFixTask } from './health-fix-task';
-import { runPlanRepairTask } from './plan-repair-task';
+import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
@@ -64,27 +63,15 @@ export class PlanStageRunner extends BaseStageRunner {
     failedCheck: CheckResult | undefined,
     attempt: number,
   ): Promise<StageTaskResult | null> {
-    if (taskId === 'repair-plan-artifacts') {
-      if (!failedCheck) {
-        return { taskId, title: 'Repair plan artifacts', status: 'failed', artifacts: [], attempts: attempt, duration: 0, reason: 'Missing failed check context' };
-      }
-      return runPlanRepairTask(ctx, {
-        worktreePath: this.worktreePath || process.cwd(),
-        failedCheck,
-        attempt,
-      });
-    }
-    if (taskId === 'fix-plan-health') {
-      if (!failedCheck) {
-        return { taskId, title: 'Fix plan health', status: 'failed', artifacts: [], attempts: attempt, duration: 0, reason: 'Missing failed check context' };
-      }
-      return runHealthFixTask(ctx, {
-        taskId: 'fix-plan-health',
-        title: 'Fix plan health',
-        stage: 'plan',
-        worktreePath: this.worktreePath || process.cwd(),
-        healthCommand: this.planHealthGatePolicy.command,
-        failedCheck,
+    if (taskId === 'repair-plan-artifacts' || taskId === 'fix-plan-health') {
+      const adapter = createRepairFixAdapter();
+      const worktreePath = this.worktreePath || ctx.worktreeManager.getPath(
+        ctx.projectRepo?.findById(ctx.issue.projectId)?.name ?? '',
+        ctx.issue.number,
+      ) || process.cwd();
+      return adapter.dispatch(taskId as any, ctx, {
+        worktreePath,
+        failedCheck: failedCheck ?? { name: taskId, status: 'fail' as const },
         attempt,
       });
     }
@@ -167,7 +154,7 @@ export class PlanStageRunner extends BaseStageRunner {
     const startedAt = Date.now();
     let attempts = 1;
     try {
-      emitRoundStart(eventBus, task.type, taskIndex, acpOptions, issue.projectId ?? '');
+      emitRoundStart(ctx, task.type, taskIndex, acpOptions, issue.projectId ?? '');
       emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'started', attempts, []);
       const result = await session.execute(task.buildPrompt(issue, changeDir), { kind: 'task', title: task.label });
       if (!result.success) {
@@ -319,6 +306,18 @@ export class PlanStageRunner extends BaseStageRunner {
 
     const completedSteps = [...resumeSteps];
 
+const planBridgeObserver = {
+      onRawNotification(_ctx: import('../agent-runtime/session-observer').SessionContext, notification: import('@agentclientprotocol/sdk').SessionNotification) {
+        ctx.emit('plan_session_update', {
+          issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+          projectId: issue.projectId,
+          roundType: '',
+          roundIndex: 0,
+          sessionUpdate: notification.update.sessionUpdate,
+          data: notification.update as unknown,
+        });
+      },
+    };
     const wfObservers = createWorkflowSessionObservers({
       eventBus: ctx.eventBus,
       workflowLogRepo: ctx.workflowLogRepo,
@@ -326,7 +325,7 @@ export class PlanStageRunner extends BaseStageRunner {
       coderSessionRepo: ctx.coderSessionRepo,
       stage: 'plan',
       title: 'Plan stage',
-    }, [this.createPlanBridgeObserver(ctx)]);
+    }, [planBridgeObserver]);
 
     const connectionOptions: AgentSessionOptions = {
       ...acpOptions,
@@ -392,7 +391,7 @@ export class PlanStageRunner extends BaseStageRunner {
 
         log.info('Plan task', { artifact: task.type, issueNumber: issue.number });
 
-        emitRoundStart(eventBus, task.type, index, acpOptions, issue.projectId ?? '');
+        emitRoundStart(ctx, task.type, index, acpOptions, issue.projectId ?? '');
         emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'started', 1, []);
 
         const taskStartTime = Date.now();
@@ -565,27 +564,19 @@ export class PlanStageRunner extends BaseStageRunner {
 }
 
 function emitRoundStart(
-  eventBus: import('../services/event-bus').EventBus | undefined,
+  ctx: StageContext,
   roundType: string,
   roundIndex: number,
   acpOptions: AgentSessionOptions,
   projectId: string,
 ): void {
-  if (!eventBus) return;
-  try {
-    eventBus.emit('plan_round_start', {
-      issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
-      projectId,
-      roundType,
-      roundLabel: roundType,
-      roundIndex,
-    });
-  } catch (e) {
-    log.warn('eventBus.emit failed for plan_round_start', {
-      roundType,
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
+  ctx.emit('plan_round_start', {
+    issueId: String(acpOptions.issueNumber ?? acpOptions.issueId ?? ''),
+    projectId,
+    roundType,
+    roundLabel: roundType,
+    roundIndex,
+  });
 }
 
 async function commitPlanArtifacts(changeDir: string, issue: { number: number; title: string }): Promise<boolean> {
