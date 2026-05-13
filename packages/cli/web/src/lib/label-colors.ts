@@ -80,6 +80,18 @@ export function formatPriority(priority: string): string {
   return priority.toUpperCase()
 }
 
+const PRIORITY_COLORS: Record<string, { bg: string; text: string }> = {
+  p0: { bg: '#fee2e2', text: '#dc2626' },
+  p1: { bg: '#fee2e2', text: '#dc2626' },
+  p2: { bg: '#fef9c3', text: '#ca8a04' },
+  p3: { bg: '#dcfce7', text: '#16a34a' },
+  p4: { bg: '#f3f4f6', text: '#6b7280' },
+}
+
+export function getPriorityStyle(priority: string): { bg: string; text: string } {
+  return PRIORITY_COLORS[priority] ?? { bg: '#fef9c3', text: '#ca8a04' }
+}
+
 export function sortLabels(labels: string[]): string[] {
   const types: string[] = []
   const urgency: string[] = []

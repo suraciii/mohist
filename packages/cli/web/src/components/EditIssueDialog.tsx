@@ -4,6 +4,9 @@ import { Dialog } from './Dialog'
 import { api } from '../lib/api'
 import { useLabels } from '../hooks/useQueries'
 import type { Issue } from '../lib/types'
+import { getPriorityStyle } from '../lib/label-colors'
+
+const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
 
 interface Props {
   open: boolean
@@ -15,6 +18,7 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
   const [title, setTitle] = useState(issue.title)
   const [body, setBody] = useState(issue.body ?? '')
   const [labels, setLabels] = useState<string[]>(issue.labels)
+  const [priority, setPriority] = useState<string>(issue.priority ?? 'p2')
   const queryClient = useQueryClient()
   const { data: allLabels } = useLabels()
 
@@ -23,6 +27,7 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
       setTitle(issue.title)
       setBody(issue.body ?? '')
       setLabels(issue.labels)
+      setPriority(issue.priority ?? 'p2')
     }
   }, [open, issue])
 
@@ -35,6 +40,7 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
         body: body || undefined,
         ...(add.length > 0 ? { addLabels: add } : {}),
         ...(remove.length > 0 ? { removeLabels: remove } : {}),
+        priority,
       })
     },
     onSuccess: () => {
@@ -96,6 +102,34 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
             </div>
           </div>
         )}
+
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Priority</label>
+          <div className="flex gap-1.5">
+            {PRIORITIES.map((p) => {
+              const style = getPriorityStyle(p)
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPriority(p)}
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                    priority === p
+                      ? 'ring-1 ring-offset-1'
+                      : 'hover:opacity-80'
+                  }`}
+                  style={{
+                    backgroundColor: style.bg,
+                    color: style.text,
+                    ...(priority === p ? { ringColor: style.text } : {}),
+                  }}
+                >
+                  {p.toUpperCase()}
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         {mutation.error && (
           <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">

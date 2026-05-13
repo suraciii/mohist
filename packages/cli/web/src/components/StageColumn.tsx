@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { Issue, AgentStatus } from '../lib/types'
+import type { SortMode } from '../lib/board-query'
 import { api } from '../lib/api'
 import { IssueCard } from './IssueCard'
 
@@ -13,24 +14,20 @@ interface Props {
   agentStatus: AgentStatus
   isDone?: boolean
   archivedCount?: number
+  sort?: SortMode
+  onSortChange?: (s: SortMode) => void
 }
 
-export function StageColumn({ label, issues, agentStatus, isDone, archivedCount = 0 }: Props) {
+export function StageColumn({ label, issues, agentStatus, isDone, archivedCount = 0, sort, onSortChange }: Props) {
   const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(false)
 
-  const sortedIssues = isDone
-    ? [...issues].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-      )
-    : issues
-
-  const totalCount = sortedIssues.length
+  const totalCount = issues.length
   const hiddenCount = totalCount - DONE_COLLAPSE_LIMIT
   const shouldCollapse = isDone && hiddenCount > 0 && !expanded
   const visibleIssues = shouldCollapse
-    ? sortedIssues.slice(0, DONE_COLLAPSE_LIMIT)
-    : sortedIssues
+    ? issues.slice(0, DONE_COLLAPSE_LIMIT)
+    : issues
 
   const archiveAllMutation = useMutation({
     mutationFn: () => api.archiveAllCompleted(),
@@ -51,6 +48,12 @@ export function StageColumn({ label, issues, agentStatus, isDone, archivedCount 
     },
   })
 
+  const sortOptions: { value: typeof sort; label: string }[] = [
+    { value: 'priority', label: 'Prio' },
+    { value: 'number', label: '#' },
+    { value: 'updated', label: 'Upd' },
+  ]
+
   return (
     <div className="flex flex-col min-w-[280px] max-w-[320px] flex-1">
       <div className="mb-3 flex items-center gap-2 px-1">
@@ -58,6 +61,24 @@ export function StageColumn({ label, issues, agentStatus, isDone, archivedCount 
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{label}</h2>
         <span className="ml-auto text-xs text-gray-400">{totalCount}</span>
       </div>
+
+      {onSortChange && sort && (
+        <div className="mb-2 flex items-center gap-0.5 px-1">
+          {sortOptions.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => onSortChange(opt.value!)}
+              className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                sort === opt.value
+                  ? 'bg-blue-100 text-blue-700 font-medium'
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex-1 space-y-2 overflow-y-auto rounded-lg bg-gray-100/60 p-2 min-h-[120px]">
         {totalCount === 0 && (

@@ -5,6 +5,9 @@ import { Dialog } from './Dialog'
 import { api } from '../lib/api'
 import { useLabels, useOpencodeModels } from '../hooks/useQueries'
 import { useProject } from '../context/ProjectContext'
+import { getPriorityStyle } from '../lib/label-colors'
+
+const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
 
 interface Props {
   open: boolean
@@ -173,6 +176,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const [body, setBody] = useState('')
   const [labels, setLabels] = useState<string[]>([])
   const [model, setModel] = useState<string | null>(null)
+  const [priority, setPriority] = useState<string>('p2')
   const { projectId } = useProject()
   const queryClient = useQueryClient()
   const { data: allLabels } = useLabels()
@@ -185,6 +189,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         labels: labels.length > 0 ? labels : undefined,
         ...(model ? { model } : {}),
         ...(projectId ? { projectId } : {}),
+        priority,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -197,6 +202,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     setBody('')
     setLabels([])
     setModel(null)
+    setPriority('p2')
     onClose()
   }
 
@@ -261,6 +267,34 @@ export function CreateIssueDialog({ open, onClose }: Props) {
             onChange={setModel}
             onClear={() => setModel(null)}
           />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Priority</label>
+          <div className="flex gap-1.5">
+            {PRIORITIES.map((p) => {
+              const style = getPriorityStyle(p)
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPriority(p)}
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                    priority === p
+                      ? 'ring-1 ring-offset-1'
+                      : 'hover:opacity-80'
+                  }`}
+                  style={{
+                    backgroundColor: style.bg,
+                    color: style.text,
+                    ...(priority === p ? { ringColor: style.text } : {}),
+                  }}
+                >
+                  {p.toUpperCase()}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         {mutation.error && (

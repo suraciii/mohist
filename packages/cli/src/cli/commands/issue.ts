@@ -193,6 +193,7 @@ export function setupIssueCommands(program: Command): void {
     .option('--body-file <path>', 'Read body from a file')
     .option('-l, --label <label>', 'Add label (can be repeated)', (val, prev: string[]) => [...prev, val], [] as string[])
     .option('-p, --priority <level>', 'Set priority (p0-p4)')
+    .option('--model <model>', 'Set coder model (provider/model)')
     .action(async (title, options) => {
       const normalizedPriority = normalizePriority(options.priority);
       if (options.priority !== undefined && normalizedPriority === null) {
@@ -208,7 +209,7 @@ export function setupIssueCommands(program: Command): void {
         const response = await apiClient<ApiResponse<Issue>>(
           'POST',
           '/issues',
-          { title, body: bodyResult.body, labels: options.label, priority: normalizedPriority }
+          { title, body: bodyResult.body, labels: options.label, priority: normalizedPriority, model: options.model }
         );
 
         if (response.success && response.data) {
