@@ -176,13 +176,14 @@ export class BuildStageRunner extends BaseStageRunner {
     });
 
     const activeCompletedTaskIds = [...completedTaskIds];
+    const requestedAggregateTaskId = ctx.workflowApplicationService && ctx.requestedWork?.kind === 'task'
+      ? ctx.requestedWork.taskId
+      : undefined;
 
     const result: RalphLoopResult = await executor.execute(change, {
-      skipTaskIds: completedTaskIds.length > 0 ? completedTaskIds : undefined,
+      skipTaskIds: requestedAggregateTaskId ? undefined : (completedTaskIds.length > 0 ? completedTaskIds : undefined),
       ignoreTaskFileProgress: Boolean(ctx.workflowApplicationService),
-      onlyTaskId: ctx.workflowApplicationService && ctx.requestedWork?.kind === 'task'
-        ? ctx.requestedWork.taskId
-        : undefined,
+      onlyTaskId: requestedAggregateTaskId,
       onTaskCompleted: (taskId: string) => {
         activeCompletedTaskIds.push(taskId);
         checkpointManager.markStepComplete(issue.number, 'build', taskId);
