@@ -91,6 +91,9 @@ export const api = {
   getCommitDiff: (number: number, hash: string) =>
     request<import('./types').CommitDiffResponse>(`/issues/${number}/commits/${hash}/diff`),
 
+  getFileContent: (number: number, filePath: string) =>
+    request<{ base: string; head: string }>(`/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`),
+
   addComment: (issueNumber: number, body: string) =>
     request<import('./types').Comment>(`/issues/${issueNumber}/comments`, {
       method: 'POST',
