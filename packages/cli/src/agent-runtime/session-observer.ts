@@ -3,6 +3,7 @@ import type { SessionNotification } from '@agentclientprotocol/sdk';
 export interface SessionObserver {
   onSessionStart?(ctx: SessionContext): void;
   onTextChunk?(ctx: SessionContext, text: string): void;
+  onThoughtChunk?(ctx: SessionContext, text: string): void;
   onToolCall?(ctx: SessionContext, event: ToolCallEvent): void;
   onSessionEvent?(ctx: SessionContext, eventType: string, data: unknown): void;
   onStateChange?(ctx: SessionContext, from: SessionState, to: SessionState): void;

@@ -2,7 +2,8 @@ import React, { useState } from 'react'
 import Markdown from 'react-markdown'
 import type { DisplayAssistantPart, DisplayChangedFile } from '../../lib/session-transcript-display'
 import { getToolRegistryEntry, getToolDisplayType } from './tool-registry'
-import { parseJsonSafely } from '../../lib/transcript-tool-utils'
+import { parseJsonSafely, getFallbackSubtitle } from '../../lib/transcript-tool-utils'
+import { parseDiff, isLargeDiff, type FileBlock } from '../../lib/diffModel'
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString()
@@ -175,24 +176,6 @@ function getToolDisplayArgs(normalizedName: string, rawInput?: string): string[]
   return entry.getBadges(normalizedName, rawInput)
 }
 
-function getFallbackSubtitle(rawInput?: string): string | undefined {
-  if (!rawInput) return undefined
-  try {
-    const parsed = JSON.parse(rawInput)
-    const desc = parsed.description ?? parsed.name
-    if (typeof desc === 'string') return desc
-    const query = parsed.query
-    if (typeof query === 'string') return query
-    const url = parsed.url
-    if (typeof url === 'string') return url
-    const fp = parsed.filePath ?? parsed.file_path ?? parsed.path
-    if (typeof fp === 'string') return fp
-    return undefined
-  } catch {
-    return undefined
-  }
-}
-
 function getRegistrySubtitle(normalizedName: string, rawInput?: string): string | undefined {
   const entry = getToolRegistryEntry(normalizedName)
   return entry.getSubtitle(normalizedName, rawInput)
@@ -295,15 +278,18 @@ function SearchContentView({ input, output }: SearchContentViewProps) {
   const searchType = parsed ? (parsed.type ?? '') as string : ''
 
   let results: string[] = []
+  let wasTruncated = false
   if (output) {
     try {
       const parsedOutput = JSON.parse(output)
       if (Array.isArray(parsedOutput)) {
+        const total = parsedOutput.length
         results = parsedOutput.slice(0, 5).map((r: any) => {
           if (typeof r === 'string') return r
           if (r.file || r.path) return `${r.file ?? r.path}:${r.line ?? ''}`
           return JSON.stringify(r).slice(0, 80)
         })
+        wasTruncated = total > 5
       } else if (typeof parsedOutput === 'object') {
         results = [JSON.stringify(parsedOutput).slice(0, 200)]
       } else {
@@ -335,7 +321,7 @@ function SearchContentView({ input, output }: SearchContentViewProps) {
                 {line}
               </pre>
             ))}
-            {output && results.length < 5 && (
+            {wasTruncated && (
               <span className="text-xs text-gray-400">...</span>
             )}
           </div>
@@ -417,6 +403,193 @@ function PatchDiffView({ changedFiles }: PatchDiffViewProps) {
   )
 }
 
+interface DiffContentViewProps {
+  changedFiles?: DisplayChangedFile[]
+  rawInput?: string
+  rawOutput?: string
+  normalizedName: string
+}
+
+function DiffContentView({ changedFiles, rawInput, rawOutput, normalizedName: _normalizedName }: DiffContentViewProps) {
+  const [showRaw, setShowRaw] = useState(false)
+
+  let diffBlocks: FileBlock[] = []
+  let diffText: string | undefined
+
+  if (rawOutput && typeof rawOutput === 'string' && rawOutput.includes('---')) {
+    diffText = rawOutput
+  } else if (rawInput && typeof rawInput === 'string' && rawInput.includes('---')) {
+    diffText = rawInput
+  }
+
+  if (diffText) {
+    diffBlocks = parseDiff(diffText)
+  }
+
+  const hasDiff = diffBlocks.length > 0
+  const displayFiles = changedFiles && changedFiles.length > 0
+    ? changedFiles
+    : diffBlocks.length > 0
+      ? diffBlocks.map(b => ({
+          path: b.newPath || b.oldPath,
+          operation: (b.status === 'added' ? 'created' : b.status === 'deleted' ? 'deleted' : b.status === 'renamed' ? 'moved' : 'modified') as DisplayChangedFile['operation'],
+          additions: b.additions,
+          deletions: b.deletions,
+        }))
+      : []
+
+  return (
+    <div className="border-t border-gray-100">
+      {displayFiles.length > 0 && (
+        <div className="px-3 pt-2">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-medium text-gray-500">
+              Changed files ({displayFiles.length})
+            </span>
+            {hasDiff && (
+              <button
+                onClick={() => setShowRaw(!showRaw)}
+                className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                {showRaw ? 'Show diff' : 'Show raw'}
+              </button>
+            )}
+          </div>
+          <div className="space-y-1">
+            {displayFiles.slice(0, 5).map((file, i) => {
+              const opBadge: Record<string, string> = { created: '+', modified: '~', deleted: '-', moved: '>' }
+              return (
+                <div key={i} className="flex items-center gap-2 py-0.5 px-1.5 bg-gray-50 rounded">
+                  <span className="text-xs font-mono text-gray-500 w-3">{opBadge[file.operation] ?? '?'}</span>
+                  <span className="text-xs font-mono text-gray-700 truncate flex-1">{file.path}</span>
+                  {file.additions !== undefined && file.additions > 0 && (
+                    <span className="text-xs text-green-600">+{file.additions}</span>
+                  )}
+                  {file.deletions !== undefined && file.deletions > 0 && (
+                    <span className="text-xs text-red-600">-{file.deletions}</span>
+                  )}
+                </div>
+              )
+            })}
+            {displayFiles.length > 5 && (
+              <div className="text-xs text-gray-400 px-1.5">...and {displayFiles.length - 5} more</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {hasDiff && !showRaw && (
+        <div className="px-3 pb-2">
+          <div className="mt-2 space-y-2">
+            {diffBlocks.map((block, i) => (
+              <DiffBlockView key={i} block={block} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showRaw && (
+        <div className="px-3 pb-2">
+          <div className="font-medium text-xs text-gray-500 mb-1">Raw output</div>
+          <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+            {diffText}
+          </pre>
+        </div>
+      )}
+
+      {!hasDiff && !showRaw && (
+        <div className="px-3 pb-2">
+          {rawInput && !rawInput.includes('---') && (
+            <div className="mb-2">
+              <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
+              <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-24 overflow-auto">
+                {rawInput}
+              </pre>
+            </div>
+          )}
+          {rawOutput && (
+            <div>
+              <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
+              <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-24 overflow-auto">
+                {rawOutput}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DiffBlockView({ block }: { block: FileBlock }) {
+  const [expanded, setExpanded] = useState(false)
+  const large = isLargeDiff(block, 200)
+
+  return (
+    <div className="rounded border border-gray-200 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full text-left px-2 py-1 hover:bg-gray-50 transition-colors text-xs"
+      >
+        <svg className={`h-3 w-3 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+        </svg>
+        <span className="font-mono text-gray-700 truncate flex-1">{block.newPath || block.oldPath}</span>
+        <span className="text-green-600">+{block.additions}</span>
+        <span className="text-red-500">-{block.deletions}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-100">
+          {large ? (
+            <div className="px-3 py-2 text-xs text-gray-400 text-center">
+              Large diff ({block.changedLineCount} lines) — truncated for display
+            </div>
+          ) : (
+            <table className="w-full text-xs font-mono">
+              <tbody>
+                {block.lines.slice(0, 100).map((line, i) => {
+                  let bg = ''
+                  let textColor = 'text-gray-700'
+                  if (line.type === 'add') {
+                    bg = 'bg-green-50'
+                    textColor = 'text-green-800'
+                  } else if (line.type === 'del') {
+                    bg = 'bg-red-50'
+                    textColor = 'text-red-800'
+                  } else if (line.type === 'hunk') {
+                    bg = 'bg-blue-50/50'
+                    textColor = 'text-blue-600'
+                  }
+                  return (
+                    <tr key={i} className={bg}>
+                      <td className="w-[1%] whitespace-nowrap select-none text-right px-2 py-0 text-gray-300 border-r border-gray-100">
+                        {line.oldLine?.toString() ?? ''}
+                      </td>
+                      <td className="w-[1%] whitespace-nowrap select-none text-right px-2 py-0 text-gray-300 border-r border-gray-100">
+                        {line.newLine?.toString() ?? ''}
+                      </td>
+                      <td className={`${textColor} px-3 py-0 whitespace-pre`}>
+                        {line.content}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {block.lines.length > 100 && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-1 text-xs text-gray-400 text-center">
+                      ... {block.lines.length - 100} more lines
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface ToolRowViewProps {
   part: Extract<DisplayAssistantPart, { partType: 'tool' }>
 }
@@ -452,6 +625,17 @@ function ToolRowView({ part }: ToolRowViewProps) {
 
     if ((part.normalizedName === 'grep' || part.normalizedName === 'search' || part.normalizedName === 'search_files') && (part.input || part.output)) {
       return <SearchContentView input={part.input} output={part.output} />
+    }
+
+    if (displayType === 'diff') {
+      return (
+        <DiffContentView
+          changedFiles={part.changedFiles}
+          rawInput={part.rawInput}
+          rawOutput={part.rawOutput}
+          normalizedName={part.normalizedName}
+        />
+      )
     }
 
     return (

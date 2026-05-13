@@ -105,6 +105,18 @@ export class WorkflowSessionObserver {
     }
   }
 
+  onThoughtChunk(ctx: SessionContext, text: string): void {
+    if (!this.eventBus || !ctx.executionId) return;
+    const sseIssueId = String(ctx.issueNumber ?? ctx.issueId ?? '');
+    this.eventBus.emit('coder_thought_chunk', {
+      issueId: sseIssueId,
+      projectId: ctx.projectId ?? '',
+      executionId: ctx.executionId,
+      acpSessionId: ctx.acpSessionId,
+      text,
+    });
+  }
+
   onToolCall(ctx: SessionContext, event: ToolCallEvent): void {
     if (!this.eventBus || !ctx.executionId) return;
     const sseIssueId = String(ctx.issueNumber ?? ctx.issueId ?? '');

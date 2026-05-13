@@ -546,7 +546,16 @@ export class AgentSession {
     const eventType = update.sessionUpdate;
 
     if (eventType === 'agent_thought_chunk') {
-      // no special handling
+      const contentBlock = update.content;
+      const thoughtText = (contentBlock?.type === 'text' ? contentBlock.text : null);
+      if (thoughtText) {
+        const ctx = this.makeCtx();
+        for (const obs of this._observers) {
+          try { obs.onThoughtChunk?.(ctx, thoughtText); } catch (err) {
+            log.error('onThoughtChunk observer failed', { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+      }
     } else if (
       eventType === 'agent_message_chunk' &&
       update.content &&

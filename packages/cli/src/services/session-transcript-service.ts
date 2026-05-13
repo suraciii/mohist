@@ -421,6 +421,106 @@ function inferDisplayTitle(d: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+function synthesizeWriteDiff(filePath: string, content: string): string {
+  if (!content) return '';
+  const lines = content.split('\n');
+  const newCount = lines.length;
+  const header = `diff --git a/${filePath} b/${filePath}\nnew file mode 100644\n--- /dev/null\n+++ b/${filePath} @@ -0,0 +1,${newCount} @@`;
+  const diffLines = lines.map(line => '+' + line).join('\n');
+  return `${header}\n${diffLines}\n`;
+}
+
+function synthesizeEditDiff(filePath: string, oldStr: string | undefined, newStr: string | undefined): string {
+  if (oldStr === undefined && newStr === undefined) return '';
+  const oldLines = oldStr !== undefined ? oldStr.split('\n') : [''];
+  const newLines = newStr !== undefined ? newStr.split('\n') : [''];
+  const oldCount = oldLines.length;
+  const newCount = newLines.length;
+  const header = `diff --git a/${filePath} b/${filePath}\n--- a/${filePath}\n+++ b/${filePath} @@ -1,${oldCount} +1,${newCount} @@`;
+  const oldPart = oldLines.map(line => '-' + line).join('\n');
+  const newPart = newLines.map(line => '+' + line).join('\n');
+  return `${header}\n${oldPart}\n${newPart}\n`;
+}
+
+function buildUnifiedDiff(toolName: string, input: string | undefined): { changedFiles: FileChangeSummary[]; diff: string } {
+  const empty = { changedFiles: [] as FileChangeSummary[], diff: '' };
+
+  if (!input) return empty;
+
+  const lower = toolName.toLowerCase();
+
+  if (lower === 'apply_patch' || toolName === 'apply_patch') {
+    try {
+      const parsed = JSON.parse(input);
+      const patchText = typeof parsed.patchText === 'string' ? parsed.patchText
+        : typeof parsed.patch === 'string' ? parsed.patch
+        : typeof input === 'string' && input.includes('Add File:') ? input
+        : '';
+      if (!patchText) return empty;
+      return { changedFiles: parseApplyPatch(patchText), diff: patchText };
+    } catch {
+      return empty;
+    }
+  }
+
+  if (lower === 'edit' || lower === 'write' || lower === 'write_file') {
+    try {
+      const parsed = JSON.parse(input);
+      if (typeof parsed !== 'object' || parsed === null) return empty;
+
+      const filePath = parsed.file_path ?? parsed.path;
+      if (typeof filePath !== 'string') return empty;
+
+      let operation: 'created' | 'modified' | 'moved' = 'modified';
+      if (lower === 'write' || lower === 'write_file') {
+        const content = parsed.content;
+        if (content === '' || content === null || content === undefined) {
+          operation = 'created';
+        }
+      }
+      if (parsed.old_path || parsed.oldPath) {
+        operation = 'moved';
+      }
+
+      let additions = 0;
+      let deletions = 0;
+      let diff = '';
+
+      if (parsed.old_string !== undefined || parsed.new_string !== undefined) {
+        const oldStr = typeof parsed.old_string === 'string' ? parsed.old_string : '';
+        const newStr = typeof parsed.new_string === 'string' ? parsed.new_string : '';
+        const oldLines = oldStr.split('\n').length;
+        const newLines = newStr.split('\n').length;
+        additions = newLines;
+        deletions = oldLines;
+        diff = synthesizeEditDiff(filePath, oldStr, newStr);
+      } else if (parsed.additions !== undefined || parsed.deletions !== undefined) {
+        additions = typeof parsed.additions === 'number' ? parsed.additions : 0;
+        deletions = typeof parsed.deletions === 'number' ? parsed.deletions : 0;
+      }
+
+      if (lower === 'write' || lower === 'write_file') {
+        const content = typeof parsed.content === 'string' ? parsed.content : '';
+        diff = synthesizeWriteDiff(filePath, content);
+      }
+
+      const changedFiles: FileChangeSummary[] = [{
+        path: filePath.split('/').pop() ?? filePath,
+        operation,
+        additions: additions || undefined,
+        deletions: deletions || undefined,
+        oldPath: (parsed.old_path ?? parsed.oldPath)?.split('/').pop() ?? (parsed.old_path ?? parsed.oldPath),
+      }];
+
+      return { changedFiles, diff };
+    } catch {
+      return empty;
+    }
+  }
+
+  return empty;
+}
+
 function parseApplyPatch(patchText: string): FileChangeSummary[] {
   const changes: FileChangeSummary[] = [];
   const addRegex = /^(?:\*\*\*\s+)?Add File:\s*(.+)/;
@@ -565,6 +665,8 @@ export class SessionTranscriptAssembler {
   private currentTurn: SessionTurn | null = null;
   private activeParts: ActiveParts = { textPart: null, reasoningPart: null };
   private toolPartsById: Map<string, ToolPart> = new Map();
+  private toolIdAliasProviderToLocal: Map<string, string> = new Map();
+  private toolIdAliasLocalToProvider: Map<string, string> = new Map();
   private incomplete: boolean = false;
   private hasReceivedPrompt: boolean = false;
   private currentEventId: string = 'session';
@@ -804,6 +906,7 @@ export class SessionTranscriptAssembler {
 
   private handleTextChunk(text: string, createdAt: string): void {
     this.ensureActiveTurn(createdAt);
+    this.closeActiveReasoningPart(createdAt);
 
     if (this.activeParts.textPart) {
       this.activeParts.textPart.text += text;
@@ -820,8 +923,28 @@ export class SessionTranscriptAssembler {
     }
   }
 
+  private closeActiveReasoningPart(createdAt: string): void {
+    if (this.activeParts.reasoningPart) {
+      this.activeParts.reasoningPart.completedAt = createdAt;
+      this.activeParts.reasoningPart = null;
+    }
+  }
+
+  private closeActiveTextPart(createdAt: string): void {
+    if (this.activeParts.textPart) {
+      this.activeParts.textPart.completedAt = createdAt;
+      this.activeParts.textPart = null;
+    }
+  }
+
+  private closeOpenStreamingParts(createdAt: string): void {
+    this.closeActiveTextPart(createdAt);
+    this.closeActiveReasoningPart(createdAt);
+  }
+
   private handleReasoningChunk(text: string, createdAt: string): void {
     this.ensureActiveTurn(createdAt);
+    this.closeActiveTextPart(createdAt);
 
     if (this.activeParts.reasoningPart) {
       this.activeParts.reasoningPart.text += text;
@@ -928,6 +1051,55 @@ export class SessionTranscriptAssembler {
     }
   }
 
+  private correlateUpdateToSyntheticTool(update: ToolCallUpdateData): string | undefined {
+    const updateNameKey = (update.toolName ?? 'unknown').toLowerCase();
+    const updateTitle = update.title ?? undefined;
+    const updateTarget = deriveToolTarget(update.toolName ?? 'unknown', update.input);
+    const updateCorrelationKey = updateTitle ?? updateTarget;
+
+    if (!updateCorrelationKey) return undefined;
+
+    for (const [localId, toolPart] of this.toolPartsById) {
+      if (toolPart.tool.status === 'completed' || toolPart.tool.status === 'failed') continue;
+
+      const partNameKey = (toolPart.tool.normalizedName ?? toolPart.tool.toolName ?? 'unknown').toLowerCase();
+      if (partNameKey !== updateNameKey) continue;
+
+      const partCorrelationKey = toolPart.tool.title ?? toolPart.tool.target;
+      if (partCorrelationKey === updateCorrelationKey) {
+        return localId;
+      }
+    }
+
+    const candidates: Array<{ localId: string; score: number }> = [];
+    for (const [localId, toolPart] of this.toolPartsById) {
+      if (toolPart.tool.status === 'completed' || toolPart.tool.status === 'failed') continue;
+
+      const partNameKey = (toolPart.tool.normalizedName ?? toolPart.tool.toolName ?? 'unknown').toLowerCase();
+      if (partNameKey !== updateNameKey) continue;
+
+      let score = 0;
+      if (toolPart.tool.title === updateTitle) score += 3;
+      if (toolPart.tool.target === updateTarget) score += 2;
+      if (score === 0) continue;
+
+      candidates.push({ localId, score });
+    }
+
+    if (candidates.length === 1) {
+      return candidates[0].localId;
+    }
+
+    if (candidates.length > 1) {
+      candidates.sort((a, b) => b.score - a.score);
+      if (candidates[0].score > candidates[1].score) {
+        return candidates[0].localId;
+      }
+    }
+
+    return undefined;
+  }
+
   private computeToolNormalization(d: Record<string, unknown>): { normalizedName: string; displayTitle?: string; displaySubtitle?: string; category?: string } {
     const { name, wasInferred } = inferNormalizedToolName(d);
     const displayTitle = inferDisplayTitle(d);
@@ -1017,8 +1189,24 @@ export class SessionTranscriptAssembler {
       this.allChangedFiles.push(...changedFiles);
     }
 
+    const { changedFiles: fc, diff } = buildUnifiedDiff(normalizedName, start.input);
+    if (fc.length > 0 && !toolPart.tool.changedFiles) {
+      toolPart.tool.changedFiles = fc;
+      this.allChangedFiles.push(...fc);
+    }
+    if (diff) {
+      toolPart.tool.metadata = { ...toolPart.tool.metadata, diff };
+    }
+
     this.toolPartsById.set(start.toolCallId, toolPart);
+    if (start.toolCallId.startsWith('synthetic-')) {
+      this.toolIdAliasLocalToProvider.set(start.toolCallId, start.toolCallId);
+    } else {
+      this.toolIdAliasProviderToLocal.set(start.toolCallId, start.toolCallId);
+      this.toolIdAliasLocalToProvider.set(start.toolCallId, start.toolCallId);
+    }
     if (!suppressed) {
+      this.closeOpenStreamingParts(start.createdAt);
       this.currentTurn!.assistant.push(toolPart);
     }
   }
@@ -1056,8 +1244,25 @@ export class SessionTranscriptAssembler {
   }
 
   private handleToolCallUpdate(update: ToolCallUpdateData): void {
-    const existing = this.toolPartsById.get(update.toolCallId);
-    if (existing) {
+    let resolvedLocalId: string | undefined = this.toolIdAliasProviderToLocal.get(update.toolCallId);
+    if (!resolvedLocalId) {
+      resolvedLocalId = this.toolPartsById.has(update.toolCallId) ? update.toolCallId : undefined;
+    }
+
+    if (!resolvedLocalId) {
+      const correlatedId = this.correlateUpdateToSyntheticTool(update);
+      if (correlatedId) {
+        resolvedLocalId = correlatedId;
+        this.toolIdAliasProviderToLocal.set(update.toolCallId, correlatedId);
+      }
+    }
+
+    const existing = resolvedLocalId ? this.toolPartsById.get(resolvedLocalId) : undefined;
+    if (existing && resolvedLocalId) {
+      if (resolvedLocalId !== update.toolCallId) {
+        existing.tool.toolCallId = update.toolCallId;
+        this.toolIdAliasLocalToProvider.set(resolvedLocalId, update.toolCallId);
+      }
       if (update.status) {
         existing.tool.status = update.status === 'completed' ? 'completed'
           : update.status === 'failed' ? 'failed'
@@ -1089,6 +1294,12 @@ export class SessionTranscriptAssembler {
         if (changedFiles.length > 0) {
           existing.tool.changedFiles = [...(existing.tool.changedFiles ?? []), ...changedFiles];
           this.allChangedFiles.push(...changedFiles);
+        }
+      }
+      if (!existing.tool.metadata?.diff && (update.input || update.rawInput)) {
+        const { diff } = buildUnifiedDiff(existing.tool.normalizedName ?? existing.tool.toolName, update.input ?? update.rawInput);
+        if (diff) {
+          existing.tool.metadata = { ...existing.tool.metadata, diff };
         }
       }
     } else {
@@ -1163,8 +1374,18 @@ export class SessionTranscriptAssembler {
         this.allChangedFiles.push(...changedFiles);
       }
 
+      const { changedFiles: fc, diff } = buildUnifiedDiff(normalizedName, update.input);
+      if (fc.length > 0 && !toolPart.tool.changedFiles) {
+        toolPart.tool.changedFiles = fc;
+        this.allChangedFiles.push(...fc);
+      }
+      if (diff) {
+        toolPart.tool.metadata = { ...toolPart.tool.metadata, diff };
+      }
+
       this.toolPartsById.set(update.toolCallId, toolPart);
       if (!suppressed) {
+        this.closeOpenStreamingParts(update.createdAt);
         this.currentTurn!.assistant.push(toolPart);
       }
     }
@@ -1182,6 +1403,7 @@ export class SessionTranscriptAssembler {
       kind,
       at: createdAt,
     };
+    this.closeOpenStreamingParts(createdAt);
     this.currentTurn!.assistant.push(errorPart);
 
     if (closeTerminal && (kind === 'timeout' || kind === 'failed' || kind === 'cancelled')) {
