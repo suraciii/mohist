@@ -172,6 +172,101 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.nextWork()).toEqual({ kind: 'check', stage: Stage.Build, checkName: 'health:build' });
   });
 
+  it('invalidates stale review after review findings are fixed', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+
+    const firstFailure = run.recordCheckResult(Stage.Check, {
+      name: 'review-passed',
+      status: 'fail',
+      message: 'Review failed',
+      output: { verdict: 'FAIL', reviewReport: 'old report' },
+    });
+
+    expect(firstFailure.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'fix-review-findings' });
+    const fix = run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+    expect(fix.events).toContainEqual({
+      type: 'task-invalidated',
+      stage: Stage.Check,
+      taskId: 'ai-review',
+      reason: 'Review findings changed code; re-run AI review before rechecking',
+    });
+    expect(fix.events).toContainEqual({
+      type: 'check-invalidated',
+      stage: Stage.Check,
+      checkName: 'review-passed',
+      reason: 'Review findings changed code; re-run AI review before rechecking',
+    });
+    expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      artifacts: [],
+      output: null,
+    });
+    expect(run.stageRun(Stage.Check).findCheck('review-passed')).toMatchObject({
+      status: 'pending',
+      message: null,
+      output: null,
+      runCount: 1,
+    });
+    expect(run.stageRun(Stage.Check).findCheck('merge-ready')).toMatchObject({
+      status: 'pending',
+      message: null,
+      output: null,
+    });
+    expect(fix.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+  });
+
+  it('retries a failed check stage by re-running ai-review after review findings were fixed', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+    run.recordCheckResult(Stage.Check, {
+      name: 'review-passed',
+      status: 'fail',
+      message: 'Review failed',
+      output: { verdict: 'FAIL', reviewReport: 'old report' },
+    });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+    const checkStage = run.stageRun(Stage.Check);
+    checkStage.findTask('ai-review').status = 'completed';
+    checkStage.findTask('ai-review').artifacts = ['ai-review'];
+    const staleReview = checkStage.findCheck('review-passed');
+    staleReview.status = 'failed';
+    staleReview.message = 'Review failed again from stale report';
+    staleReview.output = { verdict: 'FAIL', reviewReport: 'old report' };
+    checkStage.status = 'failed';
+    checkStage.failure = {
+      reason: 'check-unrepaired',
+      stage: Stage.Check,
+      checkName: 'review-passed',
+      message: 'Review failed again from stale report',
+    };
+    run.status = 'failed';
+    run.failure = checkStage.failure;
+    expect(run.status).toBe('failed');
+
+    const retry = run.retryStage(Stage.Check);
+
+    expect(run.stageRun(Stage.Check).findTask('fix-review-findings')).toMatchObject({ status: 'completed' });
+    expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({ status: 'pending' });
+    expect(run.stageRun(Stage.Check).findCheck('review-passed')).toMatchObject({
+      status: 'pending',
+      message: null,
+      output: null,
+    });
+    expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+  });
+
   it('fails unrepaired checks with check-unrepaired and traceable metadata', () => {
     const run = startRun();
     advanceToBuild(run);
