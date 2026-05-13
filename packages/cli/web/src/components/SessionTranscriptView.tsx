@@ -137,6 +137,8 @@ function PromptSummaryCard({
 }
 
 function AssistantTextPartView({ part }: { part: TextPart }) {
+  const isStreaming = part.completedAt === null
+
   return (
     <div className="max-w-[90%]">
       <div className="text-sm text-gray-800 leading-relaxed">
@@ -161,6 +163,9 @@ function AssistantTextPartView({ part }: { part: TextPart }) {
         >
           {part.text}
         </Markdown>
+        {isStreaming && (
+          <span className="inline-block h-4 w-0.5 bg-gray-800 ml-0.5 animate-pulse align-middle" />
+        )}
       </div>
     </div>
   )

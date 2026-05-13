@@ -6,12 +6,12 @@ import {
 } from '../src/lib/session-transcript-display'
 import type { CoderSessionDetail, SessionTurn } from '../src/lib/types'
 
-function makeTextPart(id: string, text: string): import('../src/lib/types').TextPart {
-  return { id, type: 'text', text, startedAt: '2024-01-01T00:00:00Z', completedAt: null }
+function makeTextPart(id: string, text: string, startedAt = '2024-01-01T00:00:00Z'): import('../src/lib/types').TextPart {
+  return { id, type: 'text', text, startedAt, completedAt: null }
 }
 
-function makeReasoningPart(id: string, text: string): import('../src/lib/types').ReasoningPart {
-  return { id, type: 'reasoning', text, startedAt: '2024-01-01T00:00:01Z', completedAt: null }
+function makeReasoningPart(id: string, text: string, startedAt = '2024-01-01T00:00:01Z'): import('../src/lib/types').ReasoningPart {
+  return { id, type: 'reasoning', text, startedAt, completedAt: null }
 }
 
 function makeToolPart(
@@ -365,5 +365,110 @@ describe('extractTurnChangedFiles', () => {
     const files = extractTurnChangedFiles(display)
     expect(files).toHaveLength(1)
     expect(files[0].path).toBe('a.txt')
+  })
+})
+
+describe('reasoning reorder', () => {
+  it('moves reasoning after text when they share same second timestamp', () => {
+    const turn = makeTurn('turn-1', 'Test task', [
+      makeReasoningPart('r1', 'Thinking...', '2024-01-01T00:00:00Z'),
+      makeTextPart('t1', 'Hello world', '2024-01-01T00:00:00Z'),
+    ])
+    const display = projectTurn(turn)
+    expect(display.assistantParts).toHaveLength(2)
+    expect(display.assistantParts[0].partType).toBe('text')
+    expect(display.assistantParts[1].partType).toBe('reasoning')
+  })
+
+  it('keeps original order when reasoning and text have different timestamps', () => {
+    const turn = makeTurn('turn-1', 'Test task', [
+      makeReasoningPart('r1', 'Thinking...', '2024-01-01T00:00:01Z'),
+      makeTextPart('t1', 'Hello world', '2024-01-01T00:00:02Z'),
+    ])
+    const display = projectTurn(turn)
+    expect(display.assistantParts).toHaveLength(2)
+    expect(display.assistantParts[0].partType).toBe('reasoning')
+    expect(display.assistantParts[1].partType).toBe('text')
+  })
+
+  it('moves multiple reasoning blocks after text when same second', () => {
+    const turn = makeTurn('turn-1', 'Test task', [
+      makeReasoningPart('r1', 'Thinking step 1...', '2024-01-01T00:00:00Z'),
+      makeReasoningPart('r2', 'Thinking step 2...', '2024-01-01T00:00:00Z'),
+      makeTextPart('t1', 'Hello world', '2024-01-01T00:00:00Z'),
+    ])
+    const display = projectTurn(turn)
+    expect(display.assistantParts).toHaveLength(3)
+    expect(display.assistantParts[0].partType).toBe('text')
+    expect((display.assistantParts[0] as any).text).toBe('Hello world')
+    expect(display.assistantParts[1].partType).toBe('reasoning')
+    expect((display.assistantParts[1] as any).text).toBe('Thinking step 1...')
+    expect(display.assistantParts[2].partType).toBe('reasoning')
+    expect((display.assistantParts[2] as any).text).toBe('Thinking step 2...')
+  })
+
+  it('does not reorder when reasoning is followed by tool (not text)', () => {
+    const turn = makeTurn('turn-1', 'Test task', [
+      makeReasoningPart('r1', 'Thinking...', '2024-01-01T00:00:00Z'),
+      makeToolPart('tool-1', 'call-1', 'bash', 'bash', 'completed'),
+    ])
+    const display = projectTurn(turn)
+    expect(display.assistantParts).toHaveLength(2)
+    expect(display.assistantParts[0].partType).toBe('reasoning')
+    expect(display.assistantParts[1].partType).toBe('tool')
+  })
+
+  it('does not reorder when reasoning is followed by error', () => {
+    const turn = makeTurn('turn-1', 'Test task', [
+      makeReasoningPart('r1', 'Thinking...', '2024-01-01T00:00:00Z'),
+      makeErrorPart('err-1', 'failed', 'Something went wrong'),
+    ])
+    const display = projectTurn(turn)
+    expect(display.assistantParts).toHaveLength(2)
+    expect(display.assistantParts[0].partType).toBe('reasoning')
+    expect(display.assistantParts[1].partType).toBe('error')
+  })
+
+  it('does not reorder when reasoning block is at end of parts', () => {
+    const turn = makeTurn('turn-1', 'Test task', [
+      makeTextPart('t1', 'Hello', '2024-01-01T00:00:01Z'),
+      makeReasoningPart('r1', 'Thinking...', '2024-01-01T00:00:00Z'),
+    ])
+    const display = projectTurn(turn)
+    expect(display.assistantParts).toHaveLength(2)
+    expect(display.assistantParts[0].partType).toBe('text')
+    expect(display.assistantParts[1].partType).toBe('reasoning')
+  })
+
+  it('does not reorder reasoning across context group boundary', () => {
+    const turn = makeTurn('turn-1', 'Test task', [
+      makeReasoningPart('r1', 'Thinking...', '2024-01-01T00:00:00Z'),
+      makeTextPart('t1', 'Hello', '2024-01-01T00:00:00Z'),
+      makeToolPart('r2', 'c1', 'read', 'read', 'completed'),
+      makeToolPart('r3', 'c2', 'read', 'read', 'completed'),
+      makeReasoningPart('r4', 'More thinking...', '2024-01-01T00:00:00Z'),
+      makeTextPart('t2', 'World', '2024-01-01T00:00:00Z'),
+    ])
+    const display = projectTurn(turn)
+    expect(display.assistantParts).toHaveLength(4)
+    expect(display.assistantParts[0].partType).toBe('text')
+    expect(display.assistantParts[1].partType).toBe('reasoning')
+    expect(display.assistantParts[2].partType).toBe('context-group')
+    expect(display.assistantParts[3].partType).toBe('reasoning')
+  })
+
+  it('does not reorder when last reasoning and text share second but earlier text exists', () => {
+    const turn = makeTurn('turn-1', 'Test task', [
+      makeTextPart('t1', 'First text', '2024-01-01T00:00:01Z'),
+      makeReasoningPart('r1', 'Thinking...', '2024-01-01T00:00:00Z'),
+      makeTextPart('t2', 'Second text', '2024-01-01T00:00:00Z'),
+    ])
+    const display = projectTurn(turn)
+    expect(display.assistantParts).toHaveLength(3)
+    expect(display.assistantParts[0].partType).toBe('text')
+    expect((display.assistantParts[0] as any).text).toBe('First text')
+    expect(display.assistantParts[1].partType).toBe('reasoning')
+    expect(display.assistantParts[2].partType).toBe('text')
+    expect((display.assistantParts[2] as any).text).toBe('Second text')
   })
 })

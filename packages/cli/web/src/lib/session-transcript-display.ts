@@ -28,6 +28,7 @@ export interface DisplayChangedFile {
   additions?: number
   deletions?: number
   oldPath?: string
+  rawDetail?: string
 }
 
 export type DisplayAssistantPart =
@@ -44,6 +45,7 @@ export interface DisplayTextPart {
   text: string
   startedAt: string
   completedAt: string | null
+  isStreaming?: boolean
 }
 
 export interface DisplayReasoningPart {
@@ -217,12 +219,64 @@ export function projectSessionToDisplayTurns(detail: CoderSessionDetail): Displa
   return detail.turns.map(turn => projectTurn(turn))
 }
 
+function sameSecond(ts1: string, ts2: string): boolean {
+  return ts1.slice(0, 19) === ts2.slice(0, 19)
+}
+
+function applyReasoningReorder(parts: SessionTurn['assistant']): SessionTurn['assistant'] {
+  const result: SessionTurn['assistant'] = []
+  let i = 0
+  while (i < parts.length) {
+    const part = parts[i]
+    if (part.type !== 'reasoning') {
+      result.push(part)
+      i++
+      continue
+    }
+    const reasoningBlockStart = i
+    while (i < parts.length && parts[i].type === 'reasoning') {
+      i++
+    }
+    const reasoningBlockEnd = i
+    if (i >= parts.length) {
+      for (let j = reasoningBlockStart; j < reasoningBlockEnd; j++) {
+        result.push(parts[j])
+      }
+      break
+    }
+    const followingPart = parts[i]
+    if (followingPart.type === 'text') {
+      const lastReasoning = parts[reasoningBlockEnd - 1] as ReasoningPart
+      if (sameSecond(lastReasoning.startedAt, followingPart.startedAt)) {
+        result.push(followingPart)
+        for (let j = reasoningBlockStart; j < reasoningBlockEnd; j++) {
+          result.push(parts[j])
+        }
+      } else {
+        for (let j = reasoningBlockStart; j < reasoningBlockEnd; j++) {
+          result.push(parts[j])
+        }
+        result.push(followingPart)
+      }
+    } else {
+      for (let j = reasoningBlockStart; j < reasoningBlockEnd; j++) {
+        result.push(parts[j])
+      }
+      result.push(followingPart)
+    }
+    i++
+  }
+  return result
+}
+
 export function projectTurn(turn: SessionTurn): DisplayTurn {
   const prompt = buildDisplayPrompt(turn)
   const rawParts = turn.assistant
 
   const displayParts: DisplayAssistantPart[] = []
   const toolStack: DisplayToolPart[] = []
+
+  const reorderedParts = applyReasoningReorder(rawParts)
 
   const flushContextGroup = () => {
     if (toolStack.length === 0) return
@@ -253,12 +307,12 @@ export function projectTurn(turn: SessionTurn): DisplayTurn {
     } as DisplayContextGroupPart)
   }
 
-  for (let i = 0; i < rawParts.length; i++) {
-    const part = rawParts[i]
+  for (let i = 0; i < reorderedParts.length; i++) {
+    const part = reorderedParts[i]
 
     if (part.type === 'text') {
       if (toolStack.length > 0) {
-        const nextPart = rawParts[i + 1]
+        const nextPart = reorderedParts[i + 1]
         const nextIsContextTool = nextPart?.type === 'tool' && isContextTool(nextPart.tool.normalizedName ?? nextPart.tool.toolName)
         if (!nextIsContextTool) {
           flushContextGroup()

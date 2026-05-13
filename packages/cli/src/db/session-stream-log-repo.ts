@@ -36,11 +36,12 @@ export class SessionStreamLogRepo {
   insert(issueId: string, sessionId: string, eventType: string, data: object): SessionStreamLogEntry {
     const id = uuidv4();
     const dataStr = JSON.stringify(data);
+    const now = new Date().toISOString();
 
     this.db.run(
       `INSERT INTO session_stream_log (id, session_id, issue_id, event_type, data, created_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-      [id, sessionId, issueId, eventType, dataStr]
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, sessionId, issueId, eventType, dataStr, now]
     );
 
     const row = this.db.get<SessionStreamLogRow>(

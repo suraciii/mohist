@@ -30,6 +30,7 @@ interface SessionTranscriptLayoutProps {
   statusKind: 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
   isRunning: boolean
   isThinking?: boolean
+  isStreaming?: boolean
 }
 
 export function SessionTranscriptLayout({
@@ -39,6 +40,7 @@ export function SessionTranscriptLayout({
   statusKind,
   isRunning,
   isThinking,
+  isStreaming,
 }: SessionTranscriptLayoutProps) {
   return (
     <div className="flex flex-col h-full">
@@ -49,7 +51,7 @@ export function SessionTranscriptLayout({
         isRunning={isRunning}
       />
 
-      <div className="flex-1 overflow-y-auto px-4 py-6">
+      <div className="flex-1 overflow-y-auto px-4 py-6" data-scrollable="">
         {turns.length === 0 ? (
           <TranscriptEmptyState isRunning={isRunning} />
         ) : (
@@ -58,7 +60,20 @@ export function SessionTranscriptLayout({
         {isThinking && turns.length > 0 && (
           <ThinkingPlaceholder />
         )}
+        {isStreaming && <StreamingIndicator />}
       </div>
+    </div>
+  )
+}
+
+function StreamingIndicator() {
+  return (
+    <div className="flex items-center gap-2 py-2 pl-4">
+      <span className="relative flex h-2 w-2">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+      </span>
+      <span className="text-xs text-blue-500">Streaming...</span>
     </div>
   )
 }
