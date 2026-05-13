@@ -60,7 +60,7 @@ function completePlanToApproval(workflowApplicationService: WorkflowApplicationS
   for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
     workflowApplicationService.completeTask({ issueId, stage: Stage.Plan, taskId, result: { status: 'completed' } });
   }
-  for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed']) {
+  for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Plan, result: { name: checkName, status: 'pass' } });
   }
 }
@@ -718,7 +718,11 @@ describe('API Routes', () => {
           expect(response.body.success).toBe(true);
           expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
           expect(issueRepo.findById(issue.id)?.status).toBe(IssueStatus.Blocked);
-          expect(workflowRunService.getActiveRunForIssue(issue.id)).toBeNull();
+          const rejectedRun = workflowRunService.getActiveRunForIssue(issue.id);
+          expect(rejectedRun?.status).toBe('failed');
+          const rejectedCheckStage = rejectedRun?.stageRuns.find(stage => stage.stage === Stage.Check);
+          expect(rejectedCheckStage?.status).toBe('failed');
+          expect(rejectedCheckStage?.approvalStatus).toBe('rejected');
           expect(checkpointRepo.get(issue.number, 'check')).toBeNull();
           expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
           expect(fs.existsSync(path.join(changeDir, 'review-self-check.md'))).toBe(false);
