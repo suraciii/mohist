@@ -570,6 +570,42 @@ describe('API Routes', () => {
         expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Integrate);
       });
 
+      it('Check approval should use WorkflowRun review when legacy stage execution is missing', async () => {
+        const issue = issueService.create({ projectId, title: 'Check Approval WorkflowRun Issue' });
+        const stageStateService = new StageStateService(db);
+        const workflowRunService = new WorkflowRunService(db);
+        const workflowApplicationService = new WorkflowApplicationService(db);
+        workflowRunService.startRun(issue.id, issue.number);
+        completePlanToApproval(workflowApplicationService, issue.id);
+        completeCheckToApproval(workflowApplicationService, issue.id, 'sha-pass-002');
+        stateManager.getIssueRepo().setApprovalState(issue.id, {
+          stage: Stage.Check,
+          status: 'awaiting',
+          output: { snapshotSha: 'sha-pass-002', result: 'PASS' },
+          requestedAt: new Date().toISOString(),
+        });
+
+        const worktreeManager = {
+          getPath: vi.fn().mockReturnValue('/tmp/worktree'),
+          getHeadSha: vi.fn().mockResolvedValue('sha-pass-002'),
+          isWorktreeClean: vi.fn().mockResolvedValue(true),
+        } as any;
+
+        const approveApp = new Hono();
+        const approveEventBus = new EventBus();
+        const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+        const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
+        const approveServer = createTestServer(approveApp);
+
+        const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+        expect(response.status).toBe(202);
+        expect(response.body.success).toBe(true);
+        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+        expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Integrate);
+      });
+
       it('Direct merge for non-Integrate issue should return bypass error', async () => {
         const issue = issueService.create({ projectId, title: 'Direct Merge Test' });
         issueService.transitionToStage(issue.id, Stage.Check);
