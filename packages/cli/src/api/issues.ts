@@ -112,6 +112,41 @@ function getLatestCheckStageReviewPassed(issueId: string, stageExecutionRepo?: S
     getLatestCheckResult(latestCheckExecution.checkResults as CheckResult[], 'ai-review');
 }
 
+function getWorkflowRunCheckReviewPassed(issueId: string, workflowRunService?: WorkflowRunService): CheckResult | undefined {
+  const checkStage = workflowRunService
+    ?.getActiveRunForIssue(issueId)
+    ?.stageRuns
+    .find(stageRun => stageRun.stage === Stage.Check);
+  if (!checkStage) return undefined;
+
+  const reviewPassed = checkStage.checks.find(check => check.checkName === 'review-passed');
+  const aiReview = checkStage.checks.find(check => check.checkName === 'ai-review');
+  const check = reviewPassed ?? aiReview;
+  if (!check) return undefined;
+
+  return {
+    name: check.checkName,
+    status: check.status === 'passed'
+      ? 'pass'
+      : check.status === 'pending' || check.status === 'running'
+        ? 'pending'
+        : check.status === 'error'
+          ? 'error'
+          : 'fail',
+    message: check.message ?? undefined,
+    output: check.output ?? undefined,
+  };
+}
+
+function getAuthoritativeCheckReviewPassed(
+  issueId: string,
+  workflowRunService?: WorkflowRunService,
+  stageExecutionRepo?: StageExecutionRepo,
+): CheckResult | undefined {
+  return getWorkflowRunCheckReviewPassed(issueId, workflowRunService) ??
+    getLatestCheckStageReviewPassed(issueId, stageExecutionRepo);
+}
+
 function taskCause(task: { causedByType: string | null; causedByCheckName: string | null; causedByTaskId: string | null; reason: string | null }) {
   if (!task.causedByType) return null;
   return {
@@ -1362,7 +1397,7 @@ export function createIssueRoutes(
 
       if (approvalStage === Stage.Check) {
         const approvalOutput = issue.approvalState?.output as Record<string, unknown> | undefined;
-        const latestReviewPassed = getLatestCheckStageReviewPassed(issue.id, stageExecutionRepo);
+        const latestReviewPassed = getAuthoritativeCheckReviewPassed(issue.id, workflowRunService, stageExecutionRepo);
         const latestReviewPassedOutput = latestReviewPassed?.output as Record<string, unknown> | undefined;
 
         if (!latestReviewPassed || latestReviewPassed.status !== 'pass' || latestReviewPassedOutput?.verdict !== 'PASS') {
