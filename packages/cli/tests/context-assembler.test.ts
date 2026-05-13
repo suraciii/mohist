@@ -47,6 +47,7 @@ describe('context-assembler', () => {
     fs.writeFileSync(path.join(changeDir, 'proposal.md'), sampleProposal);
     fs.writeFileSync(path.join(changeDir, 'design.md'), sampleDesign);
     fs.writeFileSync(path.join(changeDir, 'specs', 'auth', 'spec.md'), sampleSpec);
+    fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ tasks: [sampleTask] }, null, 2));
 
     change = {
       changePath: changeDir,
@@ -254,10 +255,24 @@ describe('context-assembler', () => {
       expect(result.fullPrompt).toContain('task T-003 of 5');
       expect(result.fullPrompt).toContain('issue #42');
       expect(result.fullPrompt).toContain('<context-files>');
-      expect(result.fullPrompt).toContain(change.proposalPath);
-      expect(result.fullPrompt).toContain(change.designPath);
+      expect(result.fullPrompt).toContain(`@${change.proposalPath}`);
+      expect(result.fullPrompt).toContain(`@${change.designPath}`);
+      expect(result.fullPrompt).toContain(`@${change.tasksPath}`);
       expect(result.fullPrompt).not.toContain(sampleProposal);
       expect(result.fullPrompt).not.toContain(sampleDesign);
+    });
+
+    it('should include issue title and body in task context', () => {
+      const result = buildTaskContext({
+        change,
+        task: sampleTask,
+        issueNumber: 42,
+        issueTitle: 'Add authentication',
+        issueBody: 'Users need JWT-based authentication.',
+      });
+
+      expect(result.fullPrompt).toContain('Issue #42: Add authentication');
+      expect(result.fullPrompt).toContain('Users need JWT-based authentication.');
     });
 
     it('should inline spec within <spec> tags', () => {

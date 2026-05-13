@@ -673,12 +673,23 @@ export class AgentSession {
   }
 
   private extractContextFiles(prompt: string): string[] | undefined {
-    const match = prompt.match(/<context_files>([\s\S]*?)<\/context_files>/i);
-    if (match) {
-      const files = match[1].trim().split('\n').map(f => f.trim()).filter(f => f);
-      return files.length > 0 ? files.slice(0, 5) : undefined;
-    }
-    return undefined;
+    const match = prompt.match(/<context[-_]files>([\s\S]*?)<\/context[-_]files>/i);
+    if (!match) return undefined;
+
+    const files = match[1]
+      .trim()
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('<!--'))
+      .map(line => {
+        const atRef = line.match(/^@(\S+)/);
+        if (atRef) return atRef[1];
+        const xmlRef = line.match(/<file\s+path="([^"]+)"/i);
+        if (xmlRef) return xmlRef[1];
+        return line;
+      })
+      .filter(Boolean);
+    return files.length > 0 ? files.slice(0, 5) : undefined;
   }
 
   static async create(options: AgentSessionOptions): Promise<AgentSession> {

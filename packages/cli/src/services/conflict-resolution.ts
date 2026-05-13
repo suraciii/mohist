@@ -10,6 +10,7 @@ import { load as loadConfig } from '../config/config-loader';
 import { resolveStageModel } from '../config/model-resolution';
 import { Stage } from '../types';
 import { createWorkflowSessionObservers } from '../agent-runtime';
+import { findChangeDir } from '../openspec/detector';
 
 export interface ConflictResolutionDeps {
   issueRepo: IssueRepo;
@@ -56,7 +57,8 @@ export async function resolveConflictsViaAgent(
   };
 
   try {
-    const prompt = buildConflictResolutionPrompt(issue, worktreePath, conflictFiles, loadAgentConfig(worktreePath));
+    const changeDir = findChangeDir(worktreePath, issue.number);
+    const prompt = buildConflictResolutionPrompt(issue, worktreePath, conflictFiles, loadAgentConfig(worktreePath), changeDir);
 
     const session = await AgentSession.create(acpOptions);
     try {

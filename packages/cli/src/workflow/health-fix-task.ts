@@ -2,6 +2,9 @@ import type { CheckResult, StageContext, StageTaskResult } from './stage-context
 import { emitStageTaskUpdate } from './stage-context';
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import { createWorkflowSessionObservers } from '../agent-runtime';
+import { formatAgentPrompt } from '../agents/agent-prompt-schema';
+import { formatIssueInfo, listOpenSpecContextFiles } from '../agents/workflow-context';
+import { loadAgentConfig } from './workflow-loader';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'health-fix-task' });
@@ -26,36 +29,42 @@ function stringifyOutput(output: unknown): string {
   }
 }
 
-function buildHealthFixPrompt(ctx: StageContext, options: HealthFixTaskOptions): string {
+function buildHealthFixPrompt(ctx: StageContext, options: HealthFixTaskOptions, changeDir: string | null): string {
   const checkOutput = stringifyOutput(options.failedCheck.output);
   const trimmedOutput = checkOutput.length > 12000 ? checkOutput.slice(-12000) : checkOutput;
 
-  return [
-    `## Health Gate Fix Required`,
+  const task = [
+    `Change Directory: ${changeDir ?? options.worktreePath}`,
     '',
-    `Issue #${ctx.issue.number}: ${ctx.issue.title}`,
+    formatIssueInfo(ctx.issue),
+    '',
     `Stage: ${options.stage}`,
     `Failed check: ${options.failedCheck.name}`,
     `Health command: ${options.healthCommand}`,
     '',
-    `## Failure Summary`,
-    '',
+    'Failure Summary:',
     options.failedCheck.message ?? 'Health gate failed.',
     '',
-    `## Check Output`,
-    '',
+    'Check Output:',
     '```json',
     trimmedOutput,
     '```',
-    '',
-    `## Instructions`,
-    '',
-    `1. Read the failed health gate output carefully.`,
-    `2. Apply the minimal code or artifact changes required to make the health command pass.`,
-    `3. Do not make unrelated refactors.`,
-    `4. Run the health command to verify your fix.`,
-    `5. Commit your fix with a descriptive message if you changed tracked files.`,
   ].join('\n');
+
+  return formatAgentPrompt({
+    role: `Fix ${options.stage} health gate failure`,
+    projectContext: loadAgentConfig(options.worktreePath).context,
+    contextFiles: listOpenSpecContextFiles(changeDir, { includeReports: true, includeSessionMemories: true }),
+    task,
+    contract: 'Apply the minimal code or artifact changes required to make the health command pass. Do not make unrelated refactors.',
+    instruction: [
+      '1. Read the issue and every @file context reference before editing.',
+      '2. Read the failed health gate output carefully.',
+      '3. Apply the minimal fix required to make the health command pass.',
+      '4. Run the health command to verify your fix.',
+      '5. Commit your fix with a descriptive message if you changed tracked files.',
+    ].join('\n'),
+  });
 }
 
 export async function runHealthFixTask(
@@ -63,6 +72,7 @@ export async function runHealthFixTask(
   options: HealthFixTaskOptions,
 ): Promise<StageTaskResult> {
   const startedAt = Date.now();
+  const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
   emitStageTaskUpdate(
     ctx.eventBus,
     ctx.issue.id,
@@ -99,7 +109,7 @@ export async function runHealthFixTask(
   let session: AgentSession | undefined;
   try {
     session = await AgentSession.create(acpOptions);
-    const result = await session.execute(buildHealthFixPrompt(ctx, options), {
+    const result = await session.execute(buildHealthFixPrompt(ctx, options, changeDir), {
       kind: 'recovery',
       title: options.title,
     });

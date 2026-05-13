@@ -138,6 +138,8 @@ export interface RalphExecutorContext {
   onLoopComplete?: (results: RalphLoopResult) => void;
   onAskUser?: (question: string, taskId: string) => Promise<string>;
   issueNumber?: number;
+  issueTitle?: string;
+  issueBody?: string;
   stageTimeoutMs?: number;
   onProcessSpawned?: (proc: import('child_process').ChildProcess) => void;
   worktreeManager?: WorktreeManager;
@@ -765,6 +767,9 @@ export async function runRalphLoop(
       task: nextTask,
       learnings,
       isRetry: false,
+      issueNumber: context.issueNumber,
+      issueTitle: context.issueTitle,
+      issueBody: context.issueBody,
       agentConfig: context.agentConfig,
     });
 
@@ -789,6 +794,9 @@ export async function runRalphLoop(
             failureReason: lastError,
             isRetry: true,
             wipResumeContext,
+            issueNumber: context.issueNumber,
+            issueTitle: context.issueTitle,
+            issueBody: context.issueBody,
             agentConfig: context.agentConfig,
           }).fullPrompt
         : assembledContext.fullPrompt;

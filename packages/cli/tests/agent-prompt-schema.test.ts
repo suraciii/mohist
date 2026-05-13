@@ -68,7 +68,7 @@ describe('formatAgentPrompt', () => {
     expect(result).not.toContain('<rules>');
   });
 
-  it('renders contextFiles as file elements', () => {
+  it('renders contextFiles as @file references', () => {
     const result = formatAgentPrompt({
       role: 'Builder',
       contextFiles: [
@@ -79,8 +79,8 @@ describe('formatAgentPrompt', () => {
     });
 
     expect(result).toContain('<context-files>');
-    expect(result).toContain('<file path="/path/to/proposal.md">Proposal document</file>');
-    expect(result).toContain('<file path="/path/to/design.md">Design document</file>');
+    expect(result).toContain('@/path/to/proposal.md - Proposal document');
+    expect(result).toContain('@/path/to/design.md - Design document');
     expect(result).toContain('</context-files>');
   });
 
