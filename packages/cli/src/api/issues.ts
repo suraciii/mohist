@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import * as fs from 'fs';
 import * as path from 'path';
 import { StateManager } from '../server/state-manager';
-import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, VALID_PRIORITIES, MergeState } from '../types';
+import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, MergeState, normalizePriority } from '../types';
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
@@ -354,11 +354,12 @@ export function createIssueRoutes(
 
       const stage = c.req.query('stage') as Stage | undefined;
       const label = c.req.query('label') as string | undefined;
-      const priority = c.req.query('priority') as string | undefined;
+      const priorityInput = c.req.query('priority') as string | undefined;
       const archived = c.req.query('archived') as string | undefined;
       const all = c.req.query('all') as string | undefined;
 
-      if (priority && !VALID_PRIORITIES.includes(priority as Priority)) {
+      const normalizedPriority = normalizePriority(priorityInput);
+      if (priorityInput !== undefined && normalizedPriority === null) {
         const response: ApiResponse = {
           success: false,
           error: 'Invalid priority'
@@ -382,11 +383,10 @@ export function createIssueRoutes(
         issues = issues.filter(issue => !issue.archivedAt);
       }
 
-
-      if (priority) {
-        issues = issues.filter(issue => issue.priority === priority);
+      if (normalizedPriority) {
+        issues = issues.filter(issue => issue.priority === normalizedPriority);
       }
-      
+
       if (label) {
         issues = issues.filter(issue => issue.labels.includes(label));
       }
@@ -414,7 +414,7 @@ export function createIssueRoutes(
   app.post('/', async (c) => {
     try {
       const { title, body, labels, priority, model, stageModels } = await c.req.json();
-      
+
       if (!title) {
         const response: ApiResponse = {
           success: false,
@@ -423,12 +423,17 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      if (priority !== undefined && !VALID_PRIORITIES.includes(priority as Priority)) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'Invalid priority'
-        };
-        return c.json(response, 400);
+      let normalizedPriority: Priority | undefined = undefined;
+      if (priority !== undefined) {
+        const normalized = normalizePriority(priority);
+        if (normalized === null) {
+          const response: ApiResponse = {
+            success: false,
+            error: 'Invalid priority'
+          };
+          return c.json(response, 400);
+        }
+        normalizedPriority = normalized;
       }
 
       if (model !== undefined && model !== null && (typeof model !== 'string' || !isValidModelId(model))) {
@@ -455,7 +460,7 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const issue = issueService.create({ projectId, title, body, labels, priority, model: model ?? undefined, stageModels: stageModels ?? undefined });
+      const issue = issueService.create({ projectId, title, body, labels, priority: normalizedPriority, model: model ?? undefined, stageModels: stageModels ?? undefined });
 
       const response: ApiResponse<Issue> = {
         success: true,
@@ -784,14 +789,6 @@ export function createIssueRoutes(
 
       const { title, body, addLabels, removeLabels, priority, model, stageModels } = await c.req.json();
 
-      if (priority !== undefined && !VALID_PRIORITIES.includes(priority as Priority)) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'Invalid priority'
-        };
-        return c.json(response, 400);
-      }
-
       if (model !== undefined && model !== null && (typeof model !== 'string' || !isValidModelId(model))) {
         return c.json({ success: false, error: 'Invalid model format. Expected provider/model.' } satisfies ApiResponse, 400);
       }
@@ -808,12 +805,23 @@ export function createIssueRoutes(
       }
 
       const updateData: Partial<{ title: string; body: string; labels: string[]; priority: Priority; model: string | null; stageModels: Record<string, string> | null }> = {};
-      
+
       if (title !== undefined) updateData.title = title;
       if (body !== undefined) updateData.body = body;
-      if (priority !== undefined) updateData.priority = priority;
       if (model !== undefined) updateData.model = model;
       if (stageModels !== undefined) updateData.stageModels = stageModels;
+
+      if (priority !== undefined) {
+        const normalized = normalizePriority(priority);
+        if (normalized === null) {
+          const response: ApiResponse = {
+            success: false,
+            error: 'Invalid priority'
+          };
+          return c.json(response, 400);
+        }
+        updateData.priority = normalized;
+      }
       
       if (addLabels || removeLabels) {
         let currentLabels = [...issue.labels];
