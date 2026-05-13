@@ -335,15 +335,12 @@ describe('SessionTranscriptView', () => {
 
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
-await waitFor(() => {
-        expect(screen.getByText(/Called UnknownTool/)).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByText(/UnknownTool/)).toBeInTheDocument()
       })
-
-      const toolCard = screen.getByText(/Called UnknownTool/).closest('[class*="rounded"]')
-      expect(toolCard).toBeInTheDocument()
     })
 
-    it('renders tool with expandable input/output', async () => {
+    it('renders unknown tool with description as subtitle when no displayTitle or displaySubtitle', async () => {
       const turns = [makeTurn({
         assistant: [{
           id: 'tool-1',
@@ -352,8 +349,7 @@ await waitFor(() => {
             toolCallId: 'tc-unknown',
             toolName: 'CustomTool',
             status: 'completed',
-            input: '{"custom":"input"}',
-            output: '{"custom":"output"}',
+            input: '{"description":"This is a useful description"}',
             startedAt: '2024-01-01T10:00:02.000Z',
             completedAt: '2024-01-01T10:00:03.000Z',
           },
@@ -363,17 +359,325 @@ await waitFor(() => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText(/Called CustomTool/)).toBeInTheDocument()
+        expect(screen.getByText(/CustomTool/)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/This is a useful description/)).toBeInTheDocument()
+    })
+
+    it('renders unknown tool with url as subtitle when no displayTitle or displaySubtitle', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-unknown',
+            toolName: 'WebFetch',
+            status: 'completed',
+            input: '{"url":"https://example.com/api/data"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/WebFetch/)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/https:\/\/example\.com\/api\/data/)).toBeInTheDocument()
+    })
+
+    it('renders unknown tool with query as subtitle when no displayTitle or displaySubtitle', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-unknown',
+            toolName: 'SearchTool',
+            status: 'completed',
+            input: '{"query":"find something"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/SearchTool/)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/find something/)).toBeInTheDocument()
+    })
+
+    it('renders unknown tool with filePath as subtitle when no displayTitle or displaySubtitle', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-unknown',
+            toolName: 'ReadTool',
+            status: 'completed',
+            input: '{"file_path":"src/main.ts"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/ReadTool/)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/src\/main\.ts/)).toBeInTheDocument()
+    })
+
+    it('renders read tool with human-readable label from getToolLabel', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-read',
+            normalizedName: 'read',
+            toolName: 'Read',
+            status: 'completed',
+            input: '{"file_path":"src/index.ts"}',
+            output: 'file content',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/src\/index\.ts/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders grep tool with human-readable args', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-grep',
+            normalizedName: 'grep',
+            toolName: 'grep',
+            status: 'completed',
+            input: '{"pattern":"function foo","type":"typescript","scope":"src"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/function foo/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders reasoning as collapsed details element by default', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'reasoning-1',
+          type: 'reasoning',
+          text: 'Detailed reasoning content'.repeat(50),
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: null,
+        } as ReasoningPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Thinking\.\.\./i)).toBeInTheDocument()
       })
 
-      const toolElement = screen.getByText(/Called CustomTool/)
-      const button = toolElement.closest('button') ?? toolElement.closest('[class*="rounded-md"]')?.querySelector('button')
-      if (button) {
-        fireEvent.click(button)
+      const details = screen.getByText(/Thinking\.\.\./i).closest('details')
+      expect(details).toBeInTheDocument()
+      const summary = details?.querySelector('summary')
+      expect(summary).toBeInTheDocument()
+      const content = details?.querySelector('pre')
+      expect(content).not.toBeInTheDocument()
+    })
+
+    it('expands reasoning when summary is clicked', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'reasoning-1',
+          type: 'reasoning',
+          text: 'Detailed reasoning content',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: null,
+        } as ReasoningPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Thinking\.\.\./i)).toBeInTheDocument()
+      })
+
+      const details = screen.getByText(/Thinking\.\.\./i).closest('details')
+      if (details) {
+        fireEvent.click(details.querySelector('summary')!)
         await waitFor(() => {
-          expect(screen.getByText('Input')).toBeInTheDocument()
+          expect(screen.getByText('Detailed reasoning content')).toBeInTheDocument()
         })
       }
+    })
+
+    it('renders bash tool with human-readable command label', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-bash',
+            normalizedName: 'bash',
+            toolName: 'bash',
+            status: 'completed',
+            input: '{"command":"npm test","cwd":"/project"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/npm test/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders question tool with human-readable query subtitle', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-question',
+            normalizedName: 'question',
+            toolName: 'question',
+            status: 'completed',
+            input: '{"question":"Should I use React or Vue?"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Should I use React or Vue\?/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders webfetch tool with url subtitle', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-webfetch',
+            normalizedName: 'webfetch',
+            toolName: 'webfetch',
+            status: 'completed',
+            input: '{"url":"https://api.example.com/data","method":"GET"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/https:\/\/api\.example\.com\/data/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders task tool with description subtitle', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-task',
+            normalizedName: 'task',
+            toolName: 'task',
+            status: 'completed',
+            input: '{"description":"Implement feature X"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Implement feature X/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders skill tool with name subtitle', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-skill',
+            normalizedName: 'skill',
+            toolName: 'skill',
+            status: 'completed',
+            input: '{"name":"frontend-design"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/frontend-design/)).toBeInTheDocument()
+      })
+    })
+
+    it('does not display unknown label for tools with raw toolName but no displayTitle', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-foo',
+            toolName: 'FooTool',
+            normalizedName: 'FooTool',
+            status: 'completed',
+            input: '{"arg1":"value1"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument()
+      })
     })
   })
 
@@ -480,7 +784,7 @@ await waitFor(() => {
   })
 
   describe('context tool grouping', () => {
-    it('groups consecutive context tools into Context gathered card', async () => {
+    it('groups consecutive context tools into Gathering context card', async () => {
       const turns = [makeTurn({
         assistant: [
           {
@@ -515,7 +819,7 @@ await waitFor(() => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText(/Context gathered/i)).toBeInTheDocument()
+        expect(screen.getByText(/Gathering context/i)).toBeInTheDocument()
       })
     })
 
@@ -554,7 +858,7 @@ await waitFor(() => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText(/Context gathered/i)).toBeInTheDocument()
+        expect(screen.getByText(/Gathering context/i)).toBeInTheDocument()
       })
       expect(screen.queryByText('content')).not.toBeInTheDocument()
 
@@ -596,7 +900,7 @@ await waitFor(() => {
       await waitFor(() => {
         expect(screen.getByText(/Let me check the files first/i)).toBeInTheDocument()
       })
-      expect(screen.getByText(/Context gathered/i)).toBeInTheDocument()
+      expect(screen.getByText(/Gathering context/i)).toBeInTheDocument()
     })
 
     it('shows failed count in context group summary', async () => {
@@ -634,7 +938,7 @@ await waitFor(() => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText(/Context gathered/)).toBeInTheDocument()
+        expect(screen.getByText(/Gathering context/)).toBeInTheDocument()
       })
     })
 
@@ -659,7 +963,7 @@ await waitFor(() => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText(/Context gathered/i)).toBeInTheDocument()
+        expect(screen.getByText(/Gathering context/i)).toBeInTheDocument()
       })
       expect(screen.queryByText('unknown')).not.toBeInTheDocument()
     })
@@ -1468,7 +1772,7 @@ describe('Live/historical parity', () => {
     renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
     await waitFor(() => {
-      expect(screen.getByText(/Context gathered/)).toBeInTheDocument()
+      expect(screen.getByText(/Gathering context/)).toBeInTheDocument()
     })
   })
 
@@ -2688,5 +2992,1158 @@ describe('Live update convergence', () => {
     )
     expect(toolParts).toHaveLength(1)
     expect(toolParts?.[0].tool.toolCallId).toBe('tc-order-1')
+  })
+})
+
+describe('ToolRegistry', () => {
+  describe('fallback behavior', () => {
+    it('renders unknown tool using registry fallback entry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-unknown',
+            toolName: 'SomeUnknownTool',
+            status: 'completed',
+            input: '{"arg1":"value1","description":"A custom tool"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/SomeUnknownTool/)).toBeInTheDocument()
+      })
+      expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument()
+    })
+
+    it('falls back to raw toolName when no parsing signals available', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-fallback',
+            toolName: 'MyCustomTool',
+            status: 'completed',
+            input: '{"foo":"bar"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/MyCustomTool/)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('known tool-family renderer selection', () => {
+    it('renders bash tool with command label from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-bash',
+            normalizedName: 'bash',
+            toolName: 'bash',
+            status: 'completed',
+            input: '{"command":"npm run build","cwd":"/project"}',
+            output: 'build success',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/npm run build/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders read tool with file path label from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-read',
+            normalizedName: 'read',
+            toolName: 'Read',
+            status: 'completed',
+            input: '{"file_path":"src/index.ts"}',
+            output: 'file content here',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/src\/index\.ts/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders grep tool with pattern label from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-grep',
+            normalizedName: 'grep',
+            toolName: 'grep',
+            status: 'completed',
+            input: '{"pattern":"function foo","type":"typescript"}',
+            output: 'found 3 matches',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/function foo/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders webfetch tool with url subtitle from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-webfetch',
+            normalizedName: 'webfetch',
+            toolName: 'webfetch',
+            status: 'completed',
+            input: '{"url":"https://api.example.com/data","method":"GET"}',
+            output: '{"data":"result"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/https:\/\/api\.example\.com\/data/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders question tool with query subtitle from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-question',
+            normalizedName: 'question',
+            toolName: 'question',
+            status: 'completed',
+            input: '{"question":"Which approach is better?"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Which approach is better\?/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders task tool with description subtitle from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-task',
+            normalizedName: 'task',
+            toolName: 'task',
+            status: 'completed',
+            input: '{"description":"Run tests on CI"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Run tests on CI/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders skill tool with name subtitle from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-skill',
+            normalizedName: 'skill',
+            toolName: 'skill',
+            status: 'completed',
+            input: '{"name":"debugging-code"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/debugging-code/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders edit tool with file name from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-edit',
+            normalizedName: 'edit',
+            toolName: 'edit',
+            status: 'completed',
+            input: '{"file_path":"src/app.ts","oldString":"foo","newString":"bar"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/app\.ts/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders write tool with file name from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-write',
+            normalizedName: 'write',
+            toolName: 'write',
+            status: 'completed',
+            input: '{"path":"src/new-file.ts","content":"hello world"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/new-file\.ts/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders apply_patch tool with file summary from registry', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-patch',
+            normalizedName: 'apply_patch',
+            toolName: 'apply_patch',
+            status: 'completed',
+            input: JSON.stringify({ patchText: '*** Add File: src/brand-new.ts\n+++ b/src/brand-new.ts\n@@ -0,0 +1 @@\n+new content' }),
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('1 file changed')).toBeInTheDocument()
+      })
+    })
+  })
+})
+
+describe('Live-then-refetch transcript equivalence', () => {
+  it('live tool grouping matches replayed context-group after refetch simulation', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-read-1',
+        toolName: 'Read',
+        state: 'started',
+        rawInput: { file_path: 'src/index.ts' },
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-read-2',
+        toolName: 'Read',
+        state: 'started',
+        rawInput: { file_path: 'src/app.ts' },
+      })
+    })
+
+    await waitFor(() => {
+      const toolParts = result.current.turns.at(-1)?.assistant.filter(
+        (part): part is ToolPart => part.type === 'tool',
+      )
+      expect(toolParts).toHaveLength(2)
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-read-1',
+        toolName: 'Read',
+        state: 'completed',
+        rawOutput: 'index content',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-read-2',
+        toolName: 'Read',
+        state: 'completed',
+        rawOutput: 'app content',
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.isFinalizing).toBe(true)
+    })
+
+    const liveTurns = result.current.turns
+    const liveToolParts = liveTurns.flatMap(t => t.assistant).filter(
+      (part): part is ToolPart => part.type === 'tool',
+    )
+
+    expect(liveToolParts).toHaveLength(2)
+    expect(liveToolParts.every(p => p.tool.status === 'completed')).toBe(true)
+    expect(liveToolParts.every(p => p.tool.normalizedName === 'read')).toBe(true)
+  })
+
+  it('live tool identity remains consistent after terminal refetch reconciliation', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-ident',
+        toolName: 'grep',
+        state: 'started',
+        rawInput: { pattern: 'function foo', file_path: 'src/' },
+      })
+    })
+
+    await waitFor(() => {
+      const toolPart = result.current.turns.at(-1)?.assistant.find(
+        (part): part is ToolPart => part.type === 'tool' && part.tool.toolCallId === 'tc-ident',
+      )
+      expect(toolPart?.tool.normalizedName).toBe('grep')
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-ident',
+        toolName: 'grep',
+        state: 'completed',
+        rawOutput: 'found 3 matches',
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.isFinalizing).toBe(true)
+    })
+
+    const toolPart = result.current.turns.at(-1)?.assistant.find(
+      (part): part is ToolPart => part.type === 'tool' && part.tool.toolCallId === 'tc-ident',
+    )
+    expect(toolPart?.tool.normalizedName).toBe('grep')
+    expect(toolPart?.tool.status).toBe('completed')
+    expect(toolPart?.tool.output).toBe('found 3 matches')
+  })
+
+  it('multiple sequential live tool events maintain correct order after refetch', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    const toolSequence = [
+      { id: 'tc-seq-1', tool: 'read', input: { file_path: 'a.txt' }, output: 'a' },
+      { id: 'tc-seq-2', tool: 'read', input: { file_path: 'b.txt' }, output: 'b' },
+      { id: 'tc-seq-3', tool: 'bash', input: { command: 'echo hi' }, output: 'hi' },
+    ]
+
+    for (const item of toolSequence) {
+      act(() => {
+        dispatchAgentEvent('coder_tool_call', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          coderSessionId: 'session-123',
+          toolCallId: item.id,
+          toolName: item.tool,
+          state: 'started',
+          rawInput: item.input,
+        })
+      })
+    }
+
+    await waitFor(() => {
+      const toolParts = result.current.turns.at(-1)?.assistant.filter(
+        (part): part is ToolPart => part.type === 'tool',
+      )
+      expect(toolParts).toHaveLength(3)
+    })
+
+    for (const item of toolSequence) {
+      act(() => {
+        dispatchAgentEvent('coder_tool_call', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          coderSessionId: 'session-123',
+          toolCallId: item.id,
+          toolName: item.tool,
+          state: 'completed',
+          rawOutput: item.output,
+        })
+      })
+    }
+
+    await waitFor(() => {
+      expect(result.current.isFinalizing).toBe(true)
+    })
+
+    const toolParts = result.current.turns.at(-1)?.assistant.filter(
+      (part): part is ToolPart => part.type === 'tool',
+    )
+    expect(toolParts).toHaveLength(3)
+    expect(toolParts?.[0].tool.toolCallId).toBe('tc-seq-1')
+    expect(toolParts?.[1].tool.toolCallId).toBe('tc-seq-2')
+    expect(toolParts?.[2].tool.toolCallId).toBe('tc-seq-3')
+    expect(toolParts?.every(p => p.tool.status === 'completed')).toBe(true)
+  })
+
+  it('text append before and after tool events preserved through reconciliation', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        text: 'Reading files...',
+        coderSessionId: 'session-123',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-file',
+        toolName: 'read',
+        state: 'started',
+        rawInput: { file_path: 'test.txt' },
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        text: 'Done reading.',
+        coderSessionId: 'session-123',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_tool_call', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        coderSessionId: 'session-123',
+        toolCallId: 'tc-file',
+        toolName: 'read',
+        state: 'completed',
+        rawOutput: 'file content',
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.isFinalizing).toBe(true)
+    })
+
+    const textPart = result.current.turns.at(-1)?.assistant.find(
+      (p): p is TextPart => p.type === 'text',
+    )
+    expect(textPart?.text).toBe('Reading files...Done reading.')
+
+    const toolPart = result.current.turns.at(-1)?.assistant.find(
+      (part): part is ToolPart => part.type === 'tool',
+    )
+    expect(toolPart?.tool.status).toBe('completed')
+    expect(toolPart?.tool.output).toBe('file content')
+  })
+})
+
+describe('T-006: Transcript affordances', () => {
+  describe('assistant reply copy action', () => {
+    it('shows copy button on assistant text part', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Hello world',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: null,
+        } as TextPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Coder')).toBeInTheDocument()
+      })
+      expect(screen.getByText('Copy')).toBeInTheDocument()
+    })
+
+    it('copies assistant text when copy button is clicked', async () => {
+      const mockWriteText = vi.fn().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: mockWriteText },
+        configurable: true,
+      })
+
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Copy this text',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: null,
+        } as TextPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Copy')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('Copy'))
+
+      await waitFor(() => {
+        expect(mockWriteText).toHaveBeenCalledWith('Copy this text')
+        expect(screen.getByText('Copied!')).toBeInTheDocument()
+      })
+    })
+
+    it('copy button shows Copy again after timeout', async () => {
+      vi.useFakeTimers()
+      const mockWriteText = vi.fn().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: mockWriteText },
+        configurable: true,
+      })
+
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Test text',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: null,
+        } as TextPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Copy')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('Copy'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Copied!')).toBeInTheDocument()
+      })
+
+      vi.advanceTimersByTime(2000)
+
+      await waitFor(() => {
+        expect(screen.getByText('Copy')).toBeInTheDocument()
+      })
+
+      vi.useRealTimers()
+    })
+  })
+
+  describe('expanded diff inspection', () => {
+    it('shows expanded diff view when rawDetail is available', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-diff',
+            toolName: 'edit',
+            status: 'completed',
+            input: JSON.stringify({ file_path: 'src/test.ts', old_string: 'old', new_string: 'new' }),
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+            changedFiles: [
+              {
+                path: 'src/test.ts',
+                operation: 'modified',
+                additions: 1,
+                deletions: 1,
+                rawDetail: '--- a/src/test.ts\n+++ b/src/test.ts\n@@ -1 +1 @@\n-old\n+new',
+              },
+            ],
+          },
+        }],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Show diff (expanded view)')).toBeInTheDocument()
+      })
+    })
+
+    it('hides diff content by default and shows it when expanded', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-diff',
+            toolName: 'edit',
+            status: 'completed',
+            input: JSON.stringify({ file_path: 'src/test.ts', old_string: 'old', new_string: 'new' }),
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+            changedFiles: [
+              {
+                path: 'src/test.ts',
+                operation: 'modified',
+                additions: 1,
+                deletions: 1,
+                rawDetail: '--- a/src/test.ts\n+++ b/src/test.ts\n@@ -1 +1 @@\n-old\n+new',
+              },
+            ],
+          },
+        }],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Show diff (expanded view)')).toBeInTheDocument()
+      })
+
+      expect(screen.queryByText(/--- a\/src\/test.ts/)).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByText('Show diff (expanded view)'))
+
+      await waitFor(() => {
+        expect(screen.getByText(/--- a\/src\/test.ts/)).toBeInTheDocument()
+      })
+    })
+
+    it('shows file summary with additions/deletions when rawDetail is not available', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-diff',
+            toolName: 'apply_patch',
+            status: 'completed',
+            input: JSON.stringify({ patchText: '*** Add File: src/new.ts\n+++ b/src/new.ts\n@@ -0,0 +1 @@\n+line1' }),
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        }],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Show diff')).toBeInTheDocument()
+      })
+    })
+
+    it('shows rawDetail content in diff view when available', async () => {
+      const rawDetailContent = '--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,3 +1,3 @@\n const x = 1\n-const y = 2\n+const y = 3\n const z = 4'
+
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-edit',
+            toolName: 'edit',
+            status: 'completed',
+            input: JSON.stringify({ file_path: 'src/app.ts', old_string: 'const y = 2', new_string: 'const y = 3' }),
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+            changedFiles: [
+              {
+                path: 'src/app.ts',
+                operation: 'modified',
+                additions: 1,
+                deletions: 1,
+                rawDetail: rawDetailContent,
+              },
+            ],
+          },
+        }],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Show diff (expanded view)')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('Show diff (expanded view)'))
+
+      await waitFor(() => {
+        expect(screen.getByText(/--- a\/src\/app.ts/)).toBeInTheDocument()
+        expect(screen.getByText(/const y = 3/)).toBeInTheDocument()
+      })
+    })
+  })
+})
+
+describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
+  describe('follow-mode pause/resume', () => {
+    it('auto-scrolls when reader is near bottom during live session', async () => {
+      const scrollToMock = vi.fn()
+      Element.prototype.scrollTo = scrollToMock
+
+      const initialTurns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Initial content',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: '2024-01-01T10:00:02.000Z',
+        } as TextPart],
+      })]
+
+      const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        acpSessionId: 'acp-123',
+        initialTurns,
+        isRunning: true,
+      }))
+
+      result.current.setIsNearBottom(true)
+
+      act(() => {
+        dispatchAgentEvent('coder_text_chunk', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          text: ' More content',
+          coderSessionId: 'session-123',
+        })
+      })
+
+      await waitFor(() => {
+        expect(scrollToMock).toHaveBeenCalled()
+      })
+    })
+
+    it('does not auto-scroll when user scrolls away from bottom', async () => {
+      const scrollToMock = vi.fn()
+      Element.prototype.scrollTo = scrollToMock
+
+      const initialTurns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Initial content',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: '2024-01-01T10:00:02.000Z',
+        } as TextPart],
+      })]
+
+      const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        acpSessionId: 'acp-123',
+        initialTurns,
+        isRunning: true,
+      }))
+
+      result.current.setIsNearBottom(false)
+
+      act(() => {
+        dispatchAgentEvent('coder_text_chunk', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          text: ' More content',
+          coderSessionId: 'session-123',
+        })
+      })
+
+      expect(scrollToMock).not.toHaveBeenCalled()
+    })
+
+    it('restores follow mode when scrollToBottom is called', async () => {
+      const scrollToMock = vi.fn()
+      Element.prototype.scrollTo = scrollToMock
+
+      const initialTurns = [makeTurn()]
+
+      const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        acpSessionId: 'acp-123',
+        initialTurns,
+        isRunning: true,
+      }))
+
+      result.current.setIsNearBottom(false)
+
+      act(() => {
+        result.current.scrollToBottom()
+      })
+
+      expect(result.current.isNearBottom).toBe(true)
+      expect(scrollToMock).toHaveBeenCalled()
+    })
+  })
+
+  describe('new-content indicator behavior', () => {
+    it('sets newContentAvailable when not near bottom and content arrives', async () => {
+      const initialTurns = [makeTurn()]
+
+      const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        acpSessionId: 'acp-123',
+        initialTurns,
+        isRunning: true,
+      }))
+
+      result.current.setIsNearBottom(false)
+
+      act(() => {
+        dispatchAgentEvent('coder_text_chunk', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          text: 'New streaming content',
+          coderSessionId: 'session-123',
+        })
+      })
+
+      await waitFor(() => {
+        expect(result.current.newContentAvailable).toBe(true)
+      })
+    })
+
+    it('does not set newContentAvailable when near bottom', async () => {
+      const initialTurns = [makeTurn()]
+
+      const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        acpSessionId: 'acp-123',
+        initialTurns,
+        isRunning: true,
+      }))
+
+      result.current.setIsNearBottom(true)
+
+      act(() => {
+        dispatchAgentEvent('coder_text_chunk', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          text: 'New streaming content',
+          coderSessionId: 'session-123',
+        })
+      })
+
+      expect(result.current.newContentAvailable).toBe(false)
+    })
+
+    it('clears newContentAvailable when acknowledgeNewContent is called', async () => {
+      const initialTurns = [makeTurn()]
+
+      const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        acpSessionId: 'acp-123',
+        initialTurns,
+        isRunning: true,
+      }))
+
+      result.current.setIsNearBottom(false)
+
+      act(() => {
+        dispatchAgentEvent('coder_text_chunk', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          text: 'New content',
+          coderSessionId: 'session-123',
+        })
+      })
+
+      await waitFor(() => {
+        expect(result.current.newContentAvailable).toBe(true)
+      })
+
+      act(() => {
+        result.current.acknowledgeNewContent()
+      })
+
+      expect(result.current.newContentAvailable).toBe(false)
+    })
+  })
+
+  describe('nested scrollable regions', () => {
+    it('does not toggle follow mode when scrolling within nested scrollable region', async () => {
+      const scrollToMock = vi.fn()
+      Element.prototype.scrollTo = scrollToMock
+
+      const initialTurns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Content with code block',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: '2024-01-01T10:00:02.000Z',
+        } as TextPart],
+      })]
+
+      const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        acpSessionId: 'acp-123',
+        initialTurns,
+        isRunning: true,
+      }))
+
+      result.current.setIsNearBottom(true)
+
+      act(() => {
+        dispatchAgentEvent('coder_text_chunk', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          text: ' More content',
+          coderSessionId: 'session-123',
+        })
+      })
+
+      await waitFor(() => {
+        expect(scrollToMock).toHaveBeenCalled()
+      })
+    })
+  })
+
+  describe('streaming text pacing', () => {
+    it('shows blinking cursor for incomplete text part', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Streaming text',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: null,
+        } as TextPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={true} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Streaming text')).toBeInTheDocument()
+      })
+
+      const cursor = document.querySelector('span.animate-pulse')
+      expect(cursor).toBeInTheDocument()
+    })
+
+    it('does not show blinking cursor for completed text part', async () => {
+      const turns = [makeTurn({
+        assistant: [{
+          id: 'text-1',
+          type: 'text',
+          text: 'Completed text',
+          startedAt: '2024-01-01T10:00:01.000Z',
+          completedAt: '2024-01-01T10:00:02.000Z',
+        } as TextPart],
+      })]
+
+      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Completed text')).toBeInTheDocument()
+      })
+
+      const cursors = document.querySelectorAll('span.animate-pulse')
+      const textCursors = Array.from(cursors).filter(cursor => {
+        const parent = cursor.parentElement
+        return parent?.textContent?.includes('Completed text')
+      })
+      expect(textCursors).toHaveLength(0)
+    })
+
+    it('persisted transcript content is unchanged by pacing display', async () => {
+      const initialTurns = [makeTurn()]
+
+      const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        acpSessionId: 'acp-123',
+        initialTurns,
+        isRunning: true,
+      }))
+
+      act(() => {
+        dispatchAgentEvent('coder_text_chunk', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          text: 'First chunk',
+          coderSessionId: 'session-123',
+        })
+      })
+
+      act(() => {
+        dispatchAgentEvent('coder_text_chunk', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          text: ' second chunk',
+          coderSessionId: 'session-123',
+        })
+      })
+
+      await waitFor(() => {
+        const textPart = result.current.turns.at(-1)?.assistant.find(
+          (p): p is TextPart => p.type === 'text',
+        )
+        expect(textPart?.text).toBe('First chunk second chunk')
+      })
+    })
   })
 })

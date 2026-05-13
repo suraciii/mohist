@@ -331,6 +331,7 @@ export function SessionPage() {
     setIsNearBottom,
     isFinalizing,
     isThinking,
+    isStreaming,
   } = useSessionTranscript({
     issueNumber,
     sessionId: sessionId ?? '',
@@ -423,6 +424,7 @@ export function SessionPage() {
     const container = scrollContainerRef.current
     if (!container) return
 
+    if (!isNearBottomRef.current) return
     if (isUserScrollingRef.current || isSelectingTextRef.current) return
 
     container.scrollTop = container.scrollHeight
@@ -433,6 +435,7 @@ export function SessionPage() {
     const container = scrollContainerRef.current
     if (!container) return
 
+    if (!isNearBottomRef.current) return
     if (isUserScrollingRef.current || isSelectingTextRef.current) return
 
     container.scrollTop = container.scrollHeight
@@ -527,6 +530,7 @@ export function SessionPage() {
           statusKind={displayStatusKind}
           isRunning={isRunning}
           isThinking={isThinking}
+          isStreaming={isStreaming}
         />
       </div>
 

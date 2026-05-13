@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import Markdown from 'react-markdown'
 import type { DisplayAssistantPart, DisplayChangedFile } from '../../lib/session-transcript-display'
+import { getToolRegistryEntry, getToolDisplayType } from './tool-registry'
+import { parseJsonSafely } from '../../lib/transcript-tool-utils'
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString()
@@ -8,9 +10,21 @@ function formatTime(iso: string): string {
 
 interface AssistantTextPartViewProps {
   text: string
+  completedAt: string | null | undefined
+  isStreaming?: boolean
 }
 
-export function AssistantTextPartView({ text }: AssistantTextPartViewProps) {
+export function AssistantTextPartView({ text, completedAt, isStreaming }: AssistantTextPartViewProps) {
+  const [copied, setCopied] = useState(false)
+  const isIncomplete = completedAt === null || completedAt === undefined
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
   return (
     <div className="max-w-[90%]">
       <div className="text-sm text-gray-800 leading-relaxed">
@@ -35,6 +49,17 @@ export function AssistantTextPartView({ text }: AssistantTextPartViewProps) {
         >
           {text}
         </Markdown>
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        {(isIncomplete || isStreaming) && (
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+        )}
+        <button
+          onClick={handleCopy}
+          className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
       </div>
     </div>
   )
@@ -113,7 +138,7 @@ export function AssistantParts({ parts }: AssistantPartsProps) {
       {parts.map((part) => {
         switch (part.partType) {
           case 'text':
-            return <AssistantTextPartView key={part.id} text={part.text} />
+            return <AssistantTextPartView key={part.id} text={part.text} completedAt={part.completedAt} isStreaming={part.isStreaming} />
           case 'reasoning':
             return <ReasoningPartView key={part.id} text={part.text} startedAt={part.startedAt} />
           case 'tool':
@@ -132,106 +157,202 @@ export function AssistantParts({ parts }: AssistantPartsProps) {
   )
 }
 
-const TOOL_ICONS: Record<string, React.ReactElement> = {
-  read: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-      <polyline points="10 9 9 9 8 9" />
-    </svg>
-  ),
-  glob: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-      <path d="M2 10h20" />
-    </svg>
-  ),
-  grep: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="11" cy="11" r="8" />
-      <path d="m21 21-4.35-4.35" />
-      <path d="M8 8h6" />
-    </svg>
-  ),
-  search: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="11" cy="11" r="8" />
-      <path d="m21 21-4.35-4.35" />
-    </svg>
-  ),
-  bash: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
-    </svg>
-  ),
-  apply_patch: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" />
-    </svg>
-  ),
-  edit: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </svg>
-  ),
-  write: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </svg>
-  ),
-  webfetch: (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-    </svg>
-  ),
-}
-
 function ToolIcon({ normalizedName }: { normalizedName: string }) {
-  const icon = TOOL_ICONS[normalizedName]
-  if (icon) return icon
-  return (
-    <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M12 8v8M8 12h8" />
-    </svg>
-  )
+  const entry = getToolRegistryEntry(normalizedName)
+  const iconEl = entry.icon as React.ReactElement<{ className?: string }>
+  return React.cloneElement(iconEl, { className: 'h-3.5 w-3.5 text-gray-400 shrink-0' })
 }
 
-function getToolDisplayLabel(normalizedName: string, displayTitle?: string, displaySubtitle?: string): string {
+function getToolDisplayLabel(normalizedName: string, displayTitle?: string, displaySubtitle?: string, rawInput?: string): string {
   if (displayTitle) return displayTitle
   if (displaySubtitle) return displaySubtitle
-  return normalizedName
+  const entry = getToolRegistryEntry(normalizedName)
+  return entry.getTitle(normalizedName, rawInput)
 }
 
-function parseJsonSafely(input: string | undefined): Record<string, unknown> | null {
-  if (!input) return null
+function getToolDisplayArgs(normalizedName: string, rawInput?: string): string[] {
+  const entry = getToolRegistryEntry(normalizedName)
+  return entry.getBadges(normalizedName, rawInput)
+}
+
+function getFallbackSubtitle(rawInput?: string): string | undefined {
+  if (!rawInput) return undefined
   try {
-    const parsed = JSON.parse(input)
-    if (typeof parsed !== 'object' || parsed === null) return null
-    return parsed as Record<string, unknown>
+    const parsed = JSON.parse(rawInput)
+    const desc = parsed.description ?? parsed.name
+    if (typeof desc === 'string') return desc
+    const query = parsed.query
+    if (typeof query === 'string') return query
+    const url = parsed.url
+    if (typeof url === 'string') return url
+    const fp = parsed.filePath ?? parsed.file_path ?? parsed.path
+    if (typeof fp === 'string') return fp
+    return undefined
   } catch {
-    return null
+    return undefined
   }
 }
 
-function getFilePathFromInput(input: string | undefined): string | null {
-  const parsed = parseJsonSafely(input)
-  if (!parsed) return null
-  const fp = parsed.filePath ?? parsed.file_path ?? parsed.path
-  if (typeof fp === 'string') return fp
-  return null
+function getRegistrySubtitle(normalizedName: string, rawInput?: string): string | undefined {
+  const entry = getToolRegistryEntry(normalizedName)
+  return entry.getSubtitle(normalizedName, rawInput)
 }
 
-function ToolStatusDot({ status }: { status: string }) {
+function RunningIndicator() {
+  return (
+    <span className="relative flex h-2.5 w-2.5 shrink-0">
+      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+    </span>
+  )
+}
+
+function truncateOutput(output: string, maxLines: number = 5): string {
+  const lines = output.split('\n')
+  if (lines.length <= maxLines) return output
+  return lines.slice(0, maxLines).join('\n') + '\n...'
+}
+
+interface BashContentViewProps {
+  input?: string
+  output?: string
+  exitCode?: number
+}
+
+function BashContentView({ input, output, exitCode }: BashContentViewProps) {
+  const parsed = input ? parseJsonSafely(input) : null
+  const command = parsed
+    ? (parsed.command ?? parsed.script ?? parsed.cmd ?? '') as string
+    : input ?? ''
+
+  return (
+    <div className="border-t border-gray-100">
+      <div className="px-3 pt-2">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xs font-medium text-gray-500">Command</span>
+          {exitCode !== undefined && (
+            <span className={`text-xs px-1 rounded ${exitCode === 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+              {exitCode === 0 ? 'success' : `exit ${exitCode}`}
+            </span>
+          )}
+        </div>
+        <pre className="whitespace-pre-wrap break-all text-xs text-gray-800 bg-gray-900 text-gray-100 rounded p-2 font-mono overflow-auto max-h-24">
+          {command}
+        </pre>
+      </div>
+      {output && (
+        <div className="px-3 pb-2">
+          <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
+          <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 font-mono overflow-auto max-h-32">
+            {truncateOutput(output)}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface ReadContentViewProps {
+  input?: string
+  output?: string
+}
+
+function ReadContentView({ input, output }: ReadContentViewProps) {
+  const parsed = input ? parseJsonSafely(input) : null
+  const filePath = parsed
+    ? (parsed.filePath ?? parsed.file_path ?? parsed.path ?? '') as string
+    : input ?? ''
+
+  const fileName = filePath.split('/').pop() ?? filePath
+
+  return (
+    <div className="border-t border-gray-100">
+      <div className="px-3 pt-2">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xs font-medium text-gray-500">Reading</span>
+          <span className="text-xs text-gray-700 font-mono">{fileName}</span>
+        </div>
+        {output && (
+          <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 font-mono overflow-auto max-h-40">
+            {truncateOutput(output, 8)}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface SearchContentViewProps {
+  input?: string
+  output?: string
+}
+
+function SearchContentView({ input, output }: SearchContentViewProps) {
+  const parsed = input ? parseJsonSafely(input) : null
+  const pattern = parsed
+    ? (parsed.pattern ?? parsed.query ?? '') as string
+    : ''
+  const searchType = parsed ? (parsed.type ?? '') as string : ''
+
+  let results: string[] = []
+  if (output) {
+    try {
+      const parsedOutput = JSON.parse(output)
+      if (Array.isArray(parsedOutput)) {
+        results = parsedOutput.slice(0, 5).map((r: any) => {
+          if (typeof r === 'string') return r
+          if (r.file || r.path) return `${r.file ?? r.path}:${r.line ?? ''}`
+          return JSON.stringify(r).slice(0, 80)
+        })
+      } else if (typeof parsedOutput === 'object') {
+        results = [JSON.stringify(parsedOutput).slice(0, 200)]
+      } else {
+        results = [String(parsedOutput).slice(0, 200)]
+      }
+    } catch {
+      results = [output.slice(0, 200)]
+    }
+  }
+
+  return (
+    <div className="border-t border-gray-100">
+      <div className="px-3 pt-2">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <span className="text-xs font-medium text-gray-500">Searching</span>
+          {pattern && (
+            <span className="text-xs text-gray-700 font-mono bg-gray-100 px-1 rounded">
+              {pattern}
+            </span>
+          )}
+          {searchType && (
+            <span className="text-xs text-gray-500">({searchType})</span>
+          )}
+        </div>
+        {results.length > 0 && (
+          <div className="space-y-0.5">
+            {results.map((line, i) => (
+              <pre key={i} className="whitespace-pre-wrap break-all text-xs text-gray-700 font-mono bg-gray-50 rounded p-1.5 overflow-auto">
+                {line}
+              </pre>
+            ))}
+            {output && results.length < 5 && (
+              <span className="text-xs text-gray-400">...</span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface ToolStatusDotProps {
+  status: string
+}
+
+function ToolStatusDot({ status }: ToolStatusDotProps) {
   switch (status) {
     case 'running':
-      return <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse shrink-0" />
+      return <RunningIndicator />
     case 'completed':
       return <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
     case 'failed':
@@ -253,6 +374,8 @@ function PatchDiffView({ changedFiles }: PatchDiffViewProps) {
 
   if (changedFiles.length === 0) return null
 
+  const hasRawDetail = changedFiles.some(f => f.rawDetail)
+
   return (
     <div className="border-t border-gray-100">
       <button
@@ -262,21 +385,28 @@ function PatchDiffView({ changedFiles }: PatchDiffViewProps) {
         <svg className={`h-3 w-3 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
-        {expanded ? 'Hide' : 'Show'} diff
+        {expanded ? 'Hide' : 'Show'} diff {hasRawDetail && '(expanded view)'}
       </button>
       {expanded && (
-        <div className="px-3 pb-2 space-y-1">
+        <div className="px-3 pb-2 space-y-2">
           {changedFiles.map((change, i) => {
             const opBadge: Record<string, string> = { created: '+', modified: '~', deleted: '-', moved: '>' }
             return (
-              <div key={i} className="flex items-center gap-2 py-0.5">
-                <span className="text-xs font-mono text-gray-500 w-3">{opBadge[change.operation] ?? '?'}</span>
-                <span className="text-xs font-mono text-gray-700 truncate flex-1">{change.path}</span>
-                {change.additions !== undefined && change.additions > 0 && (
-                  <span className="text-xs text-green-600">+{change.additions}</span>
-                )}
-                {change.deletions !== undefined && change.deletions > 0 && (
-                  <span className="text-xs text-red-600">-{change.deletions}</span>
+              <div key={i} className="space-y-1">
+                <div className="flex items-center gap-2 py-0.5">
+                  <span className="text-xs font-mono text-gray-500 w-3">{opBadge[change.operation] ?? '?'}</span>
+                  <span className="text-xs font-mono text-gray-700 truncate flex-1">{change.path}</span>
+                  {change.additions !== undefined && change.additions > 0 && (
+                    <span className="text-xs text-green-600">+{change.additions}</span>
+                  )}
+                  {change.deletions !== undefined && change.deletions > 0 && (
+                    <span className="text-xs text-red-600">-{change.deletions}</span>
+                  )}
+                </div>
+                {change.rawDetail && (
+                  <pre className="text-xs font-mono text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap break-all max-h-32 overflow-auto">
+                    {change.rawDetail}
+                  </pre>
                 )}
               </div>
             )
@@ -294,11 +424,57 @@ interface ToolRowViewProps {
 function ToolRowView({ part }: ToolRowViewProps) {
   const [expanded, setExpanded] = useState(false)
   const isRunning = part.status === 'running' || part.status === 'pending'
-  const toolLabel = getToolDisplayLabel(part.normalizedName, part.displayTitle, part.displaySubtitle)
-  const filePath = getFilePathFromInput(part.input)
+  const toolLabel = getToolDisplayLabel(part.normalizedName, part.displayTitle, part.displaySubtitle, part.input)
+  const toolArgs = getToolDisplayArgs(part.normalizedName, part.input)
+  const registrySubtitle = !part.displayTitle && !part.displaySubtitle ? getRegistrySubtitle(part.normalizedName, part.input) : undefined
+  const fallbackSubtitle = !registrySubtitle && !part.displayTitle && !part.displaySubtitle ? getFallbackSubtitle(part.input) : undefined
   const hasChangedFiles = part.changedFiles && part.changedFiles.length > 0
+  const displayType = getToolDisplayType(part.normalizedName)
 
   const showExpandableDetails = !isRunning && (part.input || part.output || part.error || hasChangedFiles)
+
+  const renderSemanticContent = () => {
+    if (part.error) {
+      return (
+        <div className="px-3 text-xs text-red-600 bg-red-50">
+          {part.error}
+        </div>
+      )
+    }
+
+    if (displayType === 'terminal' && (part.input || part.output)) {
+      return <BashContentView input={part.input} output={part.output} />
+    }
+
+    if ((part.normalizedName === 'read' || part.normalizedName === 'read_file') && (part.input || part.output)) {
+      return <ReadContentView input={part.input} output={part.output} />
+    }
+
+    if ((part.normalizedName === 'grep' || part.normalizedName === 'search' || part.normalizedName === 'search_files') && (part.input || part.output)) {
+      return <SearchContentView input={part.input} output={part.output} />
+    }
+
+    return (
+      <>
+        {part.input && (
+          <div className="px-3 pt-2">
+            <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
+            <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+              {part.input}
+            </pre>
+          </div>
+        )}
+        {part.output && (
+          <div className="px-3">
+            <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
+            <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+              {part.output}
+            </pre>
+          </div>
+        )}
+      </>
+    )
+  }
 
   return (
     <div className={`rounded-md border overflow-hidden ${part.hasError ? 'border-red-200' : 'border-gray-200'}`}>
@@ -309,8 +485,20 @@ function ToolRowView({ part }: ToolRowViewProps) {
         <ToolStatusDot status={part.status} />
         <ToolIcon normalizedName={part.normalizedName} />
         <span className="text-xs font-medium text-gray-700">{toolLabel}</span>
-        {filePath && part.normalizedName !== filePath && (
-          <span className="text-xs text-gray-400 truncate max-w-[150px]">{filePath}</span>
+        {toolArgs.length > 0 && !part.displayTitle && !part.displaySubtitle && (
+          <span className="flex gap-1 shrink-0">
+            {toolArgs.slice(0, 2).map((arg, i) => (
+              <span key={i} className="inline-flex items-center px-1 py-0.5 rounded bg-gray-100 text-xs text-gray-500 font-mono">
+                {arg}
+              </span>
+            ))}
+          </span>
+        )}
+        {registrySubtitle && !part.displayTitle && !part.displaySubtitle && (
+          <span className="text-xs text-gray-400 truncate max-w-[150px]">{registrySubtitle}</span>
+        )}
+        {fallbackSubtitle && !part.displayTitle && !part.displaySubtitle && !registrySubtitle && (
+          <span className="text-xs text-gray-400 truncate max-w-[150px]">{fallbackSubtitle}</span>
         )}
         {part.hasError && (
           <span className="text-xs text-red-500">failed</span>
@@ -329,28 +517,8 @@ function ToolRowView({ part }: ToolRowViewProps) {
         )}
       </button>
       {expanded && showExpandableDetails && (
-        <div className="border-t border-gray-100 space-y-2">
-          {part.input && (
-            <div className="px-3 pt-2">
-              <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
-              <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
-                {part.input}
-              </pre>
-            </div>
-          )}
-          {part.output && (
-            <div className="px-3">
-              <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
-              <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
-                {part.output}
-              </pre>
-            </div>
-          )}
-          {part.error && (
-            <div className="px-3 text-xs text-red-600 bg-red-50">
-              {part.error}
-            </div>
-          )}
+        <div className="border-t border-gray-100">
+          {renderSemanticContent()}
           {hasChangedFiles && (
             <PatchDiffView changedFiles={part.changedFiles!} />
           )}

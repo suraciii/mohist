@@ -132,3 +132,55 @@ describe('SESSION_STREAM_EVENT_TYPES', () => {
     expect(SESSION_STREAM_EVENT_TYPES.has('user_message_chunk')).toBe(true);
   });
 });
+
+describe('millisecond timestamp fidelity', () => {
+  let db: DatabaseManager;
+  let repo: SessionStreamLogRepo;
+  let issueId: string;
+
+  beforeEach(() => {
+    db = new DatabaseManager({ inMemory: true });
+    initializeDatabase(db);
+    const projectRepo = new ProjectRepo(db);
+    const project = projectRepo.create({ name: 'Test', path: '/test' });
+    const issueRepo = new IssueRepo(db);
+    issueRepo.create({ number: 1, projectId: project.id, title: 'Test Issue' });
+    issueId = db.get<{ id: string }>('SELECT id FROM issues WHERE project_id = ?', [project.id])!.id;
+    repo = new SessionStreamLogRepo(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('should capture millisecond precision for newly persisted events', () => {
+    const entry = repo.insert(issueId, 'sess-1', 'agent_message_chunk', { text: 'hello' });
+    expect(entry.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  it('should not produce same-second collisions for rapid inserts', async () => {
+    const entries: ReturnType<typeof repo.insert>[] = [];
+    for (let i = 0; i < 10; i++) {
+      entries.push(repo.insert(issueId, 'sess-1', 'agent_message_chunk', { text: `msg-${i}` }));
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+
+    const timestamps = entries.map(e => e.createdAt);
+    const uniqueTimestamps = new Set(timestamps);
+    expect(uniqueTimestamps.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('should order by createdAt with sub-second resolution when querying', () => {
+    const entries: ReturnType<typeof repo.insert>[] = [];
+    for (let i = 0; i < 5; i++) {
+      entries.push(repo.insert(issueId, 'sess-1', 'agent_thought_chunk', { text: `thought-${i}` }));
+    }
+
+    const results = repo.findBySessionId('sess-1');
+    expect(results).toHaveLength(5);
+
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i].createdAt >= results[i - 1].createdAt).toBe(true);
+    }
+  });
+});

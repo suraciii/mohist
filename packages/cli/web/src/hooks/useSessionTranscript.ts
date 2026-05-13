@@ -2,7 +2,13 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../lib/agent-events'
 import type { SessionTurn, TextPart, ToolPart, ErrorPart } from '../lib/types'
-import { parseEditInput, parsePatchOperations } from '../components/ToolCallCard'
+import { parseEditInput, parsePatchOperations } from '../lib/transcript-tool-utils'
+import {
+  normalizeToolName,
+  inferDisplayTitle,
+  stringifyPayload,
+  getCorrelationKey,
+} from '../lib/transcript-tool-utils'
 
 interface UseSessionTranscriptOptions {
   issueNumber: number
@@ -37,6 +43,7 @@ export interface UseSessionTranscriptResult {
   acknowledgeNewContent: () => void
   isFinalizing: boolean
   isThinking: boolean
+  isStreaming: boolean
 }
 
 function generateId(): string {
@@ -49,70 +56,6 @@ function createTextPart(text: string, startedAt: string): TextPart {
 
 function createErrorPart(message: string, kind: ErrorPart['kind'], at: string): ErrorPart {
   return { id: generateId(), type: 'error', message, kind, at }
-}
-
-function stringifyPayload(payload: unknown): string | undefined {
-  if (payload === undefined || payload === null) return undefined
-  return typeof payload === 'string' ? payload : JSON.stringify(payload)
-}
-
-function inferToolName(toolName: string | undefined, _title?: string, rawInput?: unknown, rawOutput?: unknown): string {
-  if (toolName && toolName !== 'unknown') return toolName
-
-  const input = typeof rawInput === 'string' ? rawInput : rawInput && typeof rawInput === 'object' ? rawInput as Record<string, unknown> : null
-  if (input && typeof input === 'object') {
-    if (typeof input.toolName === 'string') return input.toolName
-    if (typeof input.name === 'string') return input.name
-    if (typeof input.patchText === 'string') return 'apply_patch'
-    if (typeof input.command === 'string') return 'bash'
-    if (input.pattern !== undefined || input.query !== undefined || input.search !== undefined) {
-      if (input.file_path !== undefined) return 'grep'
-      return 'search'
-    }
-    if (typeof input.filePath === 'string' || typeof input.file_path === 'string' || typeof input.path === 'string') return 'read'
-    if (Array.isArray(input.todos)) return 'todowrite'
-  }
-  if (typeof input === 'string') {
-    try {
-      return inferToolName(undefined, undefined, JSON.parse(input), rawOutput)
-    } catch {
-      if (input.includes('*** Begin Patch') || input.includes('*** Add File:') || input.includes('*** Update File:') || input.includes('*** Delete File:')) return 'apply_patch'
-    }
-  }
-
-  const output = rawOutput && typeof rawOutput === 'object' ? rawOutput as Record<string, unknown> : null
-  const metadata = output?.metadata && typeof output.metadata === 'object' ? output.metadata as Record<string, unknown> : null
-  if (typeof metadata?.toolName === 'string') return metadata.toolName
-  if (typeof metadata?.name === 'string') return metadata.name
-
-  return toolName ?? 'unknown'
-}
-
-function normalizeToolName(toolName: string | undefined, title?: string, rawInput?: unknown, rawOutput?: unknown): string {
-  const inferred = inferToolName(toolName, title, rawInput, rawOutput)
-  if (!inferred || inferred === 'unknown') return 'unknown'
-  return inferred.toLowerCase().replace(/[^a-z0-9]/g, '_')
-}
-
-function inferDisplayTitle(toolName: string, title?: string): { displayTitle?: string; displaySubtitle?: string } {
-  if (title) {
-    return { displayTitle: title }
-  }
-  const normalized = normalizeToolName(toolName)
-  const displayTitles: Record<string, string> = {
-    apply_patch: 'Patch',
-    read: 'Read',
-    write: 'Write',
-    edit: 'Edit',
-    glob: 'Glob',
-    grep: 'Search',
-    list: 'List',
-    todowrite: 'Update todo list',
-    membrowse: 'Browse',
-    memread: 'Read memory',
-    memsearch: 'Search memory',
-  }
-  return { displayTitle: displayTitles[normalized] ?? toolName }
 }
 
 function createToolPart(tool: LiveToolCall): ToolPart {
@@ -167,17 +110,6 @@ function isTerminalState(state: string): boolean {
   return state === 'completed' || state === 'failed' || state === 'timeout' || state === 'cancelled'
 }
 
-function getCorrelationKey(toolName: string, title?: string, target?: string): string {
-  const normalized = normalizeToolName(toolName, title)
-  const keyParts = [normalized]
-  if (target) {
-    keyParts.push(target)
-  } else if (title) {
-    keyParts.push(title)
-  }
-  return keyParts.join('|')
-}
-
 function createTemporaryTurn(at: string): SessionTurn {
   return {
     id: `live-${generateId()}`,
@@ -221,15 +153,15 @@ function findToolByCorrelation(
   turn: SessionTurn,
   normalizedName: string,
   target?: string,
+  toolCallId?: string,
 ): number {
   return turn.assistant.findIndex((p): p is ToolPart => {
     if (p.type !== 'tool') return false
+    if (toolCallId && p.tool.toolCallId === toolCallId) return false
     const toolNormalized = normalizeToolName(p.tool.toolName, p.tool.title, p.tool.rawInput, p.tool.rawOutput)
     if (toolNormalized !== normalizedName) return false
     const toolTarget = p.tool.target ?? p.tool.title
-    if (target && toolTarget) {
-      return target === toolTarget
-    }
+    if (toolTarget !== undefined && target !== toolTarget) return false
     return !isTerminalState(p.tool.status)
   })
 }
@@ -363,13 +295,18 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
   const [newContentAvailable, setNewContentAvailable] = useState(false)
   const [isFinalizing, setIsFinalizing] = useState(false)
   const [isThinking, setIsThinking] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false)
 
   const turnsRef = useRef(turns)
   turnsRef.current = turns
+  const isNearBottomRef = useRef(isNearBottom)
+  isNearBottomRef.current = isNearBottom
 
   const liveToolCallMapRef = useRef<Map<string, LiveToolCall>>(new Map())
   const pendingCorrelationRef = useRef<Map<string, { normalizedName: string; target?: string; turnIndex: number }>>(new Map())
   const mountedRef = useRef(true)
+  const streamingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isStreamingRef = useRef(false)
 
   const issueId = String(issueNumber)
 
@@ -378,16 +315,30 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
     setNewContentAvailable(false)
   }, [])
 
+  const clearStreaming = useCallback(() => {
+    isStreamingRef.current = false
+    setIsStreaming(false)
+  }, [])
+
   const bumpTranscriptVersion = useCallback(() => {
     setTranscriptVersion((version) => version + 1)
-  }, [])
+    if (streamingTimerRef.current !== null) {
+      clearTimeout(streamingTimerRef.current)
+    }
+    isStreamingRef.current = true
+    setIsStreaming(true)
+    streamingTimerRef.current = setTimeout(() => {
+      clearStreaming()
+      streamingTimerRef.current = null
+    }, 2000)
+  }, [clearStreaming])
 
   const markNewContent = useCallback(() => {
     bumpTranscriptVersion()
-    if (!isNearBottom) {
+    if (!isNearBottomRef.current) {
       setNewContentAvailable(true)
     }
-  }, [bumpTranscriptVersion, isNearBottom])
+  }, [bumpTranscriptVersion])
 
   const markNewContentRef = useRef(markNewContent)
   markNewContentRef.current = markNewContent
@@ -407,6 +358,7 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
     pendingCorrelationRef.current.clear()
     setIsFinalizing(false)
     setIsThinking(false)
+    setIsStreaming(false)
     setTranscriptVersion((version) => version + 1)
   }, [initialTurns])
 
@@ -434,6 +386,7 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
+        setIsStreaming(true)
         setTurns((prev) => {
           const next = ensureLiveTurn(prev, new Date().toISOString())
           const lastTurn = next[next.length - 1]
@@ -453,8 +406,9 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
         const now = new Date().toISOString()
         const toolCallId = detail.toolCallId
         const normalizedName = normalizeToolName(detail.toolName, detail.title, detail.rawInput, detail.rawOutput)
-        const target = detail.title
-        const correlationKey = getCorrelationKey(detail.toolName, detail.title, detail.title)
+        const pendingCorrelation = pendingCorrelationRef.current.get(toolCallId)
+        const target = detail.title ?? pendingCorrelation?.target
+        const correlationKey = getCorrelationKey(detail.toolName, detail.title ?? pendingCorrelation?.target, pendingCorrelation?.target)
 
         if (detail.state === 'started') {
           liveToolCallMapRef.current.set(toolCallId, {
@@ -664,7 +618,7 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
     }
   }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient, invalidateAndRefetch])
 
-  return {
+return {
     turns,
     transcriptVersion,
     isNearBottom,
@@ -674,5 +628,6 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
     acknowledgeNewContent,
     isFinalizing,
     isThinking,
+    isStreaming,
   }
 }
