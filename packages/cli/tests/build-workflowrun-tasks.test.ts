@@ -185,6 +185,61 @@ describe('Build aggregate-backed task runtime', () => {
     expect((runner as any).gitCommitter.commitBuildChanges).toHaveBeenCalledWith(issue);
   });
 
+  it('does not replay legacy checkpoint skips while executing an aggregate requested task', async () => {
+    const issue = makeIssue();
+    const change = makeChange(tempDir, [
+      { id: 'T-001', order: 1, title: 'First', description: 'd', passes: true },
+      { id: 'T-002', order: 2, title: 'Second', description: 'd', passes: false },
+    ]);
+    const run = startBuildRun(issue);
+    run.materializeTasks(Stage.Build, [
+      { id: 'T-001', title: 'First', order: 1 },
+      { id: 'T-002', title: 'Second', order: 2 },
+    ]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    const service = makeService(run);
+    const detectModule = await import('../src/openspec/detector');
+    vi.spyOn(detectModule, 'detectOpenSpecChange').mockReturnValue(change);
+    const ralphModule = await import('../src/openspec/ralph-executor');
+    const execute = vi.fn().mockResolvedValue({ completed: 1, failed: 0, skipped: 0, total: 1, taskResults: [], success: true });
+    vi.spyOn(ralphModule.RalphExecutor.prototype, 'execute').mockImplementation(execute);
+    const runner = new BuildStageRunner({ worktreePath: tempDir, projectId: 'project-1' });
+    (runner as any).gitCommitter = { commitBuildChanges: vi.fn().mockResolvedValue(undefined) };
+
+    await runner.run({
+      issue,
+      acpOptions: { cwd: tempDir },
+      artifactManager: {
+        getChangeDir: vi.fn().mockReturnValue(change.changePath),
+        createChangeDir: vi.fn(),
+        readArtifact: vi.fn(),
+        writeArtifact: vi.fn(),
+        exists: vi.fn().mockReturnValue(true),
+        readTasks: vi.fn(),
+        updateTaskPasses: vi.fn(),
+        syncTasksToStageState: vi.fn(),
+        archiveChange: vi.fn(),
+      } as never,
+      worktreeManager: {} as never,
+      projectRepo: {} as never,
+      eventBus: { emit: vi.fn() } as never,
+      checkpointManager: {
+        getResumeSteps: vi.fn().mockReturnValue(['T-001']),
+        markStepComplete: vi.fn(),
+        delete: vi.fn(),
+      } as never,
+      issueRepo: { updateStage: vi.fn(), setApprovalState: vi.fn(), clearApprovalState: vi.fn(), updateStatus: vi.fn(), findById: vi.fn() },
+      workflowApplicationService: service,
+      requestedWork: { kind: 'task', stage: Stage.Build, taskId: 'T-002' },
+    } as never);
+
+    expect(execute).toHaveBeenCalledWith(change, expect.objectContaining({
+      ignoreTaskFileProgress: true,
+      onlyTaskId: 'T-002',
+      skipTaskIds: undefined,
+    }));
+  });
+
   it('single-task Ralph mode leaves unrelated tasks.json progress unchanged', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({ success: true, text: 'done' }));
     const issue = makeIssue();

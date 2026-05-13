@@ -218,10 +218,13 @@ export class WorkflowEngine {
       work = decision.nextWork;
 
       if (this.workKey(work) === beforeWorkKey && JSON.stringify(run.snapshot()) === beforeSnapshot) {
+        const noProgressMessage = `Aggregate workflow made no progress while executing ${beforeWorkKey}`;
         return {
           completed: false,
           stage: ctx.issue.stage,
-          message: `Aggregate workflow made no progress while executing ${beforeWorkKey}`,
+          message: result.success === false && result.message
+            ? `${result.message}; ${noProgressMessage}`
+            : noProgressMessage,
         };
       }
 
