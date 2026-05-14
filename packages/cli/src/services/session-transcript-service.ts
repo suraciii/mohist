@@ -357,6 +357,7 @@ function parseToolCallStart(data: Record<string, unknown>, fallbackCreatedAt: st
 function parseToolCallUpdate(data: Record<string, unknown>, fallbackCreatedAt: string): ToolCallUpdateData | null {
   if (typeof data !== 'object' || data === null) return null;
   const d = getObject(data.toolCall) ?? data;
+  const topLevelMetadata = getObject(data.metadata);
   const toolCallId = typeof d.toolCallId === 'string' ? d.toolCallId
     : typeof d.id === 'string' ? d.id
       : typeof d.callId === 'string' ? d.callId
@@ -369,7 +370,7 @@ function parseToolCallUpdate(data: Record<string, unknown>, fallbackCreatedAt: s
   const rawOutput = d.rawOutput ?? d.output;
   const output = stringifyPayload(rawOutput);
   const error = typeof d.error === 'string' ? d.error : undefined;
-  const metadata = getObject(d.metadata) ?? (rawOutput && typeof rawOutput === 'object' ? getObject((rawOutput as Record<string, unknown>).metadata) : null);
+  const metadata = getObject(d.metadata) ?? topLevelMetadata ?? (rawOutput && typeof rawOutput === 'object' ? getObject((rawOutput as Record<string, unknown>).metadata) : null);
   return { toolCallId, toolName, status, title: title ?? toolName, input, output, error, createdAt: String(d.createdAt ?? fallbackCreatedAt), rawInput: typeof rawInput === 'string' ? rawInput : input, rawOutput: typeof rawOutput === 'string' ? rawOutput : output, metadata: metadata ?? undefined };
 }
 

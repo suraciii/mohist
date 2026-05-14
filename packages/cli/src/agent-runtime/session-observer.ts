@@ -10,6 +10,7 @@ export interface SessionObserver {
   onRawNotification?(ctx: SessionContext, notification: SessionNotification): void;
   writeMohistPrompt?(ctx: SessionContext, prompt: MohistPromptEvent): void;
   nextToolCallId?(acpSessionId: string, toolName: string, state: 'started' | 'completed'): string;
+  rememberStartedToolCallId?(acpSessionId: string, toolName: string, toolCallId: string): void;
   onLivenessUpdate?(ctx: SessionContext, update: LivenessUpdate): void;
 }
 

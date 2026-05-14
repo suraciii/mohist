@@ -273,6 +273,636 @@ describe('Observer-driven coder_tool_call emission', () => {
   });
 });
 
+describe('ACP split-name and split-id tool call normalization', () => {
+  let capturedToolCalls: Array<{ ctx: SessionContext; event: ToolCallEvent }> = [];
+  let capturedRawNotifications: any[] = [];
+
+  beforeEach(() => {
+    capturedToolCalls = [];
+    capturedRawNotifications = [];
+    mockPromptFn.mockReset();
+    mockCancelFn.mockReset();
+    globalSessionUpdateFn = undefined;
+  });
+
+  afterEach(() => {
+    globalSessionUpdateFn = undefined;
+  });
+
+  function emitToolCallWithTopLevelName(toolName: string, status: 'started' | 'completed', toolCallId: string): void {
+    globalSessionUpdateFn?.({
+      update: {
+        sessionUpdate: 'tool_call',
+        toolName,
+        toolCallId,
+        status,
+        title: `tool-${toolName}`,
+        input: { file_path: 'src/index.ts' },
+        output: status === 'completed' ? 'result' : undefined,
+      },
+    });
+  }
+
+  function emitToolCallUpdateWithNestedId(topLevelId: string, status: string, toolName?: string): void {
+    const payload: Record<string, unknown> = {
+      update: {
+        sessionUpdate: 'tool_call_update',
+        id: topLevelId,
+        status,
+      },
+    };
+    if (toolName) {
+      (payload.update as Record<string, unknown>).toolName = toolName;
+    }
+    globalSessionUpdateFn?.(payload);
+  }
+
+  it('should recover toolName from top-level field when nested toolCall.toolName is missing', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+    };
+
+    mockPromptFn.mockImplementation(() => {
+      emitToolCallWithTopLevelName('Read', 'started', 'provider-tc-1');
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const started = capturedToolCalls.find(e => e.event.state === 'started');
+    expect(started).toBeDefined();
+    expect(started!.event.toolName).toBe('Read');
+    expect(started!.event.toolCallId).toBe('provider-tc-1');
+
+    await session.close();
+  });
+
+  it('should normalize tool_call_update with split top-level id into nested toolCall', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+      onRawNotification(_ctx, notification) {
+        capturedRawNotifications.push(notification);
+      },
+    };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'Read', status: 'started', toolCallId: 'split-id-session-Read-0' },
+        },
+      });
+      emitToolCallUpdateWithNestedId('split-id-session-Read-0', 'completed');
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const completed = capturedToolCalls.find(e => e.event.state === 'completed');
+    expect(completed).toBeDefined();
+    expect(completed!.event.toolCallId).toBe('split-id-session-Read-0');
+
+    const rawToolCallUpdates = capturedRawNotifications.filter(n =>
+      n?.update?.sessionUpdate === 'tool_call_update'
+    );
+    expect(rawToolCallUpdates).toHaveLength(1);
+    const rawUpdate = rawToolCallUpdates[0];
+    expect(rawUpdate?.update?.toolCall?.toolCallId).toBe('split-id-session-Read-0');
+    expect(rawUpdate?.update?.toolCall?.toolName).toBe('Read');
+
+    await session.close();
+  });
+
+  it('should retain split top-level completion fields on normalized tool_call_update', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+      onRawNotification(_ctx, notification) {
+        capturedRawNotifications.push(notification);
+      },
+    };
+
+    const completionOutput = { text: 'done' };
+    const completionMetadata = { durationMs: 12, source: 'top-level' };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'Read', status: 'started', toolCallId: 'split-complete-1', input: { path: 'src/a.ts' } },
+        },
+      });
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call_update',
+          id: 'split-complete-1',
+          toolName: 'Read',
+          status: 'completed',
+          title: 'Read file',
+          input: { path: 'src/a.ts' },
+          output: completionOutput,
+          metadata: completionMetadata,
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const completed = capturedToolCalls.find(e => e.event.state === 'completed');
+    expect(completed).toBeDefined();
+    expect(completed!.event.toolCallId).toBe('split-complete-1');
+    expect(completed!.event.toolName).toBe('Read');
+    expect(completed!.event.title).toBe('Read file');
+    expect(completed!.event.rawOutput).toEqual({ text: 'done', metadata: completionMetadata });
+    expect(completed!.event.rawOutputMetadata).toEqual(completionMetadata);
+
+    const rawUpdate = capturedRawNotifications.find(n =>
+      n?.update?.sessionUpdate === 'tool_call_update'
+    );
+    expect(rawUpdate).toBeDefined();
+    expect(rawUpdate?.update?.toolCall?.title).toBe('Read file');
+    expect(rawUpdate?.update?.toolCall?.input).toEqual({ path: 'src/a.ts' });
+    expect(rawUpdate?.update?.toolCall?.output).toEqual({ text: 'done', metadata: completionMetadata });
+
+    await session.close();
+  });
+
+  it('should retain top-level metadata when tool_call_update output is primitive', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+      onRawNotification(_ctx, notification) {
+        capturedRawNotifications.push(notification);
+      },
+    };
+
+    const completionMetadata = { durationMs: 12, source: 'top-level' };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'Read', status: 'started', toolCallId: 'primitive-output-1', input: { path: 'src/a.ts' } },
+        },
+      });
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call_update',
+          id: 'primitive-output-1',
+          toolName: 'Read',
+          status: 'completed',
+          output: 'done',
+          metadata: completionMetadata,
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const completed = capturedToolCalls.find(e => e.event.state === 'completed');
+    expect(completed).toBeDefined();
+    expect(completed!.event.rawOutput).toBe('done');
+    expect(completed!.event.rawOutputMetadata).toEqual(completionMetadata);
+
+    const rawUpdate = capturedRawNotifications.find(n =>
+      n?.update?.sessionUpdate === 'tool_call_update'
+    );
+    expect(rawUpdate).toBeDefined();
+    expect(rawUpdate?.update?.toolCall?.output).toBe('done');
+    expect(rawUpdate?.update?.toolCall?.metadata).toEqual(completionMetadata);
+
+    await session.close();
+  });
+
+  it('should use same toolCallId for start and completion events when id is split across payloads', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+    };
+
+    const sharedId = 'split-id-abc123';
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'Glob', status: 'started' },
+          toolCallId: sharedId,
+        },
+      });
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call_update',
+          id: sharedId,
+          toolName: 'Glob',
+          status: 'completed',
+          output: '["file-a.ts","file-b.ts"]',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const started = capturedToolCalls.find(e => e.event.state === 'started');
+    const completed = capturedToolCalls.find(e => e.event.state === 'completed');
+
+    expect(started).toBeDefined();
+    expect(completed).toBeDefined();
+    expect(started!.event.toolCallId).toBe(completed!.event.toolCallId);
+    expect(started!.event.toolCallId).toBe(sharedId);
+    expect(started!.event.toolName).toBe('Glob');
+    expect(completed!.event.toolName).toBe('Glob');
+  });
+
+  it('should emit raw notification with normalized toolCall.toolName for split-name ACP payload', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+      onRawNotification(_ctx, notification) {
+        capturedRawNotifications.push(notification);
+      },
+    };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { status: 'started' },
+          name: 'Bash',
+          toolCallId: 'split-name-bash-0',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const started = capturedToolCalls.find(e => e.event.state === 'started');
+    expect(started).toBeDefined();
+    expect(started!.event.toolName).toBe('Bash');
+
+    const rawToolCalls = capturedRawNotifications.filter(n =>
+      n?.update?.sessionUpdate === 'tool_call'
+    );
+    expect(rawToolCalls).toHaveLength(1);
+    const rawToolCall = rawToolCalls[0];
+    expect(rawToolCall?.update?.toolCall?.toolName).toBe('Bash');
+    expect(rawToolCall?.update?.toolCall?.toolCallId).toBe('split-name-bash-0');
+
+    await session.close();
+  });
+
+  it('should not produce orphan entries for completion with split id that matches start', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+    };
+
+    const providerId = 'provider-call-id-xyz';
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'apply_patch', status: 'started' },
+          toolCallId: providerId,
+        },
+      });
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call_update',
+          id: providerId,
+          status: 'completed',
+          output: 'patch applied',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const started = capturedToolCalls.filter(e => e.event.state === 'started');
+    const completed = capturedToolCalls.filter(e => e.event.state === 'completed');
+
+    expect(started).toHaveLength(1);
+    expect(completed).toHaveLength(1);
+    expect(started[0].event.toolCallId).toBe(completed[0].event.toolCallId);
+    expect(started[0].event.toolCallId).toBe(providerId);
+    expect(completed[0].event.toolName).toBe('apply_patch');
+  });
+
+  it('should reuse provider id for no-id completion after provider-id start', async () => {
+    const queuedIds = new Map<string, string[]>();
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+      nextToolCallId(acpSessionId, toolName, state) {
+        const key = `${acpSessionId}-${toolName}`;
+        if (state === 'started') {
+          const id = `${key}-generated`;
+          this.rememberStartedToolCallId?.(acpSessionId, toolName, id);
+          return id;
+        }
+        const ids = queuedIds.get(key) ?? [];
+        return ids.shift() ?? `${key}-fallback`;
+      },
+      rememberStartedToolCallId(acpSessionId, toolName, toolCallId) {
+        const key = `${acpSessionId}-${toolName}`;
+        const ids = queuedIds.get(key) ?? [];
+        ids.push(toolCallId);
+        queuedIds.set(key, ids);
+      },
+      writeMohistPrompt() {},
+    };
+
+    const providerId = 'provider-start-no-id-complete';
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'Read', status: 'started' },
+          toolCallId: providerId,
+        },
+      });
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolName: 'Read',
+          status: 'completed',
+          output: 'done',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const started = capturedToolCalls.find(e => e.event.state === 'started');
+    const completed = capturedToolCalls.find(e => e.event.state === 'completed');
+    expect(started).toBeDefined();
+    expect(completed).toBeDefined();
+    expect(started!.event.toolCallId).toBe(providerId);
+    expect(completed!.event.toolCallId).toBe(providerId);
+
+    await session.close();
+  });
+
+  it('should infer tool name from payload shape when explicit name is absent', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+    };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { status: 'started' },
+          input: { command: 'npm test' },
+        },
+      });
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { status: 'started', input: { patchText: '*** Begin Patch' } },
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    expect(capturedToolCalls.map(e => e.event.toolName)).toEqual(['bash', 'apply_patch']);
+
+    await session.close();
+  });
+
+  it('should normalize name from top-level name field when nested toolName is absent', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+    };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          name: 'Read',
+          toolCall: { status: 'started' },
+          toolCallId: 'top-level-name-id-1',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const started = capturedToolCalls.find(e => e.event.state === 'started');
+    expect(started).toBeDefined();
+    expect(started!.event.toolName).toBe('Read');
+    expect(started!.event.toolCallId).toBe('top-level-name-id-1');
+
+    await session.close();
+  });
+
+  it('should replace nested unknown with better top-level name', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+      onRawNotification(_ctx, notification) {
+        capturedRawNotifications.push(notification);
+      },
+    };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          name: 'Read',
+          toolCall: { toolName: 'unknown', status: 'started' },
+          toolCallId: 'unknown-top-level-name-id-1',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const started = capturedToolCalls.find(e => e.event.state === 'started');
+    expect(started).toBeDefined();
+    expect(started!.event.toolName).toBe('Read');
+
+    const rawToolCall = capturedRawNotifications.find(n => n?.update?.sessionUpdate === 'tool_call');
+    expect(rawToolCall?.update?.toolCall?.toolName).toBe('Read');
+
+    await session.close();
+  });
+
+  it('should use provider id over generated id for split-id payload', async () => {
+    const testObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        capturedToolCalls.push({ ctx: _ctx, event });
+      },
+    };
+
+    const providerId = 'provider-split-id-789';
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'Write', status: 'started' },
+          toolCallId: providerId,
+        },
+      });
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call_update',
+          id: providerId,
+          toolName: 'Write',
+          status: 'completed',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [testObserver],
+    });
+
+    await session.execute('test');
+
+    const started = capturedToolCalls.find(e => e.event.state === 'started');
+    const completed = capturedToolCalls.find(e => e.event.state === 'completed');
+
+    expect(started).toBeDefined();
+    expect(completed).toBeDefined();
+    expect(started!.event.toolCallId).toBe(providerId);
+    expect(completed!.event.toolCallId).toBe(providerId);
+  });
+});
+
 describe('Observer-driven session_stream_log writes', () => {
   let streamLogRepo: any;
 
@@ -529,6 +1159,164 @@ describe('Plan/Check raw notification bridge observer', () => {
 
     expect(session.acpSessionId).toBe(firstSessionId);
     expect(planSessionUpdates.length).toBeGreaterThan(3);
+
+    await session.close();
+  });
+
+  it('plan/check bridge receives normalized toolCall.toolName for split top-level/nested ACP payload', async () => {
+    const planSessionUpdates: any[] = [];
+
+    const planBridgeObserver: SessionObserver = {
+      onRawNotification(_ctx, notification) {
+        planSessionUpdates.push(notification);
+      },
+    };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { status: 'started' },
+          name: 'Bash',
+          toolCallId: 'bridge-split-id-1',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [planBridgeObserver],
+    });
+
+    await session.execute('test');
+
+    const toolCallNotifications = planSessionUpdates.filter(
+      n => n?.update?.sessionUpdate === 'tool_call'
+    );
+    expect(toolCallNotifications.length).toBeGreaterThan(0);
+
+    const splitPayload = toolCallNotifications.find(n =>
+      n?.update?.toolCall?.toolCallId === 'bridge-split-id-1'
+    );
+    expect(splitPayload).toBeDefined();
+    expect(splitPayload!.update.toolCall.toolName).toBe('Bash');
+    expect(splitPayload!.update.toolCall.toolCallId).toBe('bridge-split-id-1');
+
+    await session.close();
+  });
+
+  it('plan/check bridge receives same canonical toolCall.toolCallId as onToolCall observer', async () => {
+    const planSessionUpdates: any[] = [];
+    const toolCallEvents: ToolCallEvent[] = [];
+
+    const planBridgeObserver: SessionObserver = {
+      onToolCall(_ctx, event) {
+        toolCallEvents.push(event);
+      },
+      onRawNotification(_ctx, notification) {
+        planSessionUpdates.push(notification);
+      },
+    };
+
+    const providerId = 'bridge-canonical-id-789';
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'Write', status: 'started' },
+          toolCallId: providerId,
+        },
+      });
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call_update',
+          id: providerId,
+          toolName: 'Write',
+          status: 'completed',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [planBridgeObserver],
+    });
+
+    await session.execute('test');
+
+    const started = toolCallEvents.find(e => e.state === 'started');
+    const completed = toolCallEvents.find(e => e.state === 'completed');
+    expect(started).toBeDefined();
+    expect(completed).toBeDefined();
+    expect(started!.toolCallId).toBe(providerId);
+    expect(completed!.toolCallId).toBe(providerId);
+
+    const toolCallRawNotifications = planSessionUpdates.filter(
+      n => n?.update?.sessionUpdate === 'tool_call' || n?.update?.sessionUpdate === 'tool_call_update'
+    );
+    const startedRaw = toolCallRawNotifications.find(n =>
+      n?.update?.sessionUpdate === 'tool_call'
+    );
+    const completedRaw = toolCallRawNotifications.find(n =>
+      n?.update?.sessionUpdate === 'tool_call_update'
+    );
+    expect(startedRaw?.update?.toolCall?.toolCallId).toBe(providerId);
+    expect(completedRaw?.update?.toolCall?.toolCallId).toBe(providerId);
+
+    await session.close();
+  });
+
+  it('plan/check EventBus payload schema unchanged - raw notification carries original update shape', async () => {
+    const planSessionUpdates: any[] = [];
+
+    const planBridgeObserver: SessionObserver = {
+      onRawNotification(_ctx, notification) {
+        planSessionUpdates.push(notification);
+      },
+    };
+
+    mockPromptFn.mockImplementation(() => {
+      globalSessionUpdateFn?.({
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCall: { toolName: 'Read', status: 'started', toolCallId: 'schema-check-id-1' },
+          extraField: 'should be preserved',
+        },
+      });
+      return Promise.resolve();
+    });
+
+    const session = await AgentSession.create({
+      cwd: '/tmp/test',
+      task: 'test prompt',
+      issueId: 'issue-1',
+      projectId: 'proj-1',
+      executionId: 'exec-1',
+      observers: [planBridgeObserver],
+    });
+
+    await session.execute('test');
+
+    const toolCallNotifications = planSessionUpdates.filter(
+      n => n?.update?.sessionUpdate === 'tool_call'
+    );
+    expect(toolCallNotifications.length).toBeGreaterThan(0);
+    const notification = toolCallNotifications[0];
+    expect(notification.update).toHaveProperty('sessionUpdate');
+    expect(notification.update).toHaveProperty('toolCall');
+    expect(notification.update.extraField).toBe('should be preserved');
+    expect(notification.update.toolCall.toolName).toBe('Read');
 
     await session.close();
   });

@@ -220,10 +220,7 @@ export class WorkflowSessionObserver {
   nextToolCallId(acpSessionId: string, toolName: string, state: 'started' | 'completed'): string {
     if (state === 'started') {
       const toolCallId = `${acpSessionId}-${toolName}-${this.coderToolCallCounter++}`;
-      const key = `${acpSessionId}-${toolName}`;
-      const list = this.coderToolCallIds.get(key) ?? [];
-      list.push(toolCallId);
-      this.coderToolCallIds.set(key, list);
+      this.rememberStartedToolCallId(acpSessionId, toolName, toolCallId);
       return toolCallId;
     } else {
       const key = `${acpSessionId}-${toolName}`;
@@ -236,6 +233,13 @@ export class WorkflowSessionObserver {
       }
       return toolCallId;
     }
+  }
+
+  rememberStartedToolCallId(acpSessionId: string, toolName: string, toolCallId: string): void {
+    const key = `${acpSessionId}-${toolName}`;
+    const list = this.coderToolCallIds.get(key) ?? [];
+    if (!list.includes(toolCallId)) list.push(toolCallId);
+    this.coderToolCallIds.set(key, list);
   }
 
   writeSessionLog(

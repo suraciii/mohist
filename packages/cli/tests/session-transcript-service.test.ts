@@ -286,6 +286,29 @@ describe('SessionTranscriptAssembler', () => {
       expect(toolPart.completedAt).toBe('2024-01-01T10:00:02.000Z');
     });
 
+    it('should replay top-level metadata from primitive tool_call_update output', () => {
+      const session = makeSession();
+      const events = [
+        makePromptEvent('Read a file', 'task', '2024-01-01T10:00:00.000Z'),
+        makeToolCallStart('tc-1', 'Read', undefined, '{"file_path":"src/index.ts"}', '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call_update', {
+          toolCallId: 'tc-1',
+          toolName: 'Read',
+          status: 'completed',
+          output: 'done',
+          metadata: { durationMs: 12, source: 'top-level' },
+          createdAt: '2024-01-01T10:00:02.000Z',
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.status).toBe('completed');
+      expect(toolPart.output).toBe('done');
+      expect(toolPart.metadata).toMatchObject({ durationMs: 12, source: 'top-level' });
+    });
+
     it('should handle failed tool status', () => {
       const session = makeSession();
       const events = [
