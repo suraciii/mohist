@@ -7,6 +7,10 @@ import { formatIssueInfo, listOpenSpecContextFiles } from './workflow-context';
 
 export type ArtifactType = 'proposal' | 'specs' | 'design' | 'tasks';
 
+export interface ArtifactPromptOptions {
+  feedback?: string;
+}
+
 const ARTIFACTS_DIR = path.join(__dirname, 'prompts', 'artifacts');
 const TEMPLATES_DIR = path.join(ARTIFACTS_DIR, 'templates');
 const REVIEW_PROMPT_PATH = path.join(__dirname, 'prompts', 'review.md');
@@ -101,6 +105,7 @@ export function buildArtifactPrompt(
   issue: Issue,
   changeDir: string,
   agentConfig?: AgentConfig,
+  options: ArtifactPromptOptions = {},
 ): string {
   const instructionFile = path.join(ARTIFACTS_DIR, `${artifactType}.md`);
   const instruction = loadFile(instructionFile);
@@ -117,6 +122,7 @@ export function buildArtifactPrompt(
     ARTIFACT_DESCRIPTIONS[artifactType],
     '',
     formatIssueInfo(issue),
+    formatPlanFeedback(options.feedback),
   ].join('\n');
 
   return formatAgentPrompt({
@@ -129,6 +135,18 @@ export function buildArtifactPrompt(
     template,
     instruction,
   });
+}
+
+function formatPlanFeedback(feedback: string | undefined): string {
+  if (!feedback?.trim()) return '';
+  return [
+    '',
+    '## User feedback from prior Plan rejection',
+    '',
+    feedback.trim(),
+    '',
+    'Revise the Plan artifact to address this feedback explicitly.',
+  ].join('\n');
 }
 
 function listExistingArtifacts(changeDir: string): Array<{ path: string; desc: string }> {

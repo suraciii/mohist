@@ -771,12 +771,15 @@ export class WorkflowRun {
     }
 
     stageRun.status = 'running';
+    const wasApprovalRejected = stageRun.failure?.reason === 'approval-rejected';
     stageRun.failure = null;
     stageRun.approval = null;
 
     const firstIncompleteTaskIndex = stageRun.tasks.findIndex(task => task.status !== 'completed');
+    const resetFromIndex = wasApprovalRejected ? 0 : firstIncompleteTaskIndex;
     for (const [index, task] of stageRun.tasks.entries()) {
-      if (task.status === 'completed' && (firstIncompleteTaskIndex === -1 || index < firstIncompleteTaskIndex)) continue;
+      if (!wasApprovalRejected && task.status === 'completed' && (firstIncompleteTaskIndex === -1 || index < firstIncompleteTaskIndex)) continue;
+      if (resetFromIndex !== -1 && index < resetFromIndex) continue;
       task.status = 'pending';
       task.duration = 0;
       task.artifacts = [];

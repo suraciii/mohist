@@ -366,6 +366,22 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
   });
 
+  it('retryStage after plan approval rejection resets completed plan tasks for rework', () => {
+    const run = startRun();
+
+    completePlanTasks(run);
+    passPlanChecks(run);
+    run.rejectStage(Stage.Plan, { output: 'rewrite plan around user story and domain events' });
+    expect(run.status).toBe('failed');
+
+    run.retryStage(Stage.Plan);
+
+    const plan = run.stageRun(Stage.Plan);
+    expect(run.status).toBe('running');
+    expect(plan.tasks.map(task => task.status)).toEqual(['pending', 'pending', 'pending', 'pending', 'pending']);
+    expect(plan.nextTask()?.id).toBe('proposal');
+  });
+
   it('completes stages by configured order and completes the workflow after the final stage', () => {
     const run = startRun();
     advanceToIntegrate(run);
