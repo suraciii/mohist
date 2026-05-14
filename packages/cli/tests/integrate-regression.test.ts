@@ -56,6 +56,27 @@ function createMockContext(tmpDir: string, issueNumber = 42, overrides?: Partial
   const eventBus = new EventBus();
   vi.spyOn(eventBus, 'emit').mockImplementation(emitSpy);
 
+  const worktreeManager = {
+    checkSquashMergeability: vi.fn().mockResolvedValue({
+      kind: 'squash-mergeability',
+      strategy: 'squash',
+      targetBranch: 'main',
+      baseSha: 'abc123',
+      candidateHeadSha: 'def456',
+      mergeBaseSha: 'base456',
+      canMerge: true,
+      conflictFiles: [],
+      checkedAt: new Date().toISOString(),
+    }),
+    mergeApprovedCandidate: vi.fn().mockResolvedValue({
+      targetBranch: 'main',
+      baseSha: 'abc123',
+      candidateHeadSha: 'def456',
+      landedSha: 'ghi789',
+    }),
+    ...(overrides?.worktreeManager as object | undefined),
+  };
+
   const ctx = {
     issue: {
       id: `issue-${issueNumber}`,
@@ -80,14 +101,7 @@ function createMockContext(tmpDir: string, issueNumber = 42, overrides?: Partial
       updateTaskPasses: vi.fn(),
       archiveChange: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChangeArtifactsManager,
-    worktreeManager: {
-      mergeApprovedCandidate: vi.fn().mockResolvedValue({
-        targetBranch: 'main',
-        baseSha: 'abc123',
-        candidateHeadSha: 'def456',
-        landedSha: 'ghi789',
-      }),
-    } as any,
+    worktreeManager: worktreeManager as any,
     projectRepo: {
       findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch: 'main', path: tmpDir }),
     } as any,
@@ -110,6 +124,7 @@ function createMockContext(tmpDir: string, issueNumber = 42, overrides?: Partial
       ]),
     } as any,
     ...overrides,
+    worktreeManager: worktreeManager as any,
   } as StageContext;
   ctx.emit = ctx.emit ?? ((event: string, data: unknown) => {
     try {
@@ -1300,9 +1315,10 @@ New scenario content.`);
 
       const output = result.output as { steps?: Array<{ step: string; status: string; output: unknown }> };
       expect(output.steps).toBeDefined();
-      expect(output.steps!.length).toBe(3);
+      expect(output.steps!.length).toBe(4);
 
       const stepIds = output.steps!.map(s => s.step);
+      expect(stepIds).toContain('integrate:preflight');
       expect(stepIds).toContain('integrate:spec-sync');
       expect(stepIds).toContain('integrate:archive-change');
       expect(stepIds).toContain('integrate:merge');
@@ -1400,9 +1416,10 @@ New scenario content.`);
       expect(completedEvent).toBeDefined();
       expect(completedEvent![1].steps).toBeDefined();
       expect(Array.isArray(completedEvent![1].steps)).toBe(true);
-      expect(completedEvent![1].steps.length).toBe(3);
+      expect(completedEvent![1].steps.length).toBe(4);
 
       const stepIds = completedEvent![1].steps.map((s: any) => s.step);
+      expect(stepIds).toContain('integrate:preflight');
       expect(stepIds).toContain('integrate:spec-sync');
       expect(stepIds).toContain('integrate:archive-change');
       expect(stepIds).toContain('integrate:merge');

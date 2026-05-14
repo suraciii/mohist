@@ -455,9 +455,9 @@ describe('API Routes', () => {
 
       it('should filter by stage', async () => {
         await issueService.create({ projectId, title: 'Test' });
-        issueService.transitionToStageByNumber(projectId, 1, 'designing' as any);
+        issueService.transitionToStageByNumber(projectId, 1, 'plan' as any);
 
-        const response = await request(server).get('/api/issues?stage=designing');
+        const response = await request(server).get('/api/issues?stage=plan');
 
         expect(response.status).toBe(200);
         expect(response.body.data).toHaveLength(1);
