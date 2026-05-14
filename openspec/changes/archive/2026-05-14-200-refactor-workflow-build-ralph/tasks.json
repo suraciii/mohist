@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extract Ralph utilities and add dynamic task loader",
+      "spec": "specs/ralph-task-execution/spec.md#Requirement: Ralph-style task loop execution",
+      "description": "Extract the shared Ralph task-file, dependency-validation, sorting, and context-assembly helpers into stable modules and introduce `RalphTaskLoader` on top of them. The delivered capability is that Build dynamic tasks can be loaded from `tasks.json` as ordered executable work without relying on the legacy loop body to parse or validate the file.",
+      "acceptanceCriteria": [
+        "`RalphTaskLoader` reads `tasks.json`, applies the existing normalization defaults, validates `dependsOn`, sorts tasks by the current order rules, and returns a linear executable Build task list",
+        "Shared helper exports for `readTasks`, `sortTasksByOrder`, `findNextPendingTask`, dependency validation, and `buildTaskContext` remain available through the existing compatibility surface",
+        "Loader-focused tests cover valid loading, missing dependency detection, circular dependency detection, and aggregate-mode progress reset without changing `tasks.json` schema",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts; packages/cli/src/openspec/context-assembler.ts; packages/cli/src/openspec/ralph/*; packages/cli/src/workflow/task-runtime/*; packages/cli/tests/openspec/*ralph*loader*.test.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep loader responsibilities limited to reading, validating, sorting, and shaping executable tasks; do not move next-task selection into the loader.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1849254,
+        359408
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Implement Ralph single-task handler on shared task runtime",
+      "spec": "specs/ralph-task-execution/spec.md#Requirement: Task failure handling with retry",
+      "description": "Implement `RalphTaskHandler` as a shared task-runtime handler that executes exactly one Build task with the existing retry, failure classification, WIP handling, learning capture, and persistence behavior. The delivered capability is that a future StageRunner can execute one Ralph task through `TaskHandlerRegistry` while preserving current Build reliability semantics.",
+      "acceptanceCriteria": [
+        "A Ralph-specific task kind is registered through the shared task-runtime registry and executes one loaded Build task through the `TaskHandler` contract",
+        "`RalphTaskHandler` preserves current retry behavior, `categorizeFailure` and `FAILURE_CATEGORY_CONFIGS`, WIP resume handling, task progress persistence, and learning capture for one task",
+        "Session-failure results are treated as failed task attempts and remain governed by task-owned retry or pause policy rather than by the session runtime",
+        "Focused handler tests cover success, retryable AC failure, non-retryable dependency failure, timeout-with-WIP, and `session_failed` outcomes",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/task-runtime/types.ts; packages/cli/src/workflow/task-runtime/index.ts; packages/cli/src/openspec/ralph/*; packages/cli/tests/openspec/*ralph*handler*.test.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "The handler owns one task's full lifecycle, including retries and side effects; do not push retry or pause policy back up into the runner layer.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        634969
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Delegate legacy Ralph loop through loader and handler",
+      "spec": "specs/ralph-task-execution/spec.md#Requirement: Task status persistence",
+      "description": "Refactor `runRalphLoop()` and `RalphExecutor` into compatibility orchestrators that load tasks once, apply the existing loop semantics, and delegate each task execution to `RalphTaskHandler`. The delivered capability is that current BuildStageRunner and direct test callers keep using the same public API while the authoritative load and execute logic lives behind the new split runtime.",
+      "acceptanceCriteria": [
+        "`runRalphLoop()` delegates task loading to `RalphTaskLoader` and single-task execution to `RalphTaskHandler` while preserving `skipTaskIds`, `onlyTaskId`, deadlock detection, and all-tasks-already-passed behavior",
+        "Compatibility exports `RalphExecutor`, `runRalphLoop`, `setAcpSessionRunner`, `resetAcpSessionRunner`, `readTasks`, `sortTasksByOrder`, `findNextPendingTask`, and `categorizeFailure` continue to work for existing callers",
+        "Build dynamic task behavior remains unchanged for task order, `dependsOn` semantics, failure-is-terminal loop behavior, timeout/session-failure handling, WIP commit flow, and aggregate task reporting",
+        "`BuildStageRunner` stays on the existing public Ralph execution path and does not switch to config-driven generic StageRunner mode in this task",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/openspec/ralph-executor.ts; packages/cli/src/workflow/build-stage-runner.ts; packages/cli/src/workflow/task-runtime/*",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Preserve the current event names and loop result shape. This task must not migrate WorkflowEngine or default StageRunner registration.",
+      "attempts": 4,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1778229,
+        1856564,
+        1816828,
+        877957,
+        42209,
+        1868621,
+        1281319
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Lock Ralph split behavior with focused regression coverage",
+      "spec": "specs/ralph-task-execution/spec.md#Requirement: REQ-RTE-001 Task attempts consume session failure results",
+      "description": "Add or update focused tests that prove the new loader, handler, and legacy wrapper preserve Ralph behavior at the utility, single-task, and compatibility-loop boundaries. The delivered capability is that future StageRunner unification work can rely on direct contract coverage without silently regressing Build task semantics.",
+      "acceptanceCriteria": [
+        "Focused tests pass for loader ordering and dependency validation, handler success and failure paths, and legacy loop compatibility behavior including `onlyTaskId`, checkpoint recovery, validation failure, and deadlock handling",
+        "Focused tests prove `session_failed` results fail the current task attempt, do not mark the task passed, and remain subject to Ralph retry or pause policy",
+        "Existing Ralph-facing tests that import compatibility helpers continue to pass without changing the public helper names they use",
+        "Relevant test suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/openspec/**/*.test.ts; packages/cli/tests/workflow/**/*.test.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Prefer focused deterministic tests at the new boundaries instead of broad workflow rewrites.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1773197
+      ]
+    }
+  ]
+}

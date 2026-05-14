@@ -4,9 +4,16 @@ export {
   type TaskHandler,
   type AgentSessionTaskInput,
   type ServiceCallTaskInput,
+  type RalphTaskInput,
+  type RalphTaskHandler,
   type TaskHandlerRegistry,
   createTaskHandlerRegistry,
 } from './types';
+
+export {
+  createDefaultTaskHandlerRegistry,
+  type DefaultTaskHandlerRegistryOptions,
+} from './registry';
 
 export {
   type AgentSessionTaskHandlerDeps,
@@ -18,6 +25,11 @@ export {
   createServiceCallTaskHandler,
   defaultServiceCallTaskHandler,
 } from './service-call-task-handler';
+
+export {
+  createRalphTaskTaskHandler,
+  type RalphTaskRuntimeHandlerDeps,
+} from './ralph-task-handler';
 
 export {
   createRepairFixAdapter,
