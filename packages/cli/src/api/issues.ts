@@ -2545,7 +2545,9 @@ export function createIssueRoutes(
       }
 
       const sessions = coderSessionRepo.findByIssueId(issue.id);
-      const data = sessions.map(session => ({
+      const data = sessions
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .map(session => ({
         id: session.id,
         acpSessionId: session.acpSessionId,
         executionId: session.executionId,
