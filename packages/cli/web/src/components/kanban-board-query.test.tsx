@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
+import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { KanbanBoard } from './KanbanBoard'
 import { Stage, IssueStatus } from '../lib/types'
-import type { Issue, AgentStatus } from '../lib/types'
+import type { Issue, AgentStatus, ApprovalState } from '../lib/types'
 import {
   parseBoardQuery,
   serializeBoardQuery,
@@ -15,11 +16,15 @@ import {
 } from '../lib/board-query'
 import { groupIssuesByStage } from '../lib/kanban-grouping'
 
+const { LABELS_MOCK } = vi.hoisted(() => ({
+  LABELS_MOCK: ['bug', 'feature', 'docs', 'workflow', 'ux', 'webui', 'improvement', 'reliability', 'session', 'agent'],
+}))
+
 vi.mock('../hooks/useQueries', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../hooks/useQueries')>()
   return {
     ...actual,
-    useLabels: vi.fn().mockReturnValue({ data: ['bug', 'feature', 'docs'], isLoading: false }),
+    useLabels: vi.fn().mockReturnValue({ data: LABELS_MOCK, isLoading: false }),
   }
 })
 
@@ -305,7 +310,7 @@ describe('Board Query State - Sorting', () => {
 describe('KanbanBoard Component - Filtered Stage Counts', () => {
   beforeEach(() => {
     Object.defineProperty(window, 'location', {
-      value: { search: '' },
+      value: { search: '', pathname: '/' },
       writable: true,
     })
   })
@@ -346,7 +351,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     ]
 
     Object.defineProperty(window, 'location', {
-      value: { search: 'priorities=p0' },
+      value: { search: 'priorities=p0', pathname: '/' },
       writable: true,
     })
 
@@ -364,5 +369,487 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     const backlogCol = backlogElements[0].closest('[class*="flex-col"]')
       || backlogElements[0].closest('div')
     expect(backlogCol?.textContent).toContain('1')
+  })
+})
+
+describe('KanbanBoard Homepage Regression Coverage', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, 'location', {
+      value: { search: '', pathname: '/' },
+      writable: true,
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  describe('Desktop layout regression - horizontal multi-column contract at md+', () => {
+    it('renders desktop board container with horizontal multi-column layout at md+', () => {
+      const issues = [
+        makeIssue({ number: 1, stage: Stage.Backlog }),
+        makeIssue({ number: 2, stage: Stage.Plan }),
+        makeIssue({ number: 3, stage: Stage.Build }),
+        makeIssue({ number: 4, stage: Stage.Check }),
+      ]
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const desktopBoard = document.querySelector('.hidden.md\\:flex.flex-row')
+      expect(desktopBoard).not.toBeNull()
+      expect(desktopBoard?.children.length).toBeGreaterThan(0)
+    })
+
+    it('does not stack all stage columns vertically in desktop board container', () => {
+      const issues = [
+        makeIssue({ number: 1, stage: Stage.Backlog }),
+        makeIssue({ number: 2, stage: Stage.Plan }),
+        makeIssue({ number: 3, stage: Stage.Done }),
+      ]
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const desktopBoard = document.querySelector('.hidden.md\\:flex.flex-row')
+      expect(desktopBoard).not.toBeNull()
+      const stageColumns = desktopBoard!.querySelectorAll('[class*="min-w-"]')
+      expect(stageColumns.length).toBeGreaterThanOrEqual(3)
+    })
+  })
+
+  describe('Needs attention summary - user-action wording', () => {
+    it('renders attention summary item with user-action label for approval awaiting issue', () => {
+      const approvalAwaitingIssue = makeIssue({
+        number: 180,
+        title: 'Plan awaits review',
+        stage: Stage.Plan,
+        status: IssueStatus.Active,
+        approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' } as ApprovalState,
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[approvalAwaitingIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/Approval needed/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#180/i)).toBeInTheDocument()
+    })
+
+    it('renders attention summary item with user-action label for interrupted issue', () => {
+      const interruptedIssue = makeIssue({
+        number: 17,
+        title: 'Resume available',
+        stage: Stage.Build,
+        status: IssueStatus.Interrupted,
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[interruptedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/Interrupted/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#17/i)).toBeInTheDocument()
+    })
+
+    it('renders attention summary item with user-action label for integration failed issue', () => {
+      const failedIssue = makeIssue({
+        number: 206,
+        title: 'merge failed at squash',
+        stage: Stage.Integrate,
+        status: IssueStatus.Active,
+        mergeState: 'build-failed',
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[failedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#206/i)).toBeInTheDocument()
+    })
+
+    it('renders integration failed label for blocked integrate issue', () => {
+      const failedIssue = makeIssue({
+        number: 207,
+        title: 'integration blocked by merge conflict',
+        stage: Stage.Integrate,
+        status: IssueStatus.Blocked,
+        blockedReason: 'merge conflict',
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[failedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).queryByText(/Needs action/i)).not.toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#207/i)).toBeInTheDocument()
+    })
+
+    it('renders integration failed label for integrate merge conflict state', () => {
+      const failedIssue = makeIssue({
+        number: 208,
+        title: 'integration merge conflict',
+        stage: Stage.Integrate,
+        status: IssueStatus.Active,
+        mergeState: 'conflict',
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[failedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).queryByText(/Needs action/i)).not.toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#208/i)).toBeInTheDocument()
+    })
+
+    it('renders integration failed label for integrate blocked merge state', () => {
+      const failedIssue = makeIssue({
+        number: 209,
+        title: 'integration blocked',
+        stage: Stage.Integrate,
+        status: IssueStatus.Active,
+        mergeState: 'blocked',
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[failedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).queryByText(/Needs action/i)).not.toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#209/i)).toBeInTheDocument()
+    })
+
+    it('renders attention summary item with Not merged label for done-but-unmerged issue', () => {
+      const doneUnmergedIssue = makeIssue({
+        number: 42,
+        title: 'Completed but not merged',
+        stage: Stage.Done,
+        status: IssueStatus.Completed,
+        mergeState: 'conflict',
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[doneUnmergedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText('Not merged')).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#42/i)).toBeInTheDocument()
+    })
+
+    it('renders Not merged label for done issue with null mergeState', () => {
+      const doneUnmergedIssue = makeIssue({
+        number: 43,
+        title: 'Completed but missing merge result',
+        stage: Stage.Done,
+        status: IssueStatus.Completed,
+        mergeState: null,
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[doneUnmergedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText('Not merged')).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#43/i)).toBeInTheDocument()
+    })
+
+    it('renders attention summary item with Needs action label for blocked issue', () => {
+      const blockedIssue = makeIssue({
+        number: 99,
+        title: 'Issue blocked by dependency',
+        stage: Stage.Build,
+        status: IssueStatus.Blocked,
+        blockedReason: 'waiting on #88',
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[blockedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const summary = document.querySelector('.bg-amber-50')!
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/Needs action/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/#99/i)).toBeInTheDocument()
+    })
+
+    it('does not render attention summary when no actionable items exist', () => {
+      const normalIssue = makeIssue({
+        number: 1,
+        title: 'Normal issue',
+        stage: Stage.Backlog,
+        status: IssueStatus.Active,
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[normalIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByText(/Needs attention/i)).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Mobile compact filters', () => {
+    it('keeps secondary filters behind the mobile disclosure by default', () => {
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={makeIssues(2)} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      expect(screen.getByTestId('mobile-filter-toggle')).toBeInTheDocument()
+      expect(screen.queryByTestId('mobile-filter-panel')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('mobile-filter-toggle'))
+
+      const panel = screen.getByTestId('mobile-filter-panel')
+      expect(within(panel).getByText(/Priority:/i)).toBeInTheDocument()
+      expect(within(panel).getByText(/Labels:/i)).toBeInTheDocument()
+      expect(within(panel).getByText(/Sort:/i)).toBeInTheDocument()
+      expect(within(panel).getByRole('button', { name: 'Updated' })).toBeInTheDocument()
+    })
+  })
+
+  describe('Label filtering beyond first eight labels', () => {
+    it('restores the visible search input from URL state after popstate navigation', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: 'search=current', pathname: '/' },
+        writable: true,
+      })
+
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[makeIssue({ title: 'Current issue' })]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const searchInputs = screen.getAllByPlaceholderText('Search titles...') as HTMLInputElement[]
+      expect(searchInputs.map((input) => input.value)).toEqual(['current', 'current'])
+
+      Object.defineProperty(window, 'location', {
+        value: { search: 'search=restored', pathname: '/' },
+        writable: true,
+      })
+
+      act(() => {
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      })
+
+      await waitFor(() => {
+        expect(searchInputs.map((input) => input.value)).toEqual(['restored', 'restored'])
+      })
+    })
+
+    it('can select a label beyond the first eight via label popover search', async () => {
+      const issues = [
+        makeIssue({ number: 1, labels: ['reliability'] }),
+        makeIssue({ number: 2, labels: ['session'] }),
+        makeIssue({ number: 3, labels: ['agent'] }),
+      ]
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const labelButton = screen.getByText(/Labels:/i)
+      fireEvent.click(labelButton)
+
+      let popover: HTMLElement | null = null
+      await waitFor(() => {
+        popover = document.querySelector('[class*="origin-top-right"]')
+        expect(popover).toBeInTheDocument()
+      })
+
+      const searchInput = document.querySelector('input[placeholder="Search labels..."]') as HTMLInputElement
+      expect(searchInput).toBeInTheDocument()
+
+      fireEvent.change(searchInput, { target: { value: 'reliability' } })
+
+      await waitFor(() => {
+        expect(within(popover!).getByText('reliability')).toBeInTheDocument()
+      })
+    })
+
+    it('updates board counts after selecting a label beyond the first eight', async () => {
+      const issues = [
+        makeIssue({ number: 1, stage: Stage.Backlog, labels: ['reliability'] }),
+        makeIssue({ number: 2, stage: Stage.Backlog, labels: ['bug'] }),
+        makeIssue({ number: 3, stage: Stage.Plan, labels: ['session'] }),
+        makeIssue({ number: 4, stage: Stage.Build, labels: ['agent'] }),
+      ]
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const labelButton = screen.getByText(/Labels:/i)
+      fireEvent.click(labelButton)
+
+      await waitFor(() => {
+        const popover = document.querySelector('[class*="origin-top-right"]')
+        expect(popover).toBeInTheDocument()
+      })
+
+      const sessionLabel = within(document.querySelector('[class*="origin-top-right"]') as HTMLElement).getByText('session')
+      fireEvent.click(sessionLabel)
+
+      await waitFor(() => {
+        const desktopBoard = document.querySelector('.hidden.md\\:flex.flex-row') as HTMLElement
+        expect(desktopBoard).toBeInTheDocument()
+
+        const backlogColumn = desktopBoard.children[0] as HTMLElement
+        const planColumn = desktopBoard.children[1] as HTMLElement
+
+        expect(backlogColumn.textContent).toContain('Backlog')
+        expect(backlogColumn.textContent).toContain('No issues')
+        expect(planColumn.textContent).toContain('Plan')
+        expect(planColumn.textContent).toContain('#3')
+        expect(planColumn.textContent).toContain('session')
+      })
+    })
+
+    it('reveals all available labels through the searchable label popover', async () => {
+      const issues = [
+        makeIssue({ number: 1, labels: ['bug'] }),
+        makeIssue({ number: 2, labels: ['feature'] }),
+      ]
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const labelButton = screen.getByText(/Labels:/i)
+      fireEvent.click(labelButton)
+
+      await waitFor(() => {
+        const popover = document.querySelector('[class*="origin-top-right"]')
+        expect(popover).toBeInTheDocument()
+      })
+
+      const searchInput = document.querySelector('input[placeholder="Search labels..."]') as HTMLInputElement
+      fireEvent.change(searchInput, { target: { value: 'sess' } })
+
+      await waitFor(() => {
+        expect(screen.getByText('session')).toBeInTheDocument()
+      })
+
+      fireEvent.change(searchInput, { target: { value: 'agen' } })
+
+      await waitFor(() => {
+        expect(screen.getByText('agent')).toBeInTheDocument()
+      })
+    })
   })
 })
