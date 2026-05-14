@@ -7,6 +7,7 @@ import { BUILTIN_PROVIDERS, getBuiltinProviders } from '../config/builtin-provid
 import { ProviderConfigSchema } from '../config/config-schema';
 import { getModelsByProvider } from '../config/builtin-models';
 import type { EventBus } from '../services/event-bus';
+import type { ProviderStateService } from '../services/provider-state-service';
 import { RateLimiter } from '../utils/rate-limiter';
 import { maskSensitiveData } from '../utils/sensitive-data';
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -16,7 +17,6 @@ export interface ProviderListItem {
   id: string;
   name: string;
   baseURL: string | null;
-  models: string[];
   configured: boolean;
   source: 'config' | 'env' | 'none';
   isBuiltin: boolean;
@@ -36,7 +36,7 @@ function getDefaultProviderId(config: { model?: string }): string | null {
   return config.model.slice(0, slashIndex);
 }
 
-export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimiter): Hono {
+export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimiter, providerState?: ProviderStateService): Hono {
   const app = new Hono();
   const limiter = rateLimiter ?? new RateLimiter(60 * 1000, 30);
 
@@ -59,6 +59,14 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
 
   app.get('/', async (c) => {
     try {
+      if (providerState) {
+        const response: ApiResponse<typeof providerState.getProviders extends () => infer R ? R : never> = {
+          success: true,
+          data: providerState.getProviders(),
+        };
+        return c.json(response);
+      }
+
       const config = load();
       const allProviders = await getBuiltinProviders();
       const defaultProviderId = getDefaultProviderId(config);
@@ -66,12 +74,10 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
 
       for (const id of Object.keys(allProviders)) {
         const resolved = getProviderConfig(config, id);
-        const builtinModels = await getModelsByProvider(id, config);
         providerList.push({
           id,
           name: resolved.name,
           baseURL: resolved.baseURL,
-          models: builtinModels.map(m => m.id),
           configured: resolved.source !== 'none',
           source: resolved.source === 'builtin' ? 'none' : resolved.source,
           isBuiltin: true,
@@ -88,7 +94,6 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
           id,
           name: resolved.name,
           baseURL: resolved.baseURL,
-          models: (customProviders[id]?.models ?? []).map(m => `${id}/${m}`),
           configured: resolved.source !== 'none',
           source: resolved.source === 'builtin' ? 'none' : resolved.source,
           isBuiltin: false,
@@ -113,6 +118,14 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
 
   app.get('/models', async (c) => {
     try {
+      if (providerState) {
+        const response: ApiResponse<typeof providerState.getProviderModelGroups extends () => infer R ? R : never> = {
+          success: true,
+          data: providerState.getProviderModelGroups(),
+        };
+        return c.json(response);
+      }
+
       const config = load();
       const allProviders = await getBuiltinProviders();
       const customProviders = config.provider ?? {};
@@ -406,6 +419,10 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
         });
       }
 
+      if (providerState) {
+        await providerState.refresh();
+      }
+
       const response: ApiResponse<{ id: string; configured: boolean; version: number }> = {
         success: true,
         data: { id, configured: true, version: config._version! },
@@ -439,6 +456,10 @@ export function createProviderRoutes(eventBus?: EventBus, rateLimiter?: RateLimi
         eventBus.emit('config:providers:changed', {
           providers: [{ id }],
         });
+      }
+
+      if (providerState) {
+        await providerState.refresh();
       }
 
       const response: ApiResponse<{ id: string }> = {
