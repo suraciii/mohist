@@ -135,6 +135,39 @@ Issue body 建议结构：
 - 用长篇“作为...我希望...以便...”用户故事替代产品形态。
 - 把内部状态枚举直接当成用户问题。
 
+### Refactor Issue 口径
+
+`refactor` 只用于技术重构：改变内部代码或架构结构，以降低复杂性、提升可理解性和降低修改成本，同时不改变可观察行为。
+
+不要把产品形态变化、用户流程变化、状态语义变化、CLI/API/Web UI contract 变化标为 `refactor`。这些应使用 `feature`、`improvement`、`design` 或 `bug`。
+
+Refactor issue 应使用：
+
+```markdown
+## Problem
+[当前内部复杂性如何导致修改困难]
+
+## Evidence
+- [具体文件路径:行号]
+- [修改放大 / 认知负担 / 重复知识证据]
+
+## Refactor Goal
+[降低哪类复杂性]
+
+## Refactor Shape
+[目标内部边界和职责]
+
+## Complexity Reduction Criteria
+- [ ] [可验证的复杂性降低标准]
+
+## Behavioral Invariants
+- [ ] [可观察行为保持不变]
+
+## Non-Goals
+- [不新增功能]
+- [不改变产品语义]
+```
+
 ## Priority Guidance
 
 - `p0`：正在破坏核心工作流，用户无法继续，或数据/合并安全有风险。

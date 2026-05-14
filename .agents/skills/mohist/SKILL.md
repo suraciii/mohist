@@ -48,7 +48,7 @@ mo instructions <label>
 
 支持的 label：`bug`、`feature`、`improvement`、`refactor`、`design`、`docs`、`ui-feature`、`ui-improvement`。
 
-高质量 issue body 是 Plan 阶段的输入，不是完整 PRD、探索记录或技术设计文档。默认结构：
+高质量 issue body 是 Plan 阶段的输入，不是完整 PRD、探索记录或技术设计文档。默认产品类结构：
 
 ```markdown
 ## Problem
@@ -71,6 +71,17 @@ mo instructions <label>
 ```
 
 不要在 issue body 中写文件、函数、数据库表或逐步实现任务；这些属于 Plan 阶段。探索过程也不要原样粘贴，只沉淀结论、边界和验收。
+
+`refactor` 只用于技术重构：改变内部代码或架构结构，以降低复杂性、提升可理解性和降低修改成本，同时不改变可观察行为。产品形态、用户流程、状态语义、CLI/API/Web UI contract 发生变化时，不要使用 `refactor`，应使用 `feature`、`improvement`、`design` 或 `bug`。
+
+Refactor issue 必须包含：
+
+- `Evidence`: 具体文件路径/行号、修改放大、认知负担或重复知识证据。
+- `Refactor Goal`: 降低哪类复杂性。
+- `Refactor Shape`: 目标内部边界和职责，不写逐步任务。
+- `Complexity Reduction Criteria`: 如何证明复杂性下降。
+- `Behavioral Invariants`: 用户可见行为和 contract 保持不变。
+- `Non-Goals`: 不新增功能、不改变产品语义、不顺手修 bug。
 
 ## 常用模式
 
