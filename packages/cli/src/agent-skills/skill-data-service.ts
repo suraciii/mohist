@@ -26,6 +26,13 @@ export interface SkillContent {
 
 const BUILT_IN_SKILL_NAMES = ['mohist', 'mohist-explore'];
 
+export function findSkillDataRootCandidates(binPath: string = __dirname): string[] {
+  const runtimeAdjacentAssets = binPath;
+  const distAgentSkills = path.join(binPath, 'agent-skills');
+  const srcAgentSkills = path.resolve(binPath, '../../src/agent-skills');
+  return [runtimeAdjacentAssets, distAgentSkills, srcAgentSkills];
+}
+
 function parseFrontmatter(content: string): { name?: string; description?: string; hidden?: boolean } | null {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return null;
@@ -78,10 +85,7 @@ export class SkillDataService {
   }
 
   private findPossibleRoots(): string[] {
-    const binPath = __dirname;
-    const distAgentSkills = path.join(binPath, 'agent-skills');
-    const srcAgentSkills = path.resolve(binPath, '../../src/agent-skills');
-    return [distAgentSkills, srcAgentSkills];
+    return findSkillDataRootCandidates();
   }
 
   private collectSupplementary(dir: string, subdirs: string[]): Array<{ path: string; content: string }> {
@@ -157,6 +161,11 @@ export class SkillDataService {
     if (fs.existsSync(skillDataDir)) return skillDataDir;
     if (fs.existsSync(stubDir)) return stubDir;
     return null;
+  }
+
+  resolvePackagedSkillPath(name: string): string | null {
+    const skillDataDir = path.join(this.skillDataRoot, 'skill-data', name);
+    return fs.existsSync(skillDataDir) ? skillDataDir : null;
   }
 
   getSkillDataRoot(): string {
