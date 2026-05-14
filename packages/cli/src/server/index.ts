@@ -18,7 +18,7 @@ import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
 import { createSettingsConfigRoutes } from '../api/settings-config';
 import { createSettingsSystemRoutes } from '../api/settings-system';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, StageStateService, WorkflowRunService, type SkillRunner, type ConflictResolutionDeps } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, StageStateService, WorkflowRunService, IssuePrerequisiteService, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { ProviderStateService } from '../services/provider-state-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
@@ -137,7 +137,12 @@ async function main(): Promise<void> {
   const stageStateService = new StageStateService(db);
   const workflowRunService = new WorkflowRunService(db);
 
-  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps, sessionStreamLogRepo, stateManager.getStageExecutionRepo(), stageStateService, workflowRunService);
+  const issuePrerequisiteService = new IssuePrerequisiteService(
+    stateManager.getIssueRepo(),
+    stateManager.getIssueStartPrerequisiteRepo(),
+  );
+
+  const agentRunner = new AgentRunnerService(eventBus, workflowLogRepo, stateManager.getIssueRepo(), configService.getMaxConcurrentAgents(), stateManager.getCoderSessionRepo(), stateManager.getPipelineCheckpointRepo(), stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo(), conflictResolutionDeps, sessionStreamLogRepo, stateManager.getStageExecutionRepo(), stageStateService, workflowRunService, issuePrerequisiteService);
 
   agentRunner.setLlmConfig(fileConfig);
 
@@ -265,7 +270,7 @@ async function main(): Promise<void> {
   await providerState.warm();
 
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), postMergeFinalizer, stageStateService, workflowRunService));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), postMergeFinalizer, stageStateService, workflowRunService, issuePrerequisiteService));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));

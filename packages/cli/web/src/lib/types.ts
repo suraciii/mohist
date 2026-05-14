@@ -33,6 +33,23 @@ export interface ApprovalState {
   respondedAt?: string
 }
 
+export interface IssuePrerequisiteSummary {
+  issueId: string
+  number: number
+  title: string
+  delivered: boolean
+  stage: Stage
+  status: IssueStatus
+  mergeState?: string | null
+}
+
+export interface IssueStartEligibility {
+  startable: boolean
+  reason: 'ready' | 'not-startable-lifecycle' | 'waiting-for-delivery'
+  message?: string
+  waitingForDelivery: IssuePrerequisiteSummary[]
+}
+
 export interface Issue {
   id: string
   number: number
@@ -55,6 +72,8 @@ export interface Issue {
   archivedAt?: string
   blockedReason?: string
   checkSuite?: CheckSuite | null
+  prerequisites?: IssuePrerequisiteSummary[]
+  startEligibility?: IssueStartEligibility
 }
 
 export interface Project {

@@ -74,6 +74,9 @@ export function IssueDetailPage() {
   const descriptionBodyRef = useRef<HTMLDivElement>(null)
   const [isOverflowing, setIsOverflowing] = useState(false)
 
+  const [prereqInput, setPrereqInput] = useState('')
+  const [prereqError, setPrereqError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!forceStopConfirming) return
     const timer = setTimeout(() => setForceStopConfirming(false), 5000)
@@ -118,6 +121,27 @@ export function IssueDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+    onError: (err: Error) => {
+      if (err.message.includes('waiting for')) {
+        queryClient.invalidateQueries({ queryKey: ['issues'] })
+      }
+    },
+  })
+
+  const addPrerequisiteMutation = useMutation({
+    mutationFn: (prerequisiteNumber: number) => api.addPrerequisite(issueNumber, prerequisiteNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+    },
+  })
+
+  const removePrerequisiteMutation = useMutation({
+    mutationFn: (prerequisiteNumber: number) => api.removePrerequisite(issueNumber, prerequisiteNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
     },
   })
 
@@ -589,19 +613,27 @@ export function IssueDetailPage() {
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">Actions</h2>
                 <div className="space-y-2">
                   {isBacklog && (
-                    <button
-                      onClick={() => startMutation.mutate()}
-                      disabled={isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
-                      className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                    >
-                      {startMutation.isPending
-                        ? 'Starting...'
-                        : isAgentRunningOnThis
-                          ? 'Agent running...'
-                          : isCapacityFull
-                            ? 'Capacity full...'
-                            : 'Start'}
-                    </button>
+                    <>
+                      {issue.startEligibility?.waitingForDelivery?.length ? (
+                        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-700">
+                          {issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForDelivery[0].number}`}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => startMutation.mutate()}
+                          disabled={isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
+                          className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                        >
+                          {startMutation.isPending
+                            ? 'Starting...'
+                            : isAgentRunningOnThis
+                              ? 'Agent running...'
+                              : isCapacityFull
+                                ? 'Capacity full...'
+                                : 'Start'}
+                        </button>
+                      )}
+                    </>
                   )}
 
                   {isBacklog && (
@@ -780,6 +812,92 @@ export function IssueDetailPage() {
               </div>
 
               <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} stage={issue.stage} status={issue.status} />
+
+              {issue.prerequisites && issue.prerequisites.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <h2 className="text-sm font-semibold text-amber-800 mb-2">Start Prerequisites</h2>
+                  <div className="space-y-2">
+                    {issue.prerequisites.map((prereq) => (
+                      <div key={prereq.number} className="flex items-center justify-between text-sm">
+                        <span className="text-amber-700">
+                          #{prereq.number} {prereq.title}
+                        </span>
+                        {prereq.delivered ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 bg-green-100 px-1.5 py-0.5 rounded">
+                            Delivered
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
+                            Waiting
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isBacklog && (
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <h2 className="text-sm font-semibold text-gray-700 mb-2">Add Prerequisite</h2>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      value={prereqInput}
+                      onChange={(e) => {
+                        setPrereqInput(e.target.value)
+                        setPrereqError(null)
+                      }}
+                      placeholder="Issue #"
+                      className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        const num = parseInt(prereqInput, 10)
+                        if (isNaN(num) || num === issueNumber) {
+                          setPrereqError('Enter a valid issue number')
+                          return
+                        }
+                        setPrereqError(null)
+                        addPrerequisiteMutation.mutate(num)
+                        setPrereqInput('')
+                      }}
+                      disabled={!prereqInput || addPrerequisiteMutation.isPending}
+                      className="rounded-md bg-amber-600 px-3 py-1 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                    >
+                      {addPrerequisiteMutation.isPending ? 'Adding...' : 'Add'}
+                    </button>
+                  </div>
+                  {prereqError && (
+                    <p className="mt-1 text-xs text-red-600">{prereqError}</p>
+                  )}
+                  {addPrerequisiteMutation.error && (
+                    <p className="mt-1 text-xs text-red-600">
+                      {(addPrerequisiteMutation.error as Error).message?.includes('circular')
+                        ? 'Circular prerequisite: this would create a cycle'
+                        : (addPrerequisiteMutation.error as Error).message}
+                    </p>
+                  )}
+                  {issue.prerequisites && issue.prerequisites.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <p className="text-xs text-gray-500 mb-2">Remove prerequisite:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {issue.prerequisites.map((prereq) => (
+                          <button
+                            key={prereq.number}
+                            onClick={() => removePrerequisiteMutation.mutate(prereq.number)}
+                            disabled={removePrerequisiteMutation.isPending}
+                            className="inline-flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 px-2 py-0.5 rounded transition-colors"
+                          >
+                            #{prereq.number}
+                            <span className="text-gray-400">×</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {isAgentRunningOnThis && (
                 <QuestionPanel issueId={issue.id} />

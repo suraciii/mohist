@@ -20,6 +20,7 @@ import { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { StageStateService } from './stage-state-service';
 import type { WorkflowRunService } from './workflow-run-service';
 import { WorkflowApplicationService } from './workflow-application-service';
+import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { findChangeDir } from '../openspec/detector';
 import { WorktreeManager, smartFetch } from '../git/worktree-manager';
 import { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
@@ -129,6 +130,7 @@ export class AgentRunnerService {
     private readonly stageExecutionRepo?: StageExecutionRepo,
     private readonly stageStateService?: StageStateService,
     private readonly workflowRunService?: WorkflowRunService,
+    private readonly issuePrerequisiteService?: IssuePrerequisiteService,
   ) {
     this.maxConcurrentAgents = maxConcurrentAgents;
     this.recoverableIssues = this.detectRecoverableIssues();
@@ -1041,16 +1043,29 @@ export class AgentRunnerService {
       return;
     }
 
-    if (issue.status === IssueStatus.Blocked) {
-      log.info('Skipping start-pipeline: issue is blocked', { issueNumber: issue.number });
-      this.completeTask(task.id, 'completed', 'skipped');
-      return;
-    }
+    if (this.issuePrerequisiteService) {
+      const eligibility = this.issuePrerequisiteService.evaluateStartEligibility(issue);
+      if (!eligibility.startable) {
+        log.info('Skipping start-pipeline: issue is not start eligible', {
+          issueNumber: issue.number,
+          reason: eligibility.reason,
+          message: eligibility.message,
+        });
+        this.completeTask(task.id, 'completed', `skipped: ${eligibility.message ?? eligibility.reason}`);
+        return;
+      }
+    } else {
+      if (issue.status === IssueStatus.Blocked) {
+        log.info('Skipping start-pipeline: issue is blocked', { issueNumber: issue.number });
+        this.completeTask(task.id, 'completed', 'skipped');
+        return;
+      }
 
-    if (issue.stage !== Stage.Backlog) {
-      log.info('Skipping start-pipeline: issue not in backlog', { issueNumber: issue.number, stage: issue.stage });
-      this.completeTask(task.id, 'completed', 'skipped');
-      return;
+      if (issue.stage !== Stage.Backlog) {
+        log.info('Skipping start-pipeline: issue not in backlog', { issueNumber: issue.number, stage: issue.stage });
+        this.completeTask(task.id, 'completed', 'skipped');
+        return;
+      }
     }
 
     const project = this.projectRepo.findById(issue.projectId);

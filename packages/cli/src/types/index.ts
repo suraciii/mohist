@@ -241,3 +241,9 @@ export interface ExploreMessage {
   toolCalls: ToolCallRecord[] | null;
   createdAt: string;
 }
+
+export interface IssueStartPrerequisite {
+  issueId: string;
+  prerequisiteIssueId: string;
+  createdAt: string;
+}

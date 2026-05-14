@@ -27,6 +27,7 @@ import { StageExecutionRepo } from '../src/db/stage-execution-repo';
 import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
+import { IssuePrerequisiteService } from '../src/services/issue-prerequisite-service';
 import { WorktreeManager } from '../src/git/worktree-manager';
 import { slugify } from '../src/utils/slugify';
 
@@ -1368,7 +1369,8 @@ describe('API Routes', () => {
 
     function createRetryServer(agentRunner: AgentRunnerService) {
       const app = new Hono();
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner));
+      const prerequisiteService = new IssuePrerequisiteService(issueRepo, stateManager.getIssueStartPrerequisiteRepo());
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, prerequisiteService));
       return createTestServer(app);
     }
 

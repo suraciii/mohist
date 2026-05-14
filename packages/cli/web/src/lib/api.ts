@@ -369,4 +369,15 @@ export const api = {
   rebuildSystem: () =>
     request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
 
+  addPrerequisite: (number: number, prerequisiteNumber: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/prerequisites`, {
+      method: 'POST',
+      body: JSON.stringify({ prerequisiteNumber }),
+    }),
+
+  removePrerequisite: (number: number, prerequisiteNumber: number) =>
+    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/prerequisites/${prerequisiteNumber}`, {
+      method: 'DELETE',
+    }),
+
   }

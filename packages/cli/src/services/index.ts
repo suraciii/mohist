@@ -15,3 +15,4 @@ export { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflic
 export { PostMergeFinalizer, type FinalizationResult, type HealthGateResult } from './post-merge-finalizer';
 export { StageStateService, normalizeCheckStatus, normalizeTaskStatus, type StageTaskStatus, type StageCheckStatus, type StageStateStatus, type StageTaskState, type StageCheckState, type StageApprovalState, type StageStateRead, type UpsertTaskInput, type UpsertCheckInput, type SetApprovalInput } from './stage-state-service';
 export { WorkflowRunService } from './workflow-run-service';
+export { IssuePrerequisiteService, type IssuePrerequisiteSummary, type IssueStartEligibility, type IssuePrerequisiteView } from './issue-prerequisite-service';

@@ -25,6 +25,7 @@ import type { IssueQueueStatus } from '../services/agent-runner-service';
 import { assembleSessionTranscript } from '../services/session-transcript-service';
 import { PostMergeFinalizer } from '../services/post-merge-finalizer';
 import { StageStateService } from '../services/stage-state-service';
+import type { IssuePrerequisiteService, IssuePrerequisiteSummary, IssueStartEligibility } from '../services/issue-prerequisite-service';
 import { WorkflowApplicationService } from '../services/workflow-application-service';
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { isValidModelId } from '../config/model-resolution';
@@ -455,6 +456,7 @@ export function createIssueRoutes(
   _postMergeFinalizer?: PostMergeFinalizer,
   stageStateService?: StageStateService,
   workflowRunService?: WorkflowRunService,
+  issuePrerequisiteService?: IssuePrerequisiteService,
 ): Hono {
   const app = new Hono();
 
@@ -600,14 +602,28 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      const issuesWithProject = issues.map(issue => ({
+
+      let issuesWithPrerequisites = issues.map(issue => ({
         ...issue,
-        projectName: project?.name || 'unknown'
+        projectName: project?.name || 'unknown',
       }));
+
+      if (issuePrerequisiteService && issues.length > 0) {
+        const prereqViews = issuePrerequisiteService.getPrerequisiteViews(projectId, issues);
+        issuesWithPrerequisites = issues.map(issue => {
+          const view = prereqViews.get(issue.id);
+          return {
+            ...issue,
+            projectName: project?.name || 'unknown',
+            prerequisites: view?.prerequisites ?? [],
+            startEligibility: view?.startEligibility ?? { startable: true, reason: 'ready' as const, waitingForDelivery: [] },
+          };
+        });
+      }
 
       const response: ApiResponse = {
         success: true,
-        data: issuesWithProject
+        data: issuesWithPrerequisites
       };
       return c.json(response);
     } catch (error) {
@@ -670,9 +686,17 @@ export function createIssueRoutes(
 
       const issue = issueService.create({ projectId, title, body, labels, priority: normalizedPriority, model: model ?? undefined, stageModels: stageModels ?? undefined });
 
-      const response: ApiResponse<Issue> = {
+      const view = issuePrerequisiteService
+        ? issuePrerequisiteService.getPrerequisiteView(projectId, issue)
+        : { prerequisites: [], startEligibility: { startable: true, reason: 'ready' as const, waitingForDelivery: [] } };
+
+      const response: ApiResponse = {
         success: true,
-        data: issue
+        data: {
+          ...issue,
+          prerequisites: view.prerequisites,
+          startEligibility: view.startEligibility,
+        }
       };
       return c.json(response, 201);
     } catch (error) {
@@ -952,6 +976,15 @@ export function createIssueRoutes(
 
       const checkSuite = checkSuiteRepo ? checkSuiteRepo.findActiveByIssueId(issue.id) : null;
 
+      let prerequisites: IssuePrerequisiteSummary[] = [];
+      let startEligibility: IssueStartEligibility = { startable: true, reason: 'ready' as const, waitingForDelivery: [] };
+
+      if (issuePrerequisiteService) {
+        const view = issuePrerequisiteService.getPrerequisiteView(projectId, issue);
+        prerequisites = view.prerequisites;
+        startEligibility = view.startEligibility;
+      }
+
       const response: ApiResponse = {
         success: true,
         data: {
@@ -960,7 +993,9 @@ export function createIssueRoutes(
           projectPath: project?.path || '',
           baseBranch: project?.baseBranch || 'main',
           comments,
-          checkSuite
+          checkSuite,
+          prerequisites,
+          startEligibility,
         }
       };
       return c.json(response);
@@ -1177,36 +1212,15 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      if (issue.status === IssueStatus.Blocked) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} is blocked. Use: mo issue retry ${number} or mo issue rerun ${number}`
-        };
-        return c.json(response, 400);
-      }
-
-      if (issue.status === IssueStatus.Closed) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} is closed. Run: mo issue reopen ${number}`
-        };
-        return c.json(response, 400);
-      }
-
-      if (issue.status === IssueStatus.Paused) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} is paused. Run: mo issue approve ${number} to resume`
-        };
-        return c.json(response, 400);
-      }
-
-      if (issue.stage !== Stage.Backlog) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} is not in a startable stage (current: ${issue.stage}). Only backlog issues can be started.`
-        };
-        return c.json(response, 400);
+      if (issuePrerequisiteService) {
+        const startEligibility = issuePrerequisiteService.assertStartEligible(projectId, issue);
+        if (!startEligibility.startable) {
+          return c.json({
+            success: false,
+            error: startEligibility.message ?? `Issue #${number} is not startable: ${startEligibility.reason}`,
+            data: { startEligibility },
+          } satisfies ApiResponse, 400);
+        }
       }
 
       if (!agentRunner) {
@@ -1235,6 +1249,98 @@ export function createIssueRoutes(
         error: error instanceof Error ? error.message : 'Unknown error'
       };
       return c.json(response, 500);
+    }
+  });
+
+  app.post('/:number/prerequisites', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const { prerequisiteNumber } = await c.req.json();
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      if (typeof prerequisiteNumber !== 'number') {
+        return c.json({ success: false, error: 'prerequisiteNumber is required and must be a number' } satisfies ApiResponse, 400);
+      }
+
+      if (!issuePrerequisiteService) {
+        return c.json({ success: false, error: 'IssuePrerequisiteService not configured' } satisfies ApiResponse, 500);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      const result = issuePrerequisiteService.declarePrerequisite(projectId, number, prerequisiteNumber);
+
+      if ('error' in result) {
+        return c.json({
+          success: false,
+          error: result.error,
+          data: { reason: result.reason },
+        } satisfies ApiResponse, 400);
+      }
+
+      return c.json({
+        success: true,
+        data: {
+          issue: {
+            ...issue,
+            prerequisites: result.prerequisites,
+            startEligibility: result.startEligibility,
+          },
+          message: `Issue #${number} now requires Issue #${prerequisiteNumber} to be delivered before start.`,
+        },
+      } satisfies ApiResponse, 200);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.delete('/:number/prerequisites/:prerequisiteNumber', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const prerequisiteNumber = parseInt(c.req.param('prerequisiteNumber'));
+      const projectId = getCurrentProjectId();
+
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      if (!issuePrerequisiteService) {
+        return c.json({ success: false, error: 'IssuePrerequisiteService not configured' } satisfies ApiResponse, 500);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      const removed = issuePrerequisiteService.removePrerequisite(projectId, number, prerequisiteNumber);
+
+      if (!removed) {
+        return c.json({ success: false, error: `Prerequisite Issue #${prerequisiteNumber} not found for Issue #${number}` } satisfies ApiResponse, 404);
+      }
+
+      const view = issuePrerequisiteService.getPrerequisiteView(projectId, issue);
+
+      return c.json({
+        success: true,
+        data: {
+          issue: {
+            ...issue,
+            prerequisites: view.prerequisites,
+            startEligibility: view.startEligibility,
+          },
+          message: `Prerequisite #${prerequisiteNumber} removed from Issue #${number}.`,
+        },
+      } satisfies ApiResponse, 200);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
   });
 
