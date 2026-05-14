@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { StageContext, StageTaskResult } from '../../../src/workflow/stage-context';
 import type { TaskKind, TaskHandler, ExecutableTask } from '../../../src/workflow/task-runtime/types';
 import { createTaskHandlerRegistry } from '../../../src/workflow/task-runtime/types';
+import { createRalphTaskTaskHandler } from '../../../src/workflow/task-runtime';
 import { Stage, IssueStatus } from '../../../src/types';
 
 function makeContext(): StageContext {
@@ -97,5 +98,30 @@ describe('TaskHandlerRegistry', () => {
     expect(ctx.emit).not.toHaveBeenCalledWith('approval_requested');
     expect(ctx.emit).not.toHaveBeenCalledWith('stage_completed');
     expect(ctx.emit).not.toHaveBeenCalledWith('stage_failed');
+  });
+
+  it('supports ralph-task execution through shared registry', async () => {
+    const handler = createRalphTaskTaskHandler({
+      acpSessionRunner: vi.fn().mockResolvedValue({ success: true, text: 'done' }),
+    });
+    const registry = createTaskHandlerRegistry({ 'ralph-task': handler });
+    const ctx = makeContext();
+    const task: ExecutableTask = {
+      taskId: 'T-001',
+      title: 'Build Task',
+      kind: 'ralph-task',
+      input: {
+        taskId: 'T-001',
+        title: 'Build Task',
+        task: { id: 'T-001', title: 'Build Task', description: 'desc', passes: false, attempts: 0, order: 1, error: null, dependsOn: [], durations: [] },
+        change: { changePath: '/tmp/change', tasksPath: '/tmp/tasks.json', sessionMemoriesPath: '/tmp/memories', proposalPath: '/tmp/proposal.md', designPath: '/tmp/design.md', specsPath: '/tmp/specs' },
+        totalTasks: 1,
+        stage: 'build',
+        attempt: 1,
+      },
+    };
+
+    const run = registry.get('ralph-task');
+    expect(run).toBeDefined();
   });
 });

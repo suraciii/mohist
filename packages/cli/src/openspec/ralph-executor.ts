@@ -4,13 +4,29 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
-import { loadLearningsFromDir, buildTaskContext } from './context-assembler';
 import type { AgentConfig } from '../workflow/workflow-loader';
 import { withSession } from '../agent-runtime/agent-session';
 import type { AgentSessionOptions, AcpSessionResult } from '../agent-runtime/agent-session';
 import { WorktreeManager } from '../git/worktree-manager';
-import { load as loadConfig, getAgentTimeoutConfig } from '../config/config-loader';
 import { Log } from '../util/log';
+import { load as loadConfig, getAgentTimeoutConfig } from '../config/config-loader';
+import {
+  FAILURE_CATEGORY_CONFIGS,
+  RalphTaskLoader,
+  categorizeFailure,
+  executeRalphTask,
+  findNextPendingTask,
+  getOrderValue,
+  readTasks,
+  sortTasksByOrder,
+  validateTaskDependencies,
+  type DependencyValidationResult,
+  type FailureCategory,
+  type FailureCategoryConfig,
+  type RalphTaskHandlerDeps,
+  type RalphTaskHandlerOptions,
+} from './ralph';
+import { createDefaultTaskHandlerRegistry } from '../workflow/task-runtime';
 
 const execFileAsync = promisify(execFile);
 
@@ -35,96 +51,16 @@ import { createWorkflowSessionObservers } from '../agent-runtime';
 import type { WorkflowApplicationRuntime } from '../workflow/stage-context';
 import { Stage } from '../types';
 
-export type FailureCategory = 'ac_not_met' | 'environment' | 'dependency' | 'timeout' | 'timeout_with_wip' | 'hang_unrecoverable' | 'session_failed';
-
-export interface FailureCategoryConfig {
-  maxAttempts: number;
-  retryable: boolean;
-}
-
-export const FAILURE_CATEGORY_CONFIGS: Record<FailureCategory, FailureCategoryConfig> = {
-  ac_not_met: { maxAttempts: 3, retryable: true },
-  environment: { maxAttempts: 2, retryable: true },
-  dependency: { maxAttempts: 1, retryable: false },
-  timeout: { maxAttempts: 3, retryable: true },
-  timeout_with_wip: { maxAttempts: 2, retryable: true },
-  hang_unrecoverable: { maxAttempts: 1, retryable: false },
-  session_failed: { maxAttempts: 2, retryable: true },
+export {
+  FAILURE_CATEGORY_CONFIGS,
+  categorizeFailure,
+  findNextPendingTask,
+  getOrderValue,
+  readTasks,
+  sortTasksByOrder,
+  validateTaskDependencies,
 };
-
-export function categorizeFailure(error: string, options?: { wipCommitted?: boolean; failureKind?: string }): FailureCategory {
-  const lowerError = error.toLowerCase();
-
-  if (options?.failureKind === 'session_failed') {
-    return 'session_failed';
-  }
-
-  if (error.includes('[HANG_UNRECOVERABLE]')) {
-    return 'hang_unrecoverable';
-  }
-
-  if (lowerError.includes('timeout') || lowerError.includes('timed out')) {
-    return options?.wipCommitted ? 'timeout_with_wip' : 'timeout';
-  }
-
-  if (error.includes('[SPAWN_FAILED]')) {
-    return 'dependency';
-  }
-
-  const dependencyPatterns = [
-    'cannot find module',
-    'module not found',
-    'err_module_not_found',
-    'no such module',
-    'dependency',
-    'unmet dependency',
-    'peer dependency',
-    'cannot find package',
-    'package not found',
-    'failed to resolve',
-    'could not be resolved',
-    'import error',
-    'unresolved import',
-  ];
-  for (const pattern of dependencyPatterns) {
-    if (lowerError.includes(pattern)) {
-      return 'dependency';
-    }
-  }
-
-  const environmentPatterns = [
-    'npm install',
-    'install failed',
-    'node_modules',
-    'permission denied',
-    'enoent',
-    'no such file or directory',
-    'command not found',
-    'environment',
-    'econnrefused',
-    'econnreset',
-    'network error',
-    'network request failed',
-    'spawn error',
-    'spawn failed',
-    'spawn enoent',
-    'eacces',
-    'heap out of memory',
-    'out of memory',
-    'enospc',
-    'disk full',
-    'segmentation fault',
-    'sigsegv',
-    'sigkill',
-  ];
-  for (const pattern of environmentPatterns) {
-    if (lowerError.includes(pattern)) {
-      return 'environment';
-    }
-  }
-
-  return 'ac_not_met';
-}
+export type { DependencyValidationResult, FailureCategory, FailureCategoryConfig };
 
 export interface RalphExecutorContext {
   worktreePath: string;
@@ -182,41 +118,6 @@ export interface RalphTaskOptions {
   onRetry?: (task: Task, attempt: number, error: string) => void;
 }
 
-export function getOrderValue(order: number | undefined): number {
-  if (order === undefined) return 999999;
-  return order;
-}
-
-export function sortTasksByOrder(tasks: Task[]): Task[] {
-  return [...tasks].sort((a, b) => {
-    const orderA = getOrderValue(a.order);
-    const orderB = getOrderValue(b.order);
-    return orderA - orderB;
-  });
-}
-
-export function readTasks(tasksPath: string): Task[] | null {
-  if (!fs.existsSync(tasksPath)) {
-    return null;
-  }
-  try {
-    const content = fs.readFileSync(tasksPath, 'utf-8');
-    const tasksFile = JSON.parse(content);
-    if (tasksFile.tasks && Array.isArray(tasksFile.tasks)) {
-      return tasksFile.tasks.map((t: Task) => ({
-        ...t,
-        attempts: t.attempts ?? 0,
-        passes: t.passes ?? false,
-        order: t.order ?? 999999,
-        error: t.error ?? null,
-      })) as Task[];
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 function writeTasksFile(tasksPath: string, tasks: Task[]): void {
   try {
     const tasksFile = { version: 1, tasks };
@@ -224,11 +125,6 @@ function writeTasksFile(tasksPath: string, tasks: Task[]): void {
   } catch (e) {
     log.error('writeTasksFile failed', { tasksPath, error: e instanceof Error ? e.message : String(e) });
   }
-}
-
-function persistTasks(context: RalphExecutorContext, tasksPath: string, tasks: Task[]): void {
-  writeTasksFile(tasksPath, tasks);
-  context.syncTasksToStageState?.();
 }
 
 function reportTaskToAggregate(
@@ -313,161 +209,6 @@ export interface RalphExecutorOptions extends RalphTaskOptions {
   onlyTaskId?: string;
 }
 
-async function storeFailureLearning(
-  change: OpenSpecChange,
-  task: Task,
-  failureReason: string,
-  category: FailureCategory,
-  attempt: number
-): Promise<void> {
-  const memoriesDir = change.sessionMemoriesPath;
-  if (!fs.existsSync(memoriesDir)) {
-    fs.mkdirSync(memoriesDir, { recursive: true });
-  }
-
-  const taskIdSanitized = task.id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const timestamp = new Date().toISOString();
-
-  const learningPath = path.join(memoriesDir, `${taskIdSanitized}.json`);
-
-  const learning = {
-    task_id: task.id,
-    timestamp,
-    insights: [],
-    adjustments: generateAdjustmentsFromCategory(category, failureReason),
-    success: false,
-    execution_summary: `Failed on attempt ${attempt}: ${failureReason.slice(0, 200)}`,
-    failure_reason: failureReason,
-    failed_attempts: attempt,
-    failure_category: category,
-  };
-
-  fs.writeFileSync(learningPath, JSON.stringify(learning, null, 2), 'utf-8');
-}
-
-function generateAdjustmentsFromCategory(category: FailureCategory, _error: string): string[] {
-  const adjustments: string[] = [];
-
-  switch (category) {
-    case 'ac_not_met':
-      adjustments.push('Review acceptance criteria carefully before implementing');
-      adjustments.push('Verify implementation satisfies all AC requirements');
-      break;
-    case 'environment':
-      adjustments.push('Check environment setup and dependencies');
-      adjustments.push('Ensure npm install completes successfully before building');
-      break;
-    case 'dependency':
-      adjustments.push('Resolve code dependencies before proceeding');
-      adjustments.push('May need to restructure code to use available exports');
-      break;
-    case 'timeout':
-      adjustments.push('Consider breaking this task into smaller subtasks');
-      adjustments.push('The task may be too complex for a single execution');
-      break;
-    case 'timeout_with_wip':
-      adjustments.push('Previous progress was saved in a WIP commit');
-      adjustments.push('Continue from where the previous attempt left off');
-      break;
-    case 'hang_unrecoverable':
-      adjustments.push('LLM provider stream connection was lost and could not be recovered');
-      adjustments.push('Consider checking provider status or switching to a different model');
-      break;
-  }
-
-  return adjustments;
-}
-
-export interface DependencyValidationResult {
-  valid: boolean;
-  errors: string[];
-}
-
-export function validateTaskDependencies(tasks: Task[]): DependencyValidationResult {
-  const errors: string[] = [];
-  const taskIds = new Set(tasks.map(t => t.id));
-
-  for (const task of tasks) {
-    const deps = task.dependsOn ?? [];
-    if (deps.length === 0) continue;
-
-    for (const depId of deps) {
-      if (!taskIds.has(depId)) {
-        errors.push(`Task "${task.id}" depends on "${depId}", which does not exist in the task list`);
-      } else {
-        const depTask = tasks.find(t => t.id === depId)!;
-        if (getOrderValue(depTask.order) > getOrderValue(task.order)) {
-          errors.push(
-            `Task "${task.id}" (order: ${task.order}) depends on "${depId}" (order: ${depTask.order}), ` +
-            `but dependencies must reference tasks with a lower or equal order value`
-          );
-        }
-      }
-    }
-  }
-
-  const visited = new Set<string>();
-  const inStack = new Set<string>();
-  const adj = new Map<string, string[]>();
-
-  for (const task of tasks) {
-    adj.set(task.id, (task.dependsOn ?? []).filter(depId => taskIds.has(depId)));
-  }
-
-  function hasCycle(nodeId: string): boolean {
-    visited.add(nodeId);
-    inStack.add(nodeId);
-
-    for (const neighbor of adj.get(nodeId) ?? []) {
-      if (!visited.has(neighbor)) {
-        if (hasCycle(neighbor)) return true;
-      } else if (inStack.has(neighbor)) {
-        return true;
-      }
-    }
-
-    inStack.delete(nodeId);
-    return false;
-  }
-
-  for (const task of tasks) {
-    if (!visited.has(task.id)) {
-      if (hasCycle(task.id)) {
-        errors.push('Circular dependency detected in the task dependency graph');
-        break;
-      }
-    }
-  }
-
-  return { valid: errors.length === 0, errors };
-}
-
-export function findNextPendingTask(tasks: Task[]): Task | null {
-  const passedIds = new Set(tasks.filter(t => t.passes).map(t => t.id));
-  const ready = tasks.filter(t => {
-    if (t.passes) return false;
-    const deps = t.dependsOn ?? [];
-    return deps.every(depId => passedIds.has(depId));
-  });
-  const sorted = sortTasksByOrder(ready);
-  return sorted.length > 0 ? sorted[0] : null;
-}
-
-function updateTaskInList(
-  tasks: Task[],
-  taskId: string,
-  updates: Partial<Pick<Task, 'passes' | 'attempts' | 'error' | 'durations'>>
-): void {
-  const task = tasks.find(t => t.id === taskId);
-  if (!task) return;
-  if (updates.passes !== undefined) task.passes = updates.passes;
-  if (updates.attempts !== undefined) task.attempts = updates.attempts;
-  if (updates.error !== undefined) task.error = updates.error;
-  if (updates.durations !== undefined) {
-    task.durations = [...(task.durations ?? []), ...updates.durations];
-  }
-}
-
 function writeTaskLog(
   workflowLogRepo: import('../db/workflow-log-repo').WorkflowLogRepo | undefined,
   issueId: string,
@@ -487,8 +228,10 @@ export async function runRalphLoop(
   context: RalphExecutorContext,
   options: RalphExecutorOptions = {}
 ): Promise<RalphLoopResult> {
-  const tasks = readTasks(change.tasksPath);
-  if (!tasks || tasks.length === 0) {
+  const loader = new RalphTaskLoader();
+  const loaderResult = loader.load(change, { ignoreTaskFileProgress: options.ignoreTaskFileProgress });
+
+  if (loaderResult.tasks.length === 0) {
     return {
       completed: 0,
       failed: 0,
@@ -499,35 +242,26 @@ export async function runRalphLoop(
     };
   }
 
-  if (options.ignoreTaskFileProgress) {
-    for (const task of tasks) {
-      task.passes = false;
-      task.error = null;
-    }
-  }
-
-  const validation = validateTaskDependencies(tasks);
-  if (!validation.valid) {
-    for (const err of validation.errors) {
+  if (!loaderResult.validation.valid) {
+    for (const err of loaderResult.validation.errors) {
       log.error('Task dependency validation failed', { issueId: context.issueId || '', error: err });
     }
     const result: RalphLoopResult = {
       completed: 0,
-      failed: tasks.length,
+      failed: loaderResult.tasks.length,
       skipped: 0,
-      total: tasks.length,
+      total: loaderResult.tasks.length,
       taskResults: [],
       success: false,
-      pauseReason: `Task dependency validation failed: ${validation.errors.join('; ')}`,
+      pauseReason: `Task dependency validation failed: ${loaderResult.validation.errors.join('; ')}`,
     };
-    const duration = 0;
-    const firstTask = sortTasksByOrder(tasks)[0];
+    const firstTask = loaderResult.sortedTasks[0];
     if (firstTask) {
       reportTaskToAggregate(context, firstTask, {
         status: 'failed',
         attempts: firstTask.attempts,
-        duration,
-        output: { validationErrors: validation.errors },
+        duration: 0,
+        output: { validationErrors: loaderResult.validation.errors },
         reason: result.pauseReason,
       });
     }
@@ -535,8 +269,9 @@ export async function runRalphLoop(
     return result;
   }
 
-  const sortedTasks = sortTasksByOrder(tasks);
+  const sortedTasks = loaderResult.sortedTasks;
   const requestedTask = options.onlyTaskId ? sortedTasks.find(task => task.id === options.onlyTaskId) : undefined;
+  const nextPendingTask = options.onlyTaskId ? findNextPendingTask(sortedTasks) : null;
   if (options.onlyTaskId && !requestedTask) {
     return {
       completed: 0,
@@ -548,21 +283,34 @@ export async function runRalphLoop(
       pauseReason: `Task ${options.onlyTaskId} not found`,
     };
   }
-  const timeoutConfig = getAgentTimeoutConfig(loadConfig());
-  const perTaskTimeout = timeoutConfig.taskTimeout * 1000;
+
+  if (options.onlyTaskId && requestedTask && !options.ignoreTaskFileProgress && nextPendingTask?.id !== requestedTask.id) {
+    const failureReason = requestedTask.passes
+      ? `Task ${options.onlyTaskId} is already passed and cannot be executed again`
+      : `Task ${options.onlyTaskId} is not ready; next pending task is ${nextPendingTask?.id ?? 'none'}`;
+    return {
+      completed: 0,
+      failed: 1,
+      skipped: 0,
+      total: 1,
+      taskResults: [{ taskId: options.onlyTaskId, status: 'failed', attempts: requestedTask.attempts, error: failureReason }],
+      success: false,
+      pauseReason: failureReason,
+    };
+  }
 
   const skipTaskIds = new Set(options.skipTaskIds ?? []);
 
-  if (!options.onlyTaskId && tasks.length > 0 && tasks.every(t => t.passes)) {
+  if (!options.onlyTaskId && sortedTasks.length > 0 && sortedTasks.every(t => t.passes)) {
     log.info('All tasks already passed, returning success', {
       issueId: context.issueId || '',
-      total: tasks.length,
+      total: sortedTasks.length,
     });
     const alreadyPassedResult: RalphLoopResult = {
-      completed: tasks.length,
+      completed: sortedTasks.length,
       failed: 0,
       skipped: 0,
-      total: tasks.length,
+      total: sortedTasks.length,
       taskResults: [],
       success: true,
     };
@@ -570,7 +318,7 @@ export async function runRalphLoop(
     return alreadyPassedResult;
   }
 
-  for (const task of sortTasksByOrder(tasks)) {
+  for (const task of sortedTasks) {
     if (skipTaskIds.has(task.id) && !task.passes) {
       task.passes = true;
       task.error = null;
@@ -583,23 +331,23 @@ export async function runRalphLoop(
     }
   }
   if (skipTaskIds.size > 0) {
-    writeTasksFile(change.tasksPath, tasks);
+    writeTasksFile(change.tasksPath, sortedTasks);
     log.info('Restored completed tasks from checkpoint', {
       issueId: context.issueId || '',
       completedIds: [...skipTaskIds],
     });
   }
 
-  if (skipTaskIds.size > 0 && tasks.every(t => t.passes)) {
+  if (skipTaskIds.size > 0 && sortedTasks.every(t => t.passes)) {
     log.info('recovered-from-checkpoint', {
       issueId: context.issueId || '',
-      total: tasks.length,
+      total: sortedTasks.length,
     });
     const recoveredResult: RalphLoopResult = {
-      completed: tasks.length,
+      completed: sortedTasks.length,
       failed: 0,
       skipped: 0,
-      total: tasks.length,
+      total: sortedTasks.length,
       taskResults: [],
       success: true,
     };
@@ -612,13 +360,11 @@ export async function runRalphLoop(
   let failed = 0;
   let skipped = 0;
 
-  let learnings = loadLearningsFromDir(change.sessionMemoriesPath);
-
   const sseIssueId = context.issueId || String(context.issueNumber ?? '');
   const logIssueId = context.issueId || '';
 
-  const pending = tasks.filter(t => !t.passes).length;
-  const passed = tasks.filter(t => t.passes).length;
+  const pending = sortedTasks.filter(t => !t.passes).length;
+  const passed = sortedTasks.filter(t => t.passes).length;
   log.info('Ralph loop entry', {
     issueId: logIssueId,
     total: sortedTasks.length,
@@ -708,17 +454,43 @@ export async function runRalphLoop(
   };
 
   const processedTaskIds = new Set<string>();
+  const taskObservers = context.observers ?? createWorkflowSessionObservers({
+    eventBus: context.eventBus,
+    workflowLogRepo: context.workflowLogRepo,
+    sessionStreamLogRepo: context.sessionStreamLogRepo,
+    coderSessionRepo: context.coderSessionRepo,
+    stage: context.stage,
+    title: 'Build stage',
+  });
+
+  const persistLoopTaskState = (
+    taskId: string,
+    updates: Partial<Pick<Task, 'passes' | 'attempts' | 'error' | 'durations'>>,
+  ) => {
+    const latestTasks = readTasks(change.tasksPath) ?? sortedTasks;
+    const task = latestTasks.find(candidate => candidate.id === taskId);
+    if (!task) return;
+
+    if (updates.passes !== undefined) task.passes = updates.passes;
+    if (updates.attempts !== undefined) task.attempts = updates.attempts;
+    if (updates.error !== undefined) task.error = updates.error;
+    if (updates.durations !== undefined) task.durations = [...updates.durations];
+
+    writeTasksFile(change.tasksPath, latestTasks);
+    sortedTasks.splice(0, sortedTasks.length, ...latestTasks);
+    context.syncTasksToStageState?.();
+  };
 
   while (true) {
     const nextTask = options.onlyTaskId
-      ? tasks.find(task => task.id === options.onlyTaskId && !processedTaskIds.has(task.id))
-      : findNextPendingTask(tasks);
+      ? sortedTasks.find(task => task.id === options.onlyTaskId && !processedTaskIds.has(task.id))
+      : findNextPendingTask(sortedTasks);
     if (!nextTask || processedTaskIds.has(nextTask.id)) {
       if (!nextTask) {
-        const remainingPending = tasks.filter(t => !t.passes);
+        const remainingPending = sortedTasks.filter(t => !t.passes);
         if (remainingPending.length > 0) {
           const blockedIds = remainingPending.map(t => {
-            const deps = (t.dependsOn ?? []).filter(d => !tasks.find(x => x.id === d)?.passes);
+            const deps = (t.dependsOn ?? []).filter(d => !sortedTasks.find(x => x.id === d)?.passes);
             return `${t.id} (blocked by: ${deps.length > 0 ? deps.join(', ') : 'unknown'})`;
           });
           log.warn('Deadlock detected: pending tasks remain but none are ready', {
@@ -762,247 +534,170 @@ export async function runRalphLoop(
       ? `${context.executionId}-${nextTask.id}`
       : undefined;
 
-    const assembledContext = buildTaskContext({
-      change,
-      task: nextTask,
-      learnings,
-      isRetry: false,
-      issueNumber: context.issueNumber,
-      issueTitle: context.issueTitle,
-      issueBody: context.issueBody,
+    const timeoutConfig = getAgentTimeoutConfig(loadConfig());
+    const perTaskTimeout = timeoutConfig.taskTimeout * 1000;
+
+    const handlerOptions: RalphTaskHandlerOptions = {
+      maxRetries: options.maxRetries,
+      onRetry: options.onRetry,
+      onRetryLog: (taskId: string, attempt: number, category: any, error: string, executionId?: string) => {
+        writeTaskLog(context.workflowLogRepo, logIssueId, 'task_retrying', {
+          taskId,
+          attempt,
+          category,
+          error: error?.slice(0, 500),
+          executionId,
+        });
+      },
+      onTasksPersisted: () => {
+        const latestTasks = readTasks(change.tasksPath);
+        if (latestTasks) {
+          sortedTasks.splice(0, sortedTasks.length, ...latestTasks);
+        }
+        context.syncTasksToStageState?.();
+      },
+      emitTaskUpdate: emitTaskUpdate,
+      executionId: context.executionId,
+      stage: context.stage,
+      model: context.model,
       agentConfig: context.agentConfig,
+      taskTimeout: perTaskTimeout,
+    };
+
+    const mockCtx = {
+      issue: { id: context.issueId ?? '', number: context.issueNumber ?? 0, title: context.issueTitle ?? '', body: context.issueBody ?? '', projectId: context.projectId ?? '' },
+      acpOptions: {},
+      worktreeManager: context.worktreeManager,
+    } as any;
+
+    const deps: RalphTaskHandlerDeps = {
+      worktreePath: context.worktreePath,
+      acpSessionRunner: _acpSessionRunner,
+      worktreeManager: context.worktreeManager,
+      observers: taskObservers,
+      onBeforeKill: context.worktreeManager
+        ? async (_cwd: string) => {
+            return false;
+          }
+        : undefined,
+    };
+
+    writeTaskLog(context.workflowLogRepo, logIssueId, 'task_started', {
+      taskId: nextTask.id,
+      attempt: nextTask.attempts + 1,
+      executionId: taskExecutionId,
     });
 
-    let lastError: string | undefined;
-    let lastCategory: FailureCategory = 'ac_not_met';
-    let taskSuccess = false;
-    let attemptsUsed = nextTask.attempts;
-    let shouldPause = false;
-    let pauseReason: string | undefined;
-    let wipResumeContext: string | undefined;
+    const loadedTask = {
+      task: nextTask,
+      totalTasks: sortedTasks.length,
+      change,
+    };
 
-    const maxRetries = options.maxRetries ?? 3;
-    const totalAttempts = Math.max(1, maxRetries + 1);
+    const executableTask = loaderResult.executableTasks.find(task => task.taskId === nextTask.id);
+    const taskRegistry = createDefaultTaskHandlerRegistry({
+      ralphTask: {
+        ...deps,
+        createOptions: () => handlerOptions,
+      },
+    });
+
+    const taskHandler = taskRegistry.get('ralph-task');
     const taskStartTime = Date.now();
+    const directHandlerResult = options.onlyTaskId && executableTask && taskHandler
+      ? undefined
+      : await executeRalphTask(loadedTask, mockCtx, handlerOptions, deps);
+    const stageTaskResult = options.onlyTaskId && executableTask && taskHandler
+      ? await taskHandler(executableTask, mockCtx)
+      : directHandlerResult!.stageTaskResult;
 
-    for (let attempt = nextTask.attempts + 1; attempt <= nextTask.attempts + totalAttempts; attempt++) {
-      const prompt = attempt > 1
-        ? buildTaskContext({
-            change,
-            task: nextTask,
-            learnings,
-            failureReason: lastError,
-            isRetry: true,
-            wipResumeContext,
-            issueNumber: context.issueNumber,
-            issueTitle: context.issueTitle,
-            issueBody: context.issueBody,
-            agentConfig: context.agentConfig,
-          }).fullPrompt
-        : assembledContext.fullPrompt;
+    const persistedTask = readTasks(change.tasksPath)?.find(task => task.id === nextTask.id);
+    const handlerResult = {
+      stageTaskResult,
+      paused: directHandlerResult?.paused ?? (stageTaskResult.status === 'failed' && !persistedTask?.passes),
+      pauseReason: directHandlerResult?.pauseReason ?? stageTaskResult.reason,
+      lastError: directHandlerResult?.lastError ?? (stageTaskResult.output as { error?: string } | undefined)?.error,
+      lastCategory: directHandlerResult?.lastCategory ?? stageTaskResult.failureCategory,
+    };
 
-      emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'started', attempt);
+    const measuredDuration = Math.max(1, handlerResult.stageTaskResult.duration || Date.now() - taskStartTime);
 
-      log.info('Task attempt started', {
+    if (handlerResult.stageTaskResult.status === 'completed') {
+      const implementationCommitSha = options.onlyTaskId && context.workflowApplicationService
+        ? await commitAggregateTaskChanges(context.worktreePath, nextTask.id, context.issueNumber)
+        : undefined;
+      await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
+      if (!handlerResult.stageTaskResult.alreadyReported) {
+        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, handlerResult.stageTaskResult.attempts, sortedTasks.length, 'completed', handlerResult.stageTaskResult.attempts);
+      }
+      completed++;
+      emitLoopProgress(completed, failed, sortedTasks.length);
+      context.onTaskComplete?.(nextTask, true, handlerResult.stageTaskResult.output as string ?? '');
+
+      log.info('Task completed', {
         issueId: logIssueId,
         taskId: nextTask.id,
-        attempt,
+        attempt: handlerResult.stageTaskResult.attempts,
       });
 
-      writeTaskLog(context.workflowLogRepo, logIssueId, 'task_started', {
+      writeTaskLog(context.workflowLogRepo, logIssueId, 'task_completed', {
         taskId: nextTask.id,
-        attempt,
+        attempt: handlerResult.stageTaskResult.attempts,
         executionId: taskExecutionId,
       });
 
-      const attemptStartTime = Date.now();
+      options.onTaskCompleted?.(nextTask.id);
 
-      const taskObservers = context.observers ?? createWorkflowSessionObservers({
-        eventBus: context.eventBus,
-        workflowLogRepo: context.workflowLogRepo,
-        sessionStreamLogRepo: context.sessionStreamLogRepo,
-        coderSessionRepo: context.coderSessionRepo,
-        stage: context.stage,
-        title: `${nextTask.id}: ${nextTask.title}`,
+      appendStageTaskResult(nextTask.id, nextTask.title, 'completed', handlerResult.stageTaskResult.attempts, measuredDuration);
+      reportTaskToAggregate(context, nextTask, {
+        status: 'completed',
+        attempts: handlerResult.stageTaskResult.attempts,
+        duration: handlerResult.stageTaskResult.duration,
+        output: handlerResult.stageTaskResult.output || implementationCommitSha ? { text: handlerResult.stageTaskResult.output, implementationCommitSha } : undefined,
       });
-
-      const result = await _acpSessionRunner({
-        cwd: context.worktreePath,
-        task: prompt,
-        taskId: nextTask.id,
-        timeout: perTaskTimeout,
-        issueId: context.issueId,
-        projectId: context.projectId,
-        executionId: taskExecutionId,
-        issueNumber: context.issueNumber,
-        onProcessSpawned: context.onProcessSpawned,
-        stage: context.stage,
-        model: context.model,
-        title: `${nextTask.id}: ${nextTask.title}`,
-        observers: taskObservers,
-        onBeforeKill: context.worktreeManager
-          ? async (cwd: string) => {
-              const hash = await context.worktreeManager!.createWipCommit(cwd, nextTask.id, attempt);
-              return hash !== null;
-            }
-          : undefined,
-      });
-
-      const attemptDuration = Date.now() - attemptStartTime;
-
-      attemptsUsed = attempt;
-      if (result.success) {
-        taskSuccess = true;
-        const implementationCommitSha = options.onlyTaskId && context.workflowApplicationService
-          ? await commitAggregateTaskChanges(context.worktreePath, nextTask.id, context.issueNumber)
-          : undefined;
-        updateTaskInList(tasks, nextTask.id, { passes: true, attempts: attempt, error: null, durations: [attemptDuration] });
-        persistTasks(context, change.tasksPath, tasks);
-        await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
-        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'completed', attempt);
-        completed++;
-        emitLoopProgress(completed, failed, sortedTasks.length);
-        context.onTaskComplete?.(nextTask, true, result.text);
-
-        log.info('Task completed', {
-          issueId: logIssueId,
-          taskId: nextTask.id,
-          attempt,
-        });
-
-        writeTaskLog(context.workflowLogRepo, logIssueId, 'task_completed', {
-          taskId: nextTask.id,
-          attempt,
-          executionId: taskExecutionId,
-        });
-
-        options.onTaskCompleted?.(nextTask.id);
-
-        appendStageTaskResult(nextTask.id, nextTask.title, 'completed', attempt, Date.now() - taskStartTime);
-        reportTaskToAggregate(context, nextTask, {
-          status: 'completed',
-          attempts: attempt,
-          duration: Date.now() - taskStartTime,
-          output: result.text || implementationCommitSha ? { text: result.text, implementationCommitSha } : undefined,
-        });
-
-        break;
-      } else {
-        lastError = result.error ?? 'Unknown error';
-        lastCategory = categorizeFailure(lastError, { wipCommitted: result.wipCommitted, failureKind: result.failureKind });
-
-        if (result.failureKind === 'session_failed') {
-          log.warn('Task attempt failed due to session failure', {
-            issueId: logIssueId,
-            taskId: nextTask.id,
-            attempt,
-            failureKind: result.failureKind,
-            failureReason: result.failureReason,
-            error: lastError.slice(0, 200),
-          });
-        }
-
-        if (lastCategory === 'timeout_with_wip' && context.worktreeManager) {
-          const wipInfo = await context.worktreeManager.findWipCommit(context.worktreePath, nextTask.id);
-          if (wipInfo) {
-            wipResumeContext = [
-              `Task ${nextTask.id} timed out on attempt ${attempt}.`,
-              'A WIP commit was saved with the following progress:',
-              '',
-              'Modified files:',
-              ...wipInfo.changedFiles.map(f => `- ${f}`),
-              '',
-              'Diff summary:',
-              wipInfo.diffStat,
-              '',
-              'Continue from this state. Do NOT re-read or re-implement the files listed above.',
-              'Focus on completing the remaining acceptance criteria.',
-            ].join('\n');
-          }
-        }
-
-        log.warn('Task attempt failed', {
-          issueId: logIssueId,
-          taskId: nextTask.id,
-          attempt,
-          category: lastCategory,
-          error: lastError.slice(0, 200),
-        });
-
-        writeTaskLog(context.workflowLogRepo, logIssueId, 'task_failed', {
-          taskId: nextTask.id,
-          attempt,
-          category: lastCategory,
-          error: lastError.slice(0, 500),
-          executionId: taskExecutionId,
-        });
-
-        const categoryConfig = FAILURE_CATEGORY_CONFIGS[lastCategory];
-        const effectiveMaxAttempts = Math.min(maxRetries, categoryConfig.maxAttempts);
-
-        await storeFailureLearning(change, nextTask, lastError, lastCategory, attempt);
-
-        if (!categoryConfig.retryable) {
-          shouldPause = true;
-          pauseReason = `${lastCategory} failure: ${lastError}. This cannot be retried automatically.`;
-          updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError, durations: [attemptDuration] });
-          persistTasks(context, change.tasksPath, tasks);
-          break;
-        }
-
-        if (attempt >= effectiveMaxAttempts + nextTask.attempts) {
-          shouldPause = true;
-          pauseReason = `Max retries (${effectiveMaxAttempts}) exceeded for ${lastCategory} failure: ${lastError}`;
-          updateTaskInList(tasks, nextTask.id, { attempts: attempt, error: lastError, durations: [attemptDuration] });
-          persistTasks(context, change.tasksPath, tasks);
-          break;
-        }
-
-        updateTaskInList(tasks, nextTask.id, { durations: [attemptDuration] });
-        persistTasks(context, change.tasksPath, tasks);
-
-        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'retrying', attempt);
-
-        writeTaskLog(context.workflowLogRepo, logIssueId, 'task_retrying', {
-          taskId: nextTask.id,
-          attempt,
-          category: lastCategory,
-          error: lastError?.slice(0, 500),
-          executionId: taskExecutionId,
-        });
-
-        options.onRetry?.(nextTask, attempt, lastError);
-      }
-    }
-
-    if (!taskSuccess) {
-      if (attemptsUsed === nextTask.attempts) {
-        updateTaskInList(tasks, nextTask.id, { passes: false, attempts: nextTask.attempts, error: `Task was not executed (attemptsUsed=${attemptsUsed}, no attempts made)` });
-        persistTasks(context, change.tasksPath, tasks);
-      }
       taskResults.push({
         taskId: nextTask.id,
-        status: 'failed',
-        attempts: attemptsUsed,
-        error: lastError,
+        status: 'completed',
+        attempts: handlerResult.stageTaskResult.attempts,
       });
-      emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, attemptsUsed, sortedTasks.length, 'failed', attemptsUsed, lastError);
-      appendStageTaskResult(nextTask.id, nextTask.title, 'failed', attemptsUsed, Date.now() - taskStartTime);
-      context.onTaskComplete?.(nextTask, false, lastError ?? 'Max retries exceeded');
+    } else {
+      const shouldPause = handlerResult.paused;
+      const pauseReason = handlerResult.pauseReason;
+      const lastError = handlerResult.lastError ?? 'Unknown error';
+
+      const failureCategory = handlerResult.lastCategory ?? categorizeFailure(lastError, {});
+      persistLoopTaskState(nextTask.id, {
+        passes: false,
+        attempts: handlerResult.stageTaskResult.attempts,
+        error: `Task was not executed (attemptsUsed=${handlerResult.stageTaskResult.attempts}, no attempts made)`,
+      });
+
+      writeTaskLog(context.workflowLogRepo, logIssueId, 'task_failed', {
+        taskId: nextTask.id,
+        attempt: handlerResult.stageTaskResult.attempts,
+        category: failureCategory,
+        error: lastError?.slice(0, 500),
+        executionId: taskExecutionId,
+      });
 
       if (shouldPause && context.onAskUser) {
         const question = `Task ${nextTask.id} failed and requires user intervention.\n\nReason: ${pauseReason}\n\nOptions:\n1. Retry this task\n2. Abort the build\n\nWhat would you like to do?`;
         const answer = await context.onAskUser(question, nextTask.id);
 
         if (answer.toLowerCase().includes('skip')) {
+          persistLoopTaskState(nextTask.id, {
+            passes: false,
+            attempts: handlerResult.stageTaskResult.attempts,
+            error: lastError,
+          });
           failed++;
-          pauseReason = `Task ${nextTask.id} was not completed: ${lastError}`;
+          const skipPauseReason = `Task ${nextTask.id} was not completed: ${lastError}`;
           reportTaskToAggregate(context, nextTask, {
             status: 'failed',
-            attempts: attemptsUsed,
-            duration: Date.now() - taskStartTime,
+            attempts: handlerResult.stageTaskResult.attempts,
+            duration: handlerResult.stageTaskResult.duration,
             output: { error: lastError, requestedAction: 'skip' },
-            reason: pauseReason,
+            reason: skipPauseReason,
           });
           const result: RalphLoopResult = {
             completed,
@@ -1013,19 +708,29 @@ export async function runRalphLoop(
             success: false,
             paused: true,
             pausedTaskId: nextTask.id,
-            pauseReason,
+            pauseReason: skipPauseReason,
           };
           context.onLoopComplete?.(result);
           return result;
         } else if (answer.toLowerCase().includes('retry')) {
-          taskResults.pop();
           continue;
         } else {
+          persistLoopTaskState(nextTask.id, {
+            passes: false,
+            attempts: handlerResult.stageTaskResult.attempts,
+            error: lastError,
+          });
+          taskResults.push({
+            taskId: nextTask.id,
+            status: 'failed',
+            attempts: handlerResult.stageTaskResult.attempts,
+            error: lastError,
+          });
           failed++;
           reportTaskToAggregate(context, nextTask, {
             status: 'failed',
-            attempts: attemptsUsed,
-            duration: Date.now() - taskStartTime,
+            attempts: handlerResult.stageTaskResult.attempts,
+            duration: handlerResult.stageTaskResult.duration,
             output: { error: lastError, pauseReason },
             reason: pauseReason ?? lastError,
           });
@@ -1038,43 +743,56 @@ export async function runRalphLoop(
             success: false,
             paused: true,
             pausedTaskId: nextTask.id,
-            pauseReason,
+            pauseReason: pauseReason ?? lastError,
           };
           context.onLoopComplete?.(result);
           return result;
         }
       } else if (shouldPause && !context.onAskUser) {
-        updateTaskInList(tasks, nextTask.id, { passes: false, error: lastError });
-        persistTasks(context, change.tasksPath, tasks);
+        persistLoopTaskState(nextTask.id, {
+          passes: false,
+          attempts: handlerResult.stageTaskResult.attempts,
+          error: lastError,
+        });
         reportTaskToAggregate(context, nextTask, {
           status: 'failed',
-          attempts: attemptsUsed,
-          duration: Date.now() - taskStartTime,
+          attempts: handlerResult.stageTaskResult.attempts,
+          duration: handlerResult.stageTaskResult.duration,
           output: { error: lastError },
           reason: lastError,
         });
         failed++;
         processedTaskIds.add(nextTask.id);
       } else {
+        persistLoopTaskState(nextTask.id, {
+          passes: false,
+          attempts: handlerResult.stageTaskResult.attempts,
+          error: lastError,
+        });
         reportTaskToAggregate(context, nextTask, {
           status: 'failed',
-          attempts: attemptsUsed,
-          duration: Date.now() - taskStartTime,
+          attempts: handlerResult.stageTaskResult.attempts,
+          duration: handlerResult.stageTaskResult.duration,
           output: { error: lastError },
           reason: lastError,
         });
         failed++;
         processedTaskIds.add(nextTask.id);
       }
-    } else {
+
       taskResults.push({
         taskId: nextTask.id,
-        status: 'completed',
-        attempts: attemptsUsed,
+        status: 'failed',
+        attempts: handlerResult.stageTaskResult.attempts,
+        error: lastError,
       });
+      if (!handlerResult.stageTaskResult.alreadyReported) {
+        emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, handlerResult.stageTaskResult.attempts, sortedTasks.length, 'failed', handlerResult.stageTaskResult.attempts, lastError);
+      }
+      appendStageTaskResult(nextTask.id, nextTask.title, 'failed', handlerResult.stageTaskResult.attempts, measuredDuration);
+      context.onTaskComplete?.(nextTask, false, lastError ?? 'Max retries exceeded');
     }
 
-    learnings = loadLearningsFromDir(change.sessionMemoriesPath);
     if (options.onlyTaskId) break;
   }
 

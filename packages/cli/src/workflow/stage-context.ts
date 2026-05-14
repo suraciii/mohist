@@ -158,6 +158,7 @@ export interface StageTaskResult {
   reason?: string;
   causedBy?: StageTaskCause;
   alreadyReported?: boolean;
+  failureCategory?: string;
 }
 
 export interface CheckFailurePolicy {
