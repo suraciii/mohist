@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 27;
+const SCHEMA_VERSION = 28;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -212,6 +212,9 @@ export function initializeDatabase(db: DatabaseManager): void {
   }
   if (currentVersion < 27) {
     migrateToVersion27(db);
+  }
+  if (currentVersion < 28) {
+    migrateToVersion28(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -1186,5 +1189,31 @@ function migrateToVersion27(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 27);
+  });
+}
+
+const CREATE_ISSUE_START_PREREQUISITES_TABLE = `
+CREATE TABLE IF NOT EXISTS issue_start_prerequisites (
+  issue_id              TEXT NOT NULL,
+  prerequisite_issue_id TEXT NOT NULL,
+  created_at            TEXT NOT NULL,
+  PRIMARY KEY (issue_id, prerequisite_issue_id),
+  FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE,
+  FOREIGN KEY (prerequisite_issue_id) REFERENCES issues(id) ON DELETE CASCADE
+);
+`;
+
+const CREATE_ISSUE_START_PREREQUISITES_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_issue_start_prerequisites_issue ON issue_start_prerequisites(issue_id);',
+  'CREATE INDEX IF NOT EXISTS idx_issue_start_prerequisites_prerequisite ON issue_start_prerequisites(prerequisite_issue_id);',
+];
+
+function migrateToVersion28(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_ISSUE_START_PREREQUISITES_TABLE);
+    for (const indexSql of CREATE_ISSUE_START_PREREQUISITES_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 28);
   });
 }

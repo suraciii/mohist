@@ -55,8 +55,19 @@ function ingestStdin(): Promise<BodyIngestResult> {
   });
 }
 
-function isStartable(issue: Issue): boolean {
-  return issue.stage === Stage.Backlog;
+function isStartable(issue: IssueWithPrerequisites): boolean {
+  return issue.startEligibility?.startable === true;
+}
+
+function renderPrerequisites(prerequisites: IssuePrerequisiteSummary[] | undefined): void {
+  if (!prerequisites || prerequisites.length === 0) return;
+
+  console.log(chalk.gray('\n  Start Prerequisites:'));
+  for (const prereq of prerequisites) {
+    const deliveredColor = prereq.delivered ? chalk.green : chalk.yellow;
+    const statusLabel = prereq.delivered ? 'delivered' : 'not delivered';
+    console.log(`    ${deliveredColor(prereq.delivered ? '✓' : '○')} #${prereq.number}: ${prereq.title} (${statusLabel})`);
+  }
 }
 
 function latestCurrentTruthChecks(checkResults: any[]): any[] {
@@ -135,6 +146,28 @@ export interface CoderSessionResponse {
   failureReason: string | null;
 }
 
+export interface IssuePrerequisiteSummary {
+  issueId: string;
+  number: number;
+  title: string;
+  delivered: boolean;
+  stage: Stage;
+  status: string;
+  mergeState?: string | null;
+}
+
+export interface IssueStartEligibility {
+  startable: boolean;
+  reason: 'ready' | 'not-startable-lifecycle' | 'waiting-for-delivery';
+  message?: string;
+  waitingForDelivery: IssuePrerequisiteSummary[];
+}
+
+export interface IssueWithPrerequisites extends Issue {
+  prerequisites?: IssuePrerequisiteSummary[];
+  startEligibility?: IssueStartEligibility;
+}
+
 export function formatSessionState(session: CoderSessionResponse | null): string {
   if (!session) return chalk.gray('No active session');
 
@@ -206,7 +239,7 @@ export function setupIssueCommands(program: Command): void {
         process.exit(1);
       }
       try {
-        const response = await apiClient<ApiResponse<Issue>>(
+        const response = await apiClient<ApiResponse<IssueWithPrerequisites>>(
           'POST',
           '/issues',
           { title, body: bodyResult.body, labels: options.label, priority: normalizedPriority, model: options.model }
@@ -218,6 +251,9 @@ export function setupIssueCommands(program: Command): void {
           console.log(chalk.gray(`  Priority: ${formatPriority(issue.priority)}`));
           if (isStartable(issue)) {
             console.log(chalk.cyan(`  Tip: Run '${chalk.bold(`mo issue start ${issue.number}`)}' to begin processing`));
+          }
+          if (issue.startEligibility && !issue.startEligibility.startable && issue.startEligibility.message) {
+            console.log(chalk.yellow(`  Waiting: ${issue.startEligibility.message}`));
           }
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
@@ -309,14 +345,18 @@ export function setupIssueCommands(program: Command): void {
             const mergeStatus = classifyMergeDelivery(issue);
             const mergeWarning = mergeStatus === 'done-not-merged' ? chalk.red.bold(' [UNMERGED]') : '';
 
+            const waitingWarning = issue.startEligibility?.waitingForDelivery?.length
+              ? chalk.yellow.bold(` [Waiting for #${issue.startEligibility.waitingForDelivery[0].number}]`)
+              : '';
+
             if (options.archived || options.all) {
               const archivedCol = issue.archivedAt
                 ? chalk.gray(formatArchivedAt(issue.archivedAt)).padEnd(24)
                 : '';
               const suffix = issue.archivedAt && !options.archived ? chalk.gray(' (archived)') : '';
-              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart.padEnd(42)}${archivedCol}${suffix}${mergeWarning}`);
+              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart.padEnd(42)}${archivedCol}${suffix}${mergeWarning}${waitingWarning}`);
             } else {
-              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart}${mergeWarning}`);
+              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart}${mergeWarning}${waitingWarning}`);
             }
           });
           console.log();
@@ -486,6 +526,12 @@ export function setupIssueCommands(program: Command): void {
               console.log(`  ${chalk.gray(notes.split('\n').join('\n  '))}`);
             }
           }
+          
+          renderPrerequisites(issue.prerequisites);
+
+          if (issue.startEligibility && !issue.startEligibility.startable) {
+            console.log(chalk.yellow(`  Waiting: ${issue.startEligibility.message}`));
+          }
 
           if (issue.labels && issue.labels.length > 0) {
             console.log(`  Labels: ${formatLabels(issue.labels)}`);
@@ -512,6 +558,47 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to show issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('add-prerequisite <number> <prerequisite-number>')
+    .description('Declare an issue-level start prerequisite')
+    .action(async (number, prerequisiteNumber) => {
+      try {
+        const issueNumber = parseInt(number, 10);
+        const requiredNumber = parseInt(prerequisiteNumber, 10);
+
+        if (Number.isNaN(issueNumber) || Number.isNaN(requiredNumber)) {
+          console.error(chalk.red('Error: issue number and prerequisite number must both be integers'));
+          process.exit(1);
+        }
+
+        const response = await apiClient<ApiResponse<{ issue: IssueWithPrerequisites; message: string; reason?: string }>>(
+          'POST',
+          `/issues/${issueNumber}/prerequisites`,
+          { prerequisiteNumber: requiredNumber }
+        );
+
+        if (response.success && response.data?.issue) {
+          console.log(chalk.green(`✓ ${response.data.message}`));
+          renderPrerequisites(response.data.issue.prerequisites);
+          if (response.data.issue.startEligibility && !response.data.issue.startEligibility.startable && response.data.issue.startEligibility.message) {
+            console.log(chalk.yellow(`  Waiting: ${response.data.issue.startEligibility.message}`));
+          }
+          return;
+        }
+
+        const reason = (response.data as { reason?: string } | undefined)?.reason;
+        if (reason === 'circular-prerequisite') {
+          console.error(chalk.red(`Error: ${response.error}`));
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+        }
+        process.exit(1);
+      } catch (error) {
+        console.error(chalk.red(`Failed to add prerequisite: ${error}`));
+        process.exit(1);
       }
     });
 
@@ -739,11 +826,11 @@ export function setupIssueCommands(program: Command): void {
     .description('Start processing an issue')
     .action(async (number) => {
       try {
-        const response = await apiClient<ApiResponse>(
+        const response = await apiClient<ApiResponse<{ startEligibility?: IssueStartEligibility; taskId?: string }>>(
           'POST',
           `/issues/${number}/start`
         );
-        
+
         if (response.success) {
           console.log(chalk.green(`✓ Started processing issue #${number}`));
           if (response.data?.taskId) {
@@ -751,9 +838,17 @@ export function setupIssueCommands(program: Command): void {
           }
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
+          if (response.data?.startEligibility) {
+            const se = response.data.startEligibility;
+            if (se.waitingForDelivery.length > 0) {
+              console.error(chalk.yellow(`  Waiting for: ${se.waitingForDelivery.map(p => `#${p.number}`).join(', ')}`));
+            }
+          }
+          process.exit(1);
         }
       } catch (error) {
         console.error(chalk.red(`Failed to start issue: ${error}`));
+        process.exit(1);
       }
     });
 

@@ -24,7 +24,7 @@ interface Props {
   showArchiveButton?: boolean
 }
 
-type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | 'false-done' | null
+type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | 'false-done' | 'waiting' | null
 
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (
@@ -47,6 +47,9 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   }
   if (issue.approvalState?.status === 'awaiting') {
     return 'approval'
+  }
+  if (issue.startEligibility?.waitingForDelivery?.length) {
+    return 'waiting'
   }
   if (isAgentRunning) {
     return 'running'
@@ -81,6 +84,13 @@ function Badge({
       <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
         <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
         Running
+      </span>
+    )
+  }
+  if (type === 'waiting') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+        Waiting
       </span>
     )
   }
@@ -284,6 +294,23 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               {issue.blockedReason.length > 60
                 ? issue.blockedReason.slice(0, 60) + '...'
                 : issue.blockedReason}
+            </p>
+          </div>
+        )}
+
+        {issue.startEligibility?.waitingForDelivery?.length && !isClosed && (
+          <div className="mt-2">
+            <p
+              className="text-xs text-amber-600"
+              style={{
+                display: '-webkit-box',
+                WebkitLineClamp: 1,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+              title={issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForDelivery[0].number}`}
+            >
+              {issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForDelivery[0].number}`}
             </p>
           </div>
         )}
