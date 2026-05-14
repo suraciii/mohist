@@ -41,6 +41,7 @@ function createTestServer(app: Hono): http.Server {
 describe('Provider Routes', () => {
   let tmpDir: string;
   let configPath: string;
+  let originalHome: string | undefined;
   let eventBus: EventBus;
   let rateLimiter: RateLimiter;
   let server: http.Server;
@@ -49,6 +50,8 @@ describe('Provider Routes', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-providers-test-'));
     configPath = path.join(tmpDir, 'config.jsonc');
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
     clearConfigCache();
     
     eventBus = new EventBus();
@@ -60,6 +63,8 @@ describe('Provider Routes', () => {
 
   afterEach(() => {
     server.close();
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
     clearConfigCache();
   });
@@ -76,7 +81,7 @@ describe('Provider Routes', () => {
       expect(provider).toHaveProperty('id');
       expect(provider).toHaveProperty('name');
       expect(provider).toHaveProperty('baseURL');
-      expect(provider).toHaveProperty('models');
+      expect(provider).not.toHaveProperty('models');
       expect(provider).toHaveProperty('configured');
       expect(provider).toHaveProperty('source');
       expect(provider).toHaveProperty('isBuiltin');
@@ -105,18 +110,27 @@ describe('Provider Routes', () => {
       }
     });
 
-    it('should return models in fully-qualified ID format (provider/model-id)', async () => {
-      const response = await request(server).get('/api/providers');
+    it('should return models from /models in fully-qualified ID format (provider/model-id)', async () => {
+      await request(server)
+        .post('/api/providers/test-model-provider')
+        .send({
+          apiKey: 'sk-test-key',
+          baseURL: 'https://api.example.com/v1',
+          sdk: 'openai-compatible',
+          models: ['model-a'],
+        });
+
+      const response = await request(server).get('/api/providers/models');
 
       expect(response.status).toBe(200);
-      const anthropicProvider = response.body.data.find((p: { id: string }) => p.id === 'anthropic');
-      expect(anthropicProvider).toBeDefined();
-      expect(Array.isArray(anthropicProvider.models)).toBe(true);
-      expect(anthropicProvider.models.length).toBeGreaterThan(0);
-      const modelId = anthropicProvider.models[0];
+      const testProvider = response.body.data.find((p: { id: string }) => p.id === 'test-model-provider');
+      expect(testProvider).toBeDefined();
+      expect(Array.isArray(testProvider.models)).toBe(true);
+      expect(testProvider.models.length).toBeGreaterThan(0);
+      const modelId = testProvider.models[0].id;
       expect(typeof modelId).toBe('string');
       expect(modelId).toContain('/');
-      expect(modelId.startsWith('anthropic/')).toBe(true);
+      expect(modelId.startsWith('test-model-provider/')).toBe(true);
     });
   });
 
