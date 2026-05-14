@@ -22,6 +22,7 @@ import { createWorkflowSessionObservers } from '../agent-runtime';
 import { HealthGateCheck } from './checks/health-gate-check';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
+import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
 
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
@@ -63,6 +64,10 @@ export class PlanStageRunner extends BaseStageRunner {
     failedCheck: CheckResult | undefined,
     attempt: number,
   ): Promise<StageTaskResult | null> {
+    if (taskId === 'rebase-branch') {
+      return executeRebaseBranchTask(ctx, attempt);
+    }
+
     if (taskId === 'repair-plan-artifacts' || taskId === 'fix-plan-health') {
       const adapter = createRepairFixAdapter();
       const worktreePath = this.worktreePath || ctx.worktreeManager.getPath(

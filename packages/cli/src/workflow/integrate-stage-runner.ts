@@ -10,6 +10,7 @@ import { HealthGateCheck } from './checks/health-gate-check';
 import type { CheckResult, StageTaskResult } from './stage-context';
 import type { Check } from './checks';
 import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
+import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
 
 const log = Log.create({ service: 'integrate-stage-runner' });
 
@@ -646,6 +647,10 @@ export class IntegrateStageRunner extends BaseStageRunner {
         });
       }
       return result ? this.stepToTaskResult(result) : null;
+    }
+
+    if (taskId === 'rebase-branch') {
+      return executeRebaseBranchTask(ctx, attempt);
     }
 
     if (taskId !== 'fix-integrate-health') return null;

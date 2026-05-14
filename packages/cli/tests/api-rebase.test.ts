@@ -11,6 +11,8 @@ import { ConfigRepo } from '../src/db/config-repo';
 import { ConfigService } from '../src/services/config-service';
 import { createIssueRoutes } from '../src/api/issues';
 import { Stage, IssueStatus } from '../src/types';
+import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
+import { WorkflowRunService } from '../src/services/workflow-run-service';
 
 function createTestServer(app: Hono): http.Server {
   return http.createServer(async (req, res) => {
@@ -141,8 +143,88 @@ describe('POST /api/issues/:number/rebase', () => {
     });
   });
 
-  describe('enqueue', () => {
-    it('should enqueue rebase task and return 202', async () => {
+  describe('non-Done stages with active WorkflowRun', () => {
+    function makeServerWithWorkflow(opts: { mergeQueue?: any } = {}) {
+      const app = new Hono();
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus);
+      vi.spyOn(agentRunner, 'enqueue').mockReturnValue({
+        taskId: 'task-123',
+        status: 'pending' as const,
+        queuePosition: 0,
+      });
+      const workflowRunService = new WorkflowRunService(db);
+      app.route('/api/issues', createIssueRoutes(
+        issueService, projectService, stateManager,
+        null, undefined, agentRunner,
+        undefined, undefined, undefined, undefined,
+        opts.mergeQueue,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        workflowRunService,
+      ));
+      return { server: createTestServer(app), agentRunner, workflowRunService };
+    }
+
+    it('POST /api/issues/:number/rebase schedules rebase-branch through WorkflowRun for Build stage', async () => {
+      const issue = issueService.create({ projectId, title: 'Build Issue' });
+      issueService.transitionToStage(issue.id, Stage.Build);
+      issueService.setStatus(issue.id, IssueStatus.Active);
+
+      const { server, agentRunner, workflowRunService } = makeServerWithWorkflow();
+
+      workflowRunService.startRun(issue.id, issue.number);
+
+      const res = await request(server).post(`/api/issues/${issue.number}/rebase`);
+
+      expect(res.status).toBe(202);
+      expect(res.body.data.taskId).toBe('rebase-branch');
+      expect(res.body.data.status).toBe('pending');
+      expect(res.body.data.message).toContain('Rebase branch task scheduled');
+      expect(agentRunner.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('POST /api/issues/:number/rebase with active workflow does NOT call agentRunner.enqueue', async () => {
+      const issue = issueService.create({ projectId, title: 'Check Issue' });
+      issueService.transitionToStage(issue.id, Stage.Check);
+      issueService.setStatus(issue.id, IssueStatus.Active);
+
+      const { server, agentRunner, workflowRunService } = makeServerWithWorkflow();
+
+      workflowRunService.startRun(issue.id, issue.number);
+
+      const res = await request(server).post(`/api/issues/${issue.number}/rebase`);
+
+      expect(res.status).toBe(202);
+      expect(agentRunner.enqueue).not.toHaveBeenCalled();
+      expect(res.body.data.taskId).toBe('rebase-branch');
+    });
+
+    it('duplicate rebase click returns same taskId without creating duplicate', async () => {
+      const issue = issueService.create({ projectId, title: 'Plan Issue' });
+      issueService.transitionToStage(issue.id, Stage.Plan);
+      issueService.setStatus(issue.id, IssueStatus.Active);
+
+      const { server, workflowRunService } = makeServerWithWorkflow();
+
+      workflowRunService.startRun(issue.id, issue.number);
+
+      const res1 = await request(server).post(`/api/issues/${issue.number}/rebase`);
+      expect(res1.status).toBe(202);
+      const firstTaskId = res1.body.data.taskId;
+
+      const res2 = await request(server).post(`/api/issues/${issue.number}/rebase`);
+      expect(res2.status).toBe(202);
+      expect(res2.body.data.taskId).toBe(firstTaskId);
+    });
+  });
+
+  describe('enqueue fallback when no active WorkflowRun', () => {
+    it('should enqueue rebase task and return 202 when no WorkflowRun exists', async () => {
       const issue = issueService.create({ projectId, title: 'Build Issue' });
       issueService.transitionToStage(issue.id, Stage.Build);
       issueService.setStatus(issue.id, IssueStatus.Active);
@@ -158,7 +240,7 @@ describe('POST /api/issues/:number/rebase', () => {
       expect(agentRunner.enqueue).toHaveBeenCalledWith(issue.id, 'rebase', { reEvalPlan: true });
     });
 
-    it('should enqueue rebase with empty payload when no body', async () => {
+    it('should enqueue rebase with empty payload when no body and no WorkflowRun', async () => {
       const issue = issueService.create({ projectId, title: 'Plan Issue' });
       issueService.transitionToStage(issue.id, Stage.Plan);
       issueService.setStatus(issue.id, IssueStatus.Active);

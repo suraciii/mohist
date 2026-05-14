@@ -12,6 +12,7 @@ import { validateReviewArtifact } from './utils';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
+import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
 import * as fs from 'node:fs';
 
 const log = Log.create({ service: 'check-stage-runner' });
@@ -420,6 +421,10 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
     if (taskId === 'check:converge-review-snapshot') {
       return this.runConvergeReviewSnapshotTask(ctx);
+    }
+
+    if (taskId === 'rebase-branch') {
+      return executeRebaseBranchTask(ctx, attempt);
     }
 
     if (taskId === 'fix-review-findings' || taskId === 'repair-review-findings') {

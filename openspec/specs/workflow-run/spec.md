@@ -34,22 +34,6 @@ After Plan produces and validates `tasks.json`, Build tasks SHALL be materialize
 - **THEN** the corresponding WorkflowRun task SHALL reflect the latest status, attempts, artifacts, and output
 - **AND** the primary user-facing Build task list SHALL NOT be reconstructed from `tasks.json`, logs, checkpoints, or session events
 
-### Requirement: REQ-WR-003 Runtime-added work is represented as normal tasks
-
-Runtime-added repair, rebase, retry, rerun, and conflict-resolution work SHALL be appended to the current StageRun as ordinary WorkflowRun tasks. Such tasks SHALL include `reason` and `causedBy` metadata when they are scheduled by a task or check failure policy.
-
-#### Scenario: Fix task records origin
-
-- **WHEN** a failed check schedules a repair task
-- **THEN** the repair SHALL appear in the same StageRun task list as other tasks
-- **AND** it SHALL record causedBy metadata identifying the originating check or task
-
-#### Scenario: Origin metadata is not a user-facing category
-
-- **WHEN** WorkflowRun tasks are returned through API or rendered in UI
-- **THEN** users SHALL see one task list for the stage
-- **AND** users SHALL NOT need to interpret planned, dynamic, static, or fix task categories
-
 ### Requirement: REQ-WR-004 Evidence and checkpoints remain separate from WorkflowRun state
 
 WorkflowRun SHALL be the current runtime state root and consistency boundary. `stage_executions`, `workflow_log`, session logs, check suites, `stage_states`, and checkpoints SHALL retain evidence, audit, compatibility projection, or resume-cursor roles and SHALL NOT be used as the primary source for current stage, task, check, approval, or failure decisions.
@@ -87,4 +71,22 @@ Integrate stage progress SHALL be represented in WorkflowRun using standard task
 - **WHEN** `health:integrate` fails after `integrate:merge` has completed
 - **THEN** WorkflowRun SHALL fail with reason `post-merge-health-failed`
 - **AND** it SHALL NOT schedule `fix-integrate-health` regardless of check failure policy configuration
+
+### Requirement: REQ-WR-003 Runtime-added work is represented as normal tasks
+
+Runtime-added repair, rebase, retry, rerun, and conflict-resolution work SHALL be appended to the current StageRun as ordinary WorkflowRun tasks. User-triggered rebase SHALL use a visible `rebase-branch` task in the current stage instead of a hidden queue-only execution path.
+
+#### Scenario: User-triggered rebase appears as current stage work
+
+- **WHEN** a user triggers rebase for a non-Done issue with an active WorkflowRun
+- **THEN** the system SHALL append `rebase-branch` to the current StageRun task list with title `Rebase branch`
+- **AND** the task SHALL carry reason and causedBy metadata explaining why it was added
+- **AND** if a `rebase-branch` task in `pending` or `running` state already exists in that StageRun, the system SHALL NOT append a duplicate task
+
+#### Scenario: Approval-paused stage can execute appended rebase task
+
+- **WHEN** the current StageRun is awaiting approval
+- **AND** the system appends `rebase-branch` as new executable work
+- **THEN** the StageRun SHALL return to `running` so `nextWork()` can schedule the task
+- **AND** prior approval state SHALL remain evidence until later invalidation policy decides whether it is still valid
 

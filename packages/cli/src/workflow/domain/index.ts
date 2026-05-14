@@ -531,6 +531,31 @@ export class WorkflowRun {
     return this.decision([]);
   }
 
+  scheduleRebaseTask(reason?: string): WorkflowDecision {
+    this.assertRunning();
+    const stageRun = this.currentStageRun();
+    if (stageRun.stage !== this.currentStage) {
+      throw new WorkflowDomainError(`Cannot schedule rebase in stage ${stageRun.stage}; current stage is ${this.currentStage}`);
+    }
+
+    const existingRebase = stageRun.tasks.find(t => t.id === 'rebase-branch' && !t.terminal);
+    if (existingRebase) {
+      return this.decision([]);
+    }
+
+    if (stageRun.status === 'awaiting-approval') {
+      stageRun.status = 'running';
+      stageRun.approval = null;
+    }
+
+    const causedBy: CausedByMetadata = {
+      type: 'branch-changed',
+      message: reason ?? 'Target branch moved; rebase requested',
+    };
+    stageRun.appendAdHocTask('rebase-branch', 'Rebase branch', causedBy);
+    return this.decision([]);
+  }
+
   completeTask(stage: Stage, taskId: string, result: TaskResultInput): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
@@ -579,6 +604,22 @@ export class WorkflowRun {
       for (const checkName of ['review-passed', 'merge-ready']) {
         stageRun.resetCheck(checkName);
         events.push({ type: 'check-invalidated', stage, checkName, reason });
+      }
+    }
+    if (stage === Stage.Check && taskId === 'rebase-branch' && result.status === 'completed') {
+      const shaChanged = this.detectShaChanged(result.output);
+      if (shaChanged) {
+        const reason = 'Rebase changed the candidate snapshot; re-run review checks';
+        stageRun.resetTask('ai-review');
+        events.push({ type: 'task-invalidated', stage, taskId: 'ai-review', reason });
+        for (const checkName of ['review-passed', 'merge-ready']) {
+          stageRun.resetCheck(checkName);
+          events.push({ type: 'check-invalidated', stage, checkName, reason });
+        }
+        if (stageRun.approval?.status === 'awaiting') {
+          stageRun.approval = { ...stageRun.approval, status: 'awaiting' };
+          events.push({ type: 'approval-requested', stage });
+        }
       }
     }
     if (stageRun.freezePoint) events.push({ type: 'integrate-frozen', stage, freezePoint: stageRun.freezePoint });
@@ -916,6 +957,18 @@ export class WorkflowRun {
     if (status === 'pass') return 'passed';
     if (status === 'fail') return 'failed';
     return status;
+  }
+
+  private detectShaChanged(output: unknown): boolean {
+    if (!output || typeof output !== 'object') return false;
+    const data = output as Record<string, unknown>;
+    if (data.shaChanged === true) return true;
+    const beforeBaseSha = typeof data.beforeBaseSha === 'string' ? data.beforeBaseSha : null;
+    const afterBaseSha = typeof data.afterBaseSha === 'string' ? data.afterBaseSha : null;
+    const beforeHeadSha = typeof data.beforeHeadSha === 'string' ? data.beforeHeadSha : null;
+    const afterHeadSha = typeof data.afterHeadSha === 'string' ? data.afterHeadSha : null;
+    if (!beforeBaseSha || !afterBaseSha || !beforeHeadSha || !afterHeadSha) return false;
+    return beforeBaseSha !== afterBaseSha || beforeHeadSha !== afterHeadSha;
   }
 
   private extractDeliveryMetadata(output: unknown): DeliveryMetadata {

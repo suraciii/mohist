@@ -12,6 +12,7 @@ import { HealthGateCheck } from './checks/health-gate-check';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { runHealthFixTask } from './health-fix-task';
+import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
 
 const log = Log.create({ service: 'workflow' });
 
@@ -290,6 +291,10 @@ export class BuildStageRunner extends BaseStageRunner {
     failedCheck: CheckResult | undefined,
     attempt: number,
   ): Promise<StageTaskResult | null> {
+    if (taskId === 'rebase-branch') {
+      return executeRebaseBranchTask(ctx, attempt);
+    }
+
     if (taskId !== 'fix-build-health') return null;
     if (!failedCheck) {
       return {

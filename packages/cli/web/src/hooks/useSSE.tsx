@@ -175,6 +175,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           case 'rebase_completed': {
             setRebaseConflict(null)
             queryClient.invalidateQueries({ queryKey: ['issues'] })
+            queryClient.invalidateQueries({ queryKey: ['issues', 'workflow-run'] })
             break
           }
           case 'rebase_conflict': {
@@ -188,6 +189,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
               toast.error(`Rebase conflict on Issue #${d.issueNumber}`)
             }
             queryClient.invalidateQueries({ queryKey: ['issues'] })
+            queryClient.invalidateQueries({ queryKey: ['issues', 'workflow-run'] })
             break
           }
           case 'agent_conflict_resolution_started': {
@@ -234,6 +236,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
                 const found = data.find((i) => i.id === d.issueId)
                 if (found) {
                   queryClient.invalidateQueries({ queryKey: ['issues', found.number, 'executions'] })
+                  queryClient.invalidateQueries({ queryKey: ['issues', found.number, 'workflow-run'] })
                   break
                 }
               }

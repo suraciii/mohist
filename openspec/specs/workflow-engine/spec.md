@@ -145,29 +145,6 @@ The workflow engine SHALL use `review-passed` as the read-only verifier for the 
 - **THEN** the regenerated review SHALL be the current review truth for approval
 - **AND** stale review verdicts from earlier snapshots SHALL NOT be used for approval
 
-### Requirement: merge-ready invalidates review on code change
-
-The workflow engine SHALL use `merge-ready` as the read-only user-visible verifier that the reviewed candidate can be integrated into the target branch. If merge-readiness work changes the candidate code snapshot, the workflow SHALL invalidate the existing review result and rerun `ai-review` before approval.
-
-#### Scenario: Merge-ready passes without snapshot change
-
-- **WHEN** the reviewed candidate can be merged into the target branch without changing the candidate snapshot
-- **THEN** `merge-ready` SHALL pass
-- **AND** the current `review-passed` result MAY remain valid for approval
-
-#### Scenario: Merge-ready records mergeability failure
-
-- **WHEN** the reviewed candidate cannot currently be merged into the target branch
-- **THEN** `merge-ready` SHALL fail with target branch and conflict or mergeability evidence
-- **AND** the workflow SHALL NOT expose the legacy `merge-readiness` check name for that decision
-
-#### Scenario: Merge repair changes snapshot
-
-- **WHEN** merge-readiness repair, rebase, or conflict resolution changes `HEAD`
-- **THEN** the current review result SHALL be invalidated
-- **AND** `ai-review` SHALL rerun for the new snapshot
-- **AND** approval SHALL NOT be requested until `review-passed` and `merge-ready` both pass for that snapshot
-
 ### Requirement: Collect-first check phase reporting
 
 The workflow engine SHALL run all checks in the current phase once in declared order before deciding how to handle failures. The initial phase result set SHALL preserve the complete diagnostic picture for the phase instead of stopping at the first non-pass result.
@@ -281,17 +258,6 @@ Stage execution infrastructure SHALL expose shared stage-scoped safe `emit` and 
 - **THEN** the shared helper swallows the infrastructure failure
 - **AND** stage execution continues through the existing runner control flow
 
-### Requirement: Non-Build tasks execute through a minimal shared handler contract
-
-Non-Build task execution SHALL support a minimal shared runtime contract where a task definition plus `StageContext` resolves to an executable task and executes through a handler that returns normalized `StageTaskResult`-style output.
-
-#### Scenario: Shared handler execution preserves runner ownership
-
-- **WHEN** a Plan, Check, or Integrate task executes through the shared runtime
-- **THEN** the handler executes only that task and returns normalized task status, output, and timing data
-- **AND** the handler does not write checkpoints, transition stages, request approval, or decide workflow progression
-- **AND** the runner remains responsible for retries, reporting, checks, and final stage success or failure
-
 ### Requirement: Static task loading is available for Plan Check and Integrate tasks
 
 The workflow runtime SHALL support a static task loader that prepares executable Plan, Check, and Integrate tasks from `StageContext` without taking over Build or Ralph execution behavior.
@@ -334,4 +300,38 @@ Service-backed workflow tasks SHALL execute through a reusable `ServiceCallTaskH
 - **WHEN** an Integrate step or merge-style repair task invokes repository or application services through `ServiceCallTaskHandler`
 - **THEN** the handler normalizes successful and failed service invocation results into `StageTaskResult`-style output
 - **AND** the task continues to rely on the runner for stage-level events, checks, and final workflow decisions
+
+### Requirement: Non-Build tasks execute through a minimal shared handler contract
+
+Non-Build task execution SHALL support runtime-added rebase work through the same shared handler contract used by other WorkflowRun tasks. `rebase-branch` SHALL execute as ordinary WorkflowRun task work and SHALL NOT use a queue-only rebase execution path as the primary workflow behavior.
+
+#### Scenario: Rebase task executes through normal workflow scheduling
+
+- **WHEN** `WorkflowRun.nextWork()` returns `task: rebase-branch`
+- **THEN** the workflow engine and stage runner SHALL execute that task through the shared task runtime
+- **AND** later tasks or checks SHALL NOT run until `rebase-branch` reaches a terminal state
+
+### Requirement: merge-ready invalidates review on code change
+
+The workflow engine SHALL invalidate review, check, and approval state based on actual candidate snapshot change facts rather than on rebase intent alone. When a completed `rebase-branch` task reports `shaChanged=true`, the affected stage policy SHALL reset the dependent review/check state; when `shaChanged=false`, the prior review/check state MAY remain valid.
+
+#### Scenario: Rebase with unchanged snapshot preserves review state
+
+- **WHEN** `rebase-branch` completes successfully
+- **AND** its result reports `shaChanged=false`
+- **THEN** existing review/check state SHALL remain valid
+- **AND** the workflow SHALL continue without forcing re-review solely because the user clicked Rebase
+
+#### Scenario: Rebase with changed snapshot invalidates check-stage review truth
+
+- **WHEN** `rebase-branch` completes successfully in Check stage
+- **AND** its result reports `shaChanged=true`
+- **THEN** the workflow SHALL invalidate `ai-review`, `review-passed`, `merge-ready`, and approval state for that stage
+- **AND** later work SHALL re-run against the new snapshot before approval can be requested again
+
+#### Scenario: Failed rebase blocks later work
+
+- **WHEN** `rebase-branch` fails
+- **THEN** the current stage SHALL fail through normal task failure semantics
+- **AND** later tasks or checks SHALL NOT execute
 
