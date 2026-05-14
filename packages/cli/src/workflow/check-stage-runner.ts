@@ -427,7 +427,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       return executeRebaseBranchTask(ctx, attempt);
     }
 
-    if (taskId === 'fix-review-findings' || taskId === 'repair-review-findings') {
+    if (taskId === 'fix-review-findings' || taskId.startsWith('fix-review-findings:') || taskId === 'repair-review-findings') {
       const adapter = createRepairFixAdapter();
       const project = ctx.projectRepo?.findById(ctx.issue.projectId);
       const worktreePath = project
@@ -442,11 +442,12 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         failedCheck: failedCheck ?? { name: 'review-passed', status: 'fail' as const, output: { verdict: 'FAIL' } },
         attempt,
       });
-      if (result.status === 'completed') this.invalidateReviewArtifactForRereview(ctx);
-      return result;
+      const instanceResult = { ...result, taskId };
+      if (instanceResult.status === 'completed') this.invalidateReviewArtifactForRereview(ctx);
+      return instanceResult;
     }
 
-    if (taskId === 'fix-merge-readiness' || taskId === 'repair-merge') {
+    if (taskId === 'fix-merge-readiness' || taskId.startsWith('fix-merge-readiness:') || taskId === 'repair-merge' || taskId.startsWith('repair-merge:')) {
       const adapter = createRepairFixAdapter();
       const project = ctx.projectRepo?.findById(ctx.issue.projectId);
       const worktreePath = project
@@ -456,11 +457,12 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         log.warn('executeReportedTask: no worktree path found', { issueNumber: ctx.issue.number });
         return null;
       }
-      return adapter.dispatch('repair-merge', ctx, {
+      const result = await adapter.dispatch('repair-merge', ctx, {
         worktreePath,
         failedCheck: failedCheck ?? { name: 'merge-ready', status: 'fail' as const },
         attempt,
       });
+      return { ...result, taskId };
     }
 
     if (failedCheck) return this.runFixTask(ctx, taskId, failedCheck, attempt);
