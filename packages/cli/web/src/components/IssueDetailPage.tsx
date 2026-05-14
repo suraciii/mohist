@@ -292,29 +292,40 @@ export function IssueDetailPage() {
             <div className="rounded-lg border border-gray-200 bg-white p-4 mb-6">
               <div className="flex items-center gap-4 text-sm">
                 <span className="text-gray-500">
-                  <span className="font-medium text-gray-700">{diffData.base}</span>
-                  {' → '}
                   <span className="font-medium text-gray-700">{diffData.head}</span>
+                  {' wants to merge into '}
+                  <span className="font-medium text-gray-700">{diffData.base}</span>
                 </span>
+                <span className="text-gray-300">·</span>
+                <span className="text-gray-500">
+                  <span className="font-medium text-gray-700">{diffData.ahead}</span> ahead
+                </span>
+                {diffData.behind > 0 && (
+                  <>
+                    <span className="text-gray-300">·</span>
+                    <span className="text-gray-500">
+                      <span className="font-medium text-gray-700">{diffData.behind}</span> behind
+                    </span>
+                  </>
+                )}
                 <span className="text-gray-300">·</span>
                 <span className="text-gray-500">
                   <span className="font-medium text-gray-700">{diffData.summary.filesChanged}</span> files changed
                 </span>
                 <span className="text-gray-300">·</span>
-                <span className="text-gray-500">
-                  <span className="font-medium text-gray-700">{commitsData?.summary?.commits ?? 0}</span> commits
-                </span>
-                <span className="text-gray-300">·</span>
                 <span className="text-green-600">+{diffData.summary.additions}</span>
                 <span className="text-red-500">-{diffData.summary.deletions}</span>
-                <span className="text-gray-300">·</span>
-                <span className="text-xs text-gray-400">Worktree retained</span>
                 {issue.mergeState && (
                   <>
                     <span className="text-gray-300">·</span>
                     <span className="text-xs text-gray-500">Merge: {issue.mergeState}</span>
                   </>
                 )}
+              </div>
+              <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">
+                <span>showing merge-base → {diffData.head}</span>
+                <span>·</span>
+                <span>Worktree retained</span>
               </div>
             </div>
           )}
@@ -350,14 +361,13 @@ export function IssueDetailPage() {
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 text-sm text-gray-500">
-                      <span className="font-medium text-gray-700">{diffData.base}</span>
-                      {' → '}
-                      <span className="font-medium text-gray-700">{diffData.head}</span>
+                      <span>
+                        <span className="font-medium text-gray-700">{diffData.head}</span>
+                        {' → '}
+                        <span className="font-medium text-gray-700">{diffData.base}</span>
+                      </span>
                       <span className="text-gray-300">·</span>
-                      <span>{diffData.summary.filesChanged} files changed</span>
-                      <span className="text-gray-300">·</span>
-                      <span className="text-green-600">+{diffData.summary.additions}</span>
-                      <span className="text-red-500">-{diffData.summary.deletions}</span>
+                      <span>{diffData.summary.filesChanged} files changed · +{diffData.summary.additions} -{diffData.summary.deletions}</span>
                     </div>
                     <button
                       onClick={() => navigate(`/issue/${issueNumber}/files`)}
@@ -366,6 +376,50 @@ export function IssueDetailPage() {
                       View files
                     </button>
                   </div>
+                </div>
+              )}
+
+              {commitsData?.available === true && (
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-sm font-semibold text-gray-700">
+                      Commits ({commitsData.summary.commits})
+                    </h2>
+                    <button
+                      onClick={() => navigate(`/issue/${issueNumber}/files`)}
+                      className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-md transition-colors"
+                    >
+                      View all commits
+                    </button>
+                  </div>
+                  {commitsData.commits.length === 0 ? (
+                    <p className="text-sm text-gray-400">No commits yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {commitsData.commits.slice(0, 5).map((commit) => (
+                        <div
+                          key={commit.hash}
+                          className="flex items-center justify-between text-sm group"
+                        >
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <code className="text-xs text-gray-500 font-mono shrink-0">{commit.shortHash}</code>
+                            <span className="text-gray-700 truncate">{commit.message}</span>
+                          </div>
+                          <span className="text-xs text-gray-400 ml-3 shrink-0">{formatRelativeTime(commit.date)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(diffData?.available === false || commitsData?.available === false) && (
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <p className="text-sm text-gray-400">
+                    {diffData?.available === false && diffData.message}
+                    {diffData?.available === false && commitsData?.available === false && ' / '}
+                    {commitsData?.available === false && commitsData.message}
+                  </p>
                 </div>
               )}
 

@@ -4,7 +4,7 @@ import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff } from '../hooks
 import { NotFoundPage } from './NotFoundPage'
 import { statusBadge, statusLabel } from '../lib/status-badge'
 import { parseDiff } from '../lib/diffModel'
-import { ChangedFilesTree, UnifiedDiffPane, SplitDiffPane, RawPatchPane, FullFilePane, DiffSearchPane } from './issue-changed-files'
+import { ChangedFilesTree, UnifiedDiffPane, SplitDiffPane, RawPatchPane, FullFilePane, DiffSearchPane, FileStatusBadge } from './issue-changed-files'
 import type { FileBlock } from '../lib/diffModel'
 import type { IssueCommitsResponse, CommitEntry } from '../lib/types'
 
@@ -42,6 +42,17 @@ function saveReaderState(issueNumber: number, state: ReaderState) {
   try {
     sessionStorage.setItem(STORAGE_KEY(issueNumber), JSON.stringify(state))
   } catch {}
+}
+
+function formatRelativeTime(iso: string): string {
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime())
+  const seconds = Math.floor(diff / 1000)
+  if (seconds < 5) return 'just now'
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
 }
 
 export function IssueChangedFilesPage() {
@@ -131,6 +142,7 @@ export function IssueChangedFilesPage() {
   const worktreeRemoved = diffData?.reason === 'worktree_removed' || commitsData?.reason === 'worktree_removed'
   const branchMissing = diffData?.reason === 'branch_missing' || commitsData?.reason === 'branch_missing'
   const notStarted = diffData?.reason === 'not_started' || commitsData?.reason === 'not_started'
+  const isBehind = !!diffData && diffData.available && diffData.behind > 0
 
   const unavailableMessage = notStarted
     ? 'No changes yet'
@@ -212,13 +224,25 @@ export function IssueChangedFilesPage() {
             <p className="text-sm text-orange-700">{unavailableMessage}</p>
           </div>
         ) : diffAvailable && diffData ? (
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <div className="flex items-center gap-4 text-sm">
+          <div className="rounded-lg border border-gray-200 bg-white p-4 mb-4">
+            <div className="flex items-center gap-3 text-sm">
               <span className="text-gray-500">
-                <span className="font-medium text-gray-700">{diffData.base}</span>
-                {' → '}
                 <span className="font-medium text-gray-700">{diffData.head}</span>
+                {' wants to merge into '}
+                <span className="font-medium text-gray-700">{diffData.base}</span>
               </span>
+              <span className="text-gray-300">·</span>
+              <span className="text-gray-500">
+                <span className="font-medium text-gray-700">{diffData.ahead}</span> commits ahead
+              </span>
+              {diffData.behind > 0 && (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span className="text-gray-500">
+                    <span className="font-medium text-gray-700">{diffData.behind}</span> behind
+                  </span>
+                </>
+              )}
               <span className="text-gray-300">·</span>
               <span className="text-gray-500">
                 <span className="font-medium text-gray-700">{diffData.summary.filesChanged}</span> files changed
@@ -229,8 +253,20 @@ export function IssueChangedFilesPage() {
               <span className="text-gray-300">·</span>
               <span className="text-xs text-gray-400 capitalize">{issue.stage} · {issue.status}</span>
             </div>
+            <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">
+              <span>showing merge-base → {diffData.head}</span>
+            </div>
           </div>
         ) : null}
+
+        {isBehind && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4">
+            <p className="text-sm text-blue-700">
+              This branch is {diffData!.behind} commit{(diffData!.behind as number) > 1 ? 's' : ''} behind {diffData!.base}.
+              Files changed shows only changes introduced by {diffData!.head} from the merge base, matching GitHub PR behavior.
+            </p>
+          </div>
+        )}
       </div>
 
       {diffAvailable && parsedBlocks.length > 0 && (
@@ -256,33 +292,19 @@ export function IssueChangedFilesPage() {
               {diffMode === 'unified' ? 'Split' : 'Unified'} view
             </button>
             <div className="h-4 w-px bg-gray-200 mx-1" />
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-400">Mode:</span>
-              <button
-                onClick={() => setReaderMode('diff')}
-                className={`px-2 py-1 text-xs rounded border transition-colors ${readerMode === 'diff' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-gray-100 hover:bg-gray-200 border-gray-200'}`}
+            <label className="flex items-center gap-1 text-xs text-gray-500">
+              <span>Mode:</span>
+              <select
+                value={readerMode}
+                onChange={(e) => setReaderMode(e.target.value as ReaderMode)}
+                className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors"
               >
-                Diff
-              </button>
-              <button
-                onClick={() => setReaderMode('raw')}
-                className={`px-2 py-1 text-xs rounded border transition-colors ${readerMode === 'raw' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-gray-100 hover:bg-gray-200 border-gray-200'}`}
-              >
-                Raw
-              </button>
-              <button
-                onClick={() => setReaderMode('full')}
-                className={`px-2 py-1 text-xs rounded border transition-colors ${readerMode === 'full' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-gray-100 hover:bg-gray-200 border-gray-200'}`}
-              >
-                Full file
-              </button>
-              <button
-                onClick={() => setReaderMode('search')}
-                className={`px-2 py-1 text-xs rounded border transition-colors ${readerMode === 'search' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-gray-100 hover:bg-gray-200 border-gray-200'}`}
-              >
-                Search
-              </button>
-            </div>
+                <option value="diff">Diff</option>
+                <option value="raw">Raw</option>
+                <option value="full">Full file</option>
+                <option value="search">Search</option>
+              </select>
+            </label>
             {selectedFile && totalHunks > 1 && (
               <>
                 <div className="h-4 w-px bg-gray-200 mx-1" />
@@ -342,6 +364,7 @@ export function IssueChangedFilesPage() {
                   <div className="px-3 py-2 border-b border-gray-200 bg-blue-50">
                     <div className="text-xs font-mono text-blue-700">{selectedCommit.shortHash}</div>
                     <div className="text-xs text-blue-600 truncate">{selectedCommit.message.split('\n')[0]}</div>
+                    <div className="text-xs text-blue-500 mt-1">{formatRelativeTime(selectedCommit.date)}</div>
                   </div>
                 ) : null}
                 <ChangedFilesTree
@@ -352,31 +375,48 @@ export function IssueChangedFilesPage() {
                 />
               </div>
               <div className="flex-1 overflow-hidden" ref={diffPaneRef}>
-                {readerMode === 'raw' ? (
-                  <RawPatchPane rawPatch={selectedFile?.rawPatch ?? ''} />
-                ) : readerMode === 'full' ? (
+                {parsedBlocks.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+                    No files to display
+                  </div>
+                ) : readerMode === 'raw' && selectedFile ? (
+                  <RawPatchPane rawPatch={selectedFile.rawPatch ?? ''} />
+                ) : readerMode === 'full' && selectedFile ? (
                   <FullFilePane block={selectedFile} issueNumber={issueNumber} />
-                ) : readerMode === 'search' ? (
+                ) : readerMode === 'search' && selectedFile ? (
                   <DiffSearchPane
                     block={selectedFile}
                     activeHunkIndex={activeHunkIndex}
                     onActiveHunkChange={setActiveHunkIndex}
                     totalHunks={totalHunks}
                   />
-                ) : diffMode === 'unified' ? (
-                  <UnifiedDiffPane
-                    block={selectedFile}
-                    activeHunkIndex={activeHunkIndex}
-                    onActiveHunkChange={setActiveHunkIndex}
-                    totalHunks={totalHunks}
-                  />
                 ) : (
-                  <SplitDiffPane
-                    block={selectedFile}
-                    activeHunkIndex={activeHunkIndex}
-                    onActiveHunkChange={setActiveHunkIndex}
-                    totalHunks={totalHunks}
-                  />
+                  <div className="h-full overflow-auto">
+                    {parsedBlocks.map((block, index) => (
+                      <div key={block.newPath || index} className="border-b border-gray-100 last:border-b-0">
+                        <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center gap-3 text-xs font-mono">
+                          <span className="font-medium text-gray-800 truncate flex-1">{block.newPath || block.oldPath}</span>
+                          <FileStatusBadge status={block.status} />
+                          <span className="text-green-600">+{block.additions}</span>
+                          <span className="text-red-500">-{block.deletions}</span>
+                        </div>
+                        {diffMode === 'unified' ? (
+                          <UnifiedDiffPane
+                            block={block}
+                            activeHunkIndex={0}
+                            onActiveHunkChange={() => {}}
+                            totalHunks={0}
+                          />
+                        ) : (
+                          <SplitDiffPane
+                            block={block}
+                            activeHunkIndex={0}
+                            totalHunks={0}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>

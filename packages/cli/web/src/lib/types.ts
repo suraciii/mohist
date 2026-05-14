@@ -139,6 +139,16 @@ export interface CommitDiff {
   diff: string
 }
 
+export interface ComparisonMetadata {
+  base: string
+  head: string
+  mergeBase: string
+  ahead: number
+  behind: number
+  canFastForward: boolean
+  comparison: 'merge-base'
+}
+
 export type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error'
 
 export type ChangesAvailability =
@@ -152,16 +162,12 @@ export interface ChangesSummary {
   deletions: number
 }
 
-export type IssueDiffResponse = ChangesAvailability & {
-  base: string
-  head: string
+export type IssueDiffResponse = ChangesAvailability & ComparisonMetadata & {
   summary: ChangesSummary
   files: DiffFile[]
 }
 
-export type IssueCommitsResponse = ChangesAvailability & {
-  base: string
-  head: string
+export type IssueCommitsResponse = ChangesAvailability & ComparisonMetadata & {
   summary: ChangesSummary & { commits: number }
   commits: CommitEntry[]
 }
