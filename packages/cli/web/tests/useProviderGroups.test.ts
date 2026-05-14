@@ -8,7 +8,6 @@ function makeProvider(overrides: Partial<Provider> = {}): Provider {
     id: 'test-provider',
     name: 'Test Provider',
     baseURL: 'https://api.test.com',
-    models: ['model-1'],
     configured: false,
     source: 'none',
     isBuiltin: true,

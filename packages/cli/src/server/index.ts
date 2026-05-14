@@ -19,6 +19,7 @@ import { createScheduleRoutes } from '../api/schedules';
 import { createSettingsConfigRoutes } from '../api/settings-config';
 import { createSettingsSystemRoutes } from '../api/settings-system';
 import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, StageStateService, WorkflowRunService, type SkillRunner, type ConflictResolutionDeps } from '../services';
+import { ProviderStateService } from '../services/provider-state-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
 import { Stage } from '../types';
@@ -259,14 +260,17 @@ async function main(): Promise<void> {
 
   const rateLimiter = new RateLimiter(60 * 1000, 30);
   const server = new HttpServer(config, rateLimiter);
-  
+
+  const providerState = new ProviderStateService();
+  await providerState.warm();
+
   server.addRouter('/api/projects', createProjectRoutes(projectService));
   server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), postMergeFinalizer, stageStateService, workflowRunService));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
   server.addRouter('/api/config', createConfigRoutes(configService));
-  server.addRouter('/api/providers', createProviderRoutes(eventBus, rateLimiter));
+  server.addRouter('/api/providers', createProviderRoutes(eventBus, rateLimiter, providerState));
   server.addRouter('/api', createStatusRoutes(projectService, issueService, fileConfig, getVersionInfo()));
   server.addRouter('/api/events', createEventRoutes(eventBus));
   server.addRouter('/api/agent', createAgentRoutes(agentRunner, coderSessionRepo, projectService));

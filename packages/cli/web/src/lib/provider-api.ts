@@ -4,7 +4,6 @@ export interface Provider {
   id: string
   name: string
   baseURL: string | null
-  models: string[]
   configured: boolean
   source: 'config' | 'env' | 'none'
   isBuiltin: boolean
