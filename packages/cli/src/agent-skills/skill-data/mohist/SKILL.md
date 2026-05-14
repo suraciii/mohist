@@ -10,7 +10,7 @@ mohist 命令前缀为 `mo`。操作前确认 server 在运行：`mo server stat
 ## Issue 命令
 
 ```
-mo issue create <title> --body <text> --label <label> --priority <P0|P1|P2>
+mo issue create <title> [--body <text>|@file.md|-] [--body-file <path>] [--label <label>] [--priority <P0|P1|P2>]
 mo issue list [-s <stage>] [-l <label>] [-p <priority>] [--all] [--archived]
 mo issue show <number>
 mo issue start <number>
@@ -21,7 +21,7 @@ mo issue reopen <number>
 mo issue comment <number> <text>
 mo issue logs <number> [-f]
 mo issue diff <number>
-mo issue update <number> --title <text> --body <text> --label <+add|-remove>
+mo issue update <number> [--title <text>] [--body <text>|@file.md|-] [--label <+add|-remove>]
 mo issue archive <number>
 mo issue archive --all-completed
 mo issue unarchive <number>
@@ -31,7 +31,7 @@ mo issue unarchive <number>
 
 ```
 mo status                          当前项目概览
-mo project list /use <name>        项目管理
+mo project list / use <name>       项目管理
 mo attach [-f]                     实时跟踪 agent 事件（交互式 REPL）
 mo server start / stop / status    服务管理
 mo server update                   重新构建并重启（源码模式）
@@ -52,13 +52,37 @@ mo instructions <label>
 
 | Label | 模板说明 |
 |-------|---------|
-| bug / feature / improvement | 用户故事模板 |
+| bug / feature / improvement | 产品形态模板 |
 | refactor | 技术重构模板 |
 | design | 设计探索模板 |
 | docs | 文档变更模板 |
 | ui-feature / ui-improvement | UI 原型模板（含 ASCII 原型图要求）|
 
-获取模板后，按照模板结构填充内容。完整的模板内容也安装在 `.agents/skills/mohist/issue-templates.md`，可直接查看。
+获取模板后，按照模板结构填充内容。完整模板通过 `mo skills get mohist --full` 动态提供，避免本地副本过期。
+
+高质量 issue body 是 Plan 阶段的输入，不是完整 PRD、探索记录或技术设计文档。默认结构：
+
+```markdown
+## Problem
+[用户可见的问题]
+
+## User Goal
+[可选。压缩后的用户目标；不要写长篇模板化用户故事]
+
+## Product Shape
+[目标产品形态和设计约束；先说明用户最终看到/使用什么]
+
+## Key Domain Model
+[只保留理解需求必要的关键概念和不变量]
+
+## Acceptance Criteria
+- [ ] [可验证的产品行为]
+
+## Non-Goals
+- [明确不做的范围]
+```
+
+不要在 issue body 中写文件、函数、数据库表或逐步实现任务；这些属于 Plan 阶段。探索过程也不要原样粘贴，只沉淀结论、边界和验收。
 
 ### Label
 
@@ -89,6 +113,24 @@ mo instructions <label>
 ```bash
 mo issue create "Fix X" --body "描述" --label bug --priority P1
 mo issue start <number>
+```
+
+长 Markdown 内容使用文件或管道：
+```bash
+mo issue create "Fix X" --body @issue-body.md
+mo issue create "Fix X" --body - < issue-body.md
+cat issue-body.md | mo issue create "Fix X" --body -
+```
+
+heredoc 作为兼容性备选：
+```bash
+mo issue create "Fix X" --body "$(cat <<'EOF'
+## Problem
+
+- code block
+- special chars: $()|'"` 都可以
+EOF
+)"
 ```
 
 监控进度：

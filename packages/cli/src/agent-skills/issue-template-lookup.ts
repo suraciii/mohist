@@ -2,9 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export const LABEL_TO_TEMPLATE: Record<string, string> = {
-  bug: 'user-story',
-  feature: 'user-story',
-  improvement: 'user-story',
+  bug: 'product',
+  feature: 'product',
+  improvement: 'product',
   refactor: 'refactor',
   design: 'design',
   docs: 'docs',

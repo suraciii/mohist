@@ -42,6 +42,7 @@ Depending on what the user brings, you might:
 - Explore what "complete" looks like for a feature
 - Consider edge cases from the user's angle
 - Compare approaches with user value as the yardstick
+- When turning exploration into an issue, compress it into target Product Shape plus a small Key Domain Model. Do not paste the exploration transcript into the issue body.
 
 **Visualize**
 ```
@@ -212,6 +213,32 @@ When things crystallize, you might summarize:
 ```
 
 But this summary is optional. Sometimes the thinking IS the value.
+
+### Issue Capture Shape
+
+When exploration crystallizes into a Mohist issue, keep the final issue body short:
+
+```markdown
+## Problem
+[用户可见的问题]
+
+## User Goal
+[可选。压缩后的用户目标]
+
+## Product Shape
+[目标产品形态和设计约束]
+
+## Key Domain Model
+[只保留关键概念和不变量]
+
+## Acceptance Criteria
+- [ ] [可验证产品行为]
+
+## Non-Goals
+- [明确不做的范围]
+```
+
+Use exploration notes to think; do not include full event storms, long user-story prose, code paths, API shapes, or task lists unless they are essential to the product boundary.
 
 ---
 

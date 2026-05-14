@@ -35,7 +35,42 @@ mo project list / use <name>       项目管理
 mo attach [-f]                     实时跟踪 agent 事件（交互式 REPL）
 mo server start / stop / status    服务管理
 mo server update                   重新构建并重启（源码模式）
+mo instructions [<label>]          查看 issue 模板说明
 ```
+
+## Issue 创建流程
+
+创建或更新 issue body 前，先获取对应 label 的模板：
+
+```bash
+mo instructions <label>
+```
+
+支持的 label：`bug`、`feature`、`improvement`、`refactor`、`design`、`docs`、`ui-feature`、`ui-improvement`。
+
+高质量 issue body 是 Plan 阶段的输入，不是完整 PRD、探索记录或技术设计文档。默认结构：
+
+```markdown
+## Problem
+[用户可见的问题]
+
+## User Goal
+[可选。压缩后的用户目标；不要写长篇模板化用户故事]
+
+## Product Shape
+[目标产品形态和设计约束；先说明用户最终看到/使用什么]
+
+## Key Domain Model
+[只保留理解需求必要的关键概念和不变量]
+
+## Acceptance Criteria
+- [ ] [可验证的产品行为]
+
+## Non-Goals
+- [明确不做的范围]
+```
+
+不要在 issue body 中写文件、函数、数据库表或逐步实现任务；这些属于 Plan 阶段。探索过程也不要原样粘贴，只沉淀结论、边界和验收。
 
 ## 常用模式
 
