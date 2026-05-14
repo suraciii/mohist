@@ -29,36 +29,32 @@ export class MergeReadyCheck implements Check {
     }
 
     try {
-      const canFastForward = await ctx.worktreeManager.canFastForward(
+      const snapshot = await ctx.worktreeManager.checkSquashMergeability(
         project.path,
         project.name,
         ctx.issue.number,
         project.baseBranch
       );
 
-      const worktreeStatus = await ctx.worktreeManager.getWorktreeStatus(
-        project.path,
-        project.name,
-        ctx.issue.number
-      );
-
-      const canMerge = canFastForward || worktreeStatus.canFastForward ||
-        (!worktreeStatus.conflictingFiles || worktreeStatus.conflictingFiles.length === 0);
-      const status = canMerge ? 'pass' : 'fail';
+      const status = snapshot.canMerge ? 'pass' : 'fail';
 
       return {
         name: this.name,
         status,
         message: status === 'pass'
           ? 'Merge ready'
-          : 'Merge not ready — candidate cannot be cleanly merged',
+          : 'Merge not ready — candidate cannot be cleanly squash-merged',
         output: {
           kind: 'merge-ready',
-          targetBranch: project.baseBranch,
-          canFastForward: canFastForward || worktreeStatus.canFastForward,
-          cleanRebaseFeasible: !worktreeStatus.conflictingFiles || worktreeStatus.conflictingFiles.length === 0,
-          conflictFiles: worktreeStatus.conflictingFiles ?? [],
-          isRebaseInProgress: worktreeStatus.isRebaseInProgress ?? false,
+          targetBranch: snapshot.targetBranch,
+          strategy: snapshot.strategy,
+          baseSha: snapshot.baseSha,
+          candidateHeadSha: snapshot.candidateHeadSha,
+          mergeBaseSha: snapshot.mergeBaseSha,
+          canMerge: snapshot.canMerge,
+          conflictFiles: snapshot.conflictFiles,
+          checkedAt: snapshot.checkedAt,
+          error: snapshot.error,
         },
       };
     } catch (err) {

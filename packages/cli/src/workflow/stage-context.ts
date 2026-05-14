@@ -115,6 +115,7 @@ export interface WorktreeManager {
   getHeadSha(worktreePath: string): Promise<string>;
   isWorktreeClean(worktreePath: string): Promise<boolean>;
   createCheckConvergenceCommit(worktreePath: string, issueNumber: number): Promise<import('../git/worktree-manager').ConvergenceCommitResult>;
+  checkSquashMergeability(projectPath: string, projectName: string, issueNumber: number, baseBranch?: string): Promise<{ kind: 'merge-ready'; strategy: 'squash'; targetBranch: string; baseSha: string; candidateHeadSha: string; mergeBaseSha: string; canMerge: boolean; conflictFiles: string[]; checkedAt: string; error?: string }>;
 }
 
 export interface ProjectRepo {

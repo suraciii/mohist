@@ -27,6 +27,10 @@ import { StageExecutionRepo } from '../src/db/stage-execution-repo';
 import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
+import { WorktreeManager } from '../src/git/worktree-manager';
+import { slugify } from '../src/utils/slugify';
+
+const execFileAsync = promisify(execFile);
 
 function createTestServer(app: Hono): http.Server {
   return http.createServer(async (req, res) => {
@@ -77,6 +81,162 @@ function completeCheckToApproval(workflowApplicationService: WorkflowApplication
     result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha } },
   });
   workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass' } });
+}
+
+function mohistWorktreesPath(home: string, projectName: string): string {
+  return path.join(home, '.mohist', 'projects', slugify(projectName), 'worktrees');
+}
+
+async function initGitRepo(dir: string, email = 'test@test.com', name = 'Test User'): Promise<void> {
+  await execFileAsync('git', ['init'], { cwd: dir });
+  await execFileAsync('git', ['config', 'user.email', email], { cwd: dir });
+  await execFileAsync('git', ['config', 'user.name', name], { cwd: dir });
+  await execFileAsync('git', ['commit', '--allow-empty', '-m', 'initial'], { cwd: dir });
+  try {
+    await execFileAsync('git', ['checkout', '-b', 'main'], { cwd: dir });
+  } catch {
+    try {
+      await execFileAsync('git', ['checkout', 'main'], { cwd: dir });
+    } catch {
+      // main may already be current
+    }
+  }
+}
+
+async function createFile(dir: string, filePath: string, content: string): Promise<void> {
+  const fullPath = path.join(dir, filePath);
+  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  fs.writeFileSync(fullPath, content, 'utf-8');
+}
+
+async function gitCommit(dir: string, message: string): Promise<string> {
+  await execFileAsync('git', ['add', '.'], { cwd: dir });
+  await execFileAsync('git', ['commit', '-m', message], { cwd: dir });
+  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: dir });
+  return stdout.trim();
+}
+
+async function getGitSha(repoPath: string, ref: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', ref], { cwd: repoPath });
+  return stdout.trim();
+}
+
+async function getMergeBase(repoPath: string, branch1: string, branch2: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['merge-base', branch1, branch2], { cwd: repoPath });
+  return stdout.trim();
+}
+
+async function setupGitProject(tmpDir: string): Promise<{ projectPath: string; projectName: string }> {
+  const projectPath = path.join(tmpDir, 'project');
+  fs.mkdirSync(projectPath, { recursive: true });
+  await initGitRepo(projectPath);
+  await createFile(projectPath, 'src/foo.ts', 'original content\n');
+  await gitCommit(projectPath, 'initial commit');
+  const projectName = 'project';
+  fs.mkdirSync(mohistWorktreesPath(tmpDir, projectName), { recursive: true });
+  return { projectPath, projectName };
+}
+
+async function createIssueWorktree(
+  tmpDir: string,
+  projectPath: string,
+  projectName: string,
+  issueNumber: number,
+  fileContent: string,
+): Promise<{ worktreePath: string; candidateHead: string }> {
+  const branch = `mo/issue-${issueNumber}`;
+  const worktreePath = path.join(mohistWorktreesPath(tmpDir, projectName), `issue-${issueNumber}`);
+  await execFileAsync('git', ['worktree', 'add', '-b', branch, worktreePath, 'main'], { cwd: projectPath });
+  await createFile(worktreePath, 'src/foo.ts', fileContent);
+  const candidateHead = await gitCommit(worktreePath, `issue-${issueNumber} commit`);
+  return { worktreePath, candidateHead };
+}
+
+async function makeConflictingCommit(projectPath: string, fileContent: string): Promise<string> {
+  await createFile(projectPath, 'src/foo.ts', fileContent);
+  return gitCommit(projectPath, 'main conflicting commit');
+}
+
+async function createMergeReadyApprovalFixture(
+  tmpDir: string,
+  db: DatabaseManager,
+  projectService: ProjectService,
+  issueService: IssueService,
+  stateManager: StateManager,
+  snapshotOverrides: Partial<Record<string, unknown>> = {},
+): Promise<{
+  issue: ReturnType<IssueService['create']>;
+  projectPath: string;
+  projectName: string;
+  baseSha: string;
+  candidateHeadSha: string;
+  mergeBaseSha: string;
+  workflowRunService: WorkflowRunService;
+  stageStateService: StageStateService;
+}> {
+  const { projectPath, projectName } = await setupGitProject(tmpDir);
+  await createIssueWorktree(tmpDir, projectPath, projectName, 1, 'issue-1 content\n');
+
+  const project = await projectService.create({ name: projectName, path: projectPath });
+  projectService.setCurrent(project);
+  const issue = issueService.create({ projectId: project.id, title: 'Check Approval Ready Issue' });
+  issueService.transitionToStage(issue.id, Stage.Check);
+  issueService.setStatus(issue.id, IssueStatus.Active);
+
+  const workflowRunService = new WorkflowRunService(db);
+  const workflowApplicationService = new WorkflowApplicationService(db);
+  const stageStateService = new StageStateService(db);
+  workflowRunService.startRun(issue.id, issue.number);
+  completePlanToApproval(workflowApplicationService, issue.id);
+  const candidateHeadSha = await getGitSha(projectPath, `mo/issue-${issue.number}`);
+  completeCheckToApproval(workflowApplicationService, issue.id, candidateHeadSha);
+
+  const execution = stateManager.getStageExecutionRepo().create(issue.id, Stage.Check);
+  stateManager.getStageExecutionRepo().updateCheckResults(execution.id, [
+    {
+      name: 'ai-review',
+      status: 'pass',
+      output: {
+        verdict: 'PASS',
+        reviewReport: '# Review\n<promise>PASS</promise>',
+        snapshotSha: candidateHeadSha,
+      },
+    },
+  ]);
+  stateManager.getStageExecutionRepo().updateStatus(execution.id, 'awaiting-approval');
+
+  const checkSuiteRepo = stateManager.getCheckSuiteRepo();
+  const suite = checkSuiteRepo.create({ issueId: issue.id, snapshotSha: candidateHeadSha });
+  checkSuiteRepo.updateChecks(suite.id, 'review-passed', { status: 'passed' });
+  checkSuiteRepo.updateChecks(suite.id, 'merge-ready', { status: 'passed' });
+  checkSuiteRepo.updateStatus(suite.id, 'awaiting-approval');
+
+  const baseSha = await getGitSha(projectPath, 'main');
+  const mergeBaseSha = await getMergeBase(projectPath, 'main', `mo/issue-${issue.number}`);
+
+  stateManager.getIssueRepo().setApprovalState(issue.id, {
+    stage: Stage.Check,
+    status: 'awaiting',
+    output: {
+      snapshotSha: candidateHeadSha,
+      result: 'PASS',
+      mergeReadySnapshot: {
+        kind: 'merge-ready',
+        strategy: 'squash',
+        targetBranch: 'main',
+        baseSha,
+        candidateHeadSha,
+        mergeBaseSha,
+        canMerge: true,
+        conflictFiles: [],
+        checkedAt: new Date().toISOString(),
+        ...snapshotOverrides,
+      },
+    },
+    requestedAt: new Date().toISOString(),
+  });
+
+  return { issue, projectPath, projectName, baseSha, candidateHeadSha, mergeBaseSha, workflowRunService, stageStateService };
 }
 
 describe('API Routes', () => {
@@ -515,79 +675,81 @@ describe('API Routes', () => {
       });
 
       it('Check approval should transition to Integrate and enqueue resume-pipeline when authoritative PASS matches snapshot', async () => {
-        const issue = issueService.create({ projectId, title: 'Check Approval Ready Issue' });
-        const stageStateService = new StageStateService(db);
-        const workflowRunService = new WorkflowRunService(db);
-        const workflowApplicationService = new WorkflowApplicationService(db);
-        workflowRunService.startRun(issue.id, issue.number);
-        completePlanToApproval(workflowApplicationService, issue.id);
-        completeCheckToApproval(workflowApplicationService, issue.id, 'sha-pass-001');
-        stateManager.getIssueRepo().setApprovalState(issue.id, {
-          stage: Stage.Check,
-          status: 'awaiting',
-          output: { snapshotSha: 'sha-pass-001', result: 'PASS' },
-          requestedAt: new Date().toISOString(),
-        });
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-pass-'));
+        const originalHome = process.env.HOME;
 
-        const execution = stageExecutionRepo.create(issue.id, Stage.Check);
-        stageExecutionRepo.updateCheckResults(execution.id, [
-          {
-            name: 'ai-review',
-            status: 'pass',
-            output: {
-              verdict: 'PASS',
-              reviewReport: '# Review\n<promise>PASS</promise>',
-              snapshotSha: 'sha-pass-001',
-              reviewArtifactPath: '/tmp/change/review.md',
-              selfCheckArtifactPath: '/tmp/change/review-self-check.md',
-            },
-          },
-        ]);
-        stageExecutionRepo.updateStatus(execution.id, 'awaiting-approval');
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager);
 
-        const worktreeManager = {
-          getPath: vi.fn().mockReturnValue('/tmp/worktree'),
-          getHeadSha: vi.fn().mockResolvedValue('sha-pass-001'),
-          isWorktreeClean: vi.fn().mockResolvedValue(true),
-        } as any;
+          const approveApp = new Hono();
+          const approveEventBus = new EventBus();
+          const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
 
-        const approveApp = new Hono();
-        const approveEventBus = new EventBus();
-        const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
-        const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
-        const approveServer = createTestServer(approveApp);
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
 
-        const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
-
-        expect(response.status).toBe(202);
-        expect(response.body.success).toBe(true);
-        expect(enqueueSpy).toHaveBeenCalledTimes(1);
-        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
-        const updatedStageState = stageStateService.getStageState(issue.id, Stage.Check);
-        expect(updatedStageState?.approval?.status).toBe('approved');
-        expect(updatedStageState?.approval?.respondedAt).toBeTruthy();
-        expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Integrate);
+          expect(response.status).toBe(202);
+          expect(response.body.success).toBe(true);
+          expect(enqueueSpy).toHaveBeenCalledTimes(1);
+          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+          const updatedStageState = stageStateService.getStageState(issue.id, Stage.Check);
+          expect(updatedStageState?.approval?.status).toBe('approved');
+          expect(updatedStageState?.approval?.respondedAt).toBeTruthy();
+          expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Integrate);
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
       });
 
       it('Check approval should use WorkflowRun review when legacy stage execution is missing', async () => {
-        const issue = issueService.create({ projectId, title: 'Check Approval WorkflowRun Issue' });
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-workflowrun-pass-'));
+        const originalHome = process.env.HOME;
+
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager);
+
+          const approveApp = new Hono();
+          const approveEventBus = new EventBus();
+          const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
+
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+          expect(response.status).toBe(202);
+          expect(response.body.success).toBe(true);
+          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+          expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Integrate);
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      it('Check approval should reject WorkflowRun-only PASS when merge-ready snapshot is missing', async () => {
+        const issue = issueService.create({ projectId, title: 'Check Approval Missing Merge Evidence Issue' });
         const stageStateService = new StageStateService(db);
         const workflowRunService = new WorkflowRunService(db);
         const workflowApplicationService = new WorkflowApplicationService(db);
         workflowRunService.startRun(issue.id, issue.number);
         completePlanToApproval(workflowApplicationService, issue.id);
-        completeCheckToApproval(workflowApplicationService, issue.id, 'sha-pass-002');
+        completeCheckToApproval(workflowApplicationService, issue.id, 'sha-pass-003');
         stateManager.getIssueRepo().setApprovalState(issue.id, {
           stage: Stage.Check,
           status: 'awaiting',
-          output: { snapshotSha: 'sha-pass-002', result: 'PASS' },
+          output: { snapshotSha: 'sha-pass-003', result: 'PASS' },
           requestedAt: new Date().toISOString(),
         });
 
         const worktreeManager = {
           getPath: vi.fn().mockReturnValue('/tmp/worktree'),
-          getHeadSha: vi.fn().mockResolvedValue('sha-pass-002'),
+          getHeadSha: vi.fn().mockResolvedValue('sha-pass-003'),
           isWorktreeClean: vi.fn().mockResolvedValue(true),
         } as any;
 
@@ -600,10 +762,208 @@ describe('API Routes', () => {
 
         const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
 
-        expect(response.status).toBe(202);
-        expect(response.body.success).toBe(true);
-        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
-        expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Integrate);
+        expect(response.status).toBe(409);
+        expect(response.body.success).toBe(false);
+        expect(response.body.error).toContain('merge-ready snapshot is missing');
+        expect(enqueueSpy).not.toHaveBeenCalled();
+        expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Check);
+      });
+
+      it('Check approval should reject stale merge-ready base SHA', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-base-'));
+        const originalHome = process.env.HOME;
+
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager, {
+            baseSha: '0000000000000000000000000000000000000000',
+          });
+
+          const approveApp = new Hono();
+          const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getCheckSuiteRepo(), stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
+
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.error).toContain('base SHA');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      it('Check approval should reject malformed merge-ready conflictFiles evidence', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-conflictfiles-'));
+        const originalHome = process.env.HOME;
+
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager, {
+            conflictFiles: undefined,
+          });
+
+          const approveApp = new Hono();
+          const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getCheckSuiteRepo(), stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
+
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.error).toContain('conflictFiles');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      it('Check approval should reject stale merge-ready snapshot even when the issue worktree path is missing', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-no-worktree-'));
+        const originalHome = process.env.HOME;
+
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager, {
+            baseSha: '0000000000000000000000000000000000000000',
+          });
+          const worktreeManager = {
+            getPath: vi.fn().mockReturnValue(null),
+          } as any;
+
+          const approveApp = new Hono();
+          const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getCheckSuiteRepo(), stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
+
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.error).toContain('base SHA');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      it('Check approval should reject stale merge-ready candidate head SHA', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-head-'));
+        const originalHome = process.env.HOME;
+
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager, {
+            candidateHeadSha: '1111111111111111111111111111111111111111',
+          });
+
+          const approveApp = new Hono();
+          const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getCheckSuiteRepo(), stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
+
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.error).toContain('candidate head SHA');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      it('Check approval should reject stale merge-ready merge-base SHA', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-mergebase-'));
+        const originalHome = process.env.HOME;
+
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager, {
+            mergeBaseSha: '2222222222222222222222222222222222222222',
+          });
+
+          const approveApp = new Hono();
+          const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getCheckSuiteRepo(), stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
+
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.error).toContain('merge-base SHA');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      it('Check approval should reject stale merge-ready target branch', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-target-'));
+        const originalHome = process.env.HOME;
+
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager, {
+            targetBranch: 'release',
+          });
+
+          const approveApp = new Hono();
+          const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getCheckSuiteRepo(), stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
+
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.error).toContain('target branch');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+
+      it('Check approval should fail closed when Git freshness validation cannot run', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-approve-gitfail-'));
+        const originalHome = process.env.HOME;
+
+        try {
+          process.env.HOME = tmpDir;
+          const { issue, projectName, workflowRunService, stageStateService } = await createMergeReadyApprovalFixture(tmpDir, db, projectService, issueService, stateManager);
+
+          const failingWorktreeManager = {
+            getPath: vi.fn().mockReturnValue(path.join(mohistWorktreesPath(tmpDir, projectName), `issue-${issue.number}`)),
+            getHeadSha: vi.fn().mockRejectedValue(new Error('missing worktree')),
+            isWorktreeClean: vi.fn().mockResolvedValue(true),
+            exists: vi.fn().mockReturnValue(true),
+          } as any;
+
+          const approveApp = new Hono();
+          const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, failingWorktreeManager, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stateManager.getCheckSuiteRepo(), stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          const approveServer = createTestServer(approveApp);
+
+          const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.error).toContain('failed to validate current worktree state');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          process.env.HOME = originalHome;
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
       });
 
       it('Direct merge for non-Integrate issue should return bypass error', async () => {

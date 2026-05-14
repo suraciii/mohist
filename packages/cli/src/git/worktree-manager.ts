@@ -137,8 +137,10 @@ export interface MergeTruth {
 export interface IntegrationFailure {
   failingStep: 'merge';
   targetBranch: string;
+  strategy: 'squash';
   baseSha: string;
   candidateHeadSha: string;
+  mergeBaseSha: string;
   conflictFiles?: string[];
   error: string;
 }
@@ -153,6 +155,19 @@ export interface MergeMetadata {
   issueTitle: string;
   commitMessages?: string[];
   tasks?: MergeTaskSummary[];
+}
+
+export interface MergeabilitySnapshot {
+  kind: 'merge-ready';
+  strategy: 'squash';
+  targetBranch: string;
+  baseSha: string;
+  candidateHeadSha: string;
+  mergeBaseSha: string;
+  canMerge: boolean;
+  conflictFiles: string[];
+  checkedAt: string;
+  error?: string;
 }
 
 export type MergeBackResult =
@@ -783,8 +798,10 @@ export class WorktreeManager {
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha: '',
         candidateHeadSha: '',
+        mergeBaseSha: '',
         error: `Worktree for issue #${issueNumber} not found`,
       };
     }
@@ -821,16 +838,29 @@ export class WorktreeManager {
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha: '',
         candidateHeadSha,
+        mergeBaseSha: '',
         error: `Failed to commit integration artifacts: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
 
     let baseSha = '';
+    let mergeBaseSha = '';
+    try {
+      const { stdout: mergeBaseOut } = await execFileAsync(
+        'git', ['merge-base', baseBranch, branch],
+        { cwd: projectPath }
+      );
+      mergeBaseSha = mergeBaseOut.trim();
+    } catch {
+      // non-critical for early returns
+    }
+
     try {
       const { stdout: baseOut } = await execFileAsync(
-        'git', ['merge-base', baseBranch, branch],
+        'git', ['rev-parse', baseBranch],
         { cwd: projectPath }
       );
       baseSha = baseOut.trim();
@@ -838,9 +868,11 @@ export class WorktreeManager {
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha: '',
-        candidateHeadSha: '',
-        error: `Could not determine merge base for ${branch} vs ${baseBranch}`,
+        candidateHeadSha,
+        mergeBaseSha,
+        error: `Could not resolve base branch ${baseBranch}`,
       };
     }
 
@@ -854,8 +886,10 @@ export class WorktreeManager {
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha,
         candidateHeadSha: '',
+        mergeBaseSha,
         error: `Could not resolve branch ${branch}`,
       };
     }
@@ -865,8 +899,10 @@ export class WorktreeManager {
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha,
         candidateHeadSha,
+        mergeBaseSha,
         error: `No candidate commits to squash merge for issue #${issueNumber}`,
       };
     }
@@ -885,8 +921,10 @@ export class WorktreeManager {
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha,
         candidateHeadSha,
+        mergeBaseSha,
         error: `Failed to checkout ${baseBranch}: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
@@ -894,12 +932,16 @@ export class WorktreeManager {
     try {
       await execFileAsync('git', ['merge', '--squash', branch], { cwd: projectPath });
     } catch (err) {
+      const mergeConflictFiles = await this.getConflictingFiles(projectPath);
       await cleanupFailedSquashMerge(projectPath);
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha,
         candidateHeadSha,
+        mergeBaseSha,
+        conflictFiles: mergeConflictFiles,
         error: `Squash merge failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
@@ -911,8 +953,10 @@ export class WorktreeManager {
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha,
         candidateHeadSha,
+        mergeBaseSha,
         error: `Squash commit failed: ${err instanceof Error ? err.message : String(err)}. The base branch may need manual cleanup.`,
       };
     }
@@ -934,11 +978,218 @@ export class WorktreeManager {
       return {
         failingStep: 'merge',
         targetBranch: baseBranch,
+        strategy: 'squash',
         baseSha,
         candidateHeadSha,
+        mergeBaseSha,
         error: `Failed to resolve landed SHA after squash commit: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  async checkSquashMergeability(
+    projectPath: string,
+    projectName: string,
+    issueNumber: number,
+    baseBranch: string = 'main'
+  ): Promise<MergeabilitySnapshot> {
+    const branch = getBranchName(issueNumber);
+
+    if (!this.exists(projectName, issueNumber)) {
+      return {
+        kind: 'merge-ready',
+        strategy: 'squash',
+        targetBranch: baseBranch,
+        baseSha: '',
+        candidateHeadSha: '',
+        mergeBaseSha: '',
+        canMerge: false,
+        conflictFiles: [],
+        checkedAt: new Date().toISOString(),
+        error: `Worktree for issue #${issueNumber} not found`,
+      };
+    }
+
+    let baseSha = '';
+    let candidateHeadSha = '';
+    let mergeBaseSha = '';
+
+    try {
+      const { stdout: baseOut } = await execFileAsync(
+        'git', ['rev-parse', baseBranch],
+        { cwd: projectPath }
+      );
+      baseSha = baseOut.trim();
+    } catch {
+      return {
+        kind: 'merge-ready',
+        strategy: 'squash',
+        targetBranch: baseBranch,
+        baseSha: '',
+        candidateHeadSha: '',
+        mergeBaseSha: '',
+        canMerge: false,
+        conflictFiles: [],
+        checkedAt: new Date().toISOString(),
+        error: `Could not resolve base branch ${baseBranch}`,
+      };
+    }
+
+    try {
+      const { stdout: headOut } = await execFileAsync(
+        'git', ['rev-parse', branch],
+        { cwd: projectPath }
+      );
+      candidateHeadSha = headOut.trim();
+    } catch {
+      return {
+        kind: 'merge-ready',
+        strategy: 'squash',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha: '',
+        mergeBaseSha: '',
+        canMerge: false,
+        conflictFiles: [],
+        checkedAt: new Date().toISOString(),
+        error: `Could not resolve branch ${branch}`,
+      };
+    }
+
+    try {
+      const { stdout: mergeBaseOut } = await execFileAsync(
+        'git', ['merge-base', baseBranch, branch],
+        { cwd: projectPath }
+      );
+      mergeBaseSha = mergeBaseOut.trim();
+    } catch {
+      return {
+        kind: 'merge-ready',
+        strategy: 'squash',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        mergeBaseSha: '',
+        canMerge: false,
+        conflictFiles: [],
+        checkedAt: new Date().toISOString(),
+        error: `Could not determine merge base for ${branch} vs ${baseBranch}`,
+      };
+    }
+
+    const tempWorktreeRoot = path.join(getWorktreeBaseDir(projectName), '.tmp-mergeability');
+    const tempWorktreePath = path.join(tempWorktreeRoot, `preflight-${issueNumber}-${Date.now()}`);
+
+    let cleanupPerformed = false;
+    let conflictFiles: string[] = [];
+
+    try {
+      fs.mkdirSync(tempWorktreeRoot, { recursive: true });
+    } catch {
+      // directory may already exist
+    }
+
+    try {
+      await execFileAsync(
+        'git',
+        ['worktree', 'add', tempWorktreePath, '--detach', baseSha],
+        { cwd: projectPath }
+      );
+
+      try {
+        await execFileAsync(
+          'git',
+          ['merge', '--squash', candidateHeadSha],
+          { cwd: tempWorktreePath }
+        );
+      } catch (err) {
+        const mergedConflictFiles = await this.getConflictingFiles(tempWorktreePath);
+        conflictFiles = mergedConflictFiles;
+
+        try {
+          await execFileAsync('git', ['merge', '--abort'], { cwd: tempWorktreePath });
+        } catch {
+          // abort may fail if no merge in progress
+        }
+
+        return {
+          kind: 'merge-ready',
+          strategy: 'squash',
+          targetBranch: baseBranch,
+          baseSha,
+          candidateHeadSha,
+          mergeBaseSha,
+          canMerge: false,
+          conflictFiles,
+          checkedAt: new Date().toISOString(),
+          error: `Squash merge conflict: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+
+      try {
+        await execFileAsync('git', ['reset', '--hard'], { cwd: tempWorktreePath });
+        await execFileAsync('git', ['clean', '-fd'], { cwd: tempWorktreePath });
+      } catch {
+        // best-effort reset after successful merge
+      }
+    } finally {
+      try {
+        await execFileAsync(
+          'git',
+          ['worktree', 'remove', tempWorktreePath, '--force'],
+          { cwd: projectPath }
+        );
+        cleanupPerformed = true;
+      } catch (err) {
+        log.warn('Failed to remove temporary merge preflight worktree', {
+          tempWorktreePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        try {
+          await execFileAsync('git', ['worktree', 'prune'], { cwd: projectPath });
+        } catch {
+          // best-effort prune
+        }
+      }
+
+      try {
+        if (fs.existsSync(tempWorktreeRoot)) {
+          const entries = fs.readdirSync(tempWorktreeRoot);
+          if (entries.length === 0) {
+            fs.rmdirSync(tempWorktreeRoot);
+          }
+        }
+      } catch {
+        // best-effort cleanup
+      }
+    }
+
+    if (!cleanupPerformed && conflictFiles.length > 0) {
+      return {
+        kind: 'merge-ready',
+        strategy: 'squash',
+        targetBranch: baseBranch,
+        baseSha,
+        candidateHeadSha,
+        mergeBaseSha,
+        canMerge: false,
+        conflictFiles,
+        checkedAt: new Date().toISOString(),
+        error: `Squash merge failed and cleanup was incomplete; conflict files preserved`,
+      };
+    }
+
+    return {
+      kind: 'merge-ready',
+      strategy: 'squash',
+      targetBranch: baseBranch,
+      baseSha,
+      candidateHeadSha,
+      mergeBaseSha,
+      canMerge: true,
+      conflictFiles: [],
+      checkedAt: new Date().toISOString(),
+    };
   }
 
   async prune(projectPath: string): Promise<void> {

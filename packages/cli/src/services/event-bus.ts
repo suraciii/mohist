@@ -59,6 +59,7 @@ export type EventMap = {
   integration_step_updated: { issueId: string; projectId: string; issueNumber: number; step: string; status: string; summary?: string; output?: unknown };
   integration_completed: { issueId: string; projectId: string; issueNumber: number; steps: Array<{ step: string; status: string; output?: unknown }> };
   integration_failed: { issueId: string; projectId: string; issueNumber: number; failingStep: string; error: string; output?: unknown };
+  integration_preflight_refreshed: { issueId: string; projectId: string; issueNumber: number; status: 'passed' | 'failed'; snapshot?: unknown };
 };
 
 export type EventName = keyof EventMap;

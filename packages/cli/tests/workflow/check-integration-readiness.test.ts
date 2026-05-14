@@ -187,17 +187,20 @@ Content.`);
 
 describe('MergeReadinessCheck', () => {
   describe('pass scenario', () => {
-    it('returns pass when canFastForward is true', async () => {
+    it('returns pass when squash preflight reports canMerge true', async () => {
       const check = new MergeReadinessCheck();
       const ctx = makeCheckContext({
         worktreeManager: {
-          canFastForward: vi.fn().mockResolvedValue(true),
-          getWorktreeStatus: vi.fn().mockResolvedValue({
-            exists: true,
-            branch: 'mo/issue-1',
-            canFastForward: false,
-            isRebaseInProgress: false,
-            conflictingFiles: [],
+          checkSquashMergeability: vi.fn().mockResolvedValue({
+            kind: 'merge-ready',
+            strategy: 'squash',
+            targetBranch: 'master',
+            baseSha: 'abc123',
+            candidateHeadSha: 'def456',
+            mergeBaseSha: '789abc',
+            canMerge: true,
+            conflictFiles: [],
+            checkedAt: new Date().toISOString(),
           }),
         },
       });
@@ -208,46 +211,28 @@ describe('MergeReadinessCheck', () => {
       expect(result.output).toMatchObject({
         kind: 'merge-readiness',
         targetBranch: 'master',
-        canFastForward: true,
-      });
-    });
-
-    it('returns pass when canFastForward from getWorktreeStatus is true', async () => {
-      const check = new MergeReadinessCheck();
-      const ctx = makeCheckContext({
-        worktreeManager: {
-          canFastForward: vi.fn().mockResolvedValue(false),
-          getWorktreeStatus: vi.fn().mockResolvedValue({
-            exists: true,
-            branch: 'mo/issue-1',
-            canFastForward: true,
-            isRebaseInProgress: false,
-            conflictingFiles: [],
-          }),
-        },
-      });
-      const result = await check.run(ctx);
-
-      expect(result.status).toBe('pass');
-      expect(result.output).toMatchObject({
-        kind: 'merge-readiness',
-        canFastForward: true,
+        canMerge: true,
+        strategy: 'squash',
       });
     });
   });
 
   describe('fail scenario', () => {
-    it('returns fail when merge is not fast-forwardable and conflicts exist', async () => {
+    it('returns fail when squash preflight reports canMerge false', async () => {
       const check = new MergeReadinessCheck();
       const ctx = makeCheckContext({
         worktreeManager: {
-          canFastForward: vi.fn().mockResolvedValue(false),
-          getWorktreeStatus: vi.fn().mockResolvedValue({
-            exists: true,
-            branch: 'mo/issue-1',
-            canFastForward: false,
-            isRebaseInProgress: false,
-            conflictingFiles: ['src/foo.ts', 'src/bar.ts'],
+          checkSquashMergeability: vi.fn().mockResolvedValue({
+            kind: 'merge-ready',
+            strategy: 'squash',
+            targetBranch: 'master',
+            baseSha: 'abc123',
+            candidateHeadSha: 'def456',
+            mergeBaseSha: '789abc',
+            canMerge: false,
+            conflictFiles: ['src/foo.ts', 'src/bar.ts'],
+            checkedAt: new Date().toISOString(),
+            error: 'Squash merge conflict',
           }),
         },
       });
@@ -256,20 +241,18 @@ describe('MergeReadinessCheck', () => {
       expect(result.status).toBe('fail');
       expect(result.output).toMatchObject({
         kind: 'merge-readiness',
-        canFastForward: false,
-        cleanRebaseFeasible: false,
+        canMerge: false,
         conflictFiles: ['src/foo.ts', 'src/bar.ts'],
       });
     });
   });
 
   describe('error scenario', () => {
-    it('returns error when worktreeManager throws', async () => {
+    it('returns error when checkSquashMergeability throws', async () => {
       const check = new MergeReadinessCheck();
       const ctx = makeCheckContext({
         worktreeManager: {
-          canFastForward: vi.fn().mockRejectedValue(new Error('git error')),
-          getWorktreeStatus: vi.fn().mockRejectedValue(new Error('git error')),
+          checkSquashMergeability: vi.fn().mockRejectedValue(new Error('git error')),
         },
       });
       const result = await check.run(ctx);
