@@ -77,28 +77,227 @@ function createTimeout(ms: number): Promise<'timeout'> {
 class ToolCallIdGenerator {
   private counters = new Map<string, number>();
   private ids = new Map<string, string[]>();
+  private toolNamesById = new Map<string, string>();
 
   nextToolCallId(acpSessionId: string, toolName: string, state: 'started' | 'completed'): string {
     if (state === 'started') {
       const toolCallId = `${acpSessionId}-${toolName}-${this.counters.get(acpSessionId) ?? 0}`;
       this.counters.set(acpSessionId, (this.counters.get(acpSessionId) ?? 0) + 1);
-      const key = `${acpSessionId}-${toolName}`;
-      const list = this.ids.get(key) ?? [];
-      list.push(toolCallId);
-      this.ids.set(key, list);
+      this.rememberStartedToolCallId(acpSessionId, toolName, toolCallId);
       return toolCallId;
     } else {
-      const key = `${acpSessionId}-${toolName}`;
-      const list = this.ids.get(key) ?? [];
-      const toolCallId = list.shift() ?? `${acpSessionId}-${toolName}-${this.counters.get(acpSessionId) ?? 0}`;
-      if (list.length > 0) {
-        this.ids.set(key, list);
-      } else {
-        this.ids.delete(key);
-      }
+      const toolCallId = this.takeStartedToolCallId(acpSessionId, toolName) ?? `${acpSessionId}-${toolName}-${this.counters.get(acpSessionId) ?? 0}`;
       return toolCallId;
     }
   }
+
+  rememberStartedToolCallId(acpSessionId: string, toolName: string, toolCallId: string): void {
+    const key = `${acpSessionId}-${toolName}`;
+    const list = this.ids.get(key) ?? [];
+    if (!list.includes(toolCallId)) list.push(toolCallId);
+    this.ids.set(key, list);
+    this.toolNamesById.set(toolCallId, toolName);
+  }
+
+  takeStartedToolCallId(acpSessionId: string, toolName: string): string | undefined {
+    const key = `${acpSessionId}-${toolName}`;
+    const list = this.ids.get(key) ?? [];
+    const toolCallId = list.shift();
+    if (list.length > 0) {
+      this.ids.set(key, list);
+    } else {
+      this.ids.delete(key);
+    }
+    return toolCallId;
+  }
+
+  getToolName(id: string): string | undefined {
+    return this.toolNamesById.get(id);
+  }
+
+  setToolNameForId(id: string, toolName: string): void {
+    this.toolNamesById.set(id, toolName);
+  }
+}
+
+interface NormalizedToolCall {
+  toolCallId: string;
+  toolName: string;
+  status: string;
+  title?: string;
+  input?: unknown;
+  output?: unknown;
+  outputMetadata?: Record<string, unknown>;
+}
+
+function knownName(name: string | undefined): string | undefined {
+  return name && name !== 'unknown' ? name : undefined;
+}
+
+function inferToolName(update: Record<string, unknown>, toolCall: Record<string, unknown> | undefined): string {
+  const nestedName = knownName(toolCall?.toolName as string | undefined)
+    ?? knownName(toolCall?.name as string | undefined);
+  if (nestedName) return nestedName;
+
+  const topLevelName = knownName(update.toolName as string | undefined)
+    ?? knownName(update.name as string | undefined);
+  if (topLevelName) return topLevelName;
+
+  for (const value of [toolCall?.metadata, update.metadata, toolCall?.output, toolCall?.input, update.output, update.input]) {
+    if (isRecord(value)) {
+      const metaName = value.toolName as string | undefined ?? value.name as string | undefined;
+      if (metaName) return metaName;
+    }
+  }
+
+  const titleName = inferToolNameFromTitle(toolCall?.title as string | undefined ?? update.title as string | undefined);
+  if (titleName) return titleName;
+
+  for (const value of [toolCall?.input, update.input, toolCall?.output, update.output]) {
+    const payloadName = inferToolNameFromPayload(value);
+    if (payloadName) return payloadName;
+  }
+
+  const status = (toolCall?.status as string) ?? '';
+  if (status === 'completed') {
+    const output = toolCall?.output;
+    if (isRecord(output)) {
+      const outName = output.toolName as string | undefined ?? output.name as string | undefined;
+      if (outName) return outName;
+    }
+  }
+
+  return 'unknown';
+}
+
+function inferToolNameFromTitle(title: string | undefined): string | undefined {
+  if (!title) return undefined;
+  const lower = title.toLowerCase();
+  if (lower.includes('apply_patch') || lower.includes('patch')) return 'apply_patch';
+  if (lower.includes('bash') || lower.includes('command')) return 'bash';
+  if (lower.includes('todo')) return 'todowrite';
+  if (lower.includes('grep')) return 'grep';
+  if (lower.includes('glob')) return 'glob';
+  if (lower.includes('search')) return 'search';
+  if (lower.includes('read')) return 'read';
+  if (lower.includes('write')) return 'write';
+  if (lower.includes('edit')) return 'edit';
+  return undefined;
+}
+
+function inferToolNameFromPayload(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  if (typeof payload.patchText === 'string' || typeof payload.patch === 'string') return 'apply_patch';
+  if (typeof payload.command === 'string' || typeof payload.script === 'string') return 'bash';
+  if (Array.isArray(payload.todos)) return 'todowrite';
+  if (typeof payload.pattern === 'string') return 'glob';
+  if (typeof payload.query === 'string' || typeof payload.search === 'string') return 'search';
+  if (
+    typeof payload.file_path === 'string'
+    || typeof payload.filePath === 'string'
+    || typeof payload.path === 'string'
+  ) {
+    const contentKeys = ['content', 'oldStr', 'newStr', 'old_string', 'new_string'];
+    if (contentKeys.some(key => payload[key] !== undefined)) return 'edit';
+    return 'read';
+  }
+  for (const value of Object.values(payload)) {
+    const nestedName = inferToolNameFromPayload(value);
+    if (nestedName) return nestedName;
+  }
+  return undefined;
+}
+
+function extractProviderId(update: Record<string, unknown>, toolCall: Record<string, unknown> | undefined): string | undefined {
+  return toolCall?.toolCallId as string | undefined
+    ?? toolCall?.id as string | undefined
+    ?? toolCall?.callId as string | undefined
+    ?? update.toolCallId as string | undefined
+    ?? update.id as string | undefined
+    ?? update.callId as string | undefined;
+}
+
+function mapStatusToState(status: string): 'started' | 'completed' {
+  return status === 'completed' ? 'completed' : 'started';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeToolCallNotification(
+  update: Record<string, unknown>,
+  eventType: string,
+  sessionId: string,
+  wfObserver: SessionObserver | undefined,
+  idGenerator: ToolCallIdGenerator,
+): NormalizedToolCall {
+  let toolCall = update.toolCall as Record<string, unknown> | undefined;
+  const isUpdate = eventType === 'tool_call_update';
+
+  if (!toolCall) {
+    toolCall = {};
+    update.toolCall = toolCall;
+  }
+
+  const topLevelOutput = update.output;
+  const topLevelMetadata = update.metadata as Record<string, unknown> | undefined;
+  if (update.status !== undefined && toolCall.status === undefined) toolCall.status = update.status;
+  if (update.title !== undefined && toolCall.title === undefined) toolCall.title = update.title;
+  if (update.input !== undefined && toolCall.input === undefined) toolCall.input = update.input;
+  if (topLevelOutput !== undefined && toolCall.output === undefined) toolCall.output = topLevelOutput;
+  if (topLevelMetadata && toolCall.metadata === undefined) toolCall.metadata = topLevelMetadata;
+  if (topLevelMetadata && isRecord(toolCall.output) && toolCall.output.metadata === undefined) {
+    toolCall.output.metadata = topLevelMetadata;
+  }
+
+  const providerId = extractProviderId(update, toolCall);
+  const inferredName = inferToolName(update, toolCall);
+  const status = (toolCall?.status as string) ?? (isUpdate ? 'completed' : '');
+  const state = mapStatusToState(status);
+
+  let toolCallId: string;
+  let storedName: string | undefined;
+  if (providerId) {
+    toolCallId = providerId;
+    storedName = idGenerator.getToolName(providerId);
+  } else if (wfObserver) {
+    toolCallId = wfObserver.nextToolCallId!(sessionId, inferredName, state);
+  } else {
+    toolCallId = idGenerator.nextToolCallId(sessionId, inferredName, state);
+  }
+
+  toolCall.toolCallId = toolCallId;
+
+  let finalName = knownName(toolCall.toolName as string | undefined) ?? inferredName;
+  if (!finalName || finalName === 'unknown') {
+    if (storedName) {
+      finalName = storedName;
+    }
+  }
+  if (finalName && finalName !== 'unknown') {
+    idGenerator.setToolNameForId(toolCallId, finalName);
+    if (state === 'started' && providerId) {
+      idGenerator.rememberStartedToolCallId(sessionId, finalName, toolCallId);
+      wfObserver?.rememberStartedToolCallId?.(sessionId, finalName, toolCallId);
+    }
+  }
+  toolCall.toolName = finalName;
+
+  if (status && !toolCall.status) {
+    toolCall.status = status;
+  }
+
+  return {
+    toolCallId,
+    toolName: finalName,
+    status,
+    title: toolCall.title as string | undefined,
+    input: toolCall.input,
+    output: toolCall.output,
+    outputMetadata: toolCall.metadata as Record<string, unknown> | undefined
+      ?? (isRecord(toolCall.output) ? toolCall.output.metadata as Record<string, unknown> | undefined : undefined),
+  };
 }
 
 function buildRawNotificationObserver(
@@ -577,28 +776,31 @@ export class AgentSession {
       }
     }
 
-    if (eventType === 'tool_call') {
+    if (eventType === 'tool_call' || eventType === 'tool_call_update') {
       const toolData = update as Record<string, unknown>;
-      const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
-      const toolStatus = (toolCallData?.status as string) ?? '';
-      const state = toolStatus === 'completed' ? 'completed' as const : 'started' as const;
-      const toolName = (toolCallData?.toolName as string) ?? '';
-      const existingToolCallId = (toolCallData?.toolCallId as string | undefined)
-        ?? (toolCallData?.id as string | undefined)
-        ?? (toolCallData?.callId as string | undefined);
-      const wfObs = this._wfObserver;
-      let toolCallId: string;
-      if (existingToolCallId) {
-        toolCallId = existingToolCallId;
-      } else if (wfObs) {
-        toolCallId = wfObs.nextToolCallId!(this._sessionId, toolName, state);
-      } else {
-        toolCallId = `${this._sessionId}-${toolName}-0`;
-      }
-      if (toolCallData && !existingToolCallId) {
-        toolCallData.toolCallId = toolCallId;
-      } else if (!toolCallData && !existingToolCallId) {
-        toolData.toolCall = { toolCallId };
+      const normalized = normalizeToolCallNotification(
+        toolData,
+        eventType,
+        this._sessionId,
+        this._wfObserver,
+        this._toolCallIdGenerator,
+      );
+      const state = mapStatusToState(normalized.status);
+      const ctx = this.makeCtx();
+      const event: ToolCallEvent = {
+        toolName: normalized.toolName,
+        state,
+        toolCallId: normalized.toolCallId,
+        title: normalized.title,
+        rawInput: state === 'started' ? normalized.input : undefined,
+        rawOutput: state === 'completed' ? normalized.output : undefined,
+        rawOutputMetadata: state === 'completed' ? normalized.outputMetadata : undefined,
+        status: normalized.status || undefined,
+      };
+      for (const obs of this._observers) {
+        try { obs.onToolCall?.(ctx, event); } catch (err) {
+          log.error('onToolCall observer failed', { toolName: event.toolName, error: err instanceof Error ? err.message : String(err) });
+        }
       }
     }
 
@@ -612,31 +814,6 @@ export class AgentSession {
       for (const obs of this._observers) {
         try { obs.onRawNotification?.(ctx, notification); } catch (err) {
           log.error('onRawNotification observer failed', { error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-    }
-
-    if (eventType === 'tool_call') {
-      const toolData = update as Record<string, unknown>;
-      const toolCallData = toolData.toolCall as Record<string, unknown> | undefined;
-      const toolStatus = (toolCallData?.status as string) ?? '';
-      const state = toolStatus === 'completed' ? 'completed' as const : 'started' as const;
-      const toolName = (toolCallData?.toolName as string) ?? '';
-      const toolCallId = this._toolCallIdGenerator.nextToolCallId(this._sessionId, toolName, state);
-      const ctx = this.makeCtx();
-      const event: ToolCallEvent = {
-        toolName,
-        state,
-        toolCallId,
-        title: (toolCallData?.title as string) ?? undefined,
-        rawInput: state === 'started' ? toolCallData?.input : undefined,
-        rawOutput: state === 'completed' ? toolCallData?.output : undefined,
-        rawOutputMetadata: state === 'completed' ? ((toolCallData?.output as Record<string, unknown>)?.metadata as Record<string, unknown> | undefined) : undefined,
-        status: toolStatus || undefined,
-      };
-      for (const obs of this._observers) {
-        try { obs.onToolCall?.(ctx, event); } catch (err) {
-          log.error('onToolCall observer failed', { toolName: event.toolName, error: err instanceof Error ? err.message : String(err) });
         }
       }
     }
