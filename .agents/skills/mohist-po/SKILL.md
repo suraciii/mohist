@@ -93,6 +93,8 @@ node packages/cli/bin/mo issue create "<title>" --body "<body>" --label bug --la
 
 长正文避免 shell quoting 问题；必要时用安全的本地命令传 literal body，不要让反引号、管道符或 Markdown 破坏 CLI 参数。
 
+Issue body 是 Plan 阶段的输入，不是完整 PRD、探索记录或技术设计文档。最终正文应精简，先写目标产品形态，再保留少量关键领域模型。
+
 Issue body 建议结构：
 
 ```markdown
@@ -100,17 +102,21 @@ Issue body 建议结构：
 
 [用户视角的问题，不从内部实现开头]
 
+## User Goal
+
+[可选。压缩后的用户目标；不要写长篇模板化用户故事]
+
+## Product Shape
+
+[目标产品形态：用户最终会看到/使用什么，以及关键设计约束]
+
 ## Evidence
 
-- [CLI/API/WebUI/log/code evidence]
+- [可选。bug 或运行态问题需要证据；功能/设计 issue 可省略]
 
-## Analysis
+## Key Domain Model
 
-[触发条件、影响、边界、可能根因]
-
-## Desired Behavior
-
-[用户应该看到什么、能做什么决定]
+[只保留理解需求必要的关键概念、边界和不变量]
 
 ## Acceptance Criteria
 
@@ -121,6 +127,13 @@ Issue body 建议结构：
 
 - [明确不做的范围]
 ```
+
+写 issue 时避免：
+
+- 把探索过程原样放进正文；只沉淀结论、边界和验收。
+- 预设文件、函数、数据库表或逐步实现任务；这些属于 Plan 阶段。
+- 用长篇“作为...我希望...以便...”用户故事替代产品形态。
+- 把内部状态枚举直接当成用户问题。
 
 ## Priority Guidance
 
