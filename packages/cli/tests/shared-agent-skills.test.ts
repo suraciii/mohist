@@ -6,6 +6,7 @@ import {
   installSharedAgentSkills,
   getSharedSkillNames,
 } from '../src/agent-skills/shared-agent-skills';
+import { SkillDataService } from '../src/agent-skills/skill-data-service';
 import { setupSkillsCommands } from '../src/cli/commands/skills';
 import { Command } from 'commander';
 
@@ -176,42 +177,41 @@ describe('Shared Agent Skills', () => {
   });
 
   describe('issue-templates.md bundle installation', () => {
-    it('installs issue-templates.md alongside SKILL.md for mohist', () => {
+    it('mo skills get mohist --full serves issue-templates.md as supplementary file', () => {
       installSharedAgentSkills({ projectPath: tmpDir });
+      const skillService = new SkillDataService();
+      const content = skillService.getSkillContent('mohist', true);
+      const hasRefs = content.supplementaryFiles.some(f => f.path.includes('issue-templates'));
+      expect(hasRefs).toBe(true);
+      const refsFile = content.supplementaryFiles.find(f => f.path.includes('issue-templates'));
+      expect(refsFile!.content).toContain('## Template: refactor');
+      expect(refsFile!.content).toContain('## Template: user-story');
+      expect(refsFile!.content).toContain('## Template: ui');
+    });
 
+    it('issue-templates.md is NOT installed in repository skill directory (served via get --full)', () => {
+      installSharedAgentSkills({ projectPath: tmpDir });
       const mohistDir = path.join(tmpDir, '.agents', 'skills', 'mohist');
-      const skillMdPath = path.join(mohistDir, 'SKILL.md');
       const issueTemplatesPath = path.join(mohistDir, 'issue-templates.md');
-
-      expect(fs.existsSync(skillMdPath)).toBe(true);
-      expect(fs.existsSync(issueTemplatesPath)).toBe(true);
-
-      const content = fs.readFileSync(issueTemplatesPath, 'utf-8');
-      expect(content).toContain('## Template: refactor');
-      expect(content).toContain('## Template: user-story');
-      expect(content).toContain('## Template: ui');
+      expect(fs.existsSync(issueTemplatesPath)).toBe(false);
     });
 
     it('does not install issue-templates.md for mohist-explore', () => {
       installSharedAgentSkills({ projectPath: tmpDir });
-
       const exploreDir = path.join(tmpDir, '.agents', 'skills', 'mohist-explore');
       const skillMdPath = path.join(exploreDir, 'SKILL.md');
       const issueTemplatesPath = path.join(exploreDir, 'issue-templates.md');
-
       expect(fs.existsSync(skillMdPath)).toBe(true);
       expect(fs.existsSync(issueTemplatesPath)).toBe(false);
     });
 
-    it('installed issue-templates.md contains UI template with ASCII prototype section', () => {
+    it('installed SKILL.md for mohist is a stub under 50 lines', () => {
       installSharedAgentSkills({ projectPath: tmpDir });
-
-      const issueTemplatesPath = path.join(tmpDir, '.agents', 'skills', 'mohist', 'issue-templates.md');
-      const content = fs.readFileSync(issueTemplatesPath, 'utf-8');
-
-      expect(content).toContain('## Template: ui');
-      expect(content).toContain('ASCII 原型图');
-      expect(content).toContain('+------------------------------------------+');
+      const mohistPath = path.join(tmpDir, '.agents', 'skills', 'mohist', 'SKILL.md');
+      const content = fs.readFileSync(mohistPath, 'utf-8');
+      const lines = content.split('\n').length;
+      expect(lines).toBeLessThan(50);
+      expect(content).toContain('hidden: true');
     });
 
     it('getSharedSkillNames returns only skill names, not companion files', () => {
