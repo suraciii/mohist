@@ -1561,6 +1561,138 @@ export function createIssueRoutes(
           } satisfies ApiResponse, 409);
         }
 
+        const mergeReadySnapshot = approvalOutput?.mergeReadySnapshot as Record<string, unknown> | undefined;
+        if (!mergeReadySnapshot) {
+          return c.json({
+            success: false,
+            error: 'Cannot approve: merge-ready snapshot is missing from approval output. Re-run checks to generate merge-ready evidence.'
+          } satisfies ApiResponse, 409);
+        }
+
+        const requiredFields: Array<{ key: string; type: string }> = [
+          { key: 'kind', type: 'string' },
+          { key: 'targetBranch', type: 'string' },
+          { key: 'strategy', type: 'string' },
+          { key: 'baseSha', type: 'string' },
+          { key: 'candidateHeadSha', type: 'string' },
+          { key: 'mergeBaseSha', type: 'string' },
+          { key: 'canMerge', type: 'boolean' },
+          { key: 'checkedAt', type: 'string' },
+        ];
+        for (const field of requiredFields) {
+          const value = mergeReadySnapshot[field.key];
+          if (value === undefined || value === null || (field.type === 'string' && typeof value !== 'string') || (field.type === 'boolean' && typeof value !== 'boolean')) {
+            return c.json({
+              success: false,
+              error: `Cannot approve: merge-ready snapshot is malformed (missing or invalid field: ${field.key}). Re-run checks to regenerate merge-ready evidence.`
+            } satisfies ApiResponse, 409);
+          }
+        }
+
+        const conflictFiles = mergeReadySnapshot.conflictFiles;
+        if (!Array.isArray(conflictFiles) || conflictFiles.some(file => typeof file !== 'string')) {
+          return c.json({
+            success: false,
+            error: 'Cannot approve: merge-ready snapshot is malformed (missing or invalid field: conflictFiles). Re-run checks to regenerate merge-ready evidence.'
+          } satisfies ApiResponse, 409);
+        }
+
+        if (mergeReadySnapshot.canMerge !== true) {
+          return c.json({
+            success: false,
+            error: `Cannot approve: merge-ready snapshot reports canMerge=false. The candidate cannot be cleanly squash-merged. Re-run checks to verify merge readiness.`
+          } satisfies ApiResponse, 409);
+        }
+
+        const mergeReadyProject = projectService.getById(projectId);
+        if (!mergeReadyProject) {
+          return c.json({
+            success: false,
+            error: 'Cannot approve: project not found for merge-ready snapshot validation. Re-run Check after resolving project state.'
+          } satisfies ApiResponse, 409);
+        }
+
+        if (worktreeManager) {
+          const worktreePath = worktreeManager.getPath(mergeReadyProject.name, issue.number);
+          if (worktreePath) {
+            try {
+              const currentHead = await worktreeManager.getHeadSha(worktreePath);
+              const approvalSnapshotSha = approvalOutput.snapshotSha;
+
+              if (typeof approvalSnapshotSha === 'string' && currentHead !== approvalSnapshotSha) {
+                return c.json({
+                  success: false,
+                  error: 'Cannot approve: current HEAD does not match approval snapshot. The code may have changed since approval was requested.'
+                } satisfies ApiResponse, 409);
+              }
+
+              const isClean = await worktreeManager.isWorktreeClean(worktreePath);
+              if (!isClean) {
+                return c.json({
+                  success: false,
+                  error: 'Cannot approve: worktree has uncommitted changes. Commit or stash changes before approving.'
+                } satisfies ApiResponse, 409);
+              }
+
+            } catch (err) {
+              return c.json({
+                success: false,
+                error: `Cannot approve: failed to validate current worktree state. Re-run Check after resolving repository state. ${err instanceof Error ? err.message : String(err)}`
+              } satisfies ApiResponse, 409);
+            }
+          }
+        }
+
+        try {
+          const baseBranch = mergeReadyProject.baseBranch;
+          const candidateBranch = `mo/issue-${issue.number}`;
+          const baseShaResult = await execFileAsync('git', ['rev-parse', baseBranch], { cwd: mergeReadyProject.path });
+          const candidateHeadResult = await execFileAsync('git', ['rev-parse', candidateBranch], { cwd: mergeReadyProject.path });
+          const mergeBaseResult = await execFileAsync('git', ['merge-base', baseBranch, candidateBranch], { cwd: mergeReadyProject.path });
+
+          const currentBaseSha = baseShaResult.stdout.trim();
+          const currentCandidateHeadSha = candidateHeadResult.stdout.trim();
+          const currentMergeBaseSha = mergeBaseResult.stdout.trim();
+
+          const snapshotBaseSha = String(mergeReadySnapshot.baseSha ?? '');
+          const snapshotCandidateHeadSha = String(mergeReadySnapshot.candidateHeadSha ?? '');
+          const snapshotMergeBaseSha = String(mergeReadySnapshot.mergeBaseSha ?? '');
+          const snapshotTargetBranch = String(mergeReadySnapshot.targetBranch ?? '');
+
+          if (snapshotBaseSha && snapshotBaseSha !== currentBaseSha) {
+            return c.json({
+              success: false,
+              error: `Cannot approve: merge-ready snapshot base SHA (${snapshotBaseSha}) does not match current base SHA (${currentBaseSha}). The base branch has changed since merge-ready passed. Re-run checks.`
+            } satisfies ApiResponse, 409);
+          }
+
+          if (snapshotCandidateHeadSha && snapshotCandidateHeadSha !== currentCandidateHeadSha) {
+            return c.json({
+              success: false,
+              error: `Cannot approve: merge-ready snapshot candidate head SHA (${snapshotCandidateHeadSha}) does not match current candidate head SHA (${currentCandidateHeadSha}). The issue branch has changed since merge-ready passed. Re-run checks.`
+            } satisfies ApiResponse, 409);
+          }
+
+          if (snapshotMergeBaseSha && snapshotMergeBaseSha !== currentMergeBaseSha) {
+            return c.json({
+              success: false,
+              error: `Cannot approve: merge-ready snapshot merge-base SHA (${snapshotMergeBaseSha}) does not match current merge-base SHA (${currentMergeBaseSha}). The branch relationship has changed since merge-ready passed. Re-run checks.`
+            } satisfies ApiResponse, 409);
+          }
+
+          if (snapshotTargetBranch && snapshotTargetBranch !== baseBranch) {
+            return c.json({
+              success: false,
+              error: `Cannot approve: merge-ready snapshot target branch (${snapshotTargetBranch}) does not match current target branch (${baseBranch}). The base branch configuration has changed. Re-run checks.`
+            } satisfies ApiResponse, 409);
+          }
+        } catch (err) {
+          return c.json({
+            success: false,
+            error: `Cannot approve: failed to validate merge-ready snapshot freshness against Git state. Re-run Check to regenerate merge-ready evidence. ${err instanceof Error ? err.message : String(err)}`
+          } satisfies ApiResponse, 409);
+        }
+
         if (checkSuiteRepo) {
           const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
           if (activeSuite) {
@@ -1587,36 +1719,6 @@ export function createIssueRoutes(
                 success: false,
                 error: 'Cannot approve: approval snapshot does not match active CheckSuite snapshot. The check state may have changed since approval was requested.'
               } satisfies ApiResponse, 409);
-            }
-          }
-        }
-
-        if (worktreeManager) {
-          const project = projectService.getById(projectId);
-          if (project) {
-            const worktreePath = worktreeManager.getPath(project.name, issue.number);
-            if (worktreePath) {
-              try {
-                const currentHead = await worktreeManager.getHeadSha(worktreePath);
-                const approvalSnapshotSha = approvalOutput.snapshotSha;
-
-                if (typeof approvalSnapshotSha === 'string' && currentHead !== approvalSnapshotSha) {
-                  return c.json({
-                    success: false,
-                    error: 'Cannot approve: current HEAD does not match approval snapshot. The code may have changed since approval was requested.'
-                  } satisfies ApiResponse, 409);
-                }
-
-                const isClean = await worktreeManager.isWorktreeClean(worktreePath);
-                if (!isClean) {
-                  return c.json({
-                    success: false,
-                    error: 'Cannot approve: worktree has uncommitted changes. Commit or stash changes before approving.'
-                  } satisfies ApiResponse, 409);
-                }
-              } catch (err) {
-                log.warn('Failed to validate worktree state for approval', { error: err });
-              }
             }
           }
         }

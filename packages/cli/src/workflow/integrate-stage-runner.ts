@@ -1,5 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { Stage, MergeState } from '../types';
 import type { StageContext } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
@@ -13,6 +15,47 @@ import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
 import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
 
 const log = Log.create({ service: 'integrate-stage-runner' });
+const execFileAsync = promisify(execFile);
+
+interface MergeReadySnapshot {
+  kind?: string;
+  targetBranch?: string;
+  strategy?: string;
+  baseSha?: string;
+  candidateHeadSha?: string;
+  mergeBaseSha?: string;
+  canMerge?: boolean;
+  conflictFiles?: string[];
+  checkedAt?: string;
+  error?: string;
+}
+
+function isApprovedSnapshotFresh(
+  approvedSnapshot: MergeReadySnapshot,
+  baseBranch: string,
+  currentBaseSha: string,
+  currentCandidateHeadSha: string | null,
+  currentMergeBaseSha: string | null,
+): boolean {
+  const snapshotBaseSha = String(approvedSnapshot.baseSha ?? '');
+  const snapshotCandidateHeadSha = String(approvedSnapshot.candidateHeadSha ?? '');
+  const snapshotMergeBaseSha = String(approvedSnapshot.mergeBaseSha ?? '');
+  const snapshotTargetBranch = String(approvedSnapshot.targetBranch ?? '');
+
+  if (snapshotTargetBranch !== baseBranch) return false;
+  if (approvedSnapshot.canMerge !== true) return false;
+  if (!snapshotBaseSha || !snapshotCandidateHeadSha || !snapshotMergeBaseSha) return false;
+  if (currentCandidateHeadSha === null || currentMergeBaseSha === null) return false;
+
+  return currentBaseSha === snapshotBaseSha
+    && currentCandidateHeadSha === snapshotCandidateHeadSha
+    && currentMergeBaseSha === snapshotMergeBaseSha;
+}
+
+async function resolveRefSha(repoPath: string, ref: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', ref], { cwd: repoPath });
+  return stdout.trim();
+}
 
 function findArchivedChangePath(worktreePath: string, issueNumber: number): string | null {
   const archiveDir = path.join(worktreePath, 'openspec', 'changes', 'archive');
@@ -34,7 +77,7 @@ export interface IntegrateStageRunnerOptions {
   worktreePath: string;
 }
 
-type IntegrateTaskId = 'integrate:spec-sync' | 'integrate:archive-change' | 'integrate:merge';
+type IntegrateTaskId = 'integrate:spec-sync' | 'integrate:archive-change' | 'integrate:merge' | 'integrate:preflight';
 
 interface IntegrateStepResult {
   step: IntegrateTaskId;
@@ -80,6 +123,19 @@ export class IntegrateStageRunner extends BaseStageRunner {
 
     this.emitIntegrationStarted(ctx);
     const integration = this.resolveIntegrationContext(ctx);
+
+    const preflightResult = await this.validateMergeability(ctx, steps);
+    if (!preflightResult.valid) {
+      ctx.emit('integration_failed', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        failingStep: 'integrate:preflight',
+        error: 'Merge preflight failed: the candidate cannot be cleanly squash-merged. Re-run Check to verify merge readiness.',
+        output: steps[steps.length - 1]?.output,
+      });
+      return { integrate: false, steps };
+    }
 
     const specSyncResult = await this.runSpecSyncStep(ctx, steps, {
       effectiveChangeDir: integration.effectiveChangeDir,
@@ -147,6 +203,232 @@ export class IntegrateStageRunner extends BaseStageRunner {
       isAlreadyArchived,
       expectedArchivePath: `openspec/changes/archive/${expectedArchiveName}`,
       projectPath: this.worktreePath,
+    };
+  }
+
+  private async validateMergeability(
+    ctx: StageContext,
+    steps: IntegrateStepResult[],
+  ): Promise<{ valid: true; snapshot: MergeReadySnapshot } | { valid: false; steps: IntegrateStepResult[] }> {
+    const project = ctx.projectRepo.findById(ctx.issue.projectId);
+    if (!project) {
+      const result = this.failedPreflightResult('project-not-found', 'unknown', null, null, null, 'Project not found');
+      steps.push(result);
+      return { valid: false, steps };
+    }
+
+    const baseBranch = project.baseBranch;
+    const approvalOutput = ctx.issue.approvalState?.output as { mergeReadySnapshot?: MergeReadySnapshot } | undefined;
+    const approvedSnapshot = approvalOutput?.mergeReadySnapshot;
+
+    if (approvedSnapshot === null || approvedSnapshot === undefined) {
+      log.info('No approved merge-ready snapshot found, will run preflight', {
+        issueNumber: ctx.issue.number,
+      });
+    } else {
+      const currentBaseSha = await resolveRefSha(project.path, baseBranch);
+      const worktreePath = ctx.worktreeManager.getPath(project.name, ctx.issue.number);
+      const currentCandidateHeadSha = worktreePath
+        ? await ctx.worktreeManager.getHeadSha(worktreePath)
+        : null;
+      const currentMergeBaseSha = worktreePath
+        ? await execFileAsync('git', ['merge-base', baseBranch, `mo/issue-${ctx.issue.number}`], { cwd: project.path })
+            .then(result => result.stdout.trim())
+            .catch(() => null)
+        : null;
+
+      if (isApprovedSnapshotFresh(approvedSnapshot, baseBranch, currentBaseSha, currentCandidateHeadSha, currentMergeBaseSha)) {
+        const result: IntegrateStepResult = {
+          step: 'integrate:preflight',
+          status: 'completed',
+          output: {
+            step: 'integrate:preflight' as const,
+            kind: approvedSnapshot.kind,
+            strategy: approvedSnapshot.strategy,
+            targetBranch: approvedSnapshot.targetBranch,
+            baseSha: approvedSnapshot.baseSha,
+            candidateHeadSha: approvedSnapshot.candidateHeadSha,
+            mergeBaseSha: approvedSnapshot.mergeBaseSha,
+            canMerge: approvedSnapshot.canMerge,
+            conflictFiles: approvedSnapshot.conflictFiles,
+            checkedAt: approvedSnapshot.checkedAt,
+            refreshed: false,
+          },
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          duration: 0,
+        };
+        steps.push(result);
+        return { valid: true, snapshot: approvedSnapshot as MergeReadySnapshot };
+      }
+
+      log.info('Approved merge-ready snapshot stale; Integrate requires Check rerun before delivery', {
+        issueNumber: ctx.issue.number,
+        snapshotTargetBranch: approvedSnapshot.targetBranch,
+        currentBaseBranch: baseBranch,
+        snapshotBaseSha: approvedSnapshot.baseSha,
+        currentBaseSha,
+        snapshotCandidateHeadSha: approvedSnapshot.candidateHeadSha,
+        currentCandidateHeadSha,
+        snapshotMergeBaseSha: approvedSnapshot.mergeBaseSha,
+        currentMergeBaseSha,
+      });
+
+      const snapshot = ctx.worktreeManager.checkSquashMergeability
+        ? await ctx.worktreeManager.checkSquashMergeability(
+          project.path,
+          project.name,
+          ctx.issue.number,
+          baseBranch,
+        )
+        : null;
+      const result: IntegrateStepResult = {
+        step: 'integrate:preflight',
+        status: 'failed',
+        output: {
+          step: 'integrate:preflight' as const,
+          kind: snapshot?.kind ?? approvedSnapshot.kind,
+          strategy: snapshot?.strategy ?? approvedSnapshot.strategy,
+          targetBranch: snapshot?.targetBranch ?? baseBranch,
+          baseSha: snapshot?.baseSha ?? currentBaseSha,
+          candidateHeadSha: snapshot?.candidateHeadSha ?? currentCandidateHeadSha,
+          mergeBaseSha: snapshot?.mergeBaseSha ?? currentMergeBaseSha,
+          canMerge: snapshot?.canMerge ?? false,
+          conflictFiles: snapshot?.conflictFiles ?? [],
+          checkedAt: snapshot?.checkedAt ?? new Date().toISOString(),
+          refreshed: Boolean(snapshot),
+          staleApprovedSnapshot: {
+            targetBranch: approvedSnapshot.targetBranch,
+            baseSha: approvedSnapshot.baseSha,
+            candidateHeadSha: approvedSnapshot.candidateHeadSha,
+            mergeBaseSha: approvedSnapshot.mergeBaseSha,
+          },
+          currentSnapshot: {
+            targetBranch: baseBranch,
+            baseSha: currentBaseSha,
+            candidateHeadSha: currentCandidateHeadSha,
+            mergeBaseSha: currentMergeBaseSha,
+          },
+          error: 'Approved merge-ready snapshot is stale. Re-run Check so the user can approve the current candidate before Integrate performs delivery side effects.',
+        },
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        duration: 0,
+      };
+      steps.push(result);
+      if (snapshot) {
+        ctx.emit('integration_preflight_refreshed', {
+          issueId: ctx.issue.id,
+          projectId: ctx.issue.projectId,
+          issueNumber: ctx.issue.number,
+          status: 'failed',
+          snapshot,
+        });
+      }
+      return { valid: false, steps };
+    }
+
+    if (!ctx.worktreeManager.checkSquashMergeability) {
+      const result = this.failedPreflightResult('preflight-unavailable', baseBranch, null, null, null, 'checkSquashMergeability is not available on worktreeManager');
+      steps.push(result);
+      return { valid: false, steps };
+    }
+
+    const snapshot = await ctx.worktreeManager.checkSquashMergeability(
+      project.path,
+      project.name,
+      ctx.issue.number,
+      baseBranch,
+    );
+
+    if (!snapshot.canMerge) {
+      const result: IntegrateStepResult = {
+        step: 'integrate:preflight',
+        status: 'failed',
+        output: {
+          step: 'integrate:preflight' as const,
+          kind: snapshot.kind,
+          strategy: snapshot.strategy,
+          targetBranch: snapshot.targetBranch,
+          baseSha: snapshot.baseSha,
+          candidateHeadSha: snapshot.candidateHeadSha,
+          mergeBaseSha: snapshot.mergeBaseSha,
+          canMerge: snapshot.canMerge,
+          conflictFiles: snapshot.conflictFiles,
+          checkedAt: snapshot.checkedAt,
+          error: snapshot.error ?? 'Squash merge preflight failed',
+          refreshed: true,
+        },
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        duration: 0,
+      };
+      steps.push(result);
+      ctx.emit('integration_preflight_refreshed', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        status: 'failed',
+        snapshot: snapshot,
+      });
+      return { valid: false, steps };
+    }
+
+    const result: IntegrateStepResult = {
+      step: 'integrate:preflight',
+      status: 'completed',
+      output: {
+        step: 'integrate:preflight' as const,
+        kind: snapshot.kind,
+        strategy: snapshot.strategy,
+        targetBranch: snapshot.targetBranch,
+        baseSha: snapshot.baseSha,
+        candidateHeadSha: snapshot.candidateHeadSha,
+        mergeBaseSha: snapshot.mergeBaseSha,
+        canMerge: snapshot.canMerge,
+        conflictFiles: snapshot.conflictFiles,
+        checkedAt: snapshot.checkedAt,
+        refreshed: true,
+      },
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      duration: 0,
+    };
+    steps.push(result);
+    ctx.emit('integration_preflight_refreshed', {
+      issueId: ctx.issue.id,
+      projectId: ctx.issue.projectId,
+      issueNumber: ctx.issue.number,
+      status: 'passed',
+      snapshot: snapshot,
+    });
+
+    return { valid: true, snapshot };
+  }
+
+  private failedPreflightResult(
+    failingStep: string,
+    targetBranch: string,
+    baseSha: string | null,
+    candidateHeadSha: string | null,
+    mergeBaseSha: string | null,
+    error: string,
+  ): IntegrateStepResult {
+    return {
+      step: 'integrate:preflight',
+      status: 'failed',
+      output: {
+        step: 'integrate:preflight' as const,
+        failingStep,
+        targetBranch,
+        baseSha,
+        candidateHeadSha,
+        mergeBaseSha,
+        error,
+      },
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      duration: 0,
     };
   }
 
@@ -482,8 +764,10 @@ export class IntegrateStageRunner extends BaseStageRunner {
             step: 'integrate:merge' as const,
             failingStep: mergeTruth.failingStep,
             targetBranch: mergeTruth.targetBranch,
+            strategy: (mergeTruth as any).strategy ?? 'squash',
             baseSha: mergeTruth.baseSha,
             candidateHeadSha: mergeTruth.candidateHeadSha,
+            mergeBaseSha: (mergeTruth as any).mergeBaseSha ?? '',
             conflictFiles: mergeTruth.conflictFiles,
             error: mergeTruth.error,
           },

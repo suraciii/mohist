@@ -515,11 +515,13 @@ export abstract class BaseStageRunner implements StageRunner {
       const dimensions = reviewOutput.reviewReport ? parseDimensions(reviewOutput.reviewReport) : undefined;
       const latestReviewPassed = getLatestCheckResult(allResults, 'review-passed');
       const snapshotSha = (latestReviewPassed?.output as { snapshotSha?: string } | undefined)?.snapshotSha;
+      const mergeReadySnapshot = mergeReadyResult?.output as { kind?: string; targetBranch?: string; strategy?: string; baseSha?: string; candidateHeadSha?: string; mergeBaseSha?: string; canMerge?: boolean; conflictFiles?: string[]; checkedAt?: string; error?: string } | undefined;
       approvalOutput = {
         result: reviewOutput.verdict,
         reviewReport: reviewOutput.reviewReport,
         dimensions,
         snapshotSha,
+        mergeReadySnapshot,
       };
     }
 

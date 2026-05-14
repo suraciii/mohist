@@ -2,24 +2,75 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 import { Stage, IssueStatus, MergeState } from '../../src/types';
 import type { StageContext } from '../../src/workflow/stage-context';
 import { IntegrateStageRunner } from '../../src/workflow/integrate-stage-runner';
 import { EventBus } from '../../src/services/event-bus';
+
+function runGit(cwd: string, args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
+}
+
+function ensureGitPreflightRefs(tmpDir: string, issueNumber: number): { baseSha: string; candidateHeadSha: string; mergeBaseSha: string } {
+  if (!fs.existsSync(path.join(tmpDir, '.git'))) {
+    runGit(tmpDir, ['init']);
+    runGit(tmpDir, ['config', 'user.email', 'test@test.com']);
+    runGit(tmpDir, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(tmpDir, '.mohist-preflight'), 'base\n', 'utf-8');
+    runGit(tmpDir, ['add', '.mohist-preflight']);
+    runGit(tmpDir, ['commit', '-m', 'base']);
+    runGit(tmpDir, ['checkout', '-B', 'main']);
+  }
+
+  runGit(tmpDir, ['checkout', 'main']);
+  const baseSha = runGit(tmpDir, ['rev-parse', 'main']);
+  const branch = `mo/issue-${issueNumber}`;
+  try {
+    runGit(tmpDir, ['rev-parse', '--verify', branch]);
+  } catch {
+    runGit(tmpDir, ['branch', branch, 'main']);
+  }
+  const candidateHeadSha = runGit(tmpDir, ['rev-parse', branch]);
+  const mergeBaseSha = runGit(tmpDir, ['merge-base', 'main', branch]);
+  return { baseSha, candidateHeadSha, mergeBaseSha };
+}
 
 function createMockContext(
   tmpDir: string,
   issueNumber = 42,
   overrides?: Partial<StageContext>
 ): StageContext {
+  const preflightRefs = ensureGitPreflightRefs(tmpDir, issueNumber);
   const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test-change`);
   fs.mkdirSync(changeDir, { recursive: true });
 
   const emitSpy = vi.fn();
   const eventBus = new EventBus();
   vi.spyOn(eventBus, 'emit').mockImplementation(emitSpy);
+  const defaultWorktreeManager = {
+    getPath: vi.fn().mockReturnValue(tmpDir),
+    getHeadSha: vi.fn().mockResolvedValue(preflightRefs.candidateHeadSha),
+    checkSquashMergeability: vi.fn().mockResolvedValue({
+      kind: 'merge-ready',
+      strategy: 'squash',
+      targetBranch: 'main',
+      baseSha: preflightRefs.baseSha,
+      candidateHeadSha: preflightRefs.candidateHeadSha,
+      mergeBaseSha: preflightRefs.mergeBaseSha,
+      canMerge: true,
+      conflictFiles: [],
+      checkedAt: new Date().toISOString(),
+    }),
+    mergeApprovedCandidate: vi.fn().mockResolvedValue({
+      targetBranch: 'main',
+      baseSha: 'abc123',
+      candidateHeadSha: 'def456',
+      landedSha: 'ghi789',
+    }),
+  };
 
-  return {
+  const baseContext = {
     issue: {
       id: `issue-${issueNumber}`,
       number: issueNumber,
@@ -44,14 +95,7 @@ function createMockContext(
       updateTaskPasses: vi.fn().mockReturnValue(true),
       archiveChange: vi.fn().mockResolvedValue(undefined),
     },
-    worktreeManager: {
-      mergeApprovedCandidate: vi.fn().mockResolvedValue({
-        targetBranch: 'main',
-        baseSha: 'abc123',
-        candidateHeadSha: 'def456',
-        landedSha: 'ghi789',
-      }),
-    } as any,
+    worktreeManager: defaultWorktreeManager as any,
     projectRepo: {
       findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch: 'main', path: tmpDir }),
     } as any,
@@ -82,7 +126,15 @@ function createMockContext(
     log: (_eventType: string, _data: object) => {
       // fire-and-forget
     },
+  } as StageContext;
+
+  return {
+    ...baseContext,
     ...overrides,
+    worktreeManager: {
+      ...defaultWorktreeManager,
+      ...((overrides?.worktreeManager as object | undefined) ?? {}),
+    } as any,
   } as StageContext;
 }
 

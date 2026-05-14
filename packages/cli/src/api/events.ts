@@ -47,6 +47,7 @@ const ALL_EVENT_TYPES: EventName[] = [
   'integration_step_updated',
   'integration_completed',
   'integration_failed',
+  'integration_preflight_refreshed',
 ];
 
 export function createEventRoutes(eventBus: EventBus): Hono {
