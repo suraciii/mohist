@@ -7,7 +7,7 @@ import { IssueTaskQueueRepo } from '../../src/db/issue-task-queue-repo';
 import { AgentRunnerService } from '../../src/services/agent-runner-service';
 import { EventBus } from '../../src/services/event-bus';
 import { IssueService } from '../../src/services/issue-service';
-import { Stage, IssueStatus } from '../../src/types';
+import { Stage, IssueStatus, MergeState } from '../../src/types';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -433,6 +433,32 @@ describe('IssueTaskQueue', () => {
       const runningRecords = taskQueueRepo.findAllRunning();
       expect(runningRecords).toHaveLength(1);
       expect(runningRecords[0].issueId).toBe(issue.id);
+    });
+
+    it('should not reclassify tasks started during queue recovery when issue recovery also runs', () => {
+      const project = setupProject();
+      const issue = setupIssue(project.id);
+      issueRepo.updateStage(issue.id, Stage.Integrate);
+      issueRepo.setMergeState(issue.id, MergeState.Merged);
+
+      taskQueueRepo.insert({
+        issueId: issue.id,
+        issueNumber: issue.number,
+        projectId: project.id,
+        taskType: 'resume-pipeline',
+        priority: 0,
+      });
+
+      const service = createService();
+      service.recoverFromQueue();
+      service.recoverIssues();
+
+      const runningRecords = taskQueueRepo.findAllRunning();
+      expect(runningRecords).toHaveLength(1);
+      expect(runningRecords[0].issueId).toBe(issue.id);
+
+      const recoveredIssue = issueRepo.findById(issue.id);
+      expect(recoveredIssue!.status).not.toBe(IssueStatus.Interrupted);
     });
   });
 
