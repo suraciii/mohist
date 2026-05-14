@@ -3,7 +3,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { SkillDataService } from '../src/agent-skills/skill-data-service';
-import { installSharedAgentSkills, getSharedSkillNames } from '../src/agent-skills/shared-agent-skills';
+import {
+  installSharedAgentSkills,
+  installHermesSkills,
+  getSharedSkillNames
+} from '../src/agent-skills/shared-agent-skills';
 
 const skillDataRoot = path.join(__dirname, '../src/agent-skills');
 const stubsRoot = path.join(skillDataRoot, 'stubs');
@@ -301,5 +305,95 @@ describe('CLI skills command integration', () => {
     expect(skillPath).toBeTruthy();
     expect(fs.existsSync(skillPath!)).toBe(true);
     expect(fs.readdirSync(skillPath!).length).toBeGreaterThan(0);
+  });
+});
+
+describe('Hermes skills installation', () => {
+  let tmpHermesHome: string;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpHermesHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dyn-hermes-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-cli-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpHermesHome, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('installs full skill-data content to Hermes skills dir', () => {
+    installHermesSkills({ hermesHome: tmpHermesHome });
+
+    const mohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+    expect(fs.existsSync(mohistPath)).toBe(true);
+    const content = fs.readFileSync(mohistPath, 'utf-8');
+    expect(content.split('\n').length).toBeGreaterThan(50);
+    expect(content).not.toContain('hidden: true');
+  });
+
+  it('copies references/issue-templates.md to Hermes mohist skill', () => {
+    installHermesSkills({ hermesHome: tmpHermesHome });
+
+    const refsPath = path.join(tmpHermesHome, 'skills', 'mohist', 'references', 'issue-templates.md');
+    expect(fs.existsSync(refsPath)).toBe(true);
+    const refsContent = fs.readFileSync(refsPath, 'utf-8');
+    expect(refsContent).toContain('## Template:');
+  });
+
+  it('Hermes install does not copy stubs to Hermes', () => {
+    installHermesSkills({ hermesHome: tmpHermesHome });
+
+    const mohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+    const content = fs.readFileSync(mohistPath, 'utf-8');
+    expect(content).not.toContain('获取完整指令');
+    expect(content).not.toContain('hidden: true');
+  });
+
+  it('Hermes install only installs mohist and mohist-explore, not mohist-po', () => {
+    installHermesSkills({ hermesHome: tmpHermesHome });
+
+    const skillsDir = path.join(tmpHermesHome, 'skills');
+    expect(fs.existsSync(skillsDir)).toBe(true);
+    const entries = fs.readdirSync(skillsDir);
+    expect(entries).toContain('mohist');
+    expect(entries).toContain('mohist-explore');
+    expect(entries).not.toContain('mohist-po');
+  });
+
+  it('repeated Hermes install reports updated', () => {
+    installHermesSkills({ hermesHome: tmpHermesHome });
+
+    const mohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+    fs.writeFileSync(mohistPath, '# Modified\n', 'utf-8');
+
+    const results = installHermesSkills({ hermesHome: tmpHermesHome });
+    expect(results.some(r => r.skill === 'mohist' && r.result === 'updated')).toBe(true);
+  });
+
+  it('--path does not affect Hermes skills install', () => {
+    installHermesSkills({ hermesHome: tmpHermesHome });
+
+    const hermesMohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+    expect(fs.existsSync(hermesMohistPath)).toBe(true);
+
+    const cwdAgentPath = path.join(process.cwd(), '.agents', 'skills', 'mohist', 'SKILL.md');
+    expect(fs.existsSync(cwdAgentPath)).toBe(false);
+  });
+
+  it('--claude does not affect Hermes skills install', () => {
+    const originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    try {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const hermesMohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+      expect(fs.existsSync(hermesMohistPath)).toBe(true);
+
+      const claudePath = path.join(tmpDir, '.claude', 'skills', 'mohist', 'SKILL.md');
+      expect(fs.existsSync(claudePath)).toBe(false);
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });

@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import {
   installSharedAgentSkills,
+  installHermesSkills,
 } from '../../agent-skills/shared-agent-skills';
 import { SkillDataService } from '../../agent-skills/skill-data-service';
 
@@ -19,6 +20,21 @@ function formatResult(results: { skill: string; result: string }[], claude: bool
   }
 }
 
+function formatHermesResult(results: { skill: string; result: string }[], hermesHome: string): void {
+  for (const r of results) {
+    const icon = r.result === 'created' ? '✓' : '↻';
+    const colorFn = r.result === 'created' ? chalk.green : chalk.cyan;
+    console.log(`  ${colorFn(`${icon} ${r.skill}`)} ${chalk.gray(`→ ${hermesHome}/skills/${r.skill}/SKILL.md`)}`);
+  }
+}
+
+function formatHermesPostInstall(): void {
+  console.log(chalk.bold('\nHermes skills installed. Usage in a new Hermes session:'));
+  console.log(`  ${chalk.cyan('/mohist')} list active issues`);
+  console.log(`  ${chalk.cyan('/mohist-explore')} explore Mohist onboarding`);
+  console.log(chalk.gray('\n  (Existing session may need /reload-skills or /reset to see newly installed skills)'));
+}
+
 export function setupSkillsCommands(program: Command): void {
   const skillService = new SkillDataService();
 
@@ -32,8 +48,27 @@ export function setupSkillsCommands(program: Command): void {
     .description('Install shared coder agent skills; use --claude for Claude Code, defaults to OpenCode')
     .option('--path <repo>', 'Target repository path (defaults to current working directory)')
     .option('--claude', 'Install to .claude/skills for Claude Code instead of .agents/skills')
+    .option('--hermes', 'Install full packaged skills to Hermes native skills directory (~/.hermes/skills)')
     .addHelpText('after', SKILL_TYPE_HELP)
     .action(async (options) => {
+      if (options.hermes && options.claude) {
+        console.error(chalk.red('Error: --hermes and --claude cannot be used together'));
+        process.exit(1);
+      }
+      if (options.hermes && options.path) {
+        console.error(chalk.red('Error: --hermes and --path cannot be used together'));
+        process.exit(1);
+      }
+
+      if (options.hermes) {
+        const results = installHermesSkills();
+        const hermesHome = process.env.HERMES_HOME || '~/.hermes';
+        console.log(chalk.bold('\nHermes native skills installed:'));
+        formatHermesResult(results, hermesHome);
+        formatHermesPostInstall();
+        return;
+      }
+
       const results = installSharedAgentSkills({
         projectPath: options.path,
         claude: options.claude ?? false,

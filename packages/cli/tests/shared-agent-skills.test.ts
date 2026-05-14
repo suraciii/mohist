@@ -4,9 +4,10 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   installSharedAgentSkills,
+  installHermesSkills,
   getSharedSkillNames,
 } from '../src/agent-skills/shared-agent-skills';
-import { SkillDataService } from '../src/agent-skills/skill-data-service';
+import { SkillDataService, findSkillDataRootCandidates } from '../src/agent-skills/skill-data-service';
 import { setupSkillsCommands } from '../src/cli/commands/skills';
 import { Command } from 'commander';
 
@@ -126,13 +127,295 @@ describe('Shared Agent Skills', () => {
     });
   });
 
-  describe('getSharedSkillNames', () => {
+describe('getSharedSkillNames', () => {
     it('returns only mohist and mohist-explore', () => {
       const names = getSharedSkillNames();
       expect(names).toContain('mohist');
       expect(names).toContain('mohist-explore');
-      expect(names).not.toContain('mohist-walkthrough');
       expect(names.length).toBe(2);
+    });
+  });
+
+  describe('installHermesSkills', () => {
+    let tmpHermesHome: string;
+
+    beforeEach(() => {
+      tmpHermesHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-hermes-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpHermesHome, { recursive: true, force: true });
+    });
+
+    it('installs mohist and mohist-explore to HERMES_HOME/skills', () => {
+      const results = installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const mohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+      const explorePath = path.join(tmpHermesHome, 'skills', 'mohist-explore', 'SKILL.md');
+
+      expect(fs.existsSync(mohistPath)).toBe(true);
+      expect(fs.existsSync(explorePath)).toBe(true);
+      expect(results.some(r => r.skill === 'mohist' && r.result === 'created')).toBe(true);
+      expect(results.some(r => r.skill === 'mohist-explore' && r.result === 'created')).toBe(true);
+    });
+
+    it('HERMES_HOME env var controls install root', () => {
+      const originalHermesHome = process.env.HERMES_HOME;
+      process.env.HERMES_HOME = tmpHermesHome;
+      try {
+        const results = installHermesSkills();
+        const mohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+        expect(fs.existsSync(mohistPath)).toBe(true);
+        expect(results[0].result).toBe('created');
+      } finally {
+        if (originalHermesHome !== undefined) {
+          process.env.HERMES_HOME = originalHermesHome;
+        } else {
+          delete process.env.HERMES_HOME;
+        }
+      }
+    });
+
+    it('copies full skill-data recursively including references/issue-templates.md', () => {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const refsPath = path.join(tmpHermesHome, 'skills', 'mohist', 'references', 'issue-templates.md');
+      expect(fs.existsSync(refsPath)).toBe(true);
+      const refsContent = fs.readFileSync(refsPath, 'utf-8');
+      expect(refsContent).toContain('## Template: refactor');
+      expect(refsContent).toContain('## Template: user-story');
+      expect(refsContent).toContain('## Template: ui');
+    });
+
+    it('installed SKILL.md is full content, not the hidden stub', () => {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const mohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+      const content = fs.readFileSync(mohistPath, 'utf-8');
+      expect(content).not.toContain('hidden: true');
+      expect(content).not.toContain('获取完整指令');
+      expect(content).toContain('mo issue create');
+      expect(content.split('\n').length).toBeGreaterThan(50);
+    });
+
+    it('mohist-explore installed SKILL.md is not the hidden stub', () => {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const explorePath = path.join(tmpHermesHome, 'skills', 'mohist-explore', 'SKILL.md');
+      const content = fs.readFileSync(explorePath, 'utf-8');
+      expect(content).not.toContain('hidden: true');
+    });
+
+    it('fails when a packaged Hermes skill is missing instead of falling back to stubs', () => {
+      const service = new SkillDataService();
+      const packagedPath = service.resolvePackagedSkillPath('mohist');
+      expect(packagedPath).toBeTruthy();
+
+      const renameTarget = `${packagedPath!}-bak`;
+      fs.renameSync(packagedPath!, renameTarget);
+
+      try {
+        expect(() => installHermesSkills({ hermesHome: tmpHermesHome })).toThrow(/Packaged Hermes skill not found: mohist/i);
+
+        const installedPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+        expect(fs.existsSync(installedPath)).toBe(false);
+      } finally {
+        fs.renameSync(renameTarget, packagedPath!);
+      }
+    });
+
+    it('does not install mohist-po user skill', () => {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const poPath = path.join(tmpHermesHome, 'skills', 'mohist-po');
+      expect(fs.existsSync(poPath)).toBe(false);
+    });
+
+    it('first install reports created', () => {
+      const results = installHermesSkills({ hermesHome: tmpHermesHome });
+
+      for (const r of results) {
+        expect(r.result).toBe('created');
+      }
+    });
+
+    it('repeated install reports updated and overwrites', () => {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const mohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+      fs.writeFileSync(mohistPath, '# Modified content\n', 'utf-8');
+
+      const results = installHermesSkills({ hermesHome: tmpHermesHome });
+      expect(results.some(r => r.skill === 'mohist' && r.result === 'updated')).toBe(true);
+
+      const content = fs.readFileSync(mohistPath, 'utf-8');
+      expect(content).not.toBe('# Modified content\n');
+    });
+
+    it('installHermesSkills does not write to .agents/skills', () => {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const agentMohistPath = path.join(tmpDir, '.agents', 'skills', 'mohist', 'SKILL.md');
+      expect(fs.existsSync(agentMohistPath)).toBe(false);
+    });
+
+    it('installHermesSkills does not affect .claude/skills', () => {
+      const originalCwd = process.cwd();
+      process.chdir(tmpDir);
+      try {
+        installHermesSkills({ hermesHome: tmpHermesHome });
+
+        const claudeMohistPath = path.join(tmpDir, '.claude', 'skills', 'mohist', 'SKILL.md');
+        expect(fs.existsSync(claudeMohistPath)).toBe(false);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+
+    it('installHermesSkills leaves unrelated skill directories untouched', () => {
+      const unrelatedSkillDir = path.join(tmpHermesHome, 'skills', 'custom-skill');
+      fs.mkdirSync(unrelatedSkillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(unrelatedSkillDir, 'SKILL.md'),
+        '---\nname: custom-skill\ndescription: Custom user skill\n---\nCustom content\n'
+      );
+
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const customContent = fs.readFileSync(path.join(unrelatedSkillDir, 'SKILL.md'), 'utf-8');
+      expect(customContent).toContain('Custom content');
+    });
+
+    it('installHermesSkills respects custom hermesHome not real ~/.hermes', () => {
+      const customHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-custom-hermes-'));
+      try {
+        const results = installHermesSkills({ hermesHome: customHome });
+        expect(results.length).toBeGreaterThan(0);
+
+        const realHermesPath = path.join(os.homedir(), '.hermes', 'skills', 'mohist', 'SKILL.md');
+        expect(fs.existsSync(realHermesPath)).toBe(false);
+      } finally {
+        fs.rmSync(customHome, { recursive: true, force: true });
+      }
+    });
+
+    it('built SkillDataService prefers dist packaged assets over source fallback', () => {
+      const distRoot = path.join(tmpDir, 'dist', 'agent-skills');
+      const srcRoot = path.join(tmpDir, 'src', 'agent-skills');
+      for (const root of [distRoot, srcRoot]) {
+        fs.mkdirSync(path.join(root, 'skill-data', 'mohist'), { recursive: true });
+        fs.mkdirSync(path.join(root, 'skill-data', 'mohist-explore'), { recursive: true });
+      }
+      fs.writeFileSync(path.join(distRoot, 'skill-data', 'mohist', 'SKILL.md'), 'dist mohist', 'utf-8');
+      fs.writeFileSync(path.join(distRoot, 'skill-data', 'mohist-explore', 'SKILL.md'), 'dist explore', 'utf-8');
+      fs.writeFileSync(path.join(srcRoot, 'skill-data', 'mohist', 'SKILL.md'), 'src mohist', 'utf-8');
+      fs.writeFileSync(path.join(srcRoot, 'skill-data', 'mohist-explore', 'SKILL.md'), 'src explore', 'utf-8');
+
+      const selectedRoot = findSkillDataRootCandidates(distRoot).find(root => fs.existsSync(root));
+
+      expect(selectedRoot).toBe(distRoot);
+      expect(path.join(selectedRoot!, 'skill-data', 'mohist')).toBe(path.join(distRoot, 'skill-data', 'mohist'));
+    });
+  });
+
+  describe('installSharedAgentSkills vs installHermesSkills separation', () => {
+    let tmpHermesHome: string;
+
+    beforeEach(() => {
+      tmpHermesHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-hermes-separate-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpHermesHome, { recursive: true, force: true });
+    });
+
+    it('--claude writes to .claude/skills, not Hermes skills', () => {
+      const originalCwd = process.cwd();
+      process.chdir(tmpDir);
+      try {
+        const results = installSharedAgentSkills({ projectPath: tmpDir, claude: true });
+        expect(results.some(r => r.skill === 'mohist' && r.result === 'created')).toBe(true);
+
+        const claudeMohistPath = path.join(tmpDir, '.claude', 'skills', 'mohist', 'SKILL.md');
+        expect(fs.existsSync(claudeMohistPath)).toBe(true);
+
+        const hermesMohistPath = path.join(tmpHermesHome, 'skills', 'mohist', 'SKILL.md');
+        expect(fs.existsSync(hermesMohistPath)).toBe(false);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+
+    it('installHermesSkills does not create .agents directory', () => {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const agentDir = path.join(tmpDir, '.agents');
+      expect(fs.existsSync(agentDir)).toBe(false);
+    });
+
+    it('installHermesSkills does not create .claude directory', () => {
+      installHermesSkills({ hermesHome: tmpHermesHome });
+
+      const claudeDir = path.join(tmpDir, '.claude');
+      expect(fs.existsSync(claudeDir)).toBe(false);
+    });
+  });
+
+  describe('CLI incompatible options', () => {
+    it('setupSkillsCommands registers --hermes option', () => {
+      const program = new Command();
+      setupSkillsCommands(program);
+
+      const skillsCmd = program.commands.find(cmd => cmd.name() === 'skills');
+      const installCmd = skillsCmd?.commands.find(cmd => cmd.name() === 'install');
+
+      expect(installCmd?.options.some(opt => opt.long === '--hermes')).toBe(true);
+    });
+
+    it('--hermes and --claude cannot be used together', async () => {
+      const errors: string[] = [];
+      const originalError = console.error;
+      console.error = (msg: string) => errors.push(msg);
+
+      try {
+        const program = new Command();
+        setupSkillsCommands(program);
+        const installCmd = program.commands.find(cmd => cmd.name() === 'skills')?.commands.find(cmd => cmd.name() === 'install');
+
+        let exitCode = 0;
+        try {
+          await installCmd?.parseAsync(['node', 'test', '--hermes', '--claude'], { from: 'user' });
+        } catch {
+          exitCode = 1;
+        }
+        expect(exitCode).toBe(1);
+        expect(errors.some(e => e.includes('--hermes') && e.includes('--claude'))).toBe(true);
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    it('--hermes and --path cannot be used together', async () => {
+      const errors: string[] = [];
+      const originalError = console.error;
+      console.error = (msg: string) => errors.push(msg);
+
+      try {
+        const program = new Command();
+        setupSkillsCommands(program);
+        const installCmd = program.commands.find(cmd => cmd.name() === 'skills')?.commands.find(cmd => cmd.name() === 'install');
+
+        let exitCode = 0;
+        try {
+          await installCmd?.parseAsync(['node', 'test', '--hermes', '--path', '/some/path'], { from: 'user' });
+        } catch {
+          exitCode = 1;
+        }
+        expect(exitCode).toBe(1);
+        expect(errors.some(e => e.includes('--hermes') && e.includes('--path'))).toBe(true);
+      } finally {
+        console.error = originalError;
+      }
     });
   });
 
