@@ -135,4 +135,74 @@ describe('WorkflowApplicationService', () => {
     expect(() => service.completeTask({ issueId: 'issue-1', stage: Stage.Plan, taskId: 'specs', result: { status: 'completed' } })).toThrow(/cannot complete before earlier tasks/);
     expect(calls).toEqual(['repo.loadActiveAggregate']);
   });
+
+  it('reruns a failed latest aggregate when no active run exists', () => {
+    const calls: string[] = [];
+    const run = createRunningPlanRun();
+    run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
+    expect(run.snapshot().status).toBe('failed');
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => null,
+      loadRunningAggregate: () => {
+        calls.push('repo.loadRunningAggregate');
+        return null;
+      },
+      loadLatestAggregate: () => {
+        calls.push('repo.loadLatestAggregate');
+        return run;
+      },
+      saveAggregate: saved => calls.push(`repo.saveAggregate:${saved.snapshot().status}`),
+    };
+    const projection: WorkflowRunProjectionPort = {
+      apply: input => calls.push(`projection.apply:${input.run.snapshot().status}:${input.decision.nextWork.kind}`),
+    };
+
+    const service = new WorkflowApplicationService(repo, projection);
+    const result = service.rerunStage({ issueId: 'issue-1', stage: Stage.Plan, startedBy: 'rerun' });
+
+    expect(result.run).toBe(run);
+    expect(result.decision.nextWork).toEqual({ kind: 'task', stage: Stage.Plan, taskId: 'proposal' });
+    expect(calls).toEqual([
+      'repo.loadRunningAggregate',
+      'repo.loadLatestAggregate',
+      'repo.saveAggregate:running',
+      'projection.apply:running:task',
+    ]);
+  });
+
+  it('can inspect a failed latest aggregate when no active run exists', () => {
+    const calls: string[] = [];
+    const run = createRunningPlanRun();
+    run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => null,
+      loadRunningAggregate: () => {
+        calls.push('repo.loadRunningAggregate');
+        return null;
+      },
+      loadLatestAggregate: () => {
+        calls.push('repo.loadLatestAggregate');
+        return run;
+      },
+      saveAggregate: saved => calls.push(`repo.saveAggregate:${saved.snapshot().status}`),
+    };
+    const projection: WorkflowRunProjectionPort = {
+      apply: input => calls.push(`projection.apply:${input.decision.nextWork.kind}`),
+    };
+
+    const service = new WorkflowApplicationService(repo, projection);
+    const result = service.resumeDecision('issue-1', { startedBy: 'rerun' });
+
+    expect(result.nextWork.kind).toBe('failed');
+    expect(calls).toEqual([
+      'repo.loadRunningAggregate',
+      'repo.loadLatestAggregate',
+      'repo.saveAggregate:failed',
+      'projection.apply:failed',
+    ]);
+  });
 });
