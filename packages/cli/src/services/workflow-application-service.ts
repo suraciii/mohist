@@ -86,11 +86,25 @@ export class WorkflowApplicationService {
   }
 
   rerunStage(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
-    const run = this.loadActive(input.issueId, input.tasksPath);
-    const decision = run.rerunStage(input.stage);
-    this.repo.saveAggregate(run, input.startedBy ?? null);
-    this.projection.apply({ run, decision, sessionId: input.sessionId });
-    return { run, decision };
+    const run = this.repo.loadRunningAggregate
+      ? this.repo.loadRunningAggregate(input.issueId, { tasksPath: input.tasksPath })
+      : this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
+    if (run) {
+      const decision = run.rerunStage(input.stage);
+      this.repo.saveAggregate(run, input.startedBy ?? null);
+      this.projection.apply({ run, decision, sessionId: input.sessionId });
+      return { run, decision };
+    }
+
+    const latestRun = this.repo.loadLatestAggregate?.(input.issueId, { tasksPath: input.tasksPath }) ?? null;
+    if (latestRun?.snapshot().status !== 'failed' || latestRun.currentStage !== input.stage) {
+      throw new Error(`No active WorkflowRun for issue ${input.issueId}`);
+    }
+
+    const decision = latestRun.retryStage(input.stage);
+    this.repo.saveAggregate(latestRun, input.startedBy ?? null);
+    this.projection.apply({ run: latestRun, decision, sessionId: input.sessionId });
+    return { run: latestRun, decision };
   }
 
   scheduleRebaseTask(input: { issueId: string; reason?: string } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
@@ -98,7 +112,7 @@ export class WorkflowApplicationService {
   }
 
   resumeDecision(issueId: string, options: WorkflowCommandOptions = {}): { run: WorkflowRun; nextWork: WorkflowWork } {
-    const run = this.loadActive(issueId, options.tasksPath);
+    const run = this.loadForDecision(issueId, options.tasksPath);
     const nextWork = run.nextWork();
     if (nextWork.kind === 'failed') {
       this.repo.saveAggregate(run, options.startedBy ?? null);
@@ -125,6 +139,17 @@ export class WorkflowApplicationService {
       : this.repo.loadActiveAggregate(issueId, { tasksPath });
     if (!run) throw new Error(`No active WorkflowRun for issue ${issueId}`);
     return run;
+  }
+
+  private loadForDecision(issueId: string, tasksPath?: string): WorkflowRun {
+    const run = this.repo.loadRunningAggregate
+      ? this.repo.loadRunningAggregate(issueId, { tasksPath })
+      : this.repo.loadActiveAggregate(issueId, { tasksPath });
+    if (run) return run;
+
+    const latestRun = this.repo.loadLatestAggregate?.(issueId, { tasksPath }) ?? null;
+    if (latestRun?.snapshot().status === 'failed') return latestRun;
+    throw new Error(`No active WorkflowRun for issue ${issueId}`);
   }
 
   private decisionForProjection(run: WorkflowRun, events: WorkflowDecision['events']): WorkflowDecision {
