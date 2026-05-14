@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { execSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ApiResponse, Issue, Stage, VALID_PRIORITIES, normalizePriority } from '../../types';
@@ -232,11 +232,12 @@ export function setupIssueCommands(program: Command): void {
   issue
     .command('list')
     .description('List issues')
-    .option('-s, --status <stage>', 'Filter by stage')
+    .option('-s, --status <stages>', 'Filter by stage(s) - use comma for multiple (e.g. -s build,check) or alias (e.g. -s active)')
     .option('-l, --label <label>', 'Filter by label')
     .option('-p, --priority <level>', 'Filter by priority (p0-p4)')
     .option('--archived', 'Show only archived issues')
     .option('--all', 'Show all issues including archived')
+    .option('--attention', 'Show only issues needing user action or decision')
     .action(async (options) => {
       if (options.priority !== undefined) {
         const normalizedPriority = normalizePriority(options.priority);
@@ -262,19 +263,31 @@ export function setupIssueCommands(program: Command): void {
         } else if (options.all) {
           params.push('all=true');
         }
+        if (options.attention) {
+          params.push('attention=true');
+        }
         if (params.length > 0) {
           path += `?${params.join('&')}`;
         }
-        
+
         const response = await apiClient<ApiResponse<Issue[]>>('GET', path);
-        
-        if (response.success && response.data) {
+
+        if (!response.success) {
+          console.error(chalk.red(`Error: ${response.error}`));
+          process.exit(1);
+        }
+
+        if (response.data) {
           if (response.data.length === 0) {
-            console.log(chalk.yellow(options.archived ? 'No archived issues' : 'No issues found'));
+            if (options.attention) {
+              console.log(chalk.yellow('No issues requiring attention'));
+            } else {
+              console.log(chalk.yellow(options.archived ? 'No archived issues' : 'No issues found'));
+            }
             return;
           }
-          
-          const header = options.archived ? 'Archived Issues:' : 'Issues:';
+
+          const header = options.archived ? 'Archived Issues:' : options.attention ? 'Attention Issues:' : 'Issues:';
           console.log(chalk.bold(`\n${header}\n`));
 
           if (options.archived || options.all) {
@@ -284,7 +297,7 @@ export function setupIssueCommands(program: Command): void {
             console.log('  ID                 Priority  Stage                     Status    Labels              Title');
             console.log('  ' + '─'.repeat(105));
           }
-          
+
           response.data.forEach((issue: any) => {
             const id = chalk.cyan(`${issue.projectName || 'unknown'}#${issue.number}`.padEnd(18));
             const priority = formatPriority(issue.priority || 'p2').padEnd(9);
@@ -310,13 +323,15 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to list issues: ${error}`));
+        process.exit(1);
       }
     });
 
   issue
     .command('show <number>')
     .description('Show issue details')
-    .action(async (number) => {
+    .option('--compact', 'Print one-line summary (skips sessions, checks, comments, body)')
+    .action(async (number, options) => {
       try {
         const response = await apiClient<ApiResponse<any>>(
           'GET',
@@ -326,6 +341,16 @@ export function setupIssueCommands(program: Command): void {
         if (response.success && response.data) {
           const issue = response.data;
           const displayId = `${issue.projectName || 'unknown'}#${issue.number}`;
+
+          if (options.compact) {
+            const stage = issue.stage || 'unknown';
+            const status = issue.status || 'unknown';
+            const priority = issue.priority || 'p2';
+            const title = issue.title || '';
+            console.log(`#${issue.number} ${stage} ${status} ${priority} "${title}"`);
+            return;
+          }
+
           console.log(chalk.bold(`\nIssue ${displayId}: ${issue.title}\n`));
           console.log(`  Priority: ${formatPriority(issue.priority || 'p2')}`);
           console.log(`  Stage: ${formatStage(issue.stage)}`);
@@ -461,16 +486,16 @@ export function setupIssueCommands(program: Command): void {
               console.log(`  ${chalk.gray(notes.split('\n').join('\n  '))}`);
             }
           }
-          
+
           if (issue.labels && issue.labels.length > 0) {
             console.log(`  Labels: ${formatLabels(issue.labels)}`);
           }
-          
+
           if (issue.body) {
             console.log(`\n  ${chalk.gray('Body:')}`);
             console.log(`  ${issue.body.split('\n').join('\n  ')}`);
           }
-          
+
           if (issue.comments && issue.comments.length > 0) {
             console.log(`\n  ${chalk.gray('Comments:')} (${issue.comments.length})`);
             issue.comments.forEach((comment: any) => {
@@ -480,7 +505,7 @@ export function setupIssueCommands(program: Command): void {
               console.log();
             });
           }
-          
+
           console.log();
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
@@ -811,43 +836,71 @@ export function setupIssueCommands(program: Command): void {
   issue
     .command('diff <number>')
     .description('Show diff between issue branch and main')
-    .action(async (number) => {
+    .option('--stat', 'Show file-level change statistics without patch content')
+    .action(async (number, options) => {
       try {
-        const detailResponse = await apiClient<ApiResponse<any>>(
+        const diffResponse = await apiClient<ApiResponse<any>>(
           'GET',
-          `/issues/${number}`
+          `/issues/${number}/diff`
         );
 
-        if (!detailResponse.success || !detailResponse.data) {
-          console.error(chalk.red(`Error: ${detailResponse.error}`));
-          return;
+        if (!diffResponse.success) {
+          console.error(chalk.red(`Error: ${diffResponse.error}`));
+          process.exit(1);
         }
 
-        const issue = detailResponse.data;
-        const projectPath = issue.projectPath;
-        if (!projectPath) {
-          console.error(chalk.red('Error: No project path found'));
-          return;
+        const diffData = diffResponse.data;
+
+        if (!diffData.available) {
+          const reasonMessages: Record<string, string> = {
+            not_started: 'Issue has not started yet (no worktree or branch)',
+            worktree_removed: 'Worktree has been removed',
+            branch_missing: 'Branch not found',
+            git_error: 'Git error occurred while loading diff',
+          };
+          const reasonLabel = reasonMessages[diffData.reason] || diffData.reason;
+          console.error(chalk.red(`Diff unavailable: ${reasonLabel}`));
+          if (diffData.message) {
+            console.error(chalk.gray(`  ${diffData.message}`));
+          }
+          process.exit(1);
         }
 
-        const branchName = `mo/issue-${number}`;
-        const baseBranch = issue.baseBranch || 'main';
-
-        try {
-          execSync(`git diff ${baseBranch} ${branchName}`, {
-            cwd: projectPath,
-            stdio: 'inherit'
-          });
-        } catch (error: any) {
-          const message = error.message || String(error);
-          if (message.includes('unknown revision') || message.includes('not found')) {
-            console.error(chalk.red(`No worktree found for issue #${number}`));
-          } else {
-            console.error(chalk.red(`Failed to show diff: ${message}`));
+        if (options.stat) {
+          const { summary, files } = diffData;
+          if (summary.filesChanged === 0) {
+            console.log(chalk.yellow('No changes in diff'));
+            return;
+          }
+          console.log(chalk.bold(`\nDiff statistics for #${number} (${summary.filesChanged} file(s)):\n`));
+          console.log(`  ${chalk.green('+'+summary.additions)} additions  ${chalk.red('-'+summary.deletions)} deletions\n`);
+          console.log('  File');
+          console.log('  ' + '─'.repeat(60));
+          for (const file of files) {
+            const binaryMarker = file.isBinary ? ' (binary)' : '';
+            const addStr = file.additions > 0 ? chalk.green(`+${file.additions}`) : '+0';
+            const delStr = file.deletions > 0 ? chalk.red(`-${file.deletions}`) : '-0';
+            console.log(`  ${addStr} ${delStr}  ${file.file}${binaryMarker}`);
+          }
+          console.log();
+        } else {
+          let hasChanges = false;
+          for (const file of diffData.files) {
+            if (file.diff) {
+              hasChanges = true;
+              process.stdout.write(file.diff);
+              if (!file.diff.endsWith('\n')) {
+                process.stdout.write('\n');
+              }
+            }
+          }
+          if (!hasChanges && diffData.summary.filesChanged === 0) {
+            console.log(chalk.yellow('No changes in diff'));
           }
         }
       } catch (error) {
         console.error(chalk.red(`Failed to show diff: ${error}`));
+        process.exit(1);
       }
     });
 

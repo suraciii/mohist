@@ -16,22 +16,87 @@ import { CoderSessionRepo } from '../db/coder-session-repo';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { CheckSuiteRepo } from '../db/check-suite-repo';
 import { StageExecutionRepo } from '../db/stage-execution-repo';
+import type { WorkflowRunWithStageRuns, WorkflowStageRunWithTasksAndChecks } from '../db/workflow-run-repo';
 import { detectOpenSpecChange, findChangeDir } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Log } from '../util/log';
 import type { IssueQueueStatus } from '../services/agent-runner-service';
-import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { assembleSessionTranscript } from '../services/session-transcript-service';
-import type { PostMergeFinalizer } from '../services/post-merge-finalizer';
-import { isValidModelId } from '../config/model-resolution';
-import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
-import type { StageStateService } from '../services/stage-state-service';
-import type { WorkflowRunService } from '../services/workflow-run-service';
-import type { WorkflowRunWithStageRuns, WorkflowStageRunWithTasksAndChecks } from '../db/workflow-run-repo';
+import { PostMergeFinalizer } from '../services/post-merge-finalizer';
+import { StageStateService } from '../services/stage-state-service';
 import { WorkflowApplicationService } from '../services/workflow-application-service';
+import type { WorkflowRunService } from '../services/workflow-run-service';
+import { isValidModelId } from '../config/model-resolution';
+import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
+import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
+
+const STAGE_ALIASES: Record<string, Stage[]> = {
+  active: [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate],
+};
+
+const PIPELINE_STAGES = new Set<Stage>([Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate]);
+
+type StageSelector = {
+  matches: StagePredicate;
+};
+
+type StagePredicate = (issue: Issue) => boolean;
+
+type StageSelectionResult =
+  | { selectors: StageSelector[] }
+  | { error: string };
+
+function parseStageSelection(input: string | undefined): StageSelectionResult {
+  if (!input) return { selectors: [] };
+  const parts = input.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return { selectors: [] };
+
+  const selectors: StageSelector[] = [];
+
+  for (const part of parts) {
+    const lower = part.toLowerCase();
+    if (lower === 'active') {
+      selectors.push({
+        matches: issue => PIPELINE_STAGES.has(issue.stage) && !isTerminalStatus(issue.status),
+      });
+    } else if (STAGE_ALIASES[lower]) {
+      for (const s of STAGE_ALIASES[lower]) {
+        selectors.push({ matches: issue => issue.stage === s });
+      }
+    } else if (Object.values(Stage).map(s => s.toLowerCase()).includes(lower)) {
+      const stage = Object.values(Stage).find(s => s.toLowerCase() === lower)!;
+      selectors.push({ matches: issue => issue.stage === stage });
+    } else {
+      return { error: `Unknown stage or alias: "${part}". Valid stages: ${Object.values(Stage).join(', ')}. Aliases: ${Object.keys(STAGE_ALIASES).join(', ')}.` };
+    }
+  }
+  return { selectors };
+}
+
+function isAttentionIssue(issue: Issue): boolean {
+  if (issue.approvalState?.status === 'awaiting' && issue.approvalState.stage === issue.stage) {
+    return true;
+  }
+  if (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) {
+    return true;
+  }
+  const delivery = classifyMergeDelivery(issue);
+  if (delivery === 'blocked' || delivery === 'build-failed' || delivery === 'conflict' || delivery === 'done-not-merged') {
+    return true;
+  }
+  return false;
+}
+
+function filterByAttention(issues: Issue[]): Issue[] {
+  return issues.filter(isAttentionIssue);
+}
+
+function isTerminalStatus(status: IssueStatus): boolean {
+  return status === IssueStatus.Closed || status === IssueStatus.Completed;
+}
 
 type ChangesAvailability =
   | { available: true; reason: null }
@@ -477,11 +542,12 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
-      const stage = c.req.query('stage') as Stage | undefined;
+      const stageInput = c.req.query('stage') as string | undefined;
       const label = c.req.query('label') as string | undefined;
       const priorityInput = c.req.query('priority') as string | undefined;
       const archived = c.req.query('archived') as string | undefined;
       const all = c.req.query('all') as string | undefined;
+      const attention = c.req.query('attention') as string | undefined;
 
       const normalizedPriority = normalizePriority(priorityInput);
       if (priorityInput !== undefined && normalizedPriority === null) {
@@ -492,20 +558,33 @@ export function createIssueRoutes(
         return c.json(response, 400);
       }
 
+      const stageResult = parseStageSelection(stageInput);
+      if ('error' in stageResult) {
+        const response: ApiResponse = {
+          success: false,
+          error: stageResult.error
+        };
+        return c.json(response, 400);
+      }
+      const { selectors } = stageResult;
+
       const issueRepo = stateManager.getIssueRepo();
       let issues: Issue[];
+
       if (archived === 'true') {
         issues = issueRepo.findAll({ projectId, archivedOnly: true });
       } else if (all === 'true') {
         issues = issueRepo.findAll({ projectId, includeArchived: true });
-      } else if (stage) {
-        issues = issueService.getByStage(projectId, stage).filter(issue => !issue.archivedAt);
       } else {
-        issues = issueService.getByProject(projectId);
+        issues = issueRepo.findAll({ projectId });
       }
 
       if (all !== 'true' && archived !== 'true') {
         issues = issues.filter(issue => !issue.archivedAt);
+      }
+
+      if (selectors.length > 0) {
+        issues = issues.filter(issue => selectors.some(selector => selector.matches(issue)));
       }
 
       if (normalizedPriority) {
@@ -514,6 +593,10 @@ export function createIssueRoutes(
 
       if (label) {
         issues = issues.filter(issue => issue.labels.includes(label));
+      }
+
+      if (attention === 'true') {
+        issues = filterByAttention(issues);
       }
 
       const project = projectService.getById(projectId);

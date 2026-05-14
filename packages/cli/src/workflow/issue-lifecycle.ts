@@ -41,11 +41,10 @@ export function classifyMergeDelivery(issue: Issue): MergeDeliveryStatus {
     return 'done-not-merged';
   }
 
-  if (stage === Stage.Integrate) {
-    return 'integrating';
-  }
-
   if (mergeState === null || mergeState === undefined) {
+    if (stage === Stage.Integrate) {
+      return 'integrating';
+    }
     if (stage === Stage.Plan || stage === Stage.Build) {
       return 'not-ready';
     }
