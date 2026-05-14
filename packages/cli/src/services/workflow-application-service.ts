@@ -30,6 +30,8 @@ export interface WorkflowCommandOptions {
   startedBy?: string | null;
 }
 
+type CheckRepairScheduleStatus = 'scheduled' | 'already-running' | 'exhausted' | 'not-check-stage' | 'not-available';
+
 export class WorkflowApplicationService {
   private repo: WorkflowRunRepositoryPort;
   private projection: WorkflowRunProjectionPort;
@@ -109,6 +111,78 @@ export class WorkflowApplicationService {
 
   scheduleRebaseTask(input: { issueId: string; reason?: string } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
     return this.updateActiveRun(input.issueId, input, run => run.scheduleRebaseTask(input.reason));
+  }
+
+  scheduleFixReviewFindings(input: { issueId: string; stage: Stage.Check } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
+    const run = this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
+    if (!run) {
+      const latestRun = this.repo.loadLatestAggregate?.(input.issueId, { tasksPath: input.tasksPath });
+      if (!latestRun) throw new Error(`No WorkflowRun for issue ${input.issueId}`);
+      if (latestRun.snapshot().status !== 'failed') throw new Error(`No active or failed WorkflowRun for issue ${input.issueId}`);
+      return this.handleFixReviewFindingsOnFailedRun(latestRun, input);
+    }
+    return this.handleFixReviewFindingsOnRunningRun(run, input);
+  }
+
+  private handleFixReviewFindingsOnRunningRun(run: WorkflowRun, input: WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
+    if (run.currentStage !== Stage.Check) {
+      return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: null, repairStatus: 'not-check-stage' };
+    }
+    return this.doScheduleFixReviewFindings(run, input);
+  }
+
+  private handleFixReviewFindingsOnFailedRun(run: WorkflowRun, input: WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
+    if (run.currentStage !== Stage.Check) {
+      return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: null, repairStatus: 'not-check-stage' };
+    }
+    return this.doScheduleFixReviewFindings(run, input);
+  }
+
+  private doScheduleFixReviewFindings(run: WorkflowRun, input: WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
+    const checkStageRun = run.stageRun(Stage.Check);
+    const policy = checkStageRun.definition.checkFailurePolicies?.find(p => p.checkName === 'review-passed');
+    if (!policy) {
+      return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: null, repairStatus: 'not-check-stage' };
+    }
+
+    const reviewPassedCheck = checkStageRun.checks.find(c => c.name === 'review-passed');
+    const existingPendingFix = checkStageRun.tasks.find(t =>
+      (t.id === 'fix-review-findings' || t.id.startsWith('fix-review-findings:')) &&
+      (t.status === 'pending' || t.status === 'running')
+    );
+    if (existingPendingFix) {
+      run.status = 'running';
+      run.failure = null;
+      checkStageRun.reopenForRepair();
+      this.repo.saveAggregate(run, input.startedBy ?? null);
+      this.projection.apply({ run, decision: { events: [], nextWork: run.nextWork() }, sessionId: input.sessionId });
+      return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: existingPendingFix.id, repairStatus: 'already-running' };
+    }
+
+    const scheduledFixCount = checkStageRun.scheduledFixCount('review-passed');
+    if (scheduledFixCount >= policy.maxAttempts) {
+      return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: null, repairStatus: 'exhausted' };
+    }
+
+    if (reviewPassedCheck?.status !== 'failed') {
+      return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: null, repairStatus: 'not-available' };
+    }
+
+    const causedBy = {
+      type: 'check-failure' as const,
+      checkName: 'review-passed',
+      message: reviewPassedCheck?.message ?? 'Review failed',
+    };
+    const fixTask = checkStageRun.appendFixTask(policy, causedBy);
+    run.status = 'running';
+    run.failure = null;
+    checkStageRun.reopenForRepair();
+    const events: import('../workflow/domain').WorkflowEvent[] = [
+      { type: 'fix-task-scheduled', stage: Stage.Check, taskId: fixTask.id, causedBy },
+    ];
+    this.repo.saveAggregate(run, input.startedBy ?? null);
+    this.projection.apply({ run, decision: { events, nextWork: run.nextWork() }, sessionId: input.sessionId });
+    return { run, decision: { events, nextWork: run.nextWork() }, repairTaskId: fixTask.id, repairStatus: 'scheduled' };
   }
 
   resumeDecision(issueId: string, options: WorkflowCommandOptions = {}): { run: WorkflowRun; nextWork: WorkflowWork } {

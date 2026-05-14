@@ -408,6 +408,40 @@ export function createIssueRoutes(
 
   const activeWorkflowRunExists = (issueId: string): boolean => Boolean(workflowRunService?.getActiveRunForIssue(issueId));
 
+  const getIssueTasksPath = (projectId: string, issue: Issue): string | undefined => {
+    const project = projectService.getById(projectId);
+    const worktreePath = project && worktreeManager ? worktreeManager.getPath(project.name, issue.number) : null;
+    const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
+    return changeDir ? path.join(changeDir, 'tasks.json') : undefined;
+  };
+
+  const retryIssueCheckpoint = (
+    projectId: string,
+    issue: Issue,
+    startedBy: 'retry' | 'retry-checkpoint',
+  ): void => {
+    const issueRepo = stateManager.getIssueRepo();
+    issueRepo.updateRetryCount(issue.id, 0);
+    issueRepo.updateBlockedReason(issue.id, null);
+    issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+    const workflowApplicationService = createWorkflowApplicationService();
+    if (!workflowApplicationService) {
+      return;
+    }
+
+    try {
+      workflowApplicationService.retryStage({
+        issueId: issue.id,
+        stage: issue.stage,
+        tasksPath: getIssueTasksPath(projectId, issue),
+        startedBy,
+      });
+    } catch {
+      // Legacy blocked issues may not have a recoverable WorkflowRun aggregate.
+    }
+  };
+
   const approveThroughWorkflowRun = (issue: Issue): boolean => {
     if (!issue.approvalState || !activeWorkflowRunExists(issue.id)) return false;
     createWorkflowApplicationService()?.approveStage({
@@ -3147,11 +3181,6 @@ export function createIssueRoutes(
         } satisfies ApiResponse, 409);
       }
 
-      const issueRepo = stateManager.getIssueRepo();
-
-      issueRepo.updateRetryCount(issue.id, 0);
-      issueRepo.updateBlockedReason(issue.id, null);
-
       let hasCheckpoint = false;
       let checkpointStage: string | null = null;
 
@@ -3179,7 +3208,7 @@ export function createIssueRoutes(
         } satisfies ApiResponse, 409);
       }
 
-      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      retryIssueCheckpoint(projectId, issue, 'retry');
 
       if (agentRunner) {
         const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
@@ -3354,6 +3383,267 @@ export function createIssueRoutes(
       }
 
       return c.json({ success: true, data: { message: `Issue #${number} re-enqueued for merge` } } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/check/retry-checkpoint', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (issue.stage !== Stage.Check) {
+        return c.json({ success: false, error: `Issue #${number} is not in check stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
+      }
+
+      if (issue.status !== IssueStatus.Blocked) {
+        return c.json({ success: false, error: `Issue #${number} is not blocked (current: ${issue.status}). Use retry only for blocked issues.` } satisfies ApiResponse, 409);
+      }
+
+      const stageState = stageStateService?.getIssueStageState(issue.id).find(s => s.stage === Stage.Check);
+      const checkRepair = stageState?.checkRepair;
+      if (checkRepair && !checkRepair.repairAvailable && checkRepair.attemptsRemaining === 0) {
+        retryIssueCheckpoint(projectId, issue, 'retry-checkpoint');
+
+        if (agentRunner) {
+          const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
+          return c.json({
+            success: true,
+            data: {
+              taskId: result.taskId,
+              status: result.status,
+              queuePosition: result.queuePosition,
+              message: `Retry checkpoint for issue #${number}: repair budget is exhausted, checkpoint will be retried without scheduling a new repair task`,
+              repairBudgetExhausted: true,
+            },
+          } satisfies ApiResponse, 202);
+        }
+
+        return c.json({
+          success: true,
+          data: {
+            message: `Retry checkpoint for issue #${number}: repair budget is exhausted, checkpoint will be retried without scheduling a new repair task`,
+            repairBudgetExhausted: true,
+          },
+        } satisfies ApiResponse);
+      }
+
+      retryIssueCheckpoint(projectId, issue, 'retry-checkpoint');
+
+      if (agentRunner) {
+        const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
+        return c.json({
+          success: true,
+          data: {
+            taskId: result.taskId,
+            status: result.status,
+            queuePosition: result.queuePosition,
+            message: `Retry checkpoint for issue #${number}: checkpoint retry initiated`,
+          },
+        } satisfies ApiResponse, 202);
+      }
+
+      return c.json({
+        success: true,
+        data: {
+          message: `Retry checkpoint for issue #${number}: checkpoint retry initiated`,
+        },
+      } satisfies ApiResponse);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/check/rerun-review', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (issue.stage !== Stage.Check) {
+        return c.json({ success: false, error: `Issue #${number} is not in check stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
+      }
+
+      if (!agentRunner) {
+        return c.json({ success: false, error: 'AgentRunnerService not configured' } satisfies ApiResponse, 500);
+      }
+
+      if (coderSessionRepo) {
+        coderSessionRepo.failRunningByIssueId(issue.id);
+      }
+
+      if (checkpointRepo) {
+        checkpointRepo.delete(issue.number, Stage.Check);
+      }
+
+      const project = projectService.getById(projectId);
+      if (worktreeManager && project) {
+        const worktreePath = worktreeManager.getPath(project.name, issue.number);
+        if (worktreePath) {
+          const changeDir = findChangeDir(worktreePath, issue.number);
+          if (changeDir) {
+            for (const filename of ['review.md', 'review-self-check.md']) {
+              const artifactPath = path.join(changeDir, filename);
+              try {
+                if (fs.existsSync(artifactPath)) {
+                  fs.unlinkSync(artifactPath);
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+
+      agentRunner.cancelAll(issue.id);
+
+      const issueRepo = stateManager.getIssueRepo();
+      clearApprovalEverywhere(issue.id, Stage.Check);
+      issueRepo.updateBlockedReason(issue.id, null);
+      issueRepo.updateRetryCount(issue.id, 0);
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+      const workflowApplicationService = createWorkflowApplicationService();
+      if (workflowApplicationService && activeWorkflowRunExists(issue.id) && project) {
+        const worktreePath = worktreeManager?.getPath(project.name, issue.number);
+        const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
+        const result = workflowApplicationService.rerunStage({
+          issueId: issue.id,
+          stage: Stage.Check,
+          tasksPath: changeDir ? path.join(changeDir, 'tasks.json') : undefined,
+          startedBy: 'rerun-review',
+        });
+        if (result.decision.nextWork.kind === 'failed') {
+          workflowApplicationService.retryStage({
+            issueId: issue.id,
+            stage: Stage.Check,
+            tasksPath: changeDir ? path.join(changeDir, 'tasks.json') : undefined,
+            startedBy: 'rerun-review',
+          });
+        }
+      }
+
+      const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
+
+      return c.json({
+        success: true,
+        data: {
+          issue: issueService.getByNumber(projectId, number),
+          taskId: result.taskId,
+          status: result.status,
+          queuePosition: result.queuePosition,
+          message: `Issue #${number} rerunning review only (no repair task will be added)`,
+        },
+      } satisfies ApiResponse, 202);
+    } catch (error) {
+      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
+    }
+  });
+
+  app.post('/:number/check/repair-review-findings', async (c) => {
+    try {
+      const number = parseInt(c.req.param('number'));
+      const projectId = getCurrentProjectId();
+      if (!projectId) {
+        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
+      }
+
+      const issue = issueService.getByNumber(projectId, number);
+      if (!issue) {
+        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
+      }
+
+      if (issue.stage !== Stage.Check) {
+        return c.json({ success: false, error: `Issue #${number} is not in check stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
+      }
+
+      const workflowApplicationService = createWorkflowApplicationService();
+      if (!workflowApplicationService) {
+        return c.json({ success: false, error: 'WorkflowApplicationService not configured' } satisfies ApiResponse, 500);
+      }
+
+      const project = projectService.getById(projectId);
+      const worktreePath = worktreeManager?.getPath(project?.name ?? '', issue.number);
+      const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
+      const tasksPath = changeDir ? path.join(changeDir, 'tasks.json') : undefined;
+
+      const result = workflowApplicationService.scheduleFixReviewFindings({
+        issueId: issue.id,
+        stage: Stage.Check,
+        tasksPath,
+        startedBy: 'fix-review-findings',
+      });
+
+      switch (result.repairStatus) {
+        case 'scheduled':
+          stateManager.getIssueRepo().updateRetryCount(issue.id, 0);
+          stateManager.getIssueRepo().updateBlockedReason(issue.id, null);
+          stateManager.getIssueRepo().updateStatus(issue.id, IssueStatus.Active);
+
+          if (agentRunner) {
+            const queued = agentRunner.enqueue(issue.id, 'resume-pipeline');
+            return c.json({
+              success: true,
+              data: {
+                repairTaskId: result.repairTaskId,
+                taskId: queued.taskId,
+                status: queued.status,
+                queuePosition: queued.queuePosition,
+                message: `Fix review findings scheduled for issue #${number}`,
+              },
+            } satisfies ApiResponse, 202);
+          }
+
+          return c.json({
+            success: true,
+            data: {
+              repairTaskId: result.repairTaskId,
+              message: `Fix review findings scheduled for issue #${number}`,
+            },
+          } satisfies ApiResponse, 202);
+        case 'already-running':
+          stateManager.getIssueRepo().updateRetryCount(issue.id, 0);
+          stateManager.getIssueRepo().updateBlockedReason(issue.id, null);
+          stateManager.getIssueRepo().updateStatus(issue.id, IssueStatus.Active);
+
+          return c.json({
+            success: true,
+            data: {
+              repairTaskId: result.repairTaskId,
+              message: `Fix review findings already in progress for issue #${number}`,
+            },
+          } satisfies ApiResponse, 200);
+        case 'exhausted':
+          return c.json({
+            success: false,
+            error: `Repair budget exhausted for issue #${number}. All automatic repair attempts have been used. Use 'Rerun review only' after making code changes.`,
+          } satisfies ApiResponse, 409);
+        case 'not-check-stage':
+          return c.json({
+            success: false,
+            error: `Issue #${number} is not in check stage`,
+          } satisfies ApiResponse, 409);
+        case 'not-available':
+          return c.json({
+            success: false,
+            error: `Fix review findings is only available after the Check review has failed, or while an existing repair task is pending or running.`,
+          } satisfies ApiResponse, 409);
+      }
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

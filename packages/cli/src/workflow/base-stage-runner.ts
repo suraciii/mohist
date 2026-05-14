@@ -21,7 +21,7 @@ export abstract class BaseStageRunner implements StageRunner {
 
   protected abstract getNextStage(): Stage;
 
-  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
+  protected getCheckFailurePolicies(_ctx?: StageContext): CheckFailurePolicy[] {
     return [];
   }
 
@@ -308,7 +308,7 @@ export abstract class BaseStageRunner implements StageRunner {
     taskOutput: unknown,
     failedCheck: CheckResult,
   ): Promise<StageRunResult | null> {
-    const policy = this.getCheckFailurePolicies().find(candidate => candidate.checkName === failedCheck.name);
+    const policy = this.getCheckFailurePolicies(ctx).find(candidate => candidate.checkName === failedCheck.name);
     if (!policy) return null;
 
     const accumulatedResults = [...priorResults, failedCheck];

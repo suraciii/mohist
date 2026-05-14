@@ -354,4 +354,63 @@ describe('IssueDetailPage - merge-base semantic regression', () => {
       expect(screen.getByText('Page not found')).toBeTruthy()
     })
   })
+
+  describe('Check repair actions', () => {
+    it('shows explicit Check recovery actions from workflow-run when stage-state is unavailable', () => {
+      setupDefaultMocks()
+      mocks.useIssue.mockReturnValue({
+        data: {
+          ...SAMPLE_ISSUE,
+          status: 'blocked',
+          stage: 'check',
+          blockedReason: '[check] Review failed',
+        },
+        isLoading: false,
+        isError: false,
+      })
+      mocks.useIssueStageState.mockReturnValue({ data: undefined })
+      mocks.useWorkflowRun.mockReturnValue({
+        data: {
+          id: 'wr_123',
+          issueId: '1',
+          issueNumber: 123,
+          status: 'failed',
+          currentStage: 'check',
+          stageRuns: [
+            {
+              stage: 'check',
+              status: 'failed',
+              tasks: [],
+              checks: [
+                {
+                  checkName: 'review-passed',
+                  title: 'Review passed',
+                  status: 'failed',
+                  message: 'Review failed',
+                  output: { verdict: 'FAIL', summary: '2 issues remain' },
+                  runCount: 1,
+                  lastRunAt: new Date().toISOString(),
+                },
+              ],
+              approvalStatus: null,
+              approvalOutput: null,
+              approvalRequestedAt: null,
+              approvalRespondedAt: null,
+              attempts: 0,
+              startedAt: new Date().toISOString(),
+              completedAt: null,
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        },
+      })
+
+      renderPage()
+
+      expect(screen.getByText(/Fix review findings/i)).toBeTruthy()
+      expect(screen.getByText(/Retry checkpoint/i)).toBeTruthy()
+      expect(screen.getByText(/Rerun review only/i)).toBeTruthy()
+      expect(screen.queryByText(/^Retry$/)).toBeNull()
+    })
+  })
 })
