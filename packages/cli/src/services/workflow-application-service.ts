@@ -93,6 +93,10 @@ export class WorkflowApplicationService {
     return { run, decision };
   }
 
+  scheduleRebaseTask(input: { issueId: string; reason?: string } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    return this.updateActiveRun(input.issueId, input, run => run.scheduleRebaseTask(input.reason));
+  }
+
   resumeDecision(issueId: string, options: WorkflowCommandOptions = {}): { run: WorkflowRun; nextWork: WorkflowWork } {
     const run = this.loadActive(issueId, options.tasksPath);
     const nextWork = run.nextWork();

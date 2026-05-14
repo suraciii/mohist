@@ -426,35 +426,6 @@ Issue Detail SHALL use one shared stage-state response as the source of truth fo
 - **AND** approval SHALL remain separate from top-level task entries
 - **AND** session activity, logs, and diagnostic evidence SHALL remain supporting detail rather than additional tasks
 
-### Requirement: REQ-WUI-WORKFLOW-RUN-001 Issue Detail renders WorkflowRun-backed progress
-
-Issue Detail SHALL render workflow progress from WorkflowRun-backed data while preserving the public model of one task list and one check list per stage. Approval state, failure reason, delivery metadata, and diagnostic evidence SHALL remain visually separate from primary task rows.
-
-#### Scenario: Pipeline uses WorkflowRun-backed stage data
-
-- **WHEN** a user opens Issue Detail for a started issue
-- **THEN** the pipeline UI SHALL render stages, tasks, checks, approval, and failure state from WorkflowRun-backed data
-- **AND** it SHALL NOT infer primary progress from session events, logs, execution history, or `tasks.json`
-
-#### Scenario: Task surfaces agree
-
-- **WHEN** `PipelineView` and `TaskProgressPanel` render the same issue stage
-- **THEN** both surfaces SHALL show the same WorkflowRun-backed task list
-- **AND** they SHALL NOT disagree because one surface read legacy progress data
-
-#### Scenario: Runtime-added tasks are normal tasks
-
-- **WHEN** a repair, rebase, retry, or conflict-resolution task exists in the WorkflowRun
-- **THEN** the UI SHALL render it in the normal stage task list
-- **AND** it MAY show available reason or causedBy metadata as explanation
-- **AND** it SHALL NOT expose planned, dynamic, static, or fix categories as separate task lists
-
-#### Scenario: Checks and approval remain separate
-
-- **WHEN** Issue Detail renders stage progress
-- **THEN** checks SHALL appear in a check list separate from tasks
-- **AND** approval SHALL remain separate decision state rather than a top-level task row
-
 ### Requirement: REQ-WUI-005 Integrate progress is visible in Issue Detail
 
 Issue Detail progress surfaces SHALL render Integrate from persisted WorkflowRun task and check state so users can see which integration step is running, which steps completed, whether final verification passed or failed, and whether merge delivery has already happened.
@@ -541,3 +512,18 @@ The Kanban board SHALL support priority filtering, label filtering, title search
 - **WHEN** a user views the board on mobile
 - **THEN** the single-column stage view reflects the same filtered and sorted issue set as desktop
 
+### Requirement: REQ-WUI-WORKFLOW-RUN-001 Issue Detail renders WorkflowRun-backed progress
+
+Issue Detail SHALL render user-triggered rebase as ordinary WorkflowRun task progress in the current stage task list. Rebase-specific SSE or toast feedback MAY remain as supplementary detail, but users SHALL be able to understand rebase status from the same canonical task list used for other workflow work.
+
+#### Scenario: Rebase becomes visible task state after click
+
+- **WHEN** a user triggers rebase for the current issue
+- **THEN** Issue Detail SHALL show `Rebase branch` in the current stage task list using canonical stage-state or WorkflowRun-backed data
+- **AND** the task SHALL transition through pending, running, completed, or failed like other visible tasks
+
+#### Scenario: Rebase visibility does not rely on bespoke SSE interpretation
+
+- **WHEN** rebase work has been scheduled in the WorkflowRun
+- **THEN** Issue Detail SHALL NOT require dedicated rebase-only SSE semantics to know that rebase is part of the workflow
+- **AND** any retained rebase progress or conflict messaging SHALL be secondary to canonical task-list state

@@ -3078,6 +3078,36 @@ export function createIssueRoutes(
         return c.json({ success: true, data: { rebased: true, message: 'Rebase delegated to merge queue retry' } } satisfies ApiResponse);
       }
 
+      const workflowApplicationService = createWorkflowApplicationService();
+      if (workflowApplicationService && activeWorkflowRunExists(issue.id)) {
+        const project = projectService.getById(projectId);
+        const worktreePath = project ? worktreeManager?.getPath(project.name, issue.number) : null;
+        const changeDir = worktreePath ? findChangeDir(worktreePath, number) : null;
+        const { run, decision } = workflowApplicationService.scheduleRebaseTask({
+          issueId: issue.id,
+          reason: body.reason as string | undefined,
+          tasksPath: changeDir ? path.join(changeDir, 'tasks.json') : undefined,
+          sessionId: null,
+        });
+
+        const rebaseTask = run.stageRuns.find(sr => sr.stage === issue.stage)?.tasks.find(t => t.id === 'rebase-branch');
+        if (decision.nextWork.kind === 'failed') {
+          return c.json({
+            success: false,
+            error: decision.nextWork.reason.message ?? 'Failed to schedule rebase task',
+          } satisfies ApiResponse, 500);
+        }
+
+        return c.json({
+          success: true,
+          data: {
+            taskId: 'rebase-branch',
+            status: rebaseTask?.status ?? 'pending',
+            message: `Rebase branch task scheduled for issue #${number}`,
+          },
+        } satisfies ApiResponse, 202);
+      }
+
       if (!agentRunner) {
         return c.json({ success: false, error: 'AgentRunnerService not configured' } satisfies ApiResponse, 500);
       }
