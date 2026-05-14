@@ -78,6 +78,11 @@ const SAMPLE_DIFF_DATA = {
   reason: null,
   base: 'main',
   head: 'mo/issue-123',
+  mergeBase: 'abc123mergebase',
+  ahead: 3,
+  behind: 0,
+  canFastForward: false,
+  comparison: 'merge-base' as const,
   summary: { filesChanged: 3, additions: 6, deletions: 2 },
   files: [
     { file: 'src/foo.ts', additions: 4, deletions: 1, diff: FOO_DIFF, isBinary: false },
@@ -372,8 +377,10 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       renderPage()
       const fooFile = screen.getByText('foo.ts')
       fireEvent.click(fooFile)
-      const rawButton = screen.getByText('Raw')
-      fireEvent.click(rawButton)
+      const modeSelect = screen.getAllByRole('combobox').find(
+        s => (s as HTMLSelectElement).querySelector('option[value="raw"]') !== null
+      )!
+      fireEvent.change(modeSelect, { target: { value: 'raw' } })
       await waitFor(() => {
         expect(screen.getByText('Copy')).toBeTruthy()
       })
@@ -396,7 +403,8 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('enters commit mode when a commit is selected', async () => {
       renderPage()
-      const select = screen.getByRole('combobox')
+      const commitOption = screen.getByText('View commit...')
+      const select = commitOption.closest('select')!
       fireEvent.change(select, { target: { value: 'abc123' } })
       await waitFor(() => {
         expect(screen.getByText('Exit commit mode')).toBeTruthy()
@@ -405,7 +413,8 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('exits commit mode when Exit commit mode is clicked', async () => {
       renderPage()
-      const select = screen.getByRole('combobox')
+      const commitOption = screen.getByText('View commit...')
+      const select = commitOption.closest('select')!
       fireEvent.change(select, { target: { value: 'abc123' } })
       await waitFor(() => {
         expect(screen.getByText('Exit commit mode')).toBeTruthy()

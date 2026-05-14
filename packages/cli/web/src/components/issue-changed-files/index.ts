@@ -1,5 +1,5 @@
 export { ChangedFilesTree } from './ChangedFilesTree'
-export { UnifiedDiffPane } from './UnifiedDiffPane'
+export { UnifiedDiffPane, FileStatusBadge } from './UnifiedDiffPane'
 export { SplitDiffPane } from './SplitDiffPane'
 export { RawPatchPane } from './RawPatchPane'
 export { FullFilePane } from './FullFilePane'

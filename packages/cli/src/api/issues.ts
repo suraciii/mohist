@@ -64,16 +64,22 @@ type CommitEntry = {
   files: string[];
 };
 
-type IssueDiffResponse = ChangesAvailability & {
+type ComparisonMetadata = {
   base: string;
   head: string;
+  mergeBase: string;
+  ahead: number;
+  behind: number;
+  canFastForward: boolean;
+  comparison: 'merge-base';
+};
+
+type IssueDiffResponse = ChangesAvailability & ComparisonMetadata & {
   summary: ChangesSummary;
   files: DiffFile[];
 };
 
-type IssueCommitsResponse = ChangesAvailability & {
-  base: string;
-  head: string;
+type IssueCommitsResponse = ChangesAvailability & ComparisonMetadata & {
   summary: ChangesSummary & { commits: number };
   commits: CommitEntry[];
 };
@@ -145,6 +151,91 @@ function getAuthoritativeCheckReviewPassed(
 ): CheckResult | undefined {
   return getWorkflowRunCheckReviewPassed(issueId, workflowRunService) ??
     getLatestCheckStageReviewPassed(issueId, stageExecutionRepo);
+}
+
+type IssueComparisonContext = {
+  available: true;
+  base: string;
+  head: string;
+  mergeBase: string;
+  ahead: number;
+  behind: number;
+  canFastForward: boolean;
+  comparison: 'merge-base';
+} | {
+  available: false;
+  reason: ChangesUnavailableReason;
+  message: string;
+};
+
+async function resolveIssueComparisonContext(
+  projectId: string,
+  issue: Issue,
+  projectService: ProjectService,
+  worktreeManager: WorktreeManager | null,
+): Promise<IssueComparisonContext> {
+  const project = projectService.getById(projectId);
+  if (!project) {
+    return { available: false, reason: 'branch_missing', message: 'Project not found' };
+  }
+
+  const branchName = `mo/issue-${issue.number}`;
+
+  if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
+    if (issue.stage === Stage.Backlog) {
+      return { available: false, reason: 'not_started', message: 'Issue has not started yet. Start the issue to see changes.' };
+    }
+    return { available: false, reason: 'worktree_removed', message: 'Workspace has been removed. Diff is only available while the issue worktree is retained.' };
+  }
+
+  let branchExists = false;
+  try {
+    const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branchName}`], { cwd: project.path });
+    branchExists = revOutput.stdout.trim().length > 0;
+  } catch {
+    branchExists = false;
+  }
+
+  if (!branchExists) {
+    return { available: false, reason: 'branch_missing', message: `Branch ${branchName} not found. The issue branch may have been deleted.` };
+  }
+
+  let baseExists = false;
+  try {
+    const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${project.baseBranch}`], { cwd: project.path });
+    baseExists = revOutput.stdout.trim().length > 0;
+  } catch {
+    baseExists = false;
+  }
+
+  if (!baseExists) {
+    return { available: false, reason: 'branch_missing', message: `Base branch ${project.baseBranch} not found.` };
+  }
+
+  let mergeBaseOutput: { stdout: string };
+  try {
+    mergeBaseOutput = await execFileAsync('git', ['merge-base', project.baseBranch, branchName], { cwd: project.path });
+  } catch {
+    return { available: false, reason: 'git_error', message: 'Failed to resolve merge base. Check that the branch has commits.' };
+  }
+
+  const mergeBase = mergeBaseOutput.stdout.trim();
+  if (!mergeBase) {
+    return { available: false, reason: 'git_error', message: 'Failed to resolve merge base.' };
+  }
+
+  const status = await worktreeManager.getWorktreeStatus(project.path, project.name, issue.number, project.baseBranch);
+
+  return {
+    available: true,
+    base: project.baseBranch,
+    head: branchName,
+    mergeBase,
+    ahead: status.ahead,
+    behind: status.behind,
+    canFastForward: status.canFastForward,
+    comparison: 'merge-base',
+  };
 }
 
 function taskCause(task: { causedByType: string | null; causedByCheckName: string | null; causedByTaskId: string | null; reason: string | null }) {
@@ -1785,74 +1876,25 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const project = projectService.getById(projectId);
-      if (!project) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'Project not found'
-        };
-        return c.json(response, 404);
-      }
-
-      const branchName = `mo/issue-${number}`;
-
-      if (!worktreeManager || !worktreeManager.exists(project.name, issue.number)) {
-        if (issue.stage === Stage.Backlog) {
-          const response: ApiResponse = {
-            success: true,
-            data: { available: false as const, reason: 'not_started' as const, message: 'Issue has not started yet. Start the issue to see changes.' }
-          };
-          return c.json(response);
-        }
+      const ctx = await resolveIssueComparisonContext(projectId, issue, projectService, worktreeManager);
+      if (!ctx.available) {
         const response: ApiResponse = {
           success: true,
-          data: { available: false as const, reason: 'worktree_removed' as const, message: 'Workspace has been removed. Diff is only available while the issue worktree is retained.' }
+          data: { available: false as const, reason: ctx.reason, message: ctx.message }
         };
         return c.json(response);
       }
 
-      let branchExists = false;
-      try {
-        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branchName}`], { cwd: project.path });
-        branchExists = revOutput.stdout.trim().length > 0;
-      } catch {
-        branchExists = false;
-      }
-
-      if (!branchExists) {
-        const response: ApiResponse = {
-          success: true,
-          data: { available: false as const, reason: 'branch_missing' as const, message: `Branch ${branchName} not found. The issue branch may have been deleted.` }
-        };
-        return c.json(response);
-      }
-
-      let baseExists = false;
-      try {
-        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${project.baseBranch}`], { cwd: project.path });
-        baseExists = revOutput.stdout.trim().length > 0;
-      } catch {
-        baseExists = false;
-      }
-
-      if (!baseExists) {
-        const response: ApiResponse = {
-          success: true,
-          data: { available: false as const, reason: 'branch_missing' as const, message: `Base branch ${project.baseBranch} not found.` }
-        };
-        return c.json(response);
-      }
-
-      const diffArgs = ['diff', project.baseBranch, branchName];
+      const diffArgs = ['diff', `${ctx.base}...${ctx.head}`];
 
       let numstatOutput: { stdout: string };
       let fullDiffOutput: { stdout: string };
       try {
         [numstatOutput, fullDiffOutput] = await Promise.all([
-          execFileAsync('git', [...diffArgs, '--numstat'], { cwd: project.path }),
-          execFileAsync('git', diffArgs, { cwd: project.path }),
+          execFileAsync('git', [...diffArgs, '--numstat'], { cwd: projectService.getById(projectId)!.path }),
+          execFileAsync('git', diffArgs, { cwd: projectService.getById(projectId)!.path }),
         ]);
-      } catch (err) {
+      } catch {
         const response: ApiResponse = {
           success: true,
           data: { available: false as const, reason: 'git_error' as const, message: 'Failed to load diff. Check that the branch has commits.' }
@@ -1907,8 +1949,13 @@ export function createIssueRoutes(
       const data: IssueDiffResponse = {
         available: true,
         reason: null,
-        base: project.baseBranch,
-        head: branchName,
+        base: ctx.base,
+        head: ctx.head,
+        mergeBase: ctx.mergeBase,
+        ahead: ctx.ahead,
+        behind: ctx.behind,
+        canFastForward: ctx.canFastForward,
+        comparison: 'merge-base',
         summary: {
           filesChanged: files.length,
           commits: 0,
@@ -2088,71 +2135,11 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const project = projectService.getById(projectId);
-      if (!project) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'Project not found'
-        };
-        return c.json(response, 404);
-      }
-
-      const branchName = `mo/issue-${number}`;
-
-      if (!worktreeManager) {
+      const ctx = await resolveIssueComparisonContext(projectId, issue, projectService, worktreeManager);
+      if (!ctx.available) {
         const response: ApiResponse = {
           success: true,
-          data: {
-            ...unavailableChangesData(issue, issue.stage === Stage.Backlog
-              ? 'Issue has not started yet. Start the issue to see commits.'
-              : 'Workspace has been removed. Commits are only available while the issue worktree is retained.'),
-            commits: [],
-          }
-        };
-        return c.json(response);
-      }
-
-      if (!worktreeManager.exists(project.name, issue.number)) {
-        const response: ApiResponse = {
-          success: true,
-          data: {
-            ...unavailableChangesData(issue, issue.stage === Stage.Backlog
-              ? 'Issue has not started yet. Start the issue to see commits.'
-              : 'Workspace has been removed. Commits are only available while the issue worktree is retained.'),
-            commits: [],
-          }
-        };
-        return c.json(response);
-      }
-
-      let branchExists = false;
-      try {
-        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branchName}`], { cwd: project.path });
-        branchExists = revOutput.stdout.trim().length > 0;
-      } catch {
-        branchExists = false;
-      }
-
-      if (!branchExists) {
-        const response: ApiResponse = {
-          success: true,
-          data: { available: false as const, reason: 'branch_missing' as const, message: `Branch ${branchName} not found. The issue branch may have been deleted.` }
-        };
-        return c.json(response);
-      }
-
-      let baseExists = false;
-      try {
-        const revOutput = await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${project.baseBranch}`], { cwd: project.path });
-        baseExists = revOutput.stdout.trim().length > 0;
-      } catch {
-        baseExists = false;
-      }
-
-      if (!baseExists) {
-        const response: ApiResponse = {
-          success: true,
-          data: { available: false as const, reason: 'branch_missing' as const, message: `Base branch ${project.baseBranch} not found.` }
+          data: { available: false as const, reason: ctx.reason, message: ctx.message, commits: [] }
         };
         return c.json(response);
       }
@@ -2163,15 +2150,15 @@ export function createIssueRoutes(
         [logOutput, summaryNumstatOutput] = await Promise.all([
           execFileAsync(
             'git',
-            ['log', `${project.baseBranch}..${branchName}`, '--date=iso-strict', '--numstat', '--format=%x1e%H%x00%h%x00%s%x00%an%x00%aI'],
-            { cwd: project.path }
+            ['log', `${ctx.base}..${ctx.head}`, '--date=iso-strict', '--numstat', '--format=%x1e%H%x00%h%x00%s%x00%an%x00%aI'],
+            { cwd: projectService.getById(projectId)!.path }
           ),
-          execFileAsync('git', ['diff', `${project.baseBranch}...${branchName}`, '--numstat'], { cwd: project.path }),
+          execFileAsync('git', ['diff', `${ctx.base}...${ctx.head}`, '--numstat'], { cwd: projectService.getById(projectId)!.path }),
         ]);
-      } catch (err) {
+      } catch {
         const response: ApiResponse = {
           success: true,
-          data: { available: false as const, reason: 'git_error' as const, message: 'Failed to load commits. Check that the branch has commits.' }
+          data: { available: false as const, reason: 'git_error' as const, message: 'Failed to load commits. Check that the branch has commits.', commits: [] }
         };
         return c.json(response);
       }
@@ -2244,8 +2231,13 @@ export function createIssueRoutes(
       const data: IssueCommitsResponse = {
         available: true,
         reason: null,
-        base: project.baseBranch,
-        head: branchName,
+        base: ctx.base,
+        head: ctx.head,
+        mergeBase: ctx.mergeBase,
+        ahead: ctx.ahead,
+        behind: ctx.behind,
+        canFastForward: ctx.canFastForward,
+        comparison: 'merge-base',
         summary: {
           filesChanged: summaryFiles.size,
           commits: commits.length,
