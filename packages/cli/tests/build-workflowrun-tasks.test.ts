@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import { Stage, IssueStatus, type Issue } from '../src/types';
 import { WorkflowRun } from '../src/workflow/domain';
 import { BuildStageRunner } from '../src/workflow/build-stage-runner';
@@ -246,18 +247,21 @@ describe('Build aggregate-backed task runtime', () => {
     }));
   });
 
-  it('single-task Ralph mode leaves unrelated tasks.json progress unchanged', async () => {
+  it('single-task Ralph mode leaves unrelated completed tasks.json progress unchanged', async () => {
     setAcpSessionRunner(vi.fn().mockResolvedValue({ success: true, text: 'done' }));
     const issue = makeIssue();
     const change = makeChange(tempDir, [
-      { id: 'T-001', order: 1, title: 'First', description: 'd', passes: false },
+      { id: 'T-001', order: 1, title: 'First', description: 'd', passes: true, attempts: 2, error: null, durations: [11, 22] },
       { id: 'T-002', order: 2, title: 'Second', description: 'd', passes: false, error: 'still pending' },
+      { id: 'T-003', order: 3, title: 'Third', description: 'd', passes: false },
     ]);
     const run = startBuildRun(issue);
     run.materializeTasks(Stage.Build, [
       { id: 'T-001', title: 'First', order: 1 },
       { id: 'T-002', title: 'Second', order: 2 },
+      { id: 'T-003', title: 'Third', order: 3 },
     ]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
     const service = makeService(run);
 
     const result = await runRalphLoop(change, {
@@ -265,13 +269,62 @@ describe('Build aggregate-backed task runtime', () => {
       projectPath: tempDir,
       issueId: issue.id,
       workflowApplicationService: service,
-    }, { maxRetries: 0, ignoreTaskFileProgress: true, onlyTaskId: 'T-001' });
+    }, { maxRetries: 0, ignoreTaskFileProgress: true, onlyTaskId: 'T-002' });
 
     expect(result.success).toBe(true);
     expect(run.stageRun(Stage.Build).findTask('T-001').status).toBe('completed');
-    expect(run.stageRun(Stage.Build).findTask('T-002').status).toBe('pending');
+    expect(run.stageRun(Stage.Build).findTask('T-002').status).toBe('completed');
+    expect(run.stageRun(Stage.Build).findTask('T-003').status).toBe('pending');
     const tasksFile = JSON.parse(fs.readFileSync(change.tasksPath, 'utf-8'));
-    expect(tasksFile.tasks.find((task: any) => task.id === 'T-002')).toMatchObject({ passes: false });
+    expect(tasksFile.tasks.find((task: any) => task.id === 'T-001')).toMatchObject({ passes: true, attempts: 2, error: null, durations: [11, 22] });
+    expect(tasksFile.tasks.find((task: any) => task.id === 'T-002')).toMatchObject({ passes: true, error: null });
+    expect(tasksFile.tasks.find((task: any) => task.id === 'T-003')).toMatchObject({ passes: false });
+  });
+
+  it('routes aggregate rebase-branch through the reported task handler instead of Ralph tasks', async () => {
+    execFileSync('git', ['init', '-b', 'master'], { cwd: tempDir });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tempDir });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: tempDir });
+    fs.writeFileSync(path.join(tempDir, 'README.md'), '# test');
+    execFileSync('git', ['add', 'README.md'], { cwd: tempDir });
+    execFileSync('git', ['commit', '-m', 'initial'], { cwd: tempDir });
+    const issue = makeIssue();
+    const run = startBuildRun(issue);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'First', order: 1 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.scheduleRebaseTask('base moved');
+    const service = makeService(run);
+    const ralphModule = await import('../src/openspec/ralph-executor');
+    const execute = vi.fn();
+    vi.spyOn(ralphModule.RalphExecutor.prototype, 'execute').mockImplementation(execute);
+    const runner = new BuildStageRunner({ worktreePath: tempDir, projectId: 'project-1' });
+
+    const result = await runner.run({
+      issue,
+      acpOptions: { cwd: tempDir },
+      artifactManager: {} as never,
+      worktreeManager: {
+        getPath: vi.fn().mockReturnValue(tempDir),
+        getHeadSha: vi.fn().mockResolvedValue('head'),
+        canFastForward: vi.fn().mockResolvedValue(true),
+      } as never,
+      projectRepo: { findById: vi.fn().mockReturnValue({ id: 'project-1', name: 'mohist', path: tempDir, baseBranch: 'master' }) } as never,
+      eventBus: { emit: vi.fn() } as never,
+      checkpointManager: {} as never,
+      issueRepo: { updateStage: vi.fn(), setApprovalState: vi.fn(), clearApprovalState: vi.fn(), updateStatus: vi.fn(), findById: vi.fn() },
+      workflowApplicationService: service,
+      requestedWork: { kind: 'task', stage: Stage.Build, taskId: 'rebase-branch' },
+      requestedTask: { taskId: 'rebase-branch', status: 'pending', attempts: 0 },
+      emit: vi.fn(),
+      log: vi.fn(),
+    } as never);
+
+    expect(result.success).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+    expect(service.completeTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'rebase-branch',
+      result: expect.objectContaining({ status: 'completed' }),
+    }));
   });
 
   it('records failed task validation through the aggregate immediately', async () => {

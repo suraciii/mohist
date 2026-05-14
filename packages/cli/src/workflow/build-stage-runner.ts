@@ -328,7 +328,12 @@ export class BuildStageRunner extends BaseStageRunner {
       return super.run(ctx);
     }
 
-    if (ctx.requestedWork?.kind === 'task' && ctx.requestedWork.stage === Stage.Build && ctx.requestedWork.taskId !== 'fix-build-health') {
+    if (
+      ctx.requestedWork?.kind === 'task' &&
+      ctx.requestedWork.stage === Stage.Build &&
+      ctx.requestedWork.taskId !== 'fix-build-health' &&
+      ctx.requestedWork.taskId !== 'rebase-branch'
+    ) {
       try {
         ctx.requestedTask ??= {
           id: ctx.requestedWork.taskId,

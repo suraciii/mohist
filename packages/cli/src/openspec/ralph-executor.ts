@@ -127,6 +127,50 @@ function writeTasksFile(tasksPath: string, tasks: Task[]): void {
   }
 }
 
+function restoreUnrequestedTaskProgress(
+  tasksPath: string,
+  originalTasks: Task[],
+  allowedTaskIds: Set<string>,
+): void {
+  if (originalTasks.length === 0) return;
+
+  const latestTasks = readTasks(tasksPath);
+  if (!latestTasks) return;
+
+  const originalById = new Map(originalTasks.map(task => [task.id, task]));
+  let changed = false;
+
+  for (const task of latestTasks) {
+    if (allowedTaskIds.has(task.id)) continue;
+
+    const original = originalById.get(task.id);
+    if (!original) continue;
+
+    if (task.passes !== original.passes) {
+      task.passes = original.passes;
+      changed = true;
+    }
+    if (task.error !== original.error) {
+      task.error = original.error;
+      changed = true;
+    }
+    if (task.attempts !== original.attempts) {
+      task.attempts = original.attempts;
+      changed = true;
+    }
+    const originalDurations = original.durations ?? [];
+    const taskDurations = task.durations ?? [];
+    if (JSON.stringify(taskDurations) !== JSON.stringify(originalDurations)) {
+      task.durations = [...originalDurations];
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    writeTasksFile(tasksPath, latestTasks);
+  }
+}
+
 function reportTaskToAggregate(
   context: RalphExecutorContext,
   task: Task,
@@ -228,6 +272,9 @@ export async function runRalphLoop(
   context: RalphExecutorContext,
   options: RalphExecutorOptions = {}
 ): Promise<RalphLoopResult> {
+  const originalTasks = options.ignoreTaskFileProgress && options.onlyTaskId
+    ? (readTasks(change.tasksPath) ?? [])
+    : [];
   const loader = new RalphTaskLoader();
   const loaderResult = loader.load(change, { ignoreTaskFileProgress: options.ignoreTaskFileProgress });
 
@@ -626,6 +673,14 @@ export async function runRalphLoop(
       const implementationCommitSha = options.onlyTaskId && context.workflowApplicationService
         ? await commitAggregateTaskChanges(context.worktreePath, nextTask.id, context.issueNumber)
         : undefined;
+      if (options.onlyTaskId && options.ignoreTaskFileProgress) {
+        restoreUnrequestedTaskProgress(change.tasksPath, originalTasks, new Set([nextTask.id]));
+        const latestTasks = readTasks(change.tasksPath);
+        if (latestTasks) {
+          sortedTasks.splice(0, sortedTasks.length, ...latestTasks);
+        }
+        context.syncTasksToStageState?.();
+      }
       await commitTasksFile(change.tasksPath, context.worktreePath, nextTask.id, true);
       if (!handlerResult.stageTaskResult.alreadyReported) {
         emitTaskUpdate(taskExecutionId ?? '', nextTask.id, nextTask.title, handlerResult.stageTaskResult.attempts, sortedTasks.length, 'completed', handlerResult.stageTaskResult.attempts);
