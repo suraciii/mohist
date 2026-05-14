@@ -43,9 +43,23 @@ export abstract class BaseStageRunner implements StageRunner {
   }
 
   async executeTaskWork(ctx: StageContext, taskId: string, options: { failedCheck?: CheckResult; attempt?: number } = {}): Promise<StageTaskResult | null> {
-    const result = await this.executeReportedTask(ctx, taskId, options.failedCheck, options.attempt ?? 1);
+    const result = this.normalizeTaskResultForRequestedWork(
+      ctx,
+      await this.executeReportedTask(ctx, taskId, options.failedCheck, options.attempt ?? 1),
+    );
     if (result && !result.alreadyReported) this.appendTaskResult(ctx, result);
     return result;
+  }
+
+  private normalizeTaskResultForRequestedWork(ctx: StageContext, result: StageTaskResult | null): StageTaskResult | null {
+    if (!result || ctx.requestedWork?.kind !== 'task' || result.taskId === ctx.requestedWork.taskId) return result;
+    log.warn('Task result id differed from requested WorkflowRun task; preserving requested task instance id', {
+      requestedTaskId: ctx.requestedWork.taskId,
+      reportedTaskId: result.taskId,
+      stage: ctx.requestedWork.stage,
+      issueNumber: ctx.issue.number,
+    });
+    return { ...result, taskId: ctx.requestedWork.taskId };
   }
 
   async executeCheckWork(ctx: StageContext, checkName: string): Promise<CheckResult> {

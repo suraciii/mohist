@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Stage, IssueStatus } from '../src/types';
-import type { StageContext, CheckResult } from '../src/workflow/stage-context';
+import type { StageContext, CheckResult, StageTaskResult } from '../src/workflow/stage-context';
 import type { Check } from '../src/workflow/checks';
 import { EventBus } from '../src/services/event-bus';
 import { BaseStageRunner } from '../src/workflow/base-stage-runner';
@@ -106,6 +106,7 @@ class TestStageRunner extends BaseStageRunner {
   executeTasksFn = vi.fn().mockResolvedValue({ done: true });
   executeTasksCalls = 0;
   handledStage = Stage.Check;
+  reportedTaskResult: StageTaskResult | null = null;
 
   canHandle(s: Stage): boolean { return s === this.handledStage; }
 
@@ -118,6 +119,10 @@ class TestStageRunner extends BaseStageRunner {
     return this.executeTasksFn();
   }
 
+  protected async executeReportedTask(): Promise<StageTaskResult | null> {
+    return this.reportedTaskResult;
+  }
+
   protected getChecks(): Check[] { return this.postTaskChecks; }
   protected getPreTaskChecks(): Check[] { return this.preTaskChecks; }
   protected getNextStage(): Stage { return this.nextStage; }
@@ -127,6 +132,7 @@ describe('CheckStageRunner ordering', () => {
   let tmpDir: string;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-stage-ordering-test-'));
   });
 
@@ -258,6 +264,70 @@ describe('CheckStageRunner ordering', () => {
       expect(execute).toHaveBeenCalledTimes(1);
       expect(artifactExists(tmpDir, 42, 'review.md')).toBe(true);
       expect(result.checkResults?.find(r => r.name === 'review-passed')?.status).toBe('pass');
+    });
+
+    it('preserves suffixed fix task instance id when executing review repair', async () => {
+      const worktreePath = path.join(tmpDir, 'worktree');
+      fs.mkdirSync(worktreePath, { recursive: true });
+      const execute = vi.fn().mockResolvedValue({ success: true, text: 'fixed' });
+      const close = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(AgentSession.create).mockResolvedValue({
+        execute,
+        close,
+      } as any);
+
+      const ctx = createMockContext(tmpDir, 42, {
+        acpOptions: { cwd: worktreePath, issueNumber: 42 } as any,
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({
+            id: 'test-project',
+            name: 'test-project',
+            path: tmpDir,
+            baseBranch: 'master',
+          }),
+        } as any,
+        worktreeManager: {
+          getPath: vi.fn().mockReturnValue(worktreePath),
+        } as any,
+        checkpointManager: {
+          deleteStep: vi.fn(),
+        } as any,
+        requestedWork: { kind: 'task', stage: Stage.Check, taskId: 'fix-review-findings:1' },
+      });
+      const runner = new CheckStageRunner({ worktreePath });
+
+      const result = await runner.executeTaskWork(ctx, 'fix-review-findings:1', {
+        failedCheck: {
+          name: 'review-passed',
+          status: 'fail',
+          message: 'Review failed',
+          output: { verdict: 'FAIL', reviewReport: 'Finding to fix' },
+        },
+        attempt: 2,
+      });
+
+      expect(result?.taskId).toBe('fix-review-findings:1');
+      expect(result?.status).toBe('completed');
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('normalizes mismatched task results to the requested WorkflowRun task instance id', async () => {
+      const runner = new TestStageRunner();
+      runner.reportedTaskResult = {
+        taskId: 'fix-review-findings',
+        title: 'Fix review findings',
+        status: 'completed',
+        artifacts: [],
+        attempts: 2,
+        duration: 5,
+      };
+      const ctx = createMockContext(tmpDir, 42, {
+        requestedWork: { kind: 'task', stage: Stage.Check, taskId: 'fix-review-findings:1' },
+      });
+
+      const result = await runner.executeTaskWork(ctx, 'fix-review-findings:1');
+
+      expect(result?.taskId).toBe('fix-review-findings:1');
     });
   });
 
