@@ -112,6 +112,7 @@ export class AgentRunnerService {
   private runningSlots = new Map<string, IssueTaskQueueRecord>();
   private pendingQueues = new Map<string, IssueTaskQueueRecord[]>();
   private abortControllers = new Map<string, AbortController>();
+  private queueRecovered = false;
 
   constructor(
     private readonly eventBus: EventBus,
@@ -228,6 +229,11 @@ export class AgentRunnerService {
       log.info('Queue recovery skipped — missing taskQueueRepo or issueRepo');
       return;
     }
+    if (this.queueRecovered) {
+      log.info('Queue recovery skipped — already recovered in this service lifecycle');
+      return;
+    }
+    this.queueRecovered = true;
 
     const runningTasks = this.taskQueueRepo.findAllRunning();
     log.info('Recovering queue state from DB', { runningTasks: runningTasks.length });
