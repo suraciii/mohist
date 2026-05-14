@@ -32,8 +32,22 @@ interface TaskConfig {
   label: string;
   outputPath: string;
   verifyArtifact: () => boolean;
-  buildPrompt: (issue: import('../types').Issue, changeDir: string) => string;
+  buildPrompt: (issue: import('../types').Issue, changeDir: string, feedback?: string) => string;
 }
+
+type PlanRejectionFeedback = {
+  shouldReplan: boolean;
+  message?: string;
+};
+
+type WorkflowRunRejectionEvent = {
+  type?: string;
+  reason?: {
+    reason?: string;
+    stage?: string;
+    message?: string;
+  };
+};
 
 export class PlanStageRunner extends BaseStageRunner {
   private worktreePath: string;
@@ -100,28 +114,28 @@ export class PlanStageRunner extends BaseStageRunner {
         label: 'proposal.md',
         outputPath: path.join(changeDir, 'proposal.md'),
         verifyArtifact: () => fs.existsSync(path.join(changeDir, 'proposal.md')),
-        buildPrompt: (iss, dir) => buildArtifactPrompt('proposal', iss, dir),
+        buildPrompt: (iss, dir, feedback) => buildArtifactPrompt('proposal', iss, dir, undefined, { feedback }),
       },
       {
         type: 'specs',
         label: 'specs/',
         outputPath: path.join(changeDir, 'specs'),
         verifyArtifact: () => fs.existsSync(path.join(changeDir, 'specs')),
-        buildPrompt: (iss, dir) => buildArtifactPrompt('specs', iss, dir),
+        buildPrompt: (iss, dir, feedback) => buildArtifactPrompt('specs', iss, dir, undefined, { feedback }),
       },
       {
         type: 'design',
         label: 'design.md',
         outputPath: path.join(changeDir, 'design.md'),
         verifyArtifact: () => fs.existsSync(path.join(changeDir, 'design.md')),
-        buildPrompt: (iss, dir) => buildArtifactPrompt('design', iss, dir),
+        buildPrompt: (iss, dir, feedback) => buildArtifactPrompt('design', iss, dir, undefined, { feedback }),
       },
       {
         type: 'tasks',
         label: 'tasks.json',
         outputPath: path.join(changeDir, 'tasks.json'),
         verifyArtifact: () => fs.existsSync(path.join(changeDir, 'tasks.json')),
-        buildPrompt: (iss, dir) => buildArtifactPrompt('tasks', iss, dir),
+        buildPrompt: (iss, dir, feedback) => buildArtifactPrompt('tasks', iss, dir, undefined, { feedback }),
       },
       {
         type: 'self-review',
@@ -143,12 +157,14 @@ export class PlanStageRunner extends BaseStageRunner {
     const task = tasks[taskIndex];
     const completedSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
     const isLastTask = taskIndex === tasks.length - 1;
+    const feedback = this.getPlanRejectionFeedback(ctx);
+    const shouldReplan = feedback.shouldReplan && task.type !== 'self-review';
 
-    if (completedSteps.includes(task.type) && task.verifyArtifact()) {
+    if (!shouldReplan && completedSteps.includes(task.type) && task.verifyArtifact()) {
       if (isLastTask) await this.closeAggregateTaskSession(ctx);
       return { taskId: task.type, title: task.label, status: 'completed', artifacts: [], attempts: 0, duration: 0 };
     }
-    if (task.verifyArtifact()) {
+    if (!shouldReplan && task.verifyArtifact()) {
       checkpointManager.markStepComplete(issue.number, 'plan', task.type, tasks[taskIndex + 1]?.type ?? null);
       if (isLastTask) await this.closeAggregateTaskSession(ctx);
       return { taskId: task.type, title: task.label, status: 'completed', artifacts: [task.label], attempts: 0, duration: 0 };
@@ -161,7 +177,7 @@ export class PlanStageRunner extends BaseStageRunner {
     try {
       emitRoundStart(ctx, task.type, taskIndex, acpOptions, issue.projectId ?? '');
       emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'started', attempts, []);
-      const result = await session.execute(task.buildPrompt(issue, changeDir), { kind: 'task', title: task.label });
+      const result = await session.execute(task.buildPrompt(issue, changeDir, feedback.message), { kind: 'task', title: task.label });
       if (!result.success) {
         emitStageTaskUpdate(eventBus, issue.id, issue.projectId ?? '', 'plan', task.type, task.label, 'failed', attempts, []);
         await this.closeAggregateTaskSession(ctx);
@@ -306,6 +322,7 @@ export class PlanStageRunner extends BaseStageRunner {
     }
 
     const resumeSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
+    const feedback = this.getPlanRejectionFeedback(ctx);
 
     const tasks = this.createTaskConfigs(changeDir);
 
@@ -349,7 +366,8 @@ const planBridgeObserver = {
       session = await AgentSession.create(connectionOptions);
 
       for (const [index, task] of tasks.entries()) {
-        if (completedSteps.includes(task.type)) {
+        const shouldReplan = feedback.shouldReplan && task.type !== 'self-review';
+        if (!shouldReplan && completedSteps.includes(task.type)) {
           if (task.verifyArtifact()) {
             log.info('Plan task restored from checkpoint', {
               artifact: task.type,
@@ -371,7 +389,7 @@ const planBridgeObserver = {
           });
           const idx = completedSteps.indexOf(task.type);
           completedSteps.splice(idx);
-        } else if (task.verifyArtifact()) {
+        } else if (!shouldReplan && task.verifyArtifact()) {
           log.info('Plan artifact exists but not in checkpoint, marking complete', {
             artifact: task.type,
             issueNumber: issue.number,
@@ -402,7 +420,7 @@ const planBridgeObserver = {
         const taskStartTime = Date.now();
         let attempts = 1;
 
-        const prompt = task.buildPrompt(issue, changeDir);
+        const prompt = task.buildPrompt(issue, changeDir, feedback.message);
         const result = await session.execute(prompt, { kind: 'task', title: task.label });
 
         if (!result.success) {
@@ -515,6 +533,33 @@ const planBridgeObserver = {
     checkpointManager.delete(issue.number, 'plan');
 
     return { changeDir };
+  }
+
+  private getPlanRejectionFeedback(ctx: StageContext): PlanRejectionFeedback {
+    if (ctx.issue.stage !== Stage.Plan) return { shouldReplan: false };
+    const message = this.findLatestPlanRejectionMessage(ctx);
+    if (!message) {
+      return { shouldReplan: false };
+    }
+    return { shouldReplan: true, message };
+  }
+
+  private findLatestPlanRejectionMessage(ctx: StageContext): string | undefined {
+    if (!ctx.workflowLogRepo) return undefined;
+    const entries = ctx.workflowLogRepo.findByIssueId(ctx.issue.id, 'workflow_run.approval-rejected');
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      try {
+        const event = JSON.parse(entry.data) as WorkflowRunRejectionEvent;
+        const message = event.reason?.stage === Stage.Plan && event.reason.reason === 'approval-rejected'
+          ? event.reason.message?.trim()
+          : undefined;
+        if (message) return message;
+      } catch {
+        // Ignore malformed historical log entries.
+      }
+    }
+    return undefined;
   }
 
   protected getChecks(): Check[] {

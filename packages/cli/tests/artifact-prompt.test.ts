@@ -183,6 +183,16 @@ describe('buildArtifactPrompt', () => {
 
     expect(result).not.toContain('<project_context>');
   });
+
+  it('includes prior plan rejection feedback when provided', () => {
+    const result = buildArtifactPrompt('proposal', mockIssue, changeDir, undefined, {
+      feedback: 'Start from the user story before designing storage.',
+    });
+
+    expect(result).toContain('User feedback from prior Plan rejection');
+    expect(result).toContain('Start from the user story before designing storage.');
+    expect(result).toContain('Revise the Plan artifact to address this feedback explicitly.');
+  });
 });
 
 describe('buildSelfReviewPrompt', () => {

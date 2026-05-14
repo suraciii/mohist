@@ -1742,7 +1742,7 @@ export function createIssueRoutes(
       }
 
       const rejectedStage = issue.approvalState!.stage;
-      const rejectedThroughWorkflowRun = rejectThroughWorkflowRun(issue, issue.approvalState!.output ?? message ?? null);
+      const rejectedThroughWorkflowRun = rejectThroughWorkflowRun(issue, message ?? issue.approvalState!.output ?? null);
 
       if (!rejectedThroughWorkflowRun) {
         return c.json({
