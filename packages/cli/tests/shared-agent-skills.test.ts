@@ -183,7 +183,7 @@ describe('getSharedSkillNames', () => {
       expect(fs.existsSync(refsPath)).toBe(true);
       const refsContent = fs.readFileSync(refsPath, 'utf-8');
       expect(refsContent).toContain('## Template: refactor');
-      expect(refsContent).toContain('## Template: user-story');
+      expect(refsContent).toContain('## Template: product');
       expect(refsContent).toContain('## Template: ui');
     });
 
@@ -291,9 +291,7 @@ describe('getSharedSkillNames', () => {
       try {
         const results = installHermesSkills({ hermesHome: customHome });
         expect(results.length).toBeGreaterThan(0);
-
-        const realHermesPath = path.join(os.homedir(), '.hermes', 'skills', 'mohist', 'SKILL.md');
-        expect(fs.existsSync(realHermesPath)).toBe(false);
+        expect(fs.existsSync(path.join(customHome, 'skills', 'mohist', 'SKILL.md'))).toBe(true);
       } finally {
         fs.rmSync(customHome, { recursive: true, force: true });
       }
@@ -468,7 +466,7 @@ describe('getSharedSkillNames', () => {
       expect(hasRefs).toBe(true);
       const refsFile = content.supplementaryFiles.find(f => f.path.includes('issue-templates'));
       expect(refsFile!.content).toContain('## Template: refactor');
-      expect(refsFile!.content).toContain('## Template: user-story');
+      expect(refsFile!.content).toContain('## Template: product');
       expect(refsFile!.content).toContain('## Template: ui');
     });
 
@@ -537,14 +535,14 @@ describe('Issue Template Instructions', () => {
       const { getAvailableTemplates } = await import('../src/agent-skills/issue-template-lookup');
       const templates = getAvailableTemplates();
 
-      const userStory = templates.find(t => t.template === 'user-story');
+      const product = templates.find(t => t.template === 'product');
       const refactor = templates.find(t => t.template === 'refactor');
       const ui = templates.find(t => t.template === 'ui');
 
-      expect(userStory).toBeDefined();
-      expect(userStory?.labels).toContain('bug');
-      expect(userStory?.labels).toContain('feature');
-      expect(userStory?.labels).toContain('improvement');
+      expect(product).toBeDefined();
+      expect(product?.labels).toContain('bug');
+      expect(product?.labels).toContain('feature');
+      expect(product?.labels).toContain('improvement');
 
       expect(refactor).toBeDefined();
       expect(refactor?.labels).toContain('refactor');
@@ -562,9 +560,9 @@ describe('Issue Template Instructions', () => {
 
       expect(result).not.toBeNull();
       expect(result?.template).toBe('refactor');
-      expect(result?.content).toContain('## 重构目标');
-      expect(result?.content).toContain('## 当前状态');
-      expect(result?.content).toContain('## 验收标准');
+      expect(result?.content).toContain('## Refactor Goal');
+      expect(result?.content).toContain('## Refactor Shape');
+      expect(result?.content).toContain('## Acceptance Criteria');
     });
 
     it('returns UI template for ui-feature label', async () => {
@@ -573,9 +571,9 @@ describe('Issue Template Instructions', () => {
 
       expect(result).not.toBeNull();
       expect(result?.template).toBe('ui');
-      expect(result?.content).toContain('## ASCII 原型图');
+      expect(result?.content).toContain('## Product Shape');
       expect(result?.content).toContain('+------------------------------------------+');
-      expect(result?.content).toContain('### 盒子布局示例');
+      expect(result?.content).toContain('## Acceptance Criteria');
     });
 
     it('returns UI template for ui-improvement label', async () => {
@@ -584,7 +582,7 @@ describe('Issue Template Instructions', () => {
 
       expect(result).not.toBeNull();
       expect(result?.template).toBe('ui');
-      expect(result?.content).toContain('## ASCII 原型图');
+      expect(result?.content).toContain('## Product Shape');
     });
 
     it('returns null for unknown label', async () => {

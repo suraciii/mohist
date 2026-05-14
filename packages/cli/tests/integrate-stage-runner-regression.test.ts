@@ -19,6 +19,27 @@ function createMockContext(
   const eventBus = new EventBus();
   vi.spyOn(eventBus, 'emit').mockImplementation(emitSpy);
 
+  const worktreeManager = {
+    checkSquashMergeability: vi.fn().mockResolvedValue({
+      kind: 'squash-mergeability',
+      strategy: 'squash',
+      targetBranch: 'main',
+      baseSha: 'abc123',
+      candidateHeadSha: 'def456',
+      mergeBaseSha: 'base456',
+      canMerge: true,
+      conflictFiles: [],
+      checkedAt: new Date().toISOString(),
+    }),
+    mergeApprovedCandidate: vi.fn().mockResolvedValue({
+      targetBranch: 'main',
+      baseSha: 'abc123',
+      candidateHeadSha: 'def456',
+      landedSha: 'ghi789',
+    }),
+    ...(overrides?.worktreeManager as object | undefined),
+  };
+
   const ctx = {
     issue: {
       id: `issue-${issueNumber}`,
@@ -43,14 +64,7 @@ function createMockContext(
       updateTaskPasses: vi.fn(),
       archiveChange: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChangeArtifactsManager,
-    worktreeManager: {
-      mergeApprovedCandidate: vi.fn().mockResolvedValue({
-        targetBranch: 'main',
-        baseSha: 'abc123',
-        candidateHeadSha: 'def456',
-        landedSha: 'ghi789',
-      }),
-    } as any,
+    worktreeManager: worktreeManager as any,
     projectRepo: {
       findById: vi.fn().mockReturnValue({ id: 'test-project', name: 'test-project', baseBranch: 'main', path: tmpDir }),
     } as any,
@@ -73,6 +87,7 @@ function createMockContext(
       ]),
     } as any,
     ...overrides,
+    worktreeManager: worktreeManager as any,
   } as StageContext;
   ctx.emit = ctx.emit ?? ((event: string, data: unknown) => {
     try {
