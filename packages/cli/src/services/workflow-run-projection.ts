@@ -59,6 +59,7 @@ export class WorkflowRunProjection {
 
     if (snapshot.status === 'passed') {
       this.issueRepo.updateStatus(snapshot.issueId, IssueStatus.Completed);
+      this.issueRepo.updateBlockedReason(snapshot.issueId, null);
       this.issueRepo.clearApprovalState(snapshot.issueId);
       return;
     }
@@ -70,6 +71,7 @@ export class WorkflowRunProjection {
     }
 
     this.issueRepo.updateStatus(snapshot.issueId, IssueStatus.Active);
+    this.issueRepo.updateBlockedReason(snapshot.issueId, null);
 
     const awaitingApproval = snapshot.stageRuns.find(stage => stage.approval?.status === 'awaiting');
     if (awaitingApproval?.approval) {

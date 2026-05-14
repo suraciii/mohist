@@ -285,6 +285,15 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(stageProjection.deliveryMetadata?.merge).toMatchObject({ landedSha: 'landed789', targetBranch: 'main', rebased: true });
     expect(stageProjection.deliveryMetadata?.frozen).toBe(true);
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Integrate, status: IssueStatus.Blocked });
+
+    workflowApplicationService.retryStage({ issueId, stage: Stage.Integrate });
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Integrate, result: { name: 'health:integrate', status: 'pass' } });
+
+    expect(issueRepo.findById(issueId)).toMatchObject({
+      stage: Stage.Done,
+      status: IssueStatus.Completed,
+      blockedReason: undefined,
+    });
   });
 
   it('read-repairs partial active WorkflowRun data without losing current task or check visibility', () => {
