@@ -49,6 +49,16 @@ export interface StageDefinition {
   checkFailurePolicies?: CheckFailurePolicy[];
 }
 
+export function getCheckFailurePolicy(
+  stage: Stage,
+  checkName: string,
+  definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS,
+): CheckFailurePolicy | null {
+  return definitions
+    .find(definition => definition.stage === stage)
+    ?.checkFailurePolicies?.find(policy => policy.checkName === checkName) ?? null;
+}
+
 export interface DeliveryMetadata {
   targetBranch?: string;
   baseSha?: string;
@@ -354,6 +364,12 @@ export class StageRun {
     task.causedBy = causedBy;
     this.tasks.push(task);
     return task;
+  }
+
+  reopenForRepair(): void {
+    this.status = 'running';
+    this.failure = null;
+    this.approval = null;
   }
 
   appendAdHocTask(id: string, title: string, causedBy: CausedByMetadata): TaskRun {

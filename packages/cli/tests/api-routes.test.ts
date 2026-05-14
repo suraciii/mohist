@@ -1173,6 +1173,405 @@ describe('API Routes', () => {
       });
     });
 
+    describe('POST /api/issues/:number/check/retry-checkpoint', () => {
+      it('retries the Check checkpoint and resumes the pipeline when repair budget is exhausted', async () => {
+        const tmpRetryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-retry-test-'));
+
+        try {
+          const retryProject = await projectService.create({ name: 'CheckRetryCheckpoint', path: tmpRetryDir });
+          projectService.setCurrent(retryProject);
+
+          const issue = issueService.create({ projectId: retryProject.id, title: 'Retry Check Checkpoint' });
+          issueRepo.updateStage(issue.id, Stage.Check);
+          issueRepo.blockIssue(issue.id, 'Review still failing');
+          issueRepo.updateRetryCount(issue.id, 2);
+
+          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          const stageStateService = new StageStateService(db);
+
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
+
+          const changeDir = path.join(tmpRetryDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-retry-check', status: 'pending' });
+
+          const mockWm = {
+            getPath: () => tmpRetryDir,
+            exists: () => true,
+          } as any;
+
+          const retryApp = new Hono();
+          retryApp.route('/api/issues', createIssueRoutes(
+            issueService,
+            projectService,
+            stateManager,
+            mockWm,
+            undefined,
+            agentRunner,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            stateManager.getPipelineCheckpointRepo(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            stageStateService,
+            workflowRunService,
+          ));
+          const retryServer = createTestServer(retryApp);
+
+          const response = await request(retryServer).post(`/api/issues/${issue.number}/check/retry-checkpoint`);
+
+          expect(response.status).toBe(202);
+          expect(response.body.success).toBe(true);
+          expect(response.body.data.message).toContain('repair budget is exhausted');
+          expect(response.body.data.repairBudgetExhausted).toBe(true);
+          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+
+          const updated = issueRepo.findById(issue.id);
+          expect(updated?.status).toBe(IssueStatus.Active);
+          expect(updated?.blockedReason).toBeUndefined();
+          expect(updated?.retryCount).toBe(0);
+
+          const activeRun = workflowRunService.getActiveRunForIssue(issue.id);
+          expect(activeRun?.currentStage).toBe(Stage.Check);
+          expect(activeRun?.status).toBe('running');
+          expect(activeRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check)?.status).toBe('running');
+        } finally {
+          fs.rmSync(tmpRetryDir, { recursive: true, force: true });
+        }
+      });
+    });
+
+    describe('POST /api/issues/:number/check/rerun-review', () => {
+      it('reruns review without appending a repair task', async () => {
+        const tmpRerunDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-rerun-review-test-'));
+
+        try {
+          const rerunProject = await projectService.create({ name: 'CheckRerunReview', path: tmpRerunDir });
+          projectService.setCurrent(rerunProject);
+
+          const issue = issueService.create({ projectId: rerunProject.id, title: 'Rerun Review Only' });
+          issueRepo.updateStage(issue.id, Stage.Check);
+          issueRepo.blockIssue(issue.id, 'Review still failing');
+
+          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          const stageStateService = new StageStateService(db);
+
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
+
+          const changeDir = path.join(tmpRerunDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+          fs.writeFileSync(path.join(changeDir, 'review.md'), 'stale review');
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-rerun-review', status: 'pending' });
+
+          const mockWm = { getPath: () => tmpRerunDir, exists: () => true } as any;
+          const rerunApp = new Hono();
+          rerunApp.route('/api/issues', createIssueRoutes(
+            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
+            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
+            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
+          ));
+          const rerunServer = createTestServer(rerunApp);
+
+          const response = await request(rerunServer).post(`/api/issues/${issue.number}/check/rerun-review`);
+
+          expect(response.status).toBe(202);
+          expect(response.body.success).toBe(true);
+          expect(response.body.data.message).toContain('no repair task will be added');
+          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+          expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
+
+          const activeRun = workflowRunService.getActiveRunForIssue(issue.id);
+          const checkRun = activeRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check);
+          const fixTasks = checkRun?.tasks.filter(task => task.taskId.startsWith('fix-review-findings')) ?? [];
+          expect(fixTasks).toHaveLength(1);
+          expect(fixTasks[0].status).toBe('completed');
+          expect(checkRun?.tasks.find(task => task.taskId === 'ai-review')?.status).toBe('pending');
+          expect(checkRun?.checks.find(check => check.checkName === 'review-passed')?.status).toBe('pending');
+        } finally {
+          fs.rmSync(tmpRerunDir, { recursive: true, force: true });
+        }
+      });
+    });
+
+    describe('POST /api/issues/:number/check/repair-review-findings', () => {
+      it('reuses the WorkflowRun-scheduled repair without enqueueing duplicate resume work', async () => {
+        const tmpRepairDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-repair-test-'));
+
+        try {
+          const repairProject = await projectService.create({ name: 'CheckRepairFindings', path: tmpRepairDir });
+          projectService.setCurrent(repairProject);
+
+          const issue = issueService.create({ projectId: repairProject.id, title: 'Repair Check Findings' });
+          issueRepo.updateStage(issue.id, Stage.Check);
+          issueRepo.blockIssue(issue.id, 'Review failed');
+          issueRepo.updateRetryCount(issue.id, 2);
+
+          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          const stageStateService = new StageStateService(db);
+
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
+
+          const changeDir = path.join(tmpRepairDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-repair-check', status: 'pending' });
+
+          const mockWm = {
+            getPath: () => tmpRepairDir,
+            exists: () => true,
+          } as any;
+
+          const repairApp = new Hono();
+          repairApp.route('/api/issues', createIssueRoutes(
+            issueService,
+            projectService,
+            stateManager,
+            mockWm,
+            undefined,
+            agentRunner,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            stateManager.getPipelineCheckpointRepo(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            stageStateService,
+            workflowRunService,
+          ));
+          const repairServer = createTestServer(repairApp);
+
+          const response = await request(repairServer).post(`/api/issues/${issue.number}/check/repair-review-findings`);
+
+          expect(response.status).toBe(200);
+          expect(response.body.success).toBe(true);
+          expect(response.body.data.repairTaskId).toBe('fix-review-findings');
+          expect(response.body.data.message).toContain('already in progress');
+          expect(response.body.data.taskId).toBeUndefined();
+          expect(enqueueSpy).not.toHaveBeenCalled();
+
+          const updated = issueRepo.findById(issue.id);
+          expect(updated?.status).toBe(IssueStatus.Active);
+          expect(updated?.blockedReason).toBeUndefined();
+          expect(updated?.retryCount).toBe(0);
+
+          const activeRun = workflowRunService.getActiveRunForIssue(issue.id);
+          const checkRun = activeRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check);
+          expect(activeRun?.status).toBe('running');
+          expect(checkRun?.status).toBe('running');
+          expect(checkRun?.tasks.some(task => task.taskId === 'fix-review-findings' && task.status === 'pending')).toBe(true);
+        } finally {
+          fs.rmSync(tmpRepairDir, { recursive: true, force: true });
+        }
+      });
+
+      it('reuses a pending repair task idempotently without enqueueing duplicate resume work', async () => {
+        const tmpRepairDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-repair-idempotent-test-'));
+
+        try {
+          const repairProject = await projectService.create({ name: 'CheckRepairIdempotent', path: tmpRepairDir });
+          projectService.setCurrent(repairProject);
+
+          const issue = issueService.create({ projectId: repairProject.id, title: 'Repair Check Idempotent' });
+          issueRepo.updateStage(issue.id, Stage.Check);
+          issueRepo.blockIssue(issue.id, 'Review failed');
+
+          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          const stageStateService = new StageStateService(db);
+
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
+
+          const changeDir = path.join(tmpRepairDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-repair-idempotent', status: 'pending' });
+
+          const mockWm = { getPath: () => tmpRepairDir, exists: () => true } as any;
+          const repairApp = new Hono();
+          repairApp.route('/api/issues', createIssueRoutes(
+            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
+            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
+            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
+          ));
+          const repairServer = createTestServer(repairApp);
+
+          const response = await request(repairServer).post(`/api/issues/${issue.number}/check/repair-review-findings`);
+
+          expect(response.status).toBe(200);
+          expect(response.body.success).toBe(true);
+          expect(response.body.data.repairTaskId).toBe('fix-review-findings');
+          expect(response.body.data.message).toContain('already in progress');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          fs.rmSync(tmpRepairDir, { recursive: true, force: true });
+        }
+      });
+
+      it('rejects repair when review has not failed', async () => {
+        const tmpRepairDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-repair-unavailable-test-'));
+
+        try {
+          const repairProject = await projectService.create({ name: 'CheckRepairUnavailable', path: tmpRepairDir });
+          projectService.setCurrent(repairProject);
+
+          const issue = issueService.create({ projectId: repairProject.id, title: 'Repair Check Unavailable' });
+          issueRepo.updateStage(issue.id, Stage.Check);
+
+          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          const stageStateService = new StageStateService(db);
+
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
+
+          const changeDir = path.join(tmpRepairDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-repair-unavailable', status: 'pending' });
+
+          const mockWm = { getPath: () => tmpRepairDir, exists: () => true } as any;
+          const repairApp = new Hono();
+          repairApp.route('/api/issues', createIssueRoutes(
+            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
+            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
+            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
+          ));
+          const repairServer = createTestServer(repairApp);
+
+          const response = await request(repairServer).post(`/api/issues/${issue.number}/check/repair-review-findings`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.success).toBe(false);
+          expect(response.body.error).toContain('only available after the Check review has failed');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          fs.rmSync(tmpRepairDir, { recursive: true, force: true });
+        }
+      });
+
+      it('rejects repair when the repair budget is exhausted', async () => {
+        const tmpRepairDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-repair-exhausted-test-'));
+
+        try {
+          const repairProject = await projectService.create({ name: 'CheckRepairExhausted', path: tmpRepairDir });
+          projectService.setCurrent(repairProject);
+
+          const issue = issueService.create({ projectId: repairProject.id, title: 'Repair Check Exhausted' });
+          issueRepo.updateStage(issue.id, Stage.Check);
+          issueRepo.blockIssue(issue.id, 'Review still failing');
+
+          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          const stageStateService = new StageStateService(db);
+
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
+
+          const changeDir = path.join(tmpRepairDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-repair-exhausted', status: 'pending' });
+
+          const mockWm = { getPath: () => tmpRepairDir, exists: () => true } as any;
+          const repairApp = new Hono();
+          repairApp.route('/api/issues', createIssueRoutes(
+            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
+            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
+            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
+          ));
+          const repairServer = createTestServer(repairApp);
+
+          const response = await request(repairServer).post(`/api/issues/${issue.number}/check/repair-review-findings`);
+
+          expect(response.status).toBe(409);
+          expect(response.body.success).toBe(false);
+          expect(response.body.error).toContain('Repair budget exhausted');
+          expect(enqueueSpy).not.toHaveBeenCalled();
+        } finally {
+          fs.rmSync(tmpRepairDir, { recursive: true, force: true });
+        }
+      });
+    });
+
     describe('POST /api/issues/:number/restart', () => {
       it('returns deprecation error for any issue — restart has been removed', async () => {
         const issue = createBlockedIssue('Merged Restart');

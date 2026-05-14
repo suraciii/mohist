@@ -502,6 +502,157 @@ describe('StageStateService', () => {
     });
   });
 
+  describe('check repair projection', () => {
+    it('projects checkRepair when review-passed failed with no repair tasks', () => {
+      service.ensureStage(issueId, Stage.Check);
+      service.upsertCheck(issueId, Stage.Check, {
+        checkName: 'review-passed',
+        status: 'failed',
+        message: 'Review found issues',
+      });
+
+      const states = service.getIssueStageState(issueId);
+      const checkState = states.find(s => s.stage === Stage.Check);
+
+      expect(checkState?.checkRepair).toBeDefined();
+      expect(checkState!.checkRepair!.status).toBe('available');
+      expect(checkState!.checkRepair!.attemptsUsed).toBe(0);
+      expect(checkState!.checkRepair!.attemptsMax).toBe(1);
+      expect(checkState!.checkRepair!.attemptsRemaining).toBe(1);
+      expect(checkState!.checkRepair!.repairAvailable).toBe(true);
+      expect(checkState!.checkRepair!.lastRepairTask).toBeNull();
+      expect(checkState!.checkRepair!.followUpReviewStatus).toBe('failed');
+      expect(checkState!.checkRepair!.stopReason).toBeNull();
+      expect(checkState!.checkRepair!.unresolvedSummary).toBe('Review found issues');
+    });
+
+    it('projects checkRepair with completed repair and failed follow-up review', () => {
+      service.ensureStage(issueId, Stage.Check);
+      service.upsertTask(issueId, Stage.Check, {
+        taskId: 'fix-review-findings',
+        title: 'Fix review findings',
+        status: 'completed',
+        attempts: 1,
+        duration: 15000,
+      });
+      service.upsertCheck(issueId, Stage.Check, {
+        checkName: 'review-passed',
+        status: 'failed',
+        message: 'Review still has unresolved issues',
+        output: { verdict: 'FAIL', summary: '2 issues remain' },
+      });
+
+      const states = service.getIssueStageState(issueId);
+      const checkState = states.find(s => s.stage === Stage.Check);
+
+      expect(checkState?.checkRepair).toBeDefined();
+      expect(checkState!.checkRepair!.status).toBe('exhausted');
+      expect(checkState!.checkRepair!.attemptsUsed).toBe(1);
+      expect(checkState!.checkRepair!.attemptsMax).toBe(1);
+      expect(checkState!.checkRepair!.attemptsRemaining).toBe(0);
+      expect(checkState!.checkRepair!.repairAvailable).toBe(false);
+      expect(checkState!.checkRepair!.lastRepairTask).not.toBeNull();
+      expect(checkState!.checkRepair!.lastRepairTask!.taskId).toBe('fix-review-findings');
+      expect(checkState!.checkRepair!.lastRepairStatus).toBe('completed');
+      expect(checkState!.checkRepair!.followUpReviewStatus).toBe('failed');
+      expect(checkState!.checkRepair!.stopReason).toBe('max-repair-attempts-reached');
+      expect(checkState!.checkRepair!.unresolvedSummary).toBe('2 issues remain');
+    });
+
+    it('projects checkRepair with repair still pending after repair task started', () => {
+      service.ensureStage(issueId, Stage.Check);
+      service.upsertTask(issueId, Stage.Check, {
+        taskId: 'fix-review-findings',
+        title: 'Fix review findings',
+        status: 'running',
+        attempts: 1,
+      });
+      service.upsertCheck(issueId, Stage.Check, {
+        checkName: 'review-passed',
+        status: 'failed',
+        message: 'Initial review failed',
+      });
+
+      const states = service.getIssueStageState(issueId);
+      const checkState = states.find(s => s.stage === Stage.Check);
+
+      expect(checkState?.checkRepair).toBeDefined();
+      expect(checkState!.checkRepair!.status).toBe('running');
+      expect(checkState!.checkRepair!.attemptsUsed).toBe(1);
+      expect(checkState!.checkRepair!.attemptsRemaining).toBe(0);
+      expect(checkState!.checkRepair!.repairAvailable).toBe(false);
+      expect(checkState!.checkRepair!.lastRepairStatus).toBe('running');
+      expect(checkState!.checkRepair!.stopReason).toBe('repair-running');
+    });
+
+    it('projects checkRepair from legacy repair-review-findings task history', () => {
+      service.ensureStage(issueId, Stage.Check);
+      service.upsertTask(issueId, Stage.Check, {
+        taskId: 'repair-review-findings',
+        title: 'Repair review findings',
+        status: 'completed',
+        attempts: 1,
+      });
+      service.upsertCheck(issueId, Stage.Check, {
+        checkName: 'review-passed',
+        status: 'failed',
+        message: 'Legacy repair did not resolve review',
+      });
+
+      const states = service.getIssueStageState(issueId);
+      const checkState = states.find(s => s.stage === Stage.Check);
+
+      expect(checkState?.checkRepair).toBeDefined();
+      expect(checkState!.checkRepair!.lastRepairTask?.taskId).toBe('repair-review-findings');
+      expect(checkState!.checkRepair!.attemptsUsed).toBe(1);
+      expect(checkState!.checkRepair!.followUpReviewStatus).toBe('failed');
+    });
+
+    it('does not project checkRepair when no repair evidence exists and review-passed is pending', () => {
+      service.ensureStage(issueId, Stage.Check);
+      service.upsertCheck(issueId, Stage.Check, {
+        checkName: 'review-passed',
+        status: 'pending',
+      });
+
+      const states = service.getIssueStageState(issueId);
+      const checkState = states.find(s => s.stage === Stage.Check);
+
+      expect(checkState?.checkRepair).toBeUndefined();
+    });
+
+    it('shows not-needed when review-passed passed with no repair tasks needed', () => {
+      service.ensureStage(issueId, Stage.Check);
+      service.upsertCheck(issueId, Stage.Check, {
+        checkName: 'review-passed',
+        status: 'passed',
+        message: 'All good',
+      });
+
+      const states = service.getIssueStageState(issueId);
+      const checkState = states.find(s => s.stage === Stage.Check);
+
+      expect(checkState?.checkRepair).toBeDefined();
+      expect(checkState!.checkRepair!.status).toBe('not-needed');
+      expect(checkState!.checkRepair!.stopReason).toBe('review-passed');
+      expect(checkState!.checkRepair!.followUpReviewStatus).toBe('passed');
+    });
+
+    it('extracts unresolved summary from review-passed output', () => {
+      service.ensureStage(issueId, Stage.Check);
+      service.upsertCheck(issueId, Stage.Check, {
+        checkName: 'review-passed',
+        status: 'failed',
+        output: { verdict: 'FAIL', summary: 'Primitive tool_call_update.output missing metadata' },
+      });
+
+      const states = service.getIssueStageState(issueId);
+      const checkState = states.find(s => s.stage === Stage.Check);
+
+      expect(checkState?.checkRepair?.unresolvedSummary).toBe('Primitive tool_call_update.output missing metadata');
+    });
+  });
+
   describe('stage retry scenario', () => {
     it('should update current task state across retries', () => {
       service.ensureStage(issueId, Stage.Build);

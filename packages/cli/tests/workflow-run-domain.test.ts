@@ -439,4 +439,81 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.currentStage).toBe(Stage.Plan);
     expect(run.stageRun(Stage.Build).status).toBe('pending');
   });
+
+  describe('check repair exhaustion', () => {
+    it('does not schedule another fix-review-findings when retrying exhausted Check review', () => {
+      const run = startRun();
+      advanceToBuild(run);
+      run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+      run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+      run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+      run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+
+      run.recordCheckResult(Stage.Check, {
+        name: 'review-passed',
+        status: 'fail',
+        message: 'Review failed first time',
+        output: { verdict: 'FAIL' },
+      });
+
+      const fixTask = run.stageRun(Stage.Check).findTask('fix-review-findings');
+      expect(fixTask).toBeDefined();
+      expect(fixTask.status).toBe('pending');
+
+      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+      const checkStage = run.stageRun(Stage.Check);
+      checkStage.findTask('ai-review').status = 'completed';
+      checkStage.findCheck('review-passed').status = 'failed';
+      checkStage.findCheck('review-passed').output = { verdict: 'FAIL', summary: 'Still failing after repair' };
+      checkStage.status = 'failed';
+      checkStage.failure = {
+        reason: 'check-unrepaired',
+        stage: Stage.Check,
+        checkName: 'review-passed',
+        message: 'Still failing after repair',
+      };
+      run.status = 'failed';
+      run.failure = checkStage.failure;
+
+      const fixTaskCountBefore = run.stageRun(Stage.Check).tasks.filter(t => t.id.startsWith('fix-review-findings')).length;
+
+      const retry = run.retryStage(Stage.Check);
+
+      const fixTaskCountAfter = run.stageRun(Stage.Check).tasks.filter(t => t.id.startsWith('fix-review-findings')).length;
+      expect(fixTaskCountAfter).toBe(fixTaskCountBefore);
+      expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+    });
+
+    it('records review-passed check result after repair completion and re-run', () => {
+      const run = startRun();
+      advanceToBuild(run);
+      run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+      run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+      run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+      run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+
+      run.recordCheckResult(Stage.Check, {
+        name: 'review-passed',
+        status: 'fail',
+        message: 'Initial review failed',
+        output: { verdict: 'FAIL', summary: 'First failure' },
+      });
+
+      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+      run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+
+      const decisionAfterRepair = run.recordCheckResult(Stage.Check, {
+        name: 'review-passed',
+        status: 'pass',
+        output: { verdict: 'PASS', snapshotSha: 'abc123' },
+      });
+
+      expect(run.stageRun(Stage.Check).findCheck('review-passed').status).toBe('passed');
+      expect(decisionAfterRepair.events).toContainEqual(
+        expect.objectContaining({ type: 'check-recorded', checkName: 'review-passed', status: 'passed' }),
+      );
+    });
+  });
 });

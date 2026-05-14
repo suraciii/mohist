@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { useIssueStageState, useWorkflowRun, useIssueExecutions } from '../hooks/useQueries'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
-import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy } from '../lib/types'
+import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy, CheckRepairState, CheckRepairStatus } from '../lib/types'
 import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
@@ -1114,6 +1114,91 @@ function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
   )
 }
 
+function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairState }) {
+  const statusLabels: Record<CheckRepairStatus, string> = {
+    'not-needed': 'Repair not needed',
+    'available': 'Auto-fix available',
+    'pending': 'Repair pending',
+    'running': 'Repair running',
+    'completed': 'Repair completed',
+    'exhausted': 'Auto-fix exhausted',
+  }
+
+  const stopReasonLabels: Record<NonNullable<CheckRepairState['stopReason']>, string> = {
+    'review-passed': 'Review passed',
+    'repair-pending': 'Waiting for repair to start',
+    'repair-running': 'Repair in progress',
+    'max-repair-attempts-reached': 'Max repair attempts reached',
+    'manual-rerun-required': 'Manual review required',
+  }
+
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <CrossIcon className="h-4 w-4 text-red-500" />
+        <span className="text-sm font-semibold text-red-800">Check failed: Review found issues</span>
+      </div>
+
+      <div className="space-y-1.5 text-xs text-red-700">
+        <div className="flex items-center justify-between">
+          <span className="font-medium">Auto-fix status:</span>
+          <span className={checkRepair.status === 'exhausted' ? 'text-red-600 font-medium' : ''}>
+            {statusLabels[checkRepair.status] ?? checkRepair.status}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="font-medium">Attempts:</span>
+          <span>
+            {checkRepair.attemptsUsed} used, {checkRepair.attemptsRemaining} remaining (max {checkRepair.attemptsMax})
+          </span>
+        </div>
+
+        {checkRepair.lastRepairStatus && (
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Last repair:</span>
+            <span className={checkRepair.lastRepairStatus === 'completed' ? 'text-green-600' : ''}>
+              {checkRepair.lastRepairStatus === 'completed' ? 'completed' : checkRepair.lastRepairStatus}
+              {checkRepair.followUpReviewStatus === 'failed' && ' — follow-up review failed'}
+            </span>
+          </div>
+        )}
+
+        {checkRepair.followUpReviewStatus && (
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Follow-up review:</span>
+            <span className={checkRepair.followUpReviewStatus === 'failed' ? 'text-red-600' : checkRepair.followUpReviewStatus === 'passed' ? 'text-green-600' : ''}>
+              {checkRepair.followUpReviewStatus}
+            </span>
+          </div>
+        )}
+
+        {checkRepair.stopReason && (
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Stop reason:</span>
+            <span>{stopReasonLabels[checkRepair.stopReason] ?? checkRepair.stopReason}</span>
+          </div>
+        )}
+
+        {checkRepair.unresolvedSummary && (
+          <div className="mt-2 rounded bg-red-100 p-2">
+            <div className="font-medium text-red-800 mb-1">Unresolved findings:</div>
+            <div className="text-red-700 whitespace-pre-wrap">{checkRepair.unresolvedSummary}</div>
+          </div>
+        )}
+      </div>
+
+      {checkRepair.status === 'exhausted' && (
+        <div className="pt-2 border-t border-red-200">
+          <p className="text-xs text-red-600">
+            Auto-fix will not continue automatically. You can rerun review after making code changes, or take over manually.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   if (issue.stage !== Stage.Integrate) return null
   if (issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Interrupted) return null
@@ -1344,6 +1429,10 @@ export function PipelineView({ issue }: { issue: Issue }) {
 
       {issue.stage === Stage.Integrate && (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (
         <IntegrateFailurePanel issue={issue} />
+      )}
+
+      {issue.stage === Stage.Check && issue.status === IssueStatus.Blocked && stageStateMap.get(Stage.Check)?.checkRepair && (
+        <CheckRepairPanel checkRepair={stageStateMap.get(Stage.Check)!.checkRepair!} />
       )}
     </div>
   )

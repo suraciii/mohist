@@ -803,6 +803,23 @@ export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | '
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
 export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped'
 
+export type CheckRepairStatus = 'not-needed' | 'available' | 'pending' | 'running' | 'completed' | 'exhausted'
+
+export interface CheckRepairState {
+  checkName: 'review-passed'
+  fixTaskId: 'fix-review-findings'
+  status: CheckRepairStatus
+  attemptsUsed: number
+  attemptsMax: number
+  attemptsRemaining: number
+  repairAvailable: boolean
+  lastRepairTask: StageTaskState | null
+  lastRepairStatus: StageTaskStatus | null
+  followUpReviewStatus: StageCheckStatus | null
+  stopReason: 'review-passed' | 'repair-pending' | 'repair-running' | 'max-repair-attempts-reached' | 'manual-rerun-required' | null
+  unresolvedSummary: string | null
+}
+
 export interface StageTaskCause {
   type: 'check-failure' | 'health-gate-failure' | 'retry' | 'rebase' | 'merge-conflict' | 'unknown';
   checkName?: string;
@@ -857,6 +874,7 @@ export interface StageStateRead {
   updatedAt: string
   failure?: WorkflowFailureDetails | null
   deliveryMetadata?: WorkflowDeliveryMetadata | null
+  checkRepair?: CheckRepairState
 }
 
 export interface IssueStageStateResponse {

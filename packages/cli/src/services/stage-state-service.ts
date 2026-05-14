@@ -3,6 +3,7 @@ import * as path from 'path';
 import { DatabaseManager } from '../db/database';
 import { findChangeDir } from '../openspec/detector';
 import { Stage } from '../types';
+import { getCheckFailurePolicy } from '../workflow/domain';
 import type { CheckState, CheckSuiteChecks } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { CheckResult, StageTaskResult } from '../workflow/stage-context';
@@ -62,6 +63,23 @@ export interface StageFailureDetails {
   causedBy?: StageTaskCause | null;
 }
 
+export type CheckRepairStatus = 'not-needed' | 'available' | 'pending' | 'running' | 'completed' | 'exhausted';
+
+export interface CheckRepairState {
+  checkName: 'review-passed';
+  fixTaskId: 'fix-review-findings';
+  status: CheckRepairStatus;
+  attemptsUsed: number;
+  attemptsMax: number;
+  attemptsRemaining: number;
+  repairAvailable: boolean;
+  lastRepairTask: StageTaskState | null;
+  lastRepairStatus: StageTaskStatus | null;
+  followUpReviewStatus: StageCheckStatus | null;
+  stopReason: 'review-passed' | 'repair-pending' | 'repair-running' | 'max-repair-attempts-reached' | 'manual-rerun-required' | null;
+  unresolvedSummary: string | null;
+}
+
 export interface StageDeliveryMetadata {
   specSync: { status: StageTaskStatus; output: unknown } | null;
   archive: { status: StageTaskStatus; output: unknown } | null;
@@ -90,6 +108,7 @@ export interface StageStateRead {
   updatedAt: string;
   failure?: StageFailureDetails | null;
   deliveryMetadata?: StageDeliveryMetadata | null;
+  checkRepair?: CheckRepairState;
 }
 
 interface StageTaskRow {
@@ -341,7 +360,7 @@ interface StaticTaskDef {
 const REAL_TASK_IDS: Record<Stage, Set<string>> = {
   [Stage.Plan]: new Set(['proposal', 'specs', 'design', 'tasks', 'self-review', 'repair-plan-artifacts', 'fix-plan-health']),
   [Stage.Build]: new Set(['fix-build-health', 'repair-build']),
-  [Stage.Check]: new Set(['ai-review', 'fix-review-findings', 'repair-merge', 'fix-check-health']),
+  [Stage.Check]: new Set(['ai-review', 'fix-review-findings', 'repair-review-findings', 'repair-merge', 'fix-check-health']),
   [Stage.Integrate]: new Set(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge', 'merge-branch', 'verify-merge', 'repair-merge', 'rebase-branch', 'fix-integrate-health']),
   [Stage.Done]: new Set([]),
   [Stage.Backlog]: new Set([]),
@@ -428,6 +447,101 @@ const STATIC_TASK_DEFS: Partial<Record<Stage, StaticTaskDef[]>> = {
   [Stage.Check]: CHECK_TASK_DEFS,
   [Stage.Integrate]: INTEGRATE_TASK_DEFS,
 };
+
+function isFixReviewFindingsTask(taskId: string): boolean {
+  return taskId === 'fix-review-findings' ||
+    taskId.startsWith('fix-review-findings:') ||
+    taskId === 'repair-review-findings' ||
+    taskId.startsWith('repair-review-findings:');
+}
+
+function extractUnresolvedSummary(output: unknown, message: string | null): string | null {
+  if (!output || typeof output !== 'object') {
+    return message ?? null;
+  }
+  const obj = output as Record<string, unknown>;
+  if (typeof obj.unresolvedSummary === 'string' && obj.unresolvedSummary.length > 0) {
+    return obj.unresolvedSummary;
+  }
+  if (typeof obj.verdict === 'string' && obj.verdict === 'FAIL' && typeof obj.summary === 'string' && obj.summary.length > 0) {
+    return obj.summary;
+  }
+  if (typeof obj.message === 'string' && obj.message.length > 0) {
+    return obj.message;
+  }
+  return message ?? null;
+}
+
+function computeCheckRepairState(
+  tasks: StageTaskState[],
+  checks: StageCheckState[],
+): CheckRepairState | null {
+  const fixTasks = tasks.filter(task => isFixReviewFindingsTask(task.taskId));
+
+  if (fixTasks.length === 0) {
+    const reviewPassed = checks.find(c => c.checkName === 'review-passed');
+    if (!reviewPassed || reviewPassed.status === 'pending' || reviewPassed.status === 'running') {
+      return null;
+    }
+  }
+
+  const reviewPassed = checks.find(c => c.checkName === 'review-passed');
+  const maxAttempts = getCheckFailurePolicy(Stage.Check, 'review-passed')?.maxAttempts ?? 0;
+
+  const completedFixTasks = fixTasks.filter(t => t.status === 'completed');
+  const pendingFixTasks = fixTasks.filter(t => t.status === 'pending' || t.status === 'running');
+  const attemptsUsed = fixTasks.length;
+  const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
+
+  const repairInProgress = pendingFixTasks.length > 0;
+  const repairAvailable = attemptsRemaining > 0 && reviewPassed?.status === 'failed' && !repairInProgress;
+
+  let status: CheckRepairStatus;
+  if (reviewPassed?.status === 'passed') {
+    status = 'not-needed';
+  } else if (repairInProgress) {
+    status = pendingFixTasks.some(t => t.status === 'running') ? 'running' : 'pending';
+  } else if (completedFixTasks.length > 0) {
+    status = reviewPassed?.status === 'failed' ? 'exhausted' : 'completed';
+  } else {
+    status = repairAvailable ? 'available' : 'exhausted';
+  }
+
+  const lastRepairTask = fixTasks.at(-1) ?? null;
+  const lastRepairStatus: StageTaskStatus | null = lastRepairTask?.status ?? null;
+
+  const followUpReviewStatus: StageCheckStatus | null = reviewPassed?.status ?? null;
+
+  let stopReason: CheckRepairState['stopReason'] = null;
+  if (reviewPassed?.status === 'passed') {
+    stopReason = 'review-passed';
+  } else if (pendingFixTasks.some(t => t.status === 'pending')) {
+    stopReason = 'repair-pending';
+  } else if (pendingFixTasks.some(t => t.status === 'running')) {
+    stopReason = 'repair-running';
+  } else if (attemptsRemaining === 0 && completedFixTasks.length > 0) {
+    stopReason = 'max-repair-attempts-reached';
+  }
+
+  const unresolvedSummary = reviewPassed?.status === 'failed'
+    ? extractUnresolvedSummary(reviewPassed.output, reviewPassed.message)
+    : null;
+
+  return {
+    checkName: 'review-passed',
+    fixTaskId: 'fix-review-findings',
+    status,
+    attemptsUsed,
+    attemptsMax: maxAttempts,
+    attemptsRemaining,
+    repairAvailable,
+    lastRepairTask,
+    lastRepairStatus,
+    followUpReviewStatus,
+    stopReason,
+    unresolvedSummary,
+  };
+}
 
 export class StageStateService {
   constructor(private db: DatabaseManager) {}
@@ -635,11 +749,18 @@ export class StageStateService {
       );
       const allTasks = taskRows.map(rowToStageTask);
       const filteredTasks = allTasks.filter(t => isRealTask(row.stage as Stage, t.taskId));
-      return rowToStageStateRead(
+      const stageState = rowToStageStateRead(
         row,
         filteredTasks,
         checkRows.map(rowToStageCheck),
       );
+
+      if (row.stage === Stage.Check) {
+        const repair = computeCheckRepairState(filteredTasks, stageState.checks);
+        stageState.checkRepair = repair === null ? undefined : repair;
+      }
+
+      return stageState;
     });
   }
 
@@ -689,6 +810,10 @@ export class StageStateService {
 
       const status = stageRun.status as StageStateStatus;
 
+      const checkRepairRaw = stageRun.stage === Stage.Check
+        ? computeCheckRepairState(tasks, checks)
+        : null;
+
       return {
         stage: stageRun.stage,
         status,
@@ -701,6 +826,7 @@ export class StageStateService {
         updatedAt: stageRun.updatedAt,
         failure: this.workflowRunFailureDetails(stageRun, tasks, checks),
         deliveryMetadata: this.workflowRunDeliveryMetadata(stageRun, tasks, checks),
+        ...(checkRepairRaw !== null ? { checkRepair: checkRepairRaw } : {}),
       };
     });
   }

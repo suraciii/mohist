@@ -49,19 +49,8 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     return [];
   }
 
-  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
-    return [
-      {
-        checkName: 'review-passed',
-        fixTaskId: 'repair-review-findings',
-        maxAttempts: 3,
-      },
-      {
-        checkName: 'merge-ready',
-        fixTaskId: 'repair-merge',
-        maxAttempts: 2,
-      },
-    ];
+  protected getCheckFailurePolicies(_ctx?: StageContext): CheckFailurePolicy[] {
+    return [];
   }
 
   protected async runFixTask(

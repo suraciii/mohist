@@ -5,7 +5,9 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSessions, useCreateExploreSession } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSessions, useCreateExploreSession, useIssueStageState, useWorkflowRun } from '../hooks/useQueries'
+import type { CheckRepairState } from '../lib/types'
+import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
 import { EditIssueDialog } from './EditIssueDialog'
 import { NotFoundPage } from './NotFoundPage'
 import { IssueModelSelector } from './IssueModelSelector'
@@ -103,6 +105,13 @@ export function IssueDetailPage() {
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
   const { data: commitsData } = useIssueCommits(issueNumber)
+  const { data: stageStateData } = useIssueStageState(issueNumber)
+  const { data: workflowRun } = useWorkflowRun(issueNumber)
+
+  const workflowRunCheckRepair = workflowRun ? workflowRunToStageStateMap(workflowRun).get(Stage.Check)?.checkRepair : undefined
+  const stageStateCheckRepair = stageStateData?.stages.find(s => s.stage === Stage.Check)?.checkRepair
+  const checkRepair: CheckRepairState | undefined = workflowRunCheckRepair ?? stageStateCheckRepair
+  const showCheckRepairActions = issue?.stage === Stage.Check && Boolean(checkRepair)
 
   const startMutation = useMutation({
     mutationFn: () => api.startIssue(issueNumber),
@@ -148,6 +157,8 @@ export function IssueDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
     },
   })
 
@@ -155,6 +166,41 @@ export function IssueDetailPage() {
     mutationFn: () => api.rerunIssue(issueNumber),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
+    },
+  })
+
+  const retryCheckpointMutation = useMutation({
+    mutationFn: () => api.retryCheckpoint(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
+  const rerunReviewMutation = useMutation({
+    mutationFn: () => api.rerunReview(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+  })
+
+  const repairReviewFindingsMutation = useMutation({
+    mutationFn: () => api.repairReviewFindings(issueNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
   })
@@ -639,20 +685,50 @@ export function IssueDetailPage() {
                           {issue.blockedReason}
                         </div>
                       )}
-                      <button
-                        onClick={() => retryMutation.mutate()}
-                        disabled={retryMutation.isPending}
-                        className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                      >
-                        {retryMutation.isPending ? 'Retrying...' : 'Retry'}
-                      </button>
-                      <button
-                        onClick={() => rerunMutation.mutate()}
-                        disabled={rerunMutation.isPending}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                      >
-                        {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
-                      </button>
+                      {showCheckRepairActions ? (
+                        <>
+                          {checkRepair!.repairAvailable && (
+                            <button
+                              onClick={() => repairReviewFindingsMutation.mutate()}
+                              disabled={repairReviewFindingsMutation.isPending}
+                              className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                            >
+                              {repairReviewFindingsMutation.isPending ? 'Fixing...' : 'Fix review findings'}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => retryCheckpointMutation.mutate()}
+                            disabled={retryCheckpointMutation.isPending}
+                            className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                          >
+                            {retryCheckpointMutation.isPending ? 'Retrying...' : 'Retry checkpoint'}
+                          </button>
+                          <button
+                            onClick={() => rerunReviewMutation.mutate()}
+                            disabled={rerunReviewMutation.isPending}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                          >
+                            {rerunReviewMutation.isPending ? 'Rerunning...' : 'Rerun review only'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => retryMutation.mutate()}
+                            disabled={retryMutation.isPending}
+                            className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                          >
+                            {retryMutation.isPending ? 'Retrying...' : 'Retry'}
+                          </button>
+                          <button
+                            onClick={() => rerunMutation.mutate()}
+                            disabled={rerunMutation.isPending}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                          >
+                            {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
 

@@ -114,7 +114,7 @@ class SimpleRunner extends BaseStageRunner {
     return this.nextStage;
   }
 
-  protected getCheckFailurePolicies(): CheckFailurePolicy[] {
+  protected getCheckFailurePolicies(_ctx?: StageContext): CheckFailurePolicy[] {
     return this.failurePolicies;
   }
 

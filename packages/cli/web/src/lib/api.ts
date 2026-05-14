@@ -357,6 +357,15 @@ export const api = {
   getWorkflowRun: (number: number) =>
     request<import('./types').WorkflowRun>(`/issues/${number}/workflow-run`),
 
+  retryCheckpoint: (number: number) =>
+    request<{ message: string; repairBudgetExhausted?: boolean }>(`/issues/${number}/check/retry-checkpoint`, { method: 'POST' }),
+
+  rerunReview: (number: number) =>
+    request<{ issue: import('./types').Issue; taskId: string; status: string; queuePosition: number; message: string }>(`/issues/${number}/check/rerun-review`, { method: 'POST' }),
+
+  repairReviewFindings: (number: number) =>
+    request<{ repairTaskId: string | null; message: string }>(`/issues/${number}/check/repair-review-findings`, { method: 'POST' }),
+
   rebuildSystem: () =>
     request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
 
