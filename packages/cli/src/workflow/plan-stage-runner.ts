@@ -27,6 +27,32 @@ import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
 const execFileAsync = promisify(execFile);
 const log = Log.create({ service: 'plan-stage' });
 
+function normalizeRejectionFeedback(output: unknown): string | null {
+  if (typeof output === 'string' && output.trim()) return output;
+  if (output && typeof output === 'object' && 'feedback' in output) {
+    const feedback = (output as { feedback: unknown }).feedback;
+    if (typeof feedback === 'string' && feedback.trim()) return feedback;
+  }
+  return null;
+}
+
+function extractRejectionFeedback(workflowRun: StageContext['workflowRun'], stage: string, retryFeedback?: unknown): string | null {
+  const preservedFeedback = normalizeRejectionFeedback(retryFeedback);
+  if (preservedFeedback) return preservedFeedback;
+  if (!workflowRun) return null;
+  const stageRun = workflowRun.stageRuns?.find(sr => sr.stage === stage);
+  if (!stageRun) return null;
+  if (stageRun.approvalStatus !== 'rejected') return null;
+  return normalizeRejectionFeedback(stageRun.approvalOutput);
+}
+
+function isRejectedPlanRetry(workflowRun: StageContext['workflowRun'], retryFeedback?: unknown): boolean {
+  if (normalizeRejectionFeedback(retryFeedback)) return true;
+  if (!workflowRun) return false;
+  const stageRun = workflowRun.stageRuns?.find(sr => sr.stage === 'plan');
+  return stageRun?.approvalStatus === 'rejected';
+}
+
 interface TaskConfig {
   type: string;
   label: string;
@@ -142,7 +168,7 @@ export class PlanStageRunner extends BaseStageRunner {
         label: 'self-review.md',
         outputPath: path.join(changeDir, 'self-review.md'),
         verifyArtifact: () => fs.existsSync(path.join(changeDir, 'self-review.md')),
-        buildPrompt: (iss, dir) => buildSelfReviewPrompt(iss, dir),
+        buildPrompt: (iss, dir, feedback) => buildSelfReviewPrompt(iss, dir, undefined, feedback),
       },
     ];
   }
@@ -158,13 +184,13 @@ export class PlanStageRunner extends BaseStageRunner {
     const completedSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
     const isLastTask = taskIndex === tasks.length - 1;
     const feedback = this.getPlanRejectionFeedback(ctx);
-    const shouldReplan = feedback.shouldReplan && task.type !== 'self-review';
+    const forceFreshAttempt = feedback.shouldReplan || isRejectedPlanRetry(ctx.workflowRun, ctx.rejectionFeedback);
 
-    if (!shouldReplan && completedSteps.includes(task.type) && task.verifyArtifact()) {
+    if (!forceFreshAttempt && completedSteps.includes(task.type) && task.verifyArtifact()) {
       if (isLastTask) await this.closeAggregateTaskSession(ctx);
       return { taskId: task.type, title: task.label, status: 'completed', artifacts: [], attempts: 0, duration: 0 };
     }
-    if (!shouldReplan && task.verifyArtifact()) {
+    if (!forceFreshAttempt && task.verifyArtifact()) {
       checkpointManager.markStepComplete(issue.number, 'plan', task.type, tasks[taskIndex + 1]?.type ?? null);
       if (isLastTask) await this.closeAggregateTaskSession(ctx);
       return { taskId: task.type, title: task.label, status: 'completed', artifacts: [task.label], attempts: 0, duration: 0 };
@@ -323,8 +349,16 @@ export class PlanStageRunner extends BaseStageRunner {
 
     const resumeSteps = checkpointManager.getResumeSteps(issue.number, 'plan');
     const feedback = this.getPlanRejectionFeedback(ctx);
+    if (!feedback.message) {
+      const contextFeedback = normalizeRejectionFeedback(ctx.rejectionFeedback);
+      if (contextFeedback) {
+        feedback.shouldReplan = true;
+        feedback.message = contextFeedback;
+      }
+    }
 
     const tasks = this.createTaskConfigs(changeDir);
+    const forceFreshAttempt = feedback.shouldReplan || isRejectedPlanRetry(ctx.workflowRun, ctx.rejectionFeedback);
 
     const completedSteps = [...resumeSteps];
 
@@ -366,8 +400,7 @@ const planBridgeObserver = {
       session = await AgentSession.create(connectionOptions);
 
       for (const [index, task] of tasks.entries()) {
-        const shouldReplan = feedback.shouldReplan && task.type !== 'self-review';
-        if (!shouldReplan && completedSteps.includes(task.type)) {
+        if (!forceFreshAttempt && completedSteps.includes(task.type)) {
           if (task.verifyArtifact()) {
             log.info('Plan task restored from checkpoint', {
               artifact: task.type,
@@ -389,7 +422,7 @@ const planBridgeObserver = {
           });
           const idx = completedSteps.indexOf(task.type);
           completedSteps.splice(idx);
-        } else if (!shouldReplan && task.verifyArtifact()) {
+        } else if (!forceFreshAttempt && task.verifyArtifact()) {
           log.info('Plan artifact exists but not in checkpoint, marking complete', {
             artifact: task.type,
             issueNumber: issue.number,
@@ -537,7 +570,9 @@ const planBridgeObserver = {
 
   private getPlanRejectionFeedback(ctx: StageContext): PlanRejectionFeedback {
     if (ctx.issue.stage !== Stage.Plan) return { shouldReplan: false };
-    const message = this.findLatestPlanRejectionMessage(ctx);
+    const message = normalizeRejectionFeedback(ctx.rejectionFeedback)
+      ?? extractRejectionFeedback(ctx.workflowRun, 'plan')
+      ?? this.findLatestPlanRejectionMessage(ctx);
     if (!message) {
       return { shouldReplan: false };
     }

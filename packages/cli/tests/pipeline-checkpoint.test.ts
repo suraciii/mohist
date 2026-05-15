@@ -76,7 +76,7 @@ vi.mock('child_process', () => ({
 import * as fs from 'fs';
 import { PlanStageRunner, type StageContext, createCheckpointManager, type ChangeArtifactsManager } from '../src/workflow';
 import { AgentSession } from '../src/agent-runtime/agent-session';
-import { buildArtifactPrompt } from '../src/agents/artifact-prompt';
+import { buildArtifactPrompt, buildSelfReviewPrompt } from '../src/agents/artifact-prompt';
 
 function createMockIssue(overrides?: Partial<Issue>): Issue {
   return {
@@ -276,6 +276,18 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
     return runner.run(ctx);
   }
 
+  function createRejectedPlanWorkflowRun(feedback = 'Please make the proposal more specific') {
+    return {
+      stageRuns: [
+        {
+          stage: 'plan',
+          approvalStatus: 'rejected',
+          approvalOutput: feedback,
+        },
+      ],
+    } as StageContext['workflowRun'];
+  }
+
   async function runAggregatePlanTask(
     runner: PlanStageRunner,
     issue: Issue,
@@ -438,6 +450,97 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
       (c: unknown[]) => c[0]
     );
     expect(roundTypes).toContain('proposal');
+  });
+
+  it('should force a fresh Plan run after rejected approval even when artifacts already exist', async () => {
+    const allArtifacts = [
+      path.join(CHANGE_DIR, 'proposal.md'),
+      path.join(CHANGE_DIR, 'specs'),
+      path.join(CHANGE_DIR, 'design.md'),
+      path.join(CHANGE_DIR, 'tasks.json'),
+      path.join(CHANGE_DIR, 'self-review.md'),
+    ];
+    const existingArtifacts = new Set<string>(allArtifacts);
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      return typeof p === 'string' && existingArtifacts.has(p);
+    });
+
+    const mockSession = setupMockConn();
+    mockSession.execute.mockImplementation(async () => ({ text: 'ok', success: true, acpSessionId: 's1' }));
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+
+    const runner = new PlanStageRunner();
+    const checkpointManager = createCheckpointManager(checkpointRepo);
+    const ctx: StageContext = {
+      issue: createMockIssue(),
+      acpOptions: { cwd: '/tmp/worktree' },
+      artifactManager,
+      worktreeManager: {} as any,
+      projectRepo: {} as any,
+      eventBus: { emit: vi.fn() } as any,
+      checkpointManager,
+      issueRepo: { setApprovalState: vi.fn() } as any,
+      workflowRun: createRejectedPlanWorkflowRun(),
+      emit: (event: string, data: unknown) => {
+        try {
+          ctx.eventBus.emit(event as never, data as never);
+        } catch {
+          // fire-and-forget
+        }
+      },
+      log: vi.fn(),
+    };
+
+    const result = await runner.run(ctx);
+
+    expect(result.checkResults.some((check) => check.status === 'pending')).toBe(true);
+    expect(AgentSession.create).toHaveBeenCalledTimes(1);
+    expect(mockSession.execute).toHaveBeenCalledTimes(5);
+    expect(existingArtifacts).toEqual(new Set(allArtifacts));
+  });
+
+  it('should include rejection feedback in fresh Plan retry prompts', async () => {
+    const existingArtifacts = new Set<string>([
+      path.join(CHANGE_DIR, 'proposal.md'),
+      path.join(CHANGE_DIR, 'specs'),
+      path.join(CHANGE_DIR, 'design.md'),
+      path.join(CHANGE_DIR, 'tasks.json'),
+      path.join(CHANGE_DIR, 'self-review.md'),
+    ]);
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      return typeof p === 'string' && existingArtifacts.has(p);
+    });
+
+    setupMockConn();
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+
+    const runner = new PlanStageRunner();
+    const checkpointManager = createCheckpointManager(checkpointRepo);
+    const feedback = 'Please address the rejection feedback';
+    const ctx: StageContext = {
+      issue: createMockIssue(),
+      acpOptions: { cwd: '/tmp/worktree' },
+      artifactManager,
+      worktreeManager: {} as any,
+      projectRepo: {} as any,
+      eventBus: { emit: vi.fn() } as any,
+      checkpointManager,
+      issueRepo: { setApprovalState: vi.fn() } as any,
+      workflowRun: createRejectedPlanWorkflowRun(feedback),
+      emit: (event: string, data: unknown) => {
+        try {
+          ctx.eventBus.emit(event as never, data as never);
+        } catch {
+          // fire-and-forget
+        }
+      },
+      log: vi.fn(),
+    };
+
+    await runner.run(ctx);
+
+    expect(buildArtifactPrompt).toHaveBeenCalledWith('proposal', expect.anything(), CHANGE_DIR, undefined, { feedback });
+    expect(buildSelfReviewPrompt).toHaveBeenCalledWith(expect.anything(), CHANGE_DIR, undefined, feedback);
   });
 
   it('should not clean artifacts when checkpoint has completedSteps', async () => {
