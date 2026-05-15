@@ -16,3 +16,5 @@ export { PostMergeFinalizer, type FinalizationResult, type HealthGateResult } fr
 export { StageStateService, normalizeCheckStatus, normalizeTaskStatus, type StageTaskStatus, type StageCheckStatus, type StageStateStatus, type StageTaskState, type StageCheckState, type StageApprovalState, type StageStateRead, type UpsertTaskInput, type UpsertCheckInput, type SetApprovalInput } from './stage-state-service';
 export { WorkflowRunService } from './workflow-run-service';
 export { IssuePrerequisiteService, type IssuePrerequisiteSummary, type IssueStartEligibility, type IssuePrerequisiteView } from './issue-prerequisite-service';
+export { WorkflowApplicationService } from './workflow-application-service';
+export { BaseDriftService, evaluateBaseDrift, type BaseDriftState, type BaseDriftInput, type GitFacts, type CandidateEvidence, type WorkflowFacts, type RebaseDecision, type DeferReason, type StaleEvidence, type RebaseTaskOutput } from './base-drift-service';

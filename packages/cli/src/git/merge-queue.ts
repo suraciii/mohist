@@ -35,6 +35,7 @@ interface MergeQueueDeps {
   fixBuildErrors: (entry: MergeEntry, worktreePath: string, buildOutput: string) => Promise<{ success: boolean; error?: string }>;
   postMergeFinalizer?: PostMergeFinalizer;
   getMergeMetadata: (projectId: string, issueNumber: number) => Promise<MergeMetadata | undefined>;
+  onBaseAdvanced?: (event: { projectId: string; issueId: string; issueNumber: number; baseBranch: string; newBaseSha: string; previousBaseSha: string }) => void;
 }
 
 export class MergeQueue {
@@ -351,6 +352,16 @@ export class MergeQueue {
       issueId: entry.issueId,
       projectId: entry.projectId,
       issueNumber: entry.issueNumber,
+    });
+
+    const mergeSuccess = mergeResult as { success: true; targetBranch: string; baseSha: string; candidateHeadSha: string; landedSha: string };
+    this.deps.onBaseAdvanced?.({
+      projectId: entry.projectId,
+      issueId: entry.issueId,
+      issueNumber: entry.issueNumber,
+      baseBranch: mergeSuccess.targetBranch,
+      newBaseSha: mergeSuccess.landedSha,
+      previousBaseSha: mergeSuccess.baseSha,
     });
 
     log.info('Merge completed successfully', { issueNumber: entry.issueNumber });

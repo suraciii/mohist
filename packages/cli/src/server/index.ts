@@ -18,7 +18,7 @@ import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
 import { createSettingsConfigRoutes } from '../api/settings-config';
 import { createSettingsSystemRoutes } from '../api/settings-system';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, StageStateService, WorkflowRunService, IssuePrerequisiteService, type SkillRunner, type ConflictResolutionDeps } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, StageStateService, WorkflowRunService, WorkflowApplicationService, IssuePrerequisiteService, BaseDriftService, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { ProviderStateService } from '../services/provider-state-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
@@ -136,6 +136,8 @@ async function main(): Promise<void> {
 
   const stageStateService = new StageStateService(db);
   const workflowRunService = new WorkflowRunService(db);
+  const baseDriftService = new BaseDriftService();
+  const workflowApplicationService = new WorkflowApplicationService(db);
 
   const issuePrerequisiteService = new IssuePrerequisiteService(
     stateManager.getIssueRepo(),
@@ -244,6 +246,29 @@ async function main(): Promise<void> {
         issueNumber,
         issueTitle: issue.title,
       };
+    },
+    async onBaseAdvanced(event) {
+      log.info('Base branch advanced, triggering drift scan', { projectId: event.projectId, issueNumber: event.issueNumber, baseBranch: event.baseBranch, newBaseSha: event.newBaseSha });
+      const project = projectService.getById(event.projectId);
+      if (!project) {
+        log.warn('Project not found for drift scan', { projectId: event.projectId });
+        return;
+      }
+      try {
+        await baseDriftService.scanActiveCandidatesForDrift({
+          projectId: event.projectId,
+          baseBranch: event.baseBranch,
+          newBaseSha: event.newBaseSha,
+          issueRepo,
+          workflowRunService,
+          worktreeManager,
+          project: { path: project.path, name: project.name },
+          eventBus,
+          workflowApplicationService,
+        });
+      } catch (err) {
+        log.error('Failed to scan for base drift', { error: err instanceof Error ? err.message : String(err) });
+      }
     },
   });
 

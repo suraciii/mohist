@@ -517,10 +517,17 @@ export function setupIssueCommands(program: Command): void {
             };
             const as = issue.approvalState;
             const color = statusColors[as.status] || chalk.white;
-            console.log(`  Approval: ${color(as.status)} (stage: ${as.stage})`);
+
+            const isStaleApproval = issue.staleEvidence?.approval === true;
+            if (isStaleApproval) {
+              console.log(`  Approval: ${chalk.red('STALE')} (stage: ${as.stage})`);
+              console.log(chalk.yellow('  ⚠ Approval evidence is stale — base has advanced. Rebase or rerun checks before approving.'));
+            } else {
+              console.log(`  Approval: ${color(as.status)} (stage: ${as.stage})`);
+            }
             if (as.status === 'error' && as.output?.error) {
               console.log(`  ${chalk.red(`Error: ${as.output.error}`)}`);
-            } else if (as.output) {
+            } else if (as.output && !isStaleApproval) {
               const notes = typeof as.output === 'string' ? as.output : JSON.stringify(as.output, null, 2);
               console.log(`  Self-review notes:`);
               console.log(`  ${chalk.gray(notes.split('\n').join('\n  '))}`);
@@ -531,6 +538,37 @@ export function setupIssueCommands(program: Command): void {
 
           if (issue.startEligibility && !issue.startEligibility.startable) {
             console.log(chalk.yellow(`  Waiting: ${issue.startEligibility.message}`));
+          }
+
+          if (issue.drifted) {
+            console.log(chalk.yellow('\n  ⚠ Base Drift Detected'));
+            const decision = issue.decision;
+            const decisionLabels: Record<string, string> = {
+              'skip': 'Aligned with base',
+              'suggest': 'Rebase recommended',
+              'enqueue': 'Rebase queued',
+              'defer': 'Rebase deferred',
+              'needs-attention': 'Needs attention',
+            };
+            if (decision && decisionLabels[decision]) {
+              console.log(`    Status: ${chalk.yellow(decisionLabels[decision])}`);
+            }
+            if (issue.deferReason) {
+              const deferReasonLabels: Record<string, string> = {
+                'agent-running': 'Agent is currently running',
+                'task-running': 'A task is currently executing',
+                'waiting-for-task-boundary': 'Waiting for task boundary',
+                'rebase-already-pending': 'Rebase is already pending',
+              };
+              const reasonLabel = deferReasonLabels[issue.deferReason] || issue.deferReason;
+              console.log(`    Defer reason: ${chalk.gray(reasonLabel)}`);
+            }
+            if (issue.conflicts && issue.conflicts.length > 0) {
+              console.log(chalk.red(`    Conflicts: ${issue.conflicts.join(', ')}`));
+            }
+            if (issue.nextAction) {
+              console.log(`    ${chalk.cyan('→')} ${issue.nextAction}`);
+            }
           }
 
           if (issue.labels && issue.labels.length > 0) {

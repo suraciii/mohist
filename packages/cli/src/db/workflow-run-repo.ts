@@ -44,6 +44,7 @@ export interface WorkflowStageRun {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  staleEvidenceDetected?: boolean;
 }
 
 export interface WorkflowTask {

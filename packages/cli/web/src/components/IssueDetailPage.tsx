@@ -597,6 +597,76 @@ export function IssueDetailPage() {
                 </dl>
               </div>
 
+              {issue.drift?.drifted && (
+                <div className={`rounded-lg border p-4 ${issue.drift.staleEvidence ? 'border-orange-200 bg-orange-50' : 'border-amber-200 bg-amber-50'}`}>
+                  <h2 className={`text-sm font-semibold mb-2 ${issue.drift.staleEvidence ? 'text-orange-800' : 'text-amber-800'}`}>
+                    Base Drift Detected
+                  </h2>
+                  <div className="space-y-1.5 text-xs">
+                    {issue.drift.decision && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Rebase decision:</span>
+                        <span className={`font-medium ${issue.drift.decision === 'needs-attention' ? 'text-red-600' : issue.drift.decision === 'defer' ? 'text-orange-600' : 'text-amber-600'}`}>
+                          {issue.drift.decision === 'needs-attention' ? 'Needs Attention' :
+                           issue.drift.decision === 'defer' ? 'Deferred' :
+                           issue.drift.decision === 'suggest' ? 'Suggested' :
+                           issue.drift.decision === 'enqueue' ? 'Enqueued' : issue.drift.decision}
+                        </span>
+                      </div>
+                    )}
+                    {issue.drift.deferReason && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Defer reason:</span>
+                        <span className="text-orange-600">
+                          {issue.drift.deferReason === 'agent-running' ? 'Agent running' :
+                           issue.drift.deferReason === 'task-running' ? 'Task running' :
+                           issue.drift.deferReason === 'waiting-for-task-boundary' ? 'Waiting for task boundary' :
+                           issue.drift.deferReason === 'rebase-already-pending' ? 'Rebase already pending' :
+                           issue.drift.deferReason}
+                        </span>
+                      </div>
+                    )}
+                    {issue.drift.safeWindow !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Safe window:</span>
+                        <span className={issue.drift.safeWindow ? 'text-green-600' : 'text-gray-600'}>
+                          {issue.drift.safeWindow ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                    )}
+                    {issue.drift.observedBaseSha && issue.drift.currentBaseSha && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Base:</span>
+                        <span className="font-mono text-gray-700">
+                          {issue.drift.observedBaseSha.slice(0, 7)} → {issue.drift.currentBaseSha.slice(0, 7)}
+                        </span>
+                      </div>
+                    )}
+                    {issue.drift.nextAction && (
+                      <div className="mt-2 pt-2 border-t border-orange-200 text-orange-700">
+                        {issue.drift.nextAction}
+                      </div>
+                    )}
+                    {issue.drift.staleEvidence && (
+                      <div className="mt-2 pt-2 border-t border-orange-200">
+                        <span className="font-medium text-orange-800">Stale evidence: </span>
+                        {issue.drift.staleEvidence.review && <span className="text-orange-700">review </span>}
+                        {issue.drift.staleEvidence.mergeReady && <span className="text-orange-700">merge-ready </span>}
+                        {issue.drift.staleEvidence.approval && <span className="text-orange-700">approval </span>}
+                      </div>
+                    )}
+                    {issue.drift.conflicts && issue.drift.conflicts.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-red-200">
+                        <span className="font-medium text-red-800">Conflicts: </span>
+                        {issue.drift.conflicts.map((f) => (
+                          <span key={f} className="font-mono text-red-700 ml-1">{f}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {issue.status === IssueStatus.Interrupted && (
                 <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
                   <h2 className="text-sm font-semibold text-orange-800 mb-2">

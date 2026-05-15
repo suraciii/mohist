@@ -391,11 +391,15 @@ function InlineApproval({
   stage,
   readOnly,
   approvalOutput,
+  staleEvidence,
+  nextAction,
 }: {
   issueNumber: number
   stage: PipelineStage
   readOnly: boolean
   approvalOutput?: Record<string, unknown>
+  staleEvidence?: { review: boolean; mergeReady: boolean; approval: boolean } | null
+  nextAction?: string | null
 }) {
   const queryClient = useQueryClient()
   const [feedback, setFeedback] = useState('')
@@ -406,6 +410,8 @@ function InlineApproval({
   const [instructionsText, setInstructionsText] = useState('')
   const [notesExpanded, setNotesExpanded] = useState(false)
   const [notesText, setNotesText] = useState('')
+
+  const isStale = staleEvidence?.approval || staleEvidence?.mergeReady || staleEvidence?.review
 
   const review: ReviewOutput = useMemo(() => parseReviewOutput(approvalOutput), [approvalOutput])
   const classified = useMemo(() => classifyResult(review.result), [review.result])
@@ -499,6 +505,12 @@ function InlineApproval({
           classified={classified}
           onClose={() => setReportModalOpen(false)}
         />
+      )}
+
+      {isStale && (
+        <div className="rounded-md bg-orange-100 border border-orange-200 px-3 py-2 text-xs text-orange-800">
+          <span className="font-semibold">Evidence may be stale.</span> {nextAction ?? 'Rebase or rerun checks before approving.'}
+        </div>
       )}
 
       <h3 className="text-sm font-semibold text-amber-800">Approval Required</h3>
@@ -794,7 +806,7 @@ function StepList({
               Approval is awaiting, but this stage has no recorded check results. This usually means the issue was recovered from an interrupted state; rerun the stage if you need fresh verification before approving.
             </div>
           )}
-          <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} approvalOutput={issue.approvalState?.output} />
+          <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} approvalOutput={issue.approvalState?.output} staleEvidence={issue.drift?.staleEvidence ?? undefined} nextAction={issue.drift?.nextAction ?? undefined} />
         </div>
       )}
     </div>

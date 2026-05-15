@@ -114,6 +114,7 @@ export type WorkflowEvent =
   | { type: 'approval-requested'; stage: Stage }
   | { type: 'approval-approved'; stage: Stage }
   | { type: 'approval-rejected'; stage: Stage; reason: FailureDetails }
+  | { type: 'evidence-stale-marked'; stage: Stage; reason: string }
   | { type: 'stage-completed'; stage: Stage }
   | { type: 'stage-failed'; stage: Stage; reason: FailureDetails }
   | { type: 'workflow-completed' }
@@ -160,6 +161,7 @@ export interface ApprovalSnapshot {
   output: unknown | null;
   requestedAt: string;
   respondedAt: string | null;
+  staleEvidenceDetected?: boolean;
 }
 
 export interface StageRunSnapshot {
@@ -407,6 +409,12 @@ export class StageRun {
     };
   }
 
+  markStaleEvidence(): void {
+    if (this.approval) {
+      this.approval.staleEvidenceDetected = true;
+    }
+  }
+
   snapshot(): StageRunSnapshot {
     return {
       stage: this.stage,
@@ -636,6 +644,8 @@ export class WorkflowRun {
           stageRun.approval = { ...stageRun.approval, status: 'awaiting' };
           events.push({ type: 'approval-requested', stage });
         }
+        stageRun.markStaleEvidence();
+        events.push({ type: 'evidence-stale-marked', stage, reason: 'Rebase changed candidate or base evidence' });
       }
     }
     if (stageRun.freezePoint) events.push({ type: 'integrate-frozen', stage, freezePoint: stageRun.freezePoint });
@@ -713,6 +723,9 @@ export class WorkflowRun {
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'awaiting-approval' || !stageRun.approval) {
       throw new WorkflowDomainError(`Stage ${stage} is not awaiting approval`);
+    }
+    if (stageRun.approval.staleEvidenceDetected) {
+      throw new WorkflowDomainError(`Approval cannot be submitted: evidence is stale due to base drift or rebase. Please rebase or rerun checks before approving.`);
     }
     stageRun.approval = {
       ...stageRun.approval,
