@@ -476,7 +476,7 @@ export function setupIssueCommands(program: Command): void {
                 for (const check of latestCurrentTruthChecks(execution.checkResults)) {
                   const isHealthGate = check.name.startsWith('health:') || (check.output && (check.output as any).kind === 'health-gate');
                   const isInternalName = check.name === 'ai-review' || check.name === 'merge-readiness' || check.name === 'integration-health-gate-preview';
-                  if (isHealthGate || isInternalName) continue;
+                  if ((isHealthGate || isInternalName) && check.name !== 'health:check') continue;
                   const checkIcon = check.status === 'pass' ? chalk.green('✓') : check.status === 'fail' ? chalk.red('✗') : check.status === 'error' ? chalk.red('✗') : chalk.gray('○');
                   const displayName = check.name;
                   console.log(`      ${checkIcon} ${displayName}`);

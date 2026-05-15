@@ -214,6 +214,42 @@ function getWorkflowRunCheckReviewPassed(issueId: string, workflowRunService?: W
   };
 }
 
+function getWorkflowRunCheckHealthCheck(issueId: string, workflowRunService?: WorkflowRunService): CheckResult | undefined {
+  const checkStage = workflowRunService
+    ?.getActiveRunForIssue(issueId)
+    ?.stageRuns
+    .find(stageRun => stageRun.stage === Stage.Check);
+  if (!checkStage) return undefined;
+
+  const healthCheck = checkStage.checks.find(check => check.checkName === 'health:check');
+  if (!healthCheck) return undefined;
+
+  return {
+    name: healthCheck.checkName,
+    status: healthCheck.status === 'passed'
+      ? 'pass'
+      : healthCheck.status === 'pending' || healthCheck.status === 'running'
+        ? 'pending'
+        : healthCheck.status === 'error'
+          ? 'error'
+          : 'fail',
+    message: healthCheck.message ?? undefined,
+    output: healthCheck.output ?? undefined,
+  };
+}
+
+function getLatestCheckStageHealthCheck(issueId: string, stageExecutionRepo?: StageExecutionRepo): CheckResult | undefined {
+  if (!stageExecutionRepo) return undefined;
+
+  const latestCheckExecution = stageExecutionRepo
+    .findByIssueId(issueId)
+    .filter(execution => execution.stage === Stage.Check)
+    .at(-1);
+
+  if (!latestCheckExecution) return undefined;
+  return getLatestCheckResult(latestCheckExecution.checkResults as CheckResult[], 'health:check');
+}
+
 function getAuthoritativeCheckReviewPassed(
   issueId: string,
   workflowRunService?: WorkflowRunService,
@@ -221,6 +257,15 @@ function getAuthoritativeCheckReviewPassed(
 ): CheckResult | undefined {
   return getWorkflowRunCheckReviewPassed(issueId, workflowRunService) ??
     getLatestCheckStageReviewPassed(issueId, stageExecutionRepo);
+}
+
+function getAuthoritativeHealthCheck(
+  issueId: string,
+  workflowRunService?: WorkflowRunService,
+  stageExecutionRepo?: StageExecutionRepo,
+): CheckResult | undefined {
+  return getWorkflowRunCheckHealthCheck(issueId, workflowRunService) ??
+    getLatestCheckStageHealthCheck(issueId, stageExecutionRepo);
 }
 
 type IssueComparisonContext = {
@@ -2163,6 +2208,85 @@ export function createIssueRoutes(
                 success: false,
                 error: 'Cannot approve: approval snapshot does not match active CheckSuite snapshot. The check state may have changed since approval was requested.'
               } satisfies ApiResponse, 409);
+            }
+          }
+        }
+
+        const latestHealthCheck = getAuthoritativeHealthCheck(issue.id, workflowRunService, stageExecutionRepo);
+        const latestHealthCheckOutput = latestHealthCheck?.output as Record<string, unknown> | undefined;
+
+        if (!latestHealthCheck || latestHealthCheck.status !== 'pass') {
+          return c.json({
+            success: false,
+            error: latestHealthCheck
+              ? `Cannot approve: health:check is '${latestHealthCheck.status}', expected 'pass'. Re-run Check to generate full verification evidence.`
+              : 'Cannot approve: health:check has not run. Re-run Check to run full verification before approval.'
+          } satisfies ApiResponse, 409);
+        }
+
+        if (latestHealthCheckOutput?.enabled === false) {
+          return c.json({ success: false, error: 'Cannot approve: health:check is disabled by policy. Enable Check verification or re-run with verification enabled.' } satisfies ApiResponse, 409);
+        }
+
+        const verificationEvidence = approvalOutput?.verificationEvidence as Record<string, unknown> | undefined;
+        if (!verificationEvidence) {
+          return c.json({
+            success: false,
+            error: 'Cannot approve: approval output lacks verification evidence. Re-run Check to generate full verification evidence before approval.'
+          } satisfies ApiResponse, 409);
+        }
+
+        const evidenceCandidateHeadSha = verificationEvidence.candidateHeadSha as string | undefined;
+        if (typeof evidenceCandidateHeadSha !== 'string' || evidenceCandidateHeadSha.length === 0) {
+          return c.json({
+            success: false,
+            error: 'Cannot approve: verification evidence is malformed (missing candidateHeadSha). Re-run Check to generate valid full verification evidence.'
+          } satisfies ApiResponse, 409);
+        }
+
+        if (mergeReadySnapshot.candidateHeadSha && String(mergeReadySnapshot.candidateHeadSha) !== evidenceCandidateHeadSha) {
+          return c.json({
+            success: false,
+            error: `Cannot approve: verification evidence candidate head (${evidenceCandidateHeadSha}) does not match merge-ready candidate head (${mergeReadySnapshot.candidateHeadSha}). The verification and merge-ready evidence refer to different candidates. Re-run Check.`
+          } satisfies ApiResponse, 409);
+        }
+
+        const evidenceCheckName = verificationEvidence.checkName as string | undefined;
+        if (!evidenceCheckName || !['health:check', 'build-test'].includes(evidenceCheckName)) {
+          return c.json({
+            success: false,
+            error: `Cannot approve: verification evidence has unexpected check name '${evidenceCheckName ?? 'undefined'}'. Re-run Check to generate standard full verification evidence.`
+          } satisfies ApiResponse, 409);
+        }
+
+        if (worktreeManager && latestHealthCheckOutput) {
+          if (mergeReadyProject) {
+            const worktreePath = worktreeManager.getPath(mergeReadyProject.name, issue.number);
+            if (worktreePath) {
+              try {
+                const currentHead = await worktreeManager.getHeadSha(worktreePath);
+                const currentCandidateHeadSha = currentHead;
+
+                if (currentCandidateHeadSha !== evidenceCandidateHeadSha) {
+                  return c.json({
+                    success: false,
+                    error: `Cannot approve: verification evidence candidate head (${evidenceCandidateHeadSha}) does not match current worktree HEAD (${currentCandidateHeadSha}). The candidate has changed since verification. Re-run Check.`
+                  } satisfies ApiResponse, 409);
+                }
+
+                const snapshotSha = approvalOutput?.snapshotSha as string | undefined;
+                if (snapshotSha && latestHealthCheckOutput.candidateHeadSha !== snapshotSha && latestHealthCheckOutput.candidateHeadSha !== currentCandidateHeadSha) {
+                  return c.json({
+                    success: false,
+                    error: 'Cannot approve: verification evidence does not match the approval snapshot or current candidate state. The check evidence may be stale. Re-run Check.'
+                  } satisfies ApiResponse, 409);
+                }
+              } catch (err) {
+                return c.json({
+                  success: false,
+                  error: `Cannot approve: failed to validate verification evidence against worktree state. Re-run Check. ${err instanceof Error ? err.message : String(err)}`
+                } satisfies ApiResponse, 409);
+              }
             }
           }
         }

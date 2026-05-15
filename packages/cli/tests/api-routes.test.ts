@@ -79,6 +79,22 @@ function completeCheckToApproval(workflowApplicationService: WorkflowApplication
   workflowApplicationService.recordCheckResult({
     issueId,
     stage: Stage.Check,
+    result: {
+      name: 'health:check',
+      status: 'pass',
+      output: {
+        checkName: 'health:check',
+        status: 'pass',
+        candidateHeadSha: snapshotSha,
+        command: 'npm run build && npm test',
+        duration: 1,
+        summary: 'Verification passed',
+      },
+    },
+  });
+  workflowApplicationService.recordCheckResult({
+    issueId,
+    stage: Stage.Check,
     result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha } },
   });
   workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass' } });
@@ -218,10 +234,18 @@ async function createMergeReadyApprovalFixture(
   stateManager.getIssueRepo().setApprovalState(issue.id, {
     stage: Stage.Check,
     status: 'awaiting',
-    output: {
-      snapshotSha: candidateHeadSha,
-      result: 'PASS',
-      mergeReadySnapshot: {
+      output: {
+        snapshotSha: candidateHeadSha,
+        result: 'PASS',
+        verificationEvidence: {
+          checkName: 'health:check',
+          status: 'pass',
+          candidateHeadSha,
+          command: 'npm run build && npm test',
+          duration: 1,
+          summary: 'Verification passed',
+        },
+        mergeReadySnapshot: {
         kind: 'merge-ready',
         strategy: 'squash',
         targetBranch: 'main',
@@ -1559,9 +1583,11 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
 
           const changeDir = path.join(tmpRetryDir, 'openspec', 'changes', `${issue.number}-test-change`);
@@ -1646,9 +1672,11 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
 
           const changeDir = path.join(tmpRerunDir, 'openspec', 'changes', `${issue.number}-test-change`);
@@ -1714,6 +1742,7 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
 
           const changeDir = path.join(tmpRepairDir, 'openspec', 'changes', `${issue.number}-test-change`);
@@ -1798,6 +1827,7 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
 
           const changeDir = path.join(tmpRepairDir, 'openspec', 'changes', `${issue.number}-test-change`);
@@ -1900,9 +1930,11 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
 
           const changeDir = path.join(tmpRepairDir, 'openspec', 'changes', `${issue.number}-test-change`);

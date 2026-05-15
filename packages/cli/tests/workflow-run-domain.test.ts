@@ -40,6 +40,7 @@ function advanceToIntegrate(run: WorkflowRun): void {
   run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
   run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
   run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+  run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
   run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
   run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
   run.approveStage(Stage.Check, { output: { approved: true } });
@@ -216,6 +217,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
     run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
 
     const firstFailure = run.recordCheckResult(Stage.Check, {
       name: 'review-passed',
@@ -266,6 +268,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
     run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, {
       name: 'review-passed',
       status: 'fail',
@@ -465,6 +468,7 @@ describe('WorkflowRun domain aggregate', () => {
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
 
+      run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
       run.recordCheckResult(Stage.Check, {
         name: 'review-passed',
         status: 'fail',
@@ -509,6 +513,7 @@ describe('WorkflowRun domain aggregate', () => {
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
 
+      run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
       run.recordCheckResult(Stage.Check, {
         name: 'review-passed',
         status: 'fail',
@@ -520,6 +525,7 @@ describe('WorkflowRun domain aggregate', () => {
 
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
 
+      run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
       const decisionAfterRepair = run.recordCheckResult(Stage.Check, {
         name: 'review-passed',
         status: 'pass',

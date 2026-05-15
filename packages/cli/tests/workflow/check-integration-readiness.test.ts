@@ -377,7 +377,8 @@ Content.`, 'utf-8');
     const preChecks = runner.getPreTaskChecks();
     const postChecks = runner.getChecks();
 
-    expect(preChecks).toHaveLength(0);
+    expect(preChecks).toHaveLength(1);
+    expect(preChecks.map((c: any) => c.name)).toContain('health:check');
     const postCheckNames = postChecks.map((c: any) => c.name);
     expect(postCheckNames).not.toContain('openspec-sync-dry-run');
     expect(postCheckNames).toContain('review-passed');

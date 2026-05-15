@@ -167,7 +167,7 @@ describe('Rebase workflow regression: T-005', () => {
       checkStage.findTask('rebase-branch').status = 'completed';
 
       const nextWork2 = run.nextWork();
-      expect(nextWork2).toEqual({ kind: 'check', stage: Stage.Check, checkName: 'review-passed' });
+      expect(nextWork2).toEqual({ kind: 'check', stage: Stage.Check, checkName: 'health:check' });
     });
   });
 
@@ -312,8 +312,9 @@ describe('Rebase workflow regression: T-005', () => {
       expect(taskInvalidatedEvents[0].taskId).toBe('ai-review');
 
       const checkInvalidatedEvents = decision.events.filter((e: any) => e.type === 'check-invalidated');
-      expect(checkInvalidatedEvents).toHaveLength(2);
+      expect(checkInvalidatedEvents).toHaveLength(3);
       const invalidatedCheckNames = checkInvalidatedEvents.map((e: any) => e.checkName);
+      expect(invalidatedCheckNames).toContain('health:check');
       expect(invalidatedCheckNames).toContain('review-passed');
       expect(invalidatedCheckNames).toContain('merge-ready');
     });

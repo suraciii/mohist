@@ -434,6 +434,20 @@ export abstract class BaseStageRunner implements StageRunner {
       if (reviewOutput?.verdict === 'PASS' && !reviewOutput.snapshotSha) {
         return { ok: false, message: 'Cannot request check approval: review snapshot has not been converged' };
       }
+
+      const healthCheckResult = getLatestCheckResult(allResults, 'health:check');
+      if (!healthCheckResult || healthCheckResult.status !== 'pass') {
+        return {
+          ok: false,
+          message: healthCheckResult
+            ? `Cannot request check approval: health:check is ${healthCheckResult.status}`
+            : 'Cannot request check approval: health:check has not run',
+        };
+      }
+      const healthCheckOutput = healthCheckResult.output as Record<string, unknown> | undefined;
+      if (healthCheckOutput?.enabled === false) {
+        return { ok: false, message: 'Cannot request check approval: health:check is disabled by policy and cannot serve as approval evidence' };
+      }
     }
 
     const output = this.buildApprovalOutput(ctx, allResults);
@@ -512,16 +526,38 @@ export abstract class BaseStageRunner implements StageRunner {
         };
       }
 
+      const healthCheckResult = getLatestCheckResult(allResults, 'health:check');
+      if (!healthCheckResult || healthCheckResult.status !== 'pass') {
+        return {
+          error: healthCheckResult
+            ? `Cannot request check approval: health:check is ${healthCheckResult.status}`
+            : 'Cannot request check approval: health:check has not run',
+        };
+      }
+
       const dimensions = reviewOutput.reviewReport ? parseDimensions(reviewOutput.reviewReport) : undefined;
       const latestReviewPassed = getLatestCheckResult(allResults, 'review-passed');
       const snapshotSha = (latestReviewPassed?.output as { snapshotSha?: string } | undefined)?.snapshotSha;
       const mergeReadySnapshot = mergeReadyResult?.output as { kind?: string; targetBranch?: string; strategy?: string; baseSha?: string; candidateHeadSha?: string; mergeBaseSha?: string; canMerge?: boolean; conflictFiles?: string[]; checkedAt?: string; error?: string } | undefined;
+      const healthCheckOutput = healthCheckResult.output as Record<string, unknown> | undefined;
+      const verificationEvidence = healthCheckOutput ? {
+        checkName: healthCheckResult.name,
+        status: healthCheckResult.status,
+        command: (healthCheckOutput.command as string) ?? '',
+        duration: (healthCheckOutput.duration as number) ?? 0,
+        summary: (healthCheckOutput.summary as string) ?? healthCheckResult.message ?? '',
+        logExcerpt: (healthCheckOutput.logExcerpt as string) ?? '',
+        checkedAt: new Date().toISOString(),
+        candidateHeadSha: (healthCheckOutput.candidateHeadSha as string) ?? undefined,
+        baseSha: (healthCheckOutput.baseSha as string) ?? undefined,
+      } : undefined;
       approvalOutput = {
         result: reviewOutput.verdict,
         reviewReport: reviewOutput.reviewReport,
         dimensions,
         snapshotSha,
         mergeReadySnapshot,
+        verificationEvidence,
       };
     }
 

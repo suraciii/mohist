@@ -1,4 +1,4 @@
-# OpenSpec Capability: workflow-log
+## MODIFIED Requirements
 
 ### Requirement: Check verification diagnostics
 
@@ -14,4 +14,3 @@ Stage check evidence and diagnostics SHALL expose Check full verification detail
 - **WHEN** Check full verification fails or times out
 - **THEN** persisted check evidence SHALL include the command, status, duration, concise summary, and useful bounded log excerpt
 - **AND** the failure SHALL be visible as an approval-blocking Check-stage check result
-

@@ -721,6 +721,7 @@ The Web UI SHALL provide the minimum interaction needed to declare that one Issu
 - **WHEN** the API rejects a Web UI prerequisite declaration with reason `circular-prerequisite`
 - **THEN** the Web UI shows a clear validation message
 - **AND** it does not add the rejected prerequisite to the displayed list
+
 ### Requirement: REQ-BDA-WUI-001 Web UI surfaces drift and stale-evidence guidance
 
 The Web UI SHALL render projected base drift and rebase opportunity state for active issues and SHALL suppress stale Check approval actions.
@@ -751,3 +752,19 @@ The Web UI SHALL render projected base drift and rebase opportunity state for ac
 
 - **WHEN** drift or rebase opportunity events arrive over SSE
 - **THEN** the Web UI SHALL refresh affected issue and stage-state data
+
+### Requirement: Web UI shows Check verification approval blockers
+
+The Web UI SHALL make failed or missing Check full verification evidence visible before approval instead of presenting the issue as merely waiting for user approval.
+
+#### Scenario: Failed verification is visible on issue detail
+
+- **WHEN** an issue is in Check and `health:check` has failed
+- **THEN** the issue detail or approval panel SHALL show the failed Check verification gate
+- **AND** it SHALL show the command, summary, duration, and log excerpt when available
+
+#### Scenario: Approval panel indicates verified candidate
+
+- **WHEN** Check approval is available
+- **THEN** the approval panel SHALL indicate that required full verification evidence passed for the approval candidate
+

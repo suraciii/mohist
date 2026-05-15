@@ -137,7 +137,7 @@ export class WorkflowRunProjection {
     if (!checkStage || !suite) return;
 
     for (const check of checkStage.checks) {
-      if (check.name !== 'review-passed' && check.name !== 'merge-ready' && check.name !== 'user-approval') continue;
+      if (check.name !== 'health:check' && check.name !== 'review-passed' && check.name !== 'merge-ready' && check.name !== 'user-approval') continue;
       this.checkSuiteRepo.updateChecks(suite.id, check.name, {
         status: this.toCheckSuiteCheckStatus(check.status),
         output: check.output ?? check.message ?? undefined,

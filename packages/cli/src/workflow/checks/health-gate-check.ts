@@ -97,6 +97,8 @@ export class HealthGateCheck implements Check {
   }
 
   async run(_ctx: CheckContext): Promise<CheckResult> {
+    const candidateHeadSha = await this.resolveHeadSha();
+
     if (!this.policy.enabled) {
       return {
         name: this.name,
@@ -110,6 +112,7 @@ export class HealthGateCheck implements Check {
           duration: 0,
           enabled: false,
           logExcerpt: '',
+          candidateHeadSha,
         },
       };
     }
@@ -142,6 +145,7 @@ export class HealthGateCheck implements Check {
           duration,
           enabled: true,
           logExcerpt: truncateLog(stdout + '\n' + stderr, 5000),
+          candidateHeadSha,
         },
       };
     } catch (err: any) {
@@ -185,8 +189,21 @@ export class HealthGateCheck implements Check {
             isTimeout,
           ),
           logExcerpt: truncateLog([stdout, stderr, err.message].filter(Boolean).join('\n'), 5000),
+          candidateHeadSha,
         },
       };
+    }
+  }
+
+  private async resolveHeadSha(): Promise<string | undefined> {
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: this.worktreePath,
+        timeout: 5000,
+      });
+      return stdout.trim() || undefined;
+    } catch {
+      return undefined;
     }
   }
 
