@@ -1,6 +1,6 @@
 import { Stage, type Issue } from '../types';
 import type { StageRunner } from './check-stage-runner';
-import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, WorkflowApplicationRuntime } from './stage-context';
+import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, WorkflowApplicationRuntime, StageRunResult } from './stage-context';
 import type { CheckpointManager } from './checkpoint-manager';
 import type { EventBus } from '../services/event-bus';
 import type { AgentSessionOptions } from '../agent-runtime/agent-session';
@@ -199,6 +199,36 @@ export class WorkflowEngine {
     return stageRun?.approvalStatus === 'rejected' ? stageRun.approvalOutput : undefined;
   }
 
+  private async materializeCurrentStageWork(
+    issue: Issue,
+    acpOptions: AgentSessionOptions,
+    run: ReturnType<WorkflowApplicationRuntime['resumeDecision']>['run'],
+  ): Promise<boolean> {
+    const runner = this.getRunner(run.currentStage);
+    if (!runner?.materializeWork) return false;
+
+    const currentIssue = { ...this.refreshIssue(issue), stage: run.currentStage };
+    const ctx = this.buildContext(currentIssue, acpOptions);
+    return await runner.materializeWork(ctx);
+  }
+
+  private async resumeAfterMaterializingWork(
+    issue: Issue,
+    acpOptions: AgentSessionOptions,
+    tasksPath?: string,
+  ): Promise<ReturnType<WorkflowApplicationRuntime['resumeDecision']>> {
+    const service = this.workflowApplicationService;
+    if (!service) throw new Error('WorkflowApplicationService is required for aggregate workflow execution');
+
+    let decision = service.resumeDecision(issue.id, { tasksPath });
+
+    if (this.shouldMaterializeBeforeWork(decision.nextWork) && await this.materializeCurrentStageWork(issue, acpOptions, decision.run)) {
+      decision = service.resumeDecision(issue.id, { tasksPath });
+    }
+
+    return decision;
+  }
+
   private async runAggregateWorkflow(issue: Issue, acpOptions: AgentSessionOptions): Promise<PipelineResult> {
     const service = this.workflowApplicationService;
     if (!service) throw new Error('WorkflowApplicationService is required for aggregate workflow execution');
@@ -209,7 +239,7 @@ export class WorkflowEngine {
     if (issue.stage === Stage.Backlog) {
       initial = service.startWorkflow({ issueId: issue.id, issueNumber: issue.number, tasksPath });
     } else {
-      const retryableFailedStage = this.workflowRunService?.canRetryStage(issue.id, issue.stage) ?? false;
+      const retryableFailedStage = this.workflowRunService?.canRetryStage?.(issue.id, issue.stage) ?? false;
       if (retryableFailedStage) {
         this.pendingRejectionFeedback.set(`${issue.id}:${issue.stage}`, this.getRejectedApprovalOutput(issue.id, issue.stage));
       }
@@ -219,6 +249,11 @@ export class WorkflowEngine {
     }
     let run = initial.run;
     let work = 'decision' in initial ? initial.decision.nextWork : initial.nextWork;
+    if (this.shouldMaterializeBeforeWork(work) && await this.materializeCurrentStageWork(issue, acpOptions, run)) {
+      const materializedDecision = service.resumeDecision(issue.id, { tasksPath });
+      run = materializedDecision.run;
+      work = materializedDecision.nextWork;
+    }
 
     while (true) {
       if (this.signal?.aborted) {
@@ -265,7 +300,7 @@ export class WorkflowEngine {
         };
       }
 
-      const decision = service.resumeDecision(issue.id, { tasksPath });
+      const decision = await this.resumeAfterMaterializingWork(issue, acpOptions, tasksPath);
       run = decision.run;
       work = decision.nextWork;
 
@@ -284,6 +319,10 @@ export class WorkflowEngine {
         return { completed: false, stage: ctx.issue.stage, message: result.message };
       }
     }
+  }
+
+  private shouldMaterializeBeforeWork(work: WorkflowWork): boolean {
+    return work.kind === 'task' || work.kind === 'check';
   }
 
   async run(issue: Issue, acpOptions: AgentSessionOptions): Promise<PipelineResult> {
@@ -315,13 +354,24 @@ export class WorkflowEngine {
         };
       }
 
-      const runner = this.runners.find(r => r.canHandle(currentIssue.stage));
-      if (!runner) {
+      const ctx = this.buildContext(currentIssue, acpOptions);
+      const runners = this.runners.filter(r => r.canHandle(currentIssue.stage));
+      if (runners.length === 0) {
         return { completed: false, stage: currentIssue.stage, message: `Pipeline cannot handle stage: ${currentIssue.stage}` };
       }
 
-      const ctx = this.buildContext(currentIssue, acpOptions);
-      const result = await runner.run(ctx);
+      let result: StageRunResult | null = null;
+      for (const runner of runners) {
+        const stageResult = await runner.run(ctx);
+        if (stageResult.message === 'ConfigDrivenStageRunner requires WorkflowRun requestedWork') {
+          continue;
+        }
+        result = stageResult;
+        break;
+      }
+      if (!result) {
+        return { completed: false, stage: currentIssue.stage, message: `Pipeline cannot handle stage without aggregate workflow service: ${currentIssue.stage}` };
+      }
 
       if (result.success) {
         return { completed: false, stage: currentIssue.stage, message: 'Stage completed but aggregate workflow service is unavailable' };

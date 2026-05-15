@@ -115,3 +115,8 @@ export {
   type OpenSpecDetection,
   type WorkflowConfigWithDetection,
 } from './workflow-loader';
+
+export {
+  ConfigDrivenStageRunner,
+  type ConfigDrivenStageRunnerOptions,
+} from './config-driven-stage-runner';

@@ -21,6 +21,7 @@ const log = Log.create({ service: 'check-stage-runner' });
 
 export interface StageRunner {
   canHandle(stage: Stage): boolean;
+  materializeWork?(ctx: StageContext): Promise<boolean> | boolean;
   run(ctx: StageContext): Promise<StageRunResult>;
 }
 

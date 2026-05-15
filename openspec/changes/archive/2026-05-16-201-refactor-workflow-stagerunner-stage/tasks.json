@@ -1,0 +1,285 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add declarative stage policies and registries",
+      "spec": "specs/workflow-definition/spec.md#stage-definitions-declare-workflow-behavior-policies",
+      "description": "Extend the existing stage definition model with work sources, task execution policy, check policy, approval policy, repair policy, and invalidation policy while keeping current fields compatible. Add task loader and check registries that can bind definitions to static tasks, runtime tasks, task handlers, and check factories without executing stage work yet.",
+      "acceptanceCriteria": [
+        "DEFAULT_STAGE_DEFINITIONS exposes declarative policy data for Plan, Build, Check, and Integrate while preserving the existing stage order",
+        "StageDefinition remains a non-executing data contract and does not import concrete runner classes",
+        "TaskLoaderRegistry can resolve static and runtime work sources through narrow interfaces",
+        "CheckRegistry can resolve checks by configured check name and stage context",
+        "Existing WorkflowRun construction and legacy runner tests continue to pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts; packages/cli/src/workflow/task-runtime; packages/cli/src/workflow/checks",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Keep runtime-specific classes out of the domain definition. Prefer ids/source names in definitions and concrete bindings in registry setup.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        445058
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Implement config-driven runner shell",
+      "spec": "specs/workflow-engine/spec.md#config-driven-runner-executes-declared-stage-work",
+      "description": "Add the generic config-driven StageRunner path that executes only the task or check requested by WorkflowRun using the registries from T-001. Preserve the legacy BaseStageRunner path and reuse existing reporting helpers or extract a shared reporter so task/check results still update WorkflowRun, stage executions, stage state, logs, and events.",
+      "acceptanceCriteria": [
+        "A config-driven runner can execute a requested task through a task loader and TaskHandlerRegistry",
+        "A config-driven runner can execute a requested check through CheckRegistry",
+        "The runner reports task and check results to workflowApplicationService before later work is selected",
+        "Legacy runners remain executable without changing their public construction or files",
+        "Aggregate single task and single check runner tests cover the config-driven path",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/base-stage-runner.ts; packages/cli/src/workflow/config-driven-stage-runner.ts; packages/cli/src/workflow/stage-context.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "This task creates the execution seam only. Do not switch all stage defaults yet.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        548303
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Move repair and invalidation decisions to policy",
+      "spec": "specs/workflow-run/spec.md#workflow-run-selects-work-across-configured-sources",
+      "description": "Teach WorkflowRun or StageRun to apply configured repair and invalidation policies after task and check results. Preserve current Check review repair invalidation, rebase shaChanged behavior, approval separation, and Integrate freeze-point behavior while making those decisions data-driven from stage policy.",
+      "acceptanceCriteria": [
+        "Failed checks schedule configured repair tasks as ordinary StageRun tasks with causedBy metadata",
+        "Check repair completion invalidates stale ai-review, review-passed, merge-ready, and approval state through policy",
+        "rebase-branch completion with shaChanged=true invalidates configured dependent state and shaChanged=false preserves it",
+        "rebase-branch failure blocks later work through normal task failure semantics",
+        "Integrate post-merge health failure remains non-repairable after merge freeze",
+        "WorkflowRun unit tests cover repair scheduling, approval separation, review invalidation, rebase facts, and freeze behavior",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts; packages/cli/tests/workflow-run*.test.ts",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Task handlers and checks must not directly decide stage flow. Keep WorkflowRun as the decision boundary.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        729622
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Migrate Integrate to config-driven execution",
+      "spec": "specs/workflow-definition/spec.md#stage-definitions-preserve-existing-stage-semantics",
+      "description": "Enable Integrate to run through the config-driven runner using service-call tasks for spec sync, change archive, and merge, plus the registered health:integrate check. Keep IntegrateStageRunner available as rollback while proving ordered task blocking, single task execution, merge delivery facts, freeze point, and post-merge health failure behavior remain intact.",
+      "acceptanceCriteria": [
+        "Config-driven Integrate executes integrate:spec-sync, integrate:archive-change, and integrate:merge in order",
+        "Config-driven Integrate runs health:integrate only after ordered tasks succeed",
+        "Aggregate execution can run each Integrate task individually and report exactly one task result",
+        "Failed Integrate tasks block later Integrate tasks and checks",
+        "Post-merge health failure records post-merge-health-failed and does not schedule fix-integrate-health",
+        "Legacy IntegrateStageRunner remains available for rollback registration",
+        "Relevant Integrate runner and WorkflowRun tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/integrate-stage-runner.ts; packages/cli/src/workflow/config-driven-stage-runner.ts; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Integrate is the pilot migration. Avoid changing user-visible integration events or deleting legacy code.",
+      "attempts": 3,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1272294,
+        2130879,
+        2947882
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Migrate Plan to config-driven execution",
+      "spec": "specs/workflow-definition/spec.md#stage-definitions-preserve-existing-stage-semantics",
+      "description": "Enable Plan to run through the config-driven runner using static agent-session tasks for proposal, specs, design, tasks, and self-review. Preserve artifact verification, retry prompts, checkpoint step behavior, plan session update bridge, Plan approval output, artifact checks, and health:plan.",
+      "acceptanceCriteria": [
+        "Config-driven Plan executes proposal, specs, design, tasks, and self-review as ordered stage tasks",
+        "Artifact existence checkpoints and retry prompt behavior match the legacy Plan path",
+        "Plan session update events and stage_task_update events remain compatible",
+        "Plan artifact checks and health:plan run after Plan tasks complete",
+        "Plan approval output still includes self-review verdict evidence when available",
+        "Legacy PlanStageRunner remains available for rollback registration",
+        "Relevant Plan runner, aggregate single task, and approval tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/plan-stage-runner.ts; packages/cli/src/workflow/config-driven-stage-runner.ts; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Consume the static loader and agent-session handler path rather than copying Plan task branching into the generic runner.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1174644
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Migrate Check to config-driven execution",
+      "spec": "specs/workflow-engine/spec.md#config-driven-checks-preserve-read-only-and-repair-policy-boundaries",
+      "description": "Enable Check to run through the config-driven runner using ai-review as a static agent-session task, registered review-passed and merge-ready checks, approval policy, repair task handlers, review snapshot convergence, and policy-driven stale review invalidation. Preserve the legacy Check runner as rollback until final default registration.",
+      "acceptanceCriteria": [
+        "Config-driven Check executes ai-review before review-passed and merge-ready checks",
+        "review-passed and merge-ready remain read-only checks and do not run repairs directly",
+        "Failed review-passed and merge-ready checks schedule configured repair tasks with causedBy metadata",
+        "Review repair and rebase facts invalidate stale review/check/approval state through policy",
+        "Check approval output still requires current passing review and merge-ready evidence",
+        "Review snapshot convergence still runs as ordinary task work when required before approval",
+        "Legacy CheckStageRunner remains available for rollback registration",
+        "Relevant Check runner, repair, rebase, approval, and aggregate single-work tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/check-stage-runner.ts; packages/cli/src/workflow/config-driven-stage-runner.ts; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "This is where stale review invalidation and approval correctness are most fragile; prefer behavior tests over implementation-shape assertions.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1269136
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Migrate Build to Ralph-backed config-driven execution",
+      "spec": "specs/ralph-task-execution/spec.md#build-dynamic-tasks-execute-through-config-driven-work-source",
+      "description": "Enable Build to run through the config-driven runner by consuming the Ralph work source and Ralph task handler rather than the legacy Build-only loop. Preserve task materialization from tasks.json, checkpoint resume, dependency ordering, aggregate onlyTaskId execution, task file updates, learnings, stage state sync, commits, and health:build auto-fix.",
+      "acceptanceCriteria": [
+        "Build materializes Ralph tasks from tasks.json into the Build StageRun before WorkflowRun selects Build work",
+        "A selected Build task executes through the Ralph task handler and reports the corresponding WorkflowRun task result",
+        "Aggregate onlyTaskId Build execution runs exactly the requested task and then lets WorkflowRun select subsequent work",
+        "Checkpoint resume and already-materialized tasks do not duplicate Build task rows",
+        "health:build runs only after required Build tasks succeed",
+        "health:build repair schedules and executes fix-build-health as ordinary task work",
+        "Legacy BuildStageRunner remains available for rollback registration",
+        "Relevant Build, Ralph, aggregate single task, checkpoint, and health repair tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/build-stage-runner.ts; packages/cli/src/workflow/task-runtime; packages/cli/src/openspec/ralph-executor.ts; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "Do not reimplement Ralph internals in the generic runner. Use the real Ralph loader/handler contracts and keep task file compatibility.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1883948,
+        3397415
+      ]
+    },
+    {
+      "id": "T-008",
+      "title": "Switch WorkflowEngine defaults to unified runner",
+      "spec": "specs/workflow-engine/spec.md#legacy-and-config-driven-runner-paths-coexist-during-migration",
+      "description": "After all stages have working config-driven execution, change runner registration so WorkflowEngine uses the unified config-driven runner by default for Plan, Build, Check, and Integrate. Keep legacy runner files and rollback construction available, and verify full workflow and aggregate workflow behavior still route through WorkflowRun decisions.",
+      "acceptanceCriteria": [
+        "WorkflowEngine default runner registration handles Plan, Build, Check, and Integrate through the unified config-driven runner",
+        "Legacy PlanStageRunner, BuildStageRunner, CheckStageRunner, and IntegrateStageRunner files and exports remain present",
+        "Full workflow execution completes Plan -> Build -> Check -> Integrate -> Done through config-driven stages",
+        "Aggregate workflow no-progress detection remains effective with config-driven stages",
+        "Runtime-added rebase-branch remains visible, ordered, blocking, and fact-driven under default registration",
+        "Full workflow and aggregate workflow tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "packages/cli/src/workflow/workflow-engine.ts; packages/cli/src/services/agent-runner-service.ts; packages/cli/src/workflow/index.ts",
+      "dependsOn": [
+        "T-007"
+      ],
+      "passes": true,
+      "notes": "This is the only task that should flip defaults. Rollback is runner registration, not file deletion.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        689133
+      ]
+    },
+    {
+      "id": "T-009",
+      "title": "Add migration regression coverage",
+      "spec": "specs/workflow-engine/spec.md#aggregate-single-work-execution-remains-supported",
+      "description": "Add end-to-end and focused regression tests that prove the config-driven runner preserves stage semantics, aggregate single-work behavior, runtime-added task semantics, and legacy rollback availability. Cover the required stage migration outcomes rather than internal subclass shape.",
+      "acceptanceCriteria": [
+        "Tests prove config-driven Integrate, Plan, Check, and Build each execute their expected task/check sequence",
+        "Tests prove aggregate single task and single check execution does not run unrelated work",
+        "Tests prove runtime-added rebase-branch is visible, ordered, blocking, and invalidates only from reported facts",
+        "Tests prove approval is not repairable and is not blindly invalidated by runtime-added work",
+        "Tests prove legacy runner construction remains possible for rollback",
+        "Full workflow, aggregate workflow, and Plan/Build/Check/Integrate focused suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/workflow; packages/cli/tests",
+      "dependsOn": [
+        "T-008"
+      ],
+      "passes": true,
+      "notes": "Keep assertions on observable workflow behavior and WorkflowRun decisions. Avoid tests that require deleting legacy runner files.",
+      "attempts": 4,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        561209,
+        2469807,
+        4380421,
+        6295780
+      ]
+    }
+  ]
+}

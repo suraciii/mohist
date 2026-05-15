@@ -17,8 +17,8 @@ function isCausedByMetadata(value: unknown): value is CausedByMetadata {
 }
 
 function extractDeliveryMetadata(output: unknown): FreezePoint['delivery'] {
-  if (!output || typeof output !== 'object') return {};
-  const data = output as Record<string, unknown>;
+  const data = unwrapTaskOutput(output);
+  if (!data) return {};
   return {
     targetBranch: typeof data.targetBranch === 'string' ? data.targetBranch : undefined,
     baseSha: typeof data.baseSha === 'string' ? data.baseSha : undefined,
@@ -26,6 +26,15 @@ function extractDeliveryMetadata(output: unknown): FreezePoint['delivery'] {
     landedSha: typeof data.landedSha === 'string' ? data.landedSha : undefined,
     rebased: typeof data.rebased === 'boolean' ? data.rebased : undefined,
   };
+}
+
+function unwrapTaskOutput(output: unknown): Record<string, unknown> | null {
+  if (!output || typeof output !== 'object') return null;
+  const data = output as Record<string, unknown>;
+  if (data.kind === 'service-call-task' && data.result && typeof data.result === 'object') {
+    return data.result as Record<string, unknown>;
+  }
+  return data;
 }
 
 function inferStageFailure(stage: Stage, snapshot: StageRunSnapshot): FailureDetails | null {
