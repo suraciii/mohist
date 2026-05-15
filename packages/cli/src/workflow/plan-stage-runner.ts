@@ -190,12 +190,6 @@ export class PlanStageRunner extends BaseStageRunner {
       if (isLastTask) await this.closeAggregateTaskSession(ctx);
       return { taskId: task.type, title: task.label, status: 'completed', artifacts: [], attempts: 0, duration: 0 };
     }
-    if (!forceFreshAttempt && task.verifyArtifact()) {
-      checkpointManager.markStepComplete(issue.number, 'plan', task.type, tasks[taskIndex + 1]?.type ?? null);
-      if (isLastTask) await this.closeAggregateTaskSession(ctx);
-      return { taskId: task.type, title: task.label, status: 'completed', artifacts: [task.label], attempts: 0, duration: 0 };
-    }
-
     const session = await this.getAggregateTaskSession(ctx);
 
     const startedAt = Date.now();
@@ -422,7 +416,7 @@ const planBridgeObserver = {
           });
           const idx = completedSteps.indexOf(task.type);
           completedSteps.splice(idx);
-        } else if (!forceFreshAttempt && task.verifyArtifact()) {
+        } else if (!forceFreshAttempt && resumeSteps.length > 0 && task.verifyArtifact()) {
           log.info('Plan artifact exists but not in checkpoint, marking complete', {
             artifact: task.type,
             issueNumber: issue.number,

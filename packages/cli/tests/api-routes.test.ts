@@ -1507,7 +1507,8 @@ describe('API Routes', () => {
       });
 
       it('should return 409 when issue is not blocked', async () => {
-        await issueService.create({ projectId, title: 'Active Issue' });
+        const issue = await issueService.create({ projectId, title: 'Active Issue' });
+        issueRepo.updateStage(issue.id, Stage.Plan);
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus);
         server = createRetryServer(agentRunner);

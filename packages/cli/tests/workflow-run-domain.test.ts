@@ -129,24 +129,165 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
   });
 
-  it('reruns an active stage from the first incomplete task and clears later completed tasks', () => {
+  it('reruns current stage from the first work item and clears all current-stage state', () => {
     const run = startRun();
     advanceToBuild(run);
     run.materializeTasks(Stage.Build, [
-      { id: 'T-001', title: 'First build task', order: 1 },
-      { id: 'T-002', title: 'Second build task', order: 2, dependsOn: ['T-001'] },
+      { id: 'T-001', title: 'First build task', order: 0 },
+      { id: 'T-002', title: 'Second build task', order: 1, dependsOn: ['T-001'] },
     ]);
     const buildStage = run.stageRun(Stage.Build);
     buildStage.findTask('T-001').attempts = 2;
+    buildStage.findTask('T-001').status = 'completed';
+    buildStage.findTask('T-001').output = { text: 'done' };
+    buildStage.findTask('T-001').artifacts = ['artifact-1'];
     buildStage.findTask('T-002').status = 'completed';
-    buildStage.findTask('T-002').attempts = 1;
-    buildStage.findTask('T-002').output = { text: 'stale' };
+    buildStage.findTask('T-002').output = { text: 'also done' };
+    buildStage.findCheck('health:build').status = 'passed';
 
     const decision = run.rerunStage(Stage.Build);
 
     expect(run.status).toBe('running');
-    expect(buildStage.findTask('T-001')).toMatchObject({ status: 'pending', attempts: 2, output: null });
-    expect(buildStage.findTask('T-002')).toMatchObject({ status: 'pending', attempts: 1, output: null });
+    expect(run.failure).toBeNull();
+    expect(run.currentStage).toBe(Stage.Build);
+    expect(buildStage.status).toBe('running');
+    expect(buildStage.failure).toBeNull();
+    expect(buildStage.approval).toBeNull();
+    expect(buildStage.findTask('T-001')).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      output: null,
+      artifacts: [],
+    });
+    expect(buildStage.findTask('T-002')).toMatchObject({
+      status: 'pending',
+      output: null,
+      artifacts: [],
+    });
+    expect(buildStage.findCheck('health:build')).toMatchObject({
+      status: 'pending',
+      message: null,
+      output: null,
+      runCount: 0,
+    });
+    expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
+  });
+
+  it('rerun does not reset earlier passed stages', () => {
+    const definitions: StageDefinition[] = [
+      {
+        stage: Stage.Plan,
+        tasks: [
+          { id: 'proposal', title: 'Generate proposal' },
+          { id: 'specs', title: 'Write specs' },
+        ],
+        checks: [
+          { name: 'proposal-complete', title: 'Proposal complete' },
+          { name: 'specs-complete', title: 'Specs complete' },
+        ],
+        requiresApproval: true,
+        approvalCheckName: 'user-approval',
+      },
+      {
+        stage: Stage.Build,
+        tasks: [{ id: 'T-001', title: 'Build task' }],
+        checks: [{ name: 'build-check', title: 'Build check' }],
+      },
+    ];
+
+    const run = startRun(definitions);
+    run.completeTask(Stage.Plan, 'proposal', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'specs', { status: 'completed' });
+    run.recordCheckResult(Stage.Plan, { name: 'proposal-complete', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'specs-complete', status: 'pass' });
+    run.approveStage(Stage.Plan, { output: { approved: true } });
+    expect(run.stageRun(Stage.Plan).status).toBe('passed');
+    expect(run.currentStage).toBe(Stage.Build);
+
+    run.completeTask(Stage.Build, 'T-001', { status: 'failed', reason: 'build failed' });
+    expect(run.currentStage).toBe(Stage.Build);
+    expect(run.status).toBe('failed');
+
+    run.rerunStage(Stage.Build);
+
+    expect(run.currentStage).toBe(Stage.Build);
+    expect(run.status).toBe('running');
+    expect(run.stageRun(Stage.Plan).status).toBe('passed');
+  });
+
+  it('plan rerun makes the first Plan work pending even when prior artifact files exist', () => {
+    const run = startRun();
+    completePlanTasks(run);
+    passPlanChecks(run);
+
+    const planStage = run.stageRun(Stage.Plan);
+    expect(planStage.status).toBe('awaiting-approval');
+    expect(planStage.findTask('proposal').status).toBe('completed');
+    expect(planStage.findTask('specs').status).toBe('completed');
+    expect(planStage.findTask('design').status).toBe('completed');
+    expect(planStage.findTask('tasks').status).toBe('completed');
+    expect(planStage.findTask('self-review').status).toBe('completed');
+
+    run.rerunStage(Stage.Plan);
+
+    expect(run.status).toBe('running');
+    expect(run.currentStage).toBe(Stage.Plan);
+    expect(planStage.status).toBe('running');
+    expect(planStage.failure).toBeNull();
+    expect(planStage.approval).toBeNull();
+    expect(planStage.findTask('proposal')).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(planStage.findTask('specs')).toMatchObject({ status: 'pending' });
+    expect(planStage.findTask('design')).toMatchObject({ status: 'pending' });
+    expect(planStage.findTask('tasks')).toMatchObject({ status: 'pending' });
+    expect(planStage.findTask('self-review')).toMatchObject({ status: 'pending' });
+  });
+
+  it('rerun does not reset earlier passed stages', () => {
+    const run = startRun();
+    advanceToIntegrate(run);
+
+    const planStage = run.stageRun(Stage.Plan);
+    const buildStage = run.stageRun(Stage.Build);
+    const checkStage = run.stageRun(Stage.Check);
+    expect(planStage.status).toBe('passed');
+    expect(buildStage.status).toBe('passed');
+    expect(checkStage.status).toBe('passed');
+
+    run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'failed', reason: 'spec sync failed' });
+    expect(run.currentStage).toBe(Stage.Integrate);
+    expect(run.status).toBe('failed');
+
+    run.rerunStage(Stage.Integrate);
+
+    expect(run.currentStage).toBe(Stage.Integrate);
+    expect(run.status).toBe('running');
+    expect(run.stageRun(Stage.Plan).status).toBe('passed');
+    expect(run.stageRun(Stage.Build).status).toBe('passed');
+    expect(run.stageRun(Stage.Check).status).toBe('passed');
+  });
+
+  it('rerun resets all current-stage tasks from the first work item, not just from first incomplete', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [
+      { id: 'T-001', title: 'First build task', order: 0 },
+      { id: 'T-002', title: 'Second build task', order: 1, dependsOn: ['T-001'] },
+    ]);
+    const buildStage = run.stageRun(Stage.Build);
+    buildStage.findTask('T-001').attempts = 2;
+    buildStage.findTask('T-001').status = 'completed';
+    buildStage.findTask('T-001').output = { text: 'done' };
+    buildStage.findTask('T-002').status = 'completed';
+    buildStage.findTask('T-002').attempts = 1;
+    buildStage.findTask('T-002').output = { text: 'also done' };
+    buildStage.findCheck('health:build').status = 'passed';
+
+    const decision = run.rerunStage(Stage.Build);
+
+    expect(run.status).toBe('running');
+    expect(buildStage.findTask('T-001')).toMatchObject({ status: 'pending', attempts: 0, output: null, artifacts: [] });
+    expect(buildStage.findTask('T-002')).toMatchObject({ status: 'pending', attempts: 0, output: null, artifacts: [] });
+    expect(buildStage.findCheck('health:build')).toMatchObject({ status: 'pending', runCount: 0 });
     expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
   });
 
@@ -261,6 +402,97 @@ describe('WorkflowRun domain aggregate', () => {
     expect(fix.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
   });
 
+  it('retries a failed task and resets same-stage downstream work while preserving earlier completed tasks', () => {
+    const run = startRun();
+
+    completePlanTasks(run);
+    passPlanChecks(run);
+    run.approveStage(Stage.Plan, { output: { approved: true } });
+    run.materializeTasks(Stage.Build, [
+      { id: 'T-001', title: 'First build task', order: 0 },
+      { id: 'T-002', title: 'Second build task', order: 1, dependsOn: ['T-001'] },
+      { id: 'T-003', title: 'Third build task', order: 2, dependsOn: ['T-002'] },
+    ]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.completeTask(Stage.Build, 'T-002', { status: 'failed', reason: 'compilation error' });
+    expect(run.status).toBe('failed');
+    expect(run.failure?.taskId).toBe('T-002');
+
+    const retry = run.retryStage(Stage.Build);
+
+    expect(run.status).toBe('running');
+    expect(run.failure).toBeNull();
+    expect(run.currentStage).toBe(Stage.Build);
+    expect(run.stageRun(Stage.Build).findTask('T-001')).toMatchObject({ status: 'completed' });
+    expect(run.stageRun(Stage.Build).findTask('T-002')).toMatchObject({ status: 'pending' });
+    expect(run.stageRun(Stage.Build).findTask('T-003')).toMatchObject({ status: 'pending' });
+    expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-002' });
+  });
+
+  it('retries a failed check and resets downstream checks while preserving completed tasks', () => {
+    const definitions: StageDefinition[] = [
+      {
+        stage: Stage.Build,
+        tasks: [{ id: 'T-001', title: 'Build task', order: 0 }],
+        checks: [
+          { name: 'first-check', title: 'First check' },
+          { name: 'second-check', title: 'Second check' },
+        ],
+      },
+    ];
+    const run = startRun(definitions);
+
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'first-check', status: 'pass' });
+    run.recordCheckResult(Stage.Build, { name: 'second-check', status: 'fail', message: 'second check failed' });
+
+    expect(run.status).toBe('failed');
+    expect(run.failure?.checkName).toBe('second-check');
+
+    const retry = run.retryStage(Stage.Build);
+
+    expect(run.status).toBe('running');
+    expect(run.failure).toBeNull();
+    expect(run.stageRun(Stage.Build).findTask('T-001')).toMatchObject({ status: 'completed' });
+    expect(run.stageRun(Stage.Build).findCheck('first-check')).toMatchObject({ status: 'passed' });
+    expect(run.stageRun(Stage.Build).findCheck('second-check')).toMatchObject({ status: 'pending' });
+  });
+
+  it('retries a failed check and resets caused-by repair tasks while preserving unrelated completed tasks', () => {
+    const definitions: StageDefinition[] = [
+      {
+        stage: Stage.Build,
+        tasks: [{ id: 'T-001', title: 'First task' }],
+        checks: [
+          { name: 'first-check', title: 'First check' },
+          { name: 'second-check', title: 'Second check' },
+        ],
+        checkFailurePolicies: [
+          { checkName: 'first-check', fixTaskId: 'fix-first', fixTaskTitle: 'Fix first', maxAttempts: 1 },
+          { checkName: 'second-check', fixTaskId: 'fix-second', fixTaskTitle: 'Fix second', maxAttempts: 1 },
+        ],
+      },
+    ];
+    const run = startRun(definitions);
+
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'first-check', status: 'pass' });
+    run.recordCheckResult(Stage.Build, { name: 'second-check', status: 'fail', message: 'second check failed' });
+    run.completeTask(Stage.Build, 'fix-second', { status: 'completed' });
+    expect(run.status).toBe('running');
+
+    run.recordCheckResult(Stage.Build, { name: 'second-check', status: 'fail', message: 'still failing after repair' });
+    expect(run.status).toBe('failed');
+    expect(run.failure?.checkName).toBe('second-check');
+
+    const retry = run.retryStage(Stage.Build);
+
+    expect(run.status).toBe('running');
+    expect(run.failure).toBeNull();
+    expect(run.stageRun(Stage.Build).findCheck('first-check')).toMatchObject({ status: 'passed' });
+    expect(run.stageRun(Stage.Build).findCheck('second-check')).toMatchObject({ status: 'pending' });
+  });
+
   it('retries a failed check stage by re-running ai-review after review findings were fixed', () => {
     const run = startRun();
     advanceToBuild(run);
@@ -300,6 +532,11 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.stageRun(Stage.Check).findTask('fix-review-findings')).toMatchObject({ status: 'completed' });
     expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({ status: 'pending' });
     expect(run.stageRun(Stage.Check).findCheck('review-passed')).toMatchObject({
+      status: 'pending',
+      message: null,
+      output: null,
+    });
+    expect(run.stageRun(Stage.Check).findCheck('health:check')).toMatchObject({
       status: 'pending',
       message: null,
       output: null,
@@ -351,6 +588,61 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.stageRun(Stage.Plan).approval?.output).toEqual({ approved: true, note: 'ship it' });
     expect(run.currentStage).toBe(Stage.Build);
     expect(decision.nextWork).toEqual({ kind: 'check', stage: Stage.Build, checkName: 'health:build' });
+  });
+
+  it('requests Check approval with merge-ready and verification evidence', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, {
+      name: 'health:check',
+      status: 'pass',
+      output: {
+        command: 'npm test',
+        duration: 42,
+        summary: 'tests passed',
+        logExcerpt: 'ok',
+        candidateHeadSha: 'candidate-sha',
+        baseSha: 'base-sha',
+      },
+    });
+    run.recordCheckResult(Stage.Check, {
+      name: 'review-passed',
+      status: 'pass',
+      output: { verdict: 'PASS', reviewReport: 'PASS report', snapshotSha: 'candidate-sha' },
+    });
+    run.recordCheckResult(Stage.Check, {
+      name: 'merge-ready',
+      status: 'pass',
+      output: {
+        kind: 'merge-ready',
+        targetBranch: 'master',
+        strategy: 'squash',
+        baseSha: 'base-sha',
+        candidateHeadSha: 'candidate-sha',
+        mergeBaseSha: 'base-sha',
+        canMerge: true,
+        conflictFiles: [],
+        checkedAt: '2026-05-15T00:00:00.000Z',
+      },
+    });
+
+    const approvalOutput = run.stageRun(Stage.Check).approval?.output as Record<string, unknown>;
+
+    expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
+    expect(approvalOutput.mergeReadySnapshot).toMatchObject({
+      kind: 'merge-ready',
+      candidateHeadSha: 'candidate-sha',
+      canMerge: true,
+    });
+    expect(approvalOutput.verificationEvidence).toMatchObject({
+      checkName: 'health:check',
+      candidateHeadSha: 'candidate-sha',
+      baseSha: 'base-sha',
+    });
   });
 
   it('rejectStage only works while awaiting approval, preserves output, and fails with approval-rejected', () => {

@@ -928,7 +928,12 @@ export function setupIssueCommands(program: Command): void {
         );
         
         if (response.success) {
-          console.log(chalk.yellow(`✓ Issue #${number} rejected, pipeline will restart`));
+          const message = response.data?.message;
+          if (message) {
+            console.log(chalk.yellow(`✓ ${message}`));
+          } else {
+            console.log(chalk.yellow(`✓ Issue #${number} rejected`));
+          }
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
         }

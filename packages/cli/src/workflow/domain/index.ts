@@ -367,6 +367,45 @@ export class StageRun {
     check.output = null;
   }
 
+  resetTaskAndDownstream(taskId: string): void {
+    const task = this.findTask(taskId);
+    const boundaryOrder = task.order;
+
+    for (const t of this.tasks) {
+      if (t.order >= boundaryOrder) {
+        t.status = 'pending';
+        t.duration = 0;
+        t.artifacts = [];
+        t.output = null;
+        t.reason = null;
+        t.causedBy = null;
+      }
+    }
+  }
+
+  resetCheckAndDownstream(checkName: string): void {
+    const boundaryIndex = this.checks.findIndex(c => c.name === checkName);
+
+    for (const [index, c] of this.checks.entries()) {
+      if (index >= boundaryIndex) {
+        c.status = 'pending';
+        c.message = null;
+        c.output = null;
+      }
+    }
+
+    for (const t of this.tasks) {
+      if (t.causedBy?.type === 'check-failure' && t.causedBy.checkName === checkName) {
+        t.status = 'pending';
+        t.duration = 0;
+        t.artifacts = [];
+        t.output = null;
+        t.reason = null;
+        t.causedBy = null;
+      }
+    }
+  }
+
   scheduledFixCount(checkName: string): number {
     return this.tasks.filter(task => task.causedBy?.type === 'check-failure' && task.causedBy.checkName === checkName).length;
   }
@@ -784,6 +823,9 @@ export class WorkflowRun {
       throw new WorkflowDomainError(`Stage ${stage} is not failed`);
     }
 
+    const stageFailureReason = stageRun.failure?.reason;
+    const runFailureReason = this.failure?.reason;
+
     this.status = 'running';
     this.failure = null;
 
@@ -800,44 +842,84 @@ export class WorkflowRun {
     }
 
     stageRun.status = 'running';
-    const wasApprovalRejected = stageRun.failure?.reason === 'approval-rejected';
+    const wasApprovalRejected = (stageFailureReason ?? runFailureReason) === 'approval-rejected';
+    const failedTask = stageRun.tasks.find(t => t.status === 'failed' || t.status === 'skipped');
+    const failedCheck = stageRun.checks.find(c => c.status === 'failed' || c.status === 'error');
     stageRun.failure = null;
     stageRun.approval = null;
 
-    const firstIncompleteTaskIndex = stageRun.tasks.findIndex(task => task.status !== 'completed');
-    const resetFromIndex = wasApprovalRejected ? 0 : firstIncompleteTaskIndex;
-    for (const [index, task] of stageRun.tasks.entries()) {
-      if (!wasApprovalRejected && task.status === 'completed' && (firstIncompleteTaskIndex === -1 || index < firstIncompleteTaskIndex)) continue;
-      if (resetFromIndex !== -1 && index < resetFromIndex) continue;
-      task.status = 'pending';
-      task.duration = 0;
-      task.artifacts = [];
-      task.output = null;
-      task.reason = null;
-      task.causedBy = null;
-    }
-    for (const check of stageRun.checks) {
-      check.status = 'pending';
-      check.message = null;
-      check.output = null;
-    }
-
-    if (
-      stage === Stage.Check &&
-      stageRun.tasks.some(task => task.id.startsWith('fix-review-findings') && task.status === 'completed')
-    ) {
-      const reason = 'Retrying Check after review findings were fixed; re-run AI review before rechecking';
-      stageRun.resetTask('ai-review');
-      for (const checkName of ['health:check', 'review-passed', 'merge-ready']) {
-        stageRun.resetCheck(checkName);
+    if (wasApprovalRejected) {
+      for (const task of stageRun.tasks) {
+        task.status = 'pending';
+        task.duration = 0;
+        task.artifacts = [];
+        task.output = null;
+        task.reason = null;
+        task.causedBy = null;
       }
-      return this.decision([
-        { type: 'stage-retried', stage },
-        { type: 'task-invalidated', stage, taskId: 'ai-review', reason },
-        { type: 'check-invalidated', stage, checkName: 'health:check', reason },
-        { type: 'check-invalidated', stage, checkName: 'review-passed', reason },
-        { type: 'check-invalidated', stage, checkName: 'merge-ready', reason },
-      ]);
+      for (const check of stageRun.checks) {
+        check.status = 'pending';
+        check.message = null;
+        check.output = null;
+      }
+    } else {
+      if (failedTask) {
+        stageRun.resetTaskAndDownstream(failedTask.id);
+        for (const check of stageRun.checks) {
+          check.status = 'pending';
+          check.message = null;
+          check.output = null;
+        }
+      } else if (failedCheck) {
+        if (
+          stage === Stage.Check &&
+          stageRun.tasks.some(task => task.id.startsWith('fix-review-findings') && task.status === 'completed')
+        ) {
+          const reason = 'Retrying Check after review findings were fixed; re-run AI review before rechecking';
+          stageRun.resetTask('ai-review');
+          for (const checkName of ['health:check', 'review-passed', 'merge-ready']) {
+            stageRun.resetCheck(checkName);
+          }
+          return this.decision([
+            { type: 'stage-retried', stage },
+            { type: 'task-invalidated', stage, taskId: 'ai-review', reason },
+            { type: 'check-invalidated', stage, checkName: 'health:check', reason },
+            { type: 'check-invalidated', stage, checkName: 'review-passed', reason },
+            { type: 'check-invalidated', stage, checkName: 'merge-ready', reason },
+          ]);
+        }
+
+        for (const task of stageRun.tasks) {
+          if (!task.terminal) {
+            const isRepairTaskForFailedCheck = task.causedBy?.type === 'check-failure' && task.causedBy.checkName === failedCheck.name;
+            if (!isRepairTaskForFailedCheck) {
+              task.status = 'pending';
+              task.duration = 0;
+              task.artifacts = [];
+              task.output = null;
+              task.reason = null;
+              task.causedBy = null;
+            }
+          }
+        }
+        stageRun.resetCheckAndDownstream(failedCheck.name);
+      } else {
+        for (const task of stageRun.tasks) {
+          if (!task.terminal) {
+            task.status = 'pending';
+            task.duration = 0;
+            task.artifacts = [];
+            task.output = null;
+            task.reason = null;
+            task.causedBy = null;
+          }
+        }
+        for (const check of stageRun.checks) {
+          check.status = 'pending';
+          check.message = null;
+          check.output = null;
+        }
+      }
     }
 
     return this.decision([{ type: 'stage-retried', stage }]);
@@ -853,29 +935,41 @@ export class WorkflowRun {
   }
 
   rerunStage(stage: Stage): WorkflowDecision {
-    if (this.status !== 'running') {
-      throw new WorkflowDomainError(`WorkflowRun is ${this.status}`);
-    }
     const stageRun = this.assertCurrentStage(stage);
-    if (stageRun.status !== 'running') {
-      throw new WorkflowDomainError(`Stage ${stage} is not running`);
+
+    this.status = 'running';
+    this.failure = null;
+
+    for (const priorStageRun of this.stageRuns) {
+      if (priorStageRun.order >= stageRun.order) break;
+      if (priorStageRun.status !== 'passed') continue;
+      for (const task of priorStageRun.tasks) {
+        if (task.status === 'completed') continue;
+        task.status = 'completed';
+        if (task.attempts === 0) task.attempts = 1;
+        task.reason = null;
+        task.causedBy = null;
+      }
     }
 
-    const firstIncompleteTaskIndex = stageRun.tasks.findIndex(task => task.status !== 'completed');
-    const resetFromIndex = firstIncompleteTaskIndex === -1 ? 0 : firstIncompleteTaskIndex;
-    for (const [index, task] of stageRun.tasks.entries()) {
-      if (index < resetFromIndex) continue;
+    stageRun.status = 'running';
+    stageRun.failure = null;
+    stageRun.approval = null;
+
+    for (const task of stageRun.tasks) {
       task.status = 'pending';
       task.duration = 0;
       task.artifacts = [];
       task.output = null;
       task.reason = null;
       task.causedBy = null;
+      task.attempts = 0;
     }
     for (const check of stageRun.checks) {
       check.status = 'pending';
       check.message = null;
       check.output = null;
+      check.runCount = 0;
     }
 
     return this.decision([{ type: 'stage-retried', stage }]);
@@ -982,7 +1076,9 @@ export class WorkflowRun {
     const mergeReady = stageRun.checks.find(check => check.name === 'merge-ready');
     if (reviewPassed?.status !== 'passed' || mergeReady?.status !== 'passed') return null;
     if (!reviewPassed.output || typeof reviewPassed.output !== 'object') return null;
+    if (!mergeReady.output || typeof mergeReady.output !== 'object') return null;
     const reviewOutput = reviewPassed.output as Record<string, unknown>;
+    const mergeReadySnapshot = mergeReady.output as Record<string, unknown>;
     const snapshotSha = reviewOutput.snapshotSha;
     if (typeof snapshotSha !== 'string' || snapshotSha.length === 0) return null;
 
@@ -1002,6 +1098,7 @@ export class WorkflowRun {
       reviewReport: reviewOutput.reviewReport,
       dimensions: reviewOutput.dimensions,
       snapshotSha,
+      mergeReadySnapshot,
       verificationEvidence,
     };
   }

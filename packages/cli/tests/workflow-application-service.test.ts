@@ -392,3 +392,154 @@ describe('WorkflowApplicationService', () => {
     expect(planApproval?.output).not.toEqual({ approved: true, snapshotSha: 'xyz' });
   });
 });
+
+describe('WorkflowApplicationService.checkRetryAvailability', () => {
+  it('returns no-failed-workflow-run when no aggregate exists', () => {
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => { throw new Error('unexpected'); },
+      loadActiveAggregate: () => null,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
+
+    expect(result.available).toBe(false);
+    expect(result.reason).toBe('no-failed-workflow-run');
+    expect(result.message).toContain('No workflow run found');
+  });
+
+  it('returns no-failed-workflow-run when run is not failed', () => {
+    const run = createRunningPlanRun();
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
+
+    expect(result.available).toBe(false);
+    expect(result.reason).toBe('no-failed-workflow-run');
+    expect(result.message).toContain('No failed workflow run');
+  });
+
+  it('returns stage-mismatch when current stage differs', () => {
+    const run = createRunningPlanRun();
+    run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
+    expect(run.snapshot().status).toBe('failed');
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Build });
+
+    expect(result.available).toBe(false);
+    expect(result.reason).toBe('stage-mismatch');
+  });
+
+  it('returns no-failed-workflow-run when run status is not failed', () => {
+    const run = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    expect(run.snapshot().status).toBe('running');
+    expect(run.stageRun(Stage.Plan).status).toBe('awaiting-approval');
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
+
+    expect(result.available).toBe(false);
+    expect(result.reason).toBe('no-failed-workflow-run');
+  });
+
+  it('returns available when run is failed with a failed task', () => {
+    const run = createRunningPlanRun();
+    run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
+    expect(run.snapshot().status).toBe('failed');
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
+
+    expect(result.available).toBe(true);
+    expect(result.reason).toBeNull();
+  });
+
+  it('returns available when run is failed with a failed check', () => {
+    const run = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    run.recordCheckResult(Stage.Plan, { name: 'proposal-complete', status: 'fail', message: 'incomplete' });
+    expect(run.snapshot().status).toBe('failed');
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
+
+    expect(result.available).toBe(true);
+    expect(result.reason).toBeNull();
+  });
+
+  it('returns available when latest aggregate is failed even when active is null', () => {
+    const run = createRunningPlanRun();
+    run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
+    expect(run.snapshot().status).toBe('failed');
+
+    const calls: string[] = [];
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => {
+        calls.push('loadActiveAggregate');
+        return null;
+      },
+      loadRunningAggregate: () => {
+        calls.push('loadRunningAggregate');
+        return null;
+      },
+      loadLatestAggregate: () => {
+        calls.push('loadLatestAggregate');
+        return run;
+      },
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
+
+    expect(result.available).toBe(true);
+    expect(calls).toContain('loadLatestAggregate');
+  });
+});

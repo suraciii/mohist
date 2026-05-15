@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement WorkflowRun failed-work retry",
+      "spec": "specs/workflow-run/spec.md#REQ-WR-RECOVERY-001",
+      "description": "Update WorkflowRun and StageRun retry behavior so retry reopens the latest failed current-stage work without clearing earlier valid work. Cover failed task retry and failed check retry in focused domain tests.",
+      "acceptanceCriteria": [
+        "Retry of a failed task resets that task and same-stage downstream work while preserving earlier completed tasks",
+        "Retry of a failed check preserves completed tasks and earlier passed checks while resetting the failed check and downstream checks or derived work",
+        "Retry clears current failure and approval state without changing the current stage",
+        "Domain tests cover failed task retry and failed check retry",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts and domain retry tests",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Produces the authoritative retry state transition consumed by API and regression tasks.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1764234
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Implement WorkflowRun current-stage rerun",
+      "spec": "specs/workflow-run/spec.md#REQ-WR-RECOVERY-002",
+      "description": "Update WorkflowRun and StageRun rerun behavior so rerun resets the current stage from the first work item while preserving earlier passed stages. Cover Plan-stage rerun with existing artifact files in focused domain tests.",
+      "acceptanceCriteria": [
+        "Rerun Stage resets all task, check, failure, approval, and retry-derived state in the current stage from the first work item",
+        "Rerun Stage does not change the current stage or reset earlier passed stages",
+        "Plan rerun makes the first Plan work pending even when prior Plan artifact files exist",
+        "Domain tests cover rerun current stage from first work",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts and domain rerun tests",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "May reuse reset helpers introduced for retry in T-001.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1131085
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Make retry API use WorkflowRun failed work",
+      "spec": "specs/http-api/spec.md#REQ-HTTP-RECOVERY-001",
+      "description": "Update the workflow application and retry endpoint so `POST /api/issues/:number/retry` is available when the latest WorkflowRun has retryable failed work in the current stage. Remove checkpoint or `tasks.json` existence as the primary retry gate while preserving distinct external-resource errors.",
+      "acceptanceCriteria": [
+        "`POST /api/issues/:number/retry` accepts a failed current-stage WorkflowRun even when `tasks.json` has not been generated",
+        "Retry availability is rejected with a distinct error when there is no failed WorkflowRun",
+        "Retry availability is rejected with a distinct error when there is no retryable failed work in the current stage",
+        "Retry availability is rejected with distinct errors for missing required project, worktree, or change artifacts",
+        "Retry success queues pipeline recovery without changing stage or clearing the whole stage attempt",
+        "API or service tests cover retry before `tasks.json` exists and the major retry rejection reasons",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/workflow-application-service.ts and packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Consumes T-001 domain retry semantics and exposes them through HTTP.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        542167
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Make rerun API restart current stage work",
+      "spec": "specs/http-api/spec.md#REQ-HTTP-RECOVERY-002",
+      "description": "Update the rerun endpoint and Plan runner so `POST /api/issues/:number/rerun` applies true current-stage rerun semantics instead of retry fallback behavior. Ensure Plan execution honors pending WorkflowRun work during rerun and does not mark artifacts complete solely because old files exist.",
+      "acceptanceCriteria": [
+        "`POST /api/issues/:number/rerun` keeps the current stage unchanged and preserves earlier passed stages",
+        "Rerun clears current-stage checkpoint, failure, approval, blocked reason, and retry count before queueing recovery",
+        "Rerun resumes execution from the first current-stage work item rather than first incomplete work",
+        "Plan rerun executes `proposal`, `specs`, `design`, `tasks`, and `self-review` according to WorkflowRun pending work even when prior artifact files already exist",
+        "Normal interruption resume can still use completed checkpoint or WorkflowRun state to avoid unnecessary Plan artifact regeneration",
+        "Tests cover rerun restarting Plan from the first Plan work with existing `proposal.md`, `specs/`, and `design.md` files",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts and packages/cli/src/workflow/plan-stage-runner.ts",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Consumes T-002 rerun semantics and T-003 recovery API error structure.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        930797
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Show retry errors in Issue detail",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-RECOVERY-001",
+      "description": "Update Issue detail recovery actions so retry mutation errors are displayed through the same action error area as rerun, start, close, and reopen failures. Add UI coverage proving retry API errors are visible after a failed retry click.",
+      "acceptanceCriteria": [
+        "Issue detail action error area displays retry mutation errors returned by the API",
+        "Retry, Rerun Stage, Start, Close, and Reopen action errors use the same visible error display pattern on Issue detail",
+        "The user can still see and choose other available recovery actions after a retry error appears",
+        "Web UI tests or component coverage verify retry API errors are visible to the user",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueDetailPage.tsx and related tests",
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Consumes the visible API errors from T-003 and rerun behavior from T-004.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        136163
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Align CLI recovery vocabulary",
+      "spec": "specs/cli-interface/spec.md#REQ-CLI-RECOVERY-001",
+      "description": "Update CLI-facing workflow recovery messages so they use retry, rerun, and rewind terminology consistently. Remove workflow recovery copy that says the pipeline will restart, while leaving unrelated server restart commands intact.",
+      "acceptanceCriteria": [
+        "CLI recovery guidance uses retry, rerun, and rewind terminology for workflow recovery",
+        "Approval rejection output no longer says the pipeline will restart",
+        "Workflow recovery copy does not use restart except for unrelated server restart commands or the removed restart endpoint message",
+        "CLI tests or targeted assertions cover the changed recovery message",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts and related tests",
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Consumes API recovery terminology from T-003 and T-004.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        106291
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Add #215 recovery regression coverage",
+      "spec": "specs/http-api/spec.md#REQ-HTTP-RECOVERY-001",
+      "description": "Add end-to-end or integration-style regression coverage for the #215 failure shape: Plan fails while generating `tasks.json`, retry retries the failed Plan artifact work, and rerun restarts Plan from the first Plan work. Use existing test infrastructure and keep the scenario deterministic without requiring external agent calls.",
+      "acceptanceCriteria": [
+        "Regression test simulates Plan failure while generating `tasks.json` before the file exists",
+        "Regression test verifies Retry retries the failed Plan work instead of returning a checkpoint-required error",
+        "Regression test verifies Rerun Stage restarts Plan from the first Plan work instead of continuing at `tasks` or `self-review`",
+        "Regression test verifies retry and rerun preserve the stage and do not rerun earlier passed stages",
+        "Relevant package tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests recovery regression coverage",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "Final verification task; depends on all behavior and user-surface changes being present.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        446944
+      ]
+    }
+  ]
+}

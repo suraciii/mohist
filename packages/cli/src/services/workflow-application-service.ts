@@ -32,6 +32,27 @@ export interface WorkflowCommandOptions {
 
 type CheckRepairScheduleStatus = 'scheduled' | 'already-running' | 'exhausted' | 'not-check-stage' | 'not-available';
 
+export type RetryRejectionReason =
+  | 'no-failed-workflow-run'
+  | 'stage-mismatch'
+  | 'no-retryable-failed-work'
+  | 'missing-project'
+  | 'missing-worktree'
+  | 'missing-change-artifacts';
+
+export interface RetryAvailability {
+  available: true;
+  reason: null;
+}
+
+export interface RetryRejection {
+  available: false;
+  reason: RetryRejectionReason;
+  message: string;
+}
+
+export type RetryCheckResult = RetryAvailability | RetryRejection;
+
 export class WorkflowApplicationService {
   private repo: WorkflowRunRepositoryPort;
   private projection: WorkflowRunProjectionPort;
@@ -47,6 +68,49 @@ export class WorkflowApplicationService {
       this.repo = new WorkflowRunRepo(db);
       this.projection = new WorkflowRunProjection(db);
     }
+  }
+
+  checkRetryAvailability(input: { issueId: string; stage: Stage; tasksPath?: string }): RetryCheckResult {
+    const run = this.repo.loadLatestAggregate?.(input.issueId, { tasksPath: input.tasksPath })
+      ?? this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
+
+    if (!run) {
+      return {
+        available: false as const,
+        reason: 'no-failed-workflow-run' as const,
+        message: `No workflow run found for this issue. The pipeline may not have started yet.`,
+      };
+    }
+
+    if (run.snapshot().status !== 'failed') {
+      return {
+        available: false as const,
+        reason: 'no-failed-workflow-run' as const,
+        message: `No failed workflow run to retry. Current status is '${run.snapshot().status}'.`,
+      };
+    }
+
+    if (run.currentStage !== input.stage) {
+      return {
+        available: false as const,
+        reason: 'stage-mismatch' as const,
+        message: `Workflow run is in '${run.currentStage}' stage, but this action is for '${input.stage}'.`,
+      };
+    }
+
+    const stageRun = run.stageRun(input.stage);
+    const failedTask = stageRun.tasks.find(t => t.status === 'failed' || t.status === 'skipped');
+    const failedCheck = stageRun.checks.find(c => c.status === 'failed' || c.status === 'error');
+
+    if (!failedTask && !failedCheck) {
+      return {
+        available: false as const,
+        reason: 'no-retryable-failed-work' as const,
+        message: `The workflow run shows a failure, but no failed task or check was found in the '${input.stage}' stage.`,
+      };
+    }
+
+    return { available: true as const, reason: null };
   }
 
   startWorkflow(input: { issueId: string; issueNumber: number } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
@@ -87,6 +151,40 @@ export class WorkflowApplicationService {
     return { run, decision };
   }
 
+  retryStageOrReject(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { ok: true; run: WorkflowRun; decision: WorkflowDecision } | { ok: false; reason: RetryRejectionReason; message: string } {
+    const availability = this.checkRetryAvailability(input);
+    if (!availability.available) {
+      return { ok: false, reason: availability.reason, message: availability.message };
+    }
+
+    const run = this.repo.loadLatestAggregate
+      ? this.repo.loadLatestAggregate(input.issueId, { tasksPath: input.tasksPath })
+      : this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
+    if (!run) {
+      return {
+        ok: false,
+        reason: 'no-failed-workflow-run' as const,
+        message: `No workflow run found for this issue.`,
+      };
+    }
+
+    try {
+      const decision = run.retryStage(input.stage);
+      this.repo.saveAggregate(run, input.startedBy ?? null);
+      this.projection.apply({ run, decision, sessionId: input.sessionId });
+      return { ok: true, run, decision };
+    } catch (error) {
+      if (error instanceof Error) {
+        return {
+          ok: false,
+          reason: 'no-retryable-failed-work' as const,
+          message: `Retry failed: ${error.message}`,
+        };
+      }
+      throw error;
+    }
+  }
+
   rerunStage(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
     const run = this.repo.loadRunningAggregate
       ? this.repo.loadRunningAggregate(input.issueId, { tasksPath: input.tasksPath })
@@ -103,7 +201,7 @@ export class WorkflowApplicationService {
       throw new Error(`No active WorkflowRun for issue ${input.issueId}`);
     }
 
-    const decision = latestRun.retryStage(input.stage);
+    const decision = latestRun.rerunStage(input.stage);
     this.repo.saveAggregate(latestRun, input.startedBy ?? null);
     this.projection.apply({ run: latestRun, decision, sessionId: input.sessionId });
     return { run: latestRun, decision };
