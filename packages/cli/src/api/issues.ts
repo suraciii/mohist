@@ -475,6 +475,22 @@ export function createIssueRoutes(
 
   const activeWorkflowRunExists = (issueId: string): boolean => Boolean(workflowRunService?.getActiveRunForIssue(issueId));
 
+  const getLifecycleStartRejection = (issue: Issue): string | null => {
+    if (issue.status === IssueStatus.Blocked) {
+      return `Issue #${issue.number} is blocked. Use: mo issue retry ${issue.number} or mo issue rerun ${issue.number}`;
+    }
+    if (issue.status === IssueStatus.Closed) {
+      return `Issue #${issue.number} is closed. Run: mo issue reopen ${issue.number}`;
+    }
+    if (issue.status === IssueStatus.Paused) {
+      return `Issue #${issue.number} is paused. Run: mo issue approve ${issue.number} to resume`;
+    }
+    if (issue.stage !== Stage.Backlog) {
+      return `Issue #${issue.number} is not in a startable stage (current: ${issue.stage}). Only backlog issues can be started.`;
+    }
+    return null;
+  };
+
   const getIssueTasksPath = (projectId: string, issue: Issue): string | undefined => {
     const project = projectService.getById(projectId);
     const worktreePath = project && worktreeManager ? worktreeManager.getPath(project.name, issue.number) : null;
@@ -1220,6 +1236,11 @@ export function createIssueRoutes(
             error: startEligibility.message ?? `Issue #${number} is not startable: ${startEligibility.reason}`,
             data: { startEligibility },
           } satisfies ApiResponse, 400);
+        }
+      } else {
+        const lifecycleRejection = getLifecycleStartRejection(issue);
+        if (lifecycleRejection) {
+          return c.json({ success: false, error: lifecycleRejection } satisfies ApiResponse, 400);
         }
       }
 

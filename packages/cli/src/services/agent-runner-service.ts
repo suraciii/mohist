@@ -1104,10 +1104,14 @@ export class AgentRunnerService {
         log.info('Unblocking approved issue before resume', { issueNumber: issue.number });
         this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
         this.issueRepo.updateBlockedReason(issue.id, null);
-      } else if (this.isRetryableFailedWorkflow(issue)) {
-        log.info('Unblocking failed workflow before retry resume', { issueNumber: issue.number, stage: issue.stage });
-        this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
-        this.issueRepo.updateBlockedReason(issue.id, null);
+      } else if (this.workflowRunService) {
+        if (this.workflowRunService.canRetryStage(issue.id, issue.stage)) {
+          log.info('Allowing retryable blocked issue to resume pipeline', { issueNumber: issue.number });
+        } else {
+          log.info('Skipping resume-pipeline: issue is blocked without retryable current-stage failure', { issueNumber: issue.number });
+          this.completeTask(task.id, 'completed', 'skipped');
+          return;
+        }
       } else {
         log.info('Skipping resume-pipeline: issue is blocked', { issueNumber: issue.number });
         this.completeTask(task.id, 'completed', 'skipped');
@@ -1157,12 +1161,6 @@ export class AgentRunnerService {
 
     const acpOptions: AgentSessionOptions = { cwd: worktreePath };
     await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
-  }
-
-  private isRetryableFailedWorkflow(issue: Issue): boolean {
-    if (!this.workflowRunService) return false;
-    const latestRun = this.workflowRunService.getLatestRunForIssue(issue.id);
-    return latestRun?.status === 'failed' && latestRun.currentStage === issue.stage;
   }
 
   private async runPipelineToCompletion(

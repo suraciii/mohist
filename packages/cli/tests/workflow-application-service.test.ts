@@ -205,4 +205,190 @@ describe('WorkflowApplicationService', () => {
       'projection.apply:failed',
     ]);
   });
+
+  it('stores string rejection feedback in approval output', () => {
+    const run = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    expect(run.stageRun(Stage.Plan).approval?.status).toBe('awaiting');
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+
+    const service = new WorkflowApplicationService(repo, projection);
+    const result = service.rejectStage({
+      issueId: 'issue-1',
+      stage: Stage.Plan,
+      approval: { output: 'Please make the proposal more specific' },
+    });
+
+    const planApproval = result.run.stageRun(Stage.Plan).approval;
+    expect(planApproval?.status).toBe('rejected');
+    expect(planApproval?.output).toBe('Please make the proposal more specific');
+    expect(result.run.failure?.reason).toBe('approval-rejected');
+    expect(result.run.failure?.message).toBe('Please make the proposal more specific');
+  });
+
+  it('stores structured rejection feedback in approval output', () => {
+    const run = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+
+    const service = new WorkflowApplicationService(repo, projection);
+    const rejectionFeedback = { feedback: 'Proposal needs more detail', approvalContext: 'Prior approval request was approved' };
+    const result = service.rejectStage({
+      issueId: 'issue-1',
+      stage: Stage.Plan,
+      approval: { output: rejectionFeedback },
+    });
+
+    const planApproval = result.run.stageRun(Stage.Plan).approval;
+    expect(planApproval?.status).toBe('rejected');
+    expect(planApproval?.output).toEqual(rejectionFeedback);
+    const output = planApproval?.output as { feedback?: string; approvalContext?: string };
+    expect(output.feedback).toBe('Proposal needs more detail');
+    expect(output.approvalContext).toBe('Prior approval request was approved');
+  });
+
+  it('rejection feedback replaces prior approval output rather than being shadowed by it', () => {
+    const run = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+
+    const service = new WorkflowApplicationService(repo, projection);
+    const priorApprovalOutput = { approved: true, snapshotSha: 'abc123' };
+    const newRejectionFeedback = 'The proposal is too vague, please redo';
+    service.approveStage({
+      issueId: 'issue-1',
+      stage: Stage.Plan,
+      approval: { output: priorApprovalOutput },
+    });
+
+    const latestRun = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      latestRun.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      latestRun.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+
+    const repo2: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => latestRun,
+      loadActiveAggregate: () => latestRun,
+      saveAggregate: () => {},
+    };
+    const projection2: WorkflowRunProjectionPort = { apply: () => {} };
+    const service2 = new WorkflowApplicationService(repo2, projection2);
+
+    const result = service2.rejectStage({
+      issueId: 'issue-1',
+      stage: Stage.Plan,
+      approval: { output: newRejectionFeedback },
+    });
+
+    const planApproval = result.run.stageRun(Stage.Plan).approval;
+    expect(planApproval?.output).toBe(newRejectionFeedback);
+    expect(planApproval?.output).not.toEqual(priorApprovalOutput);
+  });
+
+  it('rejects stage and enqueues resume-pipeline through workflow application service', () => {
+    const run = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+
+    const service = new WorkflowApplicationService(repo, projection);
+    const result = service.rejectStage({
+      issueId: 'issue-1',
+      stage: Stage.Plan,
+      approval: { output: 'Try again with more detail' },
+    });
+
+    expect(result.run.snapshot().status).toBe('failed');
+    expect(result.decision.events).toContainEqual(expect.objectContaining({ type: 'approval-rejected', stage: Stage.Plan }));
+    expect(result.decision.nextWork.kind).toBe('failed');
+  });
+
+  it('rejection with string message stores message, not prior approval output', () => {
+    const run = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+
+    const service = new WorkflowApplicationService(repo, projection);
+    service.approveStage({ issueId: 'issue-1', stage: Stage.Plan, approval: { output: { approved: true, snapshotSha: 'xyz' } } });
+
+    const freshRun = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      freshRun.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      freshRun.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    const repo2: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => freshRun,
+      loadActiveAggregate: () => freshRun,
+      saveAggregate: () => {},
+    };
+    const service2 = new WorkflowApplicationService(repo2, projection);
+    const result = service2.rejectStage({
+      issueId: 'issue-1',
+      stage: Stage.Plan,
+      approval: { output: 'The design section is incomplete' },
+    });
+
+    const planApproval = result.run.stageRun(Stage.Plan).approval;
+    expect(planApproval?.output).toBe('The design section is incomplete');
+    expect(planApproval?.output).not.toEqual({ approved: true, snapshotSha: 'xyz' });
+  });
 });

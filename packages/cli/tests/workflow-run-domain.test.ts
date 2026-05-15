@@ -532,4 +532,60 @@ describe('WorkflowRun domain aggregate', () => {
       );
     });
   });
+
+  describe('canRetryStage predicate', () => {
+    it('reports retryable when WorkflowRun is failed at its current stage', () => {
+      const run = startRun();
+      completePlanTasks(run);
+      passPlanChecks(run);
+      run.rejectStage(Stage.Plan, { output: 'needs rework' });
+
+      expect(run.status).toBe('failed');
+      expect(run.currentStage).toBe(Stage.Plan);
+      expect(run.stageRun(Stage.Plan).status).toBe('failed');
+      expect(run.canRetryStage(Stage.Plan)).toBe(true);
+    });
+
+    it('reports non-retryable when WorkflowRun is not failed', () => {
+      const run = startRun();
+      expect(run.status).toBe('running');
+      expect(run.canRetryStage(Stage.Plan)).toBe(false);
+    });
+
+    it('reports non-retryable when failed WorkflowRun currentStage differs from requested stage', () => {
+      const run = startRun();
+      completePlanTasks(run);
+      passPlanChecks(run);
+      run.rejectStage(Stage.Plan, { output: 'needs rework' });
+      expect(run.currentStage).toBe(Stage.Plan);
+
+      expect(run.canRetryStage(Stage.Build)).toBe(false);
+    });
+
+    it('does not mutate the stored WorkflowRun', () => {
+      const run = startRun();
+      completePlanTasks(run);
+      passPlanChecks(run);
+      run.rejectStage(Stage.Plan, { output: 'needs rework' });
+
+      const snapshotBefore = run.snapshot();
+      run.canRetryStage(Stage.Plan);
+      const snapshotAfter = run.snapshot();
+
+      expect(snapshotBefore.status).toBe(snapshotAfter.status);
+      expect(snapshotBefore.currentStage).toBe(snapshotAfter.currentStage);
+      expect(snapshotBefore.stageRuns.map(s => s.status)).toEqual(snapshotAfter.stageRuns.map(s => s.status));
+    });
+
+    it('reports non-retryable for a stage that is failed but not the current stage', () => {
+      const run = startRun();
+      advanceToBuild(run);
+      run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+      run.completeTask(Stage.Build, 'T-001', { status: 'failed', reason: 'crashed' });
+
+      expect(run.status).toBe('failed');
+      expect(run.currentStage).toBe(Stage.Build);
+      expect(run.canRetryStage(Stage.Plan)).toBe(false);
+    });
+  });
 });

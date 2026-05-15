@@ -813,6 +813,15 @@ export class WorkflowRun {
     return this.decision([{ type: 'stage-retried', stage }]);
   }
 
+  canRetryStage(stage: Stage): boolean {
+    if (this.status !== 'failed') return false;
+    if (this.currentStage !== stage) return false;
+    const stageRun = this.stageRuns.find(candidate => candidate.stage === stage);
+    if (!stageRun) return false;
+    if (stageRun.status !== 'failed') return false;
+    return true;
+  }
+
   rerunStage(stage: Stage): WorkflowDecision {
     if (this.status !== 'running') {
       throw new WorkflowDomainError(`WorkflowRun is ${this.status}`);

@@ -31,6 +31,12 @@ export class WorkflowRunService {
     return this.repo.getLatestRunWithRelations(issueId);
   }
 
+  canRetryStage(issueId: string, stage: Stage): boolean {
+    const run = this.repo.loadLatestAggregate(issueId);
+    if (!run) return false;
+    return run.canRetryStage(stage);
+  }
+
   materializeBuildTasks(runId: string, tasks: { id: string; title: string; order: number }[]): void {
     const run = this.repo.findById(runId);
     if (!run) return;

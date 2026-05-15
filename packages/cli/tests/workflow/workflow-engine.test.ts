@@ -70,6 +70,7 @@ function makeEngine(options: {
   config?: ConfigInfo;
   issueRepo?: IssueRepo;
   workflowApplicationService?: WorkflowApplicationRuntime;
+  workflowRunService?: any;
 }) {
   return new WorkflowEngine({
     runners: options.runners,
@@ -91,6 +92,7 @@ function makeEngine(options: {
       archiveChange: vi.fn(),
     } as unknown as ChangeArtifactsManager,
     config: options.config,
+    workflowRunService: options.workflowRunService,
     workflowApplicationService: options.workflowApplicationService,
   });
 }
@@ -242,6 +244,66 @@ describe('WorkflowEngine.buildContext model injection', () => {
     expect(planRunner.capturedContexts[0].acpOptions.cwd).toBe('/tmp');
     expect(planRunner.capturedContexts[0].acpOptions.taskId).toBe('task-123');
     expect(planRunner.capturedContexts[0].acpOptions.model).toBe('injected-model');
+  });
+});
+
+describe('WorkflowEngine aggregate retry startup', () => {
+  it('uses aggregate retryability instead of failed current-stage shape checks', async () => {
+    const issue = makeIssue(Stage.Plan);
+    const service = makeSequencedWorkflowService(issue, [{ kind: 'complete' }]);
+    const workflowRunService = {
+      canRetryStage: vi.fn().mockReturnValue(false),
+      getLatestRunForIssue: vi.fn().mockReturnValue({ status: 'failed', currentStage: Stage.Plan }),
+      getActiveRunForIssue: vi.fn().mockReturnValue(null),
+    };
+
+    const engine = makeEngine({
+      runners: [new CapturingRunner(Stage.Plan, Stage.Build)],
+      workflowApplicationService: service,
+      workflowRunService,
+    });
+
+    await engine.run(issue, { cwd: '/tmp' });
+
+    expect(workflowRunService.canRetryStage).toHaveBeenCalledWith(issue.id, Stage.Plan);
+    expect(service.retryStage).not.toHaveBeenCalled();
+    expect(service.resumeDecision).toHaveBeenCalledWith(issue.id, { tasksPath: '/tmp/change/tasks.json' });
+  });
+
+  it('preserves rejected approval feedback before retryStage clears approval state', async () => {
+    const issue = makeIssue(Stage.Plan);
+    const runner = new CapturingRunner(Stage.Plan, Stage.Build);
+    const service = makeSequencedWorkflowService(issue, [
+      { kind: 'task', stage: Stage.Plan, taskId: 'proposal' },
+      { kind: 'complete' },
+    ]);
+    const workflowRunService = {
+      canRetryStage: vi.fn().mockReturnValue(true),
+      getLatestRunForIssue: vi.fn().mockReturnValue({
+        status: 'failed',
+        currentStage: Stage.Plan,
+        stageRuns: [{ stage: Stage.Plan, approvalStatus: 'rejected', approvalOutput: 'Please rewrite the plan' }],
+      }),
+      getActiveRunForIssue: vi.fn().mockReturnValue({
+        stageRuns: [{ stage: Stage.Plan, approvalStatus: null, approvalOutput: null, tasks: [] }],
+      }),
+    };
+
+    const engine = makeEngine({
+      runners: [runner],
+      workflowApplicationService: service,
+      workflowRunService,
+    });
+
+    await engine.run(issue, { cwd: '/tmp' });
+
+    expect(service.retryStage).toHaveBeenCalledWith({
+      issueId: issue.id,
+      stage: Stage.Plan,
+      tasksPath: '/tmp/change/tasks.json',
+      startedBy: 'retry',
+    });
+    expect(runner.capturedContexts[0].rejectionFeedback).toBe('Please rewrite the plan');
   });
 });
 

@@ -70,6 +70,7 @@ export interface StageContext {
   workflowRun?: WorkflowRunWithStageRuns;
   requestedWork?: WorkflowWork;
   requestedTask?: TaskRunSnapshot;
+  rejectionFeedback?: unknown;
   signal?: AbortSignal;
   emit: (event: string, data: unknown) => void;
   log: (eventType: string, data: object) => void;

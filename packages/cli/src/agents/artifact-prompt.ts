@@ -184,18 +184,34 @@ export function buildSelfReviewPrompt(
   issue: Issue,
   changeDir: string,
   agentConfig?: AgentConfig,
+  rejectionFeedback?: string | null,
 ): string {
   const instructionFile = path.join(ARTIFACTS_DIR, 'self-review.md');
   const instruction = loadFile(instructionFile);
   const existingArtifacts = listExistingArtifacts(changeDir);
 
-  const taskContent = [
+  const taskContentParts: string[] = [
     `Change Directory: ${changeDir}`,
     '',
     formatIssueInfo(issue),
     '',
     'Self-review all generated artifacts.',
-  ].join('\n');
+  ];
+
+  if (rejectionFeedback) {
+    taskContentParts.push(
+      '',
+      '---',
+      'IMPORTANT: Your previous attempt was rejected. The reviewer provided the following feedback:',
+      '',
+      rejectionFeedback,
+      '',
+      'Please address this feedback in your self-review and ensure all issues are resolved.',
+      '---',
+    );
+  }
+
+  const taskContent = taskContentParts.join('\n');
 
   return formatAgentPrompt({
     role: 'Self-review all generated artifacts for this change',

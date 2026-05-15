@@ -58,6 +58,7 @@ export class WorkflowEngine {
   private workflowRunService?: WorkflowRunService;
   private workflowApplicationService?: WorkflowApplicationRuntime;
   private config?: ConfigInfo;
+  private pendingRejectionFeedback = new Map<string, unknown>();
 
   constructor(options: WorkflowEngineOptions) {
     this.runners = options.runners;
@@ -81,6 +82,7 @@ export class WorkflowEngine {
   private buildContext(issue: Issue, acpOptions: AgentSessionOptions, work?: WorkflowWork): StageContext {
     const stage = work && 'stage' in work ? work.stage : issue.stage;
     const workflowRun = this.workflowRunService ? this.workflowRunService.getActiveRunForIssue(issue.id) ?? undefined : undefined;
+    const rejectionFeedback = this.pendingRejectionFeedback.get(`${issue.id}:${stage}`);
     const resolvedModel = this.config ? resolveStageModel(stage, this.config, issue) : undefined;
     const wfObservers = createWorkflowSessionObservers({
       eventBus: this.eventBus,
@@ -127,6 +129,7 @@ export class WorkflowEngine {
       workflowRun,
       requestedWork: work,
       requestedTask: this.findRequestedTask(workflowRun, work),
+      rejectionFeedback,
       signal: this.signal,
       emit,
       log,
@@ -190,6 +193,12 @@ export class WorkflowEngine {
     return work.kind;
   }
 
+  private getRejectedApprovalOutput(issueId: string, stage: Stage): unknown {
+    const run = this.workflowRunService?.getLatestRunForIssue(issueId);
+    const stageRun = run?.stageRuns.find(candidate => candidate.stage === stage);
+    return stageRun?.approvalStatus === 'rejected' ? stageRun.approvalOutput : undefined;
+  }
+
   private async runAggregateWorkflow(issue: Issue, acpOptions: AgentSessionOptions): Promise<PipelineResult> {
     const service = this.workflowApplicationService;
     if (!service) throw new Error('WorkflowApplicationService is required for aggregate workflow execution');
@@ -200,8 +209,10 @@ export class WorkflowEngine {
     if (issue.stage === Stage.Backlog) {
       initial = service.startWorkflow({ issueId: issue.id, issueNumber: issue.number, tasksPath });
     } else {
-      const latestRun = this.workflowRunService?.getLatestRunForIssue(issue.id);
-      const retryableFailedStage = latestRun?.status === 'failed' && latestRun.currentStage === issue.stage;
+      const retryableFailedStage = this.workflowRunService?.canRetryStage(issue.id, issue.stage) ?? false;
+      if (retryableFailedStage) {
+        this.pendingRejectionFeedback.set(`${issue.id}:${issue.stage}`, this.getRejectedApprovalOutput(issue.id, issue.stage));
+      }
       initial = retryableFailedStage
         ? service.retryStage({ issueId: issue.id, stage: issue.stage, tasksPath, startedBy: 'retry' })
         : service.resumeDecision(issue.id, { tasksPath });
