@@ -6,7 +6,15 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskType } from '../db/issue-task-queue-repo';
-import { WorkflowEngine, type PipelineResult, PlanStageRunner, BuildStageRunner, CheckStageRunner, IntegrateStageRunner } from '../workflow';
+import {
+  WorkflowEngine,
+  type PipelineResult,
+  ConfigDrivenStageRunner,
+  PlanStageRunner,
+  BuildStageRunner,
+  CheckStageRunner,
+  IntegrateStageRunner,
+} from '../workflow';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue, MergeState } from '../types';
@@ -29,10 +37,38 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
+import { createTaskHandlerRegistry, createTaskLoaderRegistry, createRalphTaskLoader, type TaskKind } from '../workflow/task-runtime';
+import { defaultAgentSessionTaskHandler } from '../workflow/task-runtime/agent-session-task-handler';
+import { defaultServiceCallTaskHandler } from '../workflow/task-runtime/service-call-task-handler';
+import { createRalphTaskHandler } from '../workflow/task-runtime/ralph-task-handler';
+import { createCheckRegistry } from '../workflow/checks/check-registry';
+import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/domain';
+import { AiReviewCheck } from '../workflow/checks/ai-review-check';
+import { ReviewPassedCheck } from '../workflow/checks/review-passed-check';
+import { MergeReadyCheck } from '../workflow/checks/merge-ready-check';
+import { ProposalCompleteCheck } from '../workflow/checks/proposal-complete-check';
+import { SpecsCompleteCheck } from '../workflow/checks/specs-complete-check';
+import { DesignCompleteCheck } from '../workflow/checks/design-complete-check';
+import { TasksValidCheck } from '../workflow/checks/tasks-valid-check';
+import { SelfReviewPassedCheck } from '../workflow/checks/self-review-passed-check';
+import { UserApprovalCheck } from '../workflow/checks/user-approval-check';
+import { CodeCompilesCheck } from '../workflow/checks/code-compiles-check';
+import { BuildTestCheck } from '../workflow/checks/build-test-check';
+import { IntegrationHealthGatePreviewCheck } from '../workflow/checks/integration-health-gate-preview-check';
+import { HealthGateCheck } from '../workflow/checks/health-gate-check';
+import { DEFAULT_HEALTH_GATE_POLICIES, loadHealthGatePolicies, loadWorkflow } from '../workflow/workflow-loader';
 
 const execFileAsync = promisify(execFile);
 
 const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done];
+const CONFIG_DRIVEN_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate];
+
+function configDrivenStagesFromEnv(): Stage[] | undefined {
+  const raw = process.env.MOHIST_CONFIG_DRIVEN_STAGES;
+  if (!raw) return CONFIG_DRIVEN_STAGES;
+  const requested = new Set(raw.split(',').map(stage => stage.trim().toLowerCase()).filter(Boolean));
+  return CONFIG_DRIVEN_STAGES.filter(stage => requested.has(stage));
+}
 
 export type TaskType = QueueTaskType;
 
@@ -92,6 +128,31 @@ export interface WaitingQuestion {
 const PIPELINE_TIMEOUT_MS = 90 * 60 * 1000;
 
 const log = Log.create({ service: 'agent-runner' });
+
+export function createDefaultCheckRegistry(input: {
+  worktreePath: string;
+  healthGatePolicies: ReturnType<typeof loadHealthGatePolicies>;
+}) {
+  const { worktreePath, healthGatePolicies } = input;
+  return createCheckRegistry({
+    'proposal-complete': () => Promise.resolve(new ProposalCompleteCheck()),
+    'specs-complete': () => Promise.resolve(new SpecsCompleteCheck()),
+    'design-complete': () => Promise.resolve(new DesignCompleteCheck()),
+    'tasks-valid': () => Promise.resolve(new TasksValidCheck()),
+    'self-review-passed': () => Promise.resolve(new SelfReviewPassedCheck()),
+    'user-approval': (ctx) => Promise.resolve(new UserApprovalCheck(ctx.issue.stage)),
+    'health:plan': () => Promise.resolve(new HealthGateCheck({ worktreePath, policy: healthGatePolicies.plan, stage: 'plan' })),
+    'health:build': () => Promise.resolve(new HealthGateCheck({ worktreePath, policy: healthGatePolicies.build, stage: 'build' })),
+    'health:check': () => Promise.resolve(new HealthGateCheck({ worktreePath, policy: healthGatePolicies.check, stage: 'check' })),
+    'health:integrate': () => Promise.resolve(new HealthGateCheck({ worktreePath, policy: healthGatePolicies.postMerge, stage: 'integrate' })),
+    'ai-review': () => Promise.resolve(new AiReviewCheck()),
+    'review-passed': () => Promise.resolve(new ReviewPassedCheck()),
+    'merge-ready': () => Promise.resolve(new MergeReadyCheck()),
+    'code-compiles': (_ctx) => Promise.resolve(new CodeCompilesCheck({ worktreePath })),
+    'build-test': (_ctx) => Promise.resolve(new BuildTestCheck({ worktreePath })),
+    'integration-health-gate-preview': () => Promise.resolve(new IntegrationHealthGatePreviewCheck()),
+  });
+}
 
 export function isCurrentStageAwaitingApproval(issue: Issue | null | undefined): boolean {
   return Boolean(issue && isCurrentStageApproval(issue, issue.stage, 'awaiting'));
@@ -1192,12 +1253,66 @@ export class AgentRunnerService {
       const checkpointManager = this.checkpointRepo
         ? createCheckpointManager(this.checkpointRepo)
         : createCheckpointManager({ get: () => null, upsert: () => {}, delete: () => {} } as any);
-      const runners = [
-        new PlanStageRunner(),
+
+      const taskHandlerRegistry = createTaskHandlerRegistry({
+        'agent-session': defaultAgentSessionTaskHandler as any,
+        'service-call': defaultServiceCallTaskHandler as any,
+        'ralph-task': createRalphTaskHandler(),
+      });
+      const taskLoaderRegistry = createTaskLoaderRegistry([
+        {
+          kind: 'static',
+          load: (ctx) => {
+            const definition = DEFAULT_STAGE_DEFINITIONS.find(candidate => candidate.stage === ctx.issue.stage);
+            if (!definition) return [];
+            const allowedTaskIds = new Set(
+              definition.workSources
+                ?.filter(source => source.kind === 'static')
+                .flatMap(source => source.taskIds ?? [])
+                ?? definition.tasks.map(task => task.id),
+            );
+            const toTaskKind = (kind: string): TaskKind => {
+              if (kind === 'service-call' || kind === 'ralph-task') return kind;
+              return 'agent-session';
+            };
+
+            return definition.tasks
+              .filter(task => allowedTaskIds.has(task.id))
+              .map(task => ({
+                taskId: task.id,
+                title: task.title,
+                kind: toTaskKind(definition.taskExecutionPolicies?.find(policy => policy.taskId === task.id)?.kind ?? 'agent-session'),
+              }));
+          },
+        },
+        createRalphTaskLoader(),
+      ]);
+
+      const workflowConfig = loadWorkflow(worktreePath);
+      const healthGatePolicies = typeof workflowConfig === 'string'
+        ? DEFAULT_HEALTH_GATE_POLICIES
+        : loadHealthGatePolicies(workflowConfig);
+
+      const checkRegistry = createDefaultCheckRegistry({ worktreePath, healthGatePolicies });
+
+      const unifiedRunner = new ConfigDrivenStageRunner({
+        taskLoaderRegistry,
+        taskHandlerRegistry,
+        checkRegistry,
+        getStageDefinition: (stage) => DEFAULT_STAGE_DEFINITIONS.find(d => d.stage === stage),
+        worktreePath,
+        enabledStages: configDrivenStagesFromEnv(),
+      });
+
+      const legacyRunners = [
+        new PlanStageRunner(worktreePath),
         new BuildStageRunner({ worktreePath, projectId }),
         new CheckStageRunner({ worktreePath }),
         new IntegrateStageRunner({ worktreePath }),
       ];
+      const runners = process.env.MOHIST_USE_LEGACY_STAGE_RUNNERS === '1'
+        ? legacyRunners
+        : [unifiedRunner, ...legacyRunners];
       const workflowApplicationService = this.workflowRunService
         ? new WorkflowApplicationService(this.workflowRunService.getDatabaseManager())
         : undefined;

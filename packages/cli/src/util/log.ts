@@ -1,6 +1,6 @@
 import path from "path"
 import fs from "fs/promises"
-import { createWriteStream, readdirSync, statSync } from "fs"
+import { readdirSync, statSync } from "fs"
 import os from "os"
 
 export namespace Log {
@@ -70,6 +70,17 @@ export namespace Log {
     return `${yyyy}-${mm}-${dd}`
   }
 
+  async function appendToLogFile(msg: string) {
+    await fs.mkdir(LOG_DIR, { recursive: true })
+    await fs.appendFile(logpath, msg)
+  }
+
+  let writeQueue: Promise<void> = Promise.resolve()
+
+  function queueLogFileWrite(msg: string) {
+    writeQueue = writeQueue.catch(() => {}).then(() => appendToLogFile(msg))
+  }
+
   export async function init(options: Options) {
     if (options.level) level = options.level
     await cleanup()
@@ -83,24 +94,19 @@ export namespace Log {
     if (options.dev) {
       await fs.truncate(logpath).catch(() => {})
     }
-    const stream = createWriteStream(logpath, { flags: "a" })
 
     if (options.print) {
       write = (msg: any) => {
         process.stderr.write(msg)
-        stream.write(msg)
+        queueLogFileWrite(String(msg))
         return msg.length
       }
       return
     }
 
-    write = async (msg: any) => {
-      return new Promise((resolve, reject) => {
-        stream.write(msg, (err) => {
-          if (err) reject(err)
-          else resolve(msg.length)
-        })
-      })
+    write = (msg: any) => {
+      queueLogFileWrite(String(msg))
+      return msg.length
     }
   }
 

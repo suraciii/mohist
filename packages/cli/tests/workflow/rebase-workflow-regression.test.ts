@@ -130,7 +130,7 @@ describe('Rebase workflow regression: T-005', () => {
       expect(nextWork).toEqual({ kind: 'task', stage: Stage.Plan, taskId: 'rebase-branch' });
     });
 
-    it('rebase scheduling clears approval state when reopening', () => {
+    it('rebase scheduling preserves approval state until invalidation facts are reported', () => {
       const run = startRunWithBuildTask();
       completePlanTasks(run);
       passPlanChecks(run);
@@ -139,7 +139,7 @@ describe('Rebase workflow regression: T-005', () => {
 
       run.scheduleRebaseTask('Target branch moved');
 
-      expect(run.stageRun(Stage.Plan).approval).toBeNull();
+      expect(run.stageRun(Stage.Plan).approval?.status).toBe('awaiting');
     });
   });
 
@@ -319,7 +319,7 @@ describe('Rebase workflow regression: T-005', () => {
       expect(invalidatedCheckNames).toContain('merge-ready');
     });
 
-    it('shaChanged=true with awaiting approval keeps approval in awaiting state', () => {
+    it('shaChanged=true with awaiting approval clears stale approval state', () => {
       const run = startCheckWithRebase(startRunWithBuildTask());
 
       const checkStage = run.stageRun(Stage.Check);
@@ -335,7 +335,8 @@ describe('Rebase workflow regression: T-005', () => {
         },
       });
 
-      expect(checkStage.approval?.status).toBe('awaiting');
+      expect(checkStage.approval).toBeNull();
+      expect(checkStage.status).toBe('running');
     });
   });
 

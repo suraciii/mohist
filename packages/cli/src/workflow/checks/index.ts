@@ -6,3 +6,11 @@ export interface Check {
 }
 
 export { type CheckResult, type CheckContext } from '../stage-context';
+
+export {
+  type CheckFactory,
+  type CheckRegistry,
+  createCheckRegistry,
+  resolveCheck,
+  runCheck,
+} from './check-registry';

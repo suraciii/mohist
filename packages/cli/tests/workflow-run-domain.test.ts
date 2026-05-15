@@ -23,9 +23,19 @@ function completePlanTasks(run: WorkflowRun): void {
 }
 
 function passPlanChecks(run: WorkflowRun): void {
-  for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+  for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid']) {
     run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
   }
+  run.recordCheckResult(Stage.Plan, {
+    name: 'self-review-passed',
+    status: 'pass',
+    output: {
+      verdict: 'PASS',
+      selfReviewNotes: 'Plan self review\n<promise>PASS</promise>',
+      dimensions: [{ name: 'Completeness', status: 'PASS' }],
+    },
+  });
+  run.recordCheckResult(Stage.Plan, { name: 'health:plan', status: 'pass' });
 }
 
 function advanceToBuild(run: WorkflowRun): void {
@@ -100,6 +110,33 @@ describe('WorkflowRun domain aggregate', () => {
 
     const decision = run.recordCheckResult(Stage.Plan, { name: 'proposal-complete', status: 'pass' });
     expect(decision.nextWork).toEqual({ kind: 'check', stage: Stage.Plan, checkName: 'specs-complete' });
+  });
+
+  it('runs pre-task checks before tasks and post-task checks after tasks', () => {
+    const definitions: StageDefinition[] = [
+      {
+        stage: Stage.Build,
+        tasks: [{ id: 'T-001', title: 'Build task' }],
+        checks: [
+          { name: 'preflight', title: 'Preflight' },
+          { name: 'health:build', title: 'Build health' },
+        ],
+        checkPolicies: [
+          { checkName: 'preflight', phase: 'pre-task' },
+          { checkName: 'health:build', phase: 'post-task' },
+        ],
+      },
+    ];
+    const run = startRun(definitions);
+
+    expect(run.nextWork()).toEqual({ kind: 'check', stage: Stage.Build, checkName: 'preflight' });
+    expect(() => run.completeTask(Stage.Build, 'T-001', { status: 'completed' })).toThrow(/earlier tasks|before earlier checks/);
+
+    const preflight = run.recordCheckResult(Stage.Build, { name: 'preflight', status: 'pass' });
+    expect(preflight.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
+
+    const task = run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    expect(task.nextWork).toEqual({ kind: 'check', stage: Stage.Build, checkName: 'health:build' });
   });
 
   it('fails the stage and workflow with task-failed when a task fails', () => {
@@ -573,6 +610,27 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.stageRun(Stage.Plan).status).toBe('awaiting-approval');
     expect(run.nextWork()).toEqual({ kind: 'await-approval', stage: Stage.Plan });
     expect(run.stageRun(Stage.Plan).approval?.status).toBe('awaiting');
+    expect(run.stageRun(Stage.Plan).approval?.output).toEqual({
+      result: 'PASS',
+      selfReviewNotes: 'Plan self review\n<promise>PASS</promise>',
+      dimensions: [{ name: 'Completeness', status: 'PASS' }],
+    });
+  });
+
+  it('Check approval becomes available after review and merge checks pass', () => {
+    const run = startRun();
+
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
+    const mergeReady = run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+
+    expect(mergeReady.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Check });
+    expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
   });
 
   it('approveStage only works while awaiting approval and preserves approval output', () => {
@@ -885,5 +943,226 @@ describe('WorkflowRun domain aggregate', () => {
       expect(run.currentStage).toBe(Stage.Build);
       expect(run.canRetryStage(Stage.Plan)).toBe(false);
     });
+  });
+
+  it('repair tasks have causedBy metadata with type check-failure', () => {
+    const definitions: StageDefinition[] = [
+      {
+        stage: Stage.Build,
+        tasks: [],
+        checks: [{ name: 'health-check', title: 'Health check' }],
+        repairPolicies: [
+          { checkName: 'health-check', fixTaskId: 'fix-health', fixTaskTitle: 'Fix health', maxAttempts: 1 },
+        ],
+      },
+    ];
+    const run = startRun(definitions);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+
+    const decision = run.recordCheckResult(Stage.Build, { name: 'health-check', status: 'fail', message: 'health degraded' });
+    const fixTask = run.stageRun(Stage.Build).findTask('fix-health');
+
+    expect(fixTask.causedBy).toEqual({ type: 'check-failure', checkName: 'health-check', message: 'health degraded' });
+    expect(decision.events).toContainEqual(expect.objectContaining({ type: 'fix-task-scheduled', taskId: 'fix-health' }));
+  });
+
+  it('rebase-branch failure blocks later work through task failure semantics', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.scheduleRebaseTask('target branch moved');
+
+    const decision = run.completeTask(Stage.Check, 'rebase-branch', { status: 'failed', reason: 'rebase conflict' });
+
+    expect(run.status).toBe('failed');
+    expect(run.failure?.reason).toBe('task-failed');
+    expect(run.failure?.taskId).toBe('rebase-branch');
+    expect(decision.nextWork.kind).toBe('failed');
+  });
+
+  it('rebase-branch with shaChanged=true invalidates review-dependent state', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-old' } });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.scheduleRebaseTask('target branch moved');
+    run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', output: { shaChanged: true, beforeBaseSha: 'a', afterBaseSha: 'b', beforeHeadSha: 'c', afterHeadSha: 'd' } });
+
+    expect(run.stageRun(Stage.Check).findTask('ai-review').status).toBe('pending');
+    expect(run.stageRun(Stage.Check).findCheck('review-passed').status).toBe('pending');
+    expect(run.stageRun(Stage.Check).findCheck('merge-ready').status).toBe('pending');
+  });
+
+  it('rebase-branch invalidates review-dependent state from service-call wrapped output', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-old' } });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.scheduleRebaseTask('target branch moved');
+    run.completeTask(Stage.Check, 'rebase-branch', {
+      status: 'completed',
+      output: {
+        kind: 'service-call-task',
+        success: true,
+        result: { shaChanged: true, beforeBaseSha: 'a', afterBaseSha: 'b', beforeHeadSha: 'c', afterHeadSha: 'd' },
+      },
+    });
+
+    expect(run.stageRun(Stage.Check).findTask('ai-review').status).toBe('pending');
+    expect(run.stageRun(Stage.Check).findCheck('review-passed').status).toBe('pending');
+    expect(run.stageRun(Stage.Check).findCheck('merge-ready').status).toBe('pending');
+  });
+
+  it('rebase-branch with shaChanged=false preserves review-dependent state', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-same' } });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.scheduleRebaseTask('target branch backported');
+    run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', output: { shaChanged: false } });
+
+    expect(run.stageRun(Stage.Check).findTask('ai-review').status).toBe('completed');
+    expect(run.stageRun(Stage.Check).findCheck('review-passed').status).toBe('passed');
+    expect(run.stageRun(Stage.Check).findCheck('merge-ready').status).toBe('passed');
+  });
+
+  it('integrate merge freezes delivery metadata from service-call wrapped output', () => {
+    const run = startRun();
+    advanceToIntegrate(run);
+
+    run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:merge', {
+      status: 'completed',
+      output: {
+        kind: 'service-call-task',
+        success: true,
+        result: {
+          targetBranch: 'main',
+          baseSha: 'base-sha',
+          candidateHeadSha: 'candidate-sha',
+          landedSha: 'landed-sha',
+          rebased: true,
+        },
+      },
+    });
+
+    expect(run.stageRun(Stage.Integrate).freezePoint?.delivery).toEqual({
+      targetBranch: 'main',
+      baseSha: 'base-sha',
+      candidateHeadSha: 'candidate-sha',
+      landedSha: 'landed-sha',
+      rebased: true,
+    });
+  });
+
+  it('rebase-branch with shaChanged=false restores awaiting approval in Plan', () => {
+    const run = startRun();
+    completePlanTasks(run);
+    passPlanChecks(run);
+
+    expect(run.stageRun(Stage.Plan).status).toBe('awaiting-approval');
+    expect(run.stageRun(Stage.Plan).approval?.status).toBe('awaiting');
+
+    run.scheduleRebaseTask('target branch backported');
+
+    const decision = run.completeTask(Stage.Plan, 'rebase-branch', {
+      status: 'completed',
+      output: { shaChanged: false },
+    });
+
+    expect(run.stageRun(Stage.Plan).status).toBe('awaiting-approval');
+    expect(run.stageRun(Stage.Plan).approval?.status).toBe('awaiting');
+    expect(decision.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Plan });
+  });
+
+  it('rebase-branch with shaChanged=false restores awaiting approval in Check', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-same' } });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+
+    expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
+    expect(run.stageRun(Stage.Check).approval?.status).toBe('awaiting');
+
+    run.scheduleRebaseTask('target branch backported');
+
+    const decision = run.completeTask(Stage.Check, 'rebase-branch', {
+      status: 'completed',
+      output: { shaChanged: false },
+    });
+
+    expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
+    expect(run.stageRun(Stage.Check).approval?.status).toBe('awaiting');
+    expect(decision.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Check });
+  });
+
+  it('approval is not scheduled as a repair task', () => {
+    const run = startRun();
+    completePlanTasks(run);
+    passPlanChecks(run);
+
+    expect(run.stageRun(Stage.Plan).status).toBe('awaiting-approval');
+    expect(run.stageRun(Stage.Plan).tasks.find(t => t.id === 'user-approval')).toBeUndefined();
+  });
+
+  it('policy-driven review invalidation uses configured reason text', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed' });
+    const fixDecision = run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+    expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({ status: 'pending' });
+    expect(fixDecision.events).toContainEqual(expect.objectContaining({
+      type: 'task-invalidated',
+      stage: Stage.Check,
+      taskId: 'ai-review',
+      reason: 'Review findings changed code; re-run AI review before rechecking',
+    }));
+  });
+
+  it('Integrate post-merge health failure remains non-repairable after merge freeze', () => {
+    const run = startRun();
+    advanceToIntegrate(run);
+    run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed', output: { landedSha: 'sha' } });
+    run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'fail', message: 'tests failed' });
+
+    expect(run.status).toBe('failed');
+    expect(run.failure?.reason).toBe('post-merge-health-failed');
+    expect(run.stageRun(Stage.Integrate).tasks.some(t => t.id === 'fix-integrate-health')).toBe(false);
   });
 });

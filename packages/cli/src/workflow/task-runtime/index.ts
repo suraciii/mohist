@@ -1,6 +1,7 @@
 export {
   type TaskDefinition,
   type ExecutableTask,
+  type TaskKind,
   type TaskHandler,
   type AgentSessionTaskInput,
   type ServiceCallTaskInput,
@@ -37,3 +38,26 @@ export {
   type RepairFixTaskId,
   type RepairFixContext,
 } from './repair-fix-adapter';
+
+export {
+  type TaskLoaderKind,
+  type TaskLoader,
+  type TaskLoaderRegistry,
+  createTaskLoaderRegistry,
+} from './task-loader-registry';
+
+export {
+  type DispatchableTask,
+  type TaskDispatchFactoryInput,
+  type TaskDispatchFactoryRegistry,
+  createDefaultTaskDispatchFactoryRegistry,
+} from './task-dispatch-factory-registry';
+
+export {
+  createRalphTaskLoader,
+} from './ralph-task-loader';
+
+export {
+  createRalphTaskHandler,
+  materializeRalphTasks,
+} from './ralph-task-handler';

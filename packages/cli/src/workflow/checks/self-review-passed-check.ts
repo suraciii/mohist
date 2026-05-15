@@ -1,5 +1,5 @@
 import type { Check, CheckContext, CheckResult } from './index';
-import { parseVerdict, readReportFile } from '../utils';
+import { parseDimensions, parseVerdict, readReportFile } from '../utils';
 
 export class SelfReviewPassedCheck implements Check {
   public readonly name = 'self-review-passed';
@@ -17,8 +17,26 @@ export class SelfReviewPassedCheck implements Check {
       return { name: this.name, status: 'error', message: 'Could not parse verdict from self-review.md' };
     }
     if (verdict === 'PASS') {
-      return { name: this.name, status: 'pass', message: 'Self-review passed' };
+      return {
+        name: this.name,
+        status: 'pass',
+        message: 'Self-review passed',
+        output: {
+          verdict,
+          selfReviewNotes: report,
+          dimensions: parseDimensions(report),
+        },
+      };
     }
-    return { name: this.name, status: 'fail', message: 'Self-review verdict: FAIL' };
+    return {
+      name: this.name,
+      status: 'fail',
+      message: 'Self-review verdict: FAIL',
+      output: {
+        verdict,
+        selfReviewNotes: report,
+        dimensions: parseDimensions(report),
+      },
+    };
   }
 }

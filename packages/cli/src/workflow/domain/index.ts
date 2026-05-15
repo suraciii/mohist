@@ -40,6 +40,61 @@ export interface CheckFailurePolicy {
   maxAttempts: number;
 }
 
+export type WorkSourceKind = 'static' | 'ralph' | 'runtime';
+
+export interface WorkSourceDefinition {
+  kind: WorkSourceKind;
+  taskIds?: string[];
+}
+
+export type TaskExecutionKind = 'agent-session' | 'service-call' | 'ralph-task' | 'repair-task' | 'rebase-task';
+
+export interface TaskExecutionPolicy {
+  taskId: string;
+  kind: TaskExecutionKind;
+  workSourceKind?: WorkSourceKind;
+}
+
+export type CheckPhase = 'pre-task' | 'post-task' | 'approval';
+
+export interface CheckPolicy {
+  checkName: string;
+  phase: CheckPhase;
+}
+
+export interface ApprovalPolicy {
+  checkName: string;
+}
+
+export interface RepairPolicy {
+  checkName: string;
+  fixTaskId: string;
+  fixTaskTitle: string;
+  maxAttempts: number;
+}
+
+export type InvalidationTrigger = 'check-completion' | 'task-completion' | 'branch-rebase';
+
+export interface InvalidationEntry {
+  trigger: InvalidationTrigger;
+  triggerTaskId?: string;
+  when?: {
+    shaChanged?: boolean;
+    checkName?: string;
+    outputContains?: Record<string, unknown>;
+  };
+  reason?: string;
+  invalidates: {
+    tasks?: string[];
+    checks?: string[];
+    approval?: boolean;
+  };
+}
+
+export interface InvalidationPolicy {
+  entries: InvalidationEntry[];
+}
+
 export interface StageDefinition {
   stage: Stage;
   tasks: TaskDefinition[];
@@ -47,6 +102,12 @@ export interface StageDefinition {
   requiresApproval?: boolean;
   approvalCheckName?: string;
   checkFailurePolicies?: CheckFailurePolicy[];
+  workSources?: WorkSourceDefinition[];
+  taskExecutionPolicies?: TaskExecutionPolicy[];
+  checkPolicies?: CheckPolicy[];
+  approvalPolicy?: ApprovalPolicy;
+  repairPolicies?: RepairPolicy[];
+  invalidationPolicy?: InvalidationPolicy;
 }
 
 export function getCheckFailurePolicy(
@@ -320,9 +381,31 @@ export class StageRun {
     }) ?? null;
   }
 
-  nextCheck(): CheckState | null {
-    if (!this.allRequiredTasksTerminal()) return null;
-    return this.checks.find(check => check.status !== 'passed') ?? null;
+  nextCheck(phase?: 'pre-task' | 'post-task'): CheckState | null {
+    if (phase === 'post-task' && !this.allRequiredTasksTerminal()) return null;
+    if (phase === undefined && !this.allRequiredTasksTerminal()) return null;
+    for (const policy of this.nonApprovalCheckPolicies()) {
+      if (phase && policy.phase !== phase) continue;
+      const check = this.checks.find(candidate => candidate.name === policy.checkName);
+      if (check && check.status !== 'passed') return check;
+    }
+    return null;
+  }
+
+  checkPhase(checkName: string): CheckPhase {
+    return this.nonApprovalCheckPolicies().find(policy => policy.checkName === checkName)?.phase ?? 'post-task';
+  }
+
+  nonApprovalCheckPolicies(): CheckPolicy[] {
+    if (this.definition.checkPolicies?.length) {
+      return this.definition.checkPolicies.filter(policy => policy.phase !== 'approval');
+    }
+    return this.checks.map(check => ({ checkName: check.name, phase: 'post-task' as const }));
+  }
+
+  requiresApproval(): boolean {
+    if (this.definition.requiresApproval === false) return false;
+    return Boolean(this.definition.approvalPolicy ?? this.definition.requiresApproval);
   }
 
   allRequiredTasksTerminal(): boolean {
@@ -331,6 +414,10 @@ export class StageRun {
 
   allRequiredTasksSucceeded(): boolean {
     return this.tasks.every(task => task.status === 'completed');
+  }
+
+  hasFailedTask(): boolean {
+    return this.tasks.some(task => task.status === 'failed' || task.status === 'skipped');
   }
 
   allChecksPassed(): boolean {
@@ -505,6 +592,33 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
     checkFailurePolicies: [
       { checkName: 'self-review-passed', fixTaskId: 'fix-plan-review', fixTaskTitle: 'Fix plan review findings', maxAttempts: 1 },
     ],
+    workSources: [
+      { kind: 'static', taskIds: ['proposal', 'specs', 'design', 'tasks', 'self-review'] },
+    ],
+    taskExecutionPolicies: [
+      { taskId: 'proposal', kind: 'agent-session' },
+      { taskId: 'specs', kind: 'agent-session' },
+      { taskId: 'design', kind: 'agent-session' },
+      { taskId: 'tasks', kind: 'agent-session' },
+      { taskId: 'self-review', kind: 'agent-session' },
+      { taskId: 'fix-plan-review', kind: 'repair-task', workSourceKind: 'runtime' },
+      { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
+    ],
+    checkPolicies: [
+      { checkName: 'proposal-complete', phase: 'post-task' },
+      { checkName: 'specs-complete', phase: 'post-task' },
+      { checkName: 'design-complete', phase: 'post-task' },
+      { checkName: 'tasks-valid', phase: 'post-task' },
+      { checkName: 'self-review-passed', phase: 'post-task' },
+      { checkName: 'health:plan', phase: 'post-task' },
+    ],
+    approvalPolicy: { checkName: 'user-approval' },
+    repairPolicies: [
+      { checkName: 'self-review-passed', fixTaskId: 'fix-plan-review', fixTaskTitle: 'Fix plan review findings', maxAttempts: 1 },
+    ],
+    invalidationPolicy: {
+      entries: [],
+    },
   },
   {
     stage: Stage.Build,
@@ -515,6 +629,24 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
     checkFailurePolicies: [
       { checkName: 'health:build', fixTaskId: 'fix-build-health', fixTaskTitle: 'Fix build health', maxAttempts: 1 },
     ],
+    workSources: [
+      { kind: 'ralph' },
+      { kind: 'runtime' },
+    ],
+    taskExecutionPolicies: [
+      { taskId: 'fix-build-health', kind: 'repair-task', workSourceKind: 'runtime' },
+      { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
+      { taskId: '*', kind: 'ralph-task', workSourceKind: 'ralph' },
+    ],
+    checkPolicies: [
+      { checkName: 'health:build', phase: 'post-task' },
+    ],
+    repairPolicies: [
+      { checkName: 'health:build', fixTaskId: 'fix-build-health', fixTaskTitle: 'Fix build health', maxAttempts: 1 },
+    ],
+    invalidationPolicy: {
+      entries: [],
+    },
   },
   {
     stage: Stage.Check,
@@ -533,6 +665,54 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
       { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1 },
       { checkName: 'merge-ready', fixTaskId: 'fix-merge-readiness', fixTaskTitle: 'Fix merge readiness', maxAttempts: 1 },
     ],
+    workSources: [
+      { kind: 'static', taskIds: ['ai-review'] },
+      { kind: 'runtime' },
+    ],
+    taskExecutionPolicies: [
+      { taskId: 'ai-review', kind: 'agent-session' },
+      { taskId: 'fix-check-health', kind: 'repair-task', workSourceKind: 'runtime' },
+      { taskId: 'fix-review-findings', kind: 'repair-task', workSourceKind: 'runtime' },
+      { taskId: 'fix-merge-readiness', kind: 'repair-task', workSourceKind: 'runtime' },
+      { taskId: 'check:converge-review-snapshot', kind: 'service-call', workSourceKind: 'runtime' },
+      { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
+    ],
+    checkPolicies: [
+      { checkName: 'health:check', phase: 'post-task' },
+      { checkName: 'review-passed', phase: 'post-task' },
+      { checkName: 'merge-ready', phase: 'post-task' },
+    ],
+    approvalPolicy: { checkName: 'user-approval' },
+    repairPolicies: [
+      { checkName: 'health:check', fixTaskId: 'fix-check-health', fixTaskTitle: 'Fix check health', maxAttempts: 1 },
+      { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1 },
+      { checkName: 'merge-ready', fixTaskId: 'fix-merge-readiness', fixTaskTitle: 'Fix merge readiness', maxAttempts: 1 },
+    ],
+    invalidationPolicy: {
+      entries: [
+        {
+          trigger: 'task-completion',
+          triggerTaskId: 'fix-review-findings',
+          reason: 'Review findings changed code; re-run AI review before rechecking',
+          invalidates: {
+            tasks: ['ai-review'],
+            checks: ['health:check', 'review-passed', 'merge-ready'],
+            approval: true,
+          },
+        },
+        {
+          trigger: 'task-completion',
+          triggerTaskId: 'rebase-branch',
+          when: { shaChanged: true },
+          reason: 'Rebase changed the candidate snapshot; re-run review checks',
+          invalidates: {
+            tasks: ['ai-review'],
+            checks: ['health:check', 'review-passed', 'merge-ready'],
+            approval: true,
+          },
+        },
+      ],
+    },
   },
   {
     stage: Stage.Integrate,
@@ -547,6 +727,23 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
     checkFailurePolicies: [
       { checkName: 'health:integrate', fixTaskId: 'fix-integrate-health', fixTaskTitle: 'Fix integrate health', maxAttempts: 1 },
     ],
+    workSources: [
+      { kind: 'static', taskIds: ['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge'] },
+    ],
+    taskExecutionPolicies: [
+      { taskId: 'integrate:spec-sync', kind: 'service-call' },
+      { taskId: 'integrate:archive-change', kind: 'service-call' },
+      { taskId: 'integrate:merge', kind: 'service-call' },
+      { taskId: 'fix-integrate-health', kind: 'repair-task', workSourceKind: 'runtime' },
+      { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
+    ],
+    checkPolicies: [
+      { checkName: 'health:integrate', phase: 'post-task' },
+    ],
+    repairPolicies: [],
+    invalidationPolicy: {
+      entries: [],
+    },
   },
 ];
 
@@ -624,7 +821,6 @@ export class WorkflowRun {
 
     if (stageRun.status === 'awaiting-approval') {
       stageRun.status = 'running';
-      stageRun.approval = null;
     }
 
     const causedBy: CausedByMetadata = {
@@ -641,6 +837,10 @@ export class WorkflowRun {
     if (stageRun.status !== 'running') throw new WorkflowDomainError(`Stage ${stage} is not running`);
 
     const task = stageRun.findTask(taskId);
+    const preTaskCheck = stageRun.nextCheck('pre-task');
+    if (preTaskCheck) {
+      throw new WorkflowDomainError(`Task ${taskId} cannot complete before earlier checks pass`);
+    }
     const expected = stageRun.nextTask();
     if (!expected || expected.id !== task.id) {
       throw new WorkflowDomainError(`Task ${taskId} cannot complete before earlier tasks are terminal`);
@@ -676,32 +876,10 @@ export class WorkflowRun {
     }
 
     const events: WorkflowEvent[] = [{ type: 'task-completed', stage, taskId }];
-    if (stage === Stage.Check && taskId.startsWith('fix-review-findings')) {
-      const reason = 'Review findings changed code; re-run AI review before rechecking';
-      stageRun.resetTask('ai-review');
-      events.push({ type: 'task-invalidated', stage, taskId: 'ai-review', reason });
-      for (const checkName of ['health:check', 'review-passed', 'merge-ready']) {
-        stageRun.resetCheck(checkName);
-        events.push({ type: 'check-invalidated', stage, checkName, reason });
-      }
-    }
-    if (stage === Stage.Check && taskId === 'rebase-branch' && result.status === 'completed') {
-      const shaChanged = this.detectShaChanged(result.output);
-      if (shaChanged) {
-        const reason = 'Rebase changed the candidate snapshot; re-run review checks';
-        stageRun.resetTask('ai-review');
-        events.push({ type: 'task-invalidated', stage, taskId: 'ai-review', reason });
-        for (const checkName of ['health:check', 'review-passed', 'merge-ready']) {
-          stageRun.resetCheck(checkName);
-          events.push({ type: 'check-invalidated', stage, checkName, reason });
-        }
-        if (stageRun.approval?.status === 'awaiting') {
-          stageRun.approval = { ...stageRun.approval, status: 'awaiting' };
-          events.push({ type: 'approval-requested', stage });
-        }
-        stageRun.markStaleEvidence();
-        events.push({ type: 'evidence-stale-marked', stage, reason: 'Rebase changed candidate or base evidence' });
-      }
+    const invalidationEvents = this.applyTaskCompletionInvalidation(stageRun, taskId, result);
+    events.push(...invalidationEvents);
+    if (stage === Stage.Check && taskId === 'check:converge-review-snapshot' && result.status === 'completed') {
+      events.push(...this.invalidateStaleCheckEvidenceAfterConvergence(stageRun, result));
     }
     if (stageRun.freezePoint) events.push({ type: 'integrate-frozen', stage, freezePoint: stageRun.freezePoint });
     return this.maybeCompleteStage(stageRun, events);
@@ -711,11 +889,14 @@ export class WorkflowRun {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'running') throw new WorkflowDomainError(`Stage ${stage} is not running`);
-    if (!stageRun.allRequiredTasksTerminal()) throw new WorkflowDomainError(`Stage ${stage} cannot run checks before tasks are terminal`);
-    if (!stageRun.allRequiredTasksSucceeded()) throw new WorkflowDomainError(`Stage ${stage} has failed tasks`);
+    const checkPhase = stageRun.checkPhase(result.name);
+    if (checkPhase === 'approval') throw new WorkflowDomainError(`Check ${result.name} is an approval check`);
+    if (checkPhase === 'post-task' && !stageRun.allRequiredTasksTerminal()) throw new WorkflowDomainError(`Stage ${stage} cannot run checks before tasks are terminal`);
+    if (checkPhase === 'post-task' && !stageRun.allRequiredTasksSucceeded()) throw new WorkflowDomainError(`Stage ${stage} has failed tasks`);
+    if (checkPhase === 'pre-task' && stageRun.hasFailedTask()) throw new WorkflowDomainError(`Stage ${stage} has failed tasks`);
 
     const check = stageRun.findCheck(result.name);
-    const expected = stageRun.nextCheck();
+    const expected = stageRun.nextCheck(checkPhase);
     if (!expected || expected.name !== check.name) {
       throw new WorkflowDomainError(`Check ${result.name} cannot run before earlier checks pass`);
     }
@@ -750,7 +931,9 @@ export class WorkflowRun {
       }, events);
     }
 
-    const policy = stageRun.definition.checkFailurePolicies?.find(candidate => candidate.checkName === result.name);
+    const policy =
+      stageRun.definition.repairPolicies?.find(candidate => candidate.checkName === result.name) ??
+      stageRun.definition.checkFailurePolicies?.find(candidate => candidate.checkName === result.name);
     const scheduledFixCount = stageRun.scheduledFixCount(result.name);
     if (policy && scheduledFixCount < policy.maxAttempts) {
       const causedBy: CausedByMetadata = {
@@ -992,9 +1175,11 @@ export class WorkflowRun {
       return { kind: 'failed', reason: failure };
     }
     if (stageRun.status === 'awaiting-approval') return { kind: 'await-approval', stage: stageRun.stage };
+    const preTaskCheck = stageRun.nextCheck('pre-task');
+    if (preTaskCheck) return { kind: 'check', stage: stageRun.stage, checkName: preTaskCheck.name };
     const task = stageRun.nextTask();
     if (task) return { kind: 'task', stage: stageRun.stage, taskId: task.id };
-    const check = stageRun.nextCheck();
+    const check = stageRun.nextCheck('post-task');
     if (check) return { kind: 'check', stage: stageRun.stage, checkName: check.name };
     return { kind: 'complete' };
   }
@@ -1027,11 +1212,13 @@ export class WorkflowRun {
   private maybeCompleteStage(stageRun: StageRun, events: WorkflowEvent[]): WorkflowDecision {
     if (!stageRun.allRequiredTasksTerminal() || !stageRun.allRequiredTasksSucceeded()) return this.decision(events);
     if (!stageRun.allChecksPassed()) return this.decision(events);
-    if (stageRun.definition.requiresApproval && stageRun.approval?.status !== 'approved') {
+    if (stageRun.requiresApproval() && stageRun.approval?.status !== 'approved') {
       if (!stageRun.approval) {
         const verificationEvidence = this.extractVerificationEvidence(stageRun);
         stageRun.requestApproval(new Date().toISOString(), this.buildApprovalOutput(stageRun, verificationEvidence), verificationEvidence);
         events.push({ type: 'approval-requested', stage: stageRun.stage });
+      } else if (stageRun.approval.status === 'awaiting') {
+        stageRun.status = 'awaiting-approval';
       }
       return this.decision(events);
     }
@@ -1071,6 +1258,21 @@ export class WorkflowRun {
   }
 
   private buildApprovalOutput(stageRun: StageRun, verificationEvidence: VerificationEvidence | null): unknown {
+    const approvalCheckName = stageRun.definition.approvalPolicy?.checkName ?? stageRun.definition.approvalCheckName;
+    if (!approvalCheckName) return null;
+
+    if (stageRun.stage === Stage.Plan) {
+      const selfReview = stageRun.checks.find(check => check.name === 'self-review-passed');
+      if (selfReview?.status !== 'passed') return null;
+      if (!selfReview.output || typeof selfReview.output !== 'object') return null;
+      const selfReviewOutput = selfReview.output as Record<string, unknown>;
+      return {
+        result: selfReviewOutput.verdict,
+        selfReviewNotes: selfReviewOutput.selfReviewNotes,
+        dimensions: selfReviewOutput.dimensions,
+      };
+    }
+
     if (stageRun.stage !== Stage.Check) return null;
     const reviewPassed = stageRun.checks.find(check => check.name === 'review-passed');
     const mergeReady = stageRun.checks.find(check => check.name === 'merge-ready');
@@ -1140,6 +1342,28 @@ export class WorkflowRun {
     return !stageRun.tasks.some(task => task.id === 'check:converge-review-snapshot');
   }
 
+  private invalidateStaleCheckEvidenceAfterConvergence(stageRun: StageRun, result: TaskResultInput): WorkflowEvent[] {
+    const data = this.unwrapTaskOutput(result.output);
+    const snapshotSha = typeof data?.snapshotSha === 'string' ? data.snapshotSha : null;
+    if (!snapshotSha) return [];
+
+    const events: WorkflowEvent[] = [];
+    for (const checkName of ['health:check', 'merge-ready']) {
+      const check = stageRun.checks.find(candidate => candidate.name === checkName);
+      if (!check || check.status === 'pending') continue;
+      const output = check.output as Record<string, unknown> | null;
+      if (output?.candidateHeadSha === snapshotSha) continue;
+      stageRun.resetCheck(checkName);
+      events.push({
+        type: 'check-invalidated',
+        stage: stageRun.stage,
+        checkName,
+        reason: 'Review convergence changed candidate snapshot; re-run verification evidence',
+      });
+    }
+    return events;
+  }
+
   private toCheckStatus(status: CheckResultInput['status']): CheckRunStatus {
     if (status === 'pass') return 'passed';
     if (status === 'fail') return 'failed';
@@ -1147,8 +1371,8 @@ export class WorkflowRun {
   }
 
   private detectShaChanged(output: unknown): boolean {
-    if (!output || typeof output !== 'object') return false;
-    const data = output as Record<string, unknown>;
+    const data = this.unwrapTaskOutput(output);
+    if (!data) return false;
     if (data.shaChanged === true) return true;
     const beforeBaseSha = typeof data.beforeBaseSha === 'string' ? data.beforeBaseSha : null;
     const afterBaseSha = typeof data.afterBaseSha === 'string' ? data.afterBaseSha : null;
@@ -1158,9 +1382,68 @@ export class WorkflowRun {
     return beforeBaseSha !== afterBaseSha || beforeHeadSha !== afterHeadSha;
   }
 
+  private evaluateInvalidationCondition(when: InvalidationEntry['when'] | undefined, output: unknown): boolean {
+    if (!when) return true;
+    if (when.shaChanged !== undefined) {
+      const shaChanged = this.detectShaChanged(output);
+      if (shaChanged !== when.shaChanged) return false;
+    }
+    if (when.checkName !== undefined) return true;
+    if (when.outputContains !== undefined) {
+      const data = this.unwrapTaskOutput(output);
+      if (!data) return false;
+      for (const [key, value] of Object.entries(when.outputContains)) {
+        if (data[key] !== value) return false;
+      }
+    }
+    return true;
+  }
+
+  private applyTaskCompletionInvalidation(stageRun: StageRun, taskId: string, result: TaskResultInput): WorkflowEvent[] {
+    const events: WorkflowEvent[] = [];
+    const policy = stageRun.definition.invalidationPolicy;
+    if (!policy) return events;
+
+    for (const entry of policy.entries) {
+      if (entry.trigger !== 'task-completion') continue;
+      if (entry.triggerTaskId && entry.triggerTaskId !== taskId) continue;
+      if (!this.evaluateInvalidationCondition(entry.when, result.output)) continue;
+
+      if (entry.invalidates.tasks) {
+        for (const t of entry.invalidates.tasks) {
+          try {
+            stageRun.resetTask(t);
+            const reason = entry.reason ?? `Policy invalidation after ${taskId}`;
+            events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId: t, reason });
+          } catch {
+            // task not in stage, skip
+          }
+        }
+      }
+      if (entry.invalidates.checks) {
+        for (const c of entry.invalidates.checks) {
+          try {
+            stageRun.resetCheck(c);
+            const reason = entry.reason ?? `Policy invalidation after ${taskId}`;
+            events.push({ type: 'check-invalidated', stage: stageRun.stage, checkName: c, reason });
+          } catch {
+            // check not in stage, skip
+          }
+        }
+      }
+      if (entry.invalidates.approval && stageRun.approval) {
+        stageRun.approval = null;
+        if (stageRun.status === 'awaiting-approval') {
+          stageRun.status = 'running';
+        }
+      }
+    }
+    return events;
+  }
+
   private extractDeliveryMetadata(output: unknown): DeliveryMetadata {
-    if (!output || typeof output !== 'object') return {};
-    const data = output as Record<string, unknown>;
+    const data = this.unwrapTaskOutput(output);
+    if (!data) return {};
     return {
       targetBranch: typeof data.targetBranch === 'string' ? data.targetBranch : undefined,
       baseSha: typeof data.baseSha === 'string' ? data.baseSha : undefined,
@@ -1168,5 +1451,14 @@ export class WorkflowRun {
       landedSha: typeof data.landedSha === 'string' ? data.landedSha : undefined,
       rebased: typeof data.rebased === 'boolean' ? data.rebased : undefined,
     };
+  }
+
+  private unwrapTaskOutput(output: unknown): Record<string, unknown> | null {
+    if (!output || typeof output !== 'object') return null;
+    const data = output as Record<string, unknown>;
+    if (data.kind === 'service-call-task' && data.result && typeof data.result === 'object') {
+      return data.result as Record<string, unknown>;
+    }
+    return data;
   }
 }
