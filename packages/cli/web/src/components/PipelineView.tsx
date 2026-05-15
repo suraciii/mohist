@@ -809,6 +809,18 @@ function StepList({
           <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} approvalOutput={issue.approvalState?.output} staleEvidence={issue.drift?.staleEvidence ?? undefined} nextAction={issue.drift?.nextAction ?? undefined} />
         </div>
       )}
+
+      {!isAwaitingApproval && stage === Stage.Check && failedHealthGates.length > 0 && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <span className="font-semibold">Full verification failed:</span> Check approval is blocked until the verification gate passes. Fix the failures and rerun Check.
+        </div>
+      )}
+
+      {!isAwaitingApproval && stage === Stage.Check && healthGateChecks.length > 0 && healthGateChecks.every(c => c.status === 'pending') && (
+        <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
+          Full verification has not run yet. Approval will be available once verification completes.
+        </div>
+      )}
     </div>
   )
 }

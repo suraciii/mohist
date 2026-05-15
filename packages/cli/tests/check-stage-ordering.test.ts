@@ -164,11 +164,11 @@ describe('CheckStageRunner ordering', () => {
       expect(runner.executeTasksCalls).toBe(0);
     });
 
-    it('default CheckStageRunner has no pre-task checks in simplified model', () => {
+    it('default CheckStageRunner has health:check as pre-task check', () => {
       const runner = new CheckStageRunner({ worktreePath: '/tmp/worktree' });
       const preChecks = runner.getPreTaskChecks();
 
-      expect(preChecks.map(check => check.name)).toEqual([]);
+      expect(preChecks.map(check => check.name)).toEqual(['health:check']);
     });
 
     it('default CheckStageRunner does not include openspec-sync-dry-run in pre-task checks', () => {
@@ -188,7 +188,7 @@ describe('CheckStageRunner ordering', () => {
       expect(checks.map(check => check.name)).toEqual(['review-passed', 'merge-ready', 'user-approval']);
     });
 
-    it('default CheckStageRunner.run does not run pre-task health checks in simplified model', async () => {
+    it('default CheckStageRunner loads health:check from workflow.yaml when present', () => {
       const worktreePath = path.join(tmpDir, 'worktree');
       fs.mkdirSync(worktreePath, { recursive: true });
       fs.writeFileSync(path.join(worktreePath, 'workflow.yaml'), [
@@ -205,17 +205,28 @@ describe('CheckStageRunner ordering', () => {
       ].join('\n'));
 
       const runner = new CheckStageRunner({ worktreePath });
-      const ctx = createMockContext(tmpDir, 42, {
-        acpOptions: { cwd: worktreePath, issueNumber: 42 } as any,
-      });
 
       const preChecks = runner.getPreTaskChecks();
-      expect(preChecks.map(check => check.name)).toEqual([]);
+      expect(preChecks.map(check => check.name)).toEqual(['health:check']);
     });
 
     it('default CheckStageRunner executes ai-review when review.md is missing', async () => {
       const worktreePath = path.join(tmpDir, 'worktree');
       fs.mkdirSync(worktreePath, { recursive: true });
+      fs.writeFileSync(path.join(worktreePath, 'workflow.yaml'), [
+        'stages:',
+        '  - stage: check',
+        '    prompt: check',
+        'healthGates:',
+        '  check:',
+        '    enabled: false',
+        '    command: "echo ok"',
+        '    timeout: 300000',
+        '    autoFix: false',
+        '    maxFixAttempts: 0',
+        '    fallbackReaction:',
+        '      type: ask-user',
+      ].join('\n'));
       const changeDir = path.join(tmpDir, 'openspec', 'changes', '42-test');
       const reviewPath = path.join(changeDir, 'review.md');
       const execute = vi.fn().mockImplementation(async () => {
@@ -453,12 +464,12 @@ describe('CheckStageRunner ordering', () => {
 
     it('approval_requested emitted after all checks pass including ask-user', async () => {
       const runner = new TestStageRunner();
-      runner.preTaskChecks = [makePassCheck('build-test')];
+      runner.preTaskChecks = [makePassCheck('health:check')];
       runner.postTaskChecks = [
         makeCheck('review-passed', async () => ({
           name: 'review-passed',
           status: 'pass' as const,
-          output: { verdict: 'PASS', reviewReport: 'Mock review report' },
+          output: { verdict: 'PASS', reviewReport: 'Mock review report', snapshotSha: 'abc123' },
         })),
         makeCheck('merge-ready', async () => ({
           name: 'merge-ready',

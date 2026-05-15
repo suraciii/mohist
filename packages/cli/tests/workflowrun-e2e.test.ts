@@ -74,6 +74,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     advanceToBuild();
     completeBuild();
     workflowApplicationService.completeTask({ issueId, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } } });
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass' } });
     workflowApplicationService.approveStage({ issueId, stage: Stage.Check, approval: { output: { approved: true } } });
@@ -99,6 +100,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(issueRepo.findById(issueId)?.stage).toBe(Stage.Check);
 
     workflowApplicationService.completeTask({ issueId, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } } });
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass' } });
     workflowApplicationService.approveStage({ issueId, stage: Stage.Check, approval: { output: { approved: true } } });

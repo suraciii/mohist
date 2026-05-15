@@ -971,7 +971,16 @@ FHD added scenario content.`);
         landedSha: 'ghi789',
       });
 
-      const execFileMock = vi.fn();
+      const execFileMock = vi.fn().mockImplementation((_cmd: any, _args: any, _opts: any, cb: any) => {
+        process.nextTick(() => {
+          if (typeof _opts === 'function') {
+            _opts(null, { stdout: 'abc123\n', stderr: '' });
+          } else if (typeof cb === 'function') {
+            cb(null, { stdout: 'abc123\n', stderr: '' });
+          }
+        });
+        return { stdout: 'abc123\n', stderr: '' };
+      });
       vi.doMock('child_process', async () => ({
         ...await vi.importActual<typeof import('child_process')>('child_process'),
         execFile: execFileMock,
@@ -1009,7 +1018,8 @@ healthGates:
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(execFileMock).not.toHaveBeenCalled();
+      const healthGateCommandCalls = execFileMock.mock.calls.filter((c: any[]) => c[0] !== 'git');
+      expect(healthGateCommandCalls).toHaveLength(0);
       expect(result.checkResults).toBeDefined();
       const healthCheck = result.checkResults?.find(cr => cr.name === 'health:integrate');
       expect(healthCheck).toBeDefined();

@@ -6,6 +6,7 @@ import type { Check } from './checks';
 import { ReviewPassedCheck } from './checks/review-passed-check';
 import { MergeReadyCheck } from './checks/merge-ready-check';
 import { UserApprovalCheck } from './checks/user-approval-check';
+import { HealthGateCheck } from './checks/health-gate-check';
 import { buildReviewerPrompt } from '../agents/artifact-prompt';
 import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
 import { validateReviewArtifact } from './utils';
@@ -13,6 +14,7 @@ import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
 import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
+import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import * as fs from 'node:fs';
 
 const log = Log.create({ service: 'check-stage-runner' });
@@ -25,15 +27,27 @@ export interface StageRunner {
 export interface CheckStageRunnerOptions {
   worktreePath: string;
   checks?: Check[];
+  healthGatePolicy?: import('./workflow-loader').HealthGatePolicy;
 }
 
 export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   private postTaskChecks: Check[];
   private usesDefaultChecks: boolean;
+  private worktreePath: string;
+  private checkHealthGatePolicy: import('./workflow-loader').HealthGatePolicy;
 
   constructor(options: CheckStageRunnerOptions) {
     super();
+    this.worktreePath = options.worktreePath;
     this.usesDefaultChecks = !options.checks;
+    this.checkHealthGatePolicy = options.healthGatePolicy ?? {
+      enabled: true,
+      command: 'npm run build && npm test',
+      timeout: 300000,
+      autoFix: false,
+      maxFixAttempts: 0,
+      fallbackReaction: { type: 'ask-user' },
+    };
     this.postTaskChecks = options.checks ?? [
       new ReviewPassedCheck(),
       new MergeReadyCheck(),
@@ -46,7 +60,18 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   }
 
   protected getPreTaskChecks(): Check[] {
-    return [];
+    if (!this.usesDefaultChecks) return [];
+    const wf = loadWorkflow(this.worktreePath);
+    const policy = typeof wf === 'string'
+      ? this.checkHealthGatePolicy
+      : loadHealthGatePolicies(wf).check;
+    return [
+      new HealthGateCheck({
+        worktreePath: this.worktreePath,
+        policy,
+        stage: 'check',
+      }),
+    ];
   }
 
   protected getCheckFailurePolicies(_ctx?: StageContext): CheckFailurePolicy[] {

@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add Check full verification gate",
+      "spec": "specs/workflow-run/spec.md#Check full verification evidence",
+      "description": "Make Check full verification a first-class Check-stage gate named `health:check`. The default Check execution must run the configured health gate before `ai-review`, persist the check result in WorkflowRun/stage check state, and continue to support legacy `checks.buildTest` through the existing health gate policy mapping.",
+      "acceptanceCriteria": [
+        "Default Check stage definitions include `health:check` before `review-passed` and `merge-ready`",
+        "Default Check runner executes `health:check` before `ai-review` starts",
+        "A failed Check verification command prevents new AI review execution, merge-ready execution, and approval request",
+        "A passing Check verification result is persisted as Check-stage evidence with command, status, duration, summary, and log excerpt fields",
+        "Existing `checks.buildTest` workflow config still resolves the Check verification command when `healthGates.check` is absent",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts, packages/cli/src/workflow/check-stage-runner.ts, packages/cli/src/workflow/checks/health-gate-check.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Consumes existing HealthGateCheck and workflow-loader policy resolution. Prefer `health:check` as canonical evidence; only mirror `build-test` if required for compatibility.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        306580
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Bind approval candidate to verification evidence",
+      "spec": "specs/workflow-engine/spec.md#Check approval requires current verification",
+      "description": "Require Check approval request creation to include passing full verification evidence for the same candidate implementation as review and merge-ready. Approval output should carry a `verificationEvidence` object, and request-time guards must reject missing, failed, malformed, or stale verification results before emitting approval.",
+      "acceptanceCriteria": [
+        "Check approval is not requested when the latest `health:check` result is missing or not passing",
+        "Check approval output includes verification evidence with command, duration, summary/log excerpt, checkedAt, and candidate snapshot metadata",
+        "Verification candidate metadata matches the review snapshot and merge-ready candidate metadata before approval can be requested",
+        "Candidate-changing Check work such as rebase or review repair invalidates `health:check` along with review, merge-ready, and approval evidence",
+        "The approval request error clearly explains missing, failed, or stale verification evidence",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/base-stage-runner.ts, packages/cli/src/workflow/domain/index.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Use candidate head/snapshot SHA as the binding. Do not rely on timestamps or run order alone.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        547026
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Harden Check approve API guard",
+      "spec": "specs/http-api/spec.md#Approve rejects missing or stale verification",
+      "description": "Extend the approve endpoint validation so direct or stale Check approval cannot bypass full verification evidence. The API must reject approval when verification evidence is missing, failed, malformed, disabled in a way that does not satisfy policy, or no longer matches current candidate Git state.",
+      "acceptanceCriteria": [
+        "POST approval for Check rejects approval output that lacks verification evidence",
+        "POST approval for Check rejects verification evidence whose candidate head does not match current candidate state",
+        "POST approval for Check rejects verification evidence that does not match the approved review snapshot or merge-ready candidate snapshot",
+        "API errors tell the user to rerun Check when verification evidence is missing or stale",
+        "Existing merge-ready freshness validation remains intact",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "This is defense in depth for manual/API callers and persisted awaiting approvals from older runs.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        309721
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Expose Check verification evidence to users",
+      "spec": "specs/cli-interface/spec.md#Issue show exposes Check verification approval blockers",
+      "description": "Ensure failed or missing approval-blocking Check verification evidence is visible through existing issue detail surfaces instead of only internal logs. CLI, API, and Web UI stage/check views should expose `health:check` status and useful failure details while keeping passing health gates compact.",
+      "acceptanceCriteria": [
+        "WorkflowRun projection and check-suite projection do not filter out `health:check` evidence",
+        "Issue API responses expose Check health gate status, command, duration, summary, and log excerpt when present",
+        "`mo issue show <number>` clearly shows failed Check full verification before any approval state",
+        "Web UI issue or approval panels show failed or missing Check verification evidence as the reason approval is unavailable",
+        "Passing Check verification evidence can be displayed compactly without hiding failed approval-blocking gates",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/workflow-run-projection.ts, packages/cli/src/api/issues.ts, packages/cli/src/cli, packages/cli/web/src",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Do not add a separate storage model. Use existing stage/check output and render failure details from the persisted evidence.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        520339
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Add Check verification regression coverage",
+      "spec": "specs/workflow-engine/spec.md#Check full verification before review",
+      "description": "Add focused regression tests that prove Check full verification is required before AI review and approval. Tests should cover failure blocking, passing evidence ordering, candidate binding, approval API rejection, and legacy `checks.buildTest` compatibility.",
+      "acceptanceCriteria": [
+        "A test proves a failing Check verification command prevents AI review, merge-ready, and approval request",
+        "A test proves passing `health:check` evidence is persisted before review-passed, merge-ready, and approval evidence",
+        "A test proves approval is rejected when verification evidence is missing or stale for the current candidate",
+        "A test proves `checks.buildTest` config controls Check full verification when `healthGates.check` is absent",
+        "A test proves failed Check verification evidence includes command, status, duration, summary, and useful log excerpt",
+        "Relevant tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Prefer deterministic workflow/domain and stage-runner tests with mocked command execution and git state over broad LLM-driven E2E tests.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        616716
+      ]
+    }
+  ]
+}

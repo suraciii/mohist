@@ -156,9 +156,22 @@ export interface CheckStateSnapshot {
   runCount: number;
 }
 
+export interface VerificationEvidence {
+  checkName: string;
+  status: 'pass' | 'fail' | 'error' | 'pending';
+  command: string;
+  duration: number;
+  summary: string;
+  logExcerpt: string;
+  checkedAt: string;
+  candidateHeadSha?: string;
+  baseSha?: string;
+}
+
 export interface ApprovalSnapshot {
   status: 'awaiting' | 'approved' | 'rejected';
   output: unknown | null;
+  verificationEvidence?: VerificationEvidence | null;
   requestedAt: string;
   respondedAt: string | null;
   staleEvidenceDetected?: boolean;
@@ -399,11 +412,12 @@ export class StageRun {
     return check;
   }
 
-  requestApproval(now: string, output: unknown = null): void {
+  requestApproval(now: string, output: unknown = null, verificationEvidence: VerificationEvidence | null = null): void {
     this.status = 'awaiting-approval';
     this.approval = {
       status: 'awaiting',
       output,
+      verificationEvidence,
       requestedAt: now,
       respondedAt: null,
     };
@@ -469,12 +483,14 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
       { id: 'ai-review', title: 'AI review' },
     ],
     checks: [
+      { name: 'health:check', title: 'Check health gate' },
       { name: 'review-passed', title: 'Review passed' },
       { name: 'merge-ready', title: 'Merge ready' },
     ],
     requiresApproval: true,
     approvalCheckName: 'user-approval',
     checkFailurePolicies: [
+      { checkName: 'health:check', fixTaskId: 'fix-check-health', fixTaskTitle: 'Fix check health', maxAttempts: 1 },
       { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1 },
       { checkName: 'merge-ready', fixTaskId: 'fix-merge-readiness', fixTaskTitle: 'Fix merge readiness', maxAttempts: 1 },
     ],
@@ -625,7 +641,7 @@ export class WorkflowRun {
       const reason = 'Review findings changed code; re-run AI review before rechecking';
       stageRun.resetTask('ai-review');
       events.push({ type: 'task-invalidated', stage, taskId: 'ai-review', reason });
-      for (const checkName of ['review-passed', 'merge-ready']) {
+      for (const checkName of ['health:check', 'review-passed', 'merge-ready']) {
         stageRun.resetCheck(checkName);
         events.push({ type: 'check-invalidated', stage, checkName, reason });
       }
@@ -636,7 +652,7 @@ export class WorkflowRun {
         const reason = 'Rebase changed the candidate snapshot; re-run review checks';
         stageRun.resetTask('ai-review');
         events.push({ type: 'task-invalidated', stage, taskId: 'ai-review', reason });
-        for (const checkName of ['review-passed', 'merge-ready']) {
+        for (const checkName of ['health:check', 'review-passed', 'merge-ready']) {
           stageRun.resetCheck(checkName);
           events.push({ type: 'check-invalidated', stage, checkName, reason });
         }
@@ -812,12 +828,13 @@ export class WorkflowRun {
     ) {
       const reason = 'Retrying Check after review findings were fixed; re-run AI review before rechecking';
       stageRun.resetTask('ai-review');
-      for (const checkName of ['review-passed', 'merge-ready']) {
+      for (const checkName of ['health:check', 'review-passed', 'merge-ready']) {
         stageRun.resetCheck(checkName);
       }
       return this.decision([
         { type: 'stage-retried', stage },
         { type: 'task-invalidated', stage, taskId: 'ai-review', reason },
+        { type: 'check-invalidated', stage, checkName: 'health:check', reason },
         { type: 'check-invalidated', stage, checkName: 'review-passed', reason },
         { type: 'check-invalidated', stage, checkName: 'merge-ready', reason },
       ]);
@@ -918,7 +935,8 @@ export class WorkflowRun {
     if (!stageRun.allChecksPassed()) return this.decision(events);
     if (stageRun.definition.requiresApproval && stageRun.approval?.status !== 'approved') {
       if (!stageRun.approval) {
-        stageRun.requestApproval(new Date().toISOString(), this.buildApprovalOutput(stageRun));
+        const verificationEvidence = this.extractVerificationEvidence(stageRun);
+        stageRun.requestApproval(new Date().toISOString(), this.buildApprovalOutput(stageRun, verificationEvidence), verificationEvidence);
         events.push({ type: 'approval-requested', stage: stageRun.stage });
       }
       return this.decision(events);
@@ -958,7 +976,7 @@ export class WorkflowRun {
     return { events, nextWork: this.nextWork() };
   }
 
-  private buildApprovalOutput(stageRun: StageRun): unknown {
+  private buildApprovalOutput(stageRun: StageRun, verificationEvidence: VerificationEvidence | null): unknown {
     if (stageRun.stage !== Stage.Check) return null;
     const reviewPassed = stageRun.checks.find(check => check.name === 'review-passed');
     const mergeReady = stageRun.checks.find(check => check.name === 'merge-ready');
@@ -967,11 +985,42 @@ export class WorkflowRun {
     const reviewOutput = reviewPassed.output as Record<string, unknown>;
     const snapshotSha = reviewOutput.snapshotSha;
     if (typeof snapshotSha !== 'string' || snapshotSha.length === 0) return null;
+
+    const healthCheck = stageRun.checks.find(check => check.name === 'health:check');
+    if (!healthCheck || healthCheck.status !== 'passed') {
+      return {
+        error: 'Cannot request check approval: health:check has not passed',
+      };
+    }
+    const healthCheckOutput = healthCheck.output as Record<string, unknown> | undefined;
+    if (healthCheckOutput?.enabled === false) {
+      return { error: 'Cannot request check approval: health:check is disabled by policy and cannot serve as approval evidence' };
+    }
+
     return {
       result: reviewOutput.verdict,
       reviewReport: reviewOutput.reviewReport,
       dimensions: reviewOutput.dimensions,
       snapshotSha,
+      verificationEvidence,
+    };
+  }
+
+  private extractVerificationEvidence(stageRun: StageRun): VerificationEvidence | null {
+    if (stageRun.stage !== Stage.Check) return null;
+    const healthCheck = stageRun.checks.find(check => check.name === 'health:check');
+    if (!healthCheck || healthCheck.status !== 'passed' || !healthCheck.output) return null;
+    const output = healthCheck.output as Record<string, unknown>;
+    return {
+      checkName: healthCheck.name,
+      status: healthCheck.status === 'passed' ? 'pass' : healthCheck.status === 'failed' ? 'fail' : healthCheck.status,
+      command: (output.command as string) ?? '',
+      duration: (output.duration as number) ?? 0,
+      summary: (output.summary as string) ?? (output.message as string) ?? '',
+      logExcerpt: (output.logExcerpt as string) ?? '',
+      checkedAt: healthCheck.runCount > 0 ? new Date().toISOString() : '',
+      candidateHeadSha: (output.candidateHeadSha as string) ?? undefined,
+      baseSha: (output.baseSha as string) ?? undefined,
     };
   }
 

@@ -223,6 +223,17 @@ describe('HealthGateCheck', () => {
 
   describe('disabled gate scenario', () => {
     it('returns pass with enabled=false and does not execute command', async () => {
+      execFileMock.mockImplementation((_cmd: any, _args: any, _opts: any, cb: any) => {
+        process.nextTick(() => {
+          if (typeof _opts === 'function') {
+            _opts(null, { stdout: 'abc123\n', stderr: '' });
+          } else if (typeof cb === 'function') {
+            cb(null, { stdout: 'abc123\n', stderr: '' });
+          }
+        });
+        return { stdout: 'abc123\n', stderr: '' };
+      });
+
       const check = new HealthGateCheck({
         worktreePath: '/tmp/worktree',
         policy: createMockPolicy({ enabled: false }),
@@ -238,7 +249,9 @@ describe('HealthGateCheck', () => {
         stage: 'build',
         enabled: false,
       });
-      expect(execFileMock).not.toHaveBeenCalled();
+      const calls = execFileMock.mock.calls;
+      const healthGateCommandCalls = calls.filter((c: any[]) => c[0] !== 'git');
+      expect(healthGateCommandCalls).toHaveLength(0);
     });
   });
 

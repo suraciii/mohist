@@ -793,6 +793,7 @@ The HTTP API SHALL name issue-level prerequisite response fields using `prerequi
 - **THEN** the API response includes `startEligibility.startable = false`
 - **AND** the API response includes `startEligibility.waitingForDelivery` with Issue #200
 - **AND** each prerequisite entry indicates whether its prerequisite issue is delivered
+
 ### Requirement: REQ-BDA-API-001 Issue APIs expose drift and rebase decision state
 
 Issue list, issue show, and stage-state APIs SHALL expose normalized base drift and rebase opportunity state for active issue candidates.
@@ -811,3 +812,32 @@ Issue list, issue show, and stage-state APIs SHALL expose normalized base drift 
 
 - **WHEN** drift-driven `rebase-branch` fails with conflicts or conflict-resolution failure
 - **THEN** issue or stage-state responses SHALL expose conflict files, failure reason, and next action guidance from durable projected state
+
+### Requirement: Approve rejects missing or stale verification
+
+Approval-related HTTP APIs SHALL NOT advance Check approval when full verification evidence is missing, failed, disabled, malformed, or stale for the current candidate implementation.
+
+#### Scenario: Approve rejects missing verification evidence
+
+- **WHEN** a user approves a Check-stage issue through the API
+- **AND** approval output has no passing full verification evidence
+- **THEN** the API SHALL reject approval
+- **AND** it SHALL return a clear error instructing the user to rerun Check verification
+
+#### Scenario: Approve rejects stale verification evidence
+
+- **WHEN** a user approves a Check-stage issue through the API
+- **AND** verification evidence does not match the current candidate implementation, review snapshot, or merge-ready snapshot
+- **THEN** the API SHALL reject approval
+- **AND** it SHALL NOT advance the issue to Integrate
+
+### Requirement: Issue API exposes Check verification failures
+
+Issue detail APIs SHALL expose failed or missing Check full verification evidence clearly enough for CLI and Web UI consumers to show why approval is unavailable.
+
+#### Scenario: Issue detail includes failed Check verification
+
+- **WHEN** Check full verification fails
+- **THEN** issue detail data SHALL include the failed `health:check` status and output
+- **AND** the output SHALL include command, summary, duration, and log excerpt when available
+

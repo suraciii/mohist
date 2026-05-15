@@ -259,6 +259,11 @@ describe('Check-stage re-review convergence regressions', () => {
         },
       };
 
+      const healthCheck: Check = {
+        name: 'health:check',
+        run: async () => ({ name: 'health:check', status: 'pass' }),
+      };
+
       const mergeReadyCheck: Check = {
         name: 'merge-ready',
         run: async () => ({ name: 'merge-ready', status: 'pass' }),
@@ -289,7 +294,7 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [reviewPassedCheck, mergeReadyCheck, userApprovalCheck],
+        checks: [healthCheck, reviewPassedCheck, mergeReadyCheck, userApprovalCheck],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'repair-review-findings', maxAttempts: 1 }],
@@ -357,13 +362,18 @@ describe('Check-stage re-review convergence regressions', () => {
         },
       };
 
+      const healthCheck: Check = {
+        name: 'health:check',
+        run: async () => ({ name: 'health:check', status: 'pass' }),
+      };
+
       const mergeReadyCheck: Check = {
         name: 'merge-ready',
         run: async () => ({ name: 'merge-ready', status: 'pass' }),
       };
 
       const runner = new TestStageRunner({
-        checks: [reviewPassedCheck, mergeReadyCheck, new PendingCheck()],
+        checks: [healthCheck, reviewPassedCheck, mergeReadyCheck, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'repair-review-findings', maxAttempts: 1 }],
@@ -416,13 +426,18 @@ describe('Check-stage re-review convergence regressions', () => {
         },
       };
 
+      const healthCheck: Check = {
+        name: 'health:check',
+        run: async () => ({ name: 'health:check', status: 'pass' }),
+      };
+
       const mergeReadyCheck: Check = {
         name: 'merge-ready',
         run: async () => ({ name: 'merge-ready', status: 'pass' }),
       };
 
       const runner = new TestStageRunner({
-        checks: [reviewPassedCheck, mergeReadyCheck, new PendingCheck()],
+        checks: [healthCheck, reviewPassedCheck, mergeReadyCheck, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'repair-review-findings', maxAttempts: 1 }],
@@ -488,7 +503,7 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
+        checks: [{ name: 'health:check', run: async () => ({ name: 'health:check', status: 'pass' as const }) } as Check, aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
@@ -537,7 +552,7 @@ describe('Check-stage re-review convergence regressions', () => {
       };
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
+        checks: [{ name: 'health:check', run: async () => ({ name: 'health:check', status: 'pass' as const }) } as Check, aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
@@ -607,7 +622,7 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
+        checks: [{ name: 'health:check', run: async () => ({ name: 'health:check', status: 'pass' as const }) } as Check, aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
@@ -665,7 +680,7 @@ describe('Check-stage re-review convergence regressions', () => {
       });
 
       const runner = new TestStageRunner({
-        checks: [aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
+        checks: [{ name: 'health:check', run: async () => ({ name: 'health:check', status: 'pass' as const }) } as Check, aiReviewCheck, { name: 'merge-ready', run: async () => ({ name: 'merge-ready', status: 'pass' as const }) } as Check, new PendingCheck()],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         failurePolicies: [{ checkName: 'review-passed', fixTaskId: 'fix-review-findings', maxAttempts: 1 }],
@@ -930,7 +945,7 @@ const runner = new TestStageRunner({
       });
 
       const runner = new TestStageRunner({
-        checks: [reviewPassedCheck, userApprovalCheck],
+        checks: [{ name: 'health:check', run: async () => ({ name: 'health:check', status: 'pass' as const }) } as Check, reviewPassedCheck, userApprovalCheck],
         nextStage: Stage.Integrate,
         stage: Stage.Check,
         approvalCheckNames: ['user-approval'],

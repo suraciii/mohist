@@ -36,6 +36,7 @@ function advanceToIntegrate(): WorkflowRun {
   run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
   run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
   run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+  run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
   run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
   run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
   run.approveStage(Stage.Check);
