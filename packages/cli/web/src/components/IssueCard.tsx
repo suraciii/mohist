@@ -24,7 +24,7 @@ interface Props {
   showArchiveButton?: boolean
 }
 
-type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | 'false-done' | 'waiting' | null
+type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | 'false-done' | 'waiting' | 'drift' | null
 
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (
@@ -54,15 +54,20 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (isAgentRunning) {
     return 'running'
   }
+  if (issue.drift?.drifted && (issue.drift.decision === 'needs-attention' || issue.drift.decision === 'defer' || issue.drift.decision === 'suggest' || issue.drift.decision === 'enqueue')) {
+    return 'drift'
+  }
   return null
 }
 
 function Badge({
   type,
   mergeState,
+  driftDecision,
 }: {
   type: Exclude<BadgeType, 'closed' | null>
   mergeState?: string | null
+  driftDecision?: string | null
 }) {
   if (type === 'conflict') {
     const label = MERGE_STATE_LABELS[mergeState ?? ''] ?? mergeState ?? 'Failed'
@@ -91,6 +96,14 @@ function Badge({
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
         Waiting
+      </span>
+    )
+  }
+  if (type === 'drift') {
+    const label = driftDecision === 'needs-attention' ? 'Needs Attention' : driftDecision === 'defer' ? 'Rebase Deferred' : driftDecision === 'suggest' ? 'Rebase Suggested' : 'Base Drift'
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">
+        {label}
       </span>
     )
   }
@@ -187,7 +200,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               <IntegrationBadge blockedReason={issue.blockedReason} />
             )}
             {badge && badge !== 'closed' && badge !== 'running' && (
-              <Badge type={badge} mergeState={issue.mergeState} />
+              <Badge type={badge} mergeState={issue.mergeState} driftDecision={issue.drift?.decision ?? undefined} />
             )}
             {showArchiveButton && issue.status === IssueStatus.Completed && (
               <button

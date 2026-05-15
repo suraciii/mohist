@@ -52,6 +52,7 @@ export interface StageApprovalState {
   output: unknown;
   requestedAt: string | null;
   respondedAt: string | null;
+  staleEvidenceDetected?: boolean;
 }
 
 export interface StageFailureDetails {
@@ -317,6 +318,7 @@ export interface SetApprovalInput {
   output?: unknown;
   requestedAt?: string | null;
   respondedAt?: string | null;
+  staleEvidenceDetected?: boolean;
 }
 
 export function normalizeCheckStatus(raw: string): StageCheckStatus {
@@ -805,6 +807,7 @@ export class StageStateService {
           output: stageRun.approvalOutput,
           requestedAt: stageRun.approvalRequestedAt,
           respondedAt: stageRun.approvalRespondedAt,
+          staleEvidenceDetected: stageRun.staleEvidenceDetected ?? false,
         };
       }
 

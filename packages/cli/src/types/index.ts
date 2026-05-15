@@ -233,6 +233,31 @@ export class ConfigConflictError extends Error {
   }
 }
 
+export type RebaseDecision = 'skip' | 'suggest' | 'enqueue' | 'defer' | 'needs-attention';
+
+export type DeferReason = 'agent-running' | 'task-running' | 'waiting-for-task-boundary' | 'rebase-already-pending';
+
+export interface StaleEvidence {
+  review: boolean;
+  mergeReady: boolean;
+  approval: boolean;
+}
+
+export interface BaseDriftState {
+  drifted: boolean;
+  baseBranch: string;
+  observedBaseSha: string | null;
+  currentBaseSha: string | null;
+  candidateHeadSha: string | null;
+  mergeBaseSha: string | null;
+  decision: RebaseDecision;
+  safeWindow: boolean;
+  deferReason?: DeferReason;
+  staleEvidence?: StaleEvidence;
+  conflicts?: string[];
+  message: string;
+}
+
 export interface ExploreMessage {
   id: string;
   sessionId: string;

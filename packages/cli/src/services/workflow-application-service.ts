@@ -113,6 +113,20 @@ export class WorkflowApplicationService {
     return this.updateActiveRun(input.issueId, input, run => run.scheduleRebaseTask(input.reason));
   }
 
+  scheduleRebaseForDrift(input: { issueId: string; baseBranch: string; observedBaseSha: string; currentBaseSha: string } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    const reason = `Base branch ${input.baseBranch} advanced from ${input.observedBaseSha} to ${input.currentBaseSha}; rebase requested by drift scan`;
+    return this.scheduleRebaseTask({ issueId: input.issueId, reason, tasksPath: input.tasksPath, sessionId: input.sessionId, startedBy: input.startedBy });
+  }
+
+  markStaleEvidence(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    return this.updateActiveRun(input.issueId, input, run => {
+      const stageRun = run.stageRun(input.stage);
+      stageRun.markStaleEvidence();
+      const events: import('../workflow/domain').WorkflowEvent[] = [{ type: 'evidence-stale-marked', stage: input.stage, reason: 'Base drift invalidated evidence' }];
+      return { events, nextWork: run.nextWork() };
+    });
+  }
+
   scheduleFixReviewFindings(input: { issueId: string; stage: Stage.Check } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
     const run = this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
     if (!run) {

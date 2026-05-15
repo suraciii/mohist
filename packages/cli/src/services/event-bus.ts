@@ -60,6 +60,15 @@ export type EventMap = {
   integration_completed: { issueId: string; projectId: string; issueNumber: number; steps: Array<{ step: string; status: string; output?: unknown }> };
   integration_failed: { issueId: string; projectId: string; issueNumber: number; failingStep: string; error: string; output?: unknown };
   integration_preflight_refreshed: { issueId: string; projectId: string; issueNumber: number; status: 'passed' | 'failed'; snapshot?: unknown };
+  base_branch_advanced: { projectId: string; issueId: string; issueNumber: number; baseBranch: string; newBaseSha: string; previousBaseSha: string };
+  base_drift_detected: { projectId: string; issueId: string; issueNumber: number; drifted: boolean; observedBaseSha: string | null; currentBaseSha: string | null; decision: string };
+  rebase_opportunity_opened: { projectId: string; issueId: string; issueNumber: number; decision: string; safeWindow: boolean; deferReason?: string };
+  active_work_protected: { projectId: string; issueId: string; issueNumber: number; deferReason: string };
+  safe_rebase_window_opened: { projectId: string; issueId: string; issueNumber: number };
+  rebase_decision_made: { projectId: string; issueId: string; issueNumber: number; decision: string; reason?: string };
+  rebase_task_scheduled: { projectId: string; issueId: string; issueNumber: number; reason: string };
+  candidate_evidence_invalidated: { projectId: string; issueId: string; issueNumber: number; staleEvidence: { review: boolean; mergeReady: boolean; approval: boolean } };
+  user_attention_requested: { projectId: string; issueId: string; issueNumber: number; reason: string; suggestion: string };
 };
 
 export type EventName = keyof EventMap;

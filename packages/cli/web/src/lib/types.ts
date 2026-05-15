@@ -74,6 +74,7 @@ export interface Issue {
   checkSuite?: CheckSuite | null
   prerequisites?: IssuePrerequisiteSummary[]
   startEligibility?: IssueStartEligibility
+  drift?: BaseDriftInfo | null
 }
 
 export interface Project {
@@ -282,6 +283,9 @@ export type EventMap = {
   integration_step_updated: { issueId: string; projectId: string; issueNumber: number; step: string; status: string; summary?: string; output?: unknown }
   integration_completed: { issueId: string; projectId: string; issueNumber: number; steps: Array<{ step: string; status: string; output?: unknown }> }
   integration_failed: { issueId: string; projectId: string; issueNumber: number; failingStep: string; error: string; output?: unknown }
+  base_drift_detected: { issueId: string; projectId: string; issueNumber: number; baseBranch: string; observedBaseSha: string | null; currentBaseSha: string | null; decision: string }
+  rebase_opportunity: { issueId: string; projectId: string; issueNumber: number; decision: string; deferReason?: string; staleEvidence?: { review: boolean; mergeReady: boolean; approval: boolean } }
+  user_attention_requested: { issueId: string; projectId: string; issueNumber: number; reason: string; nextAction: string }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap
@@ -604,6 +608,30 @@ export interface RebaseConflictState {
   error?: string
 }
 
+export type RebaseDecision = 'skip' | 'suggest' | 'enqueue' | 'defer' | 'needs-attention'
+
+export type DeferReason = 'agent-running' | 'task-running' | 'waiting-for-task-boundary' | 'rebase-already-pending'
+
+export interface StaleEvidence {
+  review: boolean
+  mergeReady: boolean
+  approval: boolean
+}
+
+export interface BaseDriftInfo {
+  drifted: boolean
+  decision: RebaseDecision | null
+  safeWindow: boolean | null
+  deferReason: DeferReason | null
+  staleEvidence: StaleEvidence | null
+  observedBaseSha: string | null
+  currentBaseSha: string | null
+  candidateHeadSha: string | null
+  mergeBaseSha: string | null
+  conflicts: string[] | null
+  nextAction: string | null
+}
+
 export interface LiveTaskState {
   activeTaskId: string | null
   activeTaskElapsedMs: number | null
@@ -900,6 +928,7 @@ export interface IssueStageStateResponse {
   issueId: string
   issueNumber: number
   stages: StageStateRead[]
+  drift?: BaseDriftInfo | null
 }
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled'

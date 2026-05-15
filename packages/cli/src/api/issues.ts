@@ -20,6 +20,7 @@ import type { WorkflowRunWithStageRuns, WorkflowStageRunWithTasksAndChecks } fro
 import { detectOpenSpecChange, findChangeDir } from '../openspec/detector';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { execFileSync } from 'child_process';
 import { Log } from '../util/log';
 import type { IssueQueueStatus } from '../services/agent-runner-service';
 import { assembleSessionTranscript } from '../services/session-transcript-service';
@@ -28,6 +29,9 @@ import { StageStateService } from '../services/stage-state-service';
 import type { IssuePrerequisiteService, IssuePrerequisiteSummary, IssueStartEligibility } from '../services/issue-prerequisite-service';
 import { WorkflowApplicationService } from '../services/workflow-application-service';
 import type { WorkflowRunService } from '../services/workflow-run-service';
+import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
+import type { MergeabilitySnapshot } from '../git/worktree-manager';
+import type { WorkflowRunSnapshot } from '../workflow/domain';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
@@ -437,6 +441,185 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
   };
 }
 
+function computeDriftStateForIssue(
+  issue: Issue,
+  projectId: string,
+  baseBranch: string,
+  worktreeManager: WorktreeManager | null,
+  workflowRunService: WorkflowRunService | undefined,
+  projectService: ProjectService,
+): BaseDriftState | null {
+  if (!worktreeManager || !workflowRunService) return null;
+
+  const activeStages: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate];
+  if (!activeStages.includes(issue.stage)) return null;
+
+  const project = projectService.getById(projectId);
+  if (!project) return null;
+
+  const worktreePath = worktreeManager.getPath(project.name, issue.number);
+  if (!worktreePath) return null;
+
+  let currentBaseSha: string | null = null;
+  let candidateHeadSha: string | null = null;
+  let mergeBaseSha: string | null = null;
+
+  try {
+    const baseResult = execFileSync('git', ['rev-parse', baseBranch], { cwd: project.path, encoding: 'utf-8' });
+    currentBaseSha = baseResult.trim() || null;
+  } catch {
+    currentBaseSha = null;
+  }
+
+  try {
+    candidateHeadSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath, encoding: 'utf-8' }).trim() || null;
+  } catch {
+    candidateHeadSha = null;
+  }
+
+  if (currentBaseSha && candidateHeadSha) {
+    try {
+      const mbResult = execFileSync('git', ['merge-base', baseBranch, `mo/issue-${issue.number}`], { cwd: project.path, encoding: 'utf-8' });
+      mergeBaseSha = mbResult.trim() || null;
+    } catch {
+      mergeBaseSha = null;
+    }
+  }
+
+  const run = workflowRunService.getLatestRunForIssue(issue.id);
+  const workflowFacts: WorkflowFacts = {
+    workflowRun: run as WorkflowRunSnapshot | null,
+    currentStage: run?.currentStage ?? null,
+    isRunning: false,
+    runningTaskId: null,
+  };
+
+  const rebaseTask = run?.stageRuns
+    .flatMap(sr => sr.tasks)
+    .find(t => t.taskId === 'rebase-branch' && t.status === 'completed');
+
+  const rebaseTaskOutput: RebaseTaskOutput | null = rebaseTask?.output && typeof rebaseTask.output === 'object'
+    ? (() => {
+        const output = rebaseTask.output as Record<string, unknown>;
+        const conflicts = Array.isArray(output.conflicts)
+          ? output.conflicts.filter((c: unknown): c is string => typeof c === 'string')
+          : undefined;
+        return {
+          beforeBaseSha: (output.beforeBaseSha as string) ?? '',
+          afterBaseSha: (output.afterBaseSha as string) ?? '',
+          beforeHeadSha: (output.beforeHeadSha as string) ?? '',
+          afterHeadSha: (output.afterHeadSha as string) ?? '',
+          shaChanged: Boolean(output.shaChanged),
+          conflicts,
+        };
+      })()
+    : null;
+
+  const checkStage = run?.stageRuns.find(sr => sr.stage === Stage.Check);
+  const mergeReadyCheck = checkStage?.checks.find(c => c.checkName === 'merge-ready');
+  const reviewCheck = checkStage?.checks.find(c => c.checkName === 'review-passed');
+
+  const mergeReadySnapshot: MergeabilitySnapshot | null = mergeReadyCheck?.output && typeof mergeReadyCheck.output === 'object'
+    ? {
+        kind: 'merge-ready' as const,
+        strategy: 'squash' as const,
+        targetBranch: (mergeReadyCheck.output as Record<string, unknown>).targetBranch as string ?? baseBranch,
+        baseSha: (mergeReadyCheck.output as Record<string, unknown>).baseSha as string ?? '',
+        candidateHeadSha: (mergeReadyCheck.output as Record<string, unknown>).candidateHeadSha as string ?? '',
+        mergeBaseSha: (mergeReadyCheck.output as Record<string, unknown>).mergeBaseSha as string ?? '',
+        canMerge: (mergeReadyCheck.output as Record<string, unknown>).canMerge as boolean ?? false,
+        conflictFiles: Array.isArray((mergeReadyCheck.output as Record<string, unknown>).conflictFiles)
+          ? (mergeReadyCheck.output as Record<string, unknown>).conflictFiles as string[]
+          : [],
+        checkedAt: (mergeReadyCheck.output as Record<string, unknown>).checkedAt as string ?? new Date().toISOString(),
+      }
+    : null;
+
+  const candidateEvidence: CandidateEvidence = {
+    observedBaseSha: rebaseTaskOutput?.afterBaseSha ?? mergeReadySnapshot?.baseSha ?? null,
+    mergeReadySnapshot,
+    approvalSnapshot: issue.approvalState ? {
+      status: issue.approvalState.status,
+      output: issue.approvalState.output,
+      requestedAt: issue.approvalState.requestedAt,
+      respondedAt: issue.approvalState.respondedAt ?? null,
+      staleEvidenceDetected: false,
+    } : null,
+    rebaseTaskOutput,
+    reviewCheckOutput: reviewCheck?.output ?? null,
+    mergeReadyCheckOutput: mergeReadyCheck?.output ?? null,
+  };
+
+  const driftInput: BaseDriftInput = {
+    projectId,
+    issueId: issue.id,
+    issueNumber: issue.number,
+    baseBranch,
+    gitFacts: { currentBaseSha, candidateHeadSha, mergeBaseSha },
+    candidateEvidence,
+    workflowFacts,
+  };
+
+  return evaluateBaseDrift(driftInput);
+}
+
+function buildDriftResponse(driftState: BaseDriftState | null): {
+  drifted: boolean;
+  decision: string | null;
+  safeWindow: boolean | null;
+  deferReason: string | null;
+  staleEvidence: { review: boolean; mergeReady: boolean; approval: boolean } | null;
+  observedBaseSha: string | null;
+  currentBaseSha: string | null;
+  candidateHeadSha: string | null;
+  mergeBaseSha: string | null;
+  conflicts: string[] | null;
+  nextAction: string | null;
+} {
+  if (!driftState) {
+    return {
+      drifted: false,
+      decision: null,
+      safeWindow: null,
+      deferReason: null,
+      staleEvidence: null,
+      observedBaseSha: null,
+      currentBaseSha: null,
+      candidateHeadSha: null,
+      mergeBaseSha: null,
+      conflicts: null,
+      nextAction: null,
+    };
+  }
+
+  let nextAction: string | null = null;
+  if (driftState.decision === 'enqueue') {
+    nextAction = 'Rebase is queued; Mohist will rebase at a safe window.';
+  } else if (driftState.decision === 'suggest') {
+    nextAction = 'Rebase recommended; run "mo issue rebase ' + driftState.baseBranch + '" when ready.';
+  } else if (driftState.decision === 'needs-attention') {
+    nextAction = 'Stale approval detected. Rebase or rerun checks before approving.';
+  } else if (driftState.decision === 'defer') {
+    nextAction = 'Rebase deferred until safe window (' + (driftState.deferReason ?? 'unknown reason') + ').';
+  } else if (driftState.decision === 'skip' && driftState.drifted) {
+    nextAction = 'Candidate is aligned with current base.';
+  }
+
+  return {
+    drifted: driftState.drifted,
+    decision: driftState.decision,
+    safeWindow: driftState.safeWindow,
+    deferReason: driftState.deferReason ?? null,
+    staleEvidence: driftState.staleEvidence ?? null,
+    observedBaseSha: driftState.observedBaseSha,
+    currentBaseSha: driftState.currentBaseSha,
+    candidateHeadSha: driftState.candidateHeadSha,
+    mergeBaseSha: driftState.mergeBaseSha,
+    conflicts: driftState.conflicts ?? null,
+    nextAction,
+  };
+}
+
 export function createIssueRoutes(
   issueService: IssueService,
   projectService: ProjectService,
@@ -619,18 +802,38 @@ export function createIssueRoutes(
 
       const project = projectService.getById(projectId);
 
-      let issuesWithPrerequisites = issues.map(issue => ({
-        ...issue,
-        projectName: project?.name || 'unknown',
-      }));
+      let issuesWithPrerequisites = issues.map(issue => {
+        const driftState = computeDriftStateForIssue(
+          issue,
+          projectId,
+          project?.baseBranch || 'main',
+          worktreeManager ?? null,
+          workflowRunService,
+          projectService,
+        );
+        return {
+          ...issue,
+          projectName: project?.name || 'unknown',
+          ...buildDriftResponse(driftState),
+        };
+      });
 
       if (issuePrerequisiteService && issues.length > 0) {
         const prereqViews = issuePrerequisiteService.getPrerequisiteViews(projectId, issues);
         issuesWithPrerequisites = issues.map(issue => {
           const view = prereqViews.get(issue.id);
+          const driftState = computeDriftStateForIssue(
+            issue,
+            projectId,
+            project?.baseBranch || 'main',
+            worktreeManager ?? null,
+            workflowRunService,
+            projectService,
+          );
           return {
             ...issue,
             projectName: project?.name || 'unknown',
+            ...buildDriftResponse(driftState),
             prerequisites: view?.prerequisites ?? [],
             startEligibility: view?.startEligibility ?? { startable: true, reason: 'ready' as const, waitingForDelivery: [] },
           };
@@ -920,18 +1123,37 @@ export function createIssueRoutes(
         const run = workflowRunService.getLatestRunForIssue(issue.id);
         if (run) {
           const stages = stageStateService.getIssueStageStateFromWorkflowRun(run);
+          const project = projectService.getById(projectId);
+          const driftState = computeDriftStateForIssue(
+            issue,
+            projectId,
+            project?.baseBranch || 'main',
+            worktreeManager ?? null,
+            workflowRunService,
+            projectService,
+          );
           return c.json({
             success: true,
             data: {
               issueId: issue.id,
               issueNumber: issue.number,
               stages,
+              drift: buildDriftResponse(driftState),
             },
           } satisfies ApiResponse);
         }
       }
 
       const stages = stageStateService.getIssueStageState(issue.id);
+      const project = projectService.getById(projectId);
+      const driftState = computeDriftStateForIssue(
+        issue,
+        projectId,
+        project?.baseBranch || 'main',
+        worktreeManager ?? null,
+        workflowRunService,
+        projectService,
+      );
 
       return c.json({
         success: true,
@@ -939,6 +1161,7 @@ export function createIssueRoutes(
           issueId: issue.id,
           issueNumber: issue.number,
           stages,
+          drift: buildDriftResponse(driftState),
         },
       } satisfies ApiResponse);
     } catch (error) {
@@ -1001,6 +1224,16 @@ export function createIssueRoutes(
         startEligibility = view.startEligibility;
       }
 
+      const driftState = computeDriftStateForIssue(
+        issue,
+        projectId,
+        project?.baseBranch || 'main',
+        worktreeManager ?? null,
+        workflowRunService,
+        projectService,
+      );
+      const driftResponse = buildDriftResponse(driftState);
+
       const response: ApiResponse = {
         success: true,
         data: {
@@ -1012,6 +1245,7 @@ export function createIssueRoutes(
           checkSuite,
           prerequisites,
           startEligibility,
+          ...driftResponse,
         }
       };
       return c.json(response);

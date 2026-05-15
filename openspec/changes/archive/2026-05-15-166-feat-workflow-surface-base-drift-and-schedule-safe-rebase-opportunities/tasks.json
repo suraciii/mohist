@@ -1,0 +1,237 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Compute base drift state",
+      "spec": "specs/base-drift-awareness/spec.md#REQ-BDA-001",
+      "description": "Implement the backend drift evaluation boundary that compares an active issue candidate's observed base position with the current project base. The result should normalize drift facts, stale evidence flags, safe-window facts, and the initial rebase decision without mutating the issue branch.",
+      "acceptanceCriteria": [
+        "A drift evaluator returns skip when the observed base position matches the current base",
+        "A drift evaluator returns drifted state with observedBaseSha, currentBaseSha, candidateHeadSha, mergeBaseSha, and staleEvidence when the base advanced",
+        "Observed base position is derived from existing authoritative evidence such as rebase task output, merge-ready snapshot, approval snapshot, or candidate merge base",
+        "The evaluator does not call rebase or otherwise mutate git state",
+        "Unit tests cover no-drift, drifted Check evidence, and missing historical observation cases",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/base-drift-service.ts; packages/cli/tests/base-drift-service.test.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Keep the service interface narrow: callers provide issue/project/workflow facts and receive a normalized read model, not scheduling side effects.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        413927
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Scan active issues after base advancement",
+      "spec": "specs/event-bus/spec.md#REQ-BDA-EVENTS-001",
+      "description": "Detect successful base branch advancement after Integrate merge and scan active issues in Plan, Build, Check, and pre-delivery Integrate. Persist or project the drift state for each candidate and emit typed domain events for base advancement, drift detection, rebase opportunity, decision, and user attention.",
+      "acceptanceCriteria": [
+        "Successful Integrate merge emits a base_branch_advanced-style event containing project, issue, base branch, and new base SHA facts",
+        "After base advancement, active Plan/Build/Check candidates in the same project are evaluated for drift",
+        "Closed, Done, and already delivered candidates are skipped by the scan",
+        "Repeating the scan for the same base SHA does not duplicate pending rebase tasks or repeated noisy attention events",
+        "Backend tests cover base advanced leading to drift projection for an active Check issue",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/base-drift-service.ts; packages/cli/src/workflow/integrate-stage-runner.ts; packages/cli/src/services/event-bus.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Events are refresh/audit signals only; the projected drift state remains the read source of truth.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        781030
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Schedule rebase only at safe windows",
+      "spec": "specs/workflow-run/spec.md#REQ-BDA-REBASE-001",
+      "description": "Use WorkflowRun state to decide whether a drifted candidate can enqueue rebase now or must defer. Safe opportunities should schedule the existing visible `rebase-branch` task with drift-specific caused-by metadata; unsafe mutating work should record a defer decision and reason.",
+      "acceptanceCriteria": [
+        "A drifted issue with a running mutating Build task records decision defer and does not append rebase-branch",
+        "A drifted issue at an approval wait, idle stage, or task boundary can enqueue or suggest rebase according to policy",
+        "Scheduling rebase uses WorkflowApplicationService.scheduleRebaseTask or the existing WorkflowRun scheduling path",
+        "Existing pending or running rebase-branch tasks are deduplicated",
+        "Backend tests cover base advanced during Build task and deferred rebase becoming actionable at task boundary",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts; packages/cli/src/services/workflow-application-service.ts; packages/cli/src/services/base-drift-service.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Do not add a hidden rebase executor. Rebase must remain ordinary workflow task work.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        508941
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Invalidate stale Check evidence",
+      "spec": "specs/workflow-engine/spec.md#REQ-BDA-EVIDENCE-001",
+      "description": "Make Check review, merge-ready, and approval evidence stale when base drift or rebase changes the facts those decisions were based on. Approval request and approval submission paths must reject stale evidence before Check can advance to Integrate.",
+      "acceptanceCriteria": [
+        "Base drift on a Check issue with previous passing merge-ready marks merge-ready and approval evidence stale",
+        "An awaiting Check approval backed by stale evidence is no longer returned as an actionable approval state",
+        "Submitting approval for stale Check evidence fails with clear guidance to rebase or rerun Check",
+        "Successful rebase-branch completion continues to invalidate Check review, merge-ready, and approval state when the candidate snapshot or base evidence changed",
+        "Regression coverage verifies base advanced to active Check issue invalidates old merge-ready and approval evidence",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts; packages/cli/src/workflow/base-stage-runner.ts; packages/cli/src/services/workflow-application-service.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Keep merge-ready read-only. It may report mergeability facts but must not schedule rebase.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        546496
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Expose drift through read APIs",
+      "spec": "specs/http-api/spec.md#REQ-BDA-API-001",
+      "description": "Expose projected drift and rebase opportunity state through issue list/show and stage-state APIs. Clients should receive normalized drift status, decision, safe-window or defer reason, stale evidence guidance, and conflict diagnostics from durable projected state.",
+      "acceptanceCriteria": [
+        "GET issue list/show responses include drifted, decision, safeWindow, deferReason, staleEvidence, base SHA facts, conflicts, and nextAction when available",
+        "Stage-state responses include drift/rebase decision details needed by Issue Detail without requiring clients to inspect raw workflow logs",
+        "Issue API responses do not present stale Check approval as currently actionable",
+        "Conflict files and failure reasons from rebase-branch output are exposed through durable read responses",
+        "API tests cover skip, defer, needs-attention, and conflict diagnostic response shapes",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/api/issues.ts; packages/cli/src/services/stage-state-service.ts; packages/cli/src/types/index.ts",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "API should expose normalized projection fields so clients do not re-derive drift policy from git.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1117773
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Render drift in CLI output",
+      "spec": "specs/cli-interface/spec.md#REQ-BDA-CLI-001",
+      "description": "Render server-projected base drift and rebase opportunity state in CLI issue output. The CLI should explain behind-base status, decisions, defer reasons, stale approval guidance, and conflict diagnostics without reimplementing drift policy.",
+      "acceptanceCriteria": [
+        "mo issue show <number> displays behind-base status, rebase decision, defer reason, stale approval guidance, and conflict files when present",
+        "CLI output does not present stale Check approval as actionable",
+        "CLI output uses API-provided drift fields rather than local git inspection to decide drift status",
+        "CLI tests cover skip, defer, needs-attention, stale approval, and conflict diagnostic rendering",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/cli/commands/issue.ts; packages/cli/tests/cli-issue-drift.test.ts",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "Keep CLI as a thin client over server-projected drift state.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        141950
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Surface drift in Web UI",
+      "spec": "specs/web-ui/spec.md#REQ-BDA-WUI-001",
+      "description": "Render base drift and rebase decisions in the Web UI using the API projection and existing WorkflowRun-backed task progress. Issue cards, Issue Detail, approval surfaces, task/check progress, attention summary, and live SSE refresh should make drift and stale evidence understandable without adding a separate hidden rebase state model.",
+      "acceptanceCriteria": [
+        "Issue cards or attention summaries identify drifted or needs-attention issues with user-facing wording",
+        "Issue Detail shows base drift state, rebase recommendation or pending task, safe-window/defer reason, and next action",
+        "Stale Check approval actions are hidden or replaced by guidance to rebase or rerun checks",
+        "Rebase conflict or conflict-resolution failure displays conflict files, failure reason, and next action from durable projected state",
+        "SSE handling refreshes issue and stage-state data when drift/rebase opportunity events arrive",
+        "Frontend tests cover drift guidance, deferred rebase display, stale approval suppression, and conflict diagnostics",
+        "Frontend typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueCard.tsx; packages/cli/web/src/components/IssueDetailPage.tsx; packages/cli/web/src/components/PipelineView.tsx; packages/cli/web/src/hooks/useSSE.tsx; packages/cli/web/src/lib/types.ts",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "Preserve the existing visual language and canonical stage-state task list; do not create a second bespoke rebase progress source.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        334005
+      ]
+    },
+    {
+      "id": "T-008",
+      "title": "Add end-to-end drift regressions",
+      "spec": "specs/base-drift-awareness/spec.md#REQ-BDA-REGRESSION-001",
+      "description": "Add focused backend and frontend regression coverage for the two highest-risk product flows. The tests should prove early drift detection invalidates stale Check approval and that Build task protection defers rebase until a task boundary.",
+      "acceptanceCriteria": [
+        "A backend regression covers base advanced to active Check issue with old merge-ready and approval evidence invalidated",
+        "A backend regression covers base advanced during Build task causing defer, no rebase task while mutating work runs, and rebase opportunity becoming actionable at task boundary",
+        "A frontend regression verifies stale Check approval is not shown as approvable after drift projection",
+        "A frontend regression verifies deferred rebase reason and conflict diagnostics are visible when projected by the API",
+        "Relevant backend and frontend test suites pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests; packages/cli/web/src/components/*.test.tsx",
+      "dependsOn": [
+        "T-006",
+        "T-007"
+      ],
+      "passes": true,
+      "notes": "This task is intentionally after implementation tasks so tests can exercise the final integration rather than isolated mocks only.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        576807,
+        1029478
+      ]
+    }
+  ]
+}

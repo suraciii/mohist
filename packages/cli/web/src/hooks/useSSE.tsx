@@ -243,6 +243,31 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             }
             break
           }
+          case 'base_drift_detected':
+          case 'rebase_opportunity': {
+            const d = parsed as EventMap['base_drift_detected'] | EventMap['rebase_opportunity']
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            if ('issueNumber' in d && d.issueNumber) {
+              queryClient.invalidateQueries({ queryKey: ['issues', d.issueNumber] })
+              queryClient.invalidateQueries({ queryKey: ['issues', d.issueNumber, 'stage-state'] })
+            }
+            if (eventName === 'base_drift_detected') {
+              const driftEvt = d as EventMap['base_drift_detected']
+              if (driftEvt.decision === 'needs-attention') {
+                toast.warning(`Issue #${driftEvt.issueNumber} has stale evidence — rebase or rerun checks`)
+              }
+            }
+            break
+          }
+          case 'user_attention_requested': {
+            const d = parsed as EventMap['user_attention_requested']
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            if (d.issueNumber) {
+              queryClient.invalidateQueries({ queryKey: ['issues', d.issueNumber] })
+              toast.info(`Issue #${d.issueNumber}: ${d.reason}`)
+            }
+            break
+          }
         }
       } catch {
         // ignore malformed events
@@ -302,6 +327,9 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'check_update',
       'check_suite_status_changed',
       'stage_task_update',
+      'base_drift_detected',
+      'rebase_opportunity',
+      'user_attention_requested',
     ]
 
     for (const type of eventTypes) {

@@ -161,12 +161,25 @@ export class IntegrateStageRunner extends BaseStageRunner {
       return { integrate: false, steps };
     }
 
+    const mergeStepOutput = mergeResult?.output as { targetBranch?: string; baseSha?: string; landedSha?: string } | undefined;
+
     ctx.emit('integration_completed', {
       issueId: ctx.issue.id,
       projectId: ctx.issue.projectId,
       issueNumber: ctx.issue.number,
       steps: steps.map(s => ({ step: s.step, status: s.status, output: s.output })),
     });
+
+    if (mergeStepOutput?.targetBranch && mergeStepOutput?.landedSha && mergeStepOutput?.baseSha) {
+      ctx.emit('base_branch_advanced', {
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        baseBranch: mergeStepOutput.targetBranch,
+        newBaseSha: mergeStepOutput.landedSha,
+        previousBaseSha: mergeStepOutput.baseSha,
+      });
+    }
 
     return {
       integrate: true,
