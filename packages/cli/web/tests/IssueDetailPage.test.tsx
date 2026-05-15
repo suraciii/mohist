@@ -5,6 +5,7 @@ import { IssueDetailPage } from '../src/components/IssueDetailPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
+import { IssueStatus, Stage } from '../src/lib/types'
 
 const mocks = vi.hoisted(() => {
   return {
@@ -48,6 +49,8 @@ vi.mock('../src/hooks/useQueries', async () => {
     useCreateExploreSession: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useIssueExecutions: () => ({ data: [] as any[] }),
     useWorktreeStatus: () => ({ data: null }),
+    useIssueStageState: () => ({ data: null }),
+    useWorkflowRun: () => ({ data: null }),
   }
 })
 
@@ -58,6 +61,7 @@ vi.mock('../src/lib/api', () => ({
     forceStopIssue: vi.fn(() => Promise.resolve()),
     reopenIssue: vi.fn(() => Promise.resolve()),
     rerunIssue: vi.fn(() => Promise.resolve()),
+    retryIssue: vi.fn(() => Promise.resolve()),
     addComment: vi.fn((_issueNumber, _body) => {
       mocks.addCommentMutation.mutate()
       return Promise.resolve()
@@ -442,6 +446,46 @@ describe('IssueDetailPage Markdown rendering', () => {
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('No comments yet.')).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('action error display', () => {
+    it('displays retry mutation error in action error area', async () => {
+      mocks.issue = makeIssue({
+        body: 'Issue body',
+        stage: Stage.Plan,
+        status: IssueStatus.Blocked,
+      })
+      const { api: originalApi } = await import('../src/lib/api')
+      vi.mocked(originalApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
+      renderWithQueryClient(<IssueDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+      await waitFor(() => {
+        expect(screen.getByText('no retryable failed work')).toBeInTheDocument()
+      })
+    })
+
+    it('allows user to see other recovery actions after retry error appears', async () => {
+      mocks.issue = makeIssue({
+        body: 'Issue body',
+        stage: Stage.Plan,
+        status: IssueStatus.Blocked,
+      })
+      const { api: originalApi } = await import('../src/lib/api')
+      vi.mocked(originalApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
+      renderWithQueryClient(<IssueDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+        expect(screen.getAllByRole('button', { name: 'Rerun Stage' }).length).toBeGreaterThan(0)
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+      await waitFor(() => {
+        expect(screen.getByText('no retryable failed work')).toBeInTheDocument()
+        expect(screen.getAllByRole('button', { name: 'Rerun Stage' }).length).toBeGreaterThan(0)
       })
     })
   })

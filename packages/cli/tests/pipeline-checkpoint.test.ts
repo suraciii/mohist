@@ -605,6 +605,71 @@ describe('PlanStageRunner runPlanStage checkpoint resume', () => {
     expect(checkpointRepo.get(1, 'plan')).toBeNull();
   });
 
+  it('should re-execute all tasks on rerun when checkpoint is cleared even if artifact files exist', async () => {
+    const existingArtifacts = new Set<string>([
+      path.join(CHANGE_DIR, 'proposal.md'),
+      path.join(CHANGE_DIR, 'specs'),
+      path.join(CHANGE_DIR, 'design.md'),
+      path.join(CHANGE_DIR, 'tasks.json'),
+      path.join(CHANGE_DIR, 'self-review.md'),
+    ]);
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+      if (typeof p === 'string' && existingArtifacts.has(p)) return true;
+      return false;
+    });
+
+    vi.mocked(fs.readdirSync).mockImplementation((p: unknown) => {
+      if (typeof p === 'string' && (p as string).endsWith('specs')) return ['spec.md'];
+      return [];
+    });
+
+    const taskArtifacts: Record<string, string> = {
+      proposal: path.join(CHANGE_DIR, 'proposal.md'),
+      specs: path.join(CHANGE_DIR, 'specs'),
+      design: path.join(CHANGE_DIR, 'design.md'),
+      tasks: path.join(CHANGE_DIR, 'tasks.json'),
+      'self-review': path.join(CHANGE_DIR, 'self-review.md'),
+    };
+    const aggregateTaskOrder = ['proposal', 'specs', 'design', 'tasks', 'self-review'];
+    const mockSession = {
+      execute: vi.fn().mockImplementation(async () => {
+        const taskId = aggregateTaskOrder[mockSession.execute.mock.calls.length - 1];
+        existingArtifacts.add(taskArtifacts[taskId]);
+        return { text: 'ok', success: true, acpSessionId: 's1' };
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+      canClose: vi.fn().mockReturnValue(true),
+    };
+    (AgentSession as any).create.mockResolvedValue(mockSession);
+
+    const artifactManager = createMockArtifactManager(CHANGE_DIR);
+    const runner = new PlanStageRunner();
+    const workflowApplicationService = {
+      completeTask: vi.fn(),
+    };
+
+    for (const taskId of aggregateTaskOrder) {
+      const result = await runAggregatePlanTask(
+        runner,
+        createMockIssue(),
+        artifactManager,
+        taskId,
+        workflowApplicationService,
+      );
+      expect(result.success).toBe(true);
+    }
+
+    const roundTypes = (buildArtifactPrompt as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => c[0]
+    );
+    expect(roundTypes).toContain('proposal');
+    expect(roundTypes).toContain('specs');
+    expect(roundTypes).toContain('design');
+    expect(roundTypes).toContain('tasks');
+    expect(mockSession.execute).toHaveBeenCalledTimes(5);
+    expect(workflowApplicationService.completeTask).toHaveBeenCalledTimes(5);
+  });
+
   it('should preserve checkpoint on stage failure', async () => {
     const existingArtifacts = new Set<string>();
     vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {

@@ -651,3 +651,17 @@ The CLI SHALL render base drift and rebase opportunity state from server API res
 - **WHEN** Check approval is unavailable because full verification evidence is missing
 - **THEN** `mo issue show <number>` SHALL show that approval is blocked by missing Check verification evidence
 
+### Requirement: REQ-CLI-RECOVERY-001 Recovery copy uses retry rerun rewind vocabulary
+
+CLI-facing workflow recovery messages SHALL use the recovery vocabulary `retry`, `rerun`, and `rewind`. Workflow recovery copy SHALL NOT reintroduce `restart` as a recovery action; the only allowed `restart` usage is unrelated server restart commands or the removed restart endpoint explaining that restart is unavailable.
+
+#### Scenario: Retry and rerun guidance uses approved terms
+- **WHEN** a workflow recovery command or endpoint fails and the CLI displays the error
+- **THEN** the guidance uses `retry`, `rerun`, or `rewind` as appropriate
+- **AND** it does not tell the user to restart the workflow or pipeline
+
+#### Scenario: Approval rejection copy avoids restart terminology
+- **WHEN** an issue approval is rejected and CLI output describes the follow-up behavior
+- **THEN** the message does not say the pipeline will restart
+- **AND** it uses current recovery vocabulary or neutral state-transition wording
+

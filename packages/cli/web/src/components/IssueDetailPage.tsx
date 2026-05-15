@@ -854,12 +854,13 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {(closeMutation.error || reopenMutation.error || startMutation.error || rerunMutation.error) && (
+                  {(closeMutation.error || reopenMutation.error || startMutation.error || rerunMutation.error || retryMutation.error) && (
                     <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
                       {closeMutation.error?.message ||
                         reopenMutation.error?.message ||
                         startMutation.error?.message ||
-                        rerunMutation.error?.message}
+                        rerunMutation.error?.message ||
+                        retryMutation.error?.message}
                     </div>
                   )}
 
