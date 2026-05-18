@@ -7,6 +7,8 @@ class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly data?: unknown,
+    public readonly code?: string,
+    public readonly details?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -24,6 +26,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       json.error ?? `Request failed: ${res.status}`,
       res.status,
       json.data,
+      json.code,
+      json.details,
     )
   }
   return json.data as T
@@ -379,5 +383,42 @@ export const api = {
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/prerequisites/${prerequisiteNumber}`, {
       method: 'DELETE',
     }),
+
+  getEpics: (params?: { projectId?: string }) => {
+    const search = new URLSearchParams()
+    if (params?.projectId) search.set('projectId', params.projectId)
+    const qs = search.toString()
+    return request<import('./types').EpicWithProgress[]>(`/epics${qs ? `?${qs}` : ''}`)
+  },
+
+  getEpic: (id: string, params?: { projectId?: string }) => {
+    const search = new URLSearchParams()
+    if (params?.projectId) search.set('projectId', params.projectId)
+    const qs = search.toString()
+    return request<import('./types').EpicDetail>(`/epics/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`)
+  },
+
+  createEpic: (data: { title: string; description: string; priority: string }) =>
+    request<import('./types').Epic>('/epics', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  addEpicIssue: (epicId: string, issueId: string) =>
+    request<{ epicId: string; issueId: string }>(`/epics/${encodeURIComponent(epicId)}/issues`, {
+      method: 'POST',
+      body: JSON.stringify({ issueId }),
+    }),
+
+  removeEpicIssue: (epicId: string, issueId: string) =>
+    request<{ epicId: string; issueId: string }>(`/epics/${encodeURIComponent(epicId)}/issues/${encodeURIComponent(issueId)}`, {
+      method: 'DELETE',
+    }),
+
+  markEpicDone: (id: string) =>
+    request<import('./types').Epic>(`/epics/${encodeURIComponent(id)}/done`, { method: 'POST' }),
+
+  closeEpic: (id: string) =>
+    request<import('./types').Epic>(`/epics/${encodeURIComponent(id)}/close`, { method: 'POST' }),
 
   }

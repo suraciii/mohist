@@ -3,6 +3,7 @@ import { StateManager } from './state-manager';
 import { DatabaseManager } from '../db';
 import { createProjectRoutes } from '../api/projects';
 import { createIssueRoutes } from '../api/issues';
+import { createEpicRoutes } from '../api/epics';
 import { createProposeRoutes } from '../api/propose';
 import { createConfigRoutes } from '../api/config';
 import { createProviderRoutes } from '../api/providers';
@@ -18,7 +19,7 @@ import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
 import { createSettingsConfigRoutes } from '../api/settings-config';
 import { createSettingsSystemRoutes } from '../api/settings-system';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, StageStateService, WorkflowRunService, WorkflowApplicationService, IssuePrerequisiteService, BaseDriftService, type SkillRunner, type ConflictResolutionDeps } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, StageStateService, WorkflowRunService, WorkflowApplicationService, IssuePrerequisiteService, BaseDriftService, EpicService, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { ProviderStateService } from '../services/provider-state-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { MergeQueue } from '../git/merge-queue';
@@ -112,6 +113,7 @@ async function main(): Promise<void> {
   const issueService = new IssueService(stateManager.getIssueRepo(), stateManager.getCommentRepo());
   const projectService = new ProjectService(stateManager.getProjectRepo(), stateManager.getConfigRepo(), stateManager.getIssueRepo(), stateManager.getLabelRepo());
   const exploreService = new ExploreService(stateManager.getExploreSessionRepo(), stateManager.getExploreMessageRepo());
+  const epicService = new EpicService(stateManager.getEpicRepo(), stateManager.getIssueRepo());
 
   const worktreeManager = new WorktreeManager();
   const eventBus = new EventBus();
@@ -295,7 +297,8 @@ async function main(): Promise<void> {
   await providerState.warm();
 
   server.addRouter('/api/projects', createProjectRoutes(projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), postMergeFinalizer, stageStateService, workflowRunService, issuePrerequisiteService));
+  server.addRouter('/api/epics', createEpicRoutes(epicService, projectService));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), postMergeFinalizer, stageStateService, workflowRunService, issuePrerequisiteService, epicService));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));

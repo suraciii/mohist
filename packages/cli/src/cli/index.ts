@@ -3,6 +3,7 @@ import { startServer, stopServer, serverStatus, serverLogs, restartServerCommand
 import { installSystemdService, uninstallSystemdService } from './commands/server-systemd';
 import { setupProjectCommands, setupInitCommand } from './commands/project';
 import { setupIssueCommands, setupLabelCommands } from './commands/issue';
+import { setupEpicCommands } from './commands/epic';
 import { setupQuickCommands } from './commands/quick';
 import { setupAttachCommand } from './commands/attach';
 import { setupProvidersCommands } from './commands/providers';
@@ -85,6 +86,7 @@ setupProjectCommands(program);
 setupInitCommand(program);
 setupIssueCommands(program);
 setupLabelCommands(program);
+setupEpicCommands(program);
 setupQuickCommands(program);
 setupAttachCommand(program);
 setupProvidersCommands(program);

@@ -353,6 +353,17 @@ export function IssueDetailPage() {
                   </span>
                 ))}
               </div>
+)}
+            </div>
+            {issue.primaryEpic && (
+              <button
+                onClick={() => navigate(`/epic/${issue.primaryEpic!.id}`)}
+                className="mt-3 inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                <span className="text-gray-400">Part of Epic:</span>
+                <span className="font-medium">#{issue.primaryEpic.id.slice(0, 8)}</span>
+                <span>{issue.primaryEpic.title}</span>
+              </button>
             )}
           </div>
 
@@ -992,7 +1003,6 @@ export function IssueDetailPage() {
             </div>
           </div>
         </div>
-      </div>
 
       {issue && (
         <EditIssueDialog
