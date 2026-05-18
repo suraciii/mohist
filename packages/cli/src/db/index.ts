@@ -17,3 +17,4 @@ export { IssueTaskQueueRepo, type IssueTaskQueueRecord, type CreateTaskQueueEntr
 export { CheckSuiteRepo, type CreateCheckSuiteData } from './check-suite-repo';
 export { StageExecutionRepo, type StageExecution, type StageExecutionStatus } from './stage-execution-repo';
 export { IssueStartPrerequisiteRepo } from './issue-start-prerequisite-repo';
+export { EpicRepo, type CreateEpicData } from './epic-repo';

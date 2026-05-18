@@ -27,6 +27,7 @@ import { assembleSessionTranscript } from '../services/session-transcript-servic
 import { PostMergeFinalizer } from '../services/post-merge-finalizer';
 import { StageStateService } from '../services/stage-state-service';
 import type { IssuePrerequisiteService, IssuePrerequisiteSummary, IssueStartEligibility } from '../services/issue-prerequisite-service';
+import type { EpicService } from '../services/epic-service';
 import { WorkflowApplicationService } from '../services/workflow-application-service';
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
@@ -699,6 +700,7 @@ export function createIssueRoutes(
   stageStateService?: StageStateService,
   workflowRunService?: WorkflowRunService,
   issuePrerequisiteService?: IssuePrerequisiteService,
+  epicService?: EpicService,
 ): Hono {
   const app = new Hono();
 
@@ -1347,6 +1349,11 @@ export function createIssueRoutes(
         startEligibility = view.startEligibility;
       }
 
+      let primaryEpic: { id: string; title: string; status: string; priority: string } | null = null;
+      if (epicService) {
+        primaryEpic = epicService.getIssueEpic(projectId, issue.id);
+      }
+
       const driftState = computeDriftStateForIssue(
         issue,
         projectId,
@@ -1368,6 +1375,7 @@ export function createIssueRoutes(
           checkSuite,
           prerequisites,
           startEligibility,
+          primaryEpic,
           ...driftResponse,
         }
       };

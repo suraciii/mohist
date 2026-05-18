@@ -9,7 +9,7 @@ import { Log } from '../util/log';
 import { OpenSpecIntegrator } from '../openspec/open-spec-integrator';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
 import { HealthGateCheck } from './checks/health-gate-check';
-import type { CheckResult, StageTaskResult } from './stage-context';
+import type { CheckResult, StageRunResult, StageTaskResult } from './stage-context';
 import type { Check } from './checks';
 import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
 import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
@@ -105,13 +105,28 @@ export class IntegrateStageRunner extends BaseStageRunner {
     this.integrator = new OpenSpecIntegrator();
     this.worktreePath = options.worktreePath;
     const wf = loadWorkflow(this.worktreePath);
-    this.integrateHealthGatePolicy = typeof wf === 'string'
+    this.integrateHealthGatePolicy = typeof wf === 'string' || wf.source === 'builtin'
       ? { enabled: true, command: 'npm run build', timeout: 300000, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' } }
       : loadHealthGatePolicies(wf).postMerge;
   }
 
   canHandle(stage: Stage): boolean {
     return stage === Stage.Integrate;
+  }
+
+  async run(ctx: StageContext): Promise<StageRunResult> {
+    const result = await super.run(ctx);
+    if (!result.success || ctx.requestedWork) return result;
+
+    const output = result.output as { integrate?: boolean; steps?: IntegrateStepResult[] } | null;
+    if (output?.integrate !== false) return result;
+
+    const failedStep = [...(output.steps ?? [])].reverse().find(step => step.status === 'failed');
+    return {
+      ...result,
+      success: false,
+      message: this.integrateFailureMessage(failedStep) ?? result.message ?? 'Integrate failed',
+    };
   }
 
   protected getPreTaskChecks(): import('./checks').Check[] {
@@ -476,6 +491,22 @@ export class IntegrateStageRunner extends BaseStageRunner {
     return typeof error === 'string' ? error : undefined;
   }
 
+  private integrateFailureMessage(step: IntegrateStepResult | undefined): string | undefined {
+    if (!step) return undefined;
+    const reason = this.failureReason(step.output);
+    if (step.step === 'integrate:spec-sync') {
+      return reason ? `Spec sync failed: ${reason}` : 'Spec sync failed';
+    }
+    if (step.step === 'integrate:merge') {
+      const conflictFiles = Array.isArray((step.output as { conflictFiles?: unknown })?.conflictFiles)
+        ? (step.output as { conflictFiles: unknown[] }).conflictFiles.filter((file): file is string => typeof file === 'string')
+        : [];
+      const suffix = conflictFiles.length > 0 ? ` Conflicting files: ${conflictFiles.join(', ')}` : '';
+      return reason ? `Merge failed: ${reason}${suffix}` : `Merge failed${suffix}`;
+    }
+    return reason;
+  }
+
   private async runSpecSyncStep(
     ctx: StageContext,
     steps: IntegrateStepResult[],
@@ -557,9 +588,17 @@ export class IntegrateStageRunner extends BaseStageRunner {
       if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       if (!summary.valid) {
-        const errMsg = `Spec sync failed: ${summary.errors.join('; ')}`;
+        const error = `Spec sync failed: ${summary.errors.join('; ')}`;
+        ctx.emit('integration_failed', {
+          issueId: ctx.issue.id,
+          projectId: ctx.issue.projectId,
+          issueNumber: ctx.issue.number,
+          failingStep: 'integrate:spec-sync',
+          error,
+          output: stepOutput,
+        });
         log.warn('Spec sync failed', { issueNumber: ctx.issue.number, errors: summary.errors });
-        throw new Error(errMsg);
+        return result;
       }
 
       log.info('Spec sync succeeded', { issueNumber: ctx.issue.number, capabilities: summary.capabilities });
@@ -581,7 +620,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         steps.push(result);
       }
 
-      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
+      if (reportTask && !previousResult) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       ctx.emit('integration_failed', {
         issueId: ctx.issue.id,
@@ -596,7 +635,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         issueNumber: ctx.issue.number,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw err;
+      return result;
     }
   }
 
@@ -698,7 +737,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         issueNumber: ctx.issue.number,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw err;
+      return result;
     }
   }
 
@@ -875,7 +914,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         steps.push(result);
       }
 
-      if (reportTask) this.appendTaskResult(ctx, this.stepToTaskResult(result));
+      if (reportTask && !previousResult) this.appendTaskResult(ctx, this.stepToTaskResult(result));
 
       ctx.emit('integration_failed', {
         issueId: ctx.issue.id,
@@ -890,7 +929,7 @@ export class IntegrateStageRunner extends BaseStageRunner {
         issueNumber: ctx.issue.number,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw err;
+      return result;
     }
   }
 

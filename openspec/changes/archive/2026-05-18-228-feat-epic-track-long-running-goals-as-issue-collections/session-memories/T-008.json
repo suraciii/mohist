@@ -1,0 +1,11 @@
+{
+  "task_id": "T-008",
+  "timestamp": "2026-05-18T09:10:27.449Z",
+  "insights": [],
+  "adjustments": [],
+  "success": false,
+  "execution_summary": "Failed on attempt 2: [PROCESS_EXIT] opencode process exited unexpectedly (exit code: killed by signal)",
+  "failure_reason": "[PROCESS_EXIT] opencode process exited unexpectedly (exit code: killed by signal)",
+  "failed_attempts": 2,
+  "failure_category": "session_failed"
+}

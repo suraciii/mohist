@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 29;
+const SCHEMA_VERSION = 33;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -218,6 +218,18 @@ export function initializeDatabase(db: DatabaseManager): void {
   }
   if (currentVersion < 29) {
     migrateToVersion29(db);
+  }
+  if (currentVersion < 30) {
+    migrateToVersion30(db);
+  }
+  if (currentVersion < 31) {
+    migrateToVersion31(db);
+  }
+  if (currentVersion < 32) {
+    migrateToVersion32(db);
+  }
+  if (currentVersion < 33) {
+    migrateToVersion33(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -1230,5 +1242,110 @@ function migrateToVersion29(db: DatabaseManager): void {
       db.exec('ALTER TABLE workflow_stage_runs ADD COLUMN build_work_source_state TEXT');
     }
     setSchemaVersion(db, 29);
+  });
+}
+
+const CREATE_EPICS_TABLE = `
+CREATE TABLE IF NOT EXISTS epics (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  description TEXT NOT NULL,
+  priority    TEXT NOT NULL DEFAULT 'p2',
+  status      TEXT NOT NULL DEFAULT 'active',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+`;
+
+const CREATE_EPICS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_epics_project_status ON epics(project_id, status);',
+  'CREATE INDEX IF NOT EXISTS idx_epics_status ON epics(status);',
+  'CREATE INDEX IF NOT EXISTS idx_epics_priority ON epics(priority);',
+];
+
+function migrateToVersion30(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_EPICS_TABLE);
+    for (const indexSql of CREATE_EPICS_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 30);
+  });
+}
+
+const CREATE_EPIC_ISSUES_TABLE = `
+CREATE TABLE IF NOT EXISTS epic_issues (
+  epic_id      TEXT NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
+  issue_id     TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (epic_id, issue_id),
+  UNIQUE (issue_id)
+);
+`;
+
+const CREATE_EPIC_ISSUES_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_epic_issues_epic_id ON epic_issues(epic_id);',
+  'CREATE INDEX IF NOT EXISTS idx_epic_issues_issue_id ON epic_issues(issue_id);',
+];
+
+function migrateToVersion31(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_EPIC_ISSUES_TABLE);
+    for (const indexSql of CREATE_EPIC_ISSUES_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 31);
+  });
+}
+
+function migrateToVersion32(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec('ALTER TABLE epic_issues RENAME TO epic_issues_old');
+    db.exec(CREATE_EPIC_ISSUES_TABLE);
+    db.exec(`
+      INSERT INTO epic_issues (epic_id, issue_id, created_at)
+      SELECT eio.epic_id, eio.issue_id, eio.created_at
+      FROM epic_issues_old eio
+      JOIN issues i ON i.id = eio.issue_id
+    `);
+    db.exec('DROP TABLE epic_issues_old');
+    for (const indexSql of CREATE_EPIC_ISSUES_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 32);
+  });
+}
+
+function migrateToVersion33(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>('PRAGMA table_info(epics)');
+    const hasProjectId = tableInfo.some(column => column.name === 'project_id');
+    if (!hasProjectId) {
+      const currentProject = db.get<{ value: string }>(
+        'SELECT value FROM config WHERE key = ?',
+        ['currentProjectId']
+      );
+      const fallbackProject = currentProject
+        ?? db.get<{ value: string }>('SELECT id AS value FROM projects ORDER BY created_at ASC LIMIT 1');
+
+      if (!fallbackProject) {
+        throw new Error('Cannot migrate epics without a project');
+      }
+
+      db.exec('ALTER TABLE epics RENAME TO epics_old');
+      db.exec(CREATE_EPICS_TABLE);
+      db.run(
+        `INSERT INTO epics (id, project_id, title, description, priority, status, created_at, updated_at)
+         SELECT id, ?, title, description, priority, status, created_at, updated_at
+         FROM epics_old`,
+        [fallbackProject.value]
+      );
+      db.exec('DROP TABLE epics_old');
+    }
+    for (const indexSql of CREATE_EPICS_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 33);
   });
 }

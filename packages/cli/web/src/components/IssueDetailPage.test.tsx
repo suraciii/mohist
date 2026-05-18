@@ -334,6 +334,39 @@ describe('IssueDetailPage - merge-base semantic regression', () => {
       expect(screen.getByText('Test Issue')).toBeTruthy()
     })
 
+    it('renders a primary Epic backlink and navigates to the Epic detail page', () => {
+      mocks.useIssue.mockReturnValue({
+        data: {
+          ...SAMPLE_ISSUE,
+          primaryEpic: {
+            id: 'epic-runtime',
+            title: 'Runtime model cleanup',
+            status: 'active',
+            priority: 'p1',
+          },
+        },
+        isLoading: false,
+        isError: false,
+      })
+
+      renderPage()
+
+      const epicLink = screen.getByText('Part of Epic:').closest('button')
+      expect(epicLink).toBeTruthy()
+      expect(screen.getByText('#epic-run')).toBeTruthy()
+      expect(screen.getByText('Runtime model cleanup')).toBeTruthy()
+
+      fireEvent.click(epicLink!)
+
+      expect(mockUseNavigate).toHaveBeenCalledWith('/epic/epic-runtime')
+    })
+
+    it('hides the primary Epic backlink for unlinked issues', () => {
+      renderPage()
+
+      expect(screen.queryByText('Part of Epic:')).toBeNull()
+    })
+
     it('renders loading state', () => {
       mocks.useIssue.mockReturnValue({
         data: undefined,

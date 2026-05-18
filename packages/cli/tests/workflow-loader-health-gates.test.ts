@@ -104,7 +104,7 @@ healthGates:
       const result = loadHealthGatePolicies(workflow);
       expect(result.build.enabled).toBe(true);
       expect(result.build.timeout).toBe(600000);
-      expect(result.build.command).toBe(DEFAULT_HEALTH_GATE_POLICIES.build.command);
+      expect(result.build.command).toBe('npm ci && npm run build');
       expect(result.build.autoFix).toBe(DEFAULT_HEALTH_GATE_POLICIES.build.autoFix);
       expect(result.build.maxFixAttempts).toBe(DEFAULT_HEALTH_GATE_POLICIES.build.maxFixAttempts);
     });
@@ -151,7 +151,7 @@ healthGates:
 `);
       const result = loadHealthGatePolicies(workflow);
       expect(result.plan.enabled).toBe(false);
-      expect(result.plan.command).toBe(DEFAULT_HEALTH_GATE_POLICIES.plan.command);
+      expect(result.plan.command).toBe('npm ci && npm run typecheck');
     });
 
     it('disabling one gate does not affect others', () => {
@@ -264,7 +264,7 @@ checks:
     command: npm run ci-test
 `);
       const result = loadHealthGatePolicies(workflow);
-      expect(result.plan.command).toBe(DEFAULT_HEALTH_GATE_POLICIES.plan.command);
+      expect(result.plan.command).toBe('npm ci && npm run typecheck');
       expect(result.plan.command).not.toBe('npm run ci-test');
     });
 
@@ -277,7 +277,7 @@ checks:
     command: npm run ci-test
 `);
       const result = loadHealthGatePolicies(workflow);
-      expect(result.build.command).toBe(DEFAULT_HEALTH_GATE_POLICIES.build.command);
+      expect(result.build.command).toBe('npm ci && npm run build');
       expect(result.build.command).not.toBe('npm run ci-test');
     });
 
@@ -290,7 +290,7 @@ checks:
     command: npm run ci-test
 `);
       const result = loadHealthGatePolicies(workflow);
-      expect(result.postMerge.command).toBe(DEFAULT_HEALTH_GATE_POLICIES.postMerge.command);
+      expect(result.postMerge.command).toBe('npm ci && npm run build && npm test');
       expect(result.postMerge.command).not.toBe('npm run ci-test');
     });
   });
@@ -354,7 +354,7 @@ healthGates:
     timeout: 400000
 `);
       const result = loadHealthGatePolicies(workflow);
-      expect(result.check.command).toBe(DEFAULT_HEALTH_GATE_POLICIES.check.command);
+      expect(result.check.command).toBe('npm ci && npm run build && npm test');
       expect(result.check.timeout).toBe(400000);
     });
 

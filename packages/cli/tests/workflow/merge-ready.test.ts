@@ -831,14 +831,9 @@ describe('merge-ready regression tests', () => {
             error?: string;
           };
 
-          try {
-            await runner.executeTaskWork(ctx, 'integrate:merge');
-            throw new Error('Expected integrate:merge to fail after post-preflight race');
-          } catch (error) {
-            const mergeStep = (error as { mergeStep?: { output?: unknown } }).mergeStep;
-            expect(mergeStep).toBeDefined();
-            mergeOutput = (mergeStep?.output ?? {}) as typeof mergeOutput;
-          }
+          const mergeTask = await runner.executeTaskWork(ctx, 'integrate:merge');
+          expect(mergeTask?.status).toBe('failed');
+          mergeOutput = (mergeTask?.output ?? {}) as typeof mergeOutput;
 
           expect(mergeOutput?.targetBranch).toBe('main');
           expect(mergeOutput?.strategy).toBe('squash');

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api } from '../lib/api'
 import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, IssueStageStateResponse, StageExecution, SystemInfo } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
+import { useProject } from '../context/ProjectContext'
 
 export function useProjects() {
   return useQuery({
@@ -589,5 +590,99 @@ export function useWorkflowRun(number: number) {
     queryFn: () => api.getWorkflowRun(number),
     enabled: number > 0,
     refetchInterval: 5000,
+  })
+}
+
+export function useEpics() {
+  const { projectId } = useProject()
+  return useQuery<import('../lib/types').EpicWithProgress[]>({
+    queryKey: ['epics', projectId],
+    queryFn: () => api.getEpics({ projectId: projectId ?? undefined }),
+    enabled: !!projectId,
+  })
+}
+
+export function useEpic(id: string) {
+  const { projectId } = useProject()
+  return useQuery<import('../lib/types').EpicDetail>({
+    queryKey: ['epics', projectId, id],
+    queryFn: () => api.getEpic(id, { projectId: projectId ?? undefined }),
+    enabled: !!projectId && !!id,
+  })
+}
+
+export function useCreateEpic() {
+  const queryClient = useQueryClient()
+  return useMutation<import('../lib/types').Epic, Error, { title: string; description: string; priority: string }>({
+    mutationFn: (data) => api.createEpic(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      toast.success('Epic created')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useAddEpicIssue() {
+  const queryClient = useQueryClient()
+  return useMutation<{ epicId: string; issueId: string }, Error, { epicId: string; issueId: string }>({
+    mutationFn: ({ epicId, issueId }) => api.addEpicIssue(epicId, issueId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', variables.epicId] })
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      toast.success('Issue added to Epic')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useRemoveEpicIssue() {
+  const queryClient = useQueryClient()
+  return useMutation<{ epicId: string; issueId: string }, Error, { epicId: string; issueId: string }>({
+    mutationFn: ({ epicId, issueId }) => api.removeEpicIssue(epicId, issueId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', variables.epicId] })
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      toast.success('Issue removed from Epic')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useMarkEpicDone() {
+  const queryClient = useQueryClient()
+  return useMutation<import('../lib/types').Epic, Error, string>({
+    mutationFn: (id) => api.markEpicDone(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', id] })
+      toast.success('Epic marked as done')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useCloseEpic() {
+  const queryClient = useQueryClient()
+  return useMutation<import('../lib/types').Epic, Error, string>({
+    mutationFn: (id) => api.closeEpic(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', id] })
+      toast.success('Epic closed')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
   })
 }

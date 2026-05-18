@@ -17,7 +17,8 @@ import {
   IssueTaskQueueRepo,
   CheckSuiteRepo,
   StageExecutionRepo,
-  IssueStartPrerequisiteRepo
+  IssueStartPrerequisiteRepo,
+  EpicRepo
 } from '../db';
 import { initializeDefaultConfig } from '../db/config-repo';
 
@@ -39,6 +40,7 @@ export class StateManager {
   private checkSuiteRepo: CheckSuiteRepo;
   private stageExecutionRepo: StageExecutionRepo;
   private issueStartPrerequisiteRepo: IssueStartPrerequisiteRepo;
+  private epicRepo: EpicRepo;
   private initialized: boolean = false;
 
   constructor(db: DatabaseManager) {
@@ -61,6 +63,7 @@ export class StateManager {
     this.checkSuiteRepo = new CheckSuiteRepo(db);
     this.stageExecutionRepo = new StageExecutionRepo(db);
     this.issueStartPrerequisiteRepo = new IssueStartPrerequisiteRepo(db);
+    this.epicRepo = new EpicRepo(db);
     
     initializeDefaultConfig(this.configRepo);
     this.initialized = true;
@@ -136,5 +139,9 @@ export class StateManager {
 
   getIssueStartPrerequisiteRepo(): IssueStartPrerequisiteRepo {
     return this.issueStartPrerequisiteRepo;
+  }
+
+  getEpicRepo(): EpicRepo {
+    return this.epicRepo;
   }
 }

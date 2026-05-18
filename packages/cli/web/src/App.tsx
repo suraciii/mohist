@@ -21,6 +21,8 @@ import { MobileBottomNav } from './components/MobileBottomNav'
 import { FAB } from './components/FAB'
 import { Toaster } from 'sonner'
 import { useDocumentTitle } from './hooks/useDocumentTitle'
+import { EpicListPage } from './components/EpicListPage'
+import { EpicDetailPage } from './components/EpicDetailPage'
 
 function KanbanView() {
   const { projectId } = useProject()
@@ -113,6 +115,8 @@ function AppContent() {
           <Route path="/settings/:section" element={<SettingsPage />} />
           <Route path="/logs" element={<LogsPage />} />
           <Route path="/archived" element={<ArchivedPage />} />
+          <Route path="/epics" element={<EpicListPage />} />
+          <Route path="/epic/:id" element={<EpicDetailPage />} />
         </Route>
       </Routes>
       {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
