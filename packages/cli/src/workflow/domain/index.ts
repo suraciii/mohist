@@ -1586,10 +1586,11 @@ export class WorkflowRun {
     const events: WorkflowEvent[] = [];
     const policy = stageRun.definition.invalidationPolicy;
     if (!policy) return events;
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
 
     for (const entry of policy.entries) {
       if (entry.trigger !== 'task-completion') continue;
-      if (entry.triggerTaskId && entry.triggerTaskId !== taskId) continue;
+      if (entry.triggerTaskId && entry.triggerTaskId !== taskId && entry.triggerTaskId !== baseTaskId) continue;
       if (!this.evaluateInvalidationCondition(entry.when, result.output)) continue;
 
       if (entry.invalidates.tasks) {
@@ -1622,6 +1623,10 @@ export class WorkflowRun {
       }
     }
     return events;
+  }
+
+  private baseRuntimeTaskId(taskId: string): string {
+    return taskId.replace(/:\d+$/, '');
   }
 
   private extractDeliveryMetadata(output: unknown): DeliveryMetadata {
