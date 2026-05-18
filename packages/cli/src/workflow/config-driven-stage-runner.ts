@@ -443,7 +443,15 @@ export class ConfigDrivenStageRunner implements StageRunner {
     const existingTaskIds = new Set(stageRun.tasks.map(task => this.persistedTaskId(task)));
     return (stageDefinition?.workSources ?? []).some(workSource => {
       if (workSource.kind === 'static' || workSource.kind === 'runtime') return false;
-      return this.materializeLoadedTasks(ctx, workSource.kind).some(task => !existingTaskIds.has(task.id));
+      const change = detectOpenSpecChange(ctx.acpOptions.cwd, ctx.issue);
+      if (!change) return false;
+      let tasks: Array<{ id: string; title: string; order: number; dependsOn: string[] }> = [];
+      try {
+        tasks = this.materializeLoadedTasks(ctx, workSource.kind, change);
+      } catch {
+        return false;
+      }
+      return tasks.some(task => !existingTaskIds.has(task.id));
     });
   }
 
@@ -460,18 +468,44 @@ export class ConfigDrivenStageRunner implements StageRunner {
     for (const workSource of stageDefinition.workSources) {
       if (workSource.kind === 'static' || workSource.kind === 'runtime') continue;
 
-      const tasks = this.materializeLoadedTasks(ctx, workSource.kind)
-        .filter(task => !existingTaskIds.has(task.id));
+      const change = detectOpenSpecChange(ctx.acpOptions.cwd, ctx.issue);
+      if (!change) {
+        if (stageRun?.stage === Stage.Build && ctx.workflowApplicationService) {
+          ctx.workflowApplicationService.materializeTasks({
+            issueId: ctx.issue.id,
+            stage: ctx.issue.stage,
+            tasks: [],
+            buildWorkSourceState: 'missing',
+          });
+        }
+        continue;
+      }
 
-      if (tasks.length === 0) continue;
+      let tasks: Array<{ id: string; title: string; order: number; dependsOn: string[] }> = [];
+      try {
+        tasks = this.materializeLoadedTasks(ctx, workSource.kind, change);
+      } catch {
+        if (stageRun?.stage === Stage.Build && ctx.workflowApplicationService) {
+          ctx.workflowApplicationService.materializeTasks({
+            issueId: ctx.issue.id,
+            stage: ctx.issue.stage,
+            tasks: [],
+            buildWorkSourceState: 'invalid',
+          });
+        }
+        continue;
+      }
 
       ctx.workflowApplicationService.materializeTasks({
         issueId: ctx.issue.id,
         stage: ctx.issue.stage,
         tasks,
+        buildWorkSourceState: tasks.length === 0 ? 'empty' : undefined,
       });
-      for (const task of tasks) existingTaskIds.add(task.id);
-      materialized = true;
+      if (tasks.length > 0) {
+        for (const task of tasks) existingTaskIds.add(task.id);
+        materialized = true;
+      }
     }
 
     return materialized;
@@ -480,6 +514,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
   private materializeLoadedTasks(
     ctx: StageContext,
     kind: 'ralph',
+    change: NonNullable<ReturnType<typeof detectOpenSpecChange>>,
   ): Array<{ id: string; title: string; order: number; dependsOn: string[] }> {
     const loader = this.taskLoaderRegistry.get(kind);
     if (!loader) return [];
@@ -487,8 +522,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
     const executableTasks = loader.load(ctx);
     if (executableTasks.length === 0) return [];
 
-    const change = detectOpenSpecChange(ctx.acpOptions.cwd, ctx.issue);
-    const orderedTasks = change ? readTasks(change.tasksPath) ?? [] : [];
+    const orderedTasks = readTasks(change.tasksPath) ?? [];
     const orderByTaskId = new Map(orderedTasks.map(task => [task.id, task]));
 
     return executableTasks.map((task, index) => {

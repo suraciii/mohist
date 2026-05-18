@@ -42,6 +42,13 @@ export interface CheckFailurePolicy {
 
 export type WorkSourceKind = 'static' | 'ralph' | 'runtime';
 
+export type BuildWorkSourceState =
+  | { evaluated: true; tasks: MaterializedTaskInput[] }
+  | { evaluated: true; missing: true }
+  | { evaluated: true; invalid: true }
+  | { evaluated: true; empty: true }
+  | { evaluated: false };
+
 export interface WorkSourceDefinition {
   kind: WorkSourceKind;
   taskIds?: string[];
@@ -187,7 +194,25 @@ export type WorkflowWork =
   | { kind: 'check'; stage: Stage; checkName: string }
   | { kind: 'await-approval'; stage: Stage }
   | { kind: 'complete' }
+  | { kind: 'blocked'; stage: Stage; reason: StageCompletionGuard }
   | { kind: 'failed'; reason: FailureDetails };
+
+export type StageCompletionGuard =
+  | { complete: true }
+  | { complete: false; reason: 'missing-static-task'; taskId: string }
+  | { complete: false; reason: 'missing-static-check'; checkName: string }
+  | { complete: false; reason: 'static-task-not-successful'; taskId: string; status: TaskRunStatus }
+  | { complete: false; reason: 'static-check-not-passed'; checkName: string }
+  | { complete: false; reason: 'run-task-pending'; taskId: string }
+  | { complete: false; reason: 'run-task-failed'; taskId: string }
+  | { complete: false; reason: 'run-task-skipped'; taskId: string }
+  | { complete: false; reason: 'dynamic-source-not-evaluated'; stage: Stage }
+  | { complete: false; reason: 'dynamic-source-missing'; stage: Stage }
+  | { complete: false; reason: 'dynamic-source-invalid'; stage: Stage }
+  | { complete: false; reason: 'dynamic-source-empty'; stage: Stage }
+  | { complete: false; reason: 'check-review-evidence-missing'; stage: Stage }
+  | { complete: false; reason: 'check-review-evidence-stale'; stage: Stage }
+  | { complete: false; reason: 'integrate-delivery-evidence-missing'; stage: Stage; taskId?: string; checkName?: string };
 
 export interface WorkflowDecision {
   events: WorkflowEvent[];
@@ -247,6 +272,7 @@ export interface StageRunSnapshot {
   approval: ApprovalSnapshot | null;
   failure: FailureDetails | null;
   freezePoint: FreezePoint | null;
+  buildWorkSourceState?: BuildWorkSourceState;
 }
 
 export interface WorkflowRunSnapshot {
@@ -333,6 +359,7 @@ export class StageRun {
   approval: ApprovalSnapshot | null = null;
   failure: FailureDetails | null = null;
   freezePoint: FreezePoint | null = null;
+  buildWorkSourceState: BuildWorkSourceState = { evaluated: false };
 
   constructor(
     readonly definition: StageDefinition,
@@ -536,6 +563,29 @@ export class StageRun {
     }
   }
 
+  recordBuildWorkSourceEvaluated(tasks: MaterializedTaskInput[]): void {
+    if (this.stage !== Stage.Build) return;
+    this.buildWorkSourceState = { evaluated: true, tasks };
+  }
+
+  recordBuildWorkSourceMissing(): void {
+    if (this.stage !== Stage.Build) return;
+    if (this.buildWorkSourceState.evaluated) return;
+    this.buildWorkSourceState = { evaluated: true, missing: true };
+  }
+
+  recordBuildWorkSourceInvalid(): void {
+    if (this.stage !== Stage.Build) return;
+    if (this.buildWorkSourceState.evaluated) return;
+    this.buildWorkSourceState = { evaluated: true, invalid: true };
+  }
+
+  recordBuildWorkSourceEmpty(): void {
+    if (this.stage !== Stage.Build) return;
+    if (this.buildWorkSourceState.evaluated) return;
+    this.buildWorkSourceState = { evaluated: true, empty: true };
+  }
+
   materializeTaskForPersistence(id: string, title: string, order: number): TaskRun {
     const existing = this.tasks.find(task => task.id === id);
     if (existing) return existing;
@@ -580,6 +630,7 @@ export class StageRun {
       approval: this.approval ? { ...this.approval } : null,
       failure: this.failure,
       freezePoint: this.freezePoint,
+      buildWorkSourceState: this.stage === Stage.Build ? this.buildWorkSourceState : undefined,
     };
   }
 }
@@ -814,11 +865,24 @@ export class WorkflowRun {
     return stageRun;
   }
 
-  materializeTasks(stage: Stage, tasks: MaterializedTaskInput[]): WorkflowDecision {
+  materializeTasks(stage: Stage, tasks: MaterializedTaskInput[], buildWorkSourceState?: 'missing' | 'invalid' | 'empty'): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'running') throw new WorkflowDomainError(`Stage ${stage} is not running`);
     stageRun.materializeTasks(tasks);
+    if (stage === Stage.Build) {
+      if (buildWorkSourceState === 'missing') {
+        stageRun.recordBuildWorkSourceMissing();
+      } else if (buildWorkSourceState === 'invalid') {
+        stageRun.recordBuildWorkSourceInvalid();
+      } else if (buildWorkSourceState === 'empty') {
+        stageRun.recordBuildWorkSourceEmpty();
+      } else if (tasks.length === 0) {
+        stageRun.recordBuildWorkSourceEmpty();
+      } else {
+        stageRun.recordBuildWorkSourceEvaluated(tasks);
+      }
+    }
     return this.decision([]);
   }
 
@@ -1198,6 +1262,8 @@ export class WorkflowRun {
     if (task) return { kind: 'task', stage: stageRun.stage, taskId: task.id };
     const check = stageRun.nextCheck('post-task');
     if (check) return { kind: 'check', stage: stageRun.stage, checkName: check.name };
+    const guard = this.evaluateStageCompletionGuard(stageRun);
+    if (!guard.complete) return { kind: 'blocked', stage: stageRun.stage, reason: guard };
     return { kind: 'complete' };
   }
 
@@ -1227,8 +1293,8 @@ export class WorkflowRun {
   }
 
   private maybeCompleteStage(stageRun: StageRun, events: WorkflowEvent[]): WorkflowDecision {
-    if (!stageRun.allRequiredTasksTerminal() || !stageRun.allRequiredTasksSucceeded()) return this.decision(events);
-    if (!stageRun.allChecksPassed()) return this.decision(events);
+    const guard = this.evaluateStageCompletionGuard(stageRun);
+    if (!guard.complete) return this.decision(events);
     if (stageRun.requiresApproval() && stageRun.approval?.status !== 'approved') {
       if (!stageRun.approval) {
         const verificationEvidence = this.extractVerificationEvidence(stageRun);
@@ -1240,6 +1306,102 @@ export class WorkflowRun {
       return this.decision(events);
     }
     return this.completeStage(stageRun, events);
+  }
+
+  private evaluateStageCompletionGuard(stageRun: StageRun): StageCompletionGuard {
+    for (const taskDef of stageRun.definition.tasks) {
+      const taskRun = stageRun.tasks.find(t => t.id === taskDef.id);
+      if (!taskRun) return { complete: false, reason: 'missing-static-task', taskId: taskDef.id };
+      if (taskRun.status !== 'completed') return { complete: false, reason: 'static-task-not-successful', taskId: taskDef.id, status: taskRun.status };
+    }
+
+    for (const checkDef of stageRun.definition.checks) {
+      const checkRun = stageRun.checks.find(c => c.name === checkDef.name);
+      if (!checkRun) return { complete: false, reason: 'missing-static-check', checkName: checkDef.name };
+      if (checkRun.status !== 'passed') return { complete: false, reason: 'static-check-not-passed', checkName: checkDef.name };
+    }
+
+    if (stageRun.stage === Stage.Build) {
+      const state: BuildWorkSourceState = stageRun.buildWorkSourceState;
+      if (!state.evaluated) return { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build };
+      if ('missing' in state && state.missing) return { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build };
+      if ('invalid' in state && state.invalid) return { complete: false, reason: 'dynamic-source-invalid', stage: Stage.Build };
+      if ('empty' in state && state.empty) return { complete: false, reason: 'dynamic-source-empty', stage: Stage.Build };
+    }
+
+    if (stageRun.stage === Stage.Check) {
+      const checkEvidenceGuard = this.evaluateCheckReviewEvidenceGuard(stageRun);
+      if (!checkEvidenceGuard.complete) return checkEvidenceGuard;
+    }
+
+    if (stageRun.stage === Stage.Integrate) {
+      const integrateEvidenceGuard = this.evaluateIntegrateDeliveryEvidenceGuard(stageRun);
+      if (!integrateEvidenceGuard.complete) return integrateEvidenceGuard;
+    }
+
+    for (const taskRun of stageRun.tasks) {
+      if (!taskRun.terminal) return { complete: false, reason: 'run-task-pending', taskId: taskRun.id };
+    }
+
+    return { complete: true };
+  }
+
+  private evaluateIntegrateDeliveryEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
+    const specSync = stageRun.tasks.find(task => task.id === 'integrate:spec-sync');
+    const archive = stageRun.tasks.find(task => task.id === 'integrate:archive-change');
+    const merge = stageRun.tasks.find(task => task.id === 'integrate:merge');
+    const health = stageRun.checks.find(check => check.name === 'health:integrate');
+    if (specSync?.status !== 'completed') {
+      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:spec-sync' };
+    }
+    if (archive?.status !== 'completed' || !archive.output || typeof archive.output !== 'object') {
+      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' };
+    }
+    const archiveOutput = archive.output as Record<string, unknown>;
+    if (typeof archiveOutput.archivePath !== 'string' || archiveOutput.archivePath.length === 0) {
+      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' };
+    }
+    if (merge?.status !== 'completed') {
+      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' };
+    }
+    const delivery = stageRun.freezePoint?.delivery ?? {};
+    if (!delivery.landedSha && !delivery.targetBranch) {
+      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' };
+    }
+    if (health?.status !== 'passed') {
+      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, checkName: 'health:integrate' };
+    }
+    return { complete: true };
+  }
+
+  private evaluateCheckReviewEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
+    const aiReview = stageRun.tasks.find(task => task.id === 'ai-review');
+    const healthCheck = stageRun.checks.find(check => check.name === 'health:check');
+    const reviewPassed = stageRun.checks.find(check => check.name === 'review-passed');
+    const mergeReady = stageRun.checks.find(check => check.name === 'merge-ready');
+    if (aiReview?.status !== 'completed') return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
+    if (healthCheck?.status !== 'passed') return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
+    if (reviewPassed?.status !== 'passed' || !reviewPassed.output || typeof reviewPassed.output !== 'object') {
+      return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
+    }
+    if (mergeReady?.status !== 'passed' || !mergeReady.output || typeof mergeReady.output !== 'object') {
+      return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
+    }
+
+    const reviewOutput = reviewPassed.output as Record<string, unknown>;
+    const mergeReadyOutput = mergeReady.output as Record<string, unknown>;
+    const reviewSnapshotSha = reviewOutput.snapshotSha;
+    const mergeCandidateHeadSha = mergeReadyOutput.candidateHeadSha;
+    if (typeof reviewSnapshotSha !== 'string' || reviewSnapshotSha.length === 0) {
+      return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
+    }
+    if (typeof mergeCandidateHeadSha !== 'string' || mergeCandidateHeadSha.length === 0) {
+      return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
+    }
+    if (reviewSnapshotSha !== mergeCandidateHeadSha) {
+      return { complete: false, reason: 'check-review-evidence-stale', stage: Stage.Check };
+    }
+    return { complete: true };
   }
 
   private completeStage(stageRun: StageRun, events: WorkflowEvent[]): WorkflowDecision {

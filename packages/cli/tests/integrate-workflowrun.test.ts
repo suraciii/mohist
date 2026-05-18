@@ -38,7 +38,21 @@ function advanceToIntegrate(): WorkflowRun {
   run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
   run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
   run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
-  run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+  run.recordCheckResult(Stage.Check, {
+    name: 'merge-ready',
+    status: 'pass',
+    output: {
+      kind: 'merge-ready',
+      targetBranch: 'main',
+      strategy: 'squash',
+      baseSha: 'base-sha',
+      candidateHeadSha: 'sha-check',
+      mergeBaseSha: 'base-sha',
+      canMerge: true,
+      conflictFiles: [],
+      checkedAt: '2026-05-15T00:00:00.000Z',
+    },
+  });
   run.approveStage(Stage.Check);
   return run;
 }

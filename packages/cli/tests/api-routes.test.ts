@@ -97,7 +97,25 @@ function completeCheckToApproval(workflowApplicationService: WorkflowApplication
     stage: Stage.Check,
     result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha } },
   });
-  workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass' } });
+  workflowApplicationService.recordCheckResult({
+    issueId,
+    stage: Stage.Check,
+    result: {
+      name: 'merge-ready',
+      status: 'pass',
+      output: {
+        kind: 'merge-ready',
+        targetBranch: 'main',
+        strategy: 'squash',
+        baseSha: snapshotSha,
+        candidateHeadSha: snapshotSha,
+        mergeBaseSha: snapshotSha,
+        canMerge: true,
+        conflictFiles: [],
+        checkedAt: new Date().toISOString(),
+      },
+    },
+  });
 }
 
 function mohistWorktreesPath(home: string, projectName: string): string {
