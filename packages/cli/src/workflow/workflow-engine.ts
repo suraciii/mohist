@@ -1,6 +1,7 @@
 import { Stage, type Issue } from '../types';
 import type { StageRunner } from './check-stage-runner';
-import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, WorkflowApplicationRuntime, StageRunResult } from './stage-context';
+import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, WorkflowApplicationRuntime, StageRunResult, AgentSessionRegistry } from './stage-context';
+import { InMemoryAgentSessionRegistry } from './stage-context';
 import type { CheckpointManager } from './checkpoint-manager';
 import type { EventBus } from '../services/event-bus';
 import type { AgentSessionOptions } from '../agent-runtime/agent-session';
@@ -41,6 +42,11 @@ export interface WorkflowEngineOptions {
   config?: ConfigInfo;
 }
 
+type StageAttemptRunInfo = {
+  id: string;
+  stageRuns: Array<{ stage: Stage; attemptSequence?: number }>;
+};
+
 export class WorkflowEngine {
   private runners: StageRunner[];
   private issueRepo: IssueRepo;
@@ -59,6 +65,7 @@ export class WorkflowEngine {
   private workflowApplicationService?: WorkflowApplicationRuntime;
   private config?: ConfigInfo;
   private pendingRejectionFeedback = new Map<string, unknown>();
+  private stageRegistries = new Map<string, AgentSessionRegistry>();
 
   constructor(options: WorkflowEngineOptions) {
     this.runners = options.runners;
@@ -82,6 +89,7 @@ export class WorkflowEngine {
   private buildContext(issue: Issue, acpOptions: AgentSessionOptions, work?: WorkflowWork): StageContext {
     const stage = work && 'stage' in work ? work.stage : issue.stage;
     const workflowRun = this.workflowRunService ? this.workflowRunService.getActiveRunForIssue(issue.id) ?? undefined : undefined;
+    const stageAttemptSequence = workflowRun?.stageRuns.find(candidate => candidate.stage === stage)?.attemptSequence ?? 1;
     const rejectionFeedback = this.pendingRejectionFeedback.get(`${issue.id}:${stage}`);
     const resolvedModel = this.config ? resolveStageModel(stage, this.config, issue) : undefined;
     const wfObservers = createWorkflowSessionObservers({
@@ -105,6 +113,7 @@ export class WorkflowEngine {
         // fire-and-forget
       }
     };
+    const registryKey = workflowRun ? this.stageAttemptKey(workflowRun.id, stage, stageAttemptSequence) : null;
     return {
       issue: { ...issue, stage },
       acpOptions: {
@@ -131,6 +140,7 @@ export class WorkflowEngine {
       requestedTask: this.findRequestedTask(workflowRun, work),
       rejectionFeedback,
       signal: this.signal,
+      agentSessionRegistry: registryKey ? this.getOrCreateStageRegistry(registryKey) : undefined,
       emit,
       log,
     };
@@ -195,6 +205,48 @@ export class WorkflowEngine {
           ? reason.stage
           : stage;
     return `${reason.reason}: ${subject}`;
+  }
+
+  private stageAttemptKey(workflowRunId: string, stage: Stage, attemptSequence: number): string {
+    return `${workflowRunId}:${stage}:${attemptSequence}`;
+  }
+
+  private stageAttemptKeyFromRun(
+    workflowRun: StageAttemptRunInfo,
+    stage: Stage,
+  ): string {
+    const stageAttemptSequence = workflowRun.stageRuns.find(candidate => candidate.stage === stage)?.attemptSequence ?? 1;
+    return this.stageAttemptKey(workflowRun.id, stage, stageAttemptSequence);
+  }
+
+  private getOrCreateStageRegistry(key: string): AgentSessionRegistry {
+    let registry = this.stageRegistries.get(key);
+    if (!registry) {
+      registry = new InMemoryAgentSessionRegistry();
+      this.stageRegistries.set(key, registry);
+    }
+    return registry;
+  }
+
+  private async closeAllStageRegistries(): Promise<void> {
+    const registries = [...this.stageRegistries.values()];
+    this.stageRegistries.clear();
+    await Promise.allSettled(registries.map(r => r.closeAll()));
+  }
+
+  private async closeStageRegistry(key: string): Promise<void> {
+    const registry = this.stageRegistries.get(key);
+    if (!registry) return;
+    this.stageRegistries.delete(key);
+    await registry.closeAll();
+  }
+
+  private async closeStageRegistryForRun(
+    workflowRun: StageAttemptRunInfo | undefined,
+    stage: Stage,
+  ): Promise<void> {
+    if (!workflowRun) return;
+    await this.closeStageRegistry(this.stageAttemptKeyFromRun(workflowRun, stage));
   }
 
   private workKey(work: WorkflowWork): string {
@@ -270,23 +322,28 @@ export class WorkflowEngine {
 
     while (true) {
       if (this.signal?.aborted) {
+        await this.closeStageRegistryForRun(run.snapshot(), run.currentStage);
         return { completed: false, stage: run.currentStage, message: 'Agent stopped by user' };
       }
 
       if (work.kind === 'complete') {
+        await this.closeAllStageRegistries();
         this.checkpointManager.deleteAll(currentIssue.number);
         return { completed: true, stage: Stage.Done, message: 'Pipeline completed' };
       }
 
       if (work.kind === 'failed') {
+        await this.closeStageRegistryForRun(run.snapshot(), work.reason.stage);
         return { completed: false, stage: work.reason.stage, message: this.formatFailure(work) };
       }
 
       if (work.kind === 'await-approval') {
+        await this.closeStageRegistryForRun(run.snapshot(), work.stage);
         return { completed: false, stage: work.stage, message: `Awaiting ${work.stage} approval` };
       }
 
       if (work.kind === 'blocked') {
+        await this.closeStageRegistryForRun(run.snapshot(), work.stage);
         return { completed: false, stage: work.stage, message: this.formatBlocked(work.stage, work.reason) };
       }
 
@@ -303,6 +360,7 @@ export class WorkflowEngine {
 
       const latestRun = this.workflowRunService?.getLatestRunForIssue(issue.id);
       if (latestRun?.status === 'passed') {
+        await this.closeAllStageRegistries();
         this.checkpointManager.deleteAll(currentIssue.number);
         return { completed: true, stage: Stage.Done, message: 'Pipeline completed' };
       }
@@ -310,6 +368,11 @@ export class WorkflowEngine {
         const failedStage = latestRun.stageRuns.find(stageRun => stageRun.status === 'failed');
         const failedTask = failedStage?.tasks.find(task => task.status === 'failed');
         const failedCheck = failedStage?.checks.find(check => check.status === 'failed' || check.status === 'error');
+        if (failedStage) {
+          await this.closeStageRegistryForRun(latestRun, failedStage.stage);
+        } else {
+          await this.closeStageRegistryForRun(ctx.workflowRun, ctx.issue.stage);
+        }
         return {
           completed: false,
           stage: failedStage?.stage ?? ctx.issue.stage,
@@ -320,6 +383,15 @@ export class WorkflowEngine {
       const decision = await this.resumeAfterMaterializingWork(issue, acpOptions, tasksPath);
       run = decision.run;
       work = decision.nextWork;
+      const nextStage = 'stage' in work ? work.stage : work.kind === 'failed' ? work.reason.stage : Stage.Done;
+      const latestStageAttemptRun = this.workflowRunService?.getActiveRunForIssue(issue.id)
+        ?? this.workflowRunService?.getLatestRunForIssue(issue.id)
+        ?? run.snapshot();
+      const nextStageAttemptKey = this.stageAttemptKeyFromRun(latestStageAttemptRun, ctx.issue.stage);
+      const previousStageAttemptKey = ctx.workflowRun ? this.stageAttemptKeyFromRun(ctx.workflowRun, ctx.issue.stage) : null;
+      if (nextStage !== ctx.issue.stage || work.kind === 'complete' || (previousStageAttemptKey !== null && nextStageAttemptKey !== previousStageAttemptKey)) {
+        await this.closeStageRegistryForRun(ctx.workflowRun, ctx.issue.stage);
+      }
 
       if (this.workKey(work) === beforeWorkKey && JSON.stringify(run.snapshot()) === beforeSnapshot) {
         const noProgressMessage = `Aggregate workflow made no progress while executing ${beforeWorkKey}`;
@@ -347,6 +419,14 @@ export class WorkflowEngine {
   }
 
   async run(issue: Issue, acpOptions: AgentSessionOptions): Promise<PipelineResult> {
+    try {
+      return await this.runInner(issue, acpOptions);
+    } finally {
+      await this.closeAllStageRegistries();
+    }
+  }
+
+  private async runInner(issue: Issue, acpOptions: AgentSessionOptions): Promise<PipelineResult> {
     if (this.signal?.aborted) {
       return { completed: false, stage: issue.stage, message: 'Agent stopped by user' };
     }

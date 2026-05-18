@@ -54,13 +54,22 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
       observers,
     };
 
-    let session: AgentSession | undefined;
     const createSessionFn = deps?.createSession ?? (async (opts: AgentSessionOptions) => {
       return AgentSession.create(opts);
     });
 
+    const sharedRef = input.agentSessionRef;
+    const isNamedSession = sharedRef != null && ctx.agentSessionRegistry != null;
+    let session: AgentSession | undefined;
+    let taskLocalSession = false;
+
     try {
-      session = await createSessionFn(acpOptions);
+      if (isNamedSession) {
+        session = await ctx.agentSessionRegistry!.getOrCreate(sharedRef, () => createSessionFn(acpOptions));
+      } else {
+        session = await createSessionFn(acpOptions);
+        taskLocalSession = true;
+      }
       const result = await session!.execute(prompt, { kind: 'task', title });
       const duration = Date.now() - startedAt;
       const status = result.success ? 'completed' : 'failed';
@@ -96,6 +105,7 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
           success: result.success,
           error: result.error,
           acpSessionId: result.acpSessionId,
+          agentSessionRef: input.agentSessionRef,
           summary: result.success
             ? `${title} completed`
             : `${title} failed: ${result.error ?? 'unknown error'}`,
@@ -133,7 +143,7 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
         },
       };
     } finally {
-      if (session !== undefined) {
+      if (taskLocalSession && session !== undefined) {
         await session.close().catch(() => {});
       }
     }

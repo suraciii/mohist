@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 33;
+const SCHEMA_VERSION = 34;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -230,6 +230,9 @@ export function initializeDatabase(db: DatabaseManager): void {
   }
   if (currentVersion < 33) {
     migrateToVersion33(db);
+  }
+  if (currentVersion < 34) {
+    migrateToVersion34(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -1130,6 +1133,7 @@ CREATE TABLE IF NOT EXISTS workflow_stage_runs (
   stage               TEXT NOT NULL,
   status              TEXT NOT NULL DEFAULT 'pending',
   stage_order         INTEGER NOT NULL,
+  attempt_sequence    INTEGER NOT NULL DEFAULT 1,
   approval_status     TEXT,
   approval_output     TEXT,
   approval_requested_at TEXT,
@@ -1347,5 +1351,16 @@ function migrateToVersion33(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 33);
+  });
+}
+
+function migrateToVersion34(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>('PRAGMA table_info(workflow_stage_runs)');
+    const hasAttemptSequence = tableInfo.some(column => column.name === 'attempt_sequence');
+    if (!hasAttemptSequence) {
+      db.exec('ALTER TABLE workflow_stage_runs ADD COLUMN attempt_sequence INTEGER NOT NULL DEFAULT 1');
+    }
+    setSchemaVersion(db, 34);
   });
 }

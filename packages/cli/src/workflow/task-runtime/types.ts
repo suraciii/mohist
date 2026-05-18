@@ -34,6 +34,7 @@ export interface AgentSessionTaskInput {
   cwd: string;
   stage: string;
   attempt: number;
+  agentSessionRef?: string;
   artifactVerification?: (artifacts: string[]) => string[];
   retryPromptFactory?: (ctx: StageContext, attempt: number) => string | null;
 }

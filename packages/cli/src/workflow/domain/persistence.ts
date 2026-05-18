@@ -101,6 +101,7 @@ export function hydrateWorkflowRun(
   for (const stageSnapshot of snapshot.stageRuns) {
     const stageRun = workflow.stageRun(stageSnapshot.stage);
     stageRun.status = stageSnapshot.status;
+    stageRun.attemptSequence = stageSnapshot.attemptSequence ?? 1;
     stageRun.approval = stageSnapshot.approval ? { ...stageSnapshot.approval } : null;
     stageRun.failure = inferStageFailure(stageSnapshot.stage, stageSnapshot);
     stageRun.freezePoint = stageSnapshot.freezePoint ? { ...stageSnapshot.freezePoint, delivery: { ...stageSnapshot.freezePoint.delivery } } : null;
@@ -164,6 +165,7 @@ export function repairWorkflowRunSnapshot(
         stage: definition.stage,
         status: definition.stage === snapshot.currentStage && snapshot.status === 'running' ? 'running' : 'pending',
         order: definitionIndex,
+        attemptSequence: 1,
         tasks: [],
         checks: [],
         approval: null,
