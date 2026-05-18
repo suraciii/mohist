@@ -126,8 +126,8 @@ export class WorkflowRunProjection {
     const merge = stageRun.tasks.find(task => task.id === 'integrate:merge');
     if (merge?.status !== 'completed') return { ok: false, reason: 'integrate:merge evidence is missing' };
     const delivery = stageRun.freezePoint?.delivery ?? {};
-    if (!delivery.landedSha && !delivery.targetBranch) {
-      return { ok: false, reason: 'integrate merge delivery evidence is missing' };
+    if (!delivery.landedSha) {
+      return { ok: false, reason: 'integrate merge landedSha evidence is missing' };
     }
 
     const health = stageRun.checks.find(check => check.name === 'health:integrate');

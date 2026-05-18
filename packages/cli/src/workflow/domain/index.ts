@@ -1365,7 +1365,7 @@ export class WorkflowRun {
       return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' };
     }
     const delivery = stageRun.freezePoint?.delivery ?? {};
-    if (!delivery.landedSha && !delivery.targetBranch) {
+    if (!delivery.landedSha) {
       return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' };
     }
     if (health?.status !== 'passed') {

@@ -922,6 +922,25 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
+  it('does not complete Integrate when merge delivery only records the target branch', () => {
+    const run = startRun();
+    advanceToIntegrate(run);
+    run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
+    run.completeTask(Stage.Integrate, 'integrate:merge', {
+      status: 'completed',
+      output: { targetBranch: 'main' },
+    });
+    const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
+
+    expect(run.status).toBe('running');
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Integrate,
+      reason: { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' },
+    });
+  });
+
   it('fails post-merge health with post-merge-health-failed and does not schedule fixes after freeze', () => {
     const run = startRun();
     advanceToIntegrate(run);

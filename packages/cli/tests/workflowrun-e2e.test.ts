@@ -185,6 +185,41 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
   });
 
+  it('rejects targetBranch-only Integrate delivery when projecting Done', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_target_branch_only_done', issueId, issueNumber });
+    run.status = 'passed';
+    run.currentStage = Stage.Integrate;
+    for (const stageRun of run.stageRuns) {
+      stageRun.status = 'passed';
+    }
+
+    const integrate = run.stageRun(Stage.Integrate);
+    const specSync = integrate.tasks.find(task => task.id === 'integrate:spec-sync')!;
+    specSync.status = 'completed';
+    specSync.output = { synced: ['workflow-run'] };
+    const archive = integrate.tasks.find(task => task.id === 'integrate:archive-change')!;
+    archive.status = 'completed';
+    archive.output = { archivePath: 'openspec/changes/archive/188-workflowrun' };
+    const merge = integrate.tasks.find(task => task.id === 'integrate:merge')!;
+    merge.status = 'completed';
+    merge.output = { targetBranch: 'main', baseSha: 'base', candidateHeadSha: 'head' };
+    integrate.freezePoint = {
+      taskId: 'integrate:merge',
+      delivery: { targetBranch: 'main', baseSha: 'base', candidateHeadSha: 'head' },
+      frozenAt: '2026-05-18T00:00:00.000Z',
+    };
+    const health = integrate.checks.find(check => check.name === 'health:integrate')!;
+    health.status = 'passed';
+
+    applyProjection(run);
+
+    expect(issueRepo.findById(issueId)).toMatchObject({
+      stage: Stage.Integrate,
+      status: IssueStatus.Blocked,
+      blockedReason: expect.stringContaining('integrate merge landedSha evidence is missing'),
+    });
+  });
+
   it('fails a task with task-failed and does not run later tasks or checks', () => {
     startWorkflow();
 
