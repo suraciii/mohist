@@ -176,9 +176,9 @@ export interface ReactionConfig {
   fallbackReaction?: ReactionConfig;
 }
 
-const DEFAULT_PLAN_COMMAND = 'npm run typecheck';
-const DEFAULT_BUILD_COMMAND = 'npm run build';
-const DEFAULT_CHECK_COMMAND = 'npm run build && npm test';
+const DEFAULT_PLAN_COMMAND = 'npm ci && npm run typecheck';
+const DEFAULT_BUILD_COMMAND = 'npm ci && npm run build';
+const DEFAULT_CHECK_COMMAND = 'npm ci && npm run build && npm test';
 
 export const DEFAULT_HEALTH_GATE_POLICIES: HealthGatePolicies = {
   plan: {

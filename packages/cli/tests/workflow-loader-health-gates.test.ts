@@ -28,26 +28,26 @@ describe('loadHealthGatePolicies', () => {
   describe('default policies', () => {
     it('returns default policies when no workflow.yaml exists', () => {
       const result = loadHealthGatePolicies({ stages: [], source: 'builtin' } as any);
-      expect(result.plan.command).toBe('npm run typecheck');
-      expect(result.build.command).toBe('npm run build');
-      expect(result.check.command).toBe('npm run build && npm test');
-      expect(result.postMerge.command).toBe('npm run build && npm test');
+      expect(result.plan.command).toBe('npm ci && npm run typecheck');
+      expect(result.build.command).toBe('npm ci && npm run build');
+      expect(result.check.command).toBe('npm ci && npm run build && npm test');
+      expect(result.postMerge.command).toBe('npm ci && npm run build && npm test');
     });
 
-    it('plan gate defaults to npm run typecheck', () => {
+    it('plan gate defaults to npm ci && npm run typecheck', () => {
       const result = loadHealthGatePolicies({ stages: [], source: 'builtin' } as any);
       expect(result.plan.enabled).toBe(true);
-      expect(result.plan.command).toBe('npm run typecheck');
+      expect(result.plan.command).toBe('npm ci && npm run typecheck');
       expect(result.plan.timeout).toBe(5 * 60 * 1000);
       expect(result.plan.autoFix).toBe(false);
       expect(result.plan.maxFixAttempts).toBe(0);
       expect(result.plan.fallbackReaction.type).toBe('ask-user');
     });
 
-    it('build gate defaults to npm run build with autoFix', () => {
+    it('build gate defaults to npm ci && npm run build with autoFix', () => {
       const result = loadHealthGatePolicies({ stages: [], source: 'builtin' } as any);
       expect(result.build.enabled).toBe(true);
-      expect(result.build.command).toBe('npm run build');
+      expect(result.build.command).toBe('npm ci && npm run build');
       expect(result.build.timeout).toBe(5 * 60 * 1000);
       expect(result.build.autoFix).toBe(true);
       expect(result.build.maxFixAttempts).toBe(2);
@@ -55,10 +55,10 @@ describe('loadHealthGatePolicies', () => {
       expect(result.build.fallbackReaction.escalateTarget).toBe('plan');
     });
 
-    it('check gate defaults to npm run build && npm test', () => {
+    it('check gate defaults to npm ci && npm run build && npm test', () => {
       const result = loadHealthGatePolicies({ stages: [], source: 'builtin' } as any);
       expect(result.check.enabled).toBe(true);
-      expect(result.check.command).toBe('npm run build && npm test');
+      expect(result.check.command).toBe('npm ci && npm run build && npm test');
       expect(result.check.timeout).toBe(5 * 60 * 1000);
       expect(result.check.autoFix).toBe(true);
       expect(result.check.maxFixAttempts).toBe(2);
@@ -69,7 +69,7 @@ describe('loadHealthGatePolicies', () => {
     it('postMerge gate defaults to same command as check', () => {
       const result = loadHealthGatePolicies({ stages: [], source: 'builtin' } as any);
       expect(result.postMerge.enabled).toBe(true);
-      expect(result.postMerge.command).toBe('npm run build && npm test');
+      expect(result.postMerge.command).toBe('npm ci && npm run build && npm test');
       expect(result.postMerge.timeout).toBe(5 * 60 * 1000);
       expect(result.postMerge.autoFix).toBe(false);
       expect(result.postMerge.maxFixAttempts).toBe(0);
