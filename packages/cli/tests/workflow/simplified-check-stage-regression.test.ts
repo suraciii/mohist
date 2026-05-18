@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Stage, IssueStatus, type Issue } from '../../src/types';
 import type {
@@ -281,6 +284,38 @@ describe('Simplified check-stage regression tests', () => {
       expect(result.status).toBe('error');
       expect(result.message).toContain('review.md not found');
       expect(result.name).toBe('review-passed');
+    });
+
+    it('ReviewPassedCheck records the candidate HEAD as review snapshot evidence', async () => {
+      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
+      const changeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-review-snapshot-'));
+      try {
+        fs.writeFileSync(path.join(changeDir, 'review.md'), '## Findings\n\nNo findings.\n\n<promise>PASS</promise>\n');
+
+        const check = new ReviewPassedCheck();
+        const result = await check.run({
+          issue: makeIssue(),
+          changeDir,
+          eventBus: new EventBus() as any,
+          projectId: 'proj-1',
+          acpOptions: {},
+          projectRepo: {
+            findById: vi.fn().mockReturnValue({ id: 'proj-1', name: 'repo', path: '/repo' }),
+          } as any,
+          worktreeManager: {
+            getPath: vi.fn().mockReturnValue('/worktree'),
+            getHeadSha: vi.fn().mockResolvedValue('candidate-head-sha'),
+          } as any,
+        } as CheckContext);
+
+        expect(result.status).toBe('pass');
+        expect(result.output).toMatchObject({
+          verdict: 'PASS',
+          snapshotSha: 'candidate-head-sha',
+        });
+      } finally {
+        fs.rmSync(changeDir, { recursive: true, force: true });
+      }
     });
   });
 

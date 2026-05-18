@@ -40,6 +40,7 @@ export class ReviewPassedCheck implements Check {
     }
 
     const fixSuggestions = verdict === 'FAIL' ? extractFixSuggestions(reviewReport) : '';
+    const snapshotSha = await this.getCandidateHeadSha(ctx);
 
     return {
       name: this.name,
@@ -49,7 +50,23 @@ export class ReviewPassedCheck implements Check {
         verdict,
         reviewReport,
         fixSuggestions,
+        ...(snapshotSha ? { snapshotSha } : {}),
       },
     };
+  }
+
+  private async getCandidateHeadSha(ctx: CheckContext): Promise<string | null> {
+    try {
+      const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+      const worktreePath = project && ctx.worktreeManager?.getPath(project.name, ctx.issue.number);
+      if (!worktreePath) return null;
+      return await ctx.worktreeManager!.getHeadSha(worktreePath);
+    } catch (err) {
+      log.warn('Failed to resolve review snapshot SHA', {
+        issueNumber: ctx.issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
 }
